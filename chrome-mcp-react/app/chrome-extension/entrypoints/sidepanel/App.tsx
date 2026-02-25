@@ -491,12 +491,12 @@ export default function SidepanelApp() {
     onEdit: (id: string) => edit(id),
     onDelete: (id: string) => void remove(id),
     onExport: (id: string) => void exportFlow(id),
-    'onUpdate:onlyBound': (value: boolean) => setOnlyBound(value),
+    onOnlyBoundChange: (value: boolean) => setOnlyBound(value),
     onToggleRun: (id: string) => toggleRun(id),
     onCreateTrigger: createTrigger,
     onEditTrigger: (id: string) => editTrigger(id),
     onRemoveTrigger: (id: string) => void removeTrigger(id),
-  } as Record<string, unknown>;
+  };
 
   return (
     <div className="h-full w-full bg-slate-50 relative agent-theme" data-agent-theme={currentTheme}>
@@ -506,7 +506,7 @@ export default function SidepanelApp() {
 
       {activeTab === 'workflows' ? (
         <div className="h-full">
-          <VueComponentHost component={WorkflowsView as any} componentProps={workflowsProps} />
+          <WorkflowsView {...workflowsProps} />
         </div>
       ) : null}
 

@@ -1,0 +1,130 @@
+.workflow-item {
+  padding: 16px;
+  cursor: pointer;
+}
+
+.workflow-item:hover {
+  background-color: var(--ac-hover-bg, #f5f5f4) !important;
+  box-shadow: var(--ac-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
+}
+
+.workflow-content {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workflow-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.workflow-name {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 2px;
+  word-break: break-word;
+}
+
+.workflow-desc {
+  font-size: 13px;
+  line-height: 1.4;
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.workflow-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workflow-tag {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.workflow-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity var(--ac-motion-fast, 120ms) ease;
+  position: relative;
+}
+
+.workflow-actions-visible {
+  opacity: 1;
+}
+
+.workflow-action {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  transition: all var(--ac-motion-fast, 120ms) ease;
+}
+
+.workflow-action:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--ac-shadow-float, 0 4px 20px -2px rgba(0, 0, 0, 0.05));
+}
+
+.workflow-action-primary:hover {
+  background-color: var(--ac-accent-hover, #c4664a) !important;
+}
+
+.workflow-more-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 140px;
+  padding: 4px;
+  z-index: 100;
+}
+
+.workflow-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  background: transparent;
+  border: none;
+  border-radius: var(--ac-radius-button, 8px);
+  cursor: pointer;
+  transition: background-color var(--ac-motion-fast, 120ms) ease;
+  text-align: left;
+}
+
+.workflow-menu-item:hover {
+  background-color: var(--ac-hover-bg, #f5f5f4);
+}
+
+.workflow-menu-item-danger:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* Menu fade transition */
+.menu-fade-enter-active,
+.menu-fade-leave-active {
+  transition:
+    opacity var(--ac-motion-fast, 120ms) ease,
+    transform var(--ac-motion-fast, 120ms) ease;
+}
+
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
