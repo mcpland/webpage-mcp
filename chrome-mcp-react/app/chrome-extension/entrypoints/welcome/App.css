@@ -1,0 +1,108 @@
+.welcome-root {
+  min-height: 100%;
+  background: var(--ac-bg);
+  background-image: var(--ac-bg-pattern);
+  background-size: var(--ac-bg-pattern-size);
+  color: var(--ac-text);
+  font-family: var(--ac-font-body);
+}
+
+.welcome-header {
+  background: var(--ac-header-bg);
+  border-bottom: var(--ac-border-width) solid var(--ac-header-border);
+  backdrop-filter: blur(8px);
+}
+
+.welcome-card {
+  background: var(--ac-surface);
+  border: var(--ac-border-width) solid var(--ac-border);
+  border-radius: var(--ac-radius-card);
+  box-shadow: var(--ac-shadow-card);
+}
+
+.welcome-card--primary {
+  box-shadow: var(--ac-shadow-float);
+}
+
+.welcome-icon {
+  background: var(--ac-surface);
+  border: var(--ac-border-width) solid var(--ac-border);
+  border-radius: var(--ac-radius-card);
+  box-shadow: var(--ac-shadow-card);
+}
+
+.welcome-title {
+  font-family: var(--ac-font-heading);
+  color: var(--ac-text);
+}
+
+.welcome-muted {
+  color: var(--ac-text-muted);
+}
+
+.welcome-subtle {
+  color: var(--ac-text-subtle);
+}
+
+.welcome-mono {
+  font-family: var(--ac-font-mono);
+}
+
+.welcome-code {
+  font-family: var(--ac-font-code);
+}
+
+.welcome-button {
+  font-family: var(--ac-font-mono);
+  color: var(--ac-text-muted);
+  background: var(--ac-surface);
+  border: var(--ac-border-width) solid var(--ac-border);
+  border-radius: var(--ac-radius-button);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.welcome-button:hover {
+  background: var(--ac-hover-bg-subtle);
+}
+
+.welcome-command-row {
+  background: var(--ac-code-bg);
+  border: var(--ac-border-width) solid var(--ac-code-border);
+  border-radius: var(--ac-radius-inner);
+}
+
+.welcome-alt-row {
+  background: var(--ac-surface-muted);
+  border: var(--ac-border-width) solid var(--ac-border);
+  border-radius: var(--ac-radius-inner);
+}
+
+.welcome-report-card {
+  background: var(--ac-diff-del-bg);
+  border: var(--ac-border-width) solid var(--ac-diff-del-border);
+  border-radius: var(--ac-radius-inner);
+}
+
+.welcome-code-inline {
+  background: var(--ac-hover-bg-subtle);
+  border: var(--ac-border-width) solid var(--ac-border);
+  border-radius: 6px;
+}
+
+.ac-btn {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ac-btn:hover {
+  opacity: 0.8;
+}
+
+summary {
+  list-style: none;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
