@@ -20,10 +20,10 @@ import {
 import { validateFlow } from '@/entrypoints/popup/components/builder/model/validation';
 import { useBuilderStore } from '@/entrypoints/popup/components/builder/store/useBuilderStore';
 import CanvasVue from '@/entrypoints/popup/components/builder/components/Canvas.vue';
-import PropertyPanelVue from '@/entrypoints/popup/components/builder/components/PropertyPanel.vue';
 import TriggerPanel from '@/entrypoints/popup/components/builder/components/TriggerPanel';
 import EdgePropertyPanel from '@/entrypoints/popup/components/builder/components/EdgePropertyPanel';
 import Sidebar from '@/entrypoints/popup/components/builder/components/Sidebar';
+import PropertyPanel from '@/entrypoints/popup/components/builder/components/PropertyPanel';
 import { VueComponentHost } from '../shared/react/mount-vue-in-react';
 import { useRRV3Rpc } from '../shared/react/useRRV3Rpc';
 import './App.css';
@@ -729,17 +729,14 @@ export default function BuilderApp() {
 
           {activeNode ? (
             <div className="floating-property">
-              <VueComponentHost
-                component={PropertyPanelVue}
-                componentProps={{
-                  node: activeNode,
-                  variables: availableVars,
-                  highlightField,
-                  subflowIds: store.listSubflowIds(),
-                  onRemoveNode: store.removeNode,
-                  onCreateSubflow: store.addSubflow,
-                  onSwitchToSubflow: store.switchToSubflow,
-                }}
+              <PropertyPanel
+                node={activeNode}
+                variables={availableVars as any}
+                highlightField={highlightField}
+                subflowIds={store.listSubflowIds()}
+                onRemoveNode={store.removeNode}
+                onCreateSubflow={store.addSubflow}
+                onSwitchToSubflow={store.switchToSubflow}
               />
             </div>
           ) : null}
