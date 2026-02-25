@@ -4,6 +4,7 @@ import {
   createApp,
   h,
   reactive,
+  type InjectionKey,
   type App as VueApp,
   type Component as VueComponent,
 } from "vue";
@@ -17,9 +18,19 @@ interface MountVueInReactOptions {
 interface VueHostProps {
   component: VueComponent;
   componentProps?: Record<string, unknown>;
+  componentProvides?: VueProvideEntry[];
 }
 
-export function VueComponentHost({ component, componentProps }: VueHostProps) {
+export interface VueProvideEntry {
+  key: InjectionKey<unknown> | string | symbol;
+  value: unknown;
+}
+
+export function VueComponentHost({
+  component,
+  componentProps,
+  componentProvides,
+}: VueHostProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const vueAppRef = useRef<VueApp<Element> | null>(null);
   const reactivePropsRef = useRef<Record<string, unknown> | null>(null);
@@ -37,6 +48,15 @@ export function VueComponentHost({ component, componentProps }: VueHostProps) {
         return h(component, reactiveProps);
       },
     });
+
+    for (const entry of componentProvides ?? []) {
+      try {
+        vueApp.provide(entry.key as any, entry.value);
+      } catch {
+        // ignore invalid provide values
+      }
+    }
+
     vueApp.mount(hostRef.current);
     vueAppRef.current = vueApp;
 
@@ -45,7 +65,7 @@ export function VueComponentHost({ component, componentProps }: VueHostProps) {
       vueAppRef.current = null;
       reactivePropsRef.current = null;
     };
-  }, [component]);
+  }, [component, componentProvides]);
 
   useEffect(() => {
     const reactiveProps = reactivePropsRef.current;
