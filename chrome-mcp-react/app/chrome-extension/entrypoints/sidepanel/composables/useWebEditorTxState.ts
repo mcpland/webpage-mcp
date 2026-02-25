@@ -222,6 +222,11 @@ export interface UseWebEditorTxStateOptions {
    * If provided, skips querying the active tab on mount.
    */
   initialTabId?: number | null;
+  /**
+   * When true, caller is responsible for invoking initialize/dispose manually.
+   * Useful when running outside Vue component lifecycle (e.g. React bridge).
+   */
+  manualLifecycle?: boolean;
 }
 
 export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
@@ -504,6 +509,7 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
 
   /** Cached window ID to filter tab activation events from other windows */
   let currentWindowId: number | null = null;
+  let initialized = false;
 
   /**
    * Handle tab activation events.
@@ -530,11 +536,10 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
     }
   };
 
-  // ==========================================================================
-  // Lifecycle
-  // ==========================================================================
+  async function initialize(): Promise<void> {
+    if (initialized) return;
+    initialized = true;
 
-  onMounted(async () => {
     // Register runtime message listener
     try {
       if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage?.addListener) {
@@ -606,9 +611,12 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
     if (isValidTabId(tabId.value)) {
       await refreshFromStorage(tabId.value);
     }
-  });
+  }
 
-  onUnmounted(() => {
+  function dispose(): void {
+    if (!initialized) return;
+    initialized = false;
+
     // Clean up runtime message listener
     try {
       if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage?.removeListener) {
@@ -623,6 +631,21 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
     // Clean up tab activation listener
     removeTabActivatedListener?.();
     removeTabActivatedListener = null;
+    currentWindowId = null;
+  }
+
+  // ==========================================================================
+  // Lifecycle
+  // ==========================================================================
+
+  onMounted(() => {
+    if (options.manualLifecycle) return;
+    void initialize();
+  });
+
+  onUnmounted(() => {
+    if (options.manualLifecycle) return;
+    dispose();
   });
 
   // ==========================================================================
@@ -650,6 +673,8 @@ export function useWebEditorTxState(options: UseWebEditorTxStateOptions = {}) {
     toggleExclude,
     clearExcluded,
     refreshFromStorage,
+    initialize,
+    dispose,
   };
 }
 
