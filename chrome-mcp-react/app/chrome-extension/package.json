@@ -12,7 +12,7 @@
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
-    "compile": "tsc --noEmit && vue-tsc --noEmit",
+    "compile": "vue-tsc --noEmit",
     "postinstall": "wxt prepare",
     "lint": "npx eslint .",
     "lint:fix": "npx eslint . --fix",
