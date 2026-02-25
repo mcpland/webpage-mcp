@@ -141,13 +141,18 @@ import { AGENT_SERVER_PORT_KEY, type TimelineItem } from '../../../composables';
 
 const props = defineProps<{
   item: Extract<TimelineItem, { kind: 'user_prompt' }>;
+  /** Optional server port override for React/Vue bridge hosts */
+  serverPort?: number | null;
 }>();
 
 type UserPromptItem = Extract<TimelineItem, { kind: 'user_prompt' }>;
 type UserPromptAttachment = UserPromptItem['attachments'][number];
 
-// Inject server port from parent
-const serverPort = inject(AGENT_SERVER_PORT_KEY, ref<number | null>(null));
+// Inject server port from parent; allow explicit prop override
+const injectedServerPort = inject(AGENT_SERVER_PORT_KEY, ref<number | null>(null));
+const serverPort = computed(() =>
+  props.serverPort === undefined ? injectedServerPort.value : props.serverPort,
+);
 
 // Compute base URL for attachment requests
 const baseUrl = computed(() => {

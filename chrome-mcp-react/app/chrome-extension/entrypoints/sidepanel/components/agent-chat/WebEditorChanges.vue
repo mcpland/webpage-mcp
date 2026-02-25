@@ -95,6 +95,11 @@ import type {
 import ElementChip from './ElementChip.vue';
 import SelectionChip from './SelectionChip.vue';
 
+const props = defineProps<{
+  /** Optional explicit TX state for React/Vue bridge hosts */
+  txState?: WebEditorTxStateReturn;
+}>();
+
 // =============================================================================
 // Inject TX State from Parent (AgentChat.vue)
 // =============================================================================
@@ -107,11 +112,13 @@ import SelectionChip from './SelectionChip.vue';
  * We use a helper function to ensure TypeScript understands tx is non-null after the check.
  */
 function injectTxStateOrThrow(): WebEditorTxStateReturn {
+  if (props.txState) return props.txState;
+
   const injected = inject<WebEditorTxStateReturn>(WEB_EDITOR_TX_STATE_INJECTION_KEY);
   if (!injected) {
     throw new Error(
       '[WebEditorChanges] WebEditorTxState must be provided by parent component. ' +
-        'Ensure AgentChat.vue calls useWebEditorTxState() and provides it via WEB_EDITOR_TX_STATE_INJECTION_KEY.',
+        'Ensure parent component provides WEB_EDITOR_TX_STATE_INJECTION_KEY or passes txState prop.',
     );
   }
   return injected;

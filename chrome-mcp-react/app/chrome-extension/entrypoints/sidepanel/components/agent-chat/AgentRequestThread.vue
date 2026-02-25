@@ -146,7 +146,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, inject, onMounted, ref, watch } from 'vue';
+import { computed, inject, onMounted, provide, ref, watch, type Ref } from 'vue';
 import type { AttachmentMetadata } from 'webpage-mcp-shared';
 import type { AgentThread } from '../../composables/useAgentThreads';
 import { AGENT_SERVER_PORT_KEY } from '../../composables';
@@ -155,10 +155,16 @@ import ApplyMessageChip from './ApplyMessageChip.vue';
 
 const props = defineProps<{
   thread: AgentThread;
+  /** Optional server port override for React/Vue bridge hosts */
+  serverPort?: number | null;
 }>();
 
-// Inject server port from parent
-const serverPort = inject(AGENT_SERVER_PORT_KEY, ref<number | null>(null));
+// Inject server port from parent; allow explicit prop override
+const injectedServerPort = inject(AGENT_SERVER_PORT_KEY, ref<number | null>(null));
+const serverPort = computed(() =>
+  props.serverPort === undefined ? injectedServerPort.value : props.serverPort,
+);
+provide(AGENT_SERVER_PORT_KEY, serverPort as Ref<number | null>);
 
 // Compute base URL for attachment requests
 const baseUrl = computed(() => {
