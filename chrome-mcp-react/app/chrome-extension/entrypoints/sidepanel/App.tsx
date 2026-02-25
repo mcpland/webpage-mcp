@@ -5,7 +5,7 @@ import type { ElementMarker, UpsertMarkerRequest } from '@/common/element-marker
 import { VueComponentHost } from '../shared/react/mount-vue-in-react';
 import type { AgentThemeId } from './composables/useAgentTheme';
 import AgentChat from './components/AgentChat.vue';
-import SidepanelNavigator from './components/SidepanelNavigator.vue';
+import SidepanelNavigator from './components/SidepanelNavigator';
 import { WorkflowsView } from './components/workflows';
 import { useWorkflowsV3React, type FlowLite } from './react/useWorkflowsV3React';
 import './App.css';
@@ -501,13 +501,7 @@ export default function SidepanelApp() {
   return (
     <div className="h-full w-full bg-slate-50 relative agent-theme" data-agent-theme={currentTheme}>
       {activeTab !== 'agent-chat' ? (
-        <VueComponentHost
-          component={SidepanelNavigator}
-          componentProps={{
-            activeTab,
-            onChange: (tab: TabType) => handleTabChange(tab),
-          }}
-        />
+        <SidepanelNavigator activeTab={activeTab} onChange={handleTabChange} />
       ) : null}
 
       {activeTab === 'workflows' ? (
