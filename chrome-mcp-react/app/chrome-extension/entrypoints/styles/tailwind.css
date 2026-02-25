@@ -1,0 +1,151 @@
+@import 'tailwindcss';
+
+/* App background and card helpers */
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+  body {
+    @apply bg-slate-50 text-slate-800;
+  }
+
+  /* Record&Replay builder design tokens */
+  .rr-theme {
+    --rr-bg: #f8fafc;
+    --rr-topbar: rgba(255, 255, 255, 0.9);
+    --rr-card: #ffffff;
+    --rr-elevated: #ffffff;
+    --rr-border: #e5e7eb;
+    --rr-subtle: #f3f4f6;
+    --rr-text: #0f172a;
+    --rr-text-weak: #475569;
+    --rr-muted: #64748b;
+    --rr-brand: #7c3aed;
+    --rr-brand-strong: #5b21b6;
+    --rr-accent: #0ea5e9;
+    --rr-success: #10b981;
+    --rr-warn: #f59e0b;
+    --rr-danger: #ef4444;
+    --rr-dot: rgba(2, 6, 23, 0.08);
+  }
+  .rr-theme[data-theme='dark'] {
+    --rr-bg: #0b1020;
+    --rr-topbar: rgba(12, 15, 24, 0.8);
+    --rr-card: #0f1528;
+    --rr-elevated: #121a33;
+    --rr-border: rgba(255, 255, 255, 0.08);
+    --rr-subtle: rgba(255, 255, 255, 0.04);
+    --rr-text: #e5e7eb;
+    --rr-text-weak: #cbd5e1;
+    --rr-muted: #94a3b8;
+    --rr-brand: #a78bfa;
+    --rr-brand-strong: #7c3aed;
+    --rr-accent: #38bdf8;
+    --rr-success: #34d399;
+    --rr-warn: #fbbf24;
+    --rr-danger: #f87171;
+    --rr-dot: rgba(226, 232, 240, 0.08);
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl shadow-md border;
+    background: var(--rr-card);
+    border-color: var(--rr-border);
+  }
+  /* Generic buttons used across builder */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition;
+    background: var(--rr-card);
+    color: var(--rr-text);
+    border: 1px solid var(--rr-border);
+  }
+  .btn:hover {
+    @apply shadow-sm;
+    background: var(--rr-subtle);
+  }
+  .btn[disabled] {
+    @apply opacity-60 cursor-not-allowed;
+  }
+  .btn.primary {
+    color: #fff;
+    background: var(--rr-brand-strong);
+    border-color: var(--rr-brand-strong);
+  }
+  .btn.primary:hover {
+    filter: brightness(1.05);
+  }
+  .btn.ghost {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  .mini {
+    @apply inline-flex items-center justify-center rounded-md px-2 py-1 text-xs font-medium;
+    background: var(--rr-card);
+    color: var(--rr-text);
+    border: 1px solid var(--rr-border);
+  }
+  .mini:hover {
+    background: var(--rr-subtle);
+  }
+  .mini.danger {
+    background: color-mix(in oklab, var(--rr-danger) 8%, transparent);
+    border-color: color-mix(in oklab, var(--rr-danger) 24%, var(--rr-border));
+    color: var(--rr-text);
+  }
+
+  .input {
+    @apply w-full px-3 py-2 rounded-lg text-sm;
+    background: var(--rr-card);
+    color: var(--rr-text);
+    border: 1px solid var(--rr-border);
+    outline: none;
+  }
+  .input:focus {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--rr-brand) 26%, transparent);
+    border-color: var(--rr-brand);
+  }
+  .select {
+    @apply w-full px-3 py-2 rounded-lg text-sm;
+    background: var(--rr-card);
+    color: var(--rr-text);
+    border: 1px solid var(--rr-border);
+    outline: none;
+  }
+  .textarea {
+    @apply w-full rounded-lg text-sm;
+    padding: 10px 12px;
+    background: var(--rr-card);
+    color: var(--rr-text);
+    border: 1px solid var(--rr-border);
+    outline: none;
+  }
+  .label {
+    @apply text-sm;
+    color: var(--rr-muted);
+  }
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-purple {
+    background: color-mix(in oklab, var(--rr-brand) 14%, transparent);
+    color: var(--rr-brand);
+  }
+
+  /* Builder topbar */
+  .rr-topbar {
+    height: 56px;
+    border-bottom: 1px solid var(--rr-border);
+    background: var(--rr-topbar);
+  }
+
+  /* Dot grid background utility for canvas container */
+  .rr-dot-grid {
+    background-image: radial-gradient(var(--rr-dot) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+}
