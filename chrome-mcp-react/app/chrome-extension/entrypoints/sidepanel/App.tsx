@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type { ElementMarker, UpsertMarkerRequest } from '@/common/element-marker-types';
-import { VueComponentHost } from '../shared/react/mount-vue-in-react';
 import type { AgentThemeId } from './composables/useAgentTheme';
-import AgentChat from './components/AgentChat.vue';
+import AgentChat from './components/AgentChat';
 import SidepanelNavigator from './components/SidepanelNavigator';
 import { WorkflowsView } from './components/workflows';
 import { useWorkflowsV3React, type FlowLite } from './react/useWorkflowsV3React';
@@ -512,7 +511,7 @@ export default function SidepanelApp() {
 
       {activeTab === 'agent-chat' ? (
         <div className="h-full">
-          <VueComponentHost component={AgentChat} />
+          <AgentChat />
         </div>
       ) : null}
 
