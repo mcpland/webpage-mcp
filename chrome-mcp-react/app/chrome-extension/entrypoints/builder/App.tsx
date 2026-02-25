@@ -20,10 +20,10 @@ import {
 import { validateFlow } from '@/entrypoints/popup/components/builder/model/validation';
 import { useBuilderStore } from '@/entrypoints/popup/components/builder/store/useBuilderStore';
 import CanvasVue from '@/entrypoints/popup/components/builder/components/Canvas.vue';
-import SidebarVue from '@/entrypoints/popup/components/builder/components/Sidebar.vue';
 import PropertyPanelVue from '@/entrypoints/popup/components/builder/components/PropertyPanel.vue';
 import TriggerPanelVue from '@/entrypoints/popup/components/builder/components/TriggerPanel.vue';
 import EdgePropertyPanel from '@/entrypoints/popup/components/builder/components/EdgePropertyPanel';
+import Sidebar from '@/entrypoints/popup/components/builder/components/Sidebar';
 import { VueComponentHost } from '../shared/react/mount-vue-in-react';
 import { useRRV3Rpc } from '../shared/react/useRRV3Rpc';
 import './App.css';
@@ -714,19 +714,16 @@ export default function BuilderApp() {
           </div>
 
           <div className="floating-sidebar">
-            <VueComponentHost
-              component={SidebarVue}
-              componentProps={{
-                flow: store.flowLocal,
-                paletteTypes: store.paletteTypes,
-                subflowIds: store.listSubflowIds(),
-                currentSubflowId: currentSubflowIdVal,
-                onAddNode: store.addNode,
-                onSwitchMain: store.switchToMain,
-                onSwitchSubflow: store.switchToSubflow,
-                onAddSubflow: store.addSubflow,
-                onRemoveSubflow: store.removeSubflow,
-              }}
+            <Sidebar
+              flow={store.flowLocal}
+              paletteTypes={store.paletteTypes}
+              subflowIds={store.listSubflowIds()}
+              currentSubflowId={currentSubflowIdVal}
+              onAddNode={store.addNode}
+              onSwitchMain={store.switchToMain}
+              onSwitchSubflow={store.switchToSubflow}
+              onAddSubflow={store.addSubflow}
+              onRemoveSubflow={store.removeSubflow}
             />
           </div>
 
