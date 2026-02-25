@@ -19,12 +19,11 @@ import {
 
 import { validateFlow } from '@/entrypoints/popup/components/builder/model/validation';
 import { useBuilderStore } from '@/entrypoints/popup/components/builder/store/useBuilderStore';
-import CanvasVue from '@/entrypoints/popup/components/builder/components/Canvas.vue';
+import Canvas from '@/entrypoints/popup/components/builder/components/Canvas';
 import TriggerPanel from '@/entrypoints/popup/components/builder/components/TriggerPanel';
 import EdgePropertyPanel from '@/entrypoints/popup/components/builder/components/EdgePropertyPanel';
 import Sidebar from '@/entrypoints/popup/components/builder/components/Sidebar';
 import PropertyPanel from '@/entrypoints/popup/components/builder/components/PropertyPanel';
-import { VueComponentHost } from '../shared/react/mount-vue-in-react';
 import { useRRV3Rpc } from '../shared/react/useRRV3Rpc';
 import './App.css';
 
@@ -612,6 +611,8 @@ export default function BuilderApp() {
     nodes: store.nodes,
     edges: store.edges,
     nodeErrors: validation.nodeErrors,
+    selectedNodeId: selectedId,
+    selectedEdgeId,
     focusNodeId,
     fitSeq,
     onSelectNode: store.selectNode,
@@ -637,7 +638,7 @@ export default function BuilderApp() {
         ) : null}
 
         <div className="main">
-          <VueComponentHost component={CanvasVue} componentProps={canvasProps} />
+          <Canvas {...canvasProps} />
 
           <div className="topbar rr-topbar backdrop-blur">
             <div className="left">

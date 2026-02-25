@@ -1,7 +1,6 @@
 // ui-nodes.ts — UI registry for builder nodes (sidebar, canvas, properties)
 // Comments in English to explain intent.
 
-import { markRaw, type Component } from 'vue';
 import type { NodeBase, NodeType } from '@/entrypoints/background/record-replay/types';
 import { NODE_TYPES } from '@/common/node-types';
 import { defaultConfigFor as fallbackDefaultConfig } from '@/entrypoints/popup/components/builder/model/transforms';
@@ -13,8 +12,8 @@ import {
 import { STEP_TYPES } from 'webpage-mcp-shared';
 
 // Canvas renderer components
-import NodeCard from '@/entrypoints/popup/components/builder/components/nodes/NodeCard.vue';
-import NodeIf from '@/entrypoints/popup/components/builder/components/nodes/NodeIf.vue';
+import NodeCard from '@/entrypoints/popup/components/builder/components/nodes/NodeCard';
+import NodeIf from '@/entrypoints/popup/components/builder/components/nodes/NodeIf';
 
 import PropertyFromSpec from '@/entrypoints/popup/components/builder/components/properties/PropertyFromSpec';
 import { registerBuiltinSpecs } from '@/entrypoints/popup/components/builder/model/node-specs-builtin';
@@ -29,8 +28,8 @@ export interface NodeUIConfig {
   label: string;
   category: NodeCategory;
   iconClass: string; // reuse existing Sidebar.css color classes
-  canvas: Component; // canvas renderer
-  property: Component; // property renderer
+  canvas?: unknown; // canvas renderer
+  property?: unknown; // property renderer
   docUrl?: string;
   io?: { inputs?: number | 'any'; outputs?: number | 'any' };
   defaultConfig?: () => any;
@@ -38,19 +37,18 @@ export interface NodeUIConfig {
 }
 
 // Registry contents generated from NodeSpec; use existing color/icon CSS classes
-const baseCard = NodeCard as Component;
+const baseCard = NodeCard;
 
 function specToUi(spec: any): NodeUIConfig {
-  const canvas = spec.type === (STEP_TYPES.IF as any) ? (NodeIf as Component) : baseCard;
+  const canvas = spec.type === (STEP_TYPES.IF as any) ? NodeIf : baseCard;
   const outputs = Array.isArray(spec.ports?.outputs) ? spec.ports.outputs.length : 'any';
   return {
     type: spec.type as any,
     label: spec.display?.label || String(spec.type),
     category: (spec.display?.category || 'Actions') as any,
     iconClass: spec.display?.iconClass || 'icon-default',
-    // Mark component refs as raw to prevent them from being proxied/reactive by consumers
-    canvas: markRaw(canvas) as Component,
-    property: markRaw(PropertyFromSpec) as Component,
+    canvas,
+    property: PropertyFromSpec,
     io: { inputs: spec.ports?.inputs ?? 1, outputs },
     defaultConfig: () => ({ ...(spec.defaults || {}) }),
     validate: (node: NodeBase) => {
