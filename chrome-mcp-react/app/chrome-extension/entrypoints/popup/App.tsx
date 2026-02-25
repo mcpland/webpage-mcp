@@ -605,7 +605,7 @@ export default function PopupApp() {
     }
   }
 
-  async function switchModel(newModel: ModelPreset) {
+  async function switchModel(newModel: ModelPreset, force = false) {
     if (isModelSwitching) {
       return;
     }
@@ -617,7 +617,7 @@ export default function PopupApp() {
     const isSameModel = newModel === currentModel;
     const isDifferentDimension = currentInfo.dimension !== newInfo.dimension;
 
-    if (isSameModel && !isDifferentDimension) {
+    if (!force && isSameModel && !isDifferentDimension) {
       return;
     }
 
@@ -692,7 +692,7 @@ export default function PopupApp() {
     setModelInitializationStatus('downloading');
     setModelDownloadProgress(0);
     setIsModelDownloading(true);
-    await switchModel(currentModel);
+    await switchModel(currentModel, true);
   }
 
   async function loadModelPreference() {
