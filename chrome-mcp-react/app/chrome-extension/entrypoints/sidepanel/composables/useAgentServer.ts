@@ -21,6 +21,11 @@ export interface UseAgentServerOptions {
   getSessionId?: () => string;
   onMessage?: (event: RealtimeEvent) => void;
   onError?: (error: string) => void;
+  /**
+   * When true, caller should invoke dispose() manually.
+   * Useful when running outside Vue component lifecycle.
+   */
+  manualLifecycle?: boolean;
 }
 
 export function useAgentServer(options: UseAgentServerOptions = {}) {
@@ -249,8 +254,13 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
 
   // Cleanup on unmount
   onUnmounted(() => {
+    if (options.manualLifecycle) return;
     closeEventSource();
   });
+
+  function dispose(): void {
+    closeEventSource();
+  }
 
   return {
     // State
@@ -272,5 +282,6 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
     isEventSourceConnected,
     reconnect,
     initialize,
+    dispose,
   };
 }
