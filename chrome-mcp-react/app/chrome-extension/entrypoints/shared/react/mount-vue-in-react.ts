@@ -12,7 +12,7 @@ interface VueHostProps {
   component: VueComponent;
 }
 
-function VueHost({ component }: VueHostProps) {
+export function VueComponentHost({ component }: VueHostProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -47,5 +47,5 @@ export async function mountVueInReact(
   }
 
   const root = createRoot(mountNode);
-  root.render(createElement(VueHost, { component }));
+  root.render(createElement(VueComponentHost, { component }));
 }
