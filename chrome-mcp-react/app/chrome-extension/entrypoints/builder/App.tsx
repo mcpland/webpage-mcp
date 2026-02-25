@@ -22,8 +22,8 @@ import { useBuilderStore } from '@/entrypoints/popup/components/builder/store/us
 import CanvasVue from '@/entrypoints/popup/components/builder/components/Canvas.vue';
 import SidebarVue from '@/entrypoints/popup/components/builder/components/Sidebar.vue';
 import PropertyPanelVue from '@/entrypoints/popup/components/builder/components/PropertyPanel.vue';
-import EdgePropertyPanelVue from '@/entrypoints/popup/components/builder/components/EdgePropertyPanel.vue';
 import TriggerPanelVue from '@/entrypoints/popup/components/builder/components/TriggerPanel.vue';
+import EdgePropertyPanel from '@/entrypoints/popup/components/builder/components/EdgePropertyPanel';
 import { VueComponentHost } from '../shared/react/mount-vue-in-react';
 import { useRRV3Rpc } from '../shared/react/useRRV3Rpc';
 import './App.css';
@@ -749,14 +749,7 @@ export default function BuilderApp() {
 
           {!activeNode && activeEdge ? (
             <div className="floating-property">
-              <VueComponentHost
-                component={EdgePropertyPanelVue}
-                componentProps={{
-                  edge: activeEdge,
-                  nodes: store.nodes,
-                  onRemoveEdge: store.removeEdge,
-                }}
-              />
+              <EdgePropertyPanel edge={activeEdge} nodes={store.nodes} onRemoveEdge={store.removeEdge} />
             </div>
           ) : null}
 
