@@ -3,6 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 import { config } from "dotenv";
 import { resolve } from "path";
+import vue from "@vitejs/plugin-vue";
 import Icons from "unplugin-icons/vite";
 import Components from "unplugin-vue-components/vite";
 import IconsResolver from "unplugin-icons/resolver";
@@ -17,7 +18,7 @@ const IS_DEV =
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
-  modules: ["@wxt-dev/module-vue"],
+  modules: ["@wxt-dev/module-react"],
   runner: {
     // Option 1: Disable auto-start (recommended)
     disabled: true,
@@ -124,6 +125,8 @@ export default defineConfig({
   },
   vite: (env) => ({
     plugins: [
+      // Keep Vue SFC support for the parity layer while React is the app shell
+      vue(),
       // TailwindCSS v4 Vite plugin – no PostCSS config required
       tailwindcss(),
       // Auto-register SVG icons as Vue components; all icons are bundled locally
