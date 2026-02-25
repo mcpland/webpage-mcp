@@ -6,8 +6,7 @@ import {
   getWidget,
   registerDefaultWidgets,
 } from '@/entrypoints/popup/components/builder/model/form-widget-registry';
-import VarInputVue from '@/entrypoints/popup/components/builder/widgets/VarInput.vue';
-import { VueComponentHost } from '@/entrypoints/shared/react/mount-vue-in-react';
+import VarInput from '@/entrypoints/popup/components/builder/widgets/VarInput';
 import type { VariableOption } from '@/entrypoints/popup/components/builder/model/variables';
 import './PropertyFormRenderer.css';
 
@@ -25,14 +24,11 @@ type FieldRendererProps = {
 
 function StringField({ field, value, variables, onChange }: FieldRendererProps) {
   return (
-    <VueComponentHost
-      component={VarInputVue}
-      componentProps={{
-        modelValue: value ?? '',
-        variables: variables || [],
-        placeholder: field.placeholder,
-        'onUpdate:modelValue': (next: string) => onChange(next),
-      }}
+    <VarInput
+      modelValue={value ?? ''}
+      variables={variables || []}
+      placeholder={field.placeholder}
+      onUpdateModelValue={(next) => onChange(next)}
     />
   );
 }
@@ -119,15 +115,13 @@ function JsonField({ value, onChange }: FieldRendererProps) {
 function DynamicField({ field, value, variables, onChange }: FieldRendererProps) {
   const widget = getWidget((field as any).widget);
   if (widget) {
+    const Widget = widget;
     return (
-      <VueComponentHost
-        component={widget as any}
-        componentProps={{
-          field,
-          modelValue: value,
-          variables: variables || [],
-          'onUpdate:modelValue': onChange,
-        }}
+      <Widget
+        field={field}
+        modelValue={value}
+        variables={variables || []}
+        onUpdateModelValue={onChange}
       />
     );
   }

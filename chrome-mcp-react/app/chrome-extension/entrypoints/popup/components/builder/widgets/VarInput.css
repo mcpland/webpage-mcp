@@ -1,0 +1,48 @@
+.var-input-wrap {
+  position: relative;
+}
+
+.var-suggest {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow: auto;
+  background: var(--rr-bg, #fff);
+  border: 1px solid rgb(0 0 0 / 12%);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 8%);
+  z-index: 1000;
+}
+
+.var-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.var-item.active,
+.var-item:hover {
+  background: var(--rr-hover, #f3f4f6);
+}
+
+.var-key {
+  color: var(--rr-text, #111);
+}
+
+.var-origin {
+  color: var(--rr-muted, #666);
+}
+
+.var-origin[data-origin='node'] {
+  color: #2563eb;
+}
+
+.var-origin[data-origin='global'] {
+  color: #059669;
+}

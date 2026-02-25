@@ -1,0 +1,18 @@
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-mini {
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid var(--rr-border);
+  border-radius: 6px;
+}
+
+.error-item {
+  font-size: 12px;
+  color: #ff6666;
+  margin-top: 6px;
+}
