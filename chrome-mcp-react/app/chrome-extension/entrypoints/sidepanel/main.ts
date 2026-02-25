@@ -1,6 +1,7 @@
+import { createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { NativeMessageType } from 'webpage-mcp-shared';
-import App from './App.vue';
-import { mountVueInReact } from '../shared/react/mount-vue-in-react';
+import App from './App';
 
 // Tailwind first, then custom tokens
 import '../styles/tailwind.css';
@@ -9,17 +10,21 @@ import './styles/agent-chat.css';
 
 import { preloadAgentTheme } from './composables';
 
-void mountVueInReact(App, {
-  /**
-   * Preload theme before mounting to prevent flash.
-   */
-  beforeMount: async () => {
-    // Preload theme from storage and apply to document
-    await preloadAgentTheme();
+async function bootstrap() {
+  // Preload theme from storage and apply to document
+  await preloadAgentTheme();
 
-    // Trigger ensure native connection (fire-and-forget, don't block UI mounting)
-    void chrome.runtime.sendMessage({ type: NativeMessageType.ENSURE_NATIVE }).catch(() => {
-      // Silent failure - background will handle reconnection
-    });
-  },
-});
+  // Trigger ensure native connection (fire-and-forget, don't block UI mounting)
+  void chrome.runtime.sendMessage({ type: NativeMessageType.ENSURE_NATIVE }).catch(() => {
+    // Silent failure - background will handle reconnection
+  });
+
+  const mountNode = document.getElementById('app');
+  if (!mountNode) {
+    throw new Error('Cannot find #app mount node');
+  }
+
+  createRoot(mountNode).render(createElement(App));
+}
+
+void bootstrap();
