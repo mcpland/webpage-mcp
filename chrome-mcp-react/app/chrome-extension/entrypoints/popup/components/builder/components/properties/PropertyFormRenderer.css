@@ -1,0 +1,89 @@
+.form-section {
+  padding: 8px 12px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rr-text);
+  margin-bottom: 6px;
+}
+
+.form-group {
+  margin-bottom: 10px;
+}
+
+.form-label {
+  display: block;
+  font-size: 12px;
+  color: var(--rr-dim);
+  margin-bottom: 4px;
+}
+
+.help {
+  font-size: 11px;
+  color: var(--rr-dim);
+  margin-top: 4px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--rr-text);
+}
+
+.nested {
+  border-left: 2px solid var(--rr-border);
+  padding-left: 8px;
+}
+
+.array-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.btn-mini {
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid var(--rr-border);
+  border-radius: 6px;
+}
+
+.btn {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--rr-border);
+  border-radius: 8px;
+}
+
+.form-input {
+  width: 100%;
+  border: 1px solid var(--rr-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--rr-card-2);
+  color: var(--rr-text);
+}
+
+.error-box {
+  background: rgb(255 102 102 / 6%);
+  border: 1px solid rgb(255 102 102 / 25%);
+  color: #ff6666;
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-top: 8px;
+}
+
+.error-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.error-item {
+  font-size: 12px;
+}

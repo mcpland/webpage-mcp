@@ -1,6 +1,5 @@
-import PropertyFormRendererVue from './PropertyFormRenderer.vue';
+import PropertyFormRenderer from './PropertyFormRenderer';
 import { getNodeSpec } from '@/entrypoints/popup/components/builder/model/node-spec-registry';
-import { VueComponentHost } from '@/entrypoints/shared/react/mount-vue-in-react';
 import './PropertyFromSpec.css';
 
 type PropertyFromSpecProps = {
@@ -12,7 +11,7 @@ export default function PropertyFromSpec({ node, variables }: PropertyFromSpecPr
   const hasSpec = !!getNodeSpec(node?.type);
 
   return hasSpec && node ? (
-    <VueComponentHost component={PropertyFormRendererVue} componentProps={{ node, variables }} />
+    <PropertyFormRenderer node={node} variables={variables as any} />
   ) : (
     <div className="property-from-spec__section">
       <div className="property-from-spec__title">未找到节点规范</div>
