@@ -24,7 +24,7 @@ import PropSetAttribute from '@/entrypoints/popup/components/builder/components/
 import PropDrag from '@/entrypoints/popup/components/builder/components/properties/PropertyDrag.vue';
 import PropScroll from '@/entrypoints/popup/components/builder/components/properties/PropertyScroll.vue';
 import PropNavigate from '@/entrypoints/popup/components/builder/components/properties/PropertyNavigate.vue';
-import PropertyFromSpec from '@/entrypoints/popup/components/builder/components/properties/PropertyFromSpec.vue';
+import PropertyFromSpec from '@/entrypoints/popup/components/builder/components/properties/PropertyFromSpec';
 import { registerBuiltinSpecs } from '@/entrypoints/popup/components/builder/model/node-specs-builtin';
 
 // Register builtin NodeSpecs at module init

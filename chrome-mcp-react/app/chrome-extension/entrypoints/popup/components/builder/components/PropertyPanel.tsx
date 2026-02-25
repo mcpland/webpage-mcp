@@ -1,7 +1,6 @@
 import type { NodeBase } from '@/entrypoints/background/record-replay/types';
 import { validateNodeWithRegistry } from '@/entrypoints/popup/components/builder/model/ui-nodes';
-import PropertyFromSpecVue from '@/entrypoints/popup/components/builder/components/properties/PropertyFromSpec.vue';
-import { VueComponentHost } from '@/entrypoints/shared/react/mount-vue-in-react';
+import PropertyFromSpec from '@/entrypoints/popup/components/builder/components/properties/PropertyFromSpec';
 import './PropertyPanel.css';
 
 type BuilderVariable = { key: string; origin?: string; nodeId?: string; nodeName?: string };
@@ -76,14 +75,7 @@ export default function PropertyPanel({ node, variables, onRemoveNode }: Propert
 
           <div className="divider" />
 
-          <VueComponentHost
-            key={`${node.type}:${node.id}`}
-            component={PropertyFromSpecVue}
-            componentProps={{
-              node,
-              variables,
-            }}
-          />
+          <PropertyFromSpec key={`${node.type}:${node.id}`} node={node} variables={variables} />
 
           <div className="divider" />
 
