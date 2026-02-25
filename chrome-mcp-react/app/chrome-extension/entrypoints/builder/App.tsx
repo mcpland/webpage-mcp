@@ -21,7 +21,7 @@ import { validateFlow } from '@/entrypoints/popup/components/builder/model/valid
 import { useBuilderStore } from '@/entrypoints/popup/components/builder/store/useBuilderStore';
 import CanvasVue from '@/entrypoints/popup/components/builder/components/Canvas.vue';
 import PropertyPanelVue from '@/entrypoints/popup/components/builder/components/PropertyPanel.vue';
-import TriggerPanelVue from '@/entrypoints/popup/components/builder/components/TriggerPanel.vue';
+import TriggerPanel from '@/entrypoints/popup/components/builder/components/TriggerPanel';
 import EdgePropertyPanel from '@/entrypoints/popup/components/builder/components/EdgePropertyPanel';
 import Sidebar from '@/entrypoints/popup/components/builder/components/Sidebar';
 import { VueComponentHost } from '../shared/react/mount-vue-in-react';
@@ -752,13 +752,7 @@ export default function BuilderApp() {
 
           {triggerPanelVisible && store.flowLocal?.id ? (
             <div className="floating-trigger">
-              <VueComponentHost
-                component={TriggerPanelVue}
-                componentProps={{
-                  flowId: store.flowLocal.id,
-                  onClose: () => setTriggerPanelVisible(false),
-                }}
-              />
+              <TriggerPanel flowId={store.flowLocal.id} onClose={() => setTriggerPanelVisible(false)} />
             </div>
           ) : null}
 
