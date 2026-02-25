@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { watch } from 'vue';
 
 import type { Flow as FlowV2, NodeBase } from '@/entrypoints/background/record-replay/types';
@@ -131,8 +131,8 @@ export default function BuilderApp() {
   const selectedEdgeId = ((store.activeEdgeId as any)?.value ?? null) as string | null;
   const activeNode = store.nodes.find((n) => n.id === selectedId) || null;
   const activeEdge = store.edges.find((e) => e.id === selectedEdgeId) || null;
-  const validation = useMemo(() => validateFlow(store.nodes), [store.nodes]);
-  const availableVars = useMemo(() => store.listAvailableVariables(selectedId || undefined), [store.nodes, store.edges, selectedId]);
+  const validation = validateFlow(store.nodes);
+  const availableVars = store.listAvailableVariables(selectedId || undefined);
   const currentSubflowIdVal = ((store.currentSubflowId as any)?.value ?? null) as string | null;
 
   const saveLabel =
