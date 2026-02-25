@@ -16,38 +16,11 @@ import { STEP_TYPES } from 'webpage-mcp-shared';
 import NodeCard from '@/entrypoints/popup/components/builder/components/nodes/NodeCard.vue';
 import NodeIf from '@/entrypoints/popup/components/builder/components/nodes/NodeIf.vue';
 
-// Property components (per-node or shared)
-import PropClick from '@/entrypoints/popup/components/builder/components/properties/PropertyClick.vue';
-import PropFill from '@/entrypoints/popup/components/builder/components/properties/PropertyFill.vue';
-import PropTriggerEvent from '@/entrypoints/popup/components/builder/components/properties/PropertyTriggerEvent.vue';
-import PropSetAttribute from '@/entrypoints/popup/components/builder/components/properties/PropertySetAttribute.vue';
-import PropDrag from '@/entrypoints/popup/components/builder/components/properties/PropertyDrag.vue';
-import PropScroll from '@/entrypoints/popup/components/builder/components/properties/PropertyScroll.vue';
-import PropNavigate from '@/entrypoints/popup/components/builder/components/properties/PropertyNavigate.vue';
 import PropertyFromSpec from '@/entrypoints/popup/components/builder/components/properties/PropertyFromSpec';
 import { registerBuiltinSpecs } from '@/entrypoints/popup/components/builder/model/node-specs-builtin';
 
 // Register builtin NodeSpecs at module init
 registerBuiltinSpecs();
-import PropWait from '@/entrypoints/popup/components/builder/components/properties/PropertyWait.vue';
-import PropAssert from '@/entrypoints/popup/components/builder/components/properties/PropertyAssert.vue';
-import PropDelay from '@/entrypoints/popup/components/builder/components/properties/PropertyDelay.vue';
-import PropHttp from '@/entrypoints/popup/components/builder/components/properties/PropertyHttp.vue';
-import PropExtract from '@/entrypoints/popup/components/builder/components/properties/PropertyExtract.vue';
-import PropScreenshot from '@/entrypoints/popup/components/builder/components/properties/PropertyScreenshot.vue';
-import PropLoopElements from '@/entrypoints/popup/components/builder/components/properties/PropertyLoopElements.vue';
-import PropSwitchFrame from '@/entrypoints/popup/components/builder/components/properties/PropertySwitchFrame.vue';
-import PropHandleDownload from '@/entrypoints/popup/components/builder/components/properties/PropertyHandleDownload.vue';
-import PropExecuteFlow from '@/entrypoints/popup/components/builder/components/properties/PropertyExecuteFlow.vue';
-import PropOpenTab from '@/entrypoints/popup/components/builder/components/properties/PropertyOpenTab.vue';
-import PropSwitchTab from '@/entrypoints/popup/components/builder/components/properties/PropertySwitchTab.vue';
-import PropCloseTab from '@/entrypoints/popup/components/builder/components/properties/PropertyCloseTab.vue';
-import PropKey from '@/entrypoints/popup/components/builder/components/properties/PropertyKey.vue';
-import PropIf from '@/entrypoints/popup/components/builder/components/properties/PropertyIf.vue';
-import PropForeach from '@/entrypoints/popup/components/builder/components/properties/PropertyForeach.vue';
-import PropWhile from '@/entrypoints/popup/components/builder/components/properties/PropertyWhile.vue';
-import PropScript from '@/entrypoints/popup/components/builder/components/properties/PropertyScript.vue';
-import PropTrigger from '@/entrypoints/popup/components/builder/components/properties/PropertyTrigger.vue';
 
 export type NodeCategory = 'Flow' | 'Actions' | 'Logic' | 'Tools' | 'Tabs' | 'Page';
 
