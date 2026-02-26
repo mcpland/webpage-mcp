@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ElementMarker, UpsertMarkerRequest } from "@/common/element-marker-types";
+import type {
+  ElementMarker,
+  UpsertMarkerRequest,
+} from "@/common/element-marker-types";
 import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
 
 export function ElementMarkerManagement() {
@@ -12,18 +15,24 @@ export function ElementMarkerManagement() {
     matchType: "prefix",
   });
 
-  const resetForm = useCallback((url?: string) => {
-    setForm({
-      url: url ?? currentUrl,
-      name: "",
-      selector: "",
-      matchType: "prefix",
-    });
-  }, [currentUrl]);
+  const resetForm = useCallback(
+    (url?: string) => {
+      setForm({
+        url: url ?? currentUrl,
+        name: "",
+        selector: "",
+        matchType: "prefix",
+      });
+    },
+    [currentUrl],
+  );
 
   const load = useCallback(async () => {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tabs = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       const activeTab = tabs[0];
       const url = String(activeTab?.url || "");
       setCurrentUrl(url);
@@ -77,23 +86,29 @@ export function ElementMarkerManagement() {
     }
   }, [currentUrl, form, load, resetForm]);
 
-  const remove = useCallback(async (marker: ElementMarker) => {
-    try {
-      const response: any = await chrome.runtime.sendMessage({
-        type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_DELETE,
-        id: marker.id,
-      });
-      if (response?.success) {
-        await load();
+  const remove = useCallback(
+    async (marker: ElementMarker) => {
+      try {
+        const response: any = await chrome.runtime.sendMessage({
+          type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_DELETE,
+          id: marker.id,
+        });
+        if (response?.success) {
+          await load();
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
-  }, [load]);
+    },
+    [load],
+  );
 
   const highlightInTab = useCallback(async (marker: ElementMarker) => {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tabs = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       const tabId = tabs[0]?.id;
       if (!tabId) return;
 
@@ -118,23 +133,26 @@ export function ElementMarkerManagement() {
     }
   }, []);
 
-  const validate = useCallback(async (marker: ElementMarker) => {
-    try {
-      const response: any = await chrome.runtime.sendMessage({
-        type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_VALIDATE,
-        selector: marker.selector,
-        selectorType: marker.selectorType || "css",
-        action: "hover",
-        listMode: !!marker.listMode,
-      });
+  const validate = useCallback(
+    async (marker: ElementMarker) => {
+      try {
+        const response: any = await chrome.runtime.sendMessage({
+          type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_VALIDATE,
+          selector: marker.selector,
+          selectorType: marker.selectorType || "css",
+          action: "hover",
+          listMode: !!marker.listMode,
+        });
 
-      if (response?.tool?.ok !== false) {
-        await highlightInTab(marker);
+        if (response?.tool?.ok !== false) {
+          await highlightInTab(marker);
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
-  }, [highlightInTab]);
+    },
+    [highlightInTab],
+  );
 
   useEffect(() => {
     void load();
@@ -170,16 +188,24 @@ export function ElementMarkerManagement() {
           <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
             <input
               className="port-input"
-              placeholder="Name, such as "Login Button"
+              placeholder={'Name, such as "Login Button"'}
               value={form.name}
-              onChange={(event) => setForm((current) => ({ ...current, name: event.currentTarget.value }))}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  name: event.currentTarget.value,
+                }))
+              }
             />
             <select
               className="port-input"
               style={{ maxWidth: "120px" }}
               value={form.selectorType || "css"}
               onChange={(event) =>
-                setForm((current) => ({ ...current, selectorType: event.currentTarget.value as "css" | "xpath" }))
+                setForm((current) => ({
+                  ...current,
+                  selectorType: event.currentTarget.value as "css" | "xpath",
+                }))
               }
             >
               <option value="css">CSS</option>
@@ -192,7 +218,10 @@ export function ElementMarkerManagement() {
               onChange={(event) =>
                 setForm((current) => ({
                   ...current,
-                  matchType: event.currentTarget.value as "exact" | "prefix" | "host",
+                  matchType: event.currentTarget.value as
+                    | "exact"
+                    | "prefix"
+                    | "host",
                 }))
               }
             >
@@ -205,13 +234,26 @@ export function ElementMarkerManagement() {
             className="port-input"
             placeholder="CSS selector"
             value={form.selector}
-            onChange={(event) => setForm((current) => ({ ...current, selector: event.currentTarget.value }))}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                selector: event.currentTarget.value,
+              }))
+            }
           />
           <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
-            <button className="semantic-engine-button" disabled={!form.selector} type="submit">
+            <button
+              className="semantic-engine-button"
+              disabled={!form.selector}
+              type="submit"
+            >
               save
             </button>
-            <button className="danger-button" type="button" onClick={() => resetForm()}>
+            <button
+              className="danger-button"
+              type="button"
+              onClick={() => resetForm()}
+            >
               Clear
             </button>
           </div>
@@ -223,24 +265,55 @@ export function ElementMarkerManagement() {
               <div
                 key={marker.id}
                 className="model-card"
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "8px",
+                }}
               >
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                  }}
+                >
                   <strong className="model-name">{marker.name}</strong>
-                  <code style={{ fontSize: "12px", opacity: 0.85 }}>{marker.selector}</code>
-                  <div style={{ display: "flex", gap: "6px", marginTop: "2px" }}>
-                    <span className="model-tag dimension">{marker.selectorType || "css"}</span>
-                    <span className="model-tag dimension">{marker.matchType}</span>
+                  <code style={{ fontSize: "12px", opacity: 0.85 }}>
+                    {marker.selector}
+                  </code>
+                  <div
+                    style={{ display: "flex", gap: "6px", marginTop: "2px" }}
+                  >
+                    <span className="model-tag dimension">
+                      {marker.selectorType || "css"}
+                    </span>
+                    <span className="model-tag dimension">
+                      {marker.matchType}
+                    </span>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: "6px" }}>
-                  <button className="semantic-engine-button" type="button" onClick={() => void validate(marker)}>
+                  <button
+                    className="semantic-engine-button"
+                    type="button"
+                    onClick={() => void validate(marker)}
+                  >
                     Verify
                   </button>
-                  <button className="secondary-button" type="button" onClick={() => prefill(marker)}>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => prefill(marker)}
+                  >
                     Edit
                   </button>
-                  <button className="danger-button" type="button" onClick={() => void remove(marker)}>
+                  <button
+                    className="danger-button"
+                    type="button"
+                    onClick={() => void remove(marker)}
+                  >
                     Delete
                   </button>
                 </div>
