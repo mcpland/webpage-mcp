@@ -231,9 +231,10 @@ const fallbackMessages: Record<string, string> = {
  * Safe i18n message getter with fallback support
  * @param key Message key
  * @param substitutions Optional substitution values
+ * @param defaultValue Optional default message when key is missing
  * @returns Localized message or fallback
  */
-export function getMessage(key: string, substitutions?: string[]): string {
+export function getMessage(key: string, substitutions?: string[], defaultValue?: string): string {
   try {
     // Check if Chrome extension APIs are available
     if (typeof chrome !== 'undefined' && chrome.i18n && chrome.i18n.getMessage) {
@@ -247,7 +248,7 @@ export function getMessage(key: string, substitutions?: string[]): string {
   }
 
   // Fallback to English messages
-  let fallback = fallbackMessages[key] || key;
+  let fallback = fallbackMessages[key] || defaultValue || key;
 
   // Handle substitutions in fallback messages
   if (substitutions && substitutions.length > 0) {

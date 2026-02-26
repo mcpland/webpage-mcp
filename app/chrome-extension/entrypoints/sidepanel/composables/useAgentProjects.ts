@@ -3,6 +3,7 @@
  * Handles project CRUD, selection, and persistence.
  */
 import { ref, computed, watch } from '@/entrypoints/shared/reactivity';
+import { getMessage } from '@/utils/i18n';
 import type { AgentProject, AgentStoredMessage } from 'webpage-mcp-shared';
 
 const STORAGE_KEY_SELECTED_PROJECT = 'agent-selected-project-id';
@@ -34,6 +35,9 @@ export interface UseAgentProjectsOptions {
 }
 
 export function useAgentProjects(options: UseAgentProjectsOptions) {
+  const t = (key: string, fallback: string, substitutions?: string[]): string =>
+    getMessage(key, substitutions, fallback);
+
   // State
   const projects = ref<AgentProject[]>([]);
   const selectedProjectId = ref<string>('');
@@ -186,12 +190,12 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       // Step 1: Validate the path
       const validation = await validatePath(rootPath);
       if (!validation) {
-        projectError.value = 'Failed to validate path';
+        projectError.value = t('agentProjectsValidateFailed', 'Failed to validate path');
         return null;
       }
 
       if (!validation.valid) {
-        projectError.value = validation.error || 'Invalid path';
+        projectError.value = validation.error || t('agentProjectsInvalidPath', 'Invalid path');
         return null;
       }
 
@@ -199,7 +203,9 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       let allowCreate = false;
       if (validation.needsCreation) {
         const confirmed = confirm(
-          `Directory "${validation.absolute}" Does not exist, create it? \n\nThe directory "${validation.absolute}" does not exist. Create it?`,
+          t('agentProjectsConfirmCreateDir', 'The directory "{0}" does not exist. Create it?', [
+            validation.absolute,
+          ]),
         );
         if (!confirmed) {
           return null;
@@ -238,12 +244,18 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
 
         return project;
       } else {
-        projectError.value = 'Project created but response is invalid.';
+        projectError.value = t(
+          'agentProjectsInvalidCreateResponse',
+          'Project created but response is invalid.',
+        );
         return null;
       }
     } catch (error: unknown) {
       console.error('Failed to create project:', error);
-      projectError.value = error instanceof Error ? error.message : 'Failed to create project.';
+      projectError.value =
+        error instanceof Error
+          ? error.message
+          : t('agentProjectsCreateFailed', 'Failed to create project.');
       return null;
     } finally {
       isCreatingProject.value = false;
@@ -288,7 +300,7 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     const ready = await options.ensureServer();
     const serverPort = options.getServerPort();
     if (!ready || !serverPort) {
-      projectError.value = 'Server not available';
+      projectError.value = t('agentProjectsServerUnavailable', 'Server not available');
       return null;
     }
 
@@ -299,10 +311,14 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       // Handle HTTP errors (e.g., 404 means server version mismatch)
       if (!response.ok) {
         if (response.status === 404) {
-          projectError.value =
-            'Directory picker not available. Please rebuild and restart the native server.';
+          projectError.value = t(
+            'agentProjectsPickerUnavailable',
+            'Directory picker not available. Please rebuild and restart the native server.',
+          );
         } else {
-          projectError.value = `Server error: HTTP ${response.status}`;
+          projectError.value = t('agentProjectsServerHttpError', 'Server error: HTTP {0}', [
+            String(response.status),
+          ]);
         }
         return null;
       }
@@ -314,12 +330,13 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       } else if (data.cancelled) {
         return null; // User cancelled, not an error
       } else {
-        projectError.value = data.error || 'Failed to open directory picker';
+        projectError.value =
+          data.error || t('agentProjectsPickerOpenFailed', 'Failed to open directory picker');
         return null;
       }
     } catch (error) {
       console.error('Failed to open directory picker:', error);
-      projectError.value = 'Failed to open directory picker';
+      projectError.value = t('agentProjectsPickerOpenFailed', 'Failed to open directory picker');
       return null;
     }
   }
@@ -397,7 +414,7 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     const ready = await options.ensureServer();
     const serverPort = options.getServerPort();
     if (!ready || !serverPort) {
-      projectError.value = 'Agent server is not available.';
+      projectError.value = t('agentProjectsServerUnavailable', 'Server not available');
       return null;
     }
 
@@ -407,12 +424,12 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       // Validate the path first
       const validation = await validatePath(rootPath);
       if (!validation) {
-        projectError.value = 'Failed to validate path';
+        projectError.value = t('agentProjectsValidateFailed', 'Failed to validate path');
         return null;
       }
 
       if (!validation.valid) {
-        projectError.value = validation.error || 'Invalid path';
+        projectError.value = validation.error || t('agentProjectsInvalidPath', 'Invalid path');
         return null;
       }
 
@@ -425,10 +442,11 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       if (existingProject) {
         // Project already exists - select it instead of creating a new one
         const shouldSwitch = confirm(
-          `Directory "${validation.absolute}" The corresponding project already exists: ${existingProject.name}\n\n` +
-            `Switch to this project? \n\n` +
-            `A project already exists for "${validation.absolute}": ${existingProject.name}\n` +
-            `Switch to that project?`,
+          t(
+            'agentProjectsConfirmSwitchExisting',
+            'A project already exists for "{0}": {1}\n\nSwitch to that project?',
+            [validation.absolute, existingProject.name],
+          ),
         );
         if (shouldSwitch) {
           selectedProjectId.value = existingProject.id;
@@ -444,7 +462,9 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       let allowCreate = false;
       if (validation.needsCreation) {
         const confirmed = confirm(
-          `Directory "${validation.absolute}" Does not exist, create it? \n\nThe directory "${validation.absolute}" does not exist. Create it?`,
+          t('agentProjectsConfirmCreateDir', 'The directory "{0}" does not exist. Create it?', [
+            validation.absolute,
+          ]),
         );
         if (!confirmed) {
           return null;

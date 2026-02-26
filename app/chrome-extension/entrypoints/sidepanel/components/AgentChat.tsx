@@ -94,8 +94,13 @@ function createAgentChatController() {
   // View routing (sessions list vs chat conversation)
   const viewRoute = useAgentChatViewRoute();
 
+  // Intentionally declared first to break circular composable dependency wiring.
+  // They are initialized immediately below in a fixed order.
+  // eslint-disable-next-line prefer-const
   let server!: ReturnType<typeof useAgentServer>;
+  // eslint-disable-next-line prefer-const
   let chat!: ReturnType<typeof useAgentChat>;
+  // eslint-disable-next-line prefer-const
   let projects!: ReturnType<typeof useAgentProjects>;
 
   // Initialize composables - sessions must be declared first for sessionId access

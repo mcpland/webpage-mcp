@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type { ElementMarker, UpsertMarkerRequest } from '@/common/element-marker-types';
+import { getMessage } from '@/utils/i18n';
 import type { AgentThemeId } from './composables/useAgentTheme';
 import AgentChat from './components/AgentChat';
 import SidepanelNavigator from './components/SidepanelNavigator';
@@ -45,6 +46,9 @@ function getCurrentUrlFromLocation(): string {
 }
 
 export default function SidepanelApp() {
+  const t = (key: string, fallback: string, substitutions?: string[]): string =>
+    getMessage(key, substitutions, fallback);
+
   const [currentTheme, setCurrentTheme] = useState<AgentThemeId>(() => getThemeFromDocument());
   const [activeTab, setActiveTab] = useState<TabType>('agent-chat');
 
@@ -176,11 +180,21 @@ export default function SidepanelApp() {
   }
 
   function createTrigger() {
-    alert('V3 Trigger Management has not been implemented yet and triggers cannot be created yet');
+    alert(
+      t(
+        'sidepanelCreateTriggerUnavailable',
+        'V3 trigger management is not implemented yet, so triggers cannot be created.',
+      ),
+    );
   }
 
   function editTrigger(_id: string) {
-    alert('V3 Trigger Management has not been implemented yet, and triggers cannot be edited at the moment');
+    alert(
+      t(
+        'sidepanelEditTriggerUnavailable',
+        'V3 trigger management is not implemented yet, so triggers cannot be edited.',
+      ),
+    );
   }
 
   async function removeTrigger(id: string): Promise<void> {
@@ -203,16 +217,31 @@ export default function SidepanelApp() {
   }
 
   function edit(_id: string): void {
-    alert('V3 Builder Not implemented yet, workflow cannot be edited at the moment');
+    alert(
+      t(
+        'sidepanelEditFlowUnavailable',
+        'V3 builder is not implemented yet, so workflows cannot be edited.',
+      ),
+    );
   }
 
   function createFlow(): void {
-    alert('V3 Builder Not implemented yet, workflow cannot be created yet');
+    alert(
+      t(
+        'sidepanelCreateFlowUnavailable',
+        'V3 builder is not implemented yet, so workflows cannot be created.',
+      ),
+    );
   }
 
   async function remove(id: string): Promise<void> {
     try {
-      const ok = confirm('Confirm to delete this workflow? This operation is irreversible');
+      const ok = confirm(
+        t(
+          'sidepanelConfirmDeleteWorkflow',
+          'Are you sure you want to delete this workflow? This action cannot be undone.',
+        ),
+      );
       if (!ok) {
         return;
       }
@@ -326,7 +355,9 @@ export default function SidepanelApp() {
 
   async function deleteMarker(marker: ElementMarker): Promise<void> {
     try {
-      const confirmed = confirm(`Are you sure you want to delete the mark "${marker.name}" ?`);
+      const confirmed = confirm(
+        t('sidepanelConfirmDeleteMarker', 'Delete marker "{0}"?', [marker.name]),
+      );
       if (!confirmed) {
         return;
       }
@@ -530,7 +561,10 @@ export default function SidepanelApp() {
                   value={markerSearch}
                   onChange={(event) => setMarkerSearch(event.currentTarget.value)}
                   className="em-search-input"
-                  placeholder="Search annotation name, selector..."
+                  placeholder={t(
+                    'sidepanelMarkerSearchPlaceholder',
+                    'Search marker name or selector...',
+                  )}
                   type="text"
                 />
                 {markerSearch ? (
@@ -549,7 +583,12 @@ export default function SidepanelApp() {
                 ) : null}
               </div>
 
-              <button className="em-add-btn" onClick={() => openMarkerEditor()} title="Add new annotation " type="button">
+              <button
+                className="em-add-btn"
+                onClick={() => openMarkerEditor()}
+                title={t('sidepanelAddMarkerTitle', 'Add new marker')}
+                type="button"
+              >
                 <svg viewBox="0 0 20 20" width="18" height="18">
                   <path
                     fill="currentColor"
@@ -563,7 +602,11 @@ export default function SidepanelApp() {
               <div className="em-modal-overlay" onClick={closeMarkerEditor}>
                 <div className="em-modal" onClick={(event) => event.stopPropagation()}>
                   <div className="em-modal-header">
-                    <h3 className="em-modal-title">{editingMarkerId ? 'Edit annotation' : 'Add annotation'}</h3>
+                    <h3 className="em-modal-title">
+                      {editingMarkerId
+                        ? t('sidepanelEditMarkerTitle', 'Edit marker')
+                        : t('sidepanelCreateMarkerTitle', 'Create marker')}
+                    </h3>
                     <button className="em-modal-close" onClick={closeMarkerEditor} type="button">
                       <svg viewBox="0 0 20 20" width="18" height="18">
                         <path
@@ -583,14 +626,19 @@ export default function SidepanelApp() {
                   >
                     <div className="em-form-row">
                       <div className="em-field">
-                        <label className="em-field-label">Name</label>
+                        <label className="em-field-label">
+                          {t('sidepanelMarkerFieldName', 'Name')}
+                        </label>
                         <input
                           value={markerForm.name}
                           onChange={(event) =>
                             setMarkerForm((current) => ({ ...current, name: event.currentTarget.value }))
                           }
                           className="em-input"
-                          placeholder="For example: Login button"
+                          placeholder={t(
+                            'sidepanelMarkerFieldNamePlaceholder',
+                            'For example: Login button',
+                          )}
                           required
                         />
                       </div>
@@ -598,7 +646,9 @@ export default function SidepanelApp() {
 
                     <div className="em-form-row em-form-row-multi">
                       <div className="em-field">
-                        <label className="em-field-label">Selector type</label>
+                        <label className="em-field-label">
+                          {t('sidepanelMarkerFieldSelectorType', 'Selector type')}
+                        </label>
                         <div className="em-select-wrapper">
                           <select
                             value={markerForm.selectorType}
@@ -610,14 +660,16 @@ export default function SidepanelApp() {
                             }
                             className="em-select"
                           >
-                            <option value="css">CSS Selector</option>
-                            <option value="xpath">XPath</option>
+                            <option value="css">{t('sidepanelMarkerSelectorCss', 'CSS selector')}</option>
+                            <option value="xpath">{t('sidepanelMarkerSelectorXpath', 'XPath')}</option>
                           </select>
                         </div>
                       </div>
 
                       <div className="em-field">
-                        <label className="em-field-label">Match type</label>
+                        <label className="em-field-label">
+                          {t('sidepanelMarkerFieldMatchType', 'Match type')}
+                        </label>
                         <div className="em-select-wrapper">
                           <select
                             value={markerForm.matchType}
@@ -629,9 +681,15 @@ export default function SidepanelApp() {
                             }
                             className="em-select"
                           >
-                            <option value="prefix">path prefix</option>
-                            <option value="exact">Exact match</option>
-                            <option value="host">Domain name</option>
+                            <option value="prefix">
+                              {t('sidepanelMarkerMatchPrefix', 'Path prefix')}
+                            </option>
+                            <option value="exact">
+                              {t('sidepanelMarkerMatchExact', 'Exact match')}
+                            </option>
+                            <option value="host">
+                              {t('sidepanelMarkerMatchHost', 'Hostname')}
+                            </option>
                           </select>
                         </div>
                       </div>
@@ -639,14 +697,19 @@ export default function SidepanelApp() {
 
                     <div className="em-form-row">
                       <div className="em-field">
-                        <label className="em-field-label">selector</label>
+                        <label className="em-field-label">
+                          {t('sidepanelMarkerFieldSelector', 'Selector')}
+                        </label>
                         <textarea
                           value={markerForm.selector}
                           onChange={(event) =>
                             setMarkerForm((current) => ({ ...current, selector: event.currentTarget.value }))
                           }
                           className="em-textarea"
-                          placeholder="CSS selector or XPath"
+                          placeholder={t(
+                            'sidepanelMarkerSelectorPlaceholder',
+                            'CSS selector or XPath',
+                          )}
                           rows={3}
                           required
                         />
@@ -655,10 +718,10 @@ export default function SidepanelApp() {
 
                     <div className="em-modal-actions">
                       <button type="button" className="em-btn em-btn-ghost" onClick={closeMarkerEditor}>
-                        Cancel
+                        {t('cancelButton', 'Cancel')}
                       </button>
                       <button type="submit" className="em-btn em-btn-primary">
-                        {editingMarkerId ? 'update' : 'save'}
+                        {editingMarkerId ? t('sidepanelUpdateButton', 'Update') : t('saveButton', 'Save')}
                       </button>
                     </div>
                   </form>
@@ -672,13 +735,23 @@ export default function SidepanelApp() {
                   <span className="em-stats-text">
                     {markerSearch ? (
                       <>
-                        Filter out <strong>{filteredMarkers.length}</strong> annotations (total {markers.length} one,
-                        {groupedMarkers.length} domain names)
+                        {t(
+                          'sidepanelMarkerStatsFiltered',
+                          'Showing {0} markers (out of {1}) across {2} domains',
+                          [
+                            String(filteredMarkers.length),
+                            String(markers.length),
+                            String(groupedMarkers.length),
+                          ],
+                        )}
                       </>
                     ) : (
                       <>
-                        Total<strong>{markers.length}</strong> a label,
-                        <strong>{groupedMarkers.length}</strong> domain names
+                        {t(
+                          'sidepanelMarkerStatsTotal',
+                          'Total {0} markers across {1} domains',
+                          [String(markers.length), String(groupedMarkers.length)],
+                        )}
                       </>
                     )}
                   </span>
@@ -697,7 +770,11 @@ export default function SidepanelApp() {
                           <path fill="currentColor" d="M6 8l4 4 4-4" />
                         </svg>
                         <h3 className="em-domain-name">{domainGroup.domain}</h3>
-                        <span className="em-domain-count">{domainGroup.count} annotations</span>
+                        <span className="em-domain-count">
+                          {t('sidepanelMarkerDomainCount', '{0} markers', [
+                            String(domainGroup.count),
+                          ])}
+                        </span>
                       </div>
                     </div>
 
@@ -725,7 +802,7 @@ export default function SidepanelApp() {
                                         <button
                                           className="em-action-btn em-action-verify"
                                           onClick={() => void validateMarker(marker)}
-                                          title="Verify"
+                                          title={t('sidepanelMarkerActionVerify', 'Verify')}
                                           type="button"
                                         >
                                           <svg viewBox="0 0 24 24" width="14" height="14">
@@ -739,7 +816,7 @@ export default function SidepanelApp() {
                                         <button
                                           className="em-action-btn em-action-edit"
                                           onClick={() => openMarkerEditor(marker)}
-                                          title="Edit"
+                                          title={t('sidepanelMarkerActionEdit', 'Edit')}
                                           type="button"
                                         >
                                           <svg viewBox="0 0 24 24" width="14" height="14">
@@ -753,7 +830,7 @@ export default function SidepanelApp() {
                                         <button
                                           className="em-action-btn em-action-delete"
                                           onClick={() => void deleteMarker(marker)}
-                                          title="delete"
+                                          title={t('sidepanelMarkerActionDelete', 'Delete')}
                                           type="button"
                                         >
                                           <svg viewBox="0 0 24 24" width="14" height="14">
@@ -789,12 +866,17 @@ export default function SidepanelApp() {
             ) : (
               <div className="em-empty">
                 {markerSearch ? (
-                  <span>No matching annotation found</span>
+                  <span>{t('sidepanelNoMatchingMarkers', 'No matching markers found')}</span>
                 ) : (
                   <>
-                    <span>There is no annotation yet, click + in the upper right corner to create the first annotation</span>
+                    <span>
+                      {t(
+                        'sidepanelNoMarkers',
+                        'No markers yet. Click + in the top-right corner to create the first marker.',
+                      )}
+                    </span>
                     <button className="em-btn em-btn-primary em-empty-btn" onClick={() => openMarkerEditor()} type="button">
-                      Create callouts
+                      {t('sidepanelCreateMarkerButton', 'Create marker')}
                     </button>
                   </>
                 )}

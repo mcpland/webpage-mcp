@@ -9,7 +9,10 @@ export const REC_CMD = {
   RESUME: 'resume',
 } as const satisfies Record<string, RecorderCmd>;
 
-const RECORDER_JS_SCRIPT = 'inject-scripts/recorder.js';
+const RECORDER_SCRIPT_FILES = [
+  'inject-scripts/recorder-shared.js',
+  'inject-scripts/recorder.js',
+] as const;
 
 export async function ensureRecorderInjected(tabId: number): Promise<void> {
   // Discover frames (top + subframes)
@@ -47,7 +50,7 @@ export async function ensureRecorderInjected(tabId: number): Promise<void> {
     try {
       await chrome.scripting.executeScript({
         target: { tabId, frameIds: needRecorder },
-        files: [RECORDER_JS_SCRIPT],
+        files: [...RECORDER_SCRIPT_FILES],
         world: 'ISOLATED',
       });
     } catch {
@@ -55,7 +58,7 @@ export async function ensureRecorderInjected(tabId: number): Promise<void> {
       try {
         await chrome.scripting.executeScript({
           target: { tabId, allFrames: true },
-          files: [RECORDER_JS_SCRIPT],
+          files: [...RECORDER_SCRIPT_FILES],
           world: 'ISOLATED',
         });
       } catch {

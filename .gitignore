@@ -4,6 +4,7 @@ node_modules/
 app/chrome-extension/.output/
 app/chrome-extension/.wxt/
 app/native-server/dist/
+app/native-server/coverage/
 packages/shared/dist/
 
 **/*.log

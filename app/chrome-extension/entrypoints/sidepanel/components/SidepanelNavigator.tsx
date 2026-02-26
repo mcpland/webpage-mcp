@@ -4,6 +4,7 @@ import {
   installFloatingDrag,
   type FloatingPosition,
 } from '@/entrypoints/web-editor-v2/ui/floating-drag';
+import { getMessage } from '@/utils/i18n';
 import './SidepanelNavigator.css';
 
 export type SidepanelTabType = 'workflows' | 'element-markers' | 'agent-chat';
@@ -61,6 +62,7 @@ async function savePosition(position: FloatingPosition): Promise<void> {
 }
 
 export default function SidepanelNavigator({ activeTab, onChange }: SidepanelNavigatorProps) {
+  const t = (key: string, fallback: string): string => getMessage(key, undefined, fallback);
   const [isOpen, setIsOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [position, setPosition] = useState<FloatingPosition>(() => getDefaultPosition());
@@ -151,7 +153,10 @@ export default function SidepanelNavigator({ activeTab, onChange }: SidepanelNav
         className={`navigator-trigger${isOpen ? ' navigator-trigger-active' : ''}`}
         onClick={handleTriggerClick}
         onDoubleClick={resetToDefault}
-        title="Switch pages (can be dragged and moved, double-click to reset the position)"
+        title={t(
+          'sidepanelNavigatorToggleTitle',
+          'Switch pages (drag to move, double-click to reset position)',
+        )}
         type="button"
       >
         <svg
@@ -171,7 +176,9 @@ export default function SidepanelNavigator({ activeTab, onChange }: SidepanelNav
         <div className="navigator-overlay" onClick={closeMenu}>
           <div className="navigator-menu" onClick={(event) => event.stopPropagation()}>
             <div className="navigator-header">
-              <span className="navigator-title">Switch pages</span>
+              <span className="navigator-title">
+                {t('sidepanelNavigatorTitle', 'Switch pages')}
+              </span>
               <button className="navigator-close" onClick={closeMenu} type="button">
                 <svg
                   viewBox="0 0 24 24"
@@ -209,8 +216,12 @@ export default function SidepanelNavigator({ activeTab, onChange }: SidepanelNav
                   </svg>
                 </div>
                 <div className="navigator-item-content">
-                  <span className="navigator-item-title">Intelligent Assistant</span>
-                  <span className="navigator-item-desc">AI Agent Conversations and Quests</span>
+                  <span className="navigator-item-title">
+                    {t('sidepanelNavigatorAgentTitle', 'AI Assistant')}
+                  </span>
+                  <span className="navigator-item-desc">
+                    {t('sidepanelNavigatorAgentDesc', 'AI agent conversations and tasks')}
+                  </span>
                 </div>
                 {activeTab === 'agent-chat' ? (
                   <div className="navigator-item-check">
@@ -250,8 +261,15 @@ export default function SidepanelNavigator({ activeTab, onChange }: SidepanelNav
                   </svg>
                 </div>
                 <div className="navigator-item-content">
-                  <span className="navigator-item-title">Workflow management</span>
-                  <span className="navigator-item-desc">Recording and playback automation process</span>
+                  <span className="navigator-item-title">
+                    {t('sidepanelNavigatorWorkflowsTitle', 'Workflow management')}
+                  </span>
+                  <span className="navigator-item-desc">
+                    {t(
+                      'sidepanelNavigatorWorkflowsDesc',
+                      'Record and replay automation workflows',
+                    )}
+                  </span>
                 </div>
                 {activeTab === 'workflows' ? (
                   <div className="navigator-item-check">
@@ -291,8 +309,18 @@ export default function SidepanelNavigator({ activeTab, onChange }: SidepanelNav
                   </svg>
                 </div>
                 <div className="navigator-item-content">
-                  <span className="navigator-item-title">Element annotation management</span>
-                  <span className="navigator-item-desc">Manage page element annotations</span>
+                  <span className="navigator-item-title">
+                    {t(
+                      'sidepanelNavigatorElementMarkersTitle',
+                      'Element annotation management',
+                    )}
+                  </span>
+                  <span className="navigator-item-desc">
+                    {t(
+                      'sidepanelNavigatorElementMarkersDesc',
+                      'Manage page element annotations',
+                    )}
+                  </span>
                 </div>
                 {activeTab === 'element-markers' ? (
                   <div className="navigator-item-check">

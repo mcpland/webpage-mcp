@@ -1,9 +1,10 @@
 import { type CSSProperties, useMemo, useState } from 'react';
 
+import { getMessage } from '@/utils/i18n';
 import WorkflowListItem, { type WorkflowFlowLite } from './WorkflowListItem';
 import './WorkflowsView.css';
 
-export interface FlowLite extends WorkflowFlowLite {}
+export type FlowLite = WorkflowFlowLite;
 
 export interface RunLite {
   id: string;
@@ -132,6 +133,8 @@ export default function WorkflowsView({
   onEditTrigger,
   onRemoveTrigger,
 }: WorkflowsViewProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]): string =>
+    getMessage(key, substitutions, fallback);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
 
@@ -174,16 +177,18 @@ export default function WorkflowsView({
   function getRunStatusText(run: RunLite): string {
     if (run.status) {
       const statusMap: Record<string, string> = {
-        queued: 'Queuing',
-        running: 'Running',
-        paused: 'Paused',
-        succeeded: 'success',
-        failed: 'failed',
-        canceled: 'Cancelled',
+        queued: t('workflowsRunQueued', 'Queued'),
+        running: t('workflowsRunRunning', 'Running'),
+        paused: t('workflowsRunPaused', 'Paused'),
+        succeeded: t('workflowsRunSucceeded', 'Succeeded'),
+        failed: t('workflowsRunFailed', 'Failed'),
+        canceled: t('workflowsRunCanceled', 'Canceled'),
       };
       return statusMap[run.status] || run.status;
     }
-    return run.success ? 'success' : 'failure';
+    return run.success
+      ? t('workflowsRunSucceeded', 'Succeeded')
+      : t('workflowsRunFailed', 'Failed');
   }
 
   function formatTime(dateStr: string): string {
@@ -226,13 +231,19 @@ export default function WorkflowsView({
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.currentTarget.value)}
               type="text"
-              placeholder="Search workflows..."
+              placeholder={t('workflowsSearchPlaceholder', 'Search workflows...')}
               className="w-full pl-9 pr-3 py-2 text-sm"
               style={inputStyle}
             />
           </div>
 
-          <button className="flex-shrink-0 p-2" style={refreshButtonStyle} onClick={onRefresh} title="Refresh" type="button">
+          <button
+            className="flex-shrink-0 p-2"
+            style={refreshButtonStyle}
+            onClick={onRefresh}
+            title={t('workflowsRefreshTitle', 'Refresh')}
+            type="button"
+          >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
               <path
                 strokeLinecap="round"
@@ -247,7 +258,7 @@ export default function WorkflowsView({
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
               </svg>
-              New
+              {t('workflowsCreateButton', 'New')}
             </span>
           </button>
         </div>
@@ -260,11 +271,14 @@ export default function WorkflowsView({
               onChange={(event) => onOnlyBoundChange(event.currentTarget.checked)}
               className="workflow-checkbox"
             />
-            <span>Current page only</span>
+            <span>{t('workflowsCurrentPageOnly', 'Current page only')}</span>
           </label>
 
           <span className="text-xs" style={{ color: 'var(--ac-text-subtle)' }}>
-            {filteredFlows.length} workflow{filteredFlows.length !== 1 ? 's' : ''}
+            {filteredFlows.length}{' '}
+            {filteredFlows.length !== 1
+              ? t('workflowsCountPlural', 'workflows')
+              : t('workflowsCountSingular', 'workflow')}
           </span>
         </div>
       </div>
@@ -283,14 +297,18 @@ export default function WorkflowsView({
               </svg>
             </div>
             <div className="text-sm font-medium mb-1" style={{ color: 'var(--ac-text)' }}>
-              {searchQuery ? 'No matching workflows' : 'No workflows yet'}
+              {searchQuery
+                ? t('workflowsEmptySearchTitle', 'No matching workflows')
+                : t('workflowsEmptyTitle', 'No workflows yet')}
             </div>
             <div className="text-xs text-center mb-4" style={{ color: 'var(--ac-text-muted)' }}>
-              {searchQuery ? 'Try a different search term' : 'Record your first automation workflow'}
+              {searchQuery
+                ? t('workflowsEmptySearchDesc', 'Try a different search term')
+                : t('workflowsEmptyDesc', 'Record your first automation workflow')}
             </div>
             {!searchQuery ? (
               <button className="px-4 py-2 text-sm font-medium" style={newButtonStyle} onClick={onCreate} type="button">
-                Create Workflow
+                {t('workflowsCreateWorkflow', 'Create workflow')}
               </button>
             ) : null}
           </div>
@@ -318,7 +336,7 @@ export default function WorkflowsView({
                 color: 'var(--ac-text-subtle)',
               }}
             >
-              Advanced
+              {t('workflowsAdvancedSection', 'Advanced')}
             </span>
           </div>
 
@@ -334,7 +352,7 @@ export default function WorkflowsView({
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
-                <span>Run History</span>
+                <span>{t('workflowsRunHistory', 'Run history')}</span>
               </div>
               <span className="text-xs" style={{ color: 'var(--ac-text-subtle)' }}>
                 {runs.length}
@@ -345,7 +363,7 @@ export default function WorkflowsView({
               <div className="advanced-section-content">
                 {runs.length === 0 ? (
                   <div className="text-sm py-3" style={{ color: 'var(--ac-text-muted)' }}>
-                    No run history yet
+                    {t('workflowsNoRunHistory', 'No run history yet')}
                   </div>
                 ) : (
                   <div className="space-y-2 py-2">
@@ -391,10 +409,12 @@ export default function WorkflowsView({
                             {run.entries.length === 0 && run.status ? (
                               <div className="text-xs py-1" style={{ color: 'var(--ac-text-muted)' }}>
                                 <div className="flex items-center gap-2">
-                                  <span>Status: {getRunStatusText(run)}</span>
+                                  <span>
+                                    {t('workflowsRunStatusPrefix', 'Status')}: {getRunStatusText(run)}
+                                  </span>
                                   {run.finishedAt ? (
                                     <span>
-                                      • Time taken:
+                                      • {t('workflowsRunDurationPrefix', 'Time taken')}:
                                       {Math.round(
                                         (new Date(run.finishedAt).getTime() -
                                           new Date(run.startedAt).getTime()) /
@@ -444,7 +464,7 @@ export default function WorkflowsView({
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
-                <span>Triggers</span>
+                <span>{t('workflowsTriggersSection', 'Triggers')}</span>
               </div>
 
               <div className="flex items-center gap-2">
@@ -458,7 +478,7 @@ export default function WorkflowsView({
                     event.stopPropagation();
                     onCreateTrigger();
                   }}
-                  title="Add trigger"
+                  title={t('workflowsAddTriggerTitle', 'Add trigger')}
                   type="button"
                 >
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -472,7 +492,7 @@ export default function WorkflowsView({
               <div className="advanced-section-content">
                 {triggers.length === 0 ? (
                   <div className="text-sm py-3" style={{ color: 'var(--ac-text-muted)' }}>
-                    No triggers configured
+                    {t('workflowsNoTriggers', 'No triggers configured')}
                   </div>
                 ) : (
                   <div className="space-y-2 py-2">
@@ -502,7 +522,7 @@ export default function WorkflowsView({
                               className="trigger-action"
                               style={triggerActionStyle}
                               onClick={() => onEditTrigger(trigger.id)}
-                              title="Edit"
+                              title={t('workflowsEditTriggerTitle', 'Edit')}
                               type="button"
                             >
                               <svg
@@ -523,7 +543,7 @@ export default function WorkflowsView({
                               className="trigger-action trigger-action-danger"
                               style={triggerActionDangerStyle}
                               onClick={() => onRemoveTrigger(trigger.id)}
-                              title="Delete"
+                              title={t('workflowsDeleteTriggerTitle', 'Delete')}
                               type="button"
                             >
                               <svg
