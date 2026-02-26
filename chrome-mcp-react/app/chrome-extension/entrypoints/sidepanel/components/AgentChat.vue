@@ -1,168 +1,5 @@
 <template>
-  <div class="agent-theme relative h-full" :data-agent-theme="themeState.theme.value">
-    <!-- Sessions List View -->
-    <template v-if="viewRoute.isSessionsView.value">
-      <AgentSessionsView
-        :sessions="sessions.allSessions.value"
-        :selected-session-id="sessions.selectedSessionId.value"
-        :is-loading="sessions.isLoadingAllSessions.value"
-        :is-creating="sessions.isCreatingSession.value"
-        :error="sessions.sessionError.value"
-        :running-session-ids="runningSessionIds"
-        :projects-map="projectsMap"
-        @session:select="handleSessionSelectAndNavigate"
-        @session:new="handleNewSessionAndNavigate"
-        @session:delete="handleDeleteSession"
-        @session:rename="handleRenameSession"
-        @session:open-project="handleSessionOpenProject"
-      />
-    </template>
-
-    <!-- Chat Conversation View -->
-    <template v-else>
-      <AgentChatShell
-        :error-message="chat.errorMessage.value"
-        :usage="chat.lastUsage.value"
-        :footer-label="`${engineDisplayName} Preview`"
-        @error:dismiss="chat.errorMessage.value = null"
-      >
-        <!-- Header -->
-        <template #header>
-          <AgentTopBar
-            :project-label="projectLabel"
-            :session-label="sessionLabel"
-            :connection-state="connectionState"
-            :show-back-button="true"
-            :brand-label="engineDisplayName"
-            @toggle:project-menu="toggleProjectMenu"
-            @toggle:session-menu="toggleSessionMenu"
-            @toggle:settings-menu="toggleSettingsMenu"
-            @toggle:open-project-menu="toggleOpenProjectMenu"
-            @back="handleBackToSessions"
-          />
-        </template>
-
-        <!-- Content -->
-        <template #content>
-          <AgentConversation :threads="threadState.threads.value" />
-        </template>
-
-        <!-- Composer -->
-        <template #composer>
-          <!-- Web Editor Changes Chips -->
-          <WebEditorChanges />
-
-          <AgentComposer
-            :model-value="chat.input.value"
-            :attachments="attachments.attachments.value"
-            :attachment-error="attachments.error.value"
-            :is-drag-over="attachments.isDragOver.value"
-            :is-streaming="chat.isStreaming.value"
-            :request-state="chat.requestState.value"
-            :sending="chat.sending.value"
-            :cancelling="chat.cancelling.value"
-            :can-cancel="!!chat.currentRequestId.value"
-            :can-send="chat.canSend.value"
-            placeholder="Ask Claude to write code..."
-            :engine-name="currentEngineName"
-            :selected-model="currentSessionModel"
-            :available-models="currentAvailableModels"
-            :reasoning-effort="currentReasoningEffort"
-            :available-reasoning-efforts="currentAvailableReasoningEfforts"
-            :enable-fake-caret="inputPreferences.fakeCaretEnabled.value"
-            @update:model-value="chat.input.value = $event"
-            @submit="handleSend"
-            @cancel="chat.cancelCurrentRequest()"
-            @attachment:add="handleAttachmentAdd"
-            @attachment:remove="attachments.removeAttachment"
-            @attachment:drop="attachments.handleDrop"
-            @attachment:paste="attachments.handlePaste"
-            @attachment:dragover="attachments.handleDragOver"
-            @attachment:dragleave="attachments.handleDragLeave"
-            @model:change="handleComposerModelChange"
-            @reasoning-effort:change="handleComposerReasoningEffortChange"
-            @session:settings="handleComposerOpenSettings"
-            @session:reset="handleComposerReset"
-          />
-        </template>
-      </AgentChatShell>
-    </template>
-
-    <!-- Click-outside handler for menus (z-40) -->
-    <div
-      v-if="projectMenuOpen || sessionMenuOpen || settingsMenuOpen || openProjectMenuOpen"
-      class="fixed inset-0 z-40"
-      @click="closeMenus"
-    />
-
-    <!-- Dropdown menus (z-50, outside stacking context) -->
-    <AgentProjectMenu
-      :open="projectMenuOpen"
-      :projects="projects.projects.value"
-      :selected-project-id="projects.selectedProjectId.value"
-      :selected-cli="selectedCli"
-      :model="model"
-      :reasoning-effort="reasoningEffort"
-      :use-ccr="useCcr"
-      :enable-webpage-mcp="enableWebpageMcp"
-      :engines="server.engines.value"
-      :is-picking="isPickingDirectory"
-      :is-saving="isSavingPreference"
-      :error="projects.projectError.value"
-      @project:select="handleProjectSelect"
-      @project:new="handleNewProject"
-      @cli:update="selectedCli = $event"
-      @model:update="model = $event"
-      @reasoning-effort:update="reasoningEffort = $event"
-      @ccr:update="useCcr = $event"
-      @webpage-mcp:update="enableWebpageMcp = $event"
-      @save="handleSaveSettings"
-    />
-
-    <AgentSessionMenu
-      :open="sessionMenuOpen"
-      :sessions="sessions.sessions.value"
-      :selected-session-id="sessions.selectedSessionId.value"
-      :is-loading="sessions.isLoadingSessions.value"
-      :is-creating="sessions.isCreatingSession.value"
-      :error="sessions.sessionError.value"
-      @session:select="handleSessionSelect"
-      @session:new="handleNewSession"
-      @session:delete="handleDeleteSession"
-      @session:rename="handleRenameSession"
-    />
-
-    <AgentSettingsMenu
-      :open="settingsMenuOpen"
-      :theme="themeState.theme.value"
-      :fake-caret-enabled="inputPreferences.fakeCaretEnabled.value"
-      @theme:set="handleThemeChange"
-      @reconnect="handleReconnect"
-      @attachments:open="handleOpenAttachmentCache"
-      @fake-caret:toggle="handleFakeCaretToggle"
-    />
-
-    <AgentOpenProjectMenu
-      :open="openProjectMenuOpen"
-      :default-target="openProjectPreference.defaultTarget.value"
-      @select="handleOpenProjectSelect"
-      @close="closeOpenProjectMenu"
-    />
-
-    <!-- Session Settings Panel -->
-    <AgentSessionSettingsPanel
-      :open="sessionSettingsOpen"
-      :session="sessions.selectedSession.value"
-      :management-info="currentManagementInfo"
-      :is-loading="sessionSettingsLoading"
-      :is-saving="sessionSettingsSaving"
-      @close="handleCloseSessionSettings"
-      @save="handleSaveSessionSettings"
-    />
-
-    <!-- Attachment Cache Panel -->
-    <AttachmentCachePanel :open="attachmentCacheOpen" @close="handleCloseAttachmentCache" />
-  </div>
+  <ReactComponentHost :component="AgentChatViewReact" :component-props="viewProps" />
 </template>
 
 <script lang="ts" setup>
@@ -187,23 +24,9 @@ import {
   type AgentThemeId,
 } from '../composables';
 import type { OpenProjectTarget } from 'webpage-mcp-shared';
-
-// New UI Components
-import {
-  AgentChatShell,
-  AgentTopBar,
-  AgentComposer,
-  WebEditorChanges,
-  AgentConversation,
-  AgentProjectMenu,
-  AgentSessionMenu,
-  AgentSettingsMenu,
-  AgentSessionSettingsPanel,
-  AgentSessionsView,
-  AgentOpenProjectMenu,
-} from './agent-chat';
-import type { SessionSettings } from './agent-chat/AgentSessionSettingsPanel.vue';
-import AttachmentCachePanel from './agent-chat/AttachmentCachePanel.vue';
+import type { SessionSettings } from './agent-chat/AgentSessionSettingsPanel';
+import ReactComponentHost from '@/entrypoints/shared/vue/ReactComponentHost.vue';
+import AgentChatViewReact from './AgentChatView';
 
 // Model utilities
 import {
@@ -1277,6 +1100,137 @@ function clearLocalSelectionState(expectedTabId: number, expectedElementKey: str
     });
   }
 }
+
+const viewProps = computed(() => ({
+  theme: themeState.theme.value,
+  isSessionsView: viewRoute.isSessionsView.value,
+  allSessions: sessions.allSessions.value,
+  selectedSessionId: sessions.selectedSessionId.value || '',
+  isLoadingAllSessions: sessions.isLoadingAllSessions.value,
+  isCreatingSession: sessions.isCreatingSession.value,
+  sessionError: sessions.sessionError.value,
+  runningSessionIds: runningSessionIds.value,
+  projectsMap: projectsMap.value,
+  onSessionSelectAndNavigate: handleSessionSelectAndNavigate,
+  onSessionNewAndNavigate: handleNewSessionAndNavigate,
+  onDeleteSession: handleDeleteSession,
+  onRenameSession: handleRenameSession,
+  onSessionOpenProject: handleSessionOpenProject,
+
+  chatErrorMessage: chat.errorMessage.value,
+  usage: chat.lastUsage.value,
+  footerLabel: `${engineDisplayName.value} Preview`,
+  onDismissError: () => {
+    chat.errorMessage.value = null;
+  },
+
+  projectLabel: projectLabel.value,
+  sessionLabel: sessionLabel.value,
+  connectionState: connectionState.value,
+  engineDisplayName: engineDisplayName.value,
+  threads: threadState.threads.value,
+  serverPort: server.serverPort.value,
+  webEditorTxState,
+
+  inputValue: chat.input.value,
+  attachments: attachments.attachments.value,
+  attachmentError: attachments.error.value,
+  isDragOver: attachments.isDragOver.value,
+  isStreaming: chat.isStreaming.value,
+  requestState: chat.requestState.value,
+  sending: chat.sending.value,
+  cancelling: chat.cancelling.value,
+  canCancel: !!chat.currentRequestId.value,
+  canSend: chat.canSend.value,
+  currentEngineName: currentEngineName.value,
+  currentSessionModel: currentSessionModel.value,
+  currentAvailableModels: currentAvailableModels.value,
+  currentReasoningEffort: currentReasoningEffort.value,
+  currentAvailableReasoningEfforts: currentAvailableReasoningEfforts.value,
+  fakeCaretEnabled: inputPreferences.fakeCaretEnabled.value,
+  onInputChange: (value: string) => {
+    chat.input.value = value;
+  },
+  onSend: handleSend,
+  onCancelRequest: () => {
+    chat.cancelCurrentRequest();
+  },
+  onAttachmentAdd: handleAttachmentAdd,
+  onAttachmentRemove: attachments.removeAttachment,
+  onAttachmentDrop: attachments.handleDrop,
+  onAttachmentPaste: attachments.handlePaste,
+  onAttachmentDragOver: attachments.handleDragOver,
+  onAttachmentDragLeave: attachments.handleDragLeave,
+  onComposerModelChange: handleComposerModelChange,
+  onComposerReasoningEffortChange: handleComposerReasoningEffortChange,
+  onComposerOpenSettings: handleComposerOpenSettings,
+  onComposerReset: handleComposerReset,
+
+  projectMenuOpen: projectMenuOpen.value,
+  sessionMenuOpen: sessionMenuOpen.value,
+  settingsMenuOpen: settingsMenuOpen.value,
+  openProjectMenuOpen: openProjectMenuOpen.value,
+  selectedProjectId: projects.selectedProjectId.value || '',
+  projects: projects.projects.value,
+  selectedCli: selectedCli.value,
+  model: model.value,
+  reasoningEffort: reasoningEffort.value,
+  useCcr: useCcr.value,
+  enableWebpageMcp: enableWebpageMcp.value,
+  engines: server.engines.value,
+  isPickingDirectory: isPickingDirectory.value,
+  isSavingPreference: isSavingPreference.value,
+  projectError: projects.projectError.value,
+  onToggleProjectMenu: toggleProjectMenu,
+  onToggleSessionMenu: toggleSessionMenu,
+  onToggleSettingsMenu: toggleSettingsMenu,
+  onToggleOpenProjectMenu: toggleOpenProjectMenu,
+  onBackToSessions: handleBackToSessions,
+  onCloseMenus: closeMenus,
+  onProjectSelect: handleProjectSelect,
+  onNewProject: handleNewProject,
+  onCliUpdate: (value: string) => {
+    selectedCli.value = value;
+  },
+  onModelUpdate: (value: string) => {
+    model.value = value;
+  },
+  onReasoningEffortUpdate: (value: CodexReasoningEffort) => {
+    reasoningEffort.value = value;
+  },
+  onCcrUpdate: (value: boolean) => {
+    useCcr.value = value;
+  },
+  onWebpageMcpUpdate: (value: boolean) => {
+    enableWebpageMcp.value = value;
+  },
+  onSaveSettings: handleSaveSettings,
+
+  projectSessions: sessions.sessions.value,
+  isLoadingSessions: sessions.isLoadingSessions.value,
+  onSessionSelect: handleSessionSelect,
+  onNewSession: handleNewSession,
+
+  onThemeSet: handleThemeChange,
+  onReconnect: handleReconnect,
+  onAttachmentsOpen: handleOpenAttachmentCache,
+  onFakeCaretToggle: handleFakeCaretToggle,
+
+  defaultOpenProjectTarget: openProjectPreference.defaultTarget.value,
+  onOpenProjectSelect: handleOpenProjectSelect,
+  onCloseOpenProjectMenu: closeOpenProjectMenu,
+
+  sessionSettingsOpen: sessionSettingsOpen.value,
+  selectedSession: sessions.selectedSession.value,
+  currentManagementInfo: currentManagementInfo.value,
+  sessionSettingsLoading: sessionSettingsLoading.value,
+  sessionSettingsSaving: sessionSettingsSaving.value,
+  onCloseSessionSettings: handleCloseSessionSettings,
+  onSaveSessionSettings: handleSaveSessionSettings,
+
+  attachmentCacheOpen: attachmentCacheOpen.value,
+  onCloseAttachmentCache: handleCloseAttachmentCache,
+}));
 
 // Initialize
 onMounted(async () => {
