@@ -1,23 +1,24 @@
 <template>
-  <div class="pl-1 space-y-3">
-    <!-- Timeline container -->
-    <div class="relative pl-5 space-y-4 ml-1">
-      <AgentTimelineItem
-        v-for="(item, index) in items"
-        :key="item.id"
-        :item="item"
-        :is-last="index === items.length - 1"
-      />
-    </div>
-  </div>
+  <ReactComponentHost :component="AgentTimelineReact" :component-props="componentProps" />
 </template>
 
 <script lang="ts" setup>
-import type { TimelineItem, AgentThreadState } from '../../composables/useAgentThreads';
-import AgentTimelineItem from './AgentTimelineItem.vue';
+import { computed, inject, ref } from 'vue';
+import type { AgentThreadState, TimelineItem } from '../../composables/useAgentThreads';
+import { AGENT_SERVER_PORT_KEY } from '../../composables';
+import ReactComponentHost from '@/entrypoints/shared/vue/ReactComponentHost.vue';
+import AgentTimelineReact from './AgentTimeline';
 
-defineProps<{
+const props = defineProps<{
   items: TimelineItem[];
   state: AgentThreadState;
 }>();
+
+const injectedServerPort = inject(AGENT_SERVER_PORT_KEY, ref<number | null>(null));
+
+const componentProps = computed(() => ({
+  items: props.items,
+  state: props.state,
+  serverPort: injectedServerPort.value,
+}));
 </script>
