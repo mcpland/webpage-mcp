@@ -1,35 +1,39 @@
 #!/usr/bin/env node
-import serverInstance from './server';
-import nativeMessagingHostInstance from './native-messaging-host';
+import serverInstance from "./server";
+import nativeMessagingHostInstance from "./native-messaging-host";
+
+const exitWithError = (label: string, error: unknown): never => {
+  const message =
+    error instanceof Error ? error.stack || error.message : String(error);
+  console.error(`[native-server] ${label}: ${message}`);
+  process.exit(1);
+};
 
 try {
   serverInstance.setNativeHost(nativeMessagingHostInstance); // Server needs setNativeHost method
   nativeMessagingHostInstance.setServer(serverInstance); // NativeHost needs setServer method
   nativeMessagingHostInstance.start();
 } catch (error) {
-  process.exit(1);
+  exitWithError("startup failed", error);
 }
 
-process.on('error', (error) => {
-  process.exit(1);
+process.on("error", (error) => {
+  exitWithError("process error", error);
 });
 
 // Handle process signals and uncaught exceptions
-process.on('SIGINT', () => {
+process.on("SIGINT", () => {
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
+process.on("SIGTERM", () => {
   process.exit(0);
 });
 
-process.on('exit', (code) => {
+process.on("uncaughtException", (error) => {
+  exitWithError("uncaught exception", error);
 });
 
-process.on('uncaughtException', (error) => {
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason) => {
-  // Don't exit immediately, let the program continue running
+process.on("unhandledRejection", (reason) => {
+  exitWithError("unhandled rejection", reason);
 });
