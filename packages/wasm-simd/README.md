@@ -4,10 +4,9 @@ SIMD-optimized WebAssembly math functions for high-performance vector operations
 
 ## Features
 
-- 🚀 **SIMD Acceleration**: Uses WebAssembly SIMD instructions for 4-8x performance boost
-- 🧮 **Vector Operations**: Optimized cosine similarity, batch processing, and matrix operations
-- 🔧 **Memory Efficient**: Smart memory pooling and aligned buffer management
-- 🌐 **Browser Compatible**: Works in all modern browsers with WebAssembly SIMD support
+- SIMD acceleration using WebAssembly SIMD instructions
+- Optimized vector operations: cosine similarity, batch similarity, similarity matrix
+- Browser-compatible WASM module for extension-side use
 
 ## Performance
 
@@ -17,10 +16,9 @@ SIMD-optimized WebAssembly math functions for high-performance vector operations
 | Batch Similarity (100x768d)    | 850ms      | 95ms      | 8.9x    |
 | Similarity Matrix (50x50x384d) | 2.1s       | 180ms     | 11.7x   |
 
-## Usage
+## API (Rust / wasm-bindgen)
 
 ```rust
-// The Rust implementation provides SIMD-optimized functions
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -33,22 +31,25 @@ impl SIMDMath {
 
     #[wasm_bindgen]
     pub fn cosine_similarity(&self, vec_a: &[f32], vec_b: &[f32]) -> f32 {
-        // SIMD-optimized implementation
+        // implementation in src/lib.rs
     }
 }
 ```
 
-## Building
+## Build
+
+From repository root:
 
 ```bash
-# Install dependencies
-cargo install wasm-pack
+pnpm --filter @webpage-mcp/wasm-simd build
+pnpm run copy:wasm
+```
 
-# Build for release
-npm run build
+Inside this package:
 
-# Build for development
-npm run build:dev
+```bash
+pnpm build
+pnpm build:dev
 ```
 
 ## Browser Support
@@ -58,4 +59,4 @@ npm run build:dev
 - Safari 16.4+
 - Edge 91+
 
-Older browsers automatically fall back to JavaScript implementations.
+When SIMD is not available, callers should use JavaScript fallback logic.

@@ -1,16 +1,16 @@
 # Webpage MCP
 
-Turn your Chrome browser into a fully-featured [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server. Let AI assistants like Claude, Cursor, Windsurf, and other MCP-compatible clients control your browser — navigate pages, take screenshots, click elements, read content, capture network traffic, run JavaScript, and much more.
+Turn your Chrome browser into a fully-featured [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server. Let AI assistants like Claude, Cursor, Windsurf, and other MCP-compatible clients control your browser - navigate pages, take screenshots, click elements, read content, capture network traffic, run JavaScript, and much more.
 
 ## How It Works
 
 ```
 AI Client (Claude Desktop, Cursor, etc.)
-    ↕  MCP (Streamable HTTP / SSE / stdio)
-Native Server (Node.js, port 12306)
-    ↕  Chrome Native Messaging (stdin/stdout)
+    <-> MCP (Streamable HTTP / SSE / stdio)
+Native Server (Node.js, default port 12306)
+    <-> Chrome Native Messaging (stdin/stdout)
 Chrome Extension (service worker)
-    ↕  Chrome APIs / DevTools Protocol
+    <-> Chrome APIs / DevTools Protocol
 Your Browser
 ```
 
@@ -52,12 +52,12 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **N
 
 ### Additional Capabilities
 
-- **AI Agent Chat Sidepanel** — Built-in sidepanel for chatting with AI agents (Claude Code CLI, OpenAI Codex CLI) directly from Chrome, with project management, session history, and streaming output
-- **Record & Replay** — Record browser actions and replay them as automated flows; published flows are exposed as dynamic MCP tools (`flow.<slug>`)
-- **Web Editor** — Visual in-page DOM editor overlay with property panel and transaction system (`Cmd+Shift+O`)
-- **Quick Panel** — Keyboard-triggered floating AI chat accessible from any page (`Cmd+Shift+U`)
-- **Semantic Search** — On-device embedding model ([all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)) with HNSW vector index for searching tab content
-- **Element Marker** — Annotate DOM elements with names/selectors, accessible to AI tools via context menu
+- **AI Agent Chat Sidepanel** - Built-in sidepanel for chatting with AI agents (Claude Code CLI, OpenAI Codex CLI) directly from Chrome, with project management, session history, and streaming output
+- **Record & Replay** - Record browser actions and replay them as automated flows; published flows are exposed as dynamic MCP tools (`flow.<slug>`)
+- **Web Editor** - Visual in-page DOM editor overlay with property panel and transaction system (`Cmd+Shift+O`)
+- **Quick Panel** - Keyboard-triggered floating AI chat accessible from any page (`Cmd+Shift+U`)
+- **Semantic Search** - On-device embedding model ([all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)) with HNSW vector index for searching tab content
+- **Element Marker** - Annotate DOM elements with names/selectors, accessible to AI tools via context menu
 
 ## Installation
 
@@ -70,7 +70,7 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **N
 ### 1. Clone and Build
 
 ```bash
-git clone https://github.com/anthropics/webpage-mcp.git
+git clone https://github.com/mcpland/webpage-mcp.git
 cd webpage-mcp
 
 # Install dependencies
@@ -87,12 +87,12 @@ pnpm build
 3. Click **Load unpacked**
 4. Select the `app/chrome-extension/.output/chrome-mv3` folder
 
-> Alternatively, download the pre-built extension from `releases/chrome-extension/latest/`.
+> This repository does not currently commit binary release zip files. To generate one locally, run `pnpm --filter webpage-mcp-server zip` and use the artifact from `app/chrome-extension/.output/`.
 
 ### 3. Register the Native Messaging Host
 
 ```bash
-# Register for Chrome (auto-detects installation)
+# Register for detected browsers
 cd app/native-server
 npx webpage-mcp-bridge register --detect
 
@@ -105,14 +105,14 @@ This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the
 ### 4. Verify Installation
 
 ```bash
-# Diagnose any installation issues
+# Diagnose installation issues
 npx webpage-mcp-bridge doctor
 
 # Generate a full diagnostic report
 npx webpage-mcp-bridge report
 ```
 
-Open Chrome and click the extension icon — it should show a connected status.
+Open Chrome and click the extension icon - it should show a connected status.
 
 ## Configuration
 
@@ -170,43 +170,49 @@ Or if using npx:
 }
 ```
 
-### Changing the Port
+### Port Configuration
+
+There are two different port settings:
+
+1. **Native server listen port**
+
+Set this in the extension popup (the "Port" field). The extension passes that value when starting the native server. Default: `12306`.
+
+2. **stdio proxy target port**
+
+This is the URL used by `webpage-mcp-stdio` when forwarding stdio MCP calls to HTTP. Update it with:
 
 ```bash
 npx webpage-mcp-bridge update-port 12307
 ```
 
-Or set the environment variable `WEBPAGE_MCP_PORT`:
-
-```bash
-export WEBPAGE_MCP_PORT=12307
-```
+`update-port` edits `app/native-server/dist/mcp/stdio-config.json` (or packaged equivalent) and does not directly change the native server listen port.
 
 ## Project Structure
 
 ```
 webpage-mcp/
-├── app/
-│   ├── chrome-extension/          # Chrome extension (WXT + React)
-│   │   ├── entrypoints/
-│   │   │   ├── background/        # Service worker (native host, tools, engines)
-│   │   │   ├── popup/             # Extension popup UI
-│   │   │   ├── sidepanel/         # AI agent chat sidepanel
-│   │   │   ├── options/           # Options page
-│   │   │   ├── offscreen/         # GIF encoding, keepalive
-│   │   │   ├── web-editor-v2/     # Visual DOM editor
-│   │   │   └── shared/            # Shared composables and utilities
-│   │   └── common/                # Shared types and constants
-│   └── native-server/             # Node.js native messaging host + MCP server
-│       └── src/
-│           ├── mcp/               # MCP server (HTTP + stdio proxy)
-│           ├── server/            # Fastify HTTP server + agent API
-│           ├── cli.ts             # CLI commands (register, doctor, report)
-│           └── native-messaging-host.ts  # Chrome native messaging bridge
-├── packages/
-│   ├── shared/                    # Shared library (tool schemas, types, constants)
-│   └── wasm-simd/                 # Rust/WASM SIMD cosine similarity
-└── releases/                      # Pre-built release artifacts
+|- app/
+|  |- chrome-extension/          # Chrome extension (WXT + React)
+|  |  |- entrypoints/
+|  |  |  |- background/          # Service worker (native host, tools, engines)
+|  |  |  |- popup/               # Extension popup UI
+|  |  |  |- sidepanel/           # AI agent chat sidepanel
+|  |  |  |- options/             # Options page
+|  |  |  |- offscreen/           # GIF encoding, keepalive
+|  |  |  |- web-editor-v2/       # Visual DOM editor
+|  |  |  '- shared/              # Shared composables and utilities
+|  |  '- common/                 # Shared types and constants
+|  '- native-server/             # Node.js native messaging host + MCP server
+|     '- src/
+|        |- mcp/                 # MCP server (HTTP + stdio proxy)
+|        |- server/              # Fastify HTTP server + agent API
+|        |- cli.ts               # CLI commands (register, doctor, report)
+|        '- native-messaging-host.ts  # Chrome native messaging bridge
+|- packages/
+|  |- shared/                    # Shared library (tool schemas, types, constants)
+|  '- wasm-simd/                 # Rust/WASM SIMD cosine similarity
+'- releases/                     # Release docs and optional artifacts
 ```
 
 ## Development
@@ -267,7 +273,7 @@ The `webpage-mcp-bridge` CLI provides the following commands:
 |---|---|
 | `register` | Register the Native Messaging host manifest |
 | `fix-permissions` | Fix execution permissions for native host files |
-| `update-port <port>` | Update the server port (1-65535) |
+| `update-port <port>` | Update stdio proxy target port in `mcp/stdio-config.json` |
 | `doctor` | Diagnose installation and environment issues |
 | `report` | Export a diagnostic report for troubleshooting |
 
@@ -310,9 +316,9 @@ Options:
 
 ### MCP client can't reach the server
 
-1. Verify the server is running: `curl http://127.0.0.1:12306/mcp`
+1. Verify the server is running: `curl http://127.0.0.1:12306/ping`
 2. Check if another process is using port 12306
-3. Try a different port: `webpage-mcp-bridge update-port <port>`
+3. If you use stdio proxy, align proxy target with server port: `webpage-mcp-bridge update-port <port>`
 
 ### Tools return errors or time out
 

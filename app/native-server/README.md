@@ -1,185 +1,91 @@
-# Fastify Chrome Native Messaging Service
+# webpage-mcp-bridge (Native Server)
 
-This is a TypeScript project based on Fastify, designed for native communication with Chrome extensions.
+Node.js Native Messaging host and MCP HTTP server for Webpage MCP.
 
-## Features
+## What This Package Does
 
-- Bidirectional communication with Chrome extensions via Chrome Native Messaging protocol
-- **Multi-browser support**: Chrome and Chromium (including Linux, macOS, and Windows)
-- RESTful API service
-- Fully developed in TypeScript
-- Complete test suite
-- Follows code quality best practices
+- Bridges Chrome extension <-> local MCP clients via Native Messaging
+- Exposes MCP endpoints (`/mcp`, `/sse`, `/messages`)
+- Provides CLI utilities for registration and diagnostics
 
-## Development Environment Setup
+## Prerequisites
 
-### Prerequisites
+- Node.js >= 20
+- pnpm >= 8 (recommended in this monorepo)
 
-- Node.js 20+
-- npm 8+ or pnpm 8+
+## Install and Build
 
-### Installation
+From the repository root:
 
 ```bash
-git clone https://github.com/your-username/fastify-chrome-native.git
-cd fastify-chrome-native
-npm install
+pnpm install
+pnpm --filter webpage-mcp-bridge build
 ```
 
-### Development
-
-1. Build and register the native server locally
+Or inside this package directory:
 
 ```bash
 cd app/native-server
-npm run dev
+pnpm install
+pnpm build
 ```
 
-2. Start the Chrome extension
+## Development
 
 ```bash
-cd app/chrome-extension
-npm run dev
+# Auto-rebuild + auto-register dev host
+pnpm --filter webpage-mcp-bridge dev
+
+# Run tests
+pnpm --filter webpage-mcp-bridge test
 ```
 
-### Build
+## CLI Commands
+
+After build (or via `npx`):
 
 ```bash
-npm run build
-```
-
-### Register Native Messaging Host
-
-#### Auto-detect and register all installed browsers
-
-```bash
+# Register Native Messaging host
 webpage-mcp-bridge register --detect
-```
-
-#### Register specific browsers
-
-```bash
-# Register Chrome only
 webpage-mcp-bridge register --browser chrome
-
-# Register Chromium only
 webpage-mcp-bridge register --browser chromium
 
-# Register all supported browsers
-webpage-mcp-bridge register --browser all
+# Diagnose installation
+webpage-mcp-bridge doctor
+
+# Export diagnostic report
+webpage-mcp-bridge report
+
+# Update stdio proxy target URL port
+webpage-mcp-bridge update-port 12307
+
+# Fix file execution permissions
+webpage-mcp-bridge fix-permissions
 ```
 
-#### Global installation (auto-registers detected browsers)
+## Port Behavior
 
-```bash
-npm i -g webpage-mcp-bridge
-```
+Two different port settings exist:
 
-#### Browser Support
+1. Native server listen port
+- Default is `12306`.
+- The actual listen port is provided by the Chrome extension when it sends the `start` command.
+- In normal usage, you change this from the extension popup "Port" field.
 
-| Browser       | Linux | macOS | Windows |
-| ------------- | ----- | ----- | ------- |
-| Google Chrome | ✓     | ✓     | ✓       |
-| Chromium      | ✓     | ✓     | ✓       |
+2. stdio proxy target port
+- `update-port` only updates `mcp/stdio-config.json` used by `webpage-mcp-stdio`.
+- It does not directly change the running native server listen port.
 
-Registration locations:
+## Browser Support
 
-- **Linux**: `~/.config/[browser-name]/NativeMessagingHosts/`
-- **macOS**: `~/Library/Application Support/[Browser]/NativeMessagingHosts/`
-- **Windows**: `%APPDATA%\[Browser]\NativeMessagingHosts\`
+- Google Chrome
+- Chromium
 
-### Integration with Chrome Extension
+Supported on Linux, macOS, and Windows (registration paths differ by OS).
 
-Here is a simple example of how to use this service in a Chrome extension:
+## Key Source Files
 
-```javascript
-// background.js
-let nativePort = null;
-let serverRunning = false;
-
-// Start Native Messaging service
-function startServer() {
-  if (nativePort) {
-    console.log("Already connected to Native Messaging host");
-    return;
-  }
-
-  try {
-    nativePort = chrome.runtime.connectNative(
-      "com.yourcompany.fastify_native_host",
-    );
-
-    nativePort.onMessage.addListener((message) => {
-      console.log("Received Native message:", message);
-
-      if (message.type === "started") {
-        serverRunning = true;
-        console.log(`Server started, port: ${message.payload.port}`);
-      } else if (message.type === "stopped") {
-        serverRunning = false;
-        console.log("Server stopped");
-      } else if (message.type === "error") {
-        console.error("Native error:", message.payload.message);
-      }
-    });
-
-    nativePort.onDisconnect.addListener(() => {
-      console.log("Native connection disconnected:", chrome.runtime.lastError);
-      nativePort = null;
-      serverRunning = false;
-    });
-
-    // Start server
-    nativePort.postMessage({ type: "start", payload: { port: 3000 } });
-  } catch (error) {
-    console.error("Error starting Native Messaging:", error);
-  }
-}
-
-// Stop server
-function stopServer() {
-  if (nativePort && serverRunning) {
-    nativePort.postMessage({ type: "stop" });
-  }
-}
-
-// Test communication with server
-async function testPing() {
-  try {
-    const response = await fetch("http://localhost:3000/ping");
-    const data = await response.json();
-    console.log("Ping response:", data);
-    return data;
-  } catch (error) {
-    console.error("Ping failed:", error);
-    return null;
-  }
-}
-
-// Connect to Native host when extension starts
-chrome.runtime.onStartup.addListener(startServer);
-
-// Export API for popup or content scripts
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "startServer") {
-    startServer();
-    sendResponse({ success: true });
-  } else if (message.action === "stopServer") {
-    stopServer();
-    sendResponse({ success: true });
-  } else if (message.action === "testPing") {
-    testPing().then(sendResponse);
-    return true; // Indicates we will send a response asynchronously
-  }
-});
-```
-
-### Testing
-
-```bash
-npm run test
-```
-
-### License
-
-MIT
+- `src/cli.ts` - CLI entry and commands
+- `src/native-messaging-host.ts` - Native Messaging protocol handling
+- `src/server/index.ts` - Fastify HTTP + MCP transport routes
+- `src/mcp/register-tools.ts` - MCP tool registration and forwarding
