@@ -1,0 +1,11 @@
+/**
+ * @fileoverview Kernel Module export entry
+ */
+
+export * from './kernel';
+export * from './runner';
+export * from './traversal';
+export * from './breakpoints';
+export * from './artifacts';
+export * from './debug-controller';
+export * from './recovery-kernel';

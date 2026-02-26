@@ -1,9 +1,0 @@
-node_modules/
-.turbo/
-
-app/chrome-extension/.output/
-app/chrome-extension/.wxt/
-app/native-server/dist/
-packages/shared/dist/
-
-**/*.log
