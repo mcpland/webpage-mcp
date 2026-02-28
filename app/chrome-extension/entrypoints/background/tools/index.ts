@@ -8,6 +8,13 @@ import { runInTabQueue } from '../tab-queue';
 
 const tools = { ...browserTools, flowRunTool, listPublishedFlowsTool } as any;
 const toolsMap = new Map(Object.values(tools).map((tool: any) => [tool.name, tool]));
+const NON_TAB_SCOPED_CHROME_TOOLS = new Set<string>([
+  TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
+  TOOL_NAMES.BROWSER.SEARCH_TABS_CONTENT,
+  TOOL_NAMES.BROWSER.HISTORY,
+  TOOL_NAMES.BROWSER.BOOKMARK_SEARCH,
+  TOOL_NAMES.BROWSER.BOOKMARK_DELETE,
+]);
 
 const getLazyTool = async (toolName: string) => {
   if (toolName === TOOL_NAMES.BROWSER.SEARCH_TABS_CONTENT) {
@@ -31,6 +38,9 @@ export interface ToolCallParam {
 }
 
 function isTabScopedTool(toolName: string): boolean {
+  if (NON_TAB_SCOPED_CHROME_TOOLS.has(toolName)) {
+    return false;
+  }
   return (
     toolName.startsWith('chrome_') ||
     toolName.startsWith('performance_') ||
