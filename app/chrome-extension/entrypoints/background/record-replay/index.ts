@@ -278,7 +278,7 @@ export function initRecordReplayListeners() {
 
   // Trigger engine: contextMenus/commands/url/dom
   if ((chrome as any).contextMenus?.onClicked?.addListener) {
-    chrome.contextMenus.onClicked.addListener(async (info) => {
+    chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       try {
         const triggers = await listTriggers();
         const t = triggers.find(
@@ -287,7 +287,11 @@ export function initRecordReplayListeners() {
         if (!t || t.enabled === false) return;
         const flow = await getFlow(t.flowId);
         if (!flow) return;
-        await runFlow(flow, { args: t.args || {}, returnLogs: false });
+        await runFlow(flow, {
+          args: t.args || {},
+          returnLogs: false,
+          tabId: typeof tab?.id === 'number' ? tab.id : undefined,
+        });
       } catch {}
     });
   }
@@ -341,21 +345,30 @@ export function initRecordReplayListeners() {
         if (matchUrl(url, (t as any).match || [])) {
           const flow = await getFlow(t.flowId);
           if (!flow) continue;
-          await runFlow(flow, { args: t.args || {}, returnLogs: false });
+          await runFlow(flow, {
+            args: t.args || {},
+            returnLogs: false,
+            tabId: details.tabId,
+          });
         }
       }
     } catch {}
   });
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       if (message && message.action === 'dom_trigger_fired') {
         const id = message.triggerId;
+        const senderTabId = sender?.tab?.id;
         listTriggers().then(async (arr) => {
           const t = arr.find((x) => x.id === id && x.type === 'dom');
           if (!t || t.enabled === false) return;
           const flow = await getFlow(t.flowId);
           if (!flow) return;
-          await runFlow(flow, { args: t.args || {}, returnLogs: false });
+          await runFlow(flow, {
+            args: t.args || {},
+            returnLogs: false,
+            tabId: typeof senderTabId === 'number' ? senderTabId : undefined,
+          });
         });
         sendResponse({ ok: true });
         return true;
@@ -497,7 +510,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (!s) return;
     const flow = await getFlow(s.flowId);
     if (!flow) return;
-    await runFlow(flow, { args: s.args || {}, returnLogs: false });
+    await runFlow(flow, {
+      args: s.args || {},
+      returnLogs: false,
+      tabTarget: s.tabTarget,
+      startUrl: s.startUrl,
+    });
   } catch (e) {
     // swallow to not spam logs
   }

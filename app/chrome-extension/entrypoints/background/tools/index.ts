@@ -31,7 +31,11 @@ export interface ToolCallParam {
 }
 
 function isTabScopedTool(toolName: string): boolean {
-  return toolName.startsWith('chrome_') || toolName.startsWith('performance_');
+  return (
+    toolName.startsWith('chrome_') ||
+    toolName.startsWith('performance_') ||
+    toolName === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN
+  );
 }
 
 async function resolveTabIdForExecution(

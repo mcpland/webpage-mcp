@@ -33,6 +33,7 @@ import { createReplayActionRegistry } from '../actions/handlers';
 
 export interface RunOptions {
   tabTarget?: 'current' | 'new';
+  tabId?: number;
   refresh?: boolean;
   captureNetwork?: boolean;
   returnLogs?: boolean;
@@ -241,6 +242,7 @@ class ExecutionOrchestrator {
 
     const ensured = await ensureTab({
       tabTarget: this.options.tabTarget,
+      tabId: this.options.tabId,
       startUrl: this.options.startUrl || derivedStartUrl,
       refresh: this.options.refresh,
     });
@@ -301,10 +303,12 @@ class ExecutionOrchestrator {
           // ignore: parse result from tool response
         }
         if (!values) {
-          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-          const tabId = tabs?.[0]?.id;
-          if (typeof tabId === 'number') {
-            const res2 = await chrome.tabs.sendMessage(tabId, {
+          const fallbackTabId =
+            typeof this.tabId === 'number'
+              ? this.tabId
+              : (await chrome.tabs.query({ active: true, currentWindow: true }))?.[0]?.id;
+          if (typeof fallbackTabId === 'number') {
+            const res2 = await chrome.tabs.sendMessage(fallbackTabId, {
               action: TOOL_MESSAGE_TYPES.COLLECT_VARIABLES,
               variables: needed,
               useOverlay: true,
@@ -328,8 +332,11 @@ class ExecutionOrchestrator {
 
     // binding enforcement
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const currentUrl = tabs?.[0]?.url || '';
+      const currentTab =
+        typeof this.tabId === 'number'
+          ? await chrome.tabs.get(this.tabId).catch(() => null)
+          : (await chrome.tabs.query({ active: true, currentWindow: true }))?.[0];
+      const currentUrl = currentTab?.url || '';
       const bindings = this.flow.meta?.bindings || [];
       if (!this.options.startUrl && bindings.length > 0) {
         const ok = bindings.some((b) => {

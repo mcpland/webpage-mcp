@@ -55,12 +55,32 @@ export function expandTemplatesDeep<T = any>(value: T, scope: Record<string, any
 
 export async function ensureTab(options: {
   tabTarget?: 'current' | 'new';
+  tabId?: number;
   startUrl?: string;
   refresh?: boolean;
 }): Promise<{ tabId: number; url?: string }> {
   const target = options.tabTarget || 'current';
+  const explicitTabId = options.tabId;
   const startUrl = options.startUrl;
   const isWebUrl = (u?: string | null) => !!u && /^(https?:|file:)/i.test(u);
+
+  const explicitTab =
+    typeof explicitTabId === 'number' ? await chrome.tabs.get(explicitTabId).catch(() => null) : null;
+  if (explicitTab?.id) {
+    if (startUrl) {
+      await handleCallTool({
+        name: TOOL_NAMES.BROWSER.NAVIGATE,
+        args: { url: startUrl, tabId: explicitTab.id, background: true },
+      });
+    } else if (options.refresh) {
+      await handleCallTool({
+        name: TOOL_NAMES.BROWSER.NAVIGATE,
+        args: { refresh: true, tabId: explicitTab.id, background: true },
+      });
+    }
+    const updated = await chrome.tabs.get(explicitTab.id);
+    return { tabId: updated.id!, url: updated.url };
+  }
 
   const tabs = await chrome.tabs.query({ currentWindow: true });
   const [active] = tabs.filter((t) => t.active);
@@ -75,11 +95,25 @@ export async function ensureTab(options: {
 
   // current tab target
   if (startUrl) {
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.NAVIGATE, args: { url: startUrl } });
+    await handleCallTool({
+      name: TOOL_NAMES.BROWSER.NAVIGATE,
+      args: {
+        url: startUrl,
+        ...(typeof active?.id === 'number' ? { tabId: active.id } : {}),
+        background: true,
+      },
+    });
   } else if (options.refresh) {
     // only refresh if current tab is a web page
     if (isWebUrl(active?.url))
-      await handleCallTool({ name: TOOL_NAMES.BROWSER.NAVIGATE, args: { refresh: true } });
+      await handleCallTool({
+        name: TOOL_NAMES.BROWSER.NAVIGATE,
+        args: {
+          refresh: true,
+          ...(typeof active?.id === 'number' ? { tabId: active.id } : {}),
+          background: true,
+        },
+      });
   }
 
   // Re-evaluate active after potential navigation

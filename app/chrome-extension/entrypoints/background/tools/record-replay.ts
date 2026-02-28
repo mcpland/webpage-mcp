@@ -16,6 +16,7 @@ class FlowRunTool {
       returnLogs,
       timeoutMs,
       startUrl,
+      tabId,
     } = args || {};
     if (!flowId) return createErrorResponse('flowId is required');
     const flow = await getFlow(flowId);
@@ -27,6 +28,7 @@ class FlowRunTool {
       returnLogs,
       timeoutMs,
       startUrl,
+      tabId,
       args: vars,
     });
     return {

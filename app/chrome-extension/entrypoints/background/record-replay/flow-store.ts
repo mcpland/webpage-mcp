@@ -404,6 +404,9 @@ export interface FlowSchedule {
   when: string;
   // optional variables to pass when running
   args?: Record<string, any>;
+  // optional runtime target controls
+  tabTarget?: 'current' | 'new';
+  startUrl?: string;
 }
 
 export async function listSchedules(): Promise<FlowSchedule[]> {
