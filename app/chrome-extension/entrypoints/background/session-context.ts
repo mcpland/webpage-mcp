@@ -57,3 +57,7 @@ export function patchSessionContext(
 export function clearSessionContext(sessionId: string): void {
   sessionContexts.delete(sessionId);
 }
+
+export function clearAllSessionContexts(): void {
+  sessionContexts.clear();
+}

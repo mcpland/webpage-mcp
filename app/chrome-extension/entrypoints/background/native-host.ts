@@ -4,6 +4,7 @@ import { NATIVE_HOST, STORAGE_KEYS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/c
 import { handleCallTool } from './tools';
 import { listPublished, getFlow } from './record-replay/flow-store';
 import { acquireKeepalive } from './keepalive-manager';
+import { clearAllSessionContexts } from './session-context';
 
 const LOG_PREFIX = '[NativeHost]';
 
@@ -449,6 +450,7 @@ export function connectNativeHost(port: number = NATIVE_HOST.DEFAULT_PORT): bool
     nativePort.onDisconnect.addListener(() => {
       console.warn(ERROR_MESSAGES.NATIVE_DISCONNECTED, chrome.runtime.lastError);
       nativePort = null;
+      clearAllSessionContexts();
 
       // Mark server as stopped since native host disconnection means server is down
       void markServerStopped('native_port_disconnected');
