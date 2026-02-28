@@ -16,6 +16,7 @@ interface ScriptConfig {
 
 interface SendCommandToInjectScriptToolParam {
   tabId?: number;
+  windowId?: number;
   eventName: string;
   payload?: string;
 }
@@ -110,13 +111,13 @@ class SendCommandToInjectScriptTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT;
   async execute(args: SendCommandToInjectScriptToolParam): Promise<ToolResult> {
     try {
-      const { tabId, eventName, payload } = args;
+      const { tabId, windowId, eventName, payload } = args;
 
       if (!eventName) {
         return createErrorResponse('Param [eventName] is required');
       }
 
-      if (tabId) {
+      if (typeof tabId === 'number') {
         const tabExists = await isTabExists(tabId);
         if (!tabExists) {
           return createErrorResponse('The tab:[tabId] is not exists');
@@ -126,8 +127,11 @@ class SendCommandToInjectScriptTool extends BaseBrowserToolExecutor {
       let finalTabId: number | undefined = tabId;
 
       if (finalTabId === undefined) {
-        // Use active tab
-        const tabs = await chrome.tabs.query({ active: true });
+        // Use active tab in current/specified window
+        const tabs =
+          typeof windowId === 'number'
+            ? await chrome.tabs.query({ active: true, windowId })
+            : await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tabs[0]) {
           return createErrorResponse('No active tab found');
         }
