@@ -54,6 +54,7 @@ type StreamableMcpSession = McpSession & { transport: StreamableHTTPServerTransp
 type SseMcpSession = McpSession & { transport: SSEServerTransport };
 const AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
 const AUTH_TOKEN_HEADER = 'x-webpage-mcp-token';
+const AUTH_TOKEN_QUERY_KEYS = ['authToken', 'token'] as const;
 const AUTH_PROTECTED_PATHS = ['/mcp', '/sse', '/messages', '/agent', '/ask-extension'] as const;
 
 function isReplyCommitted(reply: FastifyReply): boolean {
@@ -222,6 +223,21 @@ export class Server {
       if (trimmed) {
         return trimmed;
       }
+    }
+
+    try {
+      const rawUrl = request.raw.url || request.url;
+      if (rawUrl) {
+        const url = new URL(rawUrl, `http://${SERVER_CONFIG.HOST}`);
+        for (const key of AUTH_TOKEN_QUERY_KEYS) {
+          const token = url.searchParams.get(key);
+          if (token && token.trim()) {
+            return token.trim();
+          }
+        }
+      }
+    } catch {
+      // Ignore malformed URL values and continue without query token.
     }
     return undefined;
   }

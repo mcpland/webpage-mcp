@@ -6,6 +6,7 @@ import { ref, computed, onUnmounted } from '@/entrypoints/shared/reactivity';
 import { NativeMessageType } from 'webpage-mcp-shared';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type { AgentEngineInfo, RealtimeEvent } from 'webpage-mcp-shared';
+import { appendNativeAuthQuery } from '@/utils/native-auth';
 
 interface ServerStatus {
   isRunning: boolean;
@@ -186,44 +187,54 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
     closeEventSource();
 
     currentStreamSessionId = targetSessionId;
-    const url = `http://127.0.0.1:${serverPort.value}/agent/chat/${encodeURIComponent(targetSessionId)}/stream`;
-    const es = new EventSource(url);
-
-    es.onopen = () => {
-      console.log('[AgentServer] SSE connection opened');
-      reconnectAttempts = 0;
-    };
-
-    es.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data) as RealtimeEvent;
-        options.onMessage?.(parsed);
-      } catch (err) {
-        console.error('[AgentServer] Failed to parse SSE message:', err);
+    void (async () => {
+      const rawUrl = `http://127.0.0.1:${serverPort.value}/agent/chat/${encodeURIComponent(targetSessionId)}/stream`;
+      const url = await appendNativeAuthQuery(rawUrl);
+      if (currentStreamSessionId !== targetSessionId) {
+        return;
       }
-    };
 
-    es.onerror = (error) => {
-      console.error('[AgentServer] SSE error:', error);
-      es.close();
+      const es = new EventSource(url);
+
+      es.onopen = () => {
+        console.log('[AgentServer] SSE connection opened');
+        reconnectAttempts = 0;
+      };
+
+      es.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data) as RealtimeEvent;
+          options.onMessage?.(parsed);
+        } catch (err) {
+          console.error('[AgentServer] Failed to parse SSE message:', err);
+        }
+      };
+
+      es.onerror = (error) => {
+        console.error('[AgentServer] SSE error:', error);
+        es.close();
+        eventSource.value = null;
+
+        // Attempt reconnection with exponential backoff
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
+          reconnectAttempts++;
+          console.log(`[AgentServer] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
+          setTimeout(() => {
+            if (isServerReady.value) {
+              openEventSource();
+            }
+          }, delay);
+        } else {
+          options.onError?.('SSE connection failed after multiple attempts');
+        }
+      };
+
+      eventSource.value = es;
+    })().catch((error) => {
+      console.error('[AgentServer] Failed to open SSE connection:', error);
       eventSource.value = null;
-
-      // Attempt reconnection with exponential backoff
-      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-        const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
-        reconnectAttempts++;
-        console.log(`[AgentServer] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
-        setTimeout(() => {
-          if (isServerReady.value) {
-            openEventSource();
-          }
-        }, delay);
-      } else {
-        options.onError?.('SSE connection failed after multiple attempts');
-      }
-    };
-
-    eventSource.value = es;
+    });
   }
 
   // Close SSE connection
