@@ -13,3 +13,10 @@ export async function runInTabQueue<T>(tabId: number, task: () => Promise<T>): P
     }
   }
 }
+
+export function clearTabQueue(tabId: number): void {
+  if (!Number.isFinite(tabId)) {
+    return;
+  }
+  tabQueues.delete(tabId);
+}

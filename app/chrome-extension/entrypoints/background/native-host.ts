@@ -9,6 +9,7 @@ import {
   clearSessionContextsForTab,
   clearSessionContextsForWindow,
 } from './session-context';
+import { clearTabQueue } from './tab-queue';
 
 const LOG_PREFIX = '[NativeHost]';
 
@@ -34,6 +35,7 @@ let manualDisconnect = false;
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearSessionContextsForTab(tabId);
+  clearTabQueue(tabId);
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
