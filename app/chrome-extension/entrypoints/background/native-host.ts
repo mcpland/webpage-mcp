@@ -359,7 +359,16 @@ export function connectNativeHost(port: number = NATIVE_HOST.DEFAULT_PORT): bool
       } else if (message.type === NativeMessageType.CALL_TOOL && message.requestId) {
         const requestId = message.requestId;
         try {
-          const result = await handleCallTool(message.payload);
+          const payload = (message.payload || {}) as {
+            name?: string;
+            args?: any;
+            meta?: { mcpSessionId?: string; instanceId?: string };
+          };
+          const result = await handleCallTool({
+            name: String(payload.name || ''),
+            args: payload.args,
+            meta: payload.meta,
+          });
           nativePort?.postMessage({
             responseToRequestId: requestId,
             payload: {

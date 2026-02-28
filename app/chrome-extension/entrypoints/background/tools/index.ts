@@ -3,6 +3,8 @@ import { ERROR_MESSAGES } from '@/common/constants';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import * as browserTools from './browser';
 import { flowRunTool, listPublishedFlowsTool } from './record-replay';
+import { getSessionContext, patchSessionContext } from '../session-context';
+import { runInTabQueue } from '../tab-queue';
 
 const tools = { ...browserTools, flowRunTool, listPublishedFlowsTool } as any;
 const toolsMap = new Map(Object.values(tools).map((tool: any) => [tool.name, tool]));
@@ -22,6 +24,96 @@ const getLazyTool = async (toolName: string) => {
 export interface ToolCallParam {
   name: string;
   args: any;
+  meta?: {
+    mcpSessionId?: string;
+    instanceId?: string;
+  };
+}
+
+function isTabScopedTool(toolName: string): boolean {
+  return toolName.startsWith('chrome_') || toolName.startsWith('performance_');
+}
+
+async function resolveTabIdForExecution(
+  toolName: string,
+  args: any,
+  sessionId?: string,
+): Promise<number | undefined> {
+  if (typeof args?.tabId === 'number') return args.tabId;
+  if (!isTabScopedTool(toolName)) return undefined;
+
+  if (sessionId) {
+    const sessionCtx = getSessionContext(sessionId);
+    if (typeof sessionCtx?.tabId === 'number') {
+      return sessionCtx.tabId;
+    }
+  }
+
+  try {
+    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (typeof active?.id === 'number') return active.id;
+  } catch {
+    // Ignore active-tab lookup failures; tools may handle missing target themselves.
+  }
+  return undefined;
+}
+
+function mergeArgsWithResolvedTab(args: any, resolvedTabId?: number): any {
+  if (typeof resolvedTabId !== 'number') return args;
+  if (args && typeof args === 'object' && !Array.isArray(args)) {
+    if (typeof args.tabId === 'number') return args;
+    return { ...args, tabId: resolvedTabId };
+  }
+  return { tabId: resolvedTabId };
+}
+
+function findNumericField(
+  value: unknown,
+  key: 'tabId' | 'windowId',
+  depth = 0,
+  seen = new Set<unknown>(),
+): number | undefined {
+  if (depth > 6 || value == null || typeof value !== 'object' || seen.has(value)) {
+    return undefined;
+  }
+  seen.add(value);
+  const obj = value as Record<string, unknown>;
+  if (typeof obj[key] === 'number' && Number.isFinite(obj[key] as number)) {
+    return obj[key] as number;
+  }
+  for (const nested of Object.values(obj)) {
+    const found = findNumericField(nested, key, depth + 1, seen);
+    if (typeof found === 'number') return found;
+  }
+  return undefined;
+}
+
+function extractSessionPatchFromResult(result: any): { tabId?: number; windowId?: number } {
+  const candidates: unknown[] = [result];
+  const content = Array.isArray(result?.content) ? result.content : [];
+  for (const item of content) {
+    if (item?.type !== 'text' || typeof item?.text !== 'string') continue;
+    try {
+      candidates.push(JSON.parse(item.text));
+    } catch {
+      // Ignore non-JSON text content
+    }
+  }
+
+  let tabId: number | undefined;
+  let windowId: number | undefined;
+
+  for (const candidate of candidates) {
+    if (typeof tabId !== 'number') {
+      tabId = findNumericField(candidate, 'tabId');
+    }
+    if (typeof windowId !== 'number') {
+      windowId = findNumericField(candidate, 'windowId');
+    }
+    if (typeof tabId === 'number' && typeof windowId === 'number') break;
+  }
+
+  return { tabId, windowId };
 }
 
 /**
@@ -37,8 +129,28 @@ export const handleCallTool = async (param: ToolCallParam) => {
     return createErrorResponse(`Tool ${param.name} not found`);
   }
 
+  const sessionId = param.meta?.mcpSessionId?.trim() || undefined;
+  const resolvedTabId = await resolveTabIdForExecution(param.name, param.args, sessionId);
+  const mergedArgs = mergeArgsWithResolvedTab(param.args, resolvedTabId);
+
   try {
-    return await tool.execute(param.args);
+    const execute = async () => await tool.execute(mergedArgs);
+    const result =
+      typeof resolvedTabId === 'number' ? await runInTabQueue(resolvedTabId, execute) : await execute();
+
+    if (sessionId) {
+      const patch = extractSessionPatchFromResult(result);
+      const tabIdToPersist =
+        typeof patch.tabId === 'number' ? patch.tabId : typeof resolvedTabId === 'number' ? resolvedTabId : undefined;
+      const update: { tabId?: number; windowId?: number } = {};
+      if (typeof tabIdToPersist === 'number') update.tabId = tabIdToPersist;
+      if (typeof patch.windowId === 'number') update.windowId = patch.windowId;
+      if (Object.keys(update).length > 0) {
+        patchSessionContext(sessionId, update);
+      }
+    }
+
+    return result;
   } catch (error) {
     console.error(`Tool execution failed for ${param.name}:`, error);
     return createErrorResponse(
