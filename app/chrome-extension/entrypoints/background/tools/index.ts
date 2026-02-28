@@ -3,7 +3,7 @@ import { ERROR_MESSAGES } from '@/common/constants';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import * as browserTools from './browser';
 import { flowRunTool, listPublishedFlowsTool } from './record-replay';
-import { getSessionContext, patchSessionContext } from '../session-context';
+import { clearSessionContext, getSessionContext, patchSessionContext } from '../session-context';
 import { runInTabQueue } from '../tab-queue';
 
 const tools = { ...browserTools, flowRunTool, listPublishedFlowsTool } as any;
@@ -49,7 +49,14 @@ async function resolveTabIdForExecution(
   if (sessionId) {
     const sessionCtx = getSessionContext(sessionId);
     if (typeof sessionCtx?.tabId === 'number') {
-      return sessionCtx.tabId;
+      try {
+        const tab = await chrome.tabs.get(sessionCtx.tabId);
+        if (typeof tab?.id === 'number') {
+          return tab.id;
+        }
+      } catch {
+        clearSessionContext(sessionId);
+      }
     }
   }
 
