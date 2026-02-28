@@ -33,6 +33,8 @@ interface CreateArgs {
   mode?: 'auto' | 'css' | 'persistent' | 'once'; // default auto
   dnrFallback?: boolean; // default true
   tags?: string[];
+  tabId?: number;
+  windowId?: number;
 }
 
 type UpdateArgs = Partial<Omit<CreateArgs, 'script'>> & { id: string; script?: string };
@@ -218,11 +220,6 @@ function matchUrl(patterns: string[], url?: string): boolean {
     return false;
   }
   return false;
-}
-
-async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tabs[0] || null;
 }
 
 async function insertCssToTab(tabId: number, css: string, allFrames: boolean) {
@@ -422,6 +419,23 @@ chrome.webNavigation.onDOMContentLoaded.addListener(async (details) => {
 class UserscriptTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.USERSCRIPT;
 
+  private async resolveTargetTab(target?: {
+    tabId?: number;
+    windowId?: number;
+  }): Promise<chrome.tabs.Tab | null> {
+    if (typeof target?.tabId === 'number') {
+      return await this.tryGetTab(target.tabId);
+    }
+    try {
+      if (typeof target?.windowId === 'number') {
+        return await this.getActiveTabOrThrowInWindow(target.windowId);
+      }
+      return await this.getActiveTabOrThrow();
+    } catch {
+      return null;
+    }
+  }
+
   async execute(params: UserscriptArgsBase): Promise<ToolResult> {
     try {
       const { action } = params;
@@ -458,8 +472,13 @@ class UserscriptTool extends BaseBrowserToolExecutor {
   }
 
   private async create(args: CreateArgs): Promise<ToolResult> {
-    const active = await getActiveTab();
-    if (!active || !active.id) return createErrorResponse('No active tab found');
+    const active = await this.resolveTargetTab({ tabId: args.tabId, windowId: args.windowId });
+    if (!active || !active.id) {
+      if (typeof args.tabId === 'number') {
+        return createErrorResponse(`Tab not found: ${args.tabId}`);
+      }
+      return createErrorResponse('No active tab found');
+    }
     const currentUrl = active.url;
 
     const emergency = (await chrome.storage.local.get([STORAGE_KEYS.USERSCRIPTS_DISABLED]))[
@@ -686,7 +705,7 @@ class UserscriptTool extends BaseBrowserToolExecutor {
     await saveAllRecords(all);
 
     // Attempt cleanup on active tab
-    const active = await getActiveTab();
+    const active = await this.resolveTargetTab({ tabId: args?.tabId, windowId: args?.windowId });
     if (active && active.id) {
       try {
         if (rec.sourceType === 'CSS') {
@@ -705,10 +724,15 @@ class UserscriptTool extends BaseBrowserToolExecutor {
   }
 
   private async sendCommand(args: any): Promise<ToolResult> {
-    const { id, payload, tabId } = args || {};
+    const { id, payload, tabId, windowId } = args || {};
     if (!id) return createErrorResponse('id is required');
-    const tab = tabId ? await chrome.tabs.get(tabId).catch(() => null) : await getActiveTab();
-    if (!tab || !tab.id) return createErrorResponse('No active tab found');
+    const tab = await this.resolveTargetTab({ tabId, windowId });
+    if (!tab || !tab.id) {
+      if (typeof tabId === 'number') {
+        return createErrorResponse(`Tab not found: ${tabId}`);
+      }
+      return createErrorResponse('No active tab found');
+    }
 
     const all = await loadAllRecords();
     const rec = all[id];
