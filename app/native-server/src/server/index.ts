@@ -24,6 +24,7 @@ import type { Server as McpSdkServer } from '@modelcontextprotocol/sdk/server/in
 import { randomUUID } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from '../mcp/mcp-server';
+import { clearDynamicFlowCacheForSession } from '../mcp/register-tools';
 import { AgentStreamManager } from '../agent/stream-manager';
 import { AgentChatService } from '../agent/chat-service';
 import { CodexEngine } from '../agent/engines/codex';
@@ -148,6 +149,7 @@ export class Server {
     if (!session) return;
 
     this.mcpSessions.delete(sessionId);
+    clearDynamicFlowCacheForSession(sessionId);
     const { closeTransport = false, closeServer = true } = options;
 
     if (closeTransport) {

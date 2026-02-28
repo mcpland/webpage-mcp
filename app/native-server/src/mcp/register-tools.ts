@@ -50,6 +50,14 @@ const RUN_OPTION_KEY_SET = new Set<string>(SESSION_RUN_OPTION_KEYS);
 const publishedFlowsCache = new Map<string, { fetchedAt: number; items: PublishedFlow[] }>();
 const publishedFlowsInflight = new Map<string, Promise<PublishedFlow[]>>();
 
+export function clearDynamicFlowCacheForSession(sessionId: string): void {
+  if (!sessionId) {
+    return;
+  }
+  publishedFlowsCache.delete(sessionId);
+  publishedFlowsInflight.delete(sessionId);
+}
+
 function normalizePublishedFlows(response: any): PublishedFlow[] {
   if (!response || response.status !== 'success' || !Array.isArray(response.items)) {
     return [];
