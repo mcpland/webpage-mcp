@@ -50,6 +50,15 @@ interface NetworkCaptureStartToolParams {
   maxCaptureTime?: number; // Maximum capture time (milliseconds)
   inactivityTimeout?: number; // Inactivity timeout (milliseconds)
   includeStatic?: boolean; // Whether to include static resources
+  tabId?: number;
+  windowId?: number;
+  background?: boolean;
+}
+
+interface NetworkCaptureStopToolParams {
+  tabId?: number;
+  windowId?: number;
+  all?: boolean;
 }
 
 interface NetworkRequestInfo {
@@ -800,33 +809,59 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       maxCaptureTime = 3 * 60 * 1000, // Default 3 minutes
       inactivityTimeout = 60 * 1000, // Default 1 minute of inactivity before auto-stop
       includeStatic = false, // Default: don't include static resources
+      tabId: targetTabId,
+      windowId,
+      background = false,
     } = args;
 
     console.log(`NetworkCaptureStartTool: Executing with args:`, args);
 
     try {
+      const explicitTab = await this.tryGetTab(targetTabId);
       // Get current tab or create new tab
       let tabToOperateOn: chrome.tabs.Tab;
 
       if (targetUrl) {
-        // Find tabs matching the URL
-        const matchingTabs = await chrome.tabs.query({ url: targetUrl });
-
-        if (matchingTabs.length > 0) {
-          // Use existing tab
-          tabToOperateOn = matchingTabs[0];
-          console.log(`NetworkCaptureV2: Found existing tab with URL: ${targetUrl}`);
+        if (explicitTab?.id) {
+          const updatedTab = await chrome.tabs.update(explicitTab.id, { url: targetUrl });
+          if (!updatedTab) {
+            return createErrorResponse(`Failed to update target tab ${explicitTab.id}`);
+          }
+          tabToOperateOn = updatedTab;
         } else {
-          // Create new tab
-          console.log(`NetworkCaptureV2: Creating new tab with URL: ${targetUrl}`);
-          tabToOperateOn = await chrome.tabs.create({ url: targetUrl, active: true });
+          // Find tabs matching the URL
+          const matchingTabs = await chrome.tabs.query({ url: targetUrl });
 
-          // Wait for page to load
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          if (matchingTabs.length > 0 && matchingTabs[0]) {
+            // Use existing tab
+            tabToOperateOn = matchingTabs[0];
+            console.log(`NetworkCaptureV2: Found existing tab with URL: ${targetUrl}`);
+          } else {
+            // Create new tab
+            console.log(`NetworkCaptureV2: Creating new tab with URL: ${targetUrl}`);
+            tabToOperateOn = await chrome.tabs.create({
+              url: targetUrl,
+              active: background !== true,
+              windowId,
+            });
+
+            // Wait for page to load
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
         }
+
+        if (tabToOperateOn.id && background !== true) {
+          await chrome.tabs.update(tabToOperateOn.id, { active: true });
+          await chrome.windows.update(tabToOperateOn.windowId, { focused: true });
+        }
+      } else if (explicitTab?.id) {
+        tabToOperateOn = explicitTab;
       } else {
         // Use current active tab
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tabs =
+          typeof windowId === 'number'
+            ? await chrome.tabs.query({ active: true, windowId })
+            : await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tabs[0]) {
           return createErrorResponse('No active tab found');
         }
@@ -892,7 +927,7 @@ class NetworkCaptureStopTool extends BaseBrowserToolExecutor {
     NetworkCaptureStopTool.instance = this;
   }
 
-  async execute(): Promise<ToolResult> {
+  async execute(args: NetworkCaptureStopToolParams = {}): Promise<ToolResult> {
     console.log(`NetworkCaptureStopTool: Executing`);
 
     try {
@@ -912,8 +947,77 @@ class NetworkCaptureStopTool extends BaseBrowserToolExecutor {
         return createErrorResponse('No active network captures found in any tab.');
       }
 
+      if (args.all === true) {
+        const tabIds = [...ongoingCaptures];
+        let primaryStopResult: Awaited<ReturnType<NetworkCaptureStartTool['stopCapture']>> | null = null;
+        for (const tabId of tabIds) {
+          const stopResult = await startTool.stopCapture(tabId);
+          if (!primaryStopResult) {
+            primaryStopResult = stopResult;
+          }
+        }
+        if (!primaryStopResult?.success) {
+          return createErrorResponse('Failed to stop network captures');
+        }
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                message: 'Stopped all active network captures.',
+                stoppedTabIds: tabIds,
+                remainingCaptures: Array.from(startTool.captureData.keys()),
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+
+      if (typeof args.tabId === 'number') {
+        if (!startTool.captureData.has(args.tabId)) {
+          return createErrorResponse(`No active network capture found for tab ${args.tabId}.`);
+        }
+        const targetedStop = await startTool.stopCapture(args.tabId);
+        if (!targetedStop.success) {
+          return createErrorResponse(
+            targetedStop.message || `Failed to stop network capture for tab ${args.tabId}`,
+          );
+        }
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                message: `Capture complete. ${targetedStop.data?.requestCount || 0} requests captured.`,
+                tabId: args.tabId,
+                tabUrl: targetedStop.data?.tabUrl || 'N/A',
+                tabTitle: targetedStop.data?.tabTitle || 'Unknown Tab',
+                requestCount: targetedStop.data?.requestCount || 0,
+                commonRequestHeaders: targetedStop.data?.commonRequestHeaders || {},
+                commonResponseHeaders: targetedStop.data?.commonResponseHeaders || {},
+                requests: targetedStop.data?.requests || [],
+                captureStartTime: targetedStop.data?.captureStartTime,
+                captureEndTime: targetedStop.data?.captureEndTime,
+                totalDurationMs: targetedStop.data?.totalDurationMs,
+                settingsUsed: targetedStop.data?.settingsUsed || {},
+                totalRequestsReceived: targetedStop.data?.totalRequestsReceived || 0,
+                requestLimitReached: targetedStop.data?.requestLimitReached || false,
+                remainingCaptures: Array.from(startTool.captureData.keys()),
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+
       // Get current active tab
-      const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const activeTabs =
+        typeof args.windowId === 'number'
+          ? await chrome.tabs.query({ active: true, windowId: args.windowId })
+          : await chrome.tabs.query({ active: true, currentWindow: true });
       const activeTabId = activeTabs[0]?.id;
 
       // Determine the primary tab to stop

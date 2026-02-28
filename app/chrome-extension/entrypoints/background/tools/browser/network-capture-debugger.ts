@@ -9,6 +9,15 @@ interface NetworkDebuggerStartToolParams {
   maxCaptureTime?: number;
   inactivityTimeout?: number; // Inactivity timeout (milliseconds)
   includeStatic?: boolean; // if include static resources
+  tabId?: number;
+  windowId?: number;
+  background?: boolean;
+}
+
+interface NetworkDebuggerStopToolParams {
+  tabId?: number;
+  windowId?: number;
+  all?: boolean;
 }
 
 // Network request object interface
@@ -770,6 +779,9 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
       maxCaptureTime = DEFAULT_MAX_CAPTURE_TIME_MS,
       inactivityTimeout = DEFAULT_INACTIVITY_TIMEOUT_MS,
       includeStatic = false,
+      tabId: targetTabId,
+      windowId,
+      background = false,
     } = args;
 
     console.log(
@@ -779,23 +791,40 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     let tabToOperateOn: chrome.tabs.Tab | undefined;
 
     try {
+      const explicitTab = await this.tryGetTab(targetTabId);
       if (targetUrl) {
-        const existingTabs = await chrome.tabs.query({
-          url: targetUrl.startsWith('http') ? targetUrl : `*://*/*${targetUrl}*`,
-        }); // More specific query
-        if (existingTabs.length > 0 && existingTabs[0]?.id) {
-          tabToOperateOn = existingTabs[0];
+        if (explicitTab?.id) {
+          tabToOperateOn = await chrome.tabs.update(explicitTab.id, { url: targetUrl });
+        } else {
+          const existingTabs = await chrome.tabs.query({
+            url: targetUrl.startsWith('http') ? targetUrl : `*://*/*${targetUrl}*`,
+          }); // More specific query
+          if (existingTabs.length > 0 && existingTabs[0]?.id) {
+            tabToOperateOn = existingTabs[0];
+          } else {
+            tabToOperateOn = await chrome.tabs.create({
+              url: targetUrl,
+              active: background !== true,
+              windowId,
+            });
+            // Wait for tab to be somewhat ready. A better way is to listen to tabs.onUpdated status='complete'
+            // but for debugger attachment, it just needs the tabId.
+            await new Promise((resolve) => setTimeout(resolve, 500)); // Short delay
+          }
+        }
+
+        if (tabToOperateOn?.id && background !== true) {
           // Ensure window gets focus and tab is truly activated
           await chrome.windows.update(tabToOperateOn.windowId, { focused: true });
-          await chrome.tabs.update(tabToOperateOn.id!, { active: true });
-        } else {
-          tabToOperateOn = await chrome.tabs.create({ url: targetUrl, active: true });
-          // Wait for tab to be somewhat ready. A better way is to listen to tabs.onUpdated status='complete'
-          // but for debugger attachment, it just needs the tabId.
-          await new Promise((resolve) => setTimeout(resolve, 500)); // Short delay
+          await chrome.tabs.update(tabToOperateOn.id, { active: true });
         }
+      } else if (explicitTab?.id) {
+        tabToOperateOn = explicitTab;
       } else {
-        const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const activeTabs =
+          typeof windowId === 'number'
+            ? await chrome.tabs.query({ active: true, windowId })
+            : await chrome.tabs.query({ active: true, currentWindow: true });
         if (activeTabs.length > 0 && activeTabs[0]?.id) {
           tabToOperateOn = activeTabs[0];
         } else {
@@ -871,7 +900,7 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
     NetworkDebuggerStopTool.instance = this;
   }
 
-  async execute(): Promise<ToolResult> {
+  async execute(args: NetworkDebuggerStopToolParams = {}): Promise<ToolResult> {
     console.log(`NetworkDebuggerStopTool: Executing command.`);
 
     const startTool = NetworkDebuggerStartTool.instance;
@@ -891,8 +920,30 @@ class NetworkDebuggerStopTool extends BaseBrowserToolExecutor {
       return createErrorResponse('No active network captures found in any tab.');
     }
 
+    if (args.all === true) {
+      const tabIds = [...ongoingCaptures];
+      let primaryResult: ToolResult | null = null;
+      for (const tabId of tabIds) {
+        const result = await this.performStop(startTool, tabId);
+        if (!primaryResult) {
+          primaryResult = result;
+        }
+      }
+      return primaryResult || createErrorResponse('No active network captures found in any tab.');
+    }
+
+    if (typeof args.tabId === 'number') {
+      if (!startTool['captureData'].has(args.tabId)) {
+        return createErrorResponse(`No active network capture found for tab ${args.tabId}.`);
+      }
+      return await this.performStop(startTool, args.tabId);
+    }
+
     // Get current active tab
-    const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTabs =
+      typeof args.windowId === 'number'
+        ? await chrome.tabs.query({ active: true, windowId: args.windowId })
+        : await chrome.tabs.query({ active: true, currentWindow: true });
     const activeTabId = activeTabs[0]?.id;
 
     // Determine the primary tab to stop
