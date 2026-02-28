@@ -45,6 +45,10 @@ async function resolveTabIdForExecution(
 ): Promise<number | undefined> {
   if (typeof args?.tabId === 'number') return args.tabId;
   if (!isTabScopedTool(toolName)) return undefined;
+  if (toolName === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN && args?.tabTarget === 'new') {
+    // Respect explicit new-tab execution requests for flow runs.
+    return undefined;
+  }
 
   if (sessionId) {
     const sessionCtx = getSessionContext(sessionId);
