@@ -12,7 +12,7 @@ function decodeProbeText(buffer: ArrayBuffer, maxBytes = 512): string {
   try {
     return new TextDecoder('utf-8', { fatal: false })
       .decode(buffer.slice(0, maxBytes))
-      .replace(/\u0000/g, '')
+      .replaceAll('\u0000', '')
       .trim();
   } catch {
     return '';
