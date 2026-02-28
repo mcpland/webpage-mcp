@@ -72,6 +72,20 @@ async function resolveTabIdForExecution(
         clearSessionContext(sessionId);
       }
     }
+
+    if (typeof sessionCtx?.windowId === 'number') {
+      try {
+        const [windowActive] = await chrome.tabs.query({
+          active: true,
+          windowId: sessionCtx.windowId,
+        });
+        if (typeof windowActive?.id === 'number') {
+          return windowActive.id;
+        }
+      } catch {
+        // Ignore window lookup failures and continue fallback resolution.
+      }
+    }
   }
 
   try {
