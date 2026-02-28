@@ -37,6 +37,8 @@ interface PublishedFlow {
 }
 
 const FLOW_TOOL_CACHE_TTL_MS = 10_000;
+const FLOW_TOOL_CACHE_STALE_MS = 5 * 60_000;
+const FLOW_TOOL_CACHE_MAX_SESSIONS = 500;
 const SESSION_RUN_OPTION_KEYS = [
   'tabTarget',
   'refresh',
@@ -56,6 +58,29 @@ export function clearDynamicFlowCacheForSession(sessionId: string): void {
   }
   publishedFlowsCache.delete(sessionId);
   publishedFlowsInflight.delete(sessionId);
+}
+
+function pruneDynamicFlowCaches(now = Date.now()): void {
+  for (const [sessionId, cache] of publishedFlowsCache.entries()) {
+    if (now - cache.fetchedAt > FLOW_TOOL_CACHE_STALE_MS) {
+      publishedFlowsCache.delete(sessionId);
+      publishedFlowsInflight.delete(sessionId);
+    }
+  }
+
+  if (publishedFlowsCache.size <= FLOW_TOOL_CACHE_MAX_SESSIONS) {
+    return;
+  }
+  const entries = Array.from(publishedFlowsCache.entries()).sort(
+    (a, b) => a[1].fetchedAt - b[1].fetchedAt,
+  );
+  const overflow = publishedFlowsCache.size - FLOW_TOOL_CACHE_MAX_SESSIONS;
+  for (let i = 0; i < overflow; i += 1) {
+    const target = entries[i];
+    if (!target) break;
+    publishedFlowsCache.delete(target[0]);
+    publishedFlowsInflight.delete(target[0]);
+  }
 }
 
 function normalizePublishedFlows(response: any): PublishedFlow[] {
@@ -87,6 +112,7 @@ async function fetchPublishedFlows(
 ): Promise<PublishedFlow[]> {
   const forceRefresh = options?.forceRefresh === true;
   const now = Date.now();
+  pruneDynamicFlowCaches(now);
   const cached = publishedFlowsCache.get(ctx.sessionId);
   if (!forceRefresh && cached && now - cached.fetchedAt < FLOW_TOOL_CACHE_TTL_MS) {
     return cached.items;
@@ -110,6 +136,7 @@ async function fetchPublishedFlows(
       fetchedAt: Date.now(),
       items,
     });
+    pruneDynamicFlowCaches();
     return items;
   })()
     .catch(() => {
