@@ -17,6 +17,7 @@ import * as path from 'path';
 
 let stdioMcpServer: Server | null = null;
 let mcpClient: Client | null = null;
+let shutdownStarted = false;
 
 // Read configuration from stdio-config.json
 const loadConfig = () => {
@@ -114,7 +115,59 @@ const handleToolCall = async (name: string, args: any): Promise<CallToolResult> 
   }
 };
 
+async function shutdown(exitCode = 0): Promise<void> {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+
+  try {
+    mcpClient?.close();
+    mcpClient = null;
+  } catch {
+    // Ignore close errors during shutdown
+  }
+
+  try {
+    await stdioMcpServer?.close();
+    stdioMcpServer = null;
+  } catch {
+    // Ignore close errors during shutdown
+  }
+
+  process.exit(exitCode);
+}
+
+function installProcessLifecycleHooks(): void {
+  // Parent process closed stdio; exit this proxy process to avoid zombies.
+  process.stdin.on('end', () => {
+    void shutdown(0);
+  });
+  process.stdin.on('close', () => {
+    void shutdown(0);
+  });
+
+  process.on('SIGINT', () => {
+    void shutdown(0);
+  });
+  process.on('SIGTERM', () => {
+    void shutdown(0);
+  });
+
+  // Parent PID watchdog: exit if parent disappears unexpectedly.
+  const parentPid = process.ppid;
+  if (Number.isInteger(parentPid) && parentPid > 1) {
+    const timer = setInterval(() => {
+      try {
+        process.kill(parentPid, 0);
+      } catch {
+        void shutdown(0);
+      }
+    }, 5000);
+    timer.unref();
+  }
+}
+
 async function main() {
+  installProcessLifecycleHooks();
   const transport = new StdioServerTransport();
   await getStdioMcpServer().connect(transport);
 }
