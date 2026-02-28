@@ -288,6 +288,23 @@ pnpm format        # Format with Prettier
 pnpm typecheck     # TypeScript type checking
 ```
 
+## CI/CD
+
+This repository uses GitHub Actions workflows in `.github/workflows/`:
+
+- `ci.yml`
+  - Trigger: pushes and pull requests on `main`/`develop`
+  - Runs: install, lint, typecheck (native/shared + extension), tests, build
+
+- `release.yml`
+  - Trigger: tag push `v*` and manual dispatch
+  - Builds release assets:
+    - Chrome extension zip (`app/chrome-extension/.output/*.zip`)
+    - Native server npm tarball (`.tgz`)
+    - `SHA256SUMS.txt`
+  - On tag pushes, it also creates a GitHub Release and uploads the assets
+  - Optional manual npm publish for `webpage-mcp-bridge` via `workflow_dispatch` input `publish_npm=true` (requires `NPM_TOKEN` secret)
+
 ## CLI Reference
 
 The `webpage-mcp-bridge` CLI provides the following commands:

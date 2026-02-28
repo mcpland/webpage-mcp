@@ -1,0 +1,143 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: Publish webpage-mcp-bridge to npm
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-assets:
+    name: Build Release Assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck (shared + native)
+        run: pnpm typecheck
+
+      - name: Typecheck (extension)
+        run: pnpm --filter webpage-mcp-server compile
+
+      - name: Test
+        run: pnpm -r --if-present test
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Build extension zip
+        run: pnpm --filter webpage-mcp-server zip
+
+      - name: Pack native npm package
+        run: |
+          mkdir -p artifacts/native
+          pnpm --dir app/native-server pack --pack-destination ../../artifacts/native
+
+      - name: Collect extension artifacts
+        run: |
+          mkdir -p artifacts/extension
+          cp app/chrome-extension/.output/*.zip artifacts/extension/
+
+      - name: Generate checksums
+        run: |
+          (
+            cd artifacts
+            find . -type f ! -name 'SHA256SUMS.txt' -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > SHA256SUMS.txt
+          )
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/extension/*.zip
+            artifacts/native/*.tgz
+            artifacts/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+
+  publish-npm:
+    name: Publish Native Server to npm
+    needs: build-assets
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_npm == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Ensure NPM token is configured
+        if: ${{ secrets.NPM_TOKEN == '' }}
+        run: |
+          echo "NPM_TOKEN secret is required to publish."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js for npm publish
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build publishable package
+        run: pnpm --filter webpage-mcp-bridge build
+
+      - name: Publish package
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        run: pnpm --filter webpage-mcp-bridge publish --access public --no-git-checks --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
