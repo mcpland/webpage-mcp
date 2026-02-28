@@ -5,8 +5,35 @@ export interface SessionContext {
 }
 
 const sessionContexts = new Map<string, SessionContext>();
+const SESSION_CONTEXT_TTL_MS = 30 * 60 * 1000;
+const SESSION_CONTEXT_MAX_ENTRIES = 500;
+
+function pruneExpiredSessionContexts(now = Date.now()): void {
+  for (const [sessionId, ctx] of sessionContexts.entries()) {
+    if (now - ctx.updatedAt > SESSION_CONTEXT_TTL_MS) {
+      sessionContexts.delete(sessionId);
+    }
+  }
+}
+
+function enforceSessionContextCapacity(): void {
+  if (sessionContexts.size <= SESSION_CONTEXT_MAX_ENTRIES) {
+    return;
+  }
+  const entries = Array.from(sessionContexts.entries());
+  entries.sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+  const overflow = sessionContexts.size - SESSION_CONTEXT_MAX_ENTRIES;
+  for (let i = 0; i < overflow; i += 1) {
+    const target = entries[i];
+    if (!target) {
+      break;
+    }
+    sessionContexts.delete(target[0]);
+  }
+}
 
 export function getSessionContext(sessionId: string): SessionContext | undefined {
+  pruneExpiredSessionContexts();
   return sessionContexts.get(sessionId);
 }
 
@@ -14,13 +41,16 @@ export function patchSessionContext(
   sessionId: string,
   patch: Partial<Pick<SessionContext, 'tabId' | 'windowId'>>,
 ): SessionContext {
+  const now = Date.now();
+  pruneExpiredSessionContexts(now);
   const current = sessionContexts.get(sessionId) || { updatedAt: Date.now() };
   const next: SessionContext = {
     ...current,
     ...patch,
-    updatedAt: Date.now(),
+    updatedAt: now,
   };
   sessionContexts.set(sessionId, next);
+  enforceSessionContextCapacity();
   return next;
 }
 
