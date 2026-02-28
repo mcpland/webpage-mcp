@@ -209,6 +209,8 @@ When set, requests to `/mcp`, `/sse`, `/messages`, `/agent/*`, and `/ask-extensi
 
 `webpage-mcp-stdio` will forward this token automatically when `WEBPAGE_MCP_AUTH_TOKEN` is present in its environment.
 
+When the extension is connected, the popup also shows a copyable auth token block (if token auth is enabled on the native server).
+
 ## Project Structure
 
 ```
