@@ -396,8 +396,9 @@ describe('high-risk actions integration (M3-full batch 2)', () => {
       expect(mocks.waitForNavigationDone).toHaveBeenCalledWith(
         'https://before.example/',
         expect.any(Number),
+        TAB_ID,
       );
-      expect(mocks.ensureReadPageIfWeb).toHaveBeenCalled();
+      expect(mocks.ensureReadPageIfWeb).toHaveBeenCalledWith(TAB_ID);
 
       expect(mocks.handleCallTool).toHaveBeenCalledWith(
         expect.objectContaining({
