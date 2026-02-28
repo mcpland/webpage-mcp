@@ -2,6 +2,7 @@ import type { StepWait } from '../types';
 import { waitForNetworkIdle, waitForNavigation } from '../rr-utils';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveNodeTabId } from './tab-context';
 
 export const waitNode: NodeRuntime<StepWait> = {
   validate: (step) => {
@@ -17,9 +18,7 @@ export const waitNode: NodeRuntime<StepWait> = {
       | { networkIdle: true }
       | { sleep: number };
     if ('text' in cond) {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const tabId = tabs?.[0]?.id;
-      if (typeof tabId !== 'number') throw new Error('Active tab not found');
+      const tabId = await resolveNodeTabId(ctx);
       const frameIds = typeof ctx.frameId === 'number' ? [ctx.frameId] : undefined;
       await chrome.scripting.executeScript({
         target: { tabId, frameIds },
@@ -40,16 +39,14 @@ export const waitNode: NodeRuntime<StepWait> = {
     } else if ('networkIdle' in cond) {
       const total = Math.min(Math.max(1000, (s as any).timeoutMs || 5000), 120000);
       const idle = Math.min(1500, Math.max(500, Math.floor(total / 3)));
-      await waitForNetworkIdle(total, idle);
+      await waitForNetworkIdle(total, idle, ctx.tabId);
     } else if ('navigation' in cond) {
-      await waitForNavigation((s as any).timeoutMs);
+      await waitForNavigation((s as any).timeoutMs, undefined, ctx.tabId);
     } else if ('sleep' in cond) {
       const ms = Math.max(0, Number(cond.sleep ?? 0));
       await new Promise((r) => setTimeout(r, ms));
     } else if ('selector' in cond) {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const tabId = tabs?.[0]?.id;
-      if (typeof tabId !== 'number') throw new Error('Active tab not found');
+      const tabId = await resolveNodeTabId(ctx);
       const frameIds = typeof ctx.frameId === 'number' ? [ctx.frameId] : undefined;
       await chrome.scripting.executeScript({
         target: { tabId, frameIds },

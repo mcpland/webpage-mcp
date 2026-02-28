@@ -14,7 +14,11 @@ export const executeFlowNode: NodeRuntime<any> = {
     const inline = s.inline !== false; // default inline
     if (!inline) {
       const { runFlow } = await import("../flow-runner");
-      await runFlow(flow, { args: s.args || {}, returnLogs: false });
+      await runFlow(flow, {
+        args: s.args || {},
+        returnLogs: false,
+        tabId: ctx.tabId,
+      });
       return {} as ExecResult;
     }
     const {
@@ -55,11 +59,19 @@ export const executeFlowNode: NodeRuntime<any> = {
       while (true) {
         try {
           const beforeInfo = await (async () => {
-            const tabs = await chrome.tabs.query({
+            if (typeof ctx.tabId === "number") {
+              const tab = await chrome.tabs.get(ctx.tabId).catch(() => null);
+              if (tab?.id) {
+                return { url: tab.url || "", status: (tab as any)?.status || "" };
+              }
+            }
+            const [tab] = await chrome.tabs.query({
               active: true,
               currentWindow: true,
             });
-            const tab = tabs[0];
+            if (typeof tab?.id === "number") {
+              ctx.tabId = tab.id;
+            }
             return { url: tab?.url || "", status: (tab as any)?.status || "" };
           })();
           const { executeStep } = await import("../nodes");
@@ -70,11 +82,12 @@ export const executeFlowNode: NodeRuntime<any> = {
           ) {
             const after = (st as any).after as any;
             if (after.waitForNavigation)
-              await waitForNavigation((st as any).timeoutMs, beforeInfo.url);
+              await waitForNavigation((st as any).timeoutMs, beforeInfo.url, ctx.tabId);
             else if (after.waitForNetworkIdle)
               await waitForNetworkIdle(
                 Math.min((st as any).timeoutMs || 5000, 120000),
                 1200,
+                ctx.tabId,
               );
           }
           if (!result?.alreadyLogged)

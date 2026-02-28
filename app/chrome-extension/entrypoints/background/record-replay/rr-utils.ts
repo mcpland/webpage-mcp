@@ -133,13 +133,18 @@ export async function ensureTab(options: {
   return { tabId: tabId!, url };
 }
 
-export async function waitForNetworkIdle(totalTimeoutMs: number, idleThresholdMs: number) {
+export async function waitForNetworkIdle(
+  totalTimeoutMs: number,
+  idleThresholdMs: number,
+  tabId?: number,
+) {
   const deadline = Date.now() + Math.max(500, totalTimeoutMs);
   const threshold = Math.max(200, idleThresholdMs);
   while (Date.now() < deadline) {
     await handleCallTool({
       name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE_START,
       args: {
+        ...(typeof tabId === 'number' ? { tabId } : {}),
         includeStatic: false,
         // Ensure capture remains active until we explicitly stop it
         maxCaptureTime: Math.min(60_000, Math.max(threshold + 500, 2_000)),
@@ -149,7 +154,9 @@ export async function waitForNetworkIdle(totalTimeoutMs: number, idleThresholdMs
     await new Promise((r) => setTimeout(r, threshold + 200));
     const stopRes = await handleCallTool({
       name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE_STOP,
-      args: {},
+      args: {
+        ...(typeof tabId === 'number' ? { tabId } : {}),
+      },
     });
     const text = (stopRes as any)?.content?.find((c: any) => c.type === 'text')?.text;
     try {
@@ -173,11 +180,24 @@ export async function waitForNetworkIdle(totalTimeoutMs: number, idleThresholdMs
 }
 
 // Event-driven navigation wait helper
-// Waits for top-frame navigation completion or SPA history updates on active tab.
+// Waits for top-frame navigation completion or SPA history updates on a target tab.
 // Falls back to short network idle on timeout.
-export async function waitForNavigation(timeoutMs?: number, prevUrl?: string): Promise<void> {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const tabId = tabs?.[0]?.id;
+export async function waitForNavigation(
+  timeoutMs?: number,
+  prevUrl?: string,
+  preferredTabId?: number,
+): Promise<void> {
+  let tabId = preferredTabId;
+  if (typeof tabId === 'number') {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab?.id) {
+      tabId = undefined;
+    }
+  }
+  if (typeof tabId !== 'number') {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    tabId = tabs?.[0]?.id;
+  }
   if (typeof tabId !== 'number') throw new Error('Active tab not found');
   const timeout = Math.max(1000, Math.min(timeoutMs || 15000, 30000));
   const startedAt = Date.now();
@@ -248,7 +268,7 @@ export async function waitForNavigation(timeoutMs?: number, prevUrl?: string): P
     const onTimeout = async () => {
       cleanup();
       try {
-        await waitForNetworkIdle(2000, 800);
+        await waitForNetworkIdle(2000, 800, tabId);
         resolve();
       } catch {
         reject(new Error('navigation timeout'));

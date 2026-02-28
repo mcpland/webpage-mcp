@@ -94,14 +94,14 @@ export const waitHandler: ActionHandler<'wait'> = {
         idleMs = Math.min(1500, Math.max(500, Math.floor(totalMs / 3)));
       }
 
-      await waitForNetworkIdle(totalMs, idleMs);
+      await waitForNetworkIdle(totalMs, idleMs, tabId);
       return { status: 'success' };
     }
 
     // Handle navigation condition
     if (condition.kind === 'navigation') {
       const timeout = timeoutMs === undefined ? undefined : Math.max(0, Number(timeoutMs));
-      await waitForNavigation(timeout);
+      await waitForNavigation(timeout, undefined, tabId);
       return { status: 'success' };
     }
 

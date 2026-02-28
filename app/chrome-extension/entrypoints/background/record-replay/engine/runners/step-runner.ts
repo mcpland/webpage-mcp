@@ -64,9 +64,14 @@ export interface StepRunEnv {
 export class StepRunner {
   constructor(private env: StepRunEnv) {}
 
-  private async getActiveTabInfo(): Promise<{ url: string; status: string | '' }> {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tab = tabs[0];
+  private async getActiveTabInfo(preferredTabId?: number): Promise<{ url: string; status: string | '' }> {
+    if (typeof preferredTabId === 'number') {
+      const tab = await chrome.tabs.get(preferredTabId).catch(() => null);
+      if (tab?.id) {
+        return { url: tab.url || '', status: (tab.status as string) || '' };
+      }
+    }
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     return { url: tab?.url || '', status: (tab?.status as string) || '' };
   }
 
@@ -100,7 +105,7 @@ export class StepRunner {
     }
     if (ctrlStart?.pause) return { status: 'paused' };
 
-    const beforeInfo = await this.getActiveTabInfo();
+    const beforeInfo = await this.getActiveTabInfo(ctx.tabId);
     try {
       await withRetry(
         async () => {
@@ -114,6 +119,7 @@ export class StepRunner {
           if (typeof tabId !== 'number') {
             throw new Error('No active tab found for step execution');
           }
+          ctx.tabId = tabId;
 
           const execResult = await this.env.stepExecutor.execute(ctx, step, {
             tabId,
@@ -129,6 +135,7 @@ export class StepRunner {
               await waitForNavigationDone(
                 beforeInfo.url,
                 Math.min(step.timeoutMs ?? ENGINE_CONSTANTS.DEFAULT_WAIT_MS, remainingBudget),
+                ctx.tabId,
               );
             else if (after.waitForNetworkIdle) {
               const totalMs = Math.min(
@@ -136,11 +143,12 @@ export class StepRunner {
                 remainingBudget,
               );
               const idleMs = Math.min(1500, Math.max(500, Math.floor(totalMs / 3)));
-              await waitForNetworkIdle(totalMs, idleMs);
+              await waitForNetworkIdle(totalMs, idleMs, ctx.tabId);
             } else
               await maybeQuickWaitForNav(
                 beforeInfo.url,
                 Math.min(step.timeoutMs ?? ENGINE_CONSTANTS.DEFAULT_WAIT_MS, remainingBudget),
+                ctx.tabId,
               );
           }
           if (step.type === STEP_TYPES.NAVIGATE || step.type === STEP_TYPES.OPEN_TAB) {
@@ -150,10 +158,11 @@ export class StepRunner {
                 step.timeoutMs ?? ENGINE_CONSTANTS.DEFAULT_WAIT_MS,
                 this.env.getRemainingBudgetMs(),
               ),
+              ctx.tabId,
             );
-            await ensureReadPageIfWeb();
+            await ensureReadPageIfWeb(ctx.tabId);
           } else if (step.type === STEP_TYPES.SWITCH_TAB) {
-            await ensureReadPageIfWeb();
+            await ensureReadPageIfWeb(ctx.tabId);
           }
           if (!result?.alreadyLogged)
             this.env.logger.push({ stepId: step.id, status: 'success', tookMs: Date.now() - t0 });

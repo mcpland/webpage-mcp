@@ -1,6 +1,7 @@
 import type { StepScript } from '../types';
 import { expandTemplatesDeep, applyAssign } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveNodeTabId } from './tab-context';
 
 export const scriptNode: NodeRuntime<StepScript> = {
   run: async (ctx: ExecCtx, step: StepScript) => {
@@ -9,9 +10,7 @@ export const scriptNode: NodeRuntime<StepScript> = {
     const world = s.world || 'ISOLATED';
     const code = String(s.code || '');
     if (!code.trim()) return {} as ExecResult;
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tabId = tabs?.[0]?.id;
-    if (typeof tabId !== 'number') throw new Error('Active tab not found');
+    const tabId = await resolveNodeTabId(ctx);
     const frameIds = typeof ctx.frameId === 'number' ? [ctx.frameId] : undefined;
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId, frameIds } as any,

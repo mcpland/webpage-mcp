@@ -3,11 +3,16 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import type { StepKey } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveNodeTabId } from './tab-context';
 
 export const keyNode: NodeRuntime<StepKey> = {
   run: async (ctx, step: StepKey) => {
     const s = expandTemplatesDeep(step as StepKey, ctx.vars) as StepKey;
-    const args: { keys: string; frameId?: number; selector?: string } = { keys: s.keys };
+    const tabId = await resolveNodeTabId(ctx);
+    const args: { keys: string; frameId?: number; selector?: string; tabId?: number } = {
+      keys: s.keys,
+      tabId,
+    };
 
     // Support target selector for focusing before key input
     if (s.target && s.target.candidates?.length) {

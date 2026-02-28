@@ -45,9 +45,17 @@ export class AfterScriptQueue {
             message: 'Script contains potentially unsafe tokens; executed in isolated world',
           });
         }
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        const tabId = tabs?.[0]?.id;
+        let tabId = ctx.tabId;
+        if (typeof tabId === 'number') {
+          const tab = await chrome.tabs.get(tabId).catch(() => null);
+          if (!tab?.id) tabId = undefined;
+        }
+        if (typeof tabId !== 'number') {
+          const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+          tabId = active?.id;
+        }
         if (typeof tabId !== 'number') throw new Error('Active tab not found');
+        ctx.tabId = tabId;
         const [{ result }] = await chrome.scripting.executeScript({
           target: { tabId },
           func: (userCode: string) => {

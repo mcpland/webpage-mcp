@@ -1,13 +1,12 @@
 import type { StepExtract } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveNodeTabId } from './tab-context';
 
 export const extractNode: NodeRuntime<StepExtract> = {
   run: async (ctx: ExecCtx, step: StepExtract) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tabId = tabs?.[0]?.id;
-    if (typeof tabId !== 'number') throw new Error('Active tab not found');
+    const tabId = await resolveNodeTabId(ctx);
     let value: any = null;
     if (s.js && String(s.js).trim()) {
       const [{ result }] = await chrome.scripting.executeScript({

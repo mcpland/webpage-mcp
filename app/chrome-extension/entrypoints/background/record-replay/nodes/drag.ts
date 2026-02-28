@@ -3,12 +3,12 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import type { StepDrag } from '../types';
 import { locateElement } from '../selector-engine';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveNodeTabId } from './tab-context';
 
 export const dragNode: NodeRuntime<StepDrag> = {
-  run: async (_ctx, step: StepDrag) => {
+  run: async (ctx, step: StepDrag) => {
     const s = step as StepDrag;
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tabId = tabs?.[0]?.id;
+    const tabId = await resolveNodeTabId(ctx);
     let startRef: string | undefined;
     let endRef: string | undefined;
     try {
@@ -34,6 +34,7 @@ export const dragNode: NodeRuntime<StepDrag> = {
         ref: endRef,
         startCoordinates,
         coordinates: endCoordinates,
+        tabId,
       },
     });
     if ((res as any).isError) throw new Error('drag failed');

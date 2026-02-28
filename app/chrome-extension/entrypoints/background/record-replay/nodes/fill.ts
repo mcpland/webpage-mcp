@@ -4,6 +4,7 @@ import type { StepFill } from '../types';
 import { locateElement } from '../selector-engine';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
+import { resolveNodeTabId } from './tab-context';
 
 export const fillNode: NodeRuntime<StepFill> = {
   validate: (step) => {
@@ -12,11 +13,8 @@ export const fillNode: NodeRuntime<StepFill> = {
   },
   run: async (ctx: ExecCtx, step: StepFill) => {
     const s: any = step;
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const firstTab = tabs && tabs[0];
-    const tabId = firstTab && typeof firstTab.id === 'number' ? firstTab.id : undefined;
-    if (!tabId) throw new Error('Active tab not found');
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+    const tabId = await resolveNodeTabId(ctx);
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
     const located = await locateElement(tabId, s.target, ctx.frameId);
     const frameId = (located as any)?.frameId ?? ctx.frameId;
     const first = s.target?.candidates?.[0]?.type;
@@ -50,7 +48,7 @@ export const fillNode: NodeRuntime<StepFill> = {
         if (typeName === 'file') {
           const uploadRes = await handleCallTool({
             name: TOOL_NAMES.BROWSER.FILE_UPLOAD,
-            args: { selector: cssSelector, filePath: String(value ?? '') },
+            args: { selector: cssSelector, filePath: String(value ?? ''), tabId },
           });
           if ((uploadRes as any).isError) throw new Error('file upload failed');
           if (fallbackUsed)
@@ -72,6 +70,7 @@ export const fillNode: NodeRuntime<StepFill> = {
           name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
           args: {
             type: 'MAIN',
+            tabId,
             jsScript: `try{var el=document.querySelector(${JSON.stringify(cssSelector)});if(el){el.scrollIntoView({behavior:'instant',block:'center',inline:'nearest'});} }catch(e){}`,
           },
         });
@@ -88,6 +87,7 @@ export const fillNode: NodeRuntime<StepFill> = {
           name: TOOL_NAMES.BROWSER.INJECT_SCRIPT,
           args: {
             type: 'MAIN',
+            tabId,
             jsScript: `try{var el=document.querySelector(${JSON.stringify(cssSelector)});if(el&&el.focus){el.focus();}}catch(e){}`,
           },
         });
@@ -99,6 +99,7 @@ export const fillNode: NodeRuntime<StepFill> = {
         selector: cssSelector,
         value,
         frameId,
+        tabId,
       },
     });
     if ((res as any).isError) throw new Error('fill failed');
