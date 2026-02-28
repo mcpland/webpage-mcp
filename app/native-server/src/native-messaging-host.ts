@@ -14,6 +14,7 @@ interface PendingRequest {
 export class NativeMessagingHost {
   private associatedServer: Server | null = null;
   private pendingRequests: Map<string, PendingRequest> = new Map();
+  private static readonly AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
 
   public setServer(serverInstance: Server): void {
     this.associatedServer = serverInstance;
@@ -125,6 +126,9 @@ export class NativeMessagingHost {
         case NativeMessageType.STOP:
           await this.stopServer();
           break;
+        case 'auth_get_token':
+          this.handleAuthGetToken(message);
+          break;
         // Keep ping/pong for simple liveness detection, but this differs from request-response pattern
         case 'ping_from_extension':
           this.sendMessage({ type: 'pong_to_extension' });
@@ -143,6 +147,32 @@ export class NativeMessagingHost {
     } catch (error: any) {
       this.sendError(`Failed to handle directive message: ${error.message}`);
     }
+  }
+
+  private getConfiguredAuthToken(): string | undefined {
+    const token = process.env[NativeMessagingHost.AUTH_TOKEN_ENV];
+    if (typeof token !== 'string') {
+      return undefined;
+    }
+    const trimmed = token.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  private handleAuthGetToken(message: any): void {
+    const requestId = message?.requestId;
+    if (!requestId) {
+      this.sendError('auth_get_token requires requestId');
+      return;
+    }
+    const token = this.getConfiguredAuthToken();
+    this.sendMessage({
+      type: 'auth_token_response',
+      responseToRequestId: requestId,
+      payload: {
+        enabled: Boolean(token),
+        token: token || null,
+      },
+    });
   }
 
   /**

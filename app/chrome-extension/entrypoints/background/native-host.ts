@@ -33,6 +33,59 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let manualDisconnect = false;
 
+interface PendingNativeRequest {
+  resolve: (payload: any) => void;
+  reject: (reason?: unknown) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
+const pendingNativeRequests = new Map<string, PendingNativeRequest>();
+
+function makeRequestId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
+async function requestNativeHost(
+  type: string,
+  payload?: unknown,
+  timeoutMs: number = 5000,
+): Promise<any> {
+  const port = nativePort;
+  if (!port) {
+    throw new Error('Native host not connected');
+  }
+
+  const requestId = makeRequestId();
+  return await new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      pendingNativeRequests.delete(requestId);
+      reject(new Error(`Native request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    pendingNativeRequests.set(requestId, { resolve, reject, timeoutId });
+
+    try {
+      port.postMessage({ type, requestId, payload });
+    } catch (error) {
+      clearTimeout(timeoutId);
+      pendingNativeRequests.delete(requestId);
+      reject(error);
+    }
+  });
+}
+
+function rejectAllPendingNativeRequests(reason: string): void {
+  for (const [requestId, pending] of pendingNativeRequests.entries()) {
+    clearTimeout(pending.timeoutId);
+    pending.reject(new Error(reason));
+    pendingNativeRequests.delete(requestId);
+  }
+}
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearSessionContextsForTab(tabId);
   clearTabQueue(tabId);
@@ -360,6 +413,21 @@ export function connectNativeHost(port: number = NATIVE_HOST.DEFAULT_PORT): bool
     nativePort = chrome.runtime.connectNative(HOST_NAME);
 
     nativePort.onMessage.addListener(async (message) => {
+      if (message?.responseToRequestId) {
+        const requestId = String(message.responseToRequestId);
+        const pending = pendingNativeRequests.get(requestId);
+        if (pending) {
+          clearTimeout(pending.timeoutId);
+          pendingNativeRequests.delete(requestId);
+          if (message.error) {
+            pending.reject(new Error(String(message.error)));
+          } else {
+            pending.resolve(message.payload);
+          }
+          return;
+        }
+      }
+
       if (message.type === NativeMessageType.PROCESS_DATA && message.requestId) {
         const requestId = message.requestId;
         const requestPayload = message.payload;
@@ -466,6 +534,7 @@ export function connectNativeHost(port: number = NATIVE_HOST.DEFAULT_PORT): bool
       console.warn(ERROR_MESSAGES.NATIVE_DISCONNECTED, chrome.runtime.lastError);
       nativePort = null;
       clearAllSessionContexts();
+      rejectAllPendingNativeRequests('Native host disconnected');
 
       // Mark server as stopped since native host disconnection means server is down
       void markServerStopped('native_port_disconnected');
@@ -634,6 +703,34 @@ export const initNativeHostListener = () => {
             error: ERROR_MESSAGES.SERVER_STATUS_LOAD_FAILED,
             serverStatus: currentServerStatus,
             connected: nativePort !== null,
+          });
+        });
+      return true;
+    }
+
+    if (message.type === BACKGROUND_MESSAGE_TYPES.GET_NATIVE_AUTH_TOKEN) {
+      (async () => {
+        if (!nativePort) {
+          const connected = await ensureNativeConnected('ui_get_native_auth_token');
+          if (!connected) {
+            throw new Error('Native host not connected');
+          }
+        }
+        const response = await requestNativeHost('auth_get_token', {}, 5000);
+        return {
+          enabled: response?.enabled === true,
+          token: typeof response?.token === 'string' ? response.token : null,
+        };
+      })()
+        .then((res) => {
+          sendResponse({ success: true, ...res });
+        })
+        .catch((error) => {
+          sendResponse({
+            success: false,
+            enabled: false,
+            token: null,
+            error: error instanceof Error ? error.message : String(error),
           });
         });
       return true;
