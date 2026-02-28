@@ -102,11 +102,12 @@ function broadcastServerStatusChange(status: ServerStatus): void {
 /**
  * Normalize a port value to a valid port number or null.
  */
-function normalizePort(value: unknown): number | null {
+function normalizePort(value: unknown, options?: { allowZero?: boolean }): number | null {
   const n =
     typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
   if (!Number.isFinite(n)) return null;
   const port = Math.floor(n);
+  if (options?.allowZero && port === 0) return 0;
   if (port <= 0 || port > 65535) return null;
   return port;
 }
@@ -213,8 +214,8 @@ async function setNativeAutoConnectEnabled(enabled: boolean): Promise<void> {
  * Priority: explicit override > user preference > last known port > default
  */
 async function getPreferredPort(override?: unknown): Promise<number> {
-  const explicit = normalizePort(override);
-  if (explicit) return explicit;
+  const explicit = normalizePort(override, { allowZero: true });
+  if (explicit !== null) return explicit;
 
   try {
     const result = await chrome.storage.local.get([
@@ -542,13 +543,13 @@ export const initNativeHostListener = () => {
     // CONNECT_NATIVE: Explicit user connect, re-enables auto-connect
     if (msgType === NativeMessageType.CONNECT_NATIVE) {
       const portOverride = typeof message === 'object' ? message.port : undefined;
-      const normalized = normalizePort(portOverride);
+      const normalized = normalizePort(portOverride, { allowZero: true });
 
       (async () => {
         // Explicit user connect: re-enable auto-connect
         await setNativeAutoConnectEnabled(true);
 
-        if (normalized) {
+        if (typeof normalized === 'number' && normalized > 0) {
           // Best-effort: persist preferred port
           try {
             await chrome.storage.local.set({ [STORAGE_KEYS.NATIVE_SERVER_PORT]: normalized });
