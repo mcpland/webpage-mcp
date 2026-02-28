@@ -143,6 +143,12 @@ Use the `webpage-mcp-stdio` binary, which proxies stdio to the HTTP server:
 }
 ```
 
+`webpage-mcp-stdio` resolves its upstream endpoint in this order:
+
+1. `WEBPAGE_MCP_URL` (full URL)
+2. `WEBPAGE_MCP_PORT` / `MCP_HTTP_PORT` (builds `http://127.0.0.1:<port>/mcp`)
+3. `app/native-server/dist/mcp/stdio-config.json` (or packaged equivalent)
+
 ### Claude Desktop Configuration
 
 Add to your Claude Desktop MCP config (`claude_desktop_config.json`):
@@ -187,6 +193,19 @@ npx webpage-mcp-bridge update-port 12307
 ```
 
 `update-port` edits `app/native-server/dist/mcp/stdio-config.json` (or packaged equivalent) and does not directly change the native server listen port.
+
+### Optional Local Auth Token
+
+If you want to require auth on local MCP/agent endpoints, set:
+
+```bash
+export WEBPAGE_MCP_AUTH_TOKEN="your-random-token"
+```
+
+When set, requests to `/mcp`, `/sse`, `/messages`, `/agent/*`, and `/ask-extension` must include either:
+
+- `Authorization: Bearer <token>`
+- `x-webpage-mcp-token: <token>`
 
 ## Project Structure
 
