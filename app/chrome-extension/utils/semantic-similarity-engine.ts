@@ -8,6 +8,29 @@ import { OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
 
 import { ModelCacheManager } from './model-cache-manager';
 
+function decodeProbeText(buffer: ArrayBuffer, maxBytes = 512): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: false })
+      .decode(buffer.slice(0, maxBytes))
+      .replace(/\u0000/g, '')
+      .trim();
+  } catch {
+    return '';
+  }
+}
+
+function looksLikeHtmlOrJson(text: string): boolean {
+  if (!text) return false;
+  const normalized = text.toLowerCase();
+  return (
+    normalized.startsWith('<!doctype html') ||
+    normalized.startsWith('<html') ||
+    normalized.startsWith('<?xml') ||
+    normalized.startsWith('{') ||
+    normalized.startsWith('[')
+  );
+}
+
 /**
  * Get cached model data, prioritizing cache reads and handling redirected URLs.
  * @param {string} modelUrl Stable, permanent URL of the model
@@ -32,8 +55,25 @@ async function getCachedModelData(modelUrl: string): Promise<ArrayBuffer> {
       throw new Error(`Failed to fetch model: ${response.status} ${response.statusText}`);
     }
 
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    if (contentType.includes('text/html') || contentType.includes('application/json')) {
+      throw new Error(
+        `Model endpoint returned unexpected content-type (${contentType}) instead of binary model data`,
+      );
+    }
+
     // 3. Get data and store in cache
     const arrayBuffer = await response.arrayBuffer();
+
+    // Guard against CDN/auth/error pages returned as HTML/JSON with 200 status.
+    const probe = decodeProbeText(arrayBuffer);
+    if (looksLikeHtmlOrJson(probe)) {
+      const preview = probe.slice(0, 120).replace(/\s+/g, ' ');
+      throw new Error(
+        `Model download returned non-model payload (looks like HTML/JSON). Preview: ${preview}`,
+      );
+    }
+
     await cacheManager.storeModelData(modelUrl, arrayBuffer);
 
     console.log(
