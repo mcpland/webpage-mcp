@@ -1,7 +1,7 @@
 import { Server as McpSdkServer } from '@modelcontextprotocol/sdk/server/index.js';
-import { setupTools } from './register-tools';
+import { setupTools, type McpToolContext } from './register-tools';
 
-export function createMcpServer(): McpSdkServer {
+export function createMcpServer(ctx: McpToolContext): McpSdkServer {
   const mcpServer = new McpSdkServer(
     {
       name: 'WebpageMcpServer',
@@ -14,6 +14,6 @@ export function createMcpServer(): McpSdkServer {
     },
   );
 
-  setupTools(mcpServer);
+  setupTools(mcpServer, ctx);
   return mcpServer;
 }

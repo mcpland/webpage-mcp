@@ -4,14 +4,19 @@ import {
   CallToolResult,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import nativeMessagingHostInstance from '../native-messaging-host';
 import { NativeMessageType, TOOL_SCHEMAS } from 'webpage-mcp-shared';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { NativeMessagingHost } from '../native-messaging-host';
 
-async function listDynamicFlowTools(): Promise<Tool[]> {
+export interface McpToolContext {
+  sessionId: string;
+  nativeHost: NativeMessagingHost;
+}
+
+async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
   try {
-    const response = await nativeMessagingHostInstance.sendRequestToExtensionAndWait(
-      {},
+    const response = await ctx.nativeHost.sendRequestToExtensionAndWait(
+      { meta: { mcpSessionId: ctx.sessionId } },
       'rr_list_published_flows',
       20000,
     );
@@ -66,27 +71,27 @@ async function listDynamicFlowTools(): Promise<Tool[]> {
   }
 }
 
-export const setupTools = (server: Server) => {
+export const setupTools = (server: Server, ctx: McpToolContext) => {
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const dynamicTools = await listDynamicFlowTools();
+    const dynamicTools = await listDynamicFlowTools(ctx);
     return { tools: [...TOOL_SCHEMAS, ...dynamicTools] };
   });
 
   // Call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    handleToolCall(request.params.name, request.params.arguments || {}),
+    handleToolCall(ctx, request.params.name, request.params.arguments || {}),
   );
 };
 
-const handleToolCall = async (name: string, args: any): Promise<CallToolResult> => {
+const handleToolCall = async (ctx: McpToolContext, name: string, args: any): Promise<CallToolResult> => {
   try {
     // If calling a dynamic flow tool (name starts with flow.), proxy to common flow-run tool
     if (name && name.startsWith('flow.')) {
       // We need to resolve flow by slug to ID
       try {
-        const resp = await nativeMessagingHostInstance.sendRequestToExtensionAndWait(
-          {},
+        const resp = await ctx.nativeHost.sendRequestToExtensionAndWait(
+          { meta: { mcpSessionId: ctx.sessionId } },
           'rr_list_published_flows',
           20000,
         );
@@ -95,8 +100,12 @@ const handleToolCall = async (name: string, args: any): Promise<CallToolResult> 
         const match = items.find((it: any) => it.slug === slug);
         if (!match) throw new Error(`Flow not found for tool ${name}`);
         const flowArgs = { flowId: match.id, args };
-        const proxyRes = await nativeMessagingHostInstance.sendRequestToExtensionAndWait(
-          { name: 'record_replay_flow_run', args: flowArgs },
+        const proxyRes = await ctx.nativeHost.sendRequestToExtensionAndWait(
+          {
+            name: 'record_replay_flow_run',
+            args: flowArgs,
+            meta: { mcpSessionId: ctx.sessionId },
+          },
           NativeMessageType.CALL_TOOL,
           120000,
         );
@@ -118,10 +127,11 @@ const handleToolCall = async (name: string, args: any): Promise<CallToolResult> 
       }
     }
     // Send request to Chrome extension and wait for response
-    const response = await nativeMessagingHostInstance.sendRequestToExtensionAndWait(
+    const response = await ctx.nativeHost.sendRequestToExtensionAndWait(
       {
         name,
         args,
+        meta: { mcpSessionId: ctx.sessionId },
       },
       NativeMessageType.CALL_TOOL,
       120000, // Extended to 120 seconds to avoid timeout for long tasks such as performance analysis

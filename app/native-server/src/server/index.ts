@@ -105,6 +105,13 @@ export class Server {
     this.nativeHost = nativeHost;
   }
 
+  private getNativeHostOrThrow(): NativeMessagingHost {
+    if (!this.nativeHost) {
+      throw new Error(ERROR_MESSAGES.NATIVE_HOST_NOT_AVAILABLE);
+    }
+    return this.nativeHost;
+  }
+
   private registerMcpSession(session: McpSession): void {
     this.mcpSessions.set(session.sessionId, session);
   }
@@ -263,8 +270,11 @@ export class Server {
       let createdSession: McpSession | undefined;
       try {
         const transport = new SSEServerTransport('/messages', reply.raw);
-        const mcpServer = createMcpServer();
         const sessionId = transport.sessionId;
+        const mcpServer = createMcpServer({
+          sessionId,
+          nativeHost: this.getNativeHostOrThrow(),
+        });
         createdSession = {
           sessionId,
           transport,
@@ -318,7 +328,10 @@ export class Server {
         // Transport found, proceed
       } else if (!sessionId && isInitializeRequest(request.body)) {
         const newSessionId = randomUUID();
-        const mcpServer = createMcpServer();
+        const mcpServer = createMcpServer({
+          sessionId: newSessionId,
+          nativeHost: this.getNativeHostOrThrow(),
+        });
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => newSessionId,
           onsessioninitialized: (initializedSessionId) => {
