@@ -7,13 +7,14 @@
  * - Auto-create tables on first run (no migration tool needed)
  * - Configurable path via environment variable
  */
-import Database from 'better-sqlite3';
 import { drizzle, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { sql } from 'drizzle-orm';
 import * as schema from './schema';
 import { getAgentDataDir } from '../storage';
 import path from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import type BetterSqlite3 from 'better-sqlite3';
 
 // ============================================================
 // Types
@@ -21,12 +22,31 @@ import { existsSync, mkdirSync } from 'node:fs';
 
 export type DrizzleDB = BetterSQLite3Database<typeof schema>;
 
+type BetterSqlite3Ctor = typeof import('better-sqlite3');
+const runtimeRequire =
+  typeof require === 'function' ? require : createRequire(typeof __filename !== 'undefined' ? __filename : process.cwd());
+
+function loadBetterSqlite3(): BetterSqlite3Ctor {
+  try {
+    const mod = runtimeRequire('better-sqlite3') as { default?: BetterSqlite3Ctor } | BetterSqlite3Ctor;
+    return ((mod as { default?: BetterSqlite3Ctor }).default || mod) as BetterSqlite3Ctor;
+  } catch (error) {
+    const platform = `${process.platform}-${process.arch}`;
+    const raw = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to load better-sqlite3 native bindings on ${platform} with Node ${process.version}. ` +
+        `Run: pnpm --filter webpage-mcp-bridge rebuild better-sqlite3 ` +
+        `or reinstall dependencies with: pnpm install --force. Original error: ${raw}`,
+    );
+  }
+}
+
 // ============================================================
 // Singleton State
 // ============================================================
 
 let dbInstance: DrizzleDB | null = null;
-let sqliteInstance: Database.Database | null = null;
+let sqliteInstance: BetterSqlite3.Database | null = null;
 
 // ============================================================
 // Database Path Resolution
@@ -125,7 +145,7 @@ const MIGRATION_SQL = `
 /**
  * Check if a column exists in a table.
  */
-function columnExists(sqlite: Database.Database, tableName: string, columnName: string): boolean {
+function columnExists(sqlite: BetterSqlite3.Database, tableName: string, columnName: string): boolean {
   const result = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
   return result.some((col) => col.name === columnName);
 }
@@ -134,7 +154,7 @@ function columnExists(sqlite: Database.Database, tableName: string, columnName: 
  * Run migrations for existing databases.
  * Adds new columns that may be missing in older database versions.
  */
-function runMigrations(sqlite: Database.Database): void {
+function runMigrations(sqlite: BetterSqlite3.Database): void {
   // Migration 1: Add active_claude_session_id column to projects table
   if (!columnExists(sqlite, 'projects', 'active_claude_session_id')) {
     sqlite.exec('ALTER TABLE projects ADD COLUMN active_claude_session_id TEXT');
@@ -156,7 +176,7 @@ function runMigrations(sqlite: Database.Database): void {
  * Safe to call multiple times - uses IF NOT EXISTS.
  * Also runs migrations for existing databases.
  */
-function initializeSchema(sqlite: Database.Database): void {
+function initializeSchema(sqlite: BetterSqlite3.Database): void {
   sqlite.exec(CREATE_TABLES_SQL);
   runMigrations(sqlite);
 }
@@ -188,16 +208,18 @@ export function getDb(): DrizzleDB {
   const dbPath = getDatabasePath();
 
   // Create SQLite connection
-  sqliteInstance = new Database(dbPath);
+  const BetterSqlite3 = loadBetterSqlite3();
+  const sqlite = new BetterSqlite3(dbPath);
+  sqliteInstance = sqlite;
 
   // Enable WAL mode for better concurrent read performance
-  sqliteInstance.pragma('journal_mode = WAL');
+  sqlite.pragma('journal_mode = WAL');
 
   // Initialize schema
-  initializeSchema(sqliteInstance);
+  initializeSchema(sqlite);
 
   // Create Drizzle instance
-  dbInstance = drizzle(sqliteInstance, { schema });
+  dbInstance = drizzle(sqlite, { schema });
 
   return dbInstance;
 }
