@@ -14,22 +14,52 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { SERVER_CONFIG } from '../constant';
 
 let stdioMcpServer: Server | null = null;
 let mcpClient: Client | null = null;
 let shutdownStarted = false;
 
 // Read configuration from stdio-config.json
-const loadConfig = () => {
+const loadConfig = (): { url: string } | null => {
   try {
     const configPath = path.join(__dirname, 'stdio-config.json');
     const configData = fs.readFileSync(configPath, 'utf8');
-    return JSON.parse(configData);
+    return JSON.parse(configData) as { url: string };
   } catch (error) {
-    console.error('Failed to load stdio-config.json:', error);
-    throw new Error('Configuration file stdio-config.json not found or invalid');
+    console.warn('Failed to load stdio-config.json, will use env overrides if available:', error);
+    return null;
   }
 };
+
+function parsePort(rawValue: unknown): number | undefined {
+  const parsed = Number.parseInt(String(rawValue ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
+    return undefined;
+  }
+  return parsed;
+}
+
+function getResolvedTargetUrl(): URL {
+  const explicitUrl = process.env.WEBPAGE_MCP_URL?.trim();
+  if (explicitUrl) {
+    return new URL(explicitUrl);
+  }
+
+  const envPort = parsePort(process.env.WEBPAGE_MCP_PORT) ?? parsePort(process.env.MCP_HTTP_PORT);
+  if (envPort) {
+    return new URL(`http://${SERVER_CONFIG.HOST}:${envPort}/mcp`);
+  }
+
+  const config = loadConfig();
+  if (config?.url) {
+    return new URL(config.url);
+  }
+
+  throw new Error(
+    'No MCP target configured. Set WEBPAGE_MCP_URL or WEBPAGE_MCP_PORT, or provide stdio-config.json.',
+  );
+}
 
 export const getStdioMcpServer = () => {
   if (stdioMcpServer) {
@@ -62,9 +92,9 @@ export const ensureMcpClient = async () => {
       }
     }
 
-    const config = loadConfig();
+    const targetUrl = getResolvedTargetUrl();
     mcpClient = new Client({ name: 'Webpage MCP Proxy', version: '1.0.0' }, { capabilities: {} });
-    const transport = new StreamableHTTPClientTransport(new URL(config.url), {});
+    const transport = new StreamableHTTPClientTransport(targetUrl, {});
     await mcpClient.connect(transport);
     return mcpClient;
   } catch (error) {

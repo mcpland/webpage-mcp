@@ -75,6 +75,10 @@ Two different port settings exist:
 2. stdio proxy target port
 - `update-port` only updates `mcp/stdio-config.json` used by `webpage-mcp-stdio`.
 - It does not directly change the running native server listen port.
+- `webpage-mcp-stdio` resolves target endpoint with this priority:
+  1. `WEBPAGE_MCP_URL` (full URL, e.g. `http://127.0.0.1:12307/mcp`)
+  2. `WEBPAGE_MCP_PORT` / `MCP_HTTP_PORT` (builds `http://127.0.0.1:<port>/mcp`)
+  3. `mcp/stdio-config.json`
 
 ## Optional Auth Token
 
