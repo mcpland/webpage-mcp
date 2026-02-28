@@ -51,6 +51,9 @@ interface McpSession {
 
 type StreamableMcpSession = McpSession & { transport: StreamableHTTPServerTransport };
 type SseMcpSession = McpSession & { transport: SSEServerTransport };
+const AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
+const AUTH_TOKEN_HEADER = 'x-webpage-mcp-token';
+const AUTH_PROTECTED_PATHS = ['/mcp', '/sse', '/messages', '/agent', '/ask-extension'] as const;
 
 function isReplyCommitted(reply: FastifyReply): boolean {
   const raw = reply.raw;
@@ -177,8 +180,52 @@ export class Server {
     return fallbackPort;
   }
 
-  private async setupPlugins(): Promise<void> {
-    await this.fastify.register(cors, {
+  private getConfiguredAuthToken(): string | undefined {
+    const token = process.env[AUTH_TOKEN_ENV];
+    if (typeof token !== 'string') {
+      return undefined;
+    }
+    const trimmed = token.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  private isProtectedPath(rawUrl?: string): boolean {
+    const path = String(rawUrl || '').split('?')[0] || '';
+    if (!path || path === '/ping') {
+      return false;
+    }
+    return AUTH_PROTECTED_PATHS.some(
+      (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+    );
+  }
+
+  private extractAuthToken(request: FastifyRequest): string | undefined {
+    const bearerHeader = request.headers.authorization;
+    const candidate = Array.isArray(bearerHeader) ? bearerHeader[0] : bearerHeader;
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      const bearerPrefix = 'Bearer ';
+      if (trimmed.startsWith(bearerPrefix)) {
+        const token = trimmed.slice(bearerPrefix.length).trim();
+        if (token) {
+          return token;
+        }
+      }
+    }
+
+    const directHeader = request.headers[AUTH_TOKEN_HEADER];
+    const directToken = Array.isArray(directHeader) ? directHeader[0] : directHeader;
+    if (typeof directToken === 'string') {
+      const trimmed = directToken.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+    return undefined;
+  }
+
+  private setupPlugins(): void {
+    this.fastify.register(cors, {
       origin: (origin, cb) => {
         // Allow requests with no origin (e.g., curl, server-to-server)
         if (!origin) {
@@ -192,6 +239,21 @@ export class Server {
       },
       methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
       credentials: true,
+    });
+
+    this.fastify.addHook('preHandler', async (request, reply) => {
+      const expectedToken = this.getConfiguredAuthToken();
+      if (!expectedToken) {
+        return;
+      }
+      if (!this.isProtectedPath(request.raw.url || request.url)) {
+        return;
+      }
+      const requestToken = this.extractAuthToken(request);
+      if (!requestToken || requestToken !== expectedToken) {
+        reply.code(HTTP_STATUS.UNAUTHORIZED).send({ error: 'Unauthorized' });
+        return reply;
+      }
     });
   }
 

@@ -76,6 +76,17 @@ Two different port settings exist:
 - `update-port` only updates `mcp/stdio-config.json` used by `webpage-mcp-stdio`.
 - It does not directly change the running native server listen port.
 
+## Optional Auth Token
+
+Set `WEBPAGE_MCP_AUTH_TOKEN` to require authentication for local API endpoints:
+
+- Protected routes: `/mcp`, `/sse`, `/messages`, `/agent/*`, `/ask-extension`
+- Send token via either:
+  - `Authorization: Bearer <token>`
+  - `x-webpage-mcp-token: <token>`
+
+If `WEBPAGE_MCP_AUTH_TOKEN` is not set, behavior remains unchanged (no auth required).
+
 ## Browser Support
 
 - Google Chrome
