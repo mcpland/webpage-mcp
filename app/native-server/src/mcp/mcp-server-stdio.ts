@@ -106,7 +106,20 @@ export const ensureMcpClient = async () => {
 
 export const setupTools = (server: Server) => {
   // List tools handler
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOL_SCHEMAS }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    try {
+      const client = await ensureMcpClient();
+      if (client) {
+        const upstream = await client.listTools(undefined, { timeout: 20_000 });
+        if (upstream && Array.isArray(upstream.tools)) {
+          return { tools: upstream.tools };
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to list tools from upstream MCP server, using static fallback:', error);
+    }
+    return { tools: TOOL_SCHEMAS };
+  });
 
   // Call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
