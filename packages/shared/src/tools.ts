@@ -501,6 +501,16 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'string',
           description: 'Close tabs matching this URL. Can be used instead of tabIds.',
         },
+        tabId: {
+          type: 'number',
+          description:
+            'Target tab ID to close when tabIds/url are omitted (default: current active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description:
+            'Window ID to select active tab from when tabId/tabIds/url are omitted.',
+        },
       },
       required: [],
     },
@@ -629,6 +639,26 @@ export const TOOL_SCHEMAS: Tool[] = [
         includeStatic: {
           type: 'boolean',
           description: 'Include static resources like images/scripts/styles (default: false)',
+        },
+        tabId: {
+          type: 'number',
+          description:
+            'Target tab ID for start/stop operations. For action="start", captures this tab when provided. For action="stop", stops capture for this tab when provided.',
+        },
+        windowId: {
+          type: 'number',
+          description:
+            'Window ID used to resolve active tab when tabId is omitted (for both start and stop actions).',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'For action="start": avoid activating/focusing the tab/window when possible (default: false).',
+        },
+        all: {
+          type: 'boolean',
+          description:
+            'For action="stop": when true, stop all active captures instead of a single tab (default: false).',
         },
       },
       required: ['action'],
