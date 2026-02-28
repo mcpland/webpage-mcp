@@ -15,6 +15,10 @@ const NON_TAB_SCOPED_CHROME_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.BOOKMARK_SEARCH,
   TOOL_NAMES.BROWSER.BOOKMARK_DELETE,
 ]);
+const URL_PRIORITY_TOOLS = new Set<string>([
+  TOOL_NAMES.BROWSER.WEB_FETCHER,
+  TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+]);
 
 const getLazyTool = async (toolName: string) => {
   if (toolName === TOOL_NAMES.BROWSER.SEARCH_TABS_CONTENT) {
@@ -54,6 +58,11 @@ async function resolveTabIdForExecution(
   sessionId?: string,
 ): Promise<number | undefined> {
   if (typeof args?.tabId === 'number') return args.tabId;
+  if (URL_PRIORITY_TOOLS.has(toolName) && typeof args?.url === 'string' && args.url.trim()) {
+    // These tools use `url` as the primary routing key; injecting a session tabId here
+    // can accidentally bypass URL-based selection and produce unexpected behavior.
+    return undefined;
+  }
   if (!isTabScopedTool(toolName)) return undefined;
   if (toolName === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN && args?.tabTarget === 'new') {
     // Respect explicit new-tab execution requests for flow runs.
