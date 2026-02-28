@@ -248,6 +248,7 @@ class ExecutionOrchestrator {
     });
     // Capture tabId for use in ExecCtx
     this.tabId = ensured?.tabId ?? null;
+    this.logger.setTargetTabId(this.tabId);
 
     // register run state
     await runState.restore();
@@ -585,6 +586,7 @@ class ExecutionOrchestrator {
       }
     }
     while (currentId) {
+      this.logger.setTargetTabId(ctx.tabId);
       this.ensureWithinDeadline();
       if (guard++ >= ENGINE_CONSTANTS.MAX_ITERATIONS) {
         this.logger.push({

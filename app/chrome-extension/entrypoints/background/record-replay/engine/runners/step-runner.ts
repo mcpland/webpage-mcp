@@ -105,6 +105,7 @@ export class StepRunner {
     }
     if (ctrlStart?.pause) return { status: 'paused' };
 
+    this.env.logger.setTargetTabId(ctx.tabId);
     const beforeInfo = await this.getActiveTabInfo(ctx.tabId);
     try {
       await withRetry(
@@ -120,6 +121,7 @@ export class StepRunner {
             throw new Error('No active tab found for step execution');
           }
           ctx.tabId = tabId;
+          this.env.logger.setTargetTabId(tabId);
 
           const execResult = await this.env.stepExecutor.execute(ctx, step, {
             tabId,
@@ -223,6 +225,7 @@ export class StepRunner {
         message: errorMessage(e),
         tookMs: Date.now() - t0,
       });
+      await this.env.logger.screenshotOnFailure();
       await appendOverlayFail(step, e as ErrorLike);
       try {
         const hook = await this.env.pluginManager.onError({
