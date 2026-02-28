@@ -246,6 +246,9 @@ export class Server {
       if (!expectedToken) {
         return;
       }
+      if (request.method === 'OPTIONS') {
+        return;
+      }
       if (!this.isProtectedPath(request.raw.url || request.url)) {
         return;
       }
