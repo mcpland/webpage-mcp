@@ -65,8 +65,8 @@ export const navigateHandler: ActionHandler<'navigate'> = {
 
       // Skip nav-wait if StepRunner handles it
       if (!skipNavWait) {
-        await waitForNavigationDone(beforeUrl, waitMs);
-        await ensureReadPageIfWeb();
+        await waitForNavigationDone(beforeUrl, waitMs, tabId);
+        await ensureReadPageIfWeb(tabId);
       }
       return { status: 'success' };
     }
@@ -95,8 +95,8 @@ export const navigateHandler: ActionHandler<'navigate'> = {
 
     // Skip nav-wait if StepRunner handles it
     if (!skipNavWait) {
-      await waitForNavigationDone(beforeUrl, waitMs);
-      await ensureReadPageIfWeb();
+      await waitForNavigationDone(beforeUrl, waitMs, tabId);
+      await ensureReadPageIfWeb(tabId);
     }
 
     return { status: 'success' };

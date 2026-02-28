@@ -49,7 +49,7 @@ async function executeClick<T extends 'click' | 'dblclick'>(
   }
 
   // Ensure page is read before locating element
-  await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+  await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
 
   // Only read beforeUrl if we need to do nav-wait
   const beforeUrl = skipNavWait ? '' : await readTabUrl(tabId);
@@ -125,14 +125,14 @@ async function executeClick<T extends 'click' | 'dblclick'>(
   const after = action.params.after ?? {};
 
   if (after.waitForNavigation) {
-    await waitForNavigationDone(beforeUrl, waitMs);
+    await waitForNavigationDone(beforeUrl, waitMs, tabId);
   } else if (after.waitForNetworkIdle) {
     const totalMs = clampInt(waitMs, 1000, ENGINE_CONSTANTS.MAX_WAIT_MS);
     const idleMs = Math.min(1500, Math.max(500, Math.floor(totalMs / 3)));
-    await waitForNetworkIdle(totalMs, idleMs);
+    await waitForNetworkIdle(totalMs, idleMs, tabId);
   } else {
     // Quick sniff for navigation that might have been triggered
-    await maybeQuickWaitForNav(beforeUrl, waitMs);
+    await maybeQuickWaitForNav(beforeUrl, waitMs, tabId);
   }
 
   return { status: 'success' };

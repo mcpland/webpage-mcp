@@ -274,7 +274,10 @@ class ExecutionOrchestrator {
     try {
       const u = ensured?.url || '';
       if (/^(https?:|file:)/i.test(u))
-        await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+        await handleCallTool({
+          name: TOOL_NAMES.BROWSER.READ_PAGE,
+          args: typeof this.tabId === 'number' ? { tabId: this.tabId } : {},
+        });
     } catch {
       // ignore: preloading read_page is best-effort
     }
@@ -292,6 +295,7 @@ class ExecutionOrchestrator {
           args: {
             eventName: TOOL_MESSAGE_TYPES.COLLECT_VARIABLES,
             payload: JSON.stringify({ variables: needed, useOverlay: true }),
+            ...(typeof this.tabId === 'number' ? { tabId: this.tabId } : {}),
           },
         });
         let values: Record<string, any> | null = null;
@@ -379,7 +383,12 @@ class ExecutionOrchestrator {
       try {
         const res = await handleCallTool({
           name: TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_START,
-          args: { includeStatic: false, maxCaptureTime: 3 * 60_000, inactivityTimeout: 0 },
+          args: {
+            includeStatic: false,
+            maxCaptureTime: 3 * 60_000,
+            inactivityTimeout: 0,
+            ...(typeof this.tabId === 'number' ? { tabId: this.tabId } : {}),
+          },
         });
         let started = false;
         try {
@@ -772,7 +781,7 @@ class ExecutionOrchestrator {
       try {
         const stopRes = await handleCallTool({
           name: TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_STOP,
-          args: {},
+          args: typeof this.tabId === 'number' ? { tabId: this.tabId } : {},
         });
         const text = (stopRes?.content || []).find((c: any) => c.type === 'text')?.text;
         if (text) {

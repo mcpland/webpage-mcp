@@ -54,7 +54,7 @@ export const fillHandler: ActionHandler<'fill'> = {
     }
 
     // Ensure page is read before locating element
-    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: {} });
+    await handleCallTool({ name: TOOL_NAMES.BROWSER.READ_PAGE, args: { tabId } });
 
     // Resolve fill value
     const valueResolved = resolveString(action.params.value, vars);
