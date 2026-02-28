@@ -3,7 +3,7 @@ import { ERROR_MESSAGES } from '@/common/constants';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import * as browserTools from './browser';
 import { flowRunTool, listPublishedFlowsTool } from './record-replay';
-import { clearSessionContext, getSessionContext, patchSessionContext } from '../session-context';
+import { getSessionContext, patchSessionContext } from '../session-context';
 import { runInTabQueue } from '../tab-queue';
 
 const tools = { ...browserTools, flowRunTool, listPublishedFlowsTool } as any;
@@ -69,7 +69,7 @@ async function resolveTabIdForExecution(
           return tab.id;
         }
       } catch {
-        clearSessionContext(sessionId);
+        patchSessionContext(sessionId, { tabId: undefined });
       }
     }
 
