@@ -150,7 +150,10 @@ async function fetchPublishedFlows(
   return requestPromise;
 }
 
-function splitDynamicFlowArgs(args: any): {
+function splitDynamicFlowArgs(
+  args: any,
+  flowVariableKeys?: ReadonlySet<string>,
+): {
   variables: Record<string, unknown>;
   runOptions: Record<string, unknown>;
 } {
@@ -162,6 +165,10 @@ function splitDynamicFlowArgs(args: any): {
   const runOptions: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(args)) {
+    if (flowVariableKeys?.has(key)) {
+      variables[key] = value;
+      continue;
+    }
     if (RUN_OPTION_KEY_SET.has(key)) {
       runOptions[key] = value;
     } else {
@@ -207,13 +214,15 @@ async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
       properties[v.key] = prop;
     }
     // Run options
-    properties['tabTarget'] = { type: 'string', enum: ['current', 'new'], default: 'current' };
-    properties['refresh'] = { type: 'boolean', default: false };
-    properties['captureNetwork'] = { type: 'boolean', default: false };
-    properties['returnLogs'] = { type: 'boolean', default: false };
-    properties['timeoutMs'] = { type: 'number', minimum: 0 };
-    properties['startUrl'] = { type: 'string' };
-    properties['tabId'] = { type: 'number' };
+    if (!properties['tabTarget'])
+      properties['tabTarget'] = { type: 'string', enum: ['current', 'new'], default: 'current' };
+    if (!properties['refresh']) properties['refresh'] = { type: 'boolean', default: false };
+    if (!properties['captureNetwork'])
+      properties['captureNetwork'] = { type: 'boolean', default: false };
+    if (!properties['returnLogs']) properties['returnLogs'] = { type: 'boolean', default: false };
+    if (!properties['timeoutMs']) properties['timeoutMs'] = { type: 'number', minimum: 0 };
+    if (!properties['startUrl']) properties['startUrl'] = { type: 'string' };
+    if (!properties['tabId']) properties['tabId'] = { type: 'number' };
     const tool: Tool = {
       name,
       description,
@@ -251,7 +260,14 @@ const handleToolCall = async (ctx: McpToolContext, name: string, args: any): Pro
           match = items.find((it) => it.slug === slug);
         }
         if (!match) throw new Error(`Flow not found for tool ${name}`);
-        const { variables, runOptions } = splitDynamicFlowArgs(args);
+        const variableKeys = new Set(
+          Array.isArray(match.variables)
+            ? match.variables
+                .map((variable) => variable?.key)
+                .filter((key): key is string => typeof key === 'string' && key.length > 0)
+            : [],
+        );
+        const { variables, runOptions } = splitDynamicFlowArgs(args, variableKeys);
         const flowArgs = {
           flowId: match.id,
           args: variables,
