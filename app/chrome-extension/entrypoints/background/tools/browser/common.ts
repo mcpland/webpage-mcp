@@ -154,21 +154,31 @@ class NavigateTool extends BaseBrowserToolExecutor {
             // Use host-level wildcard to include all paths; we'll do precise selection later
             const pathWildcard = '/*';
 
-            const hostNoWww = u.host.replace(/^www\./, '');
-            const hostWithWww = hostNoWww.startsWith('www.') ? hostNoWww : `www.${hostNoWww}`;
+            const hostVariants = new Set<string>([u.host]);
+            const hostname = (u.hostname || '').toLowerCase();
+            const hasPort = u.port ? `:${u.port}` : '';
+            const isIpv4 = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname);
+            const isIpv6 = hostname.includes(':');
+            const isLocalhost = hostname === 'localhost' || hostname.endsWith('.localhost');
+            const labels = hostname.split('.').filter(Boolean);
+            const canToggleWww =
+              !isIpv4 && !isIpv6 && !isLocalhost && labels.length === 2 && labels[0] !== 'www';
 
-            // Keep original host
-            patterns.add(`${u.protocol}//${u.host}${pathWildcard}`);
-            // Add no-www variant
-            patterns.add(`${u.protocol}//${hostNoWww}${pathWildcard}`);
-            // Add www variant
-            patterns.add(`${u.protocol}//${hostWithWww}${pathWildcard}`);
+            if (hostname.startsWith('www.')) {
+              hostVariants.add(`${hostname.replace(/^www\./, '')}${hasPort}`);
+            } else if (canToggleWww) {
+              hostVariants.add(`www.${hostname}${hasPort}`);
+            }
+
+            for (const host of hostVariants) {
+              patterns.add(`${u.protocol}//${host}${pathWildcard}`);
+            }
 
             // Add protocol variant to catch http↔https redirects
             const altProtocol = u.protocol === 'https:' ? 'http:' : 'https:';
-            patterns.add(`${altProtocol}//${u.host}${pathWildcard}`);
-            patterns.add(`${altProtocol}//${hostNoWww}${pathWildcard}`);
-            patterns.add(`${altProtocol}//${hostWithWww}${pathWildcard}`);
+            for (const host of hostVariants) {
+              patterns.add(`${altProtocol}//${host}${pathWildcard}`);
+            }
           } else {
             patterns.add(input);
           }
