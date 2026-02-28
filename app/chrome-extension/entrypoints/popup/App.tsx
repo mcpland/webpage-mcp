@@ -107,6 +107,9 @@ export default function PopupApp() {
     lastUpdated: Date.now(),
   });
   const [copyButtonText, setCopyButtonText] = useState(getMessage('copyConfigButton'));
+  const [authCopyButtonText, setAuthCopyButtonText] = useState('Copy token');
+  const [authTokenEnabled, setAuthTokenEnabled] = useState(false);
+  const [nativeAuthToken, setNativeAuthToken] = useState<string | null>(null);
 
   const [currentModel, setCurrentModel] = useState<ModelPreset | null>(null);
   const [isModelSwitching, setIsModelSwitching] = useState(false);
@@ -134,6 +137,7 @@ export default function PopupApp() {
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const authCopyTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statusMonitoringIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const semanticEnginePollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -315,6 +319,41 @@ export default function PopupApp() {
     }
     copyTextTimerRef.current = setTimeout(() => {
       setCopyButtonText(getMessage('copyConfigButton'));
+    }, 2000);
+  }
+
+  async function refreshNativeAuthToken() {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.GET_NATIVE_AUTH_TOKEN,
+      });
+      if (response?.success) {
+        setAuthTokenEnabled(response.enabled === true);
+        setNativeAuthToken(typeof response.token === 'string' ? response.token : null);
+      } else {
+        setAuthTokenEnabled(false);
+        setNativeAuthToken(null);
+      }
+    } catch {
+      setAuthTokenEnabled(false);
+      setNativeAuthToken(null);
+    }
+  }
+
+  async function copyAuthToken() {
+    if (!nativeAuthToken) return;
+    try {
+      await navigator.clipboard.writeText(nativeAuthToken);
+      setAuthCopyButtonText('Copied');
+    } catch {
+      setAuthCopyButtonText('Copy failed');
+    }
+
+    if (authCopyTextTimerRef.current) {
+      clearTimeout(authCopyTextTimerRef.current);
+    }
+    authCopyTextTimerRef.current = setTimeout(() => {
+      setAuthCopyButtonText('Copy token');
     }, 2000);
   }
 
@@ -916,8 +955,20 @@ export default function PopupApp() {
       if (copyTextTimerRef.current) {
         clearTimeout(copyTextTimerRef.current);
       }
+      if (authCopyTextTimerRef.current) {
+        clearTimeout(authCopyTextTimerRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (showMcpConfig) {
+      void refreshNativeAuthToken();
+      return;
+    }
+    setAuthTokenEnabled(false);
+    setNativeAuthToken(null);
+  }, [showMcpConfig]);
 
   return (
     <div className="popup-container agent-theme" data-agent-theme={agentTheme}>
@@ -966,6 +1017,20 @@ export default function PopupApp() {
                     </div>
                     <div className="mcp-config-content">
                       <pre className="mcp-config-json">{mcpConfigJson}</pre>
+                    </div>
+                  </div>
+                ) : null}
+
+                {showMcpConfig && authTokenEnabled && nativeAuthToken ? (
+                  <div className="mcp-config-section">
+                    <div className="mcp-config-header">
+                      <p className="mcp-config-label">Auth token</p>
+                      <button className="copy-config-button" type="button" onClick={() => void copyAuthToken()}>
+                        {authCopyButtonText}
+                      </button>
+                    </div>
+                    <div className="mcp-config-content">
+                      <pre className="mcp-config-json">{nativeAuthToken}</pre>
                     </div>
                   </div>
                 ) : null}
