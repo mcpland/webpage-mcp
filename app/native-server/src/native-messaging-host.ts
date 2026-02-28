@@ -120,7 +120,7 @@ export class NativeMessagingHost {
     try {
       switch (message.type) {
         case NativeMessageType.START:
-          await this.startServer(message.payload?.port || 12306);
+          await this.startServer(message.payload?.port ?? 12306);
           break;
         case NativeMessageType.STOP:
           await this.stopServer();
@@ -232,11 +232,11 @@ export class NativeMessagingHost {
         return;
       }
 
-      await this.associatedServer.start(port, this);
+      const actualPort = await this.associatedServer.start(port, this);
 
       this.sendMessage({
         type: NativeMessageType.SERVER_STARTED,
-        payload: { port },
+        payload: { port: actualPort },
       });
     } catch (error: any) {
       this.sendError(`Failed to start server: ${error.message}`);

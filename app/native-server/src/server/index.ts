@@ -169,6 +169,14 @@ export class Server {
     await Promise.all(ids.map((id) => this.disposeMcpSession(id, { closeTransport: true })));
   }
 
+  private resolveListeningPort(fallbackPort: number): number {
+    const address = this.fastify.server.address();
+    if (address && typeof address === 'object' && typeof address.port === 'number') {
+      return address.port;
+    }
+    return fallbackPort;
+  }
+
   private async setupPlugins(): Promise<void> {
     await this.fastify.register(cors, {
       origin: (origin, cb) => {
@@ -450,7 +458,7 @@ export class Server {
   // Server Lifecycle
   // ============================================================
 
-  public async start(port = NATIVE_SERVER_PORT, nativeHost: NativeMessagingHost): Promise<void> {
+  public async start(port = NATIVE_SERVER_PORT, nativeHost: NativeMessagingHost): Promise<number> {
     if (!this.nativeHost) {
       this.nativeHost = nativeHost;
     } else if (this.nativeHost !== nativeHost) {
@@ -458,17 +466,19 @@ export class Server {
     }
 
     if (this.isRunning) {
-      return;
+      return this.resolveListeningPort(port);
     }
 
     try {
       await this.fastify.listen({ port, host: SERVER_CONFIG.HOST });
+      const actualPort = this.resolveListeningPort(port);
 
       // Set port environment variables after successful listen for Webpage MCP URL resolution
-      process.env.WEBPAGE_MCP_PORT = String(port);
-      process.env.MCP_HTTP_PORT = String(port);
+      process.env.WEBPAGE_MCP_PORT = String(actualPort);
+      process.env.MCP_HTTP_PORT = String(actualPort);
 
       this.isRunning = true;
+      return actualPort;
     } catch (err) {
       this.isRunning = false;
       throw err;
