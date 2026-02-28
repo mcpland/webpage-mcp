@@ -91,6 +91,8 @@ Set `WEBPAGE_MCP_AUTH_TOKEN` to require authentication for local API endpoints:
 
 If `WEBPAGE_MCP_AUTH_TOKEN` is not set, behavior remains unchanged (no auth required).
 
+`webpage-mcp-stdio` also reads `WEBPAGE_MCP_AUTH_TOKEN` and forwards it to the upstream `/mcp` endpoint automatically.
+
 ## Browser Support
 
 - Google Chrome

@@ -40,6 +40,17 @@ function parsePort(rawValue: unknown): number | undefined {
   return parsed;
 }
 
+function getOptionalAuthHeaders(): HeadersInit | undefined {
+  const token = process.env.WEBPAGE_MCP_AUTH_TOKEN?.trim();
+  if (!token) {
+    return undefined;
+  }
+  return {
+    Authorization: `Bearer ${token}`,
+    'x-webpage-mcp-token': token,
+  };
+}
+
 function getResolvedTargetUrl(): URL {
   const explicitUrl = process.env.WEBPAGE_MCP_URL?.trim();
   if (explicitUrl) {
@@ -93,8 +104,11 @@ export const ensureMcpClient = async () => {
     }
 
     const targetUrl = getResolvedTargetUrl();
+    const authHeaders = getOptionalAuthHeaders();
     mcpClient = new Client({ name: 'Webpage MCP Proxy', version: '1.0.0' }, { capabilities: {} });
-    const transport = new StreamableHTTPClientTransport(targetUrl, {});
+    const transport = new StreamableHTTPClientTransport(targetUrl, {
+      requestInit: authHeaders ? { headers: authHeaders } : undefined,
+    });
     await mcpClient.connect(transport);
     return mcpClient;
   } catch (error) {

@@ -207,6 +207,8 @@ When set, requests to `/mcp`, `/sse`, `/messages`, `/agent/*`, and `/ask-extensi
 - `Authorization: Bearer <token>`
 - `x-webpage-mcp-token: <token>`
 
+`webpage-mcp-stdio` will forward this token automatically when `WEBPAGE_MCP_AUTH_TOKEN` is present in its environment.
+
 ## Project Structure
 
 ```
