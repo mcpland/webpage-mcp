@@ -13,62 +13,180 @@ export interface McpToolContext {
   nativeHost: NativeMessagingHost;
 }
 
-async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
-  try {
+interface PublishedFlowVariable {
+  key: string;
+  label?: string;
+  type?: string;
+  default?: unknown;
+  rules?: {
+    required?: boolean;
+    enum?: unknown[];
+  };
+}
+
+interface PublishedFlow {
+  id: string;
+  slug: string;
+  description?: string;
+  variables?: PublishedFlowVariable[];
+  meta?: {
+    tool?: {
+      description?: string;
+    };
+  };
+}
+
+const FLOW_TOOL_CACHE_TTL_MS = 10_000;
+const SESSION_RUN_OPTION_KEYS = [
+  'tabTarget',
+  'refresh',
+  'captureNetwork',
+  'returnLogs',
+  'timeoutMs',
+  'startUrl',
+  'tabId',
+] as const;
+const RUN_OPTION_KEY_SET = new Set<string>(SESSION_RUN_OPTION_KEYS);
+const publishedFlowsCache = new Map<string, { fetchedAt: number; items: PublishedFlow[] }>();
+const publishedFlowsInflight = new Map<string, Promise<PublishedFlow[]>>();
+
+function normalizePublishedFlows(response: any): PublishedFlow[] {
+  if (!response || response.status !== 'success' || !Array.isArray(response.items)) {
+    return [];
+  }
+
+  return response.items
+    .filter(
+      (item: any) =>
+        item &&
+        typeof item.id === 'string' &&
+        item.id.trim().length > 0 &&
+        typeof item.slug === 'string' &&
+        item.slug.trim().length > 0,
+    )
+    .map((item: any) => ({
+      id: item.id,
+      slug: item.slug,
+      description: item.description,
+      variables: Array.isArray(item.variables) ? item.variables : [],
+      meta: item.meta,
+    }));
+}
+
+async function fetchPublishedFlows(
+  ctx: McpToolContext,
+  options?: { forceRefresh?: boolean },
+): Promise<PublishedFlow[]> {
+  const forceRefresh = options?.forceRefresh === true;
+  const now = Date.now();
+  const cached = publishedFlowsCache.get(ctx.sessionId);
+  if (!forceRefresh && cached && now - cached.fetchedAt < FLOW_TOOL_CACHE_TTL_MS) {
+    return cached.items;
+  }
+
+  if (!forceRefresh) {
+    const inflight = publishedFlowsInflight.get(ctx.sessionId);
+    if (inflight) {
+      return inflight;
+    }
+  }
+
+  const requestPromise = (async () => {
     const response = await ctx.nativeHost.sendRequestToExtensionAndWait(
       { meta: { mcpSessionId: ctx.sessionId } },
       'rr_list_published_flows',
       20000,
     );
-    if (response && response.status === 'success' && Array.isArray(response.items)) {
-      const tools: Tool[] = [];
-      for (const item of response.items) {
-        const name = `flow.${item.slug}`;
-        const description =
-          (item.meta && item.meta.tool && item.meta.tool.description) ||
-          item.description ||
-          'Recorded flow';
-        const properties: Record<string, any> = {};
-        const required: string[] = [];
-        for (const v of item.variables || []) {
-          const desc = v.label || v.key;
-          const typ = (v.type || 'string').toLowerCase();
-          const prop: any = { description: desc };
-          if (typ === 'boolean') prop.type = 'boolean';
-          else if (typ === 'number') prop.type = 'number';
-          else if (typ === 'enum') {
-            prop.type = 'string';
-            if (v.rules && Array.isArray(v.rules.enum)) prop.enum = v.rules.enum;
-          } else if (typ === 'array') {
-            // default array of strings; can extend with itemType later
-            prop.type = 'array';
-            prop.items = { type: 'string' };
-          } else {
-            prop.type = 'string';
-          }
-          if (v.default !== undefined) prop.default = v.default;
-          if (v.rules && v.rules.required) required.push(v.key);
-          properties[v.key] = prop;
-        }
-        // Run options
-        properties['tabTarget'] = { type: 'string', enum: ['current', 'new'], default: 'current' };
-        properties['refresh'] = { type: 'boolean', default: false };
-        properties['captureNetwork'] = { type: 'boolean', default: false };
-        properties['returnLogs'] = { type: 'boolean', default: false };
-        properties['timeoutMs'] = { type: 'number', minimum: 0 };
-        const tool: Tool = {
-          name,
-          description,
-          inputSchema: { type: 'object', properties, required },
-        };
-        tools.push(tool);
-      }
-      return tools;
-    }
-    return [];
-  } catch (e) {
-    return [];
+    const items = normalizePublishedFlows(response);
+    publishedFlowsCache.set(ctx.sessionId, {
+      fetchedAt: Date.now(),
+      items,
+    });
+    return items;
+  })()
+    .catch(() => {
+      return [];
+    })
+    .finally(() => {
+      publishedFlowsInflight.delete(ctx.sessionId);
+    });
+
+  publishedFlowsInflight.set(ctx.sessionId, requestPromise);
+  return requestPromise;
+}
+
+function splitDynamicFlowArgs(args: any): {
+  variables: Record<string, unknown>;
+  runOptions: Record<string, unknown>;
+} {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return { variables: {}, runOptions: {} };
   }
+
+  const variables: Record<string, unknown> = {};
+  const runOptions: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(args)) {
+    if (RUN_OPTION_KEY_SET.has(key)) {
+      runOptions[key] = value;
+    } else {
+      variables[key] = value;
+    }
+  }
+
+  return { variables, runOptions };
+}
+
+async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
+  const items = await fetchPublishedFlows(ctx);
+  const tools: Tool[] = [];
+  for (const item of items) {
+    const name = `flow.${item.slug}`;
+    const description =
+      (item.meta && item.meta.tool && item.meta.tool.description) ||
+      item.description ||
+      'Recorded flow';
+    const properties: Record<string, any> = {};
+    const required: string[] = [];
+    for (const v of item.variables || []) {
+      if (!v || typeof v.key !== 'string' || !v.key) {
+        continue;
+      }
+      const desc = v.label || v.key;
+      const typ = (v.type || 'string').toLowerCase();
+      const prop: any = { description: desc };
+      if (typ === 'boolean') prop.type = 'boolean';
+      else if (typ === 'number') prop.type = 'number';
+      else if (typ === 'enum') {
+        prop.type = 'string';
+        if (v.rules && Array.isArray(v.rules.enum)) prop.enum = v.rules.enum;
+      } else if (typ === 'array') {
+        // default array of strings; can extend with itemType later
+        prop.type = 'array';
+        prop.items = { type: 'string' };
+      } else {
+        prop.type = 'string';
+      }
+      if (v.default !== undefined) prop.default = v.default;
+      if (v.rules && v.rules.required) required.push(v.key);
+      properties[v.key] = prop;
+    }
+    // Run options
+    properties['tabTarget'] = { type: 'string', enum: ['current', 'new'], default: 'current' };
+    properties['refresh'] = { type: 'boolean', default: false };
+    properties['captureNetwork'] = { type: 'boolean', default: false };
+    properties['returnLogs'] = { type: 'boolean', default: false };
+    properties['timeoutMs'] = { type: 'number', minimum: 0 };
+    properties['startUrl'] = { type: 'string' };
+    properties['tabId'] = { type: 'number' };
+    const tool: Tool = {
+      name,
+      description,
+      inputSchema: { type: 'object', properties, required },
+    };
+    tools.push(tool);
+  }
+  return tools;
 }
 
 export const setupTools = (server: Server, ctx: McpToolContext) => {
@@ -90,16 +208,20 @@ const handleToolCall = async (ctx: McpToolContext, name: string, args: any): Pro
     if (name && name.startsWith('flow.')) {
       // We need to resolve flow by slug to ID
       try {
-        const resp = await ctx.nativeHost.sendRequestToExtensionAndWait(
-          { meta: { mcpSessionId: ctx.sessionId } },
-          'rr_list_published_flows',
-          20000,
-        );
-        const items = (resp && resp.items) || [];
         const slug = name.slice('flow.'.length);
-        const match = items.find((it: any) => it.slug === slug);
+        let items = await fetchPublishedFlows(ctx);
+        let match = items.find((it) => it.slug === slug);
+        if (!match) {
+          items = await fetchPublishedFlows(ctx, { forceRefresh: true });
+          match = items.find((it) => it.slug === slug);
+        }
         if (!match) throw new Error(`Flow not found for tool ${name}`);
-        const flowArgs = { flowId: match.id, args };
+        const { variables, runOptions } = splitDynamicFlowArgs(args);
+        const flowArgs = {
+          flowId: match.id,
+          args: variables,
+          ...runOptions,
+        };
         const proxyRes = await ctx.nativeHost.sendRequestToExtensionAndWait(
           {
             name: 'record_replay_flow_run',
