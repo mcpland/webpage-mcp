@@ -38,6 +38,29 @@ interface ExtensionRequestPayload {
   data?: unknown;
 }
 
+function isReplyCommitted(reply: FastifyReply): boolean {
+  const raw = reply.raw;
+  return reply.sent || raw.headersSent || raw.writableEnded || raw.destroyed;
+}
+
+function trySendReply(
+  reply: FastifyReply,
+  statusCode: number,
+  payload: string | { error: string },
+): boolean {
+  if (isReplyCommitted(reply)) {
+    return false;
+  }
+  reply.code(statusCode).send(payload);
+  return true;
+}
+
+function endRawReplyIfOpen(reply: FastifyReply): void {
+  if (!reply.raw.writableEnded && !reply.raw.destroyed) {
+    reply.raw.end();
+  }
+}
+
 // ============================================================
 // Server Class
 // ============================================================
@@ -168,12 +191,6 @@ export class Server {
     // SSE endpoint
     this.fastify.get('/sse', async (_, reply) => {
       try {
-        reply.raw.writeHead(HTTP_STATUS.OK, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
-        });
-
         const transport = new SSEServerTransport('/messages', reply.raw);
         this.transportsMap.set(transport.sessionId, transport);
 
@@ -183,11 +200,9 @@ export class Server {
 
         const server = getMcpServer();
         await server.connect(transport);
-
-        reply.raw.write(':\n\n');
       } catch (error) {
-        if (!reply.sent) {
-          reply.code(HTTP_STATUS.INTERNAL_SERVER_ERROR).send(ERROR_MESSAGES.INTERNAL_SERVER_ERROR);
+        if (!trySendReply(reply, HTTP_STATUS.INTERNAL_SERVER_ERROR, ERROR_MESSAGES.INTERNAL_SERVER_ERROR)) {
+          endRawReplyIfOpen(reply);
         }
       }
     });
@@ -204,8 +219,8 @@ export class Server {
 
         await transport.handlePostMessage(req.raw, reply.raw, req.body);
       } catch (error) {
-        if (!reply.sent) {
-          reply.code(HTTP_STATUS.INTERNAL_SERVER_ERROR).send(ERROR_MESSAGES.INTERNAL_SERVER_ERROR);
+        if (!trySendReply(reply, HTTP_STATUS.INTERNAL_SERVER_ERROR, ERROR_MESSAGES.INTERNAL_SERVER_ERROR)) {
+          endRawReplyIfOpen(reply);
         }
       }
     });
@@ -244,10 +259,12 @@ export class Server {
       try {
         await transport.handleRequest(request.raw, reply.raw, request.body);
       } catch (error) {
-        if (!reply.sent) {
-          reply
-            .code(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .send({ error: ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR });
+        if (
+          !trySendReply(reply, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
+            error: ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR,
+          })
+        ) {
+          endRawReplyIfOpen(reply);
         }
       }
     });
@@ -264,19 +281,15 @@ export class Server {
         return;
       }
 
-      reply.raw.setHeader('Content-Type', 'text/event-stream');
-      reply.raw.setHeader('Cache-Control', 'no-cache');
-      reply.raw.setHeader('Connection', 'keep-alive');
-      reply.raw.flushHeaders();
-
       try {
         await transport.handleRequest(request.raw, reply.raw);
-        if (!reply.sent) {
-          reply.hijack();
-        }
       } catch (error) {
-        if (!reply.raw.writableEnded) {
-          reply.raw.end();
+        if (
+          !trySendReply(reply, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
+            error: ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR,
+          })
+        ) {
+          endRawReplyIfOpen(reply);
         }
       }
 
@@ -299,14 +312,16 @@ export class Server {
 
       try {
         await transport.handleRequest(request.raw, reply.raw);
-        if (!reply.sent) {
+        if (!isReplyCommitted(reply)) {
           reply.code(HTTP_STATUS.NO_CONTENT).send();
         }
       } catch (error) {
-        if (!reply.sent) {
-          reply
-            .code(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .send({ error: ERROR_MESSAGES.MCP_SESSION_DELETION_ERROR });
+        if (
+          !trySendReply(reply, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
+            error: ERROR_MESSAGES.MCP_SESSION_DELETION_ERROR,
+          })
+        ) {
+          endRawReplyIfOpen(reply);
         }
       }
     });
