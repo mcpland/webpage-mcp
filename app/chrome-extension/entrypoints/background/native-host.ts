@@ -4,7 +4,11 @@ import { NATIVE_HOST, STORAGE_KEYS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/c
 import { handleCallTool } from './tools';
 import { listPublished, getFlow } from './record-replay/flow-store';
 import { acquireKeepalive } from './keepalive-manager';
-import { clearAllSessionContexts } from './session-context';
+import {
+  clearAllSessionContexts,
+  clearSessionContextsForTab,
+  clearSessionContextsForWindow,
+} from './session-context';
 
 const LOG_PREFIX = '[NativeHost]';
 
@@ -27,6 +31,14 @@ let ensurePromise: Promise<boolean> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let manualDisconnect = false;
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  clearSessionContextsForTab(tabId);
+});
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  clearSessionContextsForWindow(windowId);
+});
 
 /**
  * Server status management interface

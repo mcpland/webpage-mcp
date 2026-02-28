@@ -61,3 +61,25 @@ export function clearSessionContext(sessionId: string): void {
 export function clearAllSessionContexts(): void {
   sessionContexts.clear();
 }
+
+export function clearSessionContextsForTab(tabId: number): void {
+  if (!Number.isFinite(tabId)) {
+    return;
+  }
+  for (const [sessionId, ctx] of sessionContexts.entries()) {
+    if (ctx.tabId === tabId) {
+      sessionContexts.delete(sessionId);
+    }
+  }
+}
+
+export function clearSessionContextsForWindow(windowId: number): void {
+  if (!Number.isFinite(windowId)) {
+    return;
+  }
+  for (const [sessionId, ctx] of sessionContexts.entries()) {
+    if (ctx.windowId === windowId) {
+      sessionContexts.delete(sessionId);
+    }
+  }
+}
