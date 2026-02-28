@@ -759,6 +759,16 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'boolean',
           description: 'Whether to create the parent folder if it does not exist (default: false)',
         },
+        tabId: {
+          type: 'number',
+          description:
+            'Target tab ID to read URL/title from when url is omitted (default: active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description:
+            'Window ID used to resolve active tab when url/tabId are omitted (default: current window).',
+        },
       },
       required: [],
     },
