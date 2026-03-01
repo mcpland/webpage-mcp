@@ -224,17 +224,27 @@ function collectManifests(browsers: BrowserType[]): ManifestSnapshot[] {
   for (const browser of browsers) {
     const config = getBrowserConfig(browser);
     for (const scope of ['user', 'system'] as const) {
-      const manifestPath = scope === 'user' ? config.userManifestPath : config.systemManifestPath;
-      const snap = readJsonSnapshot(manifestPath);
-      results.push({
-        browser,
-        scope,
-        path: manifestPath,
-        exists: snap.exists,
-        json: snap.json,
-        raw: snap.raw,
-        error: snap.error,
-      });
+      const manifestPaths = Array.from(
+        new Set(
+          scope === 'user'
+            ? (config.userManifestPaths?.length ? config.userManifestPaths : [config.userManifestPath])
+            : (config.systemManifestPaths?.length
+                ? config.systemManifestPaths
+                : [config.systemManifestPath]),
+        ),
+      );
+      for (const manifestPath of manifestPaths) {
+        const snap = readJsonSnapshot(manifestPath);
+        results.push({
+          browser,
+          scope,
+          path: manifestPath,
+          exists: snap.exists,
+          json: snap.json,
+          raw: snap.raw,
+          error: snap.error,
+        });
+      }
     }
   }
   return results;

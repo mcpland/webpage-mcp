@@ -14,8 +14,134 @@ export interface BrowserConfig {
   displayName: string;
   userManifestPath: string;
   systemManifestPath: string;
+  userManifestPaths: string[];
+  systemManifestPaths: string[];
   registryKey?: string; // Windows only
   systemRegistryKey?: string; // Windows only
+}
+
+function uniquePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const item of paths) {
+    const normalized = item.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    ordered.push(normalized);
+  }
+  return ordered;
+}
+
+function getAdditionalUserManifestPaths(browser: BrowserType): string[] {
+  const platform = os.platform();
+  const home = os.homedir();
+
+  if (browser !== BrowserType.CHROME) {
+    return [];
+  }
+
+  if (platform === 'darwin') {
+    return [
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Google',
+        'Chrome for Testing',
+        'NativeMessagingHosts',
+        `${HOST_NAME}.json`,
+      ),
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Google',
+        'Chrome Beta',
+        'NativeMessagingHosts',
+        `${HOST_NAME}.json`,
+      ),
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Google',
+        'Chrome Canary',
+        'NativeMessagingHosts',
+        `${HOST_NAME}.json`,
+      ),
+    ];
+  }
+
+  if (platform === 'linux') {
+    return [
+      path.join(
+        home,
+        '.config',
+        'google-chrome-beta',
+        'NativeMessagingHosts',
+        `${HOST_NAME}.json`,
+      ),
+      path.join(
+        home,
+        '.config',
+        'google-chrome-unstable',
+        'NativeMessagingHosts',
+        `${HOST_NAME}.json`,
+      ),
+      path.join(
+        home,
+        '.config',
+        'google-chrome-for-testing',
+        'NativeMessagingHosts',
+        `${HOST_NAME}.json`,
+      ),
+    ];
+  }
+
+  return [];
+}
+
+function getAdditionalSystemManifestPaths(browser: BrowserType): string[] {
+  const platform = os.platform();
+
+  if (browser !== BrowserType.CHROME) {
+    return [];
+  }
+
+  if (platform === 'darwin') {
+    return [
+      path.join(
+        '/Library',
+        'Google',
+        'Chrome for Testing',
+        'NativeMessagingHosts',
+        `${HOST_NAME}.json`,
+      ),
+      path.join(
+        '/Library',
+        'Google',
+        'Chrome Beta',
+        'NativeMessagingHosts',
+        `${HOST_NAME}.json`,
+      ),
+      path.join(
+        '/Library',
+        'Google',
+        'Chrome Canary',
+        'NativeMessagingHosts',
+        `${HOST_NAME}.json`,
+      ),
+    ];
+  }
+
+  if (platform === 'linux') {
+    return [
+      path.join('/etc', 'opt', 'chrome-beta', 'native-messaging-hosts', `${HOST_NAME}.json`),
+      path.join('/etc', 'opt', 'chrome-unstable', 'native-messaging-hosts', `${HOST_NAME}.json`),
+    ];
+  }
+
+  return [];
 }
 
 /**
@@ -186,12 +312,24 @@ function getRegistryKeys(browser: BrowserType): { user: string; system: string }
  */
 export function getBrowserConfig(browser: BrowserType): BrowserConfig {
   const registryKeys = getRegistryKeys(browser);
+  const userManifestPath = getUserManifestPathForBrowser(browser);
+  const systemManifestPath = getSystemManifestPathForBrowser(browser);
+  const userManifestPaths = uniquePaths([
+    userManifestPath,
+    ...getAdditionalUserManifestPaths(browser),
+  ]);
+  const systemManifestPaths = uniquePaths([
+    systemManifestPath,
+    ...getAdditionalSystemManifestPaths(browser),
+  ]);
 
   return {
     type: browser,
     displayName: browser.charAt(0).toUpperCase() + browser.slice(1),
-    userManifestPath: getUserManifestPathForBrowser(browser),
-    systemManifestPath: getSystemManifestPathForBrowser(browser),
+    userManifestPath,
+    systemManifestPath,
+    userManifestPaths,
+    systemManifestPaths,
     registryKey: registryKeys?.user,
     systemRegistryKey: registryKeys?.system,
   };
@@ -223,11 +361,14 @@ export function detectInstalledBrowsers(): BrowserType[] {
     // Check macOS Applications folder
     const browsers: Array<{ type: BrowserType; appPath: string }> = [
       { type: BrowserType.CHROME, appPath: '/Applications/Google Chrome.app' },
+      { type: BrowserType.CHROME, appPath: '/Applications/Google Chrome for Testing.app' },
+      { type: BrowserType.CHROME, appPath: '/Applications/Google Chrome Beta.app' },
+      { type: BrowserType.CHROME, appPath: '/Applications/Google Chrome Canary.app' },
       { type: BrowserType.CHROMIUM, appPath: '/Applications/Chromium.app' },
     ];
 
     for (const browser of browsers) {
-      if (fs.existsSync(browser.appPath)) {
+      if (fs.existsSync(browser.appPath) && !detectedBrowsers.includes(browser.type)) {
         detectedBrowsers.push(browser.type);
       }
     }
@@ -242,7 +383,9 @@ export function detectInstalledBrowsers(): BrowserType[] {
       for (const cmd of browser.commands) {
         try {
           execSync(`which ${cmd} 2>/dev/null`, { stdio: 'pipe' });
-          detectedBrowsers.push(browser.type);
+          if (!detectedBrowsers.includes(browser.type)) {
+            detectedBrowsers.push(browser.type);
+          }
           break; // Found one command, no need to check others
         } catch {
           // Command not found

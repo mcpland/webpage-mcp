@@ -349,11 +349,13 @@ export default function PopupApp() {
           type: 'connectNative',
         });
 
-        if (response?.success) {
+        const connected =
+          typeof response?.connected === 'boolean' ? response.connected : Boolean(response?.success);
+        if (connected) {
           setNativeConnectionStatus('connected');
         } else {
           setNativeConnectionStatus('disconnected');
-          console.error('Connection failed:', response);
+          console.error('Connection failed:', response?.error || response);
         }
       }
     } catch (error) {

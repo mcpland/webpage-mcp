@@ -10,6 +10,8 @@ export const access = promisify(fs.access);
 export const mkdir = promisify(fs.mkdir);
 export const writeFile = promisify(fs.writeFile);
 
+const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
+
 /**
  * Get the log directory path for wrapper scripts.
  * Uses platform-appropriate user directories to avoid permission issues.
@@ -49,6 +51,180 @@ export function colorText(text: string, color: string): string {
   };
 
   return colors[color] + text + colors.reset;
+}
+
+function toExtensionId(value: string): string | null {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  return EXTENSION_ID_PATTERN.test(normalized) ? normalized : null;
+}
+
+function toOrigin(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith('chrome-extension://')) {
+    const normalized = trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+    return normalized;
+  }
+
+  const extensionId = toExtensionId(trimmed);
+  return extensionId ? `chrome-extension://${extensionId}/` : null;
+}
+
+function splitEnvList(raw: string | undefined): string[] {
+  if (!raw) {
+    return [];
+  }
+
+  return raw
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function detectChromeLikeProfileRoots(): string[] {
+  if (os.platform() === 'darwin') {
+    const home = os.homedir();
+    return [
+      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome'),
+      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome Beta'),
+      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome Canary'),
+      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome for Testing'),
+      path.join(home, 'Library', 'Application Support', 'Chromium'),
+    ];
+  }
+
+  if (os.platform() === 'linux') {
+    const home = os.homedir();
+    return [
+      path.join(home, '.config', 'google-chrome'),
+      path.join(home, '.config', 'google-chrome-beta'),
+      path.join(home, '.config', 'google-chrome-unstable'),
+      path.join(home, '.config', 'google-chrome-for-testing'),
+      path.join(home, '.config', 'chromium'),
+    ];
+  }
+
+  if (os.platform() === 'win32') {
+    const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    return [
+      path.join(local, 'Google', 'Chrome', 'User Data'),
+      path.join(local, 'Google', 'Chrome Beta', 'User Data'),
+      path.join(local, 'Google', 'Chrome SxS', 'User Data'),
+      path.join(local, 'Google', 'Chrome for Testing', 'User Data'),
+      path.join(local, 'Chromium', 'User Data'),
+    ];
+  }
+
+  return [];
+}
+
+function detectLocalExtensionIds(): string[] {
+  if (process.env.WEBPAGE_MCP_DISABLE_EXTENSION_ID_DISCOVERY === '1') {
+    return [];
+  }
+
+  const roots = detectChromeLikeProfileRoots().filter((rootPath) => fs.existsSync(rootPath));
+  if (roots.length === 0) {
+    return [];
+  }
+
+  const matches = new Set<string>();
+  const profileDirPattern = /^(Default|Profile \d+|Guest Profile|System Profile)$/;
+
+  for (const root of roots) {
+    let entries: string[] = [];
+    try {
+      entries = fs.readdirSync(root);
+    } catch {
+      continue;
+    }
+
+    for (const name of entries) {
+      if (!profileDirPattern.test(name)) {
+        continue;
+      }
+
+      const preferencesPath = path.join(root, name, 'Preferences');
+      if (!fs.existsSync(preferencesPath)) {
+        continue;
+      }
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(fs.readFileSync(preferencesPath, 'utf8'));
+      } catch {
+        continue;
+      }
+
+      const settings =
+        parsed?.extensions?.settings && typeof parsed.extensions.settings === 'object'
+          ? (parsed.extensions.settings as Record<string, any>)
+          : null;
+      if (!settings) {
+        continue;
+      }
+
+      for (const [extensionId, data] of Object.entries(settings)) {
+        const normalizedId = toExtensionId(extensionId);
+        if (!normalizedId) {
+          continue;
+        }
+
+        const extensionPath = typeof data?.path === 'string' ? data.path.toLowerCase() : '';
+        const manifestName = typeof data?.manifest?.name === 'string' ? data.manifest.name.toLowerCase() : '';
+        const isWebpageMcp =
+          extensionPath.includes('webpage-mcp') ||
+          extensionPath.includes('webpage_mcp') ||
+          extensionPath.includes('webpage mcp') ||
+          manifestName.includes('webpage') ||
+          manifestName.includes('mcp');
+
+        if (isWebpageMcp) {
+          matches.add(normalizedId);
+        }
+      }
+    }
+  }
+
+  return Array.from(matches.values());
+}
+
+export function resolveAllowedOrigins(options?: { includeDetectedExtensionIds?: boolean }): string[] {
+  const origins = new Set<string>([`chrome-extension://${EXTENSION_ID}/`]);
+
+  const extensionIds = [
+    ...splitEnvList(process.env.WEBPAGE_MCP_EXTENSION_ID),
+    ...splitEnvList(process.env.WEBPAGE_MCP_EXTENSION_IDS),
+  ];
+  for (const rawId of extensionIds) {
+    const extensionId = toExtensionId(rawId);
+    if (!extensionId) {
+      continue;
+    }
+    origins.add(`chrome-extension://${extensionId}/`);
+  }
+
+  for (const rawOrigin of splitEnvList(process.env.WEBPAGE_MCP_ALLOWED_ORIGINS)) {
+    const origin = toOrigin(rawOrigin);
+    if (!origin) {
+      continue;
+    }
+    origins.add(origin);
+  }
+
+  if (options?.includeDetectedExtensionIds) {
+    for (const extensionId of detectLocalExtensionIds()) {
+      origins.add(`chrome-extension://${extensionId}/`);
+    }
+  }
+
+  return Array.from(origins.values());
 }
 
 /**
@@ -238,13 +414,14 @@ async function ensureWindowsFilePermissions(packageDistDir: string): Promise<voi
  */
 export async function createManifestContent(): Promise<any> {
   const mainPath = await getMainPath();
+  const allowedOrigins = resolveAllowedOrigins({ includeDetectedExtensionIds: true });
 
   return {
     name: HOST_NAME,
     description: DESCRIPTION,
     path: mainPath, // Node.jsExecutable file path
     type: 'stdio',
-    allowed_origins: [`chrome-extension://${EXTENSION_ID}/`],
+    allowed_origins: allowedOrigins,
   };
 }
 
@@ -330,12 +507,40 @@ export async function tryRegisterUserLevelHost(targetBrowsers?: BrowserType[]): 
       console.log(colorText(`\nRegistering for ${config.displayName}...`, 'blue'));
 
       try {
-        // Make sure the directory exists
-        await mkdir(path.dirname(config.userManifestPath), { recursive: true });
+        const manifestPaths =
+          Array.isArray(config.userManifestPaths) && config.userManifestPaths.length > 0
+            ? config.userManifestPaths
+            : [config.userManifestPath];
+        const writtenPaths: string[] = [];
 
-        // Write manifest file
-        await writeFile(config.userManifestPath, JSON.stringify(manifest, null, 2));
-        console.log(colorText(`✓ Manifest written to ${config.userManifestPath}`, 'green'));
+        for (const manifestPath of manifestPaths) {
+          try {
+            await mkdir(path.dirname(manifestPath), { recursive: true });
+            await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+            writtenPaths.push(manifestPath);
+            if (manifestPath === config.userManifestPath) {
+              console.log(colorText(`✓ Manifest written to ${manifestPath}`, 'green'));
+            } else {
+              console.log(
+                colorText(`✓ Channel manifest written to ${manifestPath}`, 'green'),
+              );
+            }
+          } catch (error: any) {
+            if (manifestPath === config.userManifestPath) {
+              throw error;
+            }
+            console.log(
+              colorText(
+                `⚠️ Skipped optional channel path ${manifestPath}: ${error?.message || String(error)}`,
+                'yellow',
+              ),
+            );
+          }
+        }
+
+        if (writtenPaths.length === 0) {
+          throw new Error('No manifest paths could be written');
+        }
 
         // WindowsAdditional registry keys required
         if (os.platform() === 'win32' && config.registryKey) {

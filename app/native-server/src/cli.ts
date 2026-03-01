@@ -24,8 +24,16 @@ program
   .option('-s, --system', 'Use system-level installation (requires administrator/sudo privileges)')
   .option('-b, --browser <browser>', 'Register for specific browser (chrome, chromium, or all)')
   .option('-d, --detect', 'Auto-detect installed browsers')
+  .option(
+    '-e, --extension-id <id>',
+    'Override allowed Chrome extension ID(s), comma-separated',
+  )
   .action(async (options) => {
     try {
+      if (typeof options.extensionId === 'string' && options.extensionId.trim()) {
+        process.env.WEBPAGE_MCP_EXTENSION_ID = options.extensionId.trim();
+      }
+
       // Write Node.js path for run_host scripts
       writeNodePathFile(__dirname);
 

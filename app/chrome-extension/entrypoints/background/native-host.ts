@@ -42,6 +42,14 @@ let ensurePromise: Promise<boolean> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let manualDisconnect = false;
+let lastNativeDisconnectError: string | null = null;
+
+function getNativeConnectionErrorMessage(): string {
+  if (lastNativeDisconnectError && lastNativeDisconnectError.trim()) {
+    return `Native host not connected: ${lastNativeDisconnectError.trim()}`;
+  }
+  return 'Native host not connected';
+}
 
 interface PendingNativeRequest {
   resolve: (payload: any) => void;
@@ -449,6 +457,25 @@ async function requestNativeHost(
   });
 }
 
+async function probeNativeHostReady(timeoutMs: number = 3000): Promise<boolean> {
+  if (!nativePort) {
+    return false;
+  }
+
+  try {
+    const response = (await requestNativeHost(
+      NativeMessageType.LIST_INSTANCES,
+      {},
+      timeoutMs,
+    )) as NativeInstanceListPayload;
+
+    return response?.status === 'success' && Array.isArray(response.instances);
+  } catch (error) {
+    console.debug(`${LOG_PREFIX} Native host probe failed`, error);
+    return false;
+  }
+}
+
 export async function requestAgentRpcFetch(
   payload: AgentRpcRequestPayload,
   timeoutMs: number = 30_000,
@@ -793,6 +820,29 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
 
     // Already connected
     if (nativePort) {
+      const ready = await probeNativeHostReady(1500);
+      if (!ready) {
+        console.warn(`${LOG_PREFIX} Native probe failed on existing port (trigger=${trigger})`);
+        if (!lastNativeDisconnectError) {
+          lastNativeDisconnectError = 'Native host probe failed';
+        }
+        const port: any = nativePort;
+        if (port) {
+          try {
+            if (typeof port.disconnect === 'function') {
+              port.disconnect();
+            }
+          } catch {
+            // Ignore disconnect failures.
+          }
+        }
+        nativePort = null;
+        rejectAllPendingNativeRequests('Native host probe failed on existing connection');
+        await markAllServersStopped('native_probe_failed');
+        scheduleReconnect(`probe_failed:${trigger}`);
+        return false;
+      }
+
       console.debug(`${LOG_PREFIX} Already connected (trigger=${trigger})`);
       await ensureManagedInstancesRunning();
       return true;
@@ -802,11 +852,38 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
     const ok = connectNativeHost();
     if (!ok) {
       console.warn(`${LOG_PREFIX} Connection failed (trigger=${trigger})`);
+      if (!lastNativeDisconnectError) {
+        lastNativeDisconnectError = 'Failed to open native messaging port';
+      }
       scheduleReconnect(`connect_failed:${trigger}`);
       return false;
     }
 
+    const ready = await probeNativeHostReady(3000);
+    if (!ready) {
+      console.warn(`${LOG_PREFIX} Native handshake failed (trigger=${trigger})`);
+      if (!lastNativeDisconnectError) {
+        lastNativeDisconnectError = 'Native host handshake failed';
+      }
+      const port: any = nativePort;
+      if (port) {
+        try {
+          if (typeof port.disconnect === 'function') {
+            port.disconnect();
+          }
+        } catch {
+          // Ignore disconnect failures.
+        }
+      }
+      nativePort = null;
+      rejectAllPendingNativeRequests('Native host handshake failed');
+      await markAllServersStopped('native_handshake_failed');
+      scheduleReconnect(`handshake_failed:${trigger}`);
+      return false;
+    }
+
     console.debug(`${LOG_PREFIX} Connection initiated successfully (trigger=${trigger})`);
+    lastNativeDisconnectError = null;
     await ensureManagedInstancesRunning();
     return true;
   })().finally(() => {
@@ -826,6 +903,7 @@ export function connectNativeHost(): boolean {
   }
 
   try {
+    lastNativeDisconnectError = null;
     nativePort = chrome.runtime.connectNative(HOST_NAME);
 
     nativePort.onMessage.addListener(async (message) => {
@@ -961,6 +1039,8 @@ export function connectNativeHost(): boolean {
     });
 
     nativePort.onDisconnect.addListener(() => {
+      const disconnectMessage = chrome.runtime.lastError?.message || ERROR_MESSAGES.NATIVE_DISCONNECTED;
+      lastNativeDisconnectError = disconnectMessage;
       console.warn(ERROR_MESSAGES.NATIVE_DISCONNECTED, chrome.runtime.lastError);
       nativePort = null;
       clearAllSessionContexts();
@@ -981,6 +1061,8 @@ export function connectNativeHost(): boolean {
     return true;
   } catch (error) {
     console.warn(ERROR_MESSAGES.NATIVE_CONNECTION_FAILED, error);
+    lastNativeDisconnectError =
+      error instanceof Error ? error.message : ERROR_MESSAGES.NATIVE_CONNECTION_FAILED;
     nativePort = null;
     return false;
   }
@@ -1024,7 +1106,12 @@ export const initNativeHostListener = () => {
     if (msgType === NativeMessageType.ENSURE_NATIVE) {
       ensureNativeConnected('ui_ensure')
         .then((connected) => {
-          sendResponse({ success: true, connected, autoConnectEnabled });
+          sendResponse({
+            success: connected,
+            connected,
+            autoConnectEnabled,
+            error: connected ? undefined : getNativeConnectionErrorMessage(),
+          });
         })
         .catch((e) => {
           sendResponse({ success: false, connected: nativePort !== null, error: String(e) });
@@ -1040,7 +1127,11 @@ export const initNativeHostListener = () => {
         return ensureNativeConnected('ui_connect');
       })()
         .then((connected) => {
-          sendResponse({ success: true, connected });
+          sendResponse({
+            success: connected,
+            connected,
+            error: connected ? undefined : getNativeConnectionErrorMessage(),
+          });
         })
         .catch((e) => {
           sendResponse({ success: false, connected: nativePort !== null, error: String(e) });
@@ -1049,8 +1140,12 @@ export const initNativeHostListener = () => {
     }
 
     if (msgType === NativeMessageType.PING_NATIVE) {
-      const connected = nativePort !== null;
-      sendResponse({ connected, autoConnectEnabled });
+      (async () => {
+        const connected = await probeNativeHostReady(1000);
+        sendResponse({ connected, autoConnectEnabled });
+      })().catch((e) => {
+        sendResponse({ connected: false, autoConnectEnabled, error: String(e) });
+      });
       return true;
     }
 

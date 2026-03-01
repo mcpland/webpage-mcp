@@ -66,7 +66,7 @@ webpage-mcp fix-permissions
 
 - Chrome Extension <-> Native Server: Chrome Native Messaging
 - MCP Client <-> Native Server: stdio (`webpage-mcp-stdio`)
-- Internal bridge: local IPC socket/pipe (configurable by `WEBPAGE_MCP_NATIVE_SOCKET`)
+- Internal bridge: local IPC socket/pipe (default macOS/Linux: `~/.webpage-mcp/native-<uid>.sock`, configurable by `WEBPAGE_MCP_NATIVE_SOCKET`)
 
 ## Optional Auth Token
 

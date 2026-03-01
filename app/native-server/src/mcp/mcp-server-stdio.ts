@@ -13,7 +13,21 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { TOOL_SCHEMAS } from 'webpage-mcp-shared';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { getNativeSocketPath } from '../ipc/socket-path';
+import { getLegacyNativeSocketPath, getNativeSocketPath } from '../ipc/socket-path';
+
+function parsePositiveInt(input: string | undefined, fallback: number): number {
+  if (!input) {
+    return fallback;
+  }
+  const value = Number.parseInt(input, 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+const CONNECT_RETRY_INTERVAL_MS = parsePositiveInt(
+  process.env.WEBPAGE_MCP_STDIO_CONNECT_RETRY_INTERVAL_MS,
+  250,
+);
+const CONNECT_MAX_WAIT_MS = parsePositiveInt(process.env.WEBPAGE_MCP_STDIO_CONNECT_TIMEOUT_MS, 10000);
 
 interface PendingIpcRequest {
   resolve: (value: unknown) => void;
@@ -21,22 +35,89 @@ interface PendingIpcRequest {
   timer: NodeJS.Timeout;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function getErrorCode(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error && typeof (error as any).code === 'string') {
+    return (error as any).code;
+  }
+  return 'UNKNOWN';
+}
+
+function shouldRetryConnect(error: unknown): boolean {
+  const code = getErrorCode(error);
+  return code === 'ENOENT' || code === 'ECONNREFUSED' || code === 'EPIPE';
+}
+
+function getSocketPathCandidates(): string[] {
+  const explicit = process.env.WEBPAGE_MCP_NATIVE_SOCKET?.trim();
+  if (explicit) {
+    return [explicit];
+  }
+
+  const primaryPath = getNativeSocketPath();
+  const legacyPath = getLegacyNativeSocketPath();
+  if (legacyPath === primaryPath) {
+    return [primaryPath];
+  }
+  return [primaryPath, legacyPath];
+}
+
+function formatBridgeConnectError(
+  socketPaths: string[],
+  error: unknown,
+  candidateErrors?: Map<string, unknown>,
+): Error {
+  const errorCode = getErrorCode(error);
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const socketPathLines = socketPaths.map((candidate, index) => `${index + 1}. ${candidate}`);
+  const candidateErrorLines =
+    candidateErrors && candidateErrors.size > 0
+      ? socketPaths.map((candidate) => {
+          const candidateError = candidateErrors.get(candidate);
+          if (!candidateError) {
+            return `- ${candidate}: <no error details>`;
+          }
+          const code = getErrorCode(candidateError);
+          const message =
+            candidateError instanceof Error ? candidateError.message : String(candidateError);
+          return `- ${candidate}: [${code}] ${message}`;
+        })
+      : [];
+  const lines = [
+    `Unable to connect to native bridge socket (${socketPaths.length} candidate${
+      socketPaths.length > 1 ? 's' : ''
+    })`,
+    ...socketPathLines,
+    ...(candidateErrorLines.length > 0
+      ? ['Candidate errors:', ...candidateErrorLines]
+      : []),
+    `Reason: [${errorCode}] ${errorMessage}`,
+    'The native host is not running or has not opened the IPC socket yet.',
+    'Fix steps:',
+    '1. Open Chrome and ensure the Webpage MCP extension is enabled.',
+    '2. Ensure extension Native auto-connect is enabled (or click Connect in popup).',
+    '3. Run `npx -y webpage-mcp@latest doctor` and fix reported issues.',
+    '4. If WEBPAGE_MCP_NATIVE_SOCKET is set, ensure both processes use the same value.',
+    '5. If clicking Connect does not create new wrapper logs, re-register with current extension ID:',
+    '   `npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>`',
+  ];
+  return new Error(lines.join('\n'));
+}
+
 class NativeIpcBridgeClient {
   private socket: net.Socket | null = null;
   private buffer = '';
   private connectPromise: Promise<void> | null = null;
+  private connectedSocketPath: string | null = null;
   private readonly pending = new Map<string, PendingIpcRequest>();
 
-  async ensureConnected(): Promise<void> {
-    if (this.socket && !this.socket.destroyed) {
-      return;
-    }
-    if (this.connectPromise) {
-      return await this.connectPromise;
-    }
-
-    this.connectPromise = new Promise<void>((resolve, reject) => {
-      const socketPath = getNativeSocketPath();
+  private connectOnce(socketPath: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
       const socket = net.createConnection(socketPath);
 
       const cleanup = (): void => {
@@ -47,6 +128,7 @@ class NativeIpcBridgeClient {
       socket.on('connect', () => {
         cleanup();
         this.socket = socket;
+        this.connectedSocketPath = socketPath;
         this.buffer = '';
 
         socket.setEncoding('utf8');
@@ -61,7 +143,44 @@ class NativeIpcBridgeClient {
         cleanup();
         reject(error);
       });
-    }).finally(() => {
+    });
+  }
+
+  private async connectWithRetry(socketPaths: string[]): Promise<void> {
+    const start = Date.now();
+    let lastError: unknown = null;
+    const candidateErrors = new Map<string, unknown>();
+
+    while (Date.now() - start <= CONNECT_MAX_WAIT_MS) {
+      for (const socketPath of socketPaths) {
+        try {
+          await this.connectOnce(socketPath);
+          return;
+        } catch (error) {
+          lastError = error;
+          candidateErrors.set(socketPath, error);
+          if (!shouldRetryConnect(error)) {
+            throw formatBridgeConnectError(socketPaths, error, candidateErrors);
+          }
+        }
+      }
+
+      await sleep(CONNECT_RETRY_INTERVAL_MS);
+    }
+
+    throw formatBridgeConnectError(socketPaths, lastError, candidateErrors);
+  }
+
+  async ensureConnected(): Promise<void> {
+    if (this.socket && !this.socket.destroyed) {
+      return;
+    }
+    if (this.connectPromise) {
+      return await this.connectPromise;
+    }
+
+    const socketPaths = getSocketPathCandidates();
+    this.connectPromise = this.connectWithRetry(socketPaths).finally(() => {
       this.connectPromise = null;
     });
 
@@ -111,6 +230,7 @@ class NativeIpcBridgeClient {
 
   private onDisconnected(reason: string): void {
     this.socket = null;
+    this.connectedSocketPath = null;
     for (const [id, pending] of this.pending.entries()) {
       clearTimeout(pending.timer);
       pending.reject(new Error(reason));
@@ -121,7 +241,8 @@ class NativeIpcBridgeClient {
   async request<T = unknown>(method: string, params?: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
     await this.ensureConnected();
     if (!this.socket || this.socket.destroyed) {
-      throw new Error('IPC socket is not connected');
+      const detail = this.connectedSocketPath ? ` (${this.connectedSocketPath})` : '';
+      throw new Error(`IPC socket is not connected${detail}`);
     }
 
     const id = randomUUID();
@@ -292,9 +413,6 @@ function installProcessLifecycleHooks(): void {
 
 async function main(): Promise<void> {
   installProcessLifecycleHooks();
-
-  // Fail fast if bridge is not reachable.
-  await bridgeClient.ensureConnected();
 
   const transport = new StdioServerTransport();
   await getStdioMcpServer().connect(transport);

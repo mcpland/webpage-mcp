@@ -137,6 +137,28 @@ Add to your Claude Desktop MCP config (`claude_desktop_config.json`):
 
 Use the same `npx` stdio config above.
 
+### Local Absolute Path (Dev)
+
+For local development, you can point MCP directly to the built stdio entry:
+
+```json
+{
+  "mcpServers": {
+    "webpage-mcp-local": {
+      "command": "node",
+      "args": ["/Users/your-user/path/to/webpage-mcp/app/native-server/dist/mcp/mcp-server-stdio.js"]
+    }
+  }
+}
+```
+
+Important:
+
+- This stdio process still depends on the native bridge socket created by the Chrome Native host.
+- Keep Chrome open and ensure the extension is connected to native host.
+- Default bridge socket path (macOS/Linux): `~/.webpage-mcp/native-<uid>.sock`.
+- If you customized `WEBPAGE_MCP_NATIVE_SOCKET`, both processes must use the same value.
+
 ### Notes
 
 - The current architecture is fully native/stdio and does not expose localhost MCP/agent HTTP endpoints.
@@ -258,6 +280,16 @@ Options:
   -s, --system             System-level install (requires sudo/admin)
   -b, --browser <browser>  Target browser: chrome, chromium, or all
   -d, --detect             Auto-detect installed browsers
+  -e, --extension-id <id>  Override extension ID(s) for allowed_origins (comma-separated)
+```
+
+When `--browser chrome` is used, the installer also writes channel-compatible manifests on macOS/Linux (for example Chrome Stable/Beta/Canary/Chrome for Testing paths) to reduce "native host not found" channel mismatch issues.
+The installer also attempts to discover local unpacked Webpage MCP extension IDs from browser profiles and add them to `allowed_origins`.
+
+For unpacked extensions with a custom ID, you can re-register with:
+
+```bash
+npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
 ```
 
 ## Tech Stack
@@ -283,7 +315,8 @@ Options:
 
 1. Ensure the native host is registered: `npx -y webpage-mcp@latest doctor`
 2. Check that Node.js >= 20 is available at the registered path
-3. Try re-registering: `npx -y webpage-mcp@latest register --force --detect`
+3. Re-register for Chrome channels and your extension ID: `npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>`
+4. Fully restart Chrome (quit all Chrome processes), then click Connect again
 
 ### MCP client can't reach the server
 

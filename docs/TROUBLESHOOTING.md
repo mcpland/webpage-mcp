@@ -22,6 +22,14 @@ npx -y webpage-mcp@latest doctor
 npx -y webpage-mcp@latest register --force --detect
 ```
 
+For Chrome channel mismatches (Stable/Beta/Canary/Chrome for Testing), prefer:
+
+```bash
+npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
+```
+
+Then fully restart Chrome (quit all Chrome processes) before retrying.
+
 3. Keep Chrome open with the extension enabled.
 
 4. Ensure your MCP client uses `npx -y -p webpage-mcp@latest webpage-mcp-stdio`.
@@ -63,10 +71,67 @@ Checks:
 3. If needed, set explicit native socket path for both processes:
 
 ```bash
-export WEBPAGE_MCP_NATIVE_SOCKET="/tmp/webpage-mcp-native-custom.sock"
+export WEBPAGE_MCP_NATIVE_SOCKET="$HOME/.webpage-mcp/native-custom.sock"
 ```
 
 Use the same env for Chrome-launched native host environment and MCP client environment.
+
+## ENOENT Socket Missing
+
+Symptoms:
+
+- Startup fails with `connect ENOENT .../.webpage-mcp/native-<uid>.sock`
+- (Older builds) may show `.../webpage-mcp-native-<uid>.sock`
+
+Root cause:
+
+- `webpage-mcp-stdio` started, but the native host socket was not created yet.
+- Most commonly: extension is not connected to native host, auto-connect is disabled, or socket env mismatch.
+- On older builds, native host and MCP client may compute different `TMPDIR`, resulting in different socket paths.
+
+Fix:
+
+1. Open Chrome and ensure extension is enabled.
+2. In extension popup, ensure native connection is established (Connect / auto-connect on).
+3. Run:
+
+```bash
+npx -y webpage-mcp@latest doctor
+```
+
+4. If using custom socket path, make sure both sides use identical `WEBPAGE_MCP_NATIVE_SOCKET`.
+5. Upgrade to latest `webpage-mcp`, then run:
+
+```bash
+npx -y webpage-mcp@latest register --force --detect
+```
+
+6. Fully restart Chrome and retry.
+
+## Extension ID Mismatch
+
+Symptoms:
+
+- Clicking Connect in extension does not actually launch native host
+- MCP stdio keeps reporting socket `ENOENT`
+
+Root cause:
+
+- Native Messaging manifest `allowed_origins` does not include your current extension ID.
+- This often happens with unpacked builds where extension ID is not fixed.
+
+Fix:
+
+1. Copy your extension ID from `chrome://extensions`.
+2. Re-register manifest with explicit extension ID (this also writes Chrome channel-compatible manifest paths):
+
+```bash
+npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
+```
+
+Note: `register` also tries to auto-discover local unpacked Webpage MCP extension IDs, but explicit `--extension-id` remains the most reliable fix.
+
+3. Fully restart Chrome, reload extension, and retry Connect.
 
 ## Stream / Realtime Status Not Updating
 

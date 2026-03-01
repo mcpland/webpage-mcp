@@ -15,7 +15,11 @@ import {
 import { TIMEOUTS } from './constant';
 import fileHandler from './file-handler';
 import type { RealtimeEvent } from './agent/types';
-import { getNativeSocketPath } from './ipc/socket-path';
+import {
+  ensureNativeSocketParentDir,
+  getLegacyNativeSocketPath,
+  getNativeSocketPath,
+} from './ipc/socket-path';
 import { callToolForContext, listToolsForContext } from './mcp/register-tools';
 
 interface PendingRequest {
@@ -32,6 +36,20 @@ interface AgentStreamSubscription {
 }
 
 const INSTANCE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
+
+function removeSocketIfExists(socketPath: string): void {
+  if (process.platform === 'win32') {
+    return;
+  }
+  if (!socketPath || !fs.existsSync(socketPath)) {
+    return;
+  }
+  try {
+    fs.unlinkSync(socketPath);
+  } catch {
+    // Ignore stale socket cleanup failures; listen will report a concrete error if needed.
+  }
+}
 
 function normalizeInstanceId(raw: unknown): string {
   if (typeof raw === 'string') {
@@ -112,11 +130,14 @@ export class NativeMessagingHost {
   private setupIpcServer(): void {
     const socketPath = getNativeSocketPath();
 
-    if (process.platform !== 'win32' && fs.existsSync(socketPath)) {
-      try {
-        fs.unlinkSync(socketPath);
-      } catch {
-        // Ignore stale socket cleanup failures; listen will report a concrete error if needed.
+    if (process.platform !== 'win32') {
+      ensureNativeSocketParentDir(socketPath);
+      removeSocketIfExists(socketPath);
+
+      // Best-effort cleanup for legacy tmp socket path from older builds.
+      const legacySocketPath = getLegacyNativeSocketPath();
+      if (legacySocketPath !== socketPath) {
+        removeSocketIfExists(legacySocketPath);
       }
     }
 
@@ -941,11 +962,11 @@ export class NativeMessagingHost {
       this.ipcServer = null;
     }
     const socketPath = getNativeSocketPath();
-    if (process.platform !== 'win32' && fs.existsSync(socketPath)) {
-      try {
-        fs.unlinkSync(socketPath);
-      } catch {
-        // ignore
+    if (process.platform !== 'win32') {
+      removeSocketIfExists(socketPath);
+      const legacySocketPath = getLegacyNativeSocketPath();
+      if (legacySocketPath !== socketPath) {
+        removeSocketIfExists(legacySocketPath);
       }
     }
 
