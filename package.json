@@ -1,6 +1,6 @@
 {
   "name": "webpage-mcp-monorepo",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "author": "hangye",
   "type": "module",
@@ -22,6 +22,7 @@
     "clean:modules": "pnpm -r exec rm -rf node_modules && rm -rf node_modules",
     "clean": "npm run clean:dist && npm run clean:modules",
     "typecheck": "pnpm --filter webpage-mcp-shared build && pnpm --filter webpage-mcp --filter webpage-mcp-shared exec tsc --noEmit",
+    "commit": "cz",
     "prepare": "husky"
   },
   "devDependencies": {
@@ -30,6 +31,8 @@
     "@eslint/js": "^9.25.1",
     "@typescript-eslint/eslint-plugin": "^8.32.0",
     "@typescript-eslint/parser": "^8.32.0",
+    "commitizen": "^4.3.1",
+    "cz-conventional-changelog": "^3.3.0",
     "eslint": "^9.26.0",
     "eslint-config-prettier": "^10.1.5",
     "globals": "^16.1.0",
@@ -47,5 +50,10 @@
     "**/*.{json,md,yaml,html,css}": [
       "prettier --write"
     ]
+  },
+  "config": {
+    "commitizen": {
+      "path": "cz-conventional-changelog"
+    }
   }
 }

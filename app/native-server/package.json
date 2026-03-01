@@ -1,6 +1,6 @@
 {
   "name": "webpage-mcp",
-  "version": "1.0.29",
+  "version": "0.1.0",
   "description": "Chrome Native-Messaging host (Node)",
   "main": "dist/index.js",
   "bin": {

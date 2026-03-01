@@ -1,6 +1,6 @@
 {
   "name": "webpage-mcp-shared",
-  "version": "1.0.1",
+  "version": "0.1.0",
   "author": "hangye",
   "main": "dist/index.js",
   "module": "./dist/index.mjs",
