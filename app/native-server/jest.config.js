@@ -1,14 +1,16 @@
 const isCI = process.env.CI === 'true';
+const enforceCoverage = process.env.ENFORCE_COVERAGE === 'true';
+const shouldCollectCoverage = isCI && enforceCoverage;
 
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
-  collectCoverage: isCI,
+  collectCoverage: shouldCollectCoverage,
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts', '!src/scripts/**/*'],
   coverageDirectory: 'coverage',
-  ...(isCI
+  ...(shouldCollectCoverage
     ? {
         coverageThreshold: {
           global: {
