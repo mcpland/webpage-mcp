@@ -65,9 +65,41 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **N
 
 - **Chrome** (or Chromium-based browser)
 - **Node.js** >= 20.0.0
-- **pnpm** (package manager)
+- **pnpm** (only needed when building from source)
 
-### 1. Clone and Build
+### Quick Start (Published npm Package)
+
+1. Install the Chrome extension first (store package or unpacked build).
+2. Run one command to auto-fix common setup issues (permissions, node path, registration):
+
+```bash
+npx -y webpage-mcp@latest doctor --fix
+```
+
+3. If you are using an unpacked extension, copy its ID from `chrome://extensions` and re-register with explicit ID:
+
+```bash
+npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
+```
+
+4. Add `webpage-mcp` to your MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "webpage-mcp": {
+      "command": "npx",
+      "args": ["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"]
+    }
+  }
+}
+```
+
+5. Open Chrome, click the extension popup `Connect` button once, then restart your MCP client.
+
+### Build From Source (Developers)
+
+#### 1. Clone and Build
 
 ```bash
 git clone https://github.com/mcpland/webpage-mcp.git
@@ -80,7 +112,7 @@ pnpm install
 pnpm build
 ```
 
-### 2. Install the Chrome Extension
+#### 2. Install the Chrome Extension
 
 1. Open Chrome and navigate to `chrome://extensions/`
 2. Enable **Developer mode** (toggle in top right)
@@ -89,7 +121,7 @@ pnpm build
 
 > This repository does not currently commit binary release zip files. To generate one locally, run `pnpm --filter webpage-mcp-server zip` and use the artifact from `app/chrome-extension/.output/`.
 
-### 3. Register the Native Messaging Host
+#### 3. Register the Native Messaging Host
 
 ```bash
 # Register for detected browsers
@@ -102,7 +134,7 @@ npx webpage-mcp register --browser chrome
 
 This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the browser can launch the native server process.
 
-### 4. Verify Installation
+#### 4. Verify Installation
 
 ```bash
 # Diagnose installation issues
