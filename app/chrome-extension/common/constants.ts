@@ -58,7 +58,7 @@ export const SUCCESS_MESSAGES = {
 
 // External Links
 export const LINKS = {
-  TROUBLESHOOTING: 'https://github.com/mcplandwebpage-mcp/blob/master/docs/TROUBLESHOOTING.md',
+  TROUBLESHOOTING: 'https://github.com/mcpland/webpage-mcp/blob/main/docs/TROUBLESHOOTING.md',
 } as const;
 
 // File Extensions and MIME Types
