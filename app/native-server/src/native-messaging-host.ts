@@ -393,11 +393,18 @@ export class NativeMessagingHost {
     const desiredIds = new Set<string>(instances.map((item) => item.instanceId));
 
     for (const instance of instances) {
-      if (instance.enabled && instance.autoStart) {
-        await this.startServer(instance.instanceId, instance.port);
-      } else {
+      if (!instance.enabled) {
         await this.stopServer(instance.instanceId);
+        continue;
       }
+
+      if (instance.autoStart) {
+        await this.startServer(instance.instanceId, instance.port);
+        continue;
+      }
+
+      // Keep manual instances as-is: do not auto-start or auto-stop.
+      this.snapshotInstanceStatus(instance.instanceId);
     }
 
     const knownIds = new Set<string>([...this.servers.keys(), ...this.instanceStatuses.keys()]);
