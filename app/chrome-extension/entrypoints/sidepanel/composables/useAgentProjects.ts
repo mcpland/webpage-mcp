@@ -2,9 +2,10 @@
  * Composable for managing Agent Projects.
  * Handles project CRUD, selection, and persistence.
  */
-import { ref, computed, watch } from '@/entrypoints/shared/reactivity';
+import { ref, computed } from '@/entrypoints/shared/reactivity';
 import { getMessage } from '@/utils/i18n';
 import type { AgentProject, AgentStoredMessage } from 'webpage-mcp-shared';
+import { agentFetch } from '@/utils/agent-rpc';
 
 const STORAGE_KEY_SELECTED_PROJECT = 'agent-selected-project-id';
 
@@ -29,7 +30,6 @@ function normalizePathForComparison(path: string): string {
 }
 
 export interface UseAgentProjectsOptions {
-  getServerPort: () => number | null;
   ensureServer: () => Promise<boolean>;
   onHistoryLoaded?: (messages: AgentStoredMessage[]) => void;
 }
@@ -82,13 +82,10 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
 
   // Fetch projects from server
   async function fetchProjects(): Promise<void> {
-    const serverPort = options.getServerPort();
-    if (!serverPort) return;
-
     isLoadingProjects.value = true;
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/projects`;
-      const response = await fetch(url);
+      const url = '/agent/projects';
+      const response = await agentFetch(url);
       if (response.ok) {
         const data = await response.json();
         projects.value = data.projects || [];
@@ -115,8 +112,7 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
    * Uses a nonce to handle A→B→A scenarios.
    */
   async function loadChatHistory(projectId: string): Promise<void> {
-    const serverPort = options.getServerPort();
-    if (!serverPort || !projectId) return;
+    if (!projectId) return;
 
     // Increment nonce - any subsequent load will invalidate this one
     const myNonce = ++historyLoadNonce;
@@ -126,8 +122,8 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     };
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/chat/${encodeURIComponent(projectId)}/messages?limit=100`;
-      const response = await fetch(url);
+      const url = `/agent/chat/${encodeURIComponent(projectId)}/messages?limit=100`;
+      const response = await agentFetch(url);
 
       if (!isStillValid()) return;
 
@@ -147,12 +143,9 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
 
   // Validate path before creating project
   async function validatePath(rootPath: string): Promise<PathValidationResult | null> {
-    const serverPort = options.getServerPort();
-    if (!serverPort) return null;
-
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/projects/validate-path`;
-      const response = await fetch(url, {
+      const url = '/agent/projects/validate-path';
+      const response = await agentFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rootPath }),
@@ -177,8 +170,7 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     if (!name || !rootPath) return null;
 
     const ready = await options.ensureServer();
-    const serverPort = options.getServerPort();
-    if (!ready || !serverPort) {
+    if (!ready) {
       projectError.value = 'Agent server is not available.';
       return null;
     }
@@ -214,8 +206,8 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       }
 
       // Step 3: Create the project
-      const url = `http://127.0.0.1:${serverPort}/agent/projects`;
-      const response = await fetch(url, {
+      const url = '/agent/projects';
+      const response = await agentFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, rootPath, allowCreate }),
@@ -274,12 +266,11 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
 
   // Get default project root path for a project name
   async function getDefaultProjectRoot(projectName: string): Promise<string | null> {
-    const serverPort = options.getServerPort();
-    if (!serverPort || !projectName.trim()) return null;
+    if (!projectName.trim()) return null;
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/projects/default-root`;
-      const response = await fetch(url, {
+      const url = '/agent/projects/default-root';
+      const response = await agentFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectName: projectName.trim() }),
@@ -298,15 +289,14 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
   // Open directory picker dialog
   async function pickDirectory(): Promise<string | null> {
     const ready = await options.ensureServer();
-    const serverPort = options.getServerPort();
-    if (!ready || !serverPort) {
+    if (!ready) {
       projectError.value = t('agentProjectsServerUnavailable', 'Server not available');
       return null;
     }
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/projects/pick-directory`;
-      const response = await fetch(url, { method: 'POST' });
+      const url = '/agent/projects/pick-directory';
+      const response = await agentFetch(url, { method: 'POST' });
 
       // Handle HTTP errors (e.g., 404 means server version mismatch)
       if (!response.ok) {
@@ -344,8 +334,7 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
   // Ensure default project exists (auto-create if no projects)
   async function ensureDefaultProject(): Promise<AgentProject | null> {
     const ready = await options.ensureServer();
-    const serverPort = options.getServerPort();
-    if (!ready || !serverPort) return null;
+    if (!ready) return null;
 
     try {
       // First fetch current projects
@@ -357,8 +346,8 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       }
 
       // Get default workspace directory from server
-      const defaultRootUrl = `http://127.0.0.1:${serverPort}/agent/projects/default-root`;
-      const defaultRootResponse = await fetch(defaultRootUrl, {
+      const defaultRootUrl = '/agent/projects/default-root';
+      const defaultRootResponse = await agentFetch(defaultRootUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectName: 'default' }),
@@ -372,8 +361,8 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       }
 
       // Create default project
-      const createUrl = `http://127.0.0.1:${serverPort}/agent/projects`;
-      const createResponse = await fetch(createUrl, {
+      const createUrl = '/agent/projects';
+      const createResponse = await agentFetch(createUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -412,8 +401,7 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     name: string,
   ): Promise<AgentProject | null> {
     const ready = await options.ensureServer();
-    const serverPort = options.getServerPort();
-    if (!ready || !serverPort) {
+    if (!ready) {
       projectError.value = t('agentProjectsServerUnavailable', 'Server not available');
       return null;
     }
@@ -473,8 +461,8 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       }
 
       // Create the project
-      const url = `http://127.0.0.1:${serverPort}/agent/projects`;
-      const response = await fetch(url, {
+      const url = '/agent/projects';
+      const response = await agentFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, rootPath, allowCreate }),
@@ -524,12 +512,11 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     enableWebpageMcp?: boolean,
   ): Promise<void> {
     const project = selectedProject.value;
-    const serverPort = options.getServerPort();
-    if (!project || !serverPort) return;
+    if (!project) return;
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/projects`;
-      const response = await fetch(url, {
+      const url = '/agent/projects';
+      const response = await agentFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

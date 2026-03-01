@@ -1,84 +1,183 @@
 #!/usr/bin/env node
 
+import net from 'node:net';
+import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   CallToolRequestSchema,
   CallToolResult,
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
   ListPromptsRequestSchema,
+  type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { TOOL_SCHEMAS } from 'webpage-mcp-shared';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import * as fs from 'fs';
-import * as path from 'path';
-import { SERVER_CONFIG } from '../constant';
+import { getNativeSocketPath } from '../ipc/socket-path';
 
+interface PendingIpcRequest {
+  resolve: (value: unknown) => void;
+  reject: (reason?: unknown) => void;
+  timer: NodeJS.Timeout;
+}
+
+class NativeIpcBridgeClient {
+  private socket: net.Socket | null = null;
+  private buffer = '';
+  private connectPromise: Promise<void> | null = null;
+  private readonly pending = new Map<string, PendingIpcRequest>();
+
+  async ensureConnected(): Promise<void> {
+    if (this.socket && !this.socket.destroyed) {
+      return;
+    }
+    if (this.connectPromise) {
+      return await this.connectPromise;
+    }
+
+    this.connectPromise = new Promise<void>((resolve, reject) => {
+      const socketPath = getNativeSocketPath();
+      const socket = net.createConnection(socketPath);
+
+      const cleanup = (): void => {
+        socket.removeAllListeners('connect');
+        socket.removeAllListeners('error');
+      };
+
+      socket.on('connect', () => {
+        cleanup();
+        this.socket = socket;
+        this.buffer = '';
+
+        socket.setEncoding('utf8');
+        socket.on('data', (chunk: string) => this.onData(chunk));
+        socket.on('close', () => this.onDisconnected('IPC socket closed'));
+        socket.on('error', (error) => this.onDisconnected(error.message));
+
+        resolve();
+      });
+
+      socket.on('error', (error) => {
+        cleanup();
+        reject(error);
+      });
+    }).finally(() => {
+      this.connectPromise = null;
+    });
+
+    return await this.connectPromise;
+  }
+
+  private onData(chunk: string): void {
+    this.buffer += chunk;
+
+    while (true) {
+      const newlineIndex = this.buffer.indexOf('\n');
+      if (newlineIndex === -1) {
+        break;
+      }
+
+      const line = this.buffer.slice(0, newlineIndex).trim();
+      this.buffer = this.buffer.slice(newlineIndex + 1);
+      if (!line) {
+        continue;
+      }
+
+      let message: any;
+      try {
+        message = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const id = typeof message?.id === 'string' ? message.id : '';
+      if (!id) {
+        continue;
+      }
+      const pending = this.pending.get(id);
+      if (!pending) {
+        continue;
+      }
+
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      if (message.error) {
+        pending.reject(new Error(String(message.error)));
+      } else {
+        pending.resolve(message.result);
+      }
+    }
+  }
+
+  private onDisconnected(reason: string): void {
+    this.socket = null;
+    for (const [id, pending] of this.pending.entries()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+      this.pending.delete(id);
+    }
+  }
+
+  async request<T = unknown>(method: string, params?: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
+    await this.ensureConnected();
+    if (!this.socket || this.socket.destroyed) {
+      throw new Error('IPC socket is not connected');
+    }
+
+    const id = randomUUID();
+    const payload = JSON.stringify({ id, method, params });
+
+    const response = await new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`IPC request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      this.pending.set(id, {
+        resolve: (value) => resolve(value as T),
+        reject,
+        timer,
+      });
+
+      this.socket!.write(`${payload}\n`, (error) => {
+        if (!error) {
+          return;
+        }
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(error);
+      });
+    });
+
+    return response;
+  }
+
+  close(): void {
+    if (this.socket) {
+      try {
+        this.socket.destroy();
+      } catch {
+        // ignore
+      }
+      this.socket = null;
+    }
+    this.onDisconnected('IPC client closed');
+  }
+}
+
+const bridgeClient = new NativeIpcBridgeClient();
+const mcpSessionId = randomUUID();
 let stdioMcpServer: Server | null = null;
-let mcpClient: Client | null = null;
 let shutdownStarted = false;
 
-// Read configuration from stdio-config.json
-const loadConfig = (): { url: string } | null => {
-  try {
-    const configPath = path.join(__dirname, 'stdio-config.json');
-    const configData = fs.readFileSync(configPath, 'utf8');
-    return JSON.parse(configData) as { url: string };
-  } catch (error) {
-    console.warn('Failed to load stdio-config.json, will use env overrides if available:', error);
-    return null;
-  }
-};
-
-function parsePort(rawValue: unknown): number | undefined {
-  const parsed = Number.parseInt(String(rawValue ?? ''), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
-    return undefined;
-  }
-  return parsed;
-}
-
-function getOptionalAuthHeaders(): HeadersInit | undefined {
-  const token = process.env.WEBPAGE_MCP_AUTH_TOKEN?.trim();
-  if (!token) {
-    return undefined;
-  }
-  return {
-    Authorization: `Bearer ${token}`,
-    'x-webpage-mcp-token': token,
-  };
-}
-
-function getResolvedTargetUrl(): URL {
-  const explicitUrl = process.env.WEBPAGE_MCP_URL?.trim();
-  if (explicitUrl) {
-    return new URL(explicitUrl);
-  }
-
-  const envPort = parsePort(process.env.WEBPAGE_MCP_PORT) ?? parsePort(process.env.MCP_HTTP_PORT);
-  if (envPort) {
-    return new URL(`http://${SERVER_CONFIG.HOST}:${envPort}/mcp`);
-  }
-
-  const config = loadConfig();
-  if (config?.url) {
-    return new URL(config.url);
-  }
-
-  throw new Error(
-    'No MCP target configured. Set WEBPAGE_MCP_URL or WEBPAGE_MCP_PORT, or provide stdio-config.json.',
-  );
-}
-
-export const getStdioMcpServer = () => {
+function getStdioMcpServer(): Server {
   if (stdioMcpServer) {
     return stdioMcpServer;
   }
+
   stdioMcpServer = new Server(
     {
-      name: 'StdioWebpageMcpServer',
+      name: 'WebpageMcpStdioServer',
       version: '1.0.0',
     },
     {
@@ -90,111 +189,80 @@ export const getStdioMcpServer = () => {
     },
   );
 
-  setupTools(stdioMcpServer);
+  setupHandlers(stdioMcpServer);
   return stdioMcpServer;
-};
+}
 
-export const ensureMcpClient = async () => {
-  try {
-    if (mcpClient) {
-      const pingResult = await mcpClient.ping();
-      if (pingResult) {
-        return mcpClient;
-      }
-    }
-
-    const targetUrl = getResolvedTargetUrl();
-    const authHeaders = getOptionalAuthHeaders();
-    mcpClient = new Client({ name: 'Webpage MCP Proxy', version: '1.0.0' }, { capabilities: {} });
-    const transport = new StreamableHTTPClientTransport(targetUrl, {
-      requestInit: authHeaders ? { headers: authHeaders } : undefined,
-    });
-    await mcpClient.connect(transport);
-    return mcpClient;
-  } catch (error) {
-    mcpClient?.close();
-    mcpClient = null;
-    console.error('Failed to connect to MCP server:', error);
+async function listToolsFromBridge(): Promise<Tool[]> {
+  const result = await bridgeClient.request<{ tools?: Tool[] }>('mcp_list_tools', {
+    sessionId: mcpSessionId,
+  });
+  if (!result || !Array.isArray(result.tools)) {
+    return TOOL_SCHEMAS;
   }
-};
+  return result.tools;
+}
 
-export const setupTools = (server: Server) => {
-  // List tools handler
+async function callToolFromBridge(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+  const result = await bridgeClient.request<{ result?: CallToolResult }>('mcp_call_tool', {
+    sessionId: mcpSessionId,
+    name,
+    args,
+  }, 120_000);
+  if (!result?.result) {
+    throw new Error('Missing result from native bridge');
+  }
+  return result.result;
+}
+
+function setupHandlers(server: Server): void {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     try {
-      const client = await ensureMcpClient();
-      if (client) {
-        const upstream = await client.listTools(undefined, { timeout: 20_000 });
-        if (upstream && Array.isArray(upstream.tools)) {
-          return { tools: upstream.tools };
-        }
-      }
+      const tools = await listToolsFromBridge();
+      return { tools };
     } catch (error) {
-      console.warn('Failed to list tools from upstream MCP server, using static fallback:', error);
+      console.warn('[webpage-mcp-stdio] Failed to list tools via native bridge:', error);
+      return { tools: TOOL_SCHEMAS };
     }
-    return { tools: TOOL_SCHEMAS };
   });
 
-  // Call tool handler
-  server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    handleToolCall(request.params.name, request.params.arguments || {}),
-  );
-
-  // List resources handler - REQUIRED BY MCP PROTOCOL
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
-
-  // List prompts handler - REQUIRED BY MCP PROTOCOL
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [] }));
-};
-
-const handleToolCall = async (name: string, args: any): Promise<CallToolResult> => {
-  try {
-    const client = await ensureMcpClient();
-    if (!client) {
-      throw new Error('Failed to connect to MCP server');
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    try {
+      return await callToolFromBridge(request.params.name, request.params.arguments || {});
+    } catch (error: any) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error calling tool: ${error?.message || String(error)}`,
+          },
+        ],
+        isError: true,
+      };
     }
-    // Use a sane default of 2 minutes; the previous value mistakenly used 2*6*1000 (12s)
-    const DEFAULT_CALL_TIMEOUT_MS = 2 * 60 * 1000;
-    const result = await client.callTool({ name, arguments: args }, undefined, {
-      timeout: DEFAULT_CALL_TIMEOUT_MS,
-    });
-    return result as CallToolResult;
-  } catch (error: any) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Error calling tool: ${error.message}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-};
+  });
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [] }));
+}
 
 async function shutdown(exitCode = 0): Promise<void> {
   if (shutdownStarted) return;
   shutdownStarted = true;
 
-  try {
-    mcpClient?.close();
-    mcpClient = null;
-  } catch {
-    // Ignore close errors during shutdown
-  }
+  bridgeClient.close();
 
   try {
     await stdioMcpServer?.close();
-    stdioMcpServer = null;
   } catch {
-    // Ignore close errors during shutdown
+    // ignore close errors during shutdown
   }
+  stdioMcpServer = null;
 
   process.exit(exitCode);
 }
 
 function installProcessLifecycleHooks(): void {
-  // Parent process closed stdio; exit this proxy process to avoid zombies.
   process.stdin.on('end', () => {
     void shutdown(0);
   });
@@ -209,7 +277,6 @@ function installProcessLifecycleHooks(): void {
     void shutdown(0);
   });
 
-  // Parent PID watchdog: exit if parent disappears unexpectedly.
   const parentPid = process.ppid;
   if (Number.isInteger(parentPid) && parentPid > 1) {
     const timer = setInterval(() => {
@@ -223,13 +290,17 @@ function installProcessLifecycleHooks(): void {
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   installProcessLifecycleHooks();
+
+  // Fail fast if bridge is not reachable.
+  await bridgeClient.ensureConnected();
+
   const transport = new StdioServerTransport();
   await getStdioMcpServer().connect(transport);
 }
 
 main().catch((error) => {
-  console.error('Fatal error Webpage MCP Server main():', error);
+  console.error('Fatal error in webpage-mcp-stdio:', error);
   process.exit(1);
 });

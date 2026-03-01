@@ -24,9 +24,8 @@ import {
   tryRegisterUserLevelHost,
   getLogDir,
 } from './utils';
-import { NATIVE_SERVER_PORT } from '../constant';
+import { getNativeSocketPath } from '../ipc/socket-path';
 
-const EXPECTED_PORT = 12306;
 const SCHEMA_VERSION = 1;
 const MIN_NODE_MAJOR_VERSION = 20;
 
@@ -85,7 +84,7 @@ export interface DoctorReport {
     };
     nativeHost: {
       hostName: string;
-      expectedPort: number;
+      socketPath: string;
     };
   };
   fixes: DoctorFixAttempt[];
@@ -142,7 +141,6 @@ function resolveDistDir(): string {
 
   const looksLikeDist = (dir: string): boolean => {
     return (
-      fs.existsSync(path.join(dir, 'mcp', 'stdio-config.json')) ||
       fs.existsSync(path.join(dir, 'run_host.sh')) ||
       fs.existsSync(path.join(dir, 'run_host.bat'))
     );
@@ -640,7 +638,6 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
   const wrapperPath = path.resolve(distDir, wrapperScriptName);
   const nodeScriptPath = path.resolve(distDir, 'index.js');
   const logDir = getLogDir();
-  const stdioConfigPath = path.resolve(distDir, 'mcp', 'stdio-config.json');
 
   // Run fixes if requested
   const fixes = await attemptFixes(
@@ -671,7 +668,6 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
   const missingHostFiles: string[] = [];
   if (!fs.existsSync(wrapperPath)) missingHostFiles.push(wrapperPath);
   if (!fs.existsSync(nodeScriptPath)) missingHostFiles.push(nodeScriptPath);
-  if (!fs.existsSync(stdioConfigPath)) missingHostFiles.push(stdioConfigPath);
 
   if (missingHostFiles.length > 0) {
     checks.push({
@@ -688,7 +684,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
       title: 'Host files',
       status: 'ok',
       message: `Wrapper: ${wrapperPath}`,
-      details: { wrapperPath, nodeScriptPath, stdioConfigPath },
+      details: { wrapperPath, nodeScriptPath },
     });
   }
 
@@ -960,76 +956,17 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
     }
   }
 
-  // Check 7: Port configuration
-  if (fs.existsSync(stdioConfigPath)) {
-    const cfg = readJsonFile(stdioConfigPath);
-    if (!cfg.ok) {
-      checks.push({
-        id: 'port.config',
-        title: 'Port config',
-        status: 'error',
-        message: `Failed to parse stdio-config.json: ${cfg.error}`,
-      });
-    } else {
-      try {
-        const configValue = cfg.value as Record<string, unknown>;
-        const url = new URL(configValue.url as string);
-        const port = Number(url.port);
-        const portIsValid = Number.isInteger(port) && port >= 1 && port <= 65535;
-        const usesDefaultPort = portIsValid && port === EXPECTED_PORT;
-        checks.push({
-          id: 'port.config',
-          title: 'Port config',
-          status: !portIsValid ? 'error' : usesDefaultPort ? 'ok' : 'warn',
-          message: configValue.url as string,
-          details: {
-            defaultPort: EXPECTED_PORT,
-            actualPort: port,
-            validPortRange: '1-65535',
-            hint: usesDefaultPort
-              ? 'Using default port.'
-              : 'Non-default port is valid. Keep extension/server/stdio target ports aligned 1:1.',
-          },
-        });
-        if (!portIsValid) {
-          nextSteps.push(`${COMMAND_NAME} update-port ${EXPECTED_PORT}`);
-        }
-
-        // Check constant consistency
-        const nativePortOk = NATIVE_SERVER_PORT === EXPECTED_PORT;
-        checks.push({
-          id: 'port.constant',
-          title: 'Port constant',
-          status: nativePortOk ? 'ok' : 'warn',
-          message: `NATIVE_SERVER_PORT=${NATIVE_SERVER_PORT}`,
-          details: { expectedPort: EXPECTED_PORT },
-        });
-
-        // Connectivity check
-        const pingUrl = new URL('/ping', url);
-        const ping = await checkConnectivity(pingUrl.toString(), 1500);
-        checks.push({
-          id: 'connectivity',
-          title: 'Connectivity',
-          status: ping.ok ? 'ok' : 'warn',
-          message: ping.ok
-            ? `GET ${pingUrl} -> ${ping.status}`
-            : `GET ${pingUrl} failed (${ping.error || 'unknown error'})`,
-          details: {
-            hint: 'If the server is not running, click "Connect" in the extension and retry.',
-          },
-        });
-        if (!ping.ok) nextSteps.push('Click "Connect" in the extension, then re-run doctor');
-      } catch (e) {
-        checks.push({
-          id: 'port.config',
-          title: 'Port config',
-          status: 'error',
-          message: `Invalid URL in stdio-config.json: ${stringifyError(e)}`,
-        });
-      }
-    }
-  }
+  // Check 7: Native IPC bridge configuration (no localhost HTTP transport)
+  const socketPath = getNativeSocketPath();
+  checks.push({
+    id: 'native.ipc',
+    title: 'Native IPC socket/pipe',
+    status: 'ok',
+    message: socketPath,
+    details: {
+      hint: 'webpage-mcp-stdio connects to the native host through this local IPC endpoint.',
+    },
+  });
 
   // Check 8: Logs directory
   checks.push({
@@ -1057,7 +994,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
       node: { version: process.version, execPath: process.execPath },
       package: { name: packageName, version: packageVersion, rootDir, distDir },
       command: { canonical: commandInfo.canonical, aliases: commandInfo.aliases },
-      nativeHost: { hostName: HOST_NAME, expectedPort: EXPECTED_PORT },
+      nativeHost: { hostName: HOST_NAME, socketPath: getNativeSocketPath() },
     },
     fixes,
     checks,

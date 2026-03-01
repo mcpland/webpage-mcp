@@ -4,7 +4,7 @@ import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './t
 import type { AgentMessage, RealtimeEvent } from '../types';
 import { detectCcr, validateCcrConfig } from '../ccr-detector';
 import { getProject } from '../project-service';
-import { getWebpageMcpUrl } from '../../constant';
+import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
 
 // Images are provided to Claude Code via local file paths referenced in the prompt text.
 // Claude Code CLI reads images from local paths, so we write base64 images to temp files and reference them.
@@ -728,6 +728,7 @@ export class ClaudeEngine implements AgentEngine {
       // This only controls the built-in "webpage-mcp" entry; user-configured MCP servers remain untouched.
       const WEBPAGE_MCP_SERVER_NAME = 'webpage-mcp';
       if (enableWebpageMcp) {
+        const stdioConfig = resolveWebpageMcpStdioConfig();
         const existingMcpServers =
           queryOptions.mcpServers &&
           typeof queryOptions.mcpServers === 'object' &&
@@ -738,11 +739,15 @@ export class ClaudeEngine implements AgentEngine {
         queryOptions.mcpServers = {
           ...existingMcpServers,
           [WEBPAGE_MCP_SERVER_NAME]: {
-            type: 'http',
-            url: getWebpageMcpUrl(),
+            type: 'stdio',
+            command: stdioConfig.command,
+            args: stdioConfig.args,
+            ...(stdioConfig.env ? { env: stdioConfig.env } : {}),
           },
         };
-        console.error(`[ClaudeEngine] Webpage MCP server enabled: ${getWebpageMcpUrl()}`);
+        console.error(
+          `[ClaudeEngine] Webpage MCP server enabled via stdio: ${stdioConfig.command} ${stdioConfig.args.join(' ')}`,
+        );
       } else if (
         queryOptions.mcpServers &&
         typeof queryOptions.mcpServers === 'object' &&

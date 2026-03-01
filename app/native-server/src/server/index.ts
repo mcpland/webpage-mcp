@@ -1,35 +1,28 @@
 /**
- * HTTP Server - Core server implementation.
+ * Internal Route Runtime - Core server implementation.
  *
  * Responsibilities:
- * - Fastify instance management
- * - Plugin registration (CORS, etc.)
+ * - Fastify instance management (no external listen socket)
+ * - Plugin registration (CORS/auth hooks for internal route contract)
  * - Route delegation to specialized modules
- * - MCP transport handling
+ * - Native-host internal route invocation
  * - Server lifecycle management
  */
 import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import {
-  NATIVE_SERVER_PORT,
   TIMEOUTS,
   SERVER_CONFIG,
   HTTP_STATUS,
   ERROR_MESSAGES,
 } from '../constant';
 import { NativeMessagingHost } from '../native-messaging-host';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { Server as McpSdkServer } from '@modelcontextprotocol/sdk/server/index.js';
-import { randomUUID } from 'node:crypto';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { createMcpServer } from '../mcp/mcp-server';
-import { clearDynamicFlowCacheForSession } from '../mcp/register-tools';
 import { AgentStreamManager } from '../agent/stream-manager';
 import { AgentChatService } from '../agent/chat-service';
 import { CodexEngine } from '../agent/engines/codex';
 import { ClaudeEngine } from '../agent/engines/claude';
 import { closeDb } from '../agent/db';
+import type { RealtimeEvent } from '../agent/types';
 import { registerAgentRoutes } from './routes';
 import { DEFAULT_MCP_INSTANCE_ID } from 'webpage-mcp-shared';
 
@@ -45,45 +38,27 @@ interface ServerOptions {
   instanceId?: string;
 }
 
-type McpSessionTransport = StreamableHTTPServerTransport | SSEServerTransport;
-
-interface McpSession {
-  sessionId: string;
-  transport: McpSessionTransport;
-  mcpServer: McpSdkServer;
-  protocol: 'streamable-http' | 'sse';
-  createdAt: number;
+export interface InternalRouteRequest {
+  method: string;
+  path: string;
+  query?: Record<string, unknown>;
+  body?: unknown;
+  headers?: Record<string, string>;
 }
 
-type StreamableMcpSession = McpSession & { transport: StreamableHTTPServerTransport };
-type SseMcpSession = McpSession & { transport: SSEServerTransport };
+export interface InternalRouteResponse {
+  statusCode: number;
+  headers: Record<string, unknown>;
+  body: string;
+  json: unknown;
+  isBinary: boolean;
+  base64Body: string | null;
+}
+
 const AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
 const AUTH_TOKEN_HEADER = 'x-webpage-mcp-token';
 const AUTH_TOKEN_QUERY_KEYS = ['authToken', 'token'] as const;
-const AUTH_PROTECTED_PATHS = ['/mcp', '/sse', '/messages', '/agent', '/ask-extension'] as const;
-
-function isReplyCommitted(reply: FastifyReply): boolean {
-  const raw = reply.raw;
-  return reply.sent || raw.headersSent || raw.writableEnded || raw.destroyed;
-}
-
-function trySendReply(
-  reply: FastifyReply,
-  statusCode: number,
-  payload: string | { error: string },
-): boolean {
-  if (isReplyCommitted(reply)) {
-    return false;
-  }
-  reply.code(statusCode).send(payload);
-  return true;
-}
-
-function endRawReplyIfOpen(reply: FastifyReply): void {
-  if (!reply.raw.writableEnded && !reply.raw.destroyed) {
-    reply.raw.end();
-  }
-}
+const AUTH_PROTECTED_PATHS = ['/agent', '/ask-extension'] as const;
 
 // ============================================================
 // Server Class
@@ -95,10 +70,8 @@ export class Server {
   public isRunning = false;
   public readonly instanceId: string;
   private nativeHost: NativeMessagingHost | null = null;
-  private mcpSessions: Map<string, McpSession> = new Map();
   private agentStreamManager: AgentStreamManager;
   private agentChatService: AgentChatService;
-  private listeningPort: number | null = null;
 
   constructor(options: ServerOptions = {}) {
     this.instanceId = options.instanceId?.trim() || DEFAULT_MCP_INSTANCE_ID;
@@ -117,79 +90,6 @@ export class Server {
    */
   public setNativeHost(nativeHost: NativeMessagingHost): void {
     this.nativeHost = nativeHost;
-  }
-
-  private getNativeHostOrThrow(): NativeMessagingHost {
-    if (!this.nativeHost) {
-      throw new Error(ERROR_MESSAGES.NATIVE_HOST_NOT_AVAILABLE);
-    }
-    return this.nativeHost;
-  }
-
-  private registerMcpSession(session: McpSession): void {
-    this.mcpSessions.set(session.sessionId, session);
-  }
-
-  private getMcpSession(sessionId?: string): McpSession | undefined {
-    if (!sessionId) return undefined;
-    return this.mcpSessions.get(sessionId);
-  }
-
-  private getStreamableSession(sessionId?: string): StreamableMcpSession | undefined {
-    const session = this.getMcpSession(sessionId);
-    if (!session || !(session.transport instanceof StreamableHTTPServerTransport)) {
-      return undefined;
-    }
-    return session as StreamableMcpSession;
-  }
-
-  private getSseSession(sessionId?: string): SseMcpSession | undefined {
-    const session = this.getMcpSession(sessionId);
-    if (!session || !(session.transport instanceof SSEServerTransport)) {
-      return undefined;
-    }
-    return session as SseMcpSession;
-  }
-
-  private async disposeMcpSession(
-    sessionId: string,
-    options: { closeTransport?: boolean; closeServer?: boolean } = {},
-  ): Promise<void> {
-    const session = this.mcpSessions.get(sessionId);
-    if (!session) return;
-
-    this.mcpSessions.delete(sessionId);
-    clearDynamicFlowCacheForSession(sessionId);
-    const { closeTransport = false, closeServer = true } = options;
-
-    if (closeTransport) {
-      try {
-        await session.transport.close();
-      } catch {
-        // Ignore transport close errors during cleanup
-      }
-    }
-
-    if (closeServer) {
-      try {
-        await session.mcpServer.close();
-      } catch {
-        // Ignore server close errors during cleanup
-      }
-    }
-  }
-
-  private async disposeAllMcpSessions(): Promise<void> {
-    const ids = Array.from(this.mcpSessions.keys());
-    await Promise.all(ids.map((id) => this.disposeMcpSession(id, { closeTransport: true })));
-  }
-
-  private resolveListeningPort(fallbackPort: number): number {
-    const address = this.fastify.server.address();
-    if (address && typeof address === 'object' && typeof address.port === 'number') {
-      return address.port;
-    }
-    return fallbackPort;
   }
 
   private getConfiguredAuthToken(): string | undefined {
@@ -299,9 +199,6 @@ export class Server {
       streamManager: this.agentStreamManager,
       chatService: this.agentChatService,
     });
-
-    // MCP routes
-    this.setupMcpRoutes();
   }
 
   // ============================================================
@@ -360,199 +257,111 @@ export class Server {
     );
   }
 
-  // ============================================================
-  // MCP Routes
-  // ============================================================
+  private buildInjectPath(pathname: string, query?: Record<string, unknown>): string {
+    const path = pathname.startsWith('/') ? pathname : `/${pathname}`;
+    if (!query || Object.keys(query).length === 0) {
+      return path;
+    }
 
-  private setupMcpRoutes(): void {
-    // SSE endpoint
-    this.fastify.get('/sse', async (_, reply) => {
-      let createdSession: McpSession | undefined;
-      try {
-        const transport = new SSEServerTransport('/messages', reply.raw);
-        const sessionId = transport.sessionId;
-        const mcpServer = createMcpServer({
-          sessionId,
-          instanceId: this.instanceId,
-          nativeHost: this.getNativeHostOrThrow(),
-        });
-        createdSession = {
-          sessionId,
-          transport,
-          mcpServer,
-          protocol: 'sse',
-          createdAt: Date.now(),
-        };
-
-        transport.onclose = () => {
-          void this.disposeMcpSession(sessionId, { closeTransport: false });
-        };
-
-        this.registerMcpSession(createdSession);
-        await mcpServer.connect(transport);
-      } catch (error) {
-        if (createdSession) {
-          await this.disposeMcpSession(createdSession.sessionId, { closeTransport: true });
-        }
-        if (!trySendReply(reply, HTTP_STATUS.INTERNAL_SERVER_ERROR, ERROR_MESSAGES.INTERNAL_SERVER_ERROR)) {
-          endRawReplyIfOpen(reply);
-        }
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null) {
+        continue;
       }
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item === undefined || item === null) continue;
+          params.append(key, String(item));
+        }
+        continue;
+      }
+      params.set(key, String(value));
+    }
+    const queryString = params.toString();
+    return queryString ? `${path}?${queryString}` : path;
+  }
+
+  public async invokeInternalRoute(request: InternalRouteRequest): Promise<InternalRouteResponse> {
+    await this.fastify.ready();
+
+    const token = this.getConfiguredAuthToken();
+    const headers: Record<string, string> = {
+      ...(request.headers || {}),
+    };
+    if (token) {
+      if (!headers.Authorization && !headers.authorization) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      if (!headers['x-webpage-mcp-token']) {
+        headers['x-webpage-mcp-token'] = token;
+      }
+    }
+
+    const url = this.buildInjectPath(request.path, request.query);
+    const injectResponse = await new Promise<{
+      statusCode: number;
+      headers: Record<string, unknown>;
+      payload: string;
+      rawPayload: Buffer;
+      json: () => unknown;
+    }>((resolve, reject) => {
+      this.fastify.inject(
+        {
+          method: request.method as any,
+          url,
+          payload: request.body as any,
+          headers,
+        },
+        (error, response) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve(response as any);
+        },
+      );
     });
 
-    // SSE messages endpoint
-    this.fastify.post('/messages', async (req, reply) => {
+    const contentTypeHeader = String(injectResponse.headers['content-type'] || '').toLowerCase();
+    const isJson = contentTypeHeader.includes('application/json');
+    const isBinaryLike =
+      contentTypeHeader.startsWith('image/') ||
+      contentTypeHeader.startsWith('application/octet-stream');
+
+    let parsedJson: unknown = null;
+    if (isJson) {
       try {
-        const { sessionId } = req.query as { sessionId?: string };
-        const session = this.getSseSession(sessionId);
-        if (!session || !sessionId) {
-          reply.code(HTTP_STATUS.BAD_REQUEST).send('No transport found for sessionId');
-          return;
-        }
-
-        await session.transport.handlePostMessage(req.raw, reply.raw, req.body);
-      } catch (error) {
-        if (!trySendReply(reply, HTTP_STATUS.INTERNAL_SERVER_ERROR, ERROR_MESSAGES.INTERNAL_SERVER_ERROR)) {
-          endRawReplyIfOpen(reply);
-        }
+        parsedJson = injectResponse.json();
+      } catch {
+        parsedJson = null;
       }
-    });
+    }
 
-    // MCP POST endpoint
-    this.fastify.post('/mcp', async (request, reply) => {
-      const sessionId = request.headers['mcp-session-id'] as string | undefined;
-      let session = this.getStreamableSession(sessionId);
-      let createdSession: StreamableMcpSession | undefined;
-      let sessionRegistered = false;
+    return {
+      statusCode: injectResponse.statusCode,
+      headers: injectResponse.headers,
+      body: injectResponse.payload,
+      json: parsedJson,
+      isBinary: isBinaryLike,
+      base64Body: isBinaryLike ? injectResponse.rawPayload.toString('base64') : null,
+    };
+  }
 
-      if (session) {
-        // Transport found, proceed
-      } else if (!sessionId && isInitializeRequest(request.body)) {
-        const newSessionId = randomUUID();
-        const mcpServer = createMcpServer({
-          sessionId: newSessionId,
-          instanceId: this.instanceId,
-          nativeHost: this.getNativeHostOrThrow(),
-        });
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => newSessionId,
-          onsessioninitialized: (initializedSessionId) => {
-            if (!createdSession || initializedSessionId !== newSessionId) {
-              return;
-            }
-            createdSession.sessionId = initializedSessionId;
-            if (!sessionRegistered) {
-              this.registerMcpSession(createdSession);
-              sessionRegistered = true;
-            }
-          },
-        });
-        createdSession = {
-          sessionId: newSessionId,
-          transport,
-          mcpServer,
-          protocol: 'streamable-http',
-          createdAt: Date.now(),
-        };
-        session = createdSession;
-
-        transport.onclose = () => {
-          const closedSessionId = createdSession?.sessionId || newSessionId;
-          void this.disposeMcpSession(closedSessionId, { closeTransport: false });
-        };
-
-        await mcpServer.connect(transport);
-      } else {
-        reply.code(HTTP_STATUS.BAD_REQUEST).send({ error: ERROR_MESSAGES.INVALID_MCP_REQUEST });
-        return;
-      }
-
-      if (!session) {
-        reply.code(HTTP_STATUS.BAD_REQUEST).send({ error: ERROR_MESSAGES.INVALID_MCP_REQUEST });
-        return;
-      }
-
-      try {
-        await session.transport.handleRequest(request.raw, reply.raw, request.body);
-        if (createdSession && !sessionRegistered) {
-          await createdSession.transport.close().catch(() => {});
-          await createdSession.mcpServer.close().catch(() => {});
-        }
-      } catch (error) {
-        if (createdSession && !sessionRegistered) {
-          await createdSession.transport.close().catch(() => {});
-          await createdSession.mcpServer.close().catch(() => {});
-        }
-        if (
-          !trySendReply(reply, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-            error: ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR,
-          })
-        ) {
-          endRawReplyIfOpen(reply);
-        }
-      }
-    });
-
-    // MCP GET endpoint (SSE stream)
-    this.fastify.get('/mcp', async (request, reply) => {
-      const sessionId = request.headers['mcp-session-id'] as string | undefined;
-      const session = this.getStreamableSession(sessionId);
-
-      if (!session) {
-        reply.code(HTTP_STATUS.BAD_REQUEST).send({ error: ERROR_MESSAGES.INVALID_SSE_SESSION });
-        return;
-      }
-
-      try {
-        await session.transport.handleRequest(request.raw, reply.raw);
-      } catch (error) {
-        if (
-          !trySendReply(reply, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-            error: ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR,
-          })
-        ) {
-          endRawReplyIfOpen(reply);
-        }
-      }
-
-      request.socket.on('close', () => {
-        request.log.info(`SSE client disconnected for session: ${sessionId}`);
-      });
-    });
-
-    // MCP DELETE endpoint
-    this.fastify.delete('/mcp', async (request, reply) => {
-      const sessionId = request.headers['mcp-session-id'] as string | undefined;
-      const session = this.getStreamableSession(sessionId);
-
-      if (!session || !sessionId) {
-        reply.code(HTTP_STATUS.BAD_REQUEST).send({ error: ERROR_MESSAGES.INVALID_SESSION_ID });
-        return;
-      }
-
-      try {
-        await session.transport.handleRequest(request.raw, reply.raw);
-        await this.disposeMcpSession(sessionId, { closeTransport: false });
-        if (!isReplyCommitted(reply)) {
-          reply.code(HTTP_STATUS.NO_CONTENT).send();
-        }
-      } catch (error) {
-        if (
-          !trySendReply(reply, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-            error: ERROR_MESSAGES.MCP_SESSION_DELETION_ERROR,
-          })
-        ) {
-          endRawReplyIfOpen(reply);
-        }
-      }
-    });
+  public subscribeAgentEvents(
+    sessionId: string,
+    listener: (event: RealtimeEvent) => void,
+  ): () => void {
+    this.agentStreamManager.addListener(sessionId, listener);
+    return () => {
+      this.agentStreamManager.removeListener(sessionId, listener);
+    };
   }
 
   // ============================================================
   // Server Lifecycle
   // ============================================================
 
-  public async start(port = NATIVE_SERVER_PORT, nativeHost: NativeMessagingHost): Promise<number> {
+  public async start(nativeHost: NativeMessagingHost): Promise<void> {
     if (!this.nativeHost) {
       this.nativeHost = nativeHost;
     } else if (this.nativeHost !== nativeHost) {
@@ -560,28 +369,12 @@ export class Server {
     }
 
     if (this.isRunning) {
-      return this.resolveListeningPort(port);
+      return;
     }
 
-    try {
-      await this.fastify.listen({ port, host: SERVER_CONFIG.HOST });
-      const actualPort = this.resolveListeningPort(port);
-      this.listeningPort = actualPort;
-
-      // Keep backward compatibility: env URL resolution tracks the default MCP instance only.
-      if (this.instanceId === DEFAULT_MCP_INSTANCE_ID) {
-        process.env.WEBPAGE_MCP_PORT = String(actualPort);
-        process.env.MCP_HTTP_PORT = String(actualPort);
-      }
-
-      this.isRunning = true;
-      Server.activeServerCount += 1;
-      return actualPort;
-    } catch (err) {
-      this.isRunning = false;
-      this.listeningPort = null;
-      throw err;
-    }
+    await this.fastify.ready();
+    this.isRunning = true;
+    Server.activeServerCount += 1;
   }
 
   public async stop(): Promise<void> {
@@ -589,37 +382,15 @@ export class Server {
       return;
     }
 
-    try {
-      await this.disposeAllMcpSessions();
-      await this.fastify.close();
-      this.isRunning = false;
-      this.listeningPort = null;
-      Server.activeServerCount = Math.max(0, Server.activeServerCount - 1);
-      if (Server.activeServerCount === 0) {
-        closeDb();
-      }
-      if (this.instanceId === DEFAULT_MCP_INSTANCE_ID) {
-        delete process.env.WEBPAGE_MCP_PORT;
-        delete process.env.MCP_HTTP_PORT;
-      }
-    } catch (err) {
-      this.isRunning = false;
-      this.listeningPort = null;
-      Server.activeServerCount = Math.max(0, Server.activeServerCount - 1);
-      await this.disposeAllMcpSessions().catch(() => {});
-      if (Server.activeServerCount === 0) {
-        closeDb();
-      }
-      throw err;
+    this.isRunning = false;
+    Server.activeServerCount = Math.max(0, Server.activeServerCount - 1);
+    if (Server.activeServerCount === 0) {
+      closeDb();
     }
   }
 
   public getInstance(): FastifyInstance {
     return this.fastify;
-  }
-
-  public getListeningPort(): number | null {
-    return this.listeningPort;
   }
 }
 

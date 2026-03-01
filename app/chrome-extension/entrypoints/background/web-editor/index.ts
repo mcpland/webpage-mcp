@@ -11,10 +11,14 @@ import {
   type WebEditorCancelExecutionResponse,
 } from '@/common/web-editor-types';
 import { openAgentChatSidepanel } from '../utils/sidepanel';
+import {
+  requestAgentRpcFetch,
+  subscribeAgentStream,
+  unsubscribeAgentStream,
+} from '../native-host';
 
 const CONTEXT_MENU_ID = 'web_editor_toggle';
 const COMMAND_KEY = 'toggle_web_editor';
-const DEFAULT_NATIVE_SERVER_PORT = 12306;
 
 /** Storage key prefix for TX change session data (per-tab isolation) */
 const WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX = 'web-editor-v2-tx-changed-';
@@ -67,8 +71,25 @@ function getExecutionStatus(requestId: string): ExecutionStatusEntry | undefined
   return executionStatusCache.get(requestId);
 }
 
-// SSE connections for status updates (per sessionId)
-const sseConnections = new Map<string, { abort: AbortController; lastRequestId: string }>();
+// Stream subscriptions for status updates (per sessionId)
+const sseConnections = new Map<
+  string,
+  { subscriptionId: string; lastRequestId: string; listener: (message: unknown) => void }
+>();
+
+async function closeSessionStatusSubscription(sessionId: string, requestId?: string): Promise<void> {
+  const existing = sseConnections.get(sessionId);
+  if (!existing) {
+    return;
+  }
+  if (requestId && existing.lastRequestId !== requestId) {
+    return;
+  }
+
+  chrome.runtime.onMessage.removeListener(existing.listener);
+  await unsubscribeAgentStream(existing.subscriptionId).catch(() => {});
+  sseConnections.delete(sessionId);
+}
 
 /**
  * Start SSE subscription for a session to receive status updates
@@ -76,74 +97,50 @@ const sseConnections = new Map<string, { abort: AbortController; lastRequestId: 
 async function subscribeToSessionStatus(
   sessionId: string,
   requestId: string,
-  port: number,
 ): Promise<void> {
-  // Close existing connection for this session if any
+  // Close existing subscription for this session if any
   const existing = sseConnections.get(sessionId);
   if (existing) {
-    existing.abort.abort();
-    sseConnections.delete(sessionId);
+    await closeSessionStatusSubscription(sessionId);
   }
-
-  const abortController = new AbortController();
-  sseConnections.set(sessionId, { abort: abortController, lastRequestId: requestId });
 
   // Set initial status
   setExecutionStatus(requestId, 'starting', 'Connecting to Agent...');
 
-  const sseUrl = `http://127.0.0.1:${port}/agent/chat/${encodeURIComponent(sessionId)}/stream`;
-
   try {
-    const response = await fetch(sseUrl, {
-      method: 'GET',
-      headers: { Accept: 'text/event-stream' },
-      signal: abortController.signal,
+    const subscription = await subscribeAgentStream(sessionId, {
+      subscriptionId: `web-editor-${sessionId}-${requestId}`,
     });
 
-    if (!response.ok || !response.body) {
-      setExecutionStatus(requestId, 'running', 'Agent processing...');
-      return;
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    setExecutionStatus(requestId, 'running', 'Agent processing...');
-
-    // Read SSE stream
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        if (line.startsWith('data:')) {
-          try {
-            const data = JSON.parse(line.slice(5).trim());
-            handleSseEvent(requestId, data);
-          } catch {
-            // Ignore parse errors
-          }
-        }
+    const onMessage = (message: unknown): void => {
+      const msg = message as {
+        type?: string;
+        payload?: {
+          subscriptionId?: string;
+          event?: unknown;
+        };
+      };
+      if (msg?.type !== BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT) {
+        return;
       }
-    }
+      if (msg.payload?.subscriptionId !== subscription.subscriptionId || !msg.payload.event) {
+        return;
+      }
+      handleSseEvent(requestId, msg.payload.event);
+    };
+
+    sseConnections.set(sessionId, {
+      subscriptionId: subscription.subscriptionId,
+      lastRequestId: requestId,
+      listener: onMessage,
+    });
+    chrome.runtime.onMessage.addListener(onMessage);
+    setExecutionStatus(requestId, 'running', 'Agent processing...');
   } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      // Intentionally aborted, not an error
-      return;
-    }
-    // Connection error - mark as unknown but not failed (Agent may still be running)
     const cached = getExecutionStatus(requestId);
     if (cached && !['completed', 'failed', 'cancelled'].includes(cached.status)) {
       setExecutionStatus(requestId, 'running', 'Agent processing (connection lost)...');
     }
-  } finally {
-    sseConnections.delete(sessionId);
   }
 }
 
@@ -163,6 +160,7 @@ function handleSseEvent(requestId: string, event: unknown): void {
   if (type === 'status' && data) {
     const status = data.status as string;
     const message = data.message as string | undefined;
+    const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
 
     // Map Agent status to our status
     // - 'ready' -> 'running' (ready is a running sub-state)
@@ -172,6 +170,12 @@ function handleSseEvent(requestId: string, event: unknown): void {
     if (status === 'error') mappedStatus = 'failed';
 
     setExecutionStatus(requestId, mappedStatus, message);
+    if (
+      sessionId &&
+      (mappedStatus === 'completed' || mappedStatus === 'failed' || mappedStatus === 'cancelled')
+    ) {
+      void closeSessionStatusSubscription(sessionId, requestId);
+    }
   } else if (type === 'message' && data) {
     // Update status to show we're receiving messages
     const cached = getExecutionStatus(requestId);
@@ -1006,15 +1010,7 @@ export function initWebEditorListeners(): void {
               return sendResponse({ success: false, error: 'debugSource.file is required' });
             }
 
-            // Read server port and selected project
-            const stored = await chrome.storage.local.get([
-              'nativeServerPort',
-              'agent-selected-project-id',
-            ]);
-            const portRaw = stored.nativeServerPort;
-            const port = Number.isFinite(Number(portRaw))
-              ? Number(portRaw)
-              : DEFAULT_NATIVE_SERVER_PORT;
+            const stored = await chrome.storage.local.get(['agent-selected-project-id']);
             const projectId = stored['agent-selected-project-id'];
 
             if (!projectId || typeof projectId !== 'string') {
@@ -1031,28 +1027,26 @@ export function initWebEditorListeners(): void {
             const column = Number.isFinite(columnRaw) && columnRaw > 0 ? columnRaw : undefined;
 
             // Call native-server to open file (server will validate project and path)
-            const openResp = await fetch(
-              `http://127.0.0.1:${port}/agent/projects/${encodeURIComponent(projectId)}/open-file`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  filePath: file,
-                  line,
-                  column,
-                }),
-              },
-            );
+            const openResp = await requestAgentRpcFetch({
+              method: 'POST',
+              path: `/agent/projects/${encodeURIComponent(projectId)}/open-file`,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                filePath: file,
+                line,
+                column,
+              }),
+            });
 
             // Try to parse JSON response for detailed error
             let result: { success: boolean; error?: string };
             try {
-              result = await openResp.json();
+              result = (openResp.json || {}) as { success: boolean; error?: string };
             } catch {
-              const text = await openResp.text().catch(() => '');
+              const text = openResp.body || '';
               result = {
                 success: false,
-                error: text || `HTTP ${openResp.status}`,
+                error: text || `HTTP ${openResp.statusCode}`,
               };
             }
 
@@ -1225,16 +1219,7 @@ export function initWebEditorListeners(): void {
           const senderTabId = (_sender as chrome.runtime.MessageSender)?.tab?.id;
           const senderWindowId = (_sender as chrome.runtime.MessageSender)?.tab?.windowId;
 
-          // Read storage for server port and selected session
-          const stored = await chrome.storage.local.get([
-            'nativeServerPort',
-            STORAGE_KEY_SELECTED_SESSION,
-          ]);
-
-          const portRaw = stored?.nativeServerPort;
-          const port = Number.isFinite(Number(portRaw))
-            ? Number(portRaw)
-            : DEFAULT_NATIVE_SERVER_PORT;
+          const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
 
           const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
 
@@ -1297,13 +1282,13 @@ export function initWebEditorListeners(): void {
 
           // Build batch prompt and send to agent
           const instruction = buildAgentPromptBatch(elements, pageUrl);
-          const url = `http://127.0.0.1:${port}/agent/chat/${encodeURIComponent(sessionId)}/act`;
 
           // Extract element labels for compact display
           const elementLabels = elements.slice(0, 5).map((e) => e.label);
 
-          const resp = await fetch(url, {
+          const resp = await requestAgentRpcFetch({
             method: 'POST',
+            path: `/agent/chat/${encodeURIComponent(sessionId)}/act`,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               instruction,
@@ -1322,20 +1307,20 @@ export function initWebEditorListeners(): void {
           });
 
           if (!resp.ok) {
-            const text = await resp.text().catch(() => '');
+            const text = resp.body || '';
             sendResponse({
               success: false,
-              error: text || `HTTP ${resp.status}`,
+              error: text || `HTTP ${resp.statusCode}`,
             });
             return;
           }
 
-          const json: any = await resp.json().catch(() => ({}));
+          const json: any = resp.json || {};
           const requestId = json?.requestId as string | undefined;
 
           if (requestId) {
             // Start SSE subscription for status updates (fire and forget)
-            subscribeToSessionStatus(sessionId, requestId, port).catch(() => {});
+            subscribeToSessionStatus(sessionId, requestId).catch(() => {});
           }
 
           sendResponse({ success: true, requestId, sessionId });
@@ -1484,14 +1469,7 @@ export function initWebEditorListeners(): void {
           const sessionId =
             typeof senderTabId === 'number' ? `web-editor-${senderTabId}` : 'web-editor';
 
-          const stored = await chrome.storage.local.get([
-            'nativeServerPort',
-            'agent-selected-project-id',
-          ]);
-          const portRaw = stored?.nativeServerPort;
-          const port = Number.isFinite(Number(portRaw))
-            ? Number(portRaw)
-            : DEFAULT_NATIVE_SERVER_PORT;
+          const stored = await chrome.storage.local.get(['agent-selected-project-id']);
 
           const projectId = normalizeString(stored?.['agent-selected-project-id']).trim() || '';
 
@@ -1504,10 +1482,10 @@ export function initWebEditorListeners(): void {
           }
 
           const instruction = buildAgentPrompt(payload);
-          const url = `http://127.0.0.1:${port}/agent/chat/${encodeURIComponent(sessionId)}/act`;
 
-          const resp = await fetch(url, {
+          const resp = await requestAgentRpcFetch({
             method: 'POST',
+            path: `/agent/chat/${encodeURIComponent(sessionId)}/act`,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               instruction,
@@ -1516,19 +1494,19 @@ export function initWebEditorListeners(): void {
           });
 
           if (!resp.ok) {
-            const text = await resp.text().catch(() => '');
+            const text = resp.body || '';
             return sendResponse({
               success: false,
-              error: text || `HTTP ${resp.status}`,
+              error: text || `HTTP ${resp.statusCode}`,
             });
           }
 
-          const json: any = await resp.json().catch(() => ({}));
+          const json: any = resp.json || {};
           const requestId = json?.requestId as string | undefined;
 
           if (requestId) {
             // Start SSE subscription for status updates (fire and forget)
-            subscribeToSessionStatus(sessionId, requestId, port).catch(() => {});
+            subscribeToSessionStatus(sessionId, requestId).catch(() => {});
           }
 
           return sendResponse({ success: true, requestId, sessionId });
@@ -1587,17 +1565,15 @@ export function initWebEditorListeners(): void {
             return;
           }
 
-          // Get server port
-          const stored = await chrome.storage.local.get(['nativeServerPort']);
-          const port = stored.nativeServerPort || DEFAULT_NATIVE_SERVER_PORT;
-
           try {
             // Call cancel API
-            const cancelUrl = `http://127.0.0.1:${port}/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(requestId)}`;
-            const response = await fetch(cancelUrl, { method: 'DELETE' });
+            const response = await requestAgentRpcFetch({
+              method: 'DELETE',
+              path: `/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(requestId)}`,
+            });
 
             if (!response.ok) {
-              const errorText = await response.text().catch(() => `HTTP ${response.status}`);
+              const errorText = response.body || `HTTP ${response.statusCode}`;
               sendResponse({
                 success: false,
                 error: errorText,
@@ -1611,8 +1587,7 @@ export function initWebEditorListeners(): void {
             // Abort SSE connection for this session
             const sseConnection = sseConnections.get(sessionId);
             if (sseConnection && sseConnection.lastRequestId === requestId) {
-              sseConnection.abort.abort();
-              sseConnections.delete(sessionId);
+              void closeSessionStatusSubscription(sessionId, requestId);
             }
 
             sendResponse({ success: true } as WebEditorCancelExecutionResponse);

@@ -16,7 +16,6 @@
 import type { AgentActRequest, RealtimeEvent } from 'webpage-mcp-shared';
 import { NativeMessageType } from 'webpage-mcp-shared';
 
-import { NATIVE_HOST, STORAGE_KEYS } from '@/common/constants';
 import {
   BACKGROUND_MESSAGE_TYPES,
   TOOL_MESSAGE_TYPES,
@@ -28,6 +27,11 @@ import {
 } from '@/common/message-types';
 import { acquireKeepalive } from '../keepalive-manager';
 import { openAgentChatSidepanel } from '../utils/sidepanel';
+import {
+  requestAgentRpcFetch,
+  subscribeAgentStream,
+  unsubscribeAgentStream,
+} from '../native-host';
 
 // ============================================================
 // Constants
@@ -44,9 +48,6 @@ const SSE_CONNECT_TIMEOUT_MS = 3000;
 
 /** Safety timeout for entire request lifecycle (15 minutes) */
 const REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
-
-/** Flag indicating SSE connection was successful */
-const SSE_CONNECTED = Symbol('SSE_CONNECTED');
 
 /** Flag indicating SSE connection timed out but we should continue */
 const SSE_TIMEOUT = Symbol('SSE_TIMEOUT');
@@ -70,11 +71,12 @@ interface ActiveRequest {
   readonly tabId: number;
   readonly windowId?: number;
   readonly frameId?: number;
-  readonly port: number;
   readonly createdAt: number;
   readonly abortController: AbortController;
   readonly releaseKeepalive: () => void;
   readonly timeoutId: ReturnType<typeof setTimeout>;
+  streamSubscriptionId?: string;
+  streamListener?: (message: unknown) => void;
 }
 
 // ============================================================
@@ -93,18 +95,6 @@ let initialized = false;
 
 function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value : '';
-}
-
-function normalizePort(value: unknown): number | null {
-  const num =
-    typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
-
-  if (!Number.isFinite(num)) return null;
-
-  const port = Math.floor(num);
-  if (port <= 0 || port > 65535) return null;
-
-  return port;
 }
 
 function createRequestId(): string {
@@ -220,6 +210,20 @@ function cleanupRequest(requestId: string, reason: string): void {
     // Ignore
   }
 
+  if (request.streamListener) {
+    try {
+      chrome.runtime.onMessage.removeListener(request.streamListener);
+    } catch {
+      // Ignore
+    }
+  }
+
+  if (request.streamSubscriptionId) {
+    void unsubscribeAgentStream(request.streamSubscriptionId).catch(() => {
+      // Ignore
+    });
+  }
+
   // Release keepalive
   try {
     request.releaseKeepalive();
@@ -238,10 +242,12 @@ function cleanupRequest(requestId: string, reason: string): void {
  * Validate that the selected session exists on the native server.
  * Returns false if the session is invalid or server is unreachable.
  */
-async function validateSession(port: number, sessionId: string): Promise<boolean> {
-  const url = `http://127.0.0.1:${port}/agent/sessions/${encodeURIComponent(sessionId)}`;
+async function validateSession(sessionId: string): Promise<boolean> {
   try {
-    const response = await fetch(url);
+    const response = await requestAgentRpcFetch({
+      method: 'GET',
+      path: `/agent/sessions/${encodeURIComponent(sessionId)}`,
+    });
     return response.ok;
   } catch {
     return false;
@@ -305,100 +311,82 @@ interface SseSubscription {
  *   - false: SSE failed (request was cleaned up, don't send /act)
  */
 function createSseSubscription(request: ActiveRequest): SseSubscription {
-  // Track whether ready has been resolved
   let readySettled = false;
   let readyResolve: (connected: boolean) => void;
+  let doneResolve: () => void;
 
   const ready = new Promise<boolean>((resolve) => {
     readyResolve = resolve;
   });
+  const done = new Promise<void>((resolve) => {
+    doneResolve = resolve;
+  });
 
-  // Helper to resolve ready exactly once
   const settleReady = (connected: boolean): void => {
     if (readySettled) return;
     readySettled = true;
     readyResolve(connected);
   };
 
-  const done = (async () => {
-    const sseUrl = `http://127.0.0.1:${request.port}/agent/chat/${encodeURIComponent(request.sessionId)}/stream`;
+  const subscriptionId = `quick-panel-${request.requestId}`;
 
-    try {
-      const response = await fetch(sseUrl, {
-        method: 'GET',
-        headers: { Accept: 'text/event-stream' },
-        signal: request.abortController.signal,
-      });
+  void subscribeAgentStream(request.sessionId, { subscriptionId })
+    .then(({ subscriptionId: actualSubscriptionId }) => {
+      request.streamSubscriptionId = actualSubscriptionId;
 
-      if (!response.ok || !response.body) {
-        throw new Error(`SSE stream unavailable (HTTP ${response.status})`);
-      }
+      const onMessage = (message: unknown): void => {
+        const msg = message as {
+          type?: string;
+          payload?: {
+            subscriptionId?: string;
+            event?: RealtimeEvent;
+          };
+        };
+        if (msg?.type !== BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT) {
+          return;
+        }
+        if (msg.payload?.subscriptionId !== actualSubscriptionId || !msg.payload.event) {
+          return;
+        }
 
-      // Signal that SSE is connected successfully
-      settleReady(true);
+        const event = msg.payload.event;
+        if (!shouldForwardEvent(event, request.requestId)) {
+          return;
+        }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      // Read and parse SSE stream
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue;
-          const raw = line.slice(5).trim();
-          if (!raw) continue;
-
-          try {
-            const event = JSON.parse(raw) as RealtimeEvent;
-
-            // Filter by requestId to prevent cross-request leakage
-            if (!shouldForwardEvent(event, request.requestId)) {
-              continue;
-            }
-
-            forwardEventToQuickPanel(request, event);
-
-            // Cleanup on terminal status
-            if (event.type === 'status' && event.data?.requestId === request.requestId) {
-              if (isTerminalStatus(event.data.status)) {
-                cleanupRequest(request.requestId, `terminal_status:${event.data.status}`);
-                return;
-              }
-            }
-          } catch {
-            // Ignore parse errors (best-effort stream processing)
+        forwardEventToQuickPanel(request, event);
+        if (event.type === 'status' && event.data?.requestId === request.requestId) {
+          if (isTerminalStatus(event.data.status)) {
+            cleanupRequest(request.requestId, `terminal_status:${event.data.status}`);
           }
         }
-      }
-    } catch (err) {
-      // AbortError is intentional (cancellation or cleanup)
-      if (err instanceof Error && err.name === 'AbortError') {
-        // Signal not connected if aborted before connecting
-        settleReady(false);
-        return;
-      }
+      };
 
-      // Surface error to UI and cleanup if request is still active
+      request.streamListener = onMessage;
+      chrome.runtime.onMessage.addListener(request.streamListener);
+
+      request.abortController.signal.addEventListener(
+        'abort',
+        () => {
+          doneResolve();
+        },
+        { once: true },
+      );
+
+      settleReady(true);
+    })
+    .catch((error) => {
+      settleReady(false);
+      const message = error instanceof Error ? error.message : String(error);
       if (activeRequests.has(request.requestId)) {
-        const msg = err instanceof Error ? err.message : String(err);
         forwardEventToQuickPanel(
           request,
-          createErrorEvent(request.sessionId, request.requestId, msg),
+          createErrorEvent(request.sessionId, request.requestId, message),
         );
-        cleanupRequest(request.requestId, 'sse_error');
+        cleanupRequest(request.requestId, 'stream_subscribe_failed');
       }
-
-      // Signal failed connection
-      settleReady(false);
-    }
-  })();
+      doneResolve();
+    });
 
   return { ready, done };
 }
@@ -420,8 +408,6 @@ async function postActRequest(request: ActiveRequest): Promise<void> {
     throw new Error('Request was cancelled');
   }
 
-  const url = `http://127.0.0.1:${request.port}/agent/chat/${encodeURIComponent(request.sessionId)}/act`;
-
   const payload: AgentActRequest = {
     instruction: request.instruction,
     // Ensures session-level config is loaded (engine, model, options, project binding)
@@ -430,16 +416,16 @@ async function postActRequest(request: ActiveRequest): Promise<void> {
     requestId: request.requestId,
   };
 
-  const response = await fetch(url, {
+  const response = await requestAgentRpcFetch({
     method: 'POST',
+    path: `/agent/chat/${encodeURIComponent(request.sessionId)}/act`,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-    signal: request.abortController.signal,
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `HTTP ${response.status}`);
+    const text = response.body || '';
+    throw new Error(text || `HTTP ${response.statusCode}`);
   }
 }
 
@@ -447,13 +433,14 @@ async function postActRequest(request: ActiveRequest): Promise<void> {
  * Cancel an active request on the native-server.
  */
 async function cancelRequestOnServer(
-  port: number,
   sessionId: string,
   requestId: string,
 ): Promise<void> {
-  const url = `http://127.0.0.1:${port}/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(requestId)}`;
   try {
-    await fetch(url, { method: 'DELETE' });
+    await requestAgentRpcFetch({
+      method: 'DELETE',
+      path: `/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(requestId)}`,
+    });
   } catch {
     // Best-effort: cancellation might still succeed if request already ended
   }
@@ -494,7 +481,7 @@ async function startRequest(request: ActiveRequest): Promise<void> {
     if (!isRequestStillActive(request)) return;
 
     // Validate session still exists
-    const sessionValid = await validateSession(request.port, request.sessionId);
+    const sessionValid = await validateSession(request.sessionId);
 
     // Guard: check if cancelled during validation
     if (!isRequestStillActive(request)) return;
@@ -591,13 +578,7 @@ async function handleSendToAI(
     return { success: false, error: 'instruction is required' };
   }
 
-  // Read server port and selected session from storage
-  const stored = await chrome.storage.local.get([
-    STORAGE_KEYS.NATIVE_SERVER_PORT,
-    STORAGE_KEY_SELECTED_SESSION,
-  ]);
-
-  const port = normalizePort(stored?.[STORAGE_KEYS.NATIVE_SERVER_PORT]) ?? NATIVE_HOST.DEFAULT_PORT;
+  const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
   const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
 
   if (!sessionId) {
@@ -638,7 +619,6 @@ async function handleSendToAI(
     tabId,
     windowId: typeof windowId === 'number' ? windowId : undefined,
     frameId,
-    port,
     createdAt: Date.now(),
     abortController,
     releaseKeepalive,
@@ -694,15 +674,8 @@ async function handleCancelAI(
     }
   }
 
-  // Determine port
-  let port = activeRequest?.port;
-  if (!port) {
-    const stored = await chrome.storage.local.get([STORAGE_KEYS.NATIVE_SERVER_PORT]);
-    port = normalizePort(stored?.[STORAGE_KEYS.NATIVE_SERVER_PORT]) ?? NATIVE_HOST.DEFAULT_PORT;
-  }
-
   // Cancel on server (async, don't await)
-  void cancelRequestOnServer(port, sessionId, requestId);
+  void cancelRequestOnServer(sessionId, requestId);
 
   // Send synthetic cancelled status to UI
   const cancelledEvent = createCancelledStatusEvent(sessionId, requestId);

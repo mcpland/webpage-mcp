@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
 import { program } from 'commander';
-import * as fs from 'fs';
-import * as path from 'path';
 import {
   tryRegisterUserLevelHost,
   colorText,
@@ -137,42 +135,6 @@ program
       console.log(colorText('✓ Execution permissions fixed successfully!', 'green'));
     } catch (error: any) {
       console.error(colorText(`Failed to fix permissions: ${error.message}`, 'red'));
-      process.exit(1);
-    }
-  });
-
-// Update port in stdio-config.json
-program
-  .command('update-port <port>')
-  .description('Update the port number in stdio-config.json')
-  .action(async (port: string) => {
-    try {
-      const portNumber = parseInt(port, 10);
-      if (isNaN(portNumber) || portNumber < 1 || portNumber > 65535) {
-        console.error(colorText('Error: Port must be a valid number between 1 and 65535', 'red'));
-        process.exit(1);
-      }
-
-      const configPath = path.join(__dirname, 'mcp', 'stdio-config.json');
-
-      if (!fs.existsSync(configPath)) {
-        console.error(colorText(`Error: Configuration file not found at ${configPath}`, 'red'));
-        process.exit(1);
-      }
-
-      const configData = fs.readFileSync(configPath, 'utf8');
-      const config = JSON.parse(configData);
-
-      const currentUrl = new URL(config.url);
-      currentUrl.port = portNumber.toString();
-      config.url = currentUrl.toString();
-
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
-
-      console.log(colorText(`✓ Port updated successfully to ${portNumber}`, 'green'));
-      console.log(colorText(`Updated URL: ${config.url}`, 'blue'));
-    } catch (error: any) {
-      console.error(colorText(`Failed to update port: ${error.message}`, 'red'));
       process.exit(1);
     }
   });

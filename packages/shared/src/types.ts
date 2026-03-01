@@ -20,6 +20,10 @@ export enum NativeMessageType {
   PING_NATIVE = 'ping_native',
   DISCONNECT_NATIVE = 'disconnect_native',
   LIST_INSTANCES = 'list_instances',
+  AGENT_RPC = 'agent_rpc',
+  AGENT_STREAM_SUBSCRIBE = 'agent_stream_subscribe',
+  AGENT_STREAM_UNSUBSCRIBE = 'agent_stream_unsubscribe',
+  AGENT_STREAM_EVENT = 'agent_stream_event',
 }
 
 export interface NativeMessage<P = any, E = any> {
@@ -31,7 +35,6 @@ export interface NativeMessage<P = any, E = any> {
 
 export interface McpServerInstanceConfig {
   instanceId: string;
-  port: number;
   enabled: boolean;
   autoStart: boolean;
   label?: string;
@@ -40,7 +43,6 @@ export interface McpServerInstanceConfig {
 export interface McpServerInstanceStatus {
   instanceId: string;
   isRunning: boolean;
-  port?: number;
   lastUpdated: number;
 }
 

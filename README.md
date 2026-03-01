@@ -6,15 +6,15 @@ Turn your Chrome browser into a fully-featured [MCP (Model Context Protocol)](ht
 
 ```
 AI Client (Claude Desktop, Cursor, etc.)
-    <-> MCP (Streamable HTTP / SSE / stdio)
-Native Server (Node.js, default port 12306)
+    <-> MCP (stdio)
+Native Server (Node.js, no HTTP port)
     <-> Chrome Native Messaging (stdin/stdout)
 Chrome Extension (service worker)
     <-> Chrome APIs / DevTools Protocol
 Your Browser
 ```
 
-The **Chrome extension** exposes real browser capabilities as MCP tools. The **Native Server** acts as the bridge between AI clients and the Chrome extension using Chrome's [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging) protocol. Any MCP-compatible AI client can connect via HTTP, SSE, or stdio transport.
+The **Chrome extension** exposes real browser capabilities as MCP tools. The **Native Server** bridges AI clients and the extension using Chrome [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging). MCP clients connect over stdio only (no localhost HTTP transport).
 
 ## Features
 
@@ -118,19 +118,7 @@ Open Chrome and click the extension icon - it should show a connected status.
 
 ### Connecting AI Clients
 
-The MCP server runs on `http://127.0.0.1:12306` by default. It supports three transport modes:
-
-#### Streamable HTTP (recommended)
-
-Endpoint: `http://127.0.0.1:12306/mcp`
-
-#### SSE (legacy)
-
-Endpoints: `http://127.0.0.1:12306/sse` (event stream) + `http://127.0.0.1:12306/messages` (messages)
-
-#### stdio
-
-Use the `webpage-mcp-stdio` binary, which proxies stdio to the HTTP server:
+Use stdio transport with the `webpage-mcp-stdio` binary:
 
 ```json
 {
@@ -142,12 +130,6 @@ Use the `webpage-mcp-stdio` binary, which proxies stdio to the HTTP server:
   }
 }
 ```
-
-`webpage-mcp-stdio` resolves its upstream endpoint in this order:
-
-1. `WEBPAGE_MCP_URL` (full URL)
-2. `WEBPAGE_MCP_PORT` / `MCP_HTTP_PORT` (builds `http://127.0.0.1:<port>/mcp`)
-3. `app/native-server/dist/mcp/stdio-config.json` (or packaged equivalent)
 
 ### Claude Desktop Configuration
 
@@ -176,38 +158,10 @@ Or if using npx:
 }
 ```
 
-### Port Configuration
+### Notes
 
-Use a strict 1:1 port mapping:
-
-1. Set the server port in the extension popup (default `12306`).
-2. Point `webpage-mcp-stdio` to that same port:
-
-```bash
-npx webpage-mcp update-port 12306
-```
-
-`update-port` edits `app/native-server/dist/mcp/stdio-config.json` (or packaged equivalent).
-If the popup port changes, run `update-port` with the same value.
-
-For multiple MCP server instances, each instance must use a unique port.
-
-### Optional Local Auth Token
-
-If you want to require auth on local MCP/agent endpoints, set:
-
-```bash
-export WEBPAGE_MCP_AUTH_TOKEN="your-random-token"
-```
-
-When set, requests to `/mcp`, `/sse`, `/messages`, `/agent/*`, and `/ask-extension` must include either:
-
-- `Authorization: Bearer <token>`
-- `x-webpage-mcp-token: <token>`
-
-`webpage-mcp-stdio` will forward this token automatically when `WEBPAGE_MCP_AUTH_TOKEN` is present in its environment.
-
-When the extension is connected, the popup also shows a copyable auth token block (if token auth is enabled on the native server).
+- The current architecture is fully native/stdio and does not expose localhost MCP/agent HTTP endpoints.
+- Multiple instances are identified by `instanceId`; data transport is native/stdio only.
 
 ## Project Structure
 
@@ -226,8 +180,8 @@ webpage-mcp/
 |  |  '- common/                 # Shared types and constants
 |  '- native-server/             # Node.js native messaging host + MCP server
 |     '- src/
-|        |- mcp/                 # MCP server (HTTP + stdio proxy)
-|        |- server/              # Fastify HTTP server + agent API
+|        |- mcp/                 # MCP server (stdio + native IPC bridge)
+|        |- server/              # Internal route/runtime layer (no external HTTP listener)
 |        |- cli.ts               # CLI commands (register, doctor, report)
 |        '- native-messaging-host.ts  # Chrome native messaging bridge
 |- packages/
@@ -311,7 +265,6 @@ The `webpage-mcp` CLI provides the following commands:
 |---|---|
 | `register` | Register the Native Messaging host manifest |
 | `fix-permissions` | Fix execution permissions for native host files |
-| `update-port <port>` | Update stdio proxy target port in `mcp/stdio-config.json` |
 | `doctor` | Diagnose installation and environment issues |
 | `report` | Export a diagnostic report for troubleshooting |
 
@@ -334,7 +287,7 @@ Options:
 | Extension framework | [WXT](https://wxt.dev/) (Vite-based) |
 | Extension UI | React 18 + TailwindCSS v4 |
 | Flow builder | @xyflow/react (ReactFlow) |
-| Native server | Fastify v5 + @fastify/cors |
+| Native server | Node.js Native Messaging + local IPC |
 | MCP SDK | @modelcontextprotocol/sdk |
 | Agent SDK | @anthropic-ai/claude-agent-sdk |
 | Database | SQLite (better-sqlite3 + drizzle-orm) |
@@ -354,9 +307,9 @@ Options:
 
 ### MCP client can't reach the server
 
-1. Verify the server is running: `curl http://127.0.0.1:12306/ping`
-2. Check if another process is using port 12306
-3. If you use stdio proxy, align proxy target with server port: `webpage-mcp update-port <port>`
+1. Ensure Chrome is open and the extension is enabled
+2. Ensure native host is connected (`webpage-mcp doctor`)
+3. Use stdio config (`webpage-mcp-stdio`) in your MCP client; no localhost endpoint is required
 
 ### Tools return errors or time out
 

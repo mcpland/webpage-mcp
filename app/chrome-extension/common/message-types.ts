@@ -91,6 +91,10 @@ export const BACKGROUND_MESSAGE_TYPES = {
   // Quick Panel <-> AgentChat integration
   QUICK_PANEL_SEND_TO_AI: 'quick_panel_send_to_ai',
   QUICK_PANEL_CANCEL_AI: 'quick_panel_cancel_ai',
+  AGENT_RPC_FETCH: 'agent_rpc_fetch',
+  AGENT_STREAM_SUBSCRIBE: 'agent_stream_subscribe',
+  AGENT_STREAM_UNSUBSCRIBE: 'agent_stream_unsubscribe',
+  AGENT_STREAM_EVENT: 'agent_stream_event',
   // Quick Panel Search - Tabs bridge
   QUICK_PANEL_TABS_QUERY: 'quick_panel_tabs_query',
   QUICK_PANEL_TAB_ACTIVATE: 'quick_panel_tab_activate',

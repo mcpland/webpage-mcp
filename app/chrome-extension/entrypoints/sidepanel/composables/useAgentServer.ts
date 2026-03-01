@@ -6,7 +6,7 @@ import { ref, computed, onUnmounted } from '@/entrypoints/shared/reactivity';
 import { NativeMessageType } from 'webpage-mcp-shared';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type { AgentEngineInfo, RealtimeEvent } from 'webpage-mcp-shared';
-import { appendNativeAuthQuery } from '@/utils/native-auth';
+import { agentFetch, subscribeAgentStream, unsubscribeAgentStream } from '@/utils/agent-rpc';
 
 interface ServerStatus {
   isRunning: boolean;
@@ -36,7 +36,7 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
   const serverStatus = ref<ServerStatus | null>(null);
   const connecting = ref(false);
   const engines = ref<AgentEngineInfo[]>([]);
-  const eventSource = ref<EventSource | null>(null);
+  const eventSource = ref<string | null>(null);
 
   // Reconnection state
   let reconnectAttempts = 0;
@@ -45,10 +45,31 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
 
   // Track which sessionId the current SSE connection is subscribed to
   let currentStreamSessionId: string | null = null;
+  const streamMessageHandler = (message: unknown): void => {
+    const msg = message as {
+      type?: string;
+      payload?: {
+        subscriptionId?: string;
+        event?: RealtimeEvent;
+      };
+    };
+    if (msg?.type !== BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT) {
+      return;
+    }
+    if (!eventSource.value) {
+      return;
+    }
+    if (msg?.payload?.subscriptionId !== eventSource.value) {
+      return;
+    }
+    if (msg.payload?.event) {
+      options.onMessage?.(msg.payload.event);
+    }
+  };
 
   // Computed
   const isServerReady = computed(() => {
-    return nativeConnected.value && serverStatus.value?.isRunning && serverPort.value !== null;
+    return nativeConnected.value && serverStatus.value?.isRunning === true;
   });
 
   // Check native host connection using existing message type
@@ -97,8 +118,13 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
       });
       if (response?.serverStatus) {
         serverStatus.value = response.serverStatus;
-        if (response.serverStatus.port) {
-          serverPort.value = response.serverStatus.port;
+        if (response.serverStatus.isRunning) {
+          serverPort.value =
+            typeof response.serverStatus.port === 'number' && response.serverStatus.port > 0
+              ? response.serverStatus.port
+              : null;
+        } else {
+          serverPort.value = null;
         }
         // Also update native connected status from response
         if (typeof response.connected === 'boolean') {
@@ -138,7 +164,7 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
 
       // Step 2: Get server status
       const status = await getServerStatus();
-      if (!status?.isRunning || !status.port) {
+      if (!status?.isRunning) {
         console.error('Server not running or port not available', status);
         return false;
       }
@@ -154,10 +180,8 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
 
   // Fetch available engines
   async function fetchEngines(): Promise<void> {
-    if (!serverPort.value) return;
     try {
-      const url = `http://127.0.0.1:${serverPort.value}/agent/engines`;
-      const response = await fetch(url);
+      const response = await agentFetch('/agent/engines');
       if (response.ok) {
         const data = await response.json();
         engines.value = data.engines || [];
@@ -169,13 +193,13 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
 
   // Check if SSE is connected
   function isEventSourceConnected(): boolean {
-    return eventSource.value !== null && eventSource.value.readyState === EventSource.OPEN;
+    return eventSource.value !== null;
   }
 
-  // Open SSE connection (skip if already connected to same session)
+  // Open agent stream subscription (skip if already connected to same session)
   function openEventSource(): void {
     const targetSessionId = options.getSessionId?.()?.trim() ?? '';
-    if (!serverPort.value || !targetSessionId) return;
+    if (!targetSessionId) return;
 
     // Skip if already connected to the same session
     if (isEventSourceConnected() && currentStreamSessionId === targetSessionId) {
@@ -188,60 +212,37 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
 
     currentStreamSessionId = targetSessionId;
     void (async () => {
-      const rawUrl = `http://127.0.0.1:${serverPort.value}/agent/chat/${encodeURIComponent(targetSessionId)}/stream`;
-      const url = await appendNativeAuthQuery(rawUrl);
       if (currentStreamSessionId !== targetSessionId) {
         return;
       }
-
-      const es = new EventSource(url);
-
-      es.onopen = () => {
-        console.log('[AgentServer] SSE connection opened');
-        reconnectAttempts = 0;
-      };
-
-      es.onmessage = (event) => {
-        try {
-          const parsed = JSON.parse(event.data) as RealtimeEvent;
-          options.onMessage?.(parsed);
-        } catch (err) {
-          console.error('[AgentServer] Failed to parse SSE message:', err);
-        }
-      };
-
-      es.onerror = (error) => {
-        console.error('[AgentServer] SSE error:', error);
-        es.close();
-        eventSource.value = null;
-
-        // Attempt reconnection with exponential backoff
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
-          reconnectAttempts++;
-          console.log(`[AgentServer] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
-          setTimeout(() => {
-            if (isServerReady.value) {
-              openEventSource();
-            }
-          }, delay);
-        } else {
-          options.onError?.('SSE connection failed after multiple attempts');
-        }
-      };
-
-      eventSource.value = es;
+      const res = await subscribeAgentStream(targetSessionId);
+      eventSource.value = res.subscriptionId;
+      reconnectAttempts = 0;
     })().catch((error) => {
-      console.error('[AgentServer] Failed to open SSE connection:', error);
+      console.error('[AgentServer] Failed to open stream subscription:', error);
       eventSource.value = null;
+      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
+        reconnectAttempts++;
+        setTimeout(() => {
+          if (isServerReady.value) {
+            openEventSource();
+          }
+        }, delay);
+      } else {
+        options.onError?.('Agent stream subscription failed after multiple attempts');
+      }
     });
   }
 
-  // Close SSE connection
+  // Close stream subscription
   function closeEventSource(): void {
-    if (eventSource.value) {
-      eventSource.value.close();
-      eventSource.value = null;
+    const subscriptionId = eventSource.value;
+    eventSource.value = null;
+    if (subscriptionId) {
+      void unsubscribeAgentStream(subscriptionId).catch(() => {
+        // ignore unsubscribe errors on teardown
+      });
     }
     currentStreamSessionId = null;
   }
@@ -267,11 +268,15 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
   onUnmounted(() => {
     if (options.manualLifecycle) return;
     closeEventSource();
+    chrome.runtime.onMessage.removeListener(streamMessageHandler);
   });
 
   function dispose(): void {
     closeEventSource();
+    chrome.runtime.onMessage.removeListener(streamMessageHandler);
   }
+
+  chrome.runtime.onMessage.addListener(streamMessageHandler);
 
   return {
     // State

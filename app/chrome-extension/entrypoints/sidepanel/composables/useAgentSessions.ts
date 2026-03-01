@@ -3,7 +3,8 @@
  * Sessions represent independent conversations within a project.
  * Each session has its own engine configuration, chat history, and resume state.
  */
-import { ref, computed, watch } from '@/entrypoints/shared/reactivity';
+import { ref, computed } from '@/entrypoints/shared/reactivity';
+import { agentFetch } from '@/utils/agent-rpc';
 import type {
   AgentSession,
   AgentCliPreference,
@@ -31,7 +32,6 @@ type AgentSessionWithPreviewMeta = AgentSession & {
 const STORAGE_KEY_SELECTED_SESSION = 'agent-selected-session-id';
 
 export interface UseAgentSessionsOptions {
-  getServerPort: () => number | null;
   ensureServer: () => Promise<boolean>;
   onSessionChanged?: (sessionId: string) => void;
   onHistoryLoaded?: (messages: AgentStoredMessage[]) => void;
@@ -85,8 +85,7 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
    * Uses a nonce to handle A→B→A scenarios.
    */
   async function fetchSessions(projectId: string): Promise<void> {
-    const serverPort = options.getServerPort();
-    if (!serverPort || !projectId) return;
+    if (!projectId) return;
 
     // Increment nonce - any subsequent fetch will invalidate this one
     const myNonce = ++fetchSessionsNonce;
@@ -99,8 +98,8 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     sessionError.value = null;
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/projects/${encodeURIComponent(projectId)}/sessions`;
-      const response = await fetch(url);
+      const url = `/agent/projects/${encodeURIComponent(projectId)}/sessions`;
+      const response = await agentFetch(url);
 
       if (!isStillValid()) return;
 
@@ -136,9 +135,6 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
    * Used for the global sessions list view.
    */
   async function fetchAllSessions(): Promise<void> {
-    const serverPort = options.getServerPort();
-    if (!serverPort) return;
-
     const myNonce = ++fetchAllSessionsNonce;
 
     const isStillValid = (): boolean => {
@@ -149,8 +145,8 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     sessionError.value = null;
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/sessions`;
-      const response = await fetch(url);
+      const url = '/agent/sessions';
+      const response = await agentFetch(url);
 
       if (!isStillValid()) return;
 
@@ -185,8 +181,7 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     input: CreateAgentSessionInput,
   ): Promise<AgentSession | null> {
     const ready = await options.ensureServer();
-    const serverPort = options.getServerPort();
-    if (!ready || !serverPort) {
+    if (!ready) {
       sessionError.value = 'Server not available';
       return null;
     }
@@ -198,8 +193,8 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     sessionError.value = null;
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/projects/${encodeURIComponent(projectId)}/sessions`;
-      const response = await fetch(url, {
+      const url = `/agent/projects/${encodeURIComponent(projectId)}/sessions`;
+      const response = await agentFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
@@ -253,12 +248,11 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
 
   // Get a session by ID
   async function getSession(sessionId: string): Promise<AgentSession | null> {
-    const serverPort = options.getServerPort();
-    if (!serverPort || !sessionId) return null;
+    if (!sessionId) return null;
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/sessions/${encodeURIComponent(sessionId)}`;
-      const response = await fetch(url);
+      const url = `/agent/sessions/${encodeURIComponent(sessionId)}`;
+      const response = await agentFetch(url);
       if (response.ok) {
         const data = await response.json();
         return data.session || null;
@@ -275,12 +269,11 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     sessionId: string,
     updates: UpdateAgentSessionInput,
   ): Promise<AgentSession | null> {
-    const serverPort = options.getServerPort();
-    if (!serverPort || !sessionId) return null;
+    if (!sessionId) return null;
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/sessions/${encodeURIComponent(sessionId)}`;
-      const response = await fetch(url, {
+      const url = `/agent/sessions/${encodeURIComponent(sessionId)}`;
+      const response = await agentFetch(url, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -318,12 +311,11 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
 
   // Delete a session
   async function deleteSession(sessionId: string): Promise<boolean> {
-    const serverPort = options.getServerPort();
-    if (!serverPort || !sessionId) return false;
+    if (!sessionId) return false;
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/sessions/${encodeURIComponent(sessionId)}`;
-      const response = await fetch(url, { method: 'DELETE' });
+      const url = `/agent/sessions/${encodeURIComponent(sessionId)}`;
+      const response = await agentFetch(url, { method: 'DELETE' });
 
       if (response.ok || response.status === 204) {
         // Remove from local list
@@ -396,8 +388,7 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     session: AgentSession | null;
   } | null> {
     const ready = await options.ensureServer();
-    const serverPort = options.getServerPort();
-    if (!ready || !serverPort || !sessionId) {
+    if (!ready || !sessionId) {
       sessionError.value = 'Server not available';
       return null;
     }
@@ -405,8 +396,8 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     sessionError.value = null;
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/sessions/${encodeURIComponent(sessionId)}/reset`;
-      const response = await fetch(url, { method: 'POST' });
+      const url = `/agent/sessions/${encodeURIComponent(sessionId)}/reset`;
+      const response = await agentFetch(url, { method: 'POST' });
 
       if (!response.ok) {
         const text = await response.text().catch(() => '');
@@ -442,12 +433,11 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     sessionId: string;
     engineName: string;
   } | null> {
-    const serverPort = options.getServerPort();
-    if (!serverPort || !sessionId) return null;
+    if (!sessionId) return null;
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/sessions/${encodeURIComponent(sessionId)}/claude-info`;
-      const response = await fetch(url);
+      const url = `/agent/sessions/${encodeURIComponent(sessionId)}/claude-info`;
+      const response = await agentFetch(url);
 
       if (!response.ok) {
         const text = await response.text().catch(() => '');

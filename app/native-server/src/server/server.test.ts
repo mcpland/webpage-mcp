@@ -25,16 +25,15 @@ describe("test", () => {
     });
   });
 
-  test("GET /mcp returns 400 without auth token when auth is disabled", async () => {
+  test("GET /agent/engines returns 200 when auth is disabled", async () => {
     const previous = process.env.WEBPAGE_MCP_AUTH_TOKEN;
     delete process.env.WEBPAGE_MCP_AUTH_TOKEN;
     try {
       const response = await supertest(Server.getInstance().server)
-        .get("/mcp")
-        .expect(400)
+        .get("/agent/engines")
+        .expect(200)
         .expect("Content-Type", /json/);
-      expect(response.body).toHaveProperty("error");
-      expect(response.body.error).toContain("session");
+      expect(Array.isArray(response.body.engines)).toBe(true);
     } finally {
       if (typeof previous === "string") {
         process.env.WEBPAGE_MCP_AUTH_TOKEN = previous;
@@ -44,12 +43,12 @@ describe("test", () => {
     }
   });
 
-  test("GET /mcp returns 401 when auth token is enabled and missing", async () => {
+  test("GET /agent/engines returns 401 when auth token is enabled and missing", async () => {
     const previous = process.env.WEBPAGE_MCP_AUTH_TOKEN;
     process.env.WEBPAGE_MCP_AUTH_TOKEN = "unit-test-token";
     try {
       const response = await supertest(Server.getInstance().server)
-        .get("/mcp")
+        .get("/agent/engines")
         .expect(401)
         .expect("Content-Type", /json/);
       expect(response.body).toEqual({ error: "Unauthorized" });
@@ -62,17 +61,16 @@ describe("test", () => {
     }
   });
 
-  test("GET /mcp accepts valid auth token and reaches route handler", async () => {
+  test("GET /agent/engines accepts valid auth token and reaches route handler", async () => {
     const previous = process.env.WEBPAGE_MCP_AUTH_TOKEN;
     process.env.WEBPAGE_MCP_AUTH_TOKEN = "unit-test-token";
     try {
       const response = await supertest(Server.getInstance().server)
-        .get("/mcp")
+        .get("/agent/engines")
         .set("Authorization", "Bearer unit-test-token")
-        .expect(400)
+        .expect(200)
         .expect("Content-Type", /json/);
-      expect(response.body).toHaveProperty("error");
-      expect(response.body.error).toContain("session");
+      expect(Array.isArray(response.body.engines)).toBe(true);
     } finally {
       if (typeof previous === "string") {
         process.env.WEBPAGE_MCP_AUTH_TOKEN = previous;

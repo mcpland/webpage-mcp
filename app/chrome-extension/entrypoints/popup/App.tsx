@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { LINKS } from '@/common/constants';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
@@ -32,7 +32,6 @@ type ModelInitializationStatus = 'idle' | 'downloading' | 'initializing' | 'read
 
 type ServerStatus = {
   isRunning: boolean;
-  port?: number;
   lastUpdated: number;
 };
 
@@ -101,7 +100,6 @@ export default function PopupApp() {
 
   const [nativeConnectionStatus, setNativeConnectionStatus] = useState<NativeConnectionStatus>('unknown');
   const [isConnecting, setIsConnecting] = useState(false);
-  const [nativeServerPort, setNativeServerPort] = useState(12306);
   const [serverStatus, setServerStatus] = useState<ServerStatus>({
     isRunning: false,
     lastUpdated: Date.now(),
@@ -144,17 +142,15 @@ export default function PopupApp() {
   const showMcpConfig = nativeConnectionStatus === 'connected' && serverStatus.isRunning;
 
   const mcpConfigJson = useMemo(() => {
-    const port = serverStatus.port || nativeServerPort;
     const config = {
       mcpServers: {
-        'streamable-mcp-server': {
-          type: 'streamable-http',
-          url: `http://127.0.0.1:${port}/mcp`,
+        'webpage-mcp': {
+          command: 'webpage-mcp-stdio',
         },
       },
     };
     return JSON.stringify(config, null, 2);
-  }, [nativeServerPort, serverStatus.port]);
+  }, []);
 
   const availableModels = useMemo(() => {
     return Object.entries(PREDEFINED_MODELS).map(([preset, model]) => ({
@@ -186,7 +182,7 @@ export default function PopupApp() {
   function getStatusText(): string {
     if (nativeConnectionStatus === 'connected') {
       if (serverStatus.isRunning) {
-        return getMessage('serviceRunningStatus', [(serverStatus.port || 'Unknown').toString()]);
+        return getMessage('connectedStatus');
       }
       return getMessage('connectedServiceNotStartedStatus');
     }
@@ -194,26 +190,6 @@ export default function PopupApp() {
       return getMessage('serviceNotConnectedStatus');
     }
     return getMessage('detectingStatus');
-  }
-
-  async function savePortPreference(port: number) {
-    try {
-      await chrome.storage.local.set({ nativeServerPort: port });
-    } catch (error) {
-      console.error('Failed to save port preference:', error);
-    }
-  }
-
-  async function loadPortPreference() {
-    try {
-      const result = await chrome.storage.local.get(['nativeServerPort']);
-      const saved = result.nativeServerPort;
-      if (typeof saved === 'number' && Number.isFinite(saved)) {
-        setNativeServerPort(saved);
-      }
-    } catch (error) {
-      console.error('Failed to load port preferences:', error);
-    }
   }
 
   async function saveModelPreference(model: ModelPreset) {
@@ -357,14 +333,6 @@ export default function PopupApp() {
     }, 2000);
   }
 
-  async function updatePort(event: ChangeEvent<HTMLInputElement>) {
-    const value = Number(event.currentTarget.value);
-    setNativeServerPort(value);
-    if (Number.isFinite(value)) {
-      await savePortPreference(value);
-    }
-  }
-
   async function testNativeConnection() {
     if (isConnecting) {
       return;
@@ -378,12 +346,10 @@ export default function PopupApp() {
       } else {
         const response = await chrome.runtime.sendMessage({
           type: 'connectNative',
-          port: nativeServerPort,
         });
 
         if (response?.success) {
           setNativeConnectionStatus('connected');
-          await savePortPreference(nativeServerPort);
         } else {
           setNativeConnectionStatus('disconnected');
           console.error('Connection failed:', response);
@@ -933,7 +899,6 @@ export default function PopupApp() {
     chrome.storage.onChanged.addListener(onStorageChanged);
 
     void (async () => {
-      await loadPortPreference();
       await loadModelPreference();
       await checkNativeConnection();
       await checkServerStatus();
@@ -1034,19 +999,6 @@ export default function PopupApp() {
                     </div>
                   </div>
                 ) : null}
-
-                <div className="port-section">
-                  <label htmlFor="port" className="port-label">
-                    {getMessage('connectionPortLabel')}
-                  </label>
-                  <input
-                    type="text"
-                    id="port"
-                    value={nativeServerPort}
-                    onChange={(event) => void updatePort(event)}
-                    className="port-input"
-                  />
-                </div>
 
                 <button
                   className="connect-button"

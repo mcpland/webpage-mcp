@@ -1,10 +1,10 @@
 /**
- * Agent Routes - All agent-related HTTP endpoints.
+ * Agent Routes - Internal agent route contract (HTTP-style paths/methods over native RPC).
  *
  * Handles:
  * - Projects CRUD
  * - Chat messages CRUD
- * - Chat streaming (SSE)
+ * - Chat streaming (session event bridge)
  * - Chat actions (act, cancel)
  * - Engine listing
  */

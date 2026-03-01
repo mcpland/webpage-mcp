@@ -7,6 +7,8 @@ type WebSocketLike = {
   close?: () => void;
 };
 
+type StreamListener = (event: RealtimeEvent) => void;
+
 const WEBSOCKET_OPEN_STATE = 1;
 
 /**
@@ -18,6 +20,7 @@ const WEBSOCKET_OPEN_STATE = 1;
 export class AgentStreamManager {
   private readonly sseClients = new Map<string, Set<ServerResponse>>();
   private readonly webSocketClients = new Map<string, Set<WebSocketLike>>();
+  private readonly listeners = new Map<string, Set<StreamListener>>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
 
   addSseStream(sessionId: string, res: ServerResponse): void {
@@ -64,6 +67,26 @@ export class AgentStreamManager {
     this.stopHeartbeatTimerIfIdle();
   }
 
+  addListener(sessionId: string, listener: StreamListener): void {
+    if (!this.listeners.has(sessionId)) {
+      this.listeners.set(sessionId, new Set());
+    }
+    this.listeners.get(sessionId)!.add(listener);
+    this.ensureHeartbeatTimer();
+  }
+
+  removeListener(sessionId: string, listener: StreamListener): void {
+    const listeners = this.listeners.get(sessionId);
+    if (!listeners) {
+      return;
+    }
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      this.listeners.delete(sessionId);
+    }
+    this.stopHeartbeatTimerIfIdle();
+  }
+
   publish(event: RealtimeEvent): void {
     const payload = JSON.stringify(event);
     const ssePayload = `data: ${payload}\n\n`;
@@ -71,6 +94,7 @@ export class AgentStreamManager {
     // Heartbeat events are broadcast to all connections to keep them alive.
     if (event.type === 'heartbeat') {
       this.broadcastToAll(ssePayload, payload);
+      this.broadcastToAllListeners(event);
       return;
     }
 
@@ -85,6 +109,7 @@ export class AgentStreamManager {
 
     // Session-scoped routing: only send to clients subscribed to this session.
     this.sendToSession(targetSessionId, ssePayload, payload);
+    this.emitToListeners(targetSessionId, event);
   }
 
   /**
@@ -195,6 +220,26 @@ export class AgentStreamManager {
     }
   }
 
+  private emitToListeners(sessionId: string, event: RealtimeEvent): void {
+    const listeners = this.listeners.get(sessionId);
+    if (!listeners || listeners.size === 0) {
+      return;
+    }
+    for (const listener of Array.from(listeners)) {
+      try {
+        listener(event);
+      } catch (error) {
+        console.warn('[AgentStreamManager] listener callback failed:', error);
+      }
+    }
+  }
+
+  private broadcastToAllListeners(event: RealtimeEvent): void {
+    for (const sessionId of this.listeners.keys()) {
+      this.emitToListeners(sessionId, event);
+    }
+  }
+
   private isResponseDead(res: ServerResponse): boolean {
     return (res as any).writableEnded || (res as any).destroyed;
   }
@@ -226,6 +271,7 @@ export class AgentStreamManager {
       this.webSocketClients.delete(sessionId);
     }
 
+    this.listeners.clear();
     this.stopHeartbeatTimer();
   }
 
@@ -235,7 +281,11 @@ export class AgentStreamManager {
     }
 
     this.heartbeatTimer = setInterval(() => {
-      if (this.sseClients.size === 0 && this.webSocketClients.size === 0) {
+      if (
+        this.sseClients.size === 0 &&
+        this.webSocketClients.size === 0 &&
+        this.listeners.size === 0
+      ) {
         this.stopHeartbeatTimer();
         return;
       }
@@ -252,7 +302,11 @@ export class AgentStreamManager {
   }
 
   private stopHeartbeatTimerIfIdle(): void {
-    if (this.sseClients.size === 0 && this.webSocketClients.size === 0) {
+    if (
+      this.sseClients.size === 0 &&
+      this.webSocketClients.size === 0 &&
+      this.listeners.size === 0
+    ) {
       this.stopHeartbeatTimer();
     }
   }

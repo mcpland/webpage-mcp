@@ -1,4 +1,6 @@
 import { stdin, stdout } from 'process';
+import fs from 'node:fs';
+import net from 'node:net';
 import { Server } from './server';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -8,13 +10,24 @@ import {
   type McpServerInstanceStatus,
   type NativeSyncInstancesPayload,
 } from 'webpage-mcp-shared';
-import { NATIVE_SERVER_PORT, TIMEOUTS } from './constant';
+import { TIMEOUTS } from './constant';
 import fileHandler from './file-handler';
+import type { RealtimeEvent } from './agent/types';
+import type { InternalRouteRequest } from './server';
+import { getNativeSocketPath } from './ipc/socket-path';
+import { callToolForContext, listToolsForContext } from './mcp/register-tools';
 
 interface PendingRequest {
   resolve: (value: any) => void;
   reject: (reason?: any) => void;
   timeoutId: NodeJS.Timeout;
+}
+
+interface AgentStreamSubscription {
+  subscriptionId: string;
+  instanceId: string;
+  sessionId: string;
+  dispose: () => void;
 }
 
 const INSTANCE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
@@ -29,36 +42,15 @@ function normalizeInstanceId(raw: unknown): string {
   return DEFAULT_MCP_INSTANCE_ID;
 }
 
-function normalizePort(raw: unknown): number | undefined {
-  const parsed =
-    typeof raw === 'number' ? raw : typeof raw === 'string' ? Number.parseInt(raw, 10) : Number.NaN;
-  if (!Number.isFinite(parsed)) {
-    return undefined;
-  }
-  const port = Math.floor(parsed);
-  if (port <= 0 || port > 65535) {
-    return undefined;
-  }
-  return port;
-}
-
-function normalizeInstanceConfig(
-  raw: unknown,
-  fallbackPort: number,
-): McpServerInstanceConfig | null {
+function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
   if (!raw || typeof raw !== 'object') {
     return null;
   }
   const obj = raw as Record<string, unknown>;
   const instanceId = normalizeInstanceId(obj.instanceId);
-  const port = normalizePort(obj.port) ?? (instanceId === DEFAULT_MCP_INSTANCE_ID ? fallbackPort : undefined);
-  if (!port) {
-    return null;
-  }
 
   return {
     instanceId,
-    port,
     enabled: typeof obj.enabled === 'boolean' ? obj.enabled : true,
     autoStart: typeof obj.autoStart === 'boolean' ? obj.autoStart : true,
     label: typeof obj.label === 'string' && obj.label.trim() ? obj.label.trim() : undefined,
@@ -77,6 +69,9 @@ export class NativeMessagingHost {
   private servers: Map<string, Server> = new Map();
   private instanceStatuses: Map<string, McpServerInstanceStatus> = new Map();
   private pendingRequests: Map<string, PendingRequest> = new Map();
+  private streamSubscriptions: Map<string, AgentStreamSubscription> = new Map();
+  private ipcServer: net.Server | null = null;
+  private ipcSockets: Set<net.Socket> = new Set();
   private static readonly AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
 
   public setServer(serverInstance: Server): void {
@@ -86,7 +81,6 @@ export class NativeMessagingHost {
     this.instanceStatuses.set(instanceId, {
       instanceId,
       isRunning: serverInstance.isRunning,
-      port: serverInstance.getListeningPort() ?? undefined,
       lastUpdated: Date.now(),
     });
   }
@@ -94,9 +88,130 @@ export class NativeMessagingHost {
   // add message handler to wait for start server
   public start(): void {
     try {
+      this.setupIpcServer();
       this.setupMessageHandling();
     } catch (_error: any) {
       process.exit(1);
+    }
+  }
+
+  private setupIpcServer(): void {
+    const socketPath = getNativeSocketPath();
+
+    if (process.platform !== 'win32' && fs.existsSync(socketPath)) {
+      try {
+        fs.unlinkSync(socketPath);
+      } catch {
+        // Ignore stale socket cleanup failures; listen will report a concrete error if needed.
+      }
+    }
+
+    this.ipcServer = net.createServer((socket) => {
+      this.handleIpcSocket(socket);
+    });
+
+    this.ipcServer.on('error', (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.sendError(`IPC server error: ${message}`);
+    });
+
+    this.ipcServer.listen(socketPath);
+  }
+
+  private handleIpcSocket(socket: net.Socket): void {
+    this.ipcSockets.add(socket);
+    socket.setEncoding('utf8');
+    let buffer = '';
+
+    const send = (payload: unknown): void => {
+      try {
+        socket.write(`${JSON.stringify(payload)}\n`);
+      } catch {
+        // Ignore broken socket writes.
+      }
+    };
+
+    socket.on('data', (chunk: string) => {
+      buffer += chunk;
+      while (true) {
+        const newlineIndex = buffer.indexOf('\n');
+        if (newlineIndex === -1) break;
+
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (!line) continue;
+
+        let parsed: any;
+        try {
+          parsed = JSON.parse(line);
+        } catch (error) {
+          send({
+            id: null,
+            error: error instanceof Error ? error.message : 'Invalid JSON payload',
+          });
+          continue;
+        }
+
+        void this.handleIpcRequest(parsed)
+          .then((result) => {
+            send({ id: parsed?.id ?? null, result });
+          })
+          .catch((error) => {
+            send({
+              id: parsed?.id ?? null,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+      }
+    });
+
+    socket.on('close', () => {
+      this.ipcSockets.delete(socket);
+    });
+    socket.on('error', () => {
+      this.ipcSockets.delete(socket);
+    });
+  }
+
+  private async handleIpcRequest(request: any): Promise<unknown> {
+    const method = typeof request?.method === 'string' ? request.method : '';
+    const params = request?.params && typeof request.params === 'object' ? request.params : {};
+    const instanceId = normalizeInstanceId((params as Record<string, unknown>).instanceId);
+    const sessionIdRaw = (params as Record<string, unknown>).sessionId;
+    const sessionId =
+      typeof sessionIdRaw === 'string' && sessionIdRaw.trim() ? sessionIdRaw.trim() : uuidv4();
+
+    switch (method) {
+      case 'ping':
+        return { ok: true };
+      case 'mcp_list_tools': {
+        const tools = await listToolsForContext({
+          sessionId,
+          instanceId,
+          nativeHost: this,
+        });
+        return { tools };
+      }
+      case 'mcp_call_tool': {
+        const paramsRecord = params as Record<string, unknown>;
+        const name = typeof paramsRecord.name === 'string' ? paramsRecord.name : '';
+        if (!name) {
+          throw new Error('name is required');
+        }
+        const args = paramsRecord.args ?? {};
+        const result = await callToolForContext(
+          {
+            sessionId,
+            instanceId,
+            nativeHost: this,
+          },
+          name,
+          args,
+        );
+        return { result };
+      }
+      default:
+        throw new Error(`Unsupported IPC method: ${method}`);
     }
   }
 
@@ -184,12 +299,9 @@ export class NativeMessagingHost {
   private snapshotInstanceStatus(instanceId: string): McpServerInstanceStatus {
     const normalized = normalizeInstanceId(instanceId);
     const server = this.servers.get(normalized);
-    const previous = this.instanceStatuses.get(normalized);
-
     const status: McpServerInstanceStatus = {
       instanceId: normalized,
-      isRunning: server?.isRunning ?? previous?.isRunning ?? false,
-      port: server?.getListeningPort() ?? previous?.port,
+      isRunning: server?.isRunning ?? false,
       lastUpdated: Date.now(),
     };
 
@@ -208,59 +320,30 @@ export class NativeMessagingHost {
     return statuses;
   }
 
-  private findRunningInstanceByPort(
-    requestedPort: number,
-    excludedInstanceId?: string,
-  ): { instanceId: string; port: number } | null {
-    for (const [instanceId, server] of this.servers.entries()) {
-      if (instanceId === excludedInstanceId) continue;
-      if (!server.isRunning) continue;
-      const listeningPort = server.getListeningPort();
-      if (typeof listeningPort === 'number' && listeningPort === requestedPort) {
-        return { instanceId, port: listeningPort };
-      }
-    }
-    return null;
-  }
-
-  private async startServer(instanceId: string, port: number): Promise<McpServerInstanceStatus> {
+  private async startServer(instanceId: string): Promise<McpServerInstanceStatus> {
     const normalized = normalizeInstanceId(instanceId);
-    const requestedPort = normalizePort(port) ?? NATIVE_SERVER_PORT;
     const server = this.getOrCreateServer(normalized);
 
     if (server.isRunning) {
-      const listeningPort = server.getListeningPort();
-      if (typeof listeningPort === 'number' && listeningPort === requestedPort) {
-        const runningStatus = this.snapshotInstanceStatus(normalized);
-        this.sendMessage({
-          type: NativeMessageType.SERVER_STARTED,
-          payload: { instanceId: normalized, port: runningStatus.port },
-        });
-        return runningStatus;
-      }
-
-      await server.stop();
+      const runningStatus = this.snapshotInstanceStatus(normalized);
+      this.sendMessage({
+        type: NativeMessageType.SERVER_STARTED,
+        payload: { instanceId: normalized },
+      });
+      return runningStatus;
     }
 
-    const conflict = this.findRunningInstanceByPort(requestedPort, normalized);
-    if (conflict) {
-      throw new Error(
-        `Port ${requestedPort} is already in use by instance "${conflict.instanceId}". Each instance must use a unique port.`,
-      );
-    }
-
-    const actualPort = await server.start(requestedPort, this);
+    await server.start(this);
     const status: McpServerInstanceStatus = {
       instanceId: normalized,
       isRunning: true,
-      port: actualPort,
       lastUpdated: Date.now(),
     };
     this.instanceStatuses.set(normalized, status);
 
     this.sendMessage({
       type: NativeMessageType.SERVER_STARTED,
-      payload: { instanceId: normalized, port: actualPort },
+      payload: { instanceId: normalized },
     });
 
     return status;
@@ -269,24 +352,23 @@ export class NativeMessagingHost {
   private async stopServer(instanceId: string): Promise<McpServerInstanceStatus> {
     const normalized = normalizeInstanceId(instanceId);
     const server = this.servers.get(normalized);
-    const previous = this.instanceStatuses.get(normalized);
-    const port = server?.getListeningPort() ?? previous?.port;
 
     if (server?.isRunning) {
       await server.stop();
     }
 
+    this.cleanupStreamSubscriptionsForInstance(normalized);
+
     const status: McpServerInstanceStatus = {
       instanceId: normalized,
       isRunning: false,
-      port,
       lastUpdated: Date.now(),
     };
     this.instanceStatuses.set(normalized, status);
 
     this.sendMessage({
       type: NativeMessageType.SERVER_STOPPED,
-      payload: { instanceId: normalized, port },
+      payload: { instanceId: normalized },
     });
 
     return status;
@@ -308,26 +390,16 @@ export class NativeMessagingHost {
     payload: unknown,
   ): {
     instanceId: string;
-    port: number;
   } {
-    if (typeof payload === 'number' || typeof payload === 'string') {
-      return {
-        instanceId: DEFAULT_MCP_INSTANCE_ID,
-        port: normalizePort(payload) ?? NATIVE_SERVER_PORT,
-      };
-    }
-
     if (payload && typeof payload === 'object') {
       const obj = payload as Record<string, unknown>;
       return {
         instanceId: normalizeInstanceId(obj.instanceId),
-        port: normalizePort(obj.port) ?? NATIVE_SERVER_PORT,
       };
     }
 
     return {
       instanceId: DEFAULT_MCP_INSTANCE_ID,
-      port: NATIVE_SERVER_PORT,
     };
   }
 
@@ -346,14 +418,10 @@ export class NativeMessagingHost {
   private resolveSyncDirective(payload: unknown): McpServerInstanceConfig[] {
     const rawPayload = payload && typeof payload === 'object' ? (payload as NativeSyncInstancesPayload) : null;
     const rawInstances = Array.isArray(rawPayload?.instances) ? rawPayload.instances : [];
-    const defaultPort =
-      this.instanceStatuses.get(DEFAULT_MCP_INSTANCE_ID)?.port ??
-      this.servers.get(DEFAULT_MCP_INSTANCE_ID)?.getListeningPort() ??
-      NATIVE_SERVER_PORT;
     const byId = new Map<string, McpServerInstanceConfig>();
 
     for (const raw of rawInstances) {
-      const normalized = normalizeInstanceConfig(raw, defaultPort);
+      const normalized = normalizeInstanceConfig(raw);
       if (!normalized) continue;
       byId.set(normalized.instanceId, normalized);
     }
@@ -361,7 +429,6 @@ export class NativeMessagingHost {
     if (!byId.has(DEFAULT_MCP_INSTANCE_ID)) {
       byId.set(DEFAULT_MCP_INSTANCE_ID, {
         instanceId: DEFAULT_MCP_INSTANCE_ID,
-        port: defaultPort,
         enabled: true,
         autoStart: true,
         label: 'Default',
@@ -371,25 +438,7 @@ export class NativeMessagingHost {
     return sortInstanceConfigs(Array.from(byId.values()));
   }
 
-  private ensureUniqueAutoStartPorts(instances: McpServerInstanceConfig[]): void {
-    const byPort = new Map<number, string>();
-    for (const instance of instances) {
-      if (!instance.enabled || !instance.autoStart) {
-        continue;
-      }
-      const existing = byPort.get(instance.port);
-      if (existing && existing !== instance.instanceId) {
-        throw new Error(
-          `Port ${instance.port} is assigned to both "${existing}" and "${instance.instanceId}". Configure unique ports for enabled auto-start instances.`,
-        );
-      }
-      byPort.set(instance.port, instance.instanceId);
-    }
-  }
-
   private async syncServers(instances: McpServerInstanceConfig[]): Promise<McpServerInstanceStatus[]> {
-    this.ensureUniqueAutoStartPorts(instances);
-
     const desiredIds = new Set<string>(instances.map((item) => item.instanceId));
 
     for (const instance of instances) {
@@ -399,7 +448,7 @@ export class NativeMessagingHost {
       }
 
       if (instance.autoStart) {
-        await this.startServer(instance.instanceId, instance.port);
+        await this.startServer(instance.instanceId);
         continue;
       }
 
@@ -418,6 +467,193 @@ export class NativeMessagingHost {
     }
 
     return this.listServerInstances();
+  }
+
+  private cleanupStreamSubscriptionsForInstance(instanceId: string): void {
+    const normalized = normalizeInstanceId(instanceId);
+    for (const [subscriptionId, item] of this.streamSubscriptions.entries()) {
+      if (item.instanceId !== normalized) {
+        continue;
+      }
+      try {
+        item.dispose();
+      } catch {
+        // ignore cleanup errors
+      }
+      this.streamSubscriptions.delete(subscriptionId);
+    }
+  }
+
+  private parseAgentRpcPayload(payload: unknown): {
+    instanceId: string;
+    request: InternalRouteRequest;
+  } {
+    const raw = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+    const instanceId = normalizeInstanceId(raw.instanceId);
+    const method =
+      typeof raw.method === 'string' && raw.method.trim() ? raw.method.trim().toUpperCase() : 'GET';
+    const path = typeof raw.path === 'string' && raw.path.trim() ? raw.path.trim() : '/ping';
+    const query = raw.query && typeof raw.query === 'object' ? (raw.query as Record<string, unknown>) : undefined;
+    const body = raw.body;
+    const headers =
+      raw.headers && typeof raw.headers === 'object'
+        ? Object.fromEntries(
+            Object.entries(raw.headers as Record<string, unknown>)
+              .filter(([, value]) => typeof value === 'string')
+              .map(([key, value]) => [key, String(value)]),
+          )
+        : undefined;
+
+    return {
+      instanceId,
+      request: {
+        method,
+        path,
+        query,
+        body,
+        headers,
+      },
+    };
+  }
+
+  private async handleAgentRpc(message: any): Promise<void> {
+    const requestId = typeof message?.requestId === 'string' ? message.requestId : '';
+    if (!requestId) {
+      this.sendError('agent_rpc requires requestId');
+      return;
+    }
+
+    const { instanceId, request } = this.parseAgentRpcPayload(message.payload);
+    const server = this.getOrCreateServer(instanceId);
+    if (!server.isRunning) {
+      await this.startServer(instanceId);
+    }
+
+    const response = await server.invokeInternalRoute(request);
+    this.sendRequestResponse(requestId, {
+      ok: response.statusCode >= 200 && response.statusCode < 300,
+      statusCode: response.statusCode,
+      headers: response.headers,
+      body: response.body,
+      json: response.json,
+      isBinary: response.isBinary,
+      base64Body: response.base64Body,
+    });
+  }
+
+  private async handleAgentStreamSubscribe(message: any): Promise<void> {
+    const requestId = typeof message?.requestId === 'string' ? message.requestId : '';
+    if (!requestId) {
+      this.sendError('agent_stream_subscribe requires requestId');
+      return;
+    }
+
+    const payload =
+      message?.payload && typeof message.payload === 'object'
+        ? (message.payload as Record<string, unknown>)
+        : {};
+    const instanceId = normalizeInstanceId(payload.instanceId);
+    const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
+    if (!sessionId) {
+      this.sendRequestResponse(requestId, undefined, 'sessionId is required');
+      return;
+    }
+
+    const requestedSubscriptionId =
+      typeof payload.subscriptionId === 'string' ? payload.subscriptionId.trim() : '';
+    const subscriptionId = requestedSubscriptionId || requestId;
+
+    const existing = this.streamSubscriptions.get(subscriptionId);
+    if (existing) {
+      try {
+        existing.dispose();
+      } catch {
+        // ignore
+      }
+      this.streamSubscriptions.delete(subscriptionId);
+    }
+
+    const server = this.getOrCreateServer(instanceId);
+    if (!server.isRunning) {
+      await this.startServer(instanceId);
+    }
+
+    const dispose = server.subscribeAgentEvents(sessionId, (event: RealtimeEvent) => {
+      this.sendMessage({
+        type: NativeMessageType.AGENT_STREAM_EVENT,
+        payload: {
+          subscriptionId,
+          instanceId,
+          sessionId,
+          event,
+        },
+      });
+    });
+
+    this.streamSubscriptions.set(subscriptionId, {
+      subscriptionId,
+      instanceId,
+      sessionId,
+      dispose,
+    });
+
+    const connectedEvent: RealtimeEvent = {
+      type: 'connected',
+      data: {
+        sessionId,
+        transport: 'sse',
+        timestamp: new Date().toISOString(),
+      },
+    };
+    this.sendMessage({
+      type: NativeMessageType.AGENT_STREAM_EVENT,
+      payload: {
+        subscriptionId,
+        instanceId,
+        sessionId,
+        event: connectedEvent,
+      },
+    });
+
+    this.sendRequestResponse(requestId, {
+      success: true,
+      subscriptionId,
+      instanceId,
+      sessionId,
+    });
+  }
+
+  private handleAgentStreamUnsubscribe(message: any): void {
+    const requestId = typeof message?.requestId === 'string' ? message.requestId : '';
+    if (!requestId) {
+      this.sendError('agent_stream_unsubscribe requires requestId');
+      return;
+    }
+
+    const payload =
+      message?.payload && typeof message.payload === 'object'
+        ? (message.payload as Record<string, unknown>)
+        : {};
+    const subscriptionId = typeof payload.subscriptionId === 'string' ? payload.subscriptionId.trim() : '';
+    if (!subscriptionId) {
+      this.sendRequestResponse(requestId, undefined, 'subscriptionId is required');
+      return;
+    }
+
+    const existing = this.streamSubscriptions.get(subscriptionId);
+    if (existing) {
+      try {
+        existing.dispose();
+      } catch {
+        // ignore
+      }
+      this.streamSubscriptions.delete(subscriptionId);
+    }
+
+    this.sendRequestResponse(requestId, {
+      success: true,
+      subscriptionId,
+    });
   }
 
   private async handleMessage(message: any): Promise<void> {
@@ -449,7 +685,7 @@ export class NativeMessagingHost {
       switch (message.type) {
         case NativeMessageType.START: {
           const directive = this.resolveStartDirective(message.payload);
-          const status = await this.startServer(directive.instanceId, directive.port);
+          const status = await this.startServer(directive.instanceId);
           if (requestId) {
             this.sendRequestResponse(requestId, { status: 'success', instance: status });
           }
@@ -496,6 +732,15 @@ export class NativeMessagingHost {
           break;
         case 'file_operation':
           await this.handleFileOperation(message);
+          break;
+        case NativeMessageType.AGENT_RPC:
+          await this.handleAgentRpc(message);
+          break;
+        case NativeMessageType.AGENT_STREAM_SUBSCRIBE:
+          await this.handleAgentStreamSubscribe(message);
+          break;
+        case NativeMessageType.AGENT_STREAM_UNSUBSCRIBE:
+          this.handleAgentStreamUnsubscribe(message);
           break;
         default:
           if (requestId) {
@@ -654,6 +899,41 @@ export class NativeMessagingHost {
       pending.reject(new Error('Native host is shutting down or Chrome disconnected.'));
     });
     this.pendingRequests.clear();
+
+    for (const [subscriptionId, subscription] of this.streamSubscriptions.entries()) {
+      try {
+        subscription.dispose();
+      } catch {
+        // ignore cleanup failures
+      }
+      this.streamSubscriptions.delete(subscriptionId);
+    }
+
+    for (const socket of Array.from(this.ipcSockets)) {
+      try {
+        socket.destroy();
+      } catch {
+        // ignore
+      }
+      this.ipcSockets.delete(socket);
+    }
+
+    if (this.ipcServer) {
+      try {
+        this.ipcServer.close();
+      } catch {
+        // ignore
+      }
+      this.ipcServer = null;
+    }
+    const socketPath = getNativeSocketPath();
+    if (process.platform !== 'win32' && fs.existsSync(socketPath)) {
+      try {
+        fs.unlinkSync(socketPath);
+      } catch {
+        // ignore
+      }
+    }
 
     const runningServers = Array.from(this.servers.values()).filter((server) => server.isRunning);
     if (runningServers.length === 0) {

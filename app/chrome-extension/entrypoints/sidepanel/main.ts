@@ -9,11 +9,8 @@ import '../styles/tailwind.css';
 import './styles/agent-chat.css';
 
 import { preloadAgentTheme } from './composables';
-import { installNativeAuthFetchInterceptor } from '@/utils/native-auth';
 
 async function bootstrap() {
-  installNativeAuthFetchInterceptor();
-
   // Preload theme from storage and apply to document
   await preloadAgentTheme();
 

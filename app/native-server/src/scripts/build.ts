@@ -21,25 +21,6 @@ console.log("dist and dist/logs directories created/confirmed");
 console.log("Compiling TypeScript...");
 execSync("tsc", { stdio: "inherit" });
 
-// Copy config files
-console.log("Copying config files...");
-const configSourcePath = path.join(__dirname, "..", "mcp", "stdio-config.json");
-const configDestPath = path.join(distDir, "mcp", "stdio-config.json");
-
-try {
-  // Ensure target directory exists
-  fs.mkdirSync(path.dirname(configDestPath), { recursive: true });
-
-  if (fs.existsSync(configSourcePath)) {
-    fs.copyFileSync(configSourcePath, configDestPath);
-    console.log(`Copied stdio-config.json to ${configDestPath}`);
-  } else {
-    console.error(`Error: Config file not found: ${configSourcePath}`);
-  }
-} catch (error) {
-  console.error("Error copying config file:", error);
-}
-
 // Copy package.json and update its content
 console.log("Preparing package.json...");
 const packageJson = require("../../package.json");

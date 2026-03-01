@@ -237,17 +237,25 @@ async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
 export const setupTools = (server: Server, ctx: McpToolContext) => {
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const dynamicTools = await listDynamicFlowTools(ctx);
-    return { tools: [...TOOL_SCHEMAS, ...dynamicTools] };
+    return { tools: await listToolsForContext(ctx) };
   });
 
   // Call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    handleToolCall(ctx, request.params.name, request.params.arguments || {}),
+    callToolForContext(ctx, request.params.name, request.params.arguments || {}),
   );
 };
 
-const handleToolCall = async (ctx: McpToolContext, name: string, args: any): Promise<CallToolResult> => {
+export async function listToolsForContext(ctx: McpToolContext): Promise<Tool[]> {
+  const dynamicTools = await listDynamicFlowTools(ctx);
+  return [...TOOL_SCHEMAS, ...dynamicTools];
+}
+
+export const callToolForContext = async (
+  ctx: McpToolContext,
+  name: string,
+  args: any,
+): Promise<CallToolResult> => {
   try {
     // If calling a dynamic flow tool (name starts with flow.), proxy to common flow-run tool
     if (name && name.startsWith('flow.')) {

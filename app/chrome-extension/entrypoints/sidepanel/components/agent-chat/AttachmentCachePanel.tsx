@@ -3,6 +3,7 @@ import type {
   AttachmentCleanupResponse,
   AttachmentStatsResponse,
 } from 'webpage-mcp-shared';
+import { agentFetch } from '@/utils/agent-rpc';
 
 type AttachmentCachePanelProps = {
   open: boolean;
@@ -35,7 +36,11 @@ function isSelectable(project: AttachmentProjectEntry): boolean {
   return project.exists === true && project.fileCount > 0;
 }
 
-export default function AttachmentCachePanel({ open, serverPort, onClose }: AttachmentCachePanelProps) {
+export default function AttachmentCachePanel({
+  open,
+  serverPort: _serverPort,
+  onClose,
+}: AttachmentCachePanelProps) {
   const [stats, setStats] = useState<AttachmentStatsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
@@ -44,13 +49,7 @@ export default function AttachmentCachePanel({ open, serverPort, onClose }: Atta
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
   const statsAbortRef = useRef<AbortController | null>(null);
 
-  const baseUrl = useMemo(() => {
-    if (serverPort === null || serverPort === undefined) return null;
-    if (!Number.isInteger(serverPort) || serverPort <= 0) return null;
-    return `http://127.0.0.1:${serverPort}`;
-  }, [serverPort]);
-
-  const serverReady = baseUrl !== null;
+  const serverReady = true;
   const totalBytes = stats?.totalBytes ?? 0;
   const totalFiles = stats?.totalFiles ?? 0;
   const orphanProjectIds = stats?.orphanProjectIds ?? [];
@@ -110,7 +109,6 @@ export default function AttachmentCachePanel({ open, serverPort, onClose }: Atta
   const loadStats = useCallback(
     async (opts: LoadStatsOptions = {}): Promise<void> => {
       const { resetStatusMessage = true } = opts;
-      if (!baseUrl) return;
 
       statsAbortRef.current?.abort();
       const controller = new AbortController();
@@ -123,7 +121,7 @@ export default function AttachmentCachePanel({ open, serverPort, onClose }: Atta
       }
 
       try {
-        const response = await fetch(`${baseUrl}/agent/attachments/stats`, { signal: controller.signal });
+        const response = await agentFetch('/agent/attachments/stats', { signal: controller.signal });
 
         if (!response.ok) {
           const text = await response.text().catch(() => '');
@@ -149,7 +147,7 @@ export default function AttachmentCachePanel({ open, serverPort, onClose }: Atta
         }
       }
     },
-    [baseUrl],
+    [],
   );
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -158,7 +156,6 @@ export default function AttachmentCachePanel({ open, serverPort, onClose }: Atta
   }, [loadStats, serverReady]);
 
   const clearSelected = useCallback(async (): Promise<void> => {
-    if (!baseUrl) return;
     const projectIds = [...selectedProjectIds];
     if (projectIds.length === 0) return;
 
@@ -167,7 +164,7 @@ export default function AttachmentCachePanel({ open, serverPort, onClose }: Atta
     setStatusMessage(null);
 
     try {
-      const response = await fetch(`${baseUrl}/agent/attachments`, {
+      const response = await agentFetch('/agent/attachments', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectIds }),
@@ -194,7 +191,7 @@ export default function AttachmentCachePanel({ open, serverPort, onClose }: Atta
     } finally {
       setIsClearing(false);
     }
-  }, [baseUrl, loadStats, selectedProjectIds]);
+  }, [loadStats, selectedProjectIds]);
 
   const toggleProject = useCallback((projectId: string): void => {
     setSelectedProjectIds((current) => {
@@ -236,9 +233,9 @@ export default function AttachmentCachePanel({ open, serverPort, onClose }: Atta
   }, [open]);
 
   useEffect(() => {
-    if (!open || !baseUrl) return;
+    if (!open) return;
     void loadStats();
-  }, [open, baseUrl, loadStats]);
+  }, [open, loadStats]);
 
   useEffect(() => {
     if (!open) return;

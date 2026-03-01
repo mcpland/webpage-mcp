@@ -31,6 +31,7 @@ import {
   getDefaultModelForCli,
 } from '@/common/agent-models';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { agentFetch } from '@/utils/agent-rpc';
 
 type AgentCli = 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm';
 
@@ -105,7 +106,6 @@ function createAgentChatController() {
 
   // Initialize composables - sessions must be declared first for sessionId access
   const sessions = useAgentSessions({
-    getServerPort: () => server.serverPort.value,
     ensureServer: () => server.ensureNativeServer(),
     onSessionChanged: (sessionId: string) => {
       // Guard against stale callbacks from concurrent session switches
@@ -144,14 +144,12 @@ function createAgentChatController() {
   });
 
   chat = useAgentChat({
-    getServerPort: () => server.serverPort.value,
     getSessionId: () => sessions.selectedSessionId.value,
     ensureServer: () => server.ensureNativeServer(),
     openEventSource: () => server.openEventSource(),
   });
 
   projects = useAgentProjects({
-    getServerPort: () => server.serverPort.value,
     ensureServer: () => server.ensureNativeServer(),
     onHistoryLoaded: (messages: AgentStoredMessage[]) => {
       const converted = convertStoredMessages(messages);
@@ -162,7 +160,7 @@ function createAgentChatController() {
   const attachments = useAttachments();
   const themeState = useAgentTheme();
   const openProjectPreference = useOpenProjectPreference({
-    getServerPort: () => server.serverPort.value,
+    ensureServer: () => server.ensureNativeServer(),
   });
   const inputPreferences = useAgentInputPreferences();
 
@@ -272,8 +270,7 @@ function createAgentChatController() {
    * session could return after newer ones.
    */
   async function loadSessionHistory(sessionId: string): Promise<void> {
-    const serverPort = server.serverPort.value;
-    if (!serverPort || !sessionId) return;
+    if (!sessionId) return;
 
     // Increment nonce for this load - any subsequent load will invalidate this one
     const myNonce = ++historyLoadNonce;
@@ -287,8 +284,8 @@ function createAgentChatController() {
     };
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/sessions/${encodeURIComponent(sessionId)}/history`;
-      const response = await fetch(url);
+      const url = `/agent/sessions/${encodeURIComponent(sessionId)}/history`;
+      const response = await agentFetch(url);
 
       if (!isStillValid()) return;
 

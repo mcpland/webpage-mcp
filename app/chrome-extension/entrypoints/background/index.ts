@@ -11,7 +11,6 @@ import { initWebEditorListeners } from './web-editor';
 import { initQuickPanelAgentHandler } from './quick-panel/agent-handler';
 import { initQuickPanelCommands } from './quick-panel/commands';
 import { initQuickPanelTabsHandler } from './quick-panel/tabs-handler';
-import { installNativeAuthFetchInterceptor } from '@/utils/native-auth';
 
 // Record-Replay V3 (feature flag)
 import { bootstrapV3 } from './record-replay-v3/bootstrap';
@@ -27,8 +26,6 @@ const ENABLE_RR_V3 = true;
  * Initializes all background services and listeners
  */
 export default defineBackground(() => {
-  installNativeAuthFetchInterceptor();
-
   // Open welcome page on first install
   chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {

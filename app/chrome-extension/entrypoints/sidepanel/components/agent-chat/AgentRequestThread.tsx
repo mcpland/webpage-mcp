@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { AttachmentMetadata } from 'webpage-mcp-shared';
+import { resolveAgentAttachmentUrl } from '@/utils/agent-attachment-url';
 
 import type { AgentThread } from '../../composables/useAgentThreads';
 import ApplyMessageChip from './ApplyMessageChip';
@@ -11,37 +12,25 @@ type AgentRequestThreadProps = {
   serverPort?: number | null;
 };
 
-export default function AgentRequestThread({ thread, serverPort }: AgentRequestThreadProps) {
+export default function AgentRequestThread({ thread, serverPort: _serverPort }: AgentRequestThreadProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [overlayTarget, setOverlayTarget] = useState<Element | null>(null);
   const [viewerAttachment, setViewerAttachment] = useState<AttachmentMetadata | null>(null);
-
-  const baseUrl = useMemo(() => {
-    if (typeof serverPort !== 'number' || !Number.isInteger(serverPort) || serverPort <= 0) {
-      return null;
-    }
-
-    return `http://127.0.0.1:${serverPort}`;
-  }, [serverPort]);
+  const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({});
 
   const viewerUrl = useMemo(() => {
-    if (!viewerAttachment || !baseUrl) {
+    if (!viewerAttachment) {
       return null;
     }
-
     const path = viewerAttachment.urlPath.startsWith('/')
       ? viewerAttachment.urlPath
       : `/${viewerAttachment.urlPath}`;
-    return `${baseUrl}${path}`;
-  }, [baseUrl, viewerAttachment]);
+    return attachmentUrls[path] || null;
+  }, [attachmentUrls, viewerAttachment]);
 
   function getAttachmentUrl(attachment: AttachmentMetadata): string | null {
-    if (!baseUrl) {
-      return null;
-    }
-
     const path = attachment.urlPath.startsWith('/') ? attachment.urlPath : `/${attachment.urlPath}`;
-    return `${baseUrl}${path}`;
+    return attachmentUrls[path] || null;
   }
 
   useEffect(() => {
@@ -66,6 +55,41 @@ export default function AgentRequestThread({ thread, serverPort }: AgentRequestT
       document.removeEventListener('keydown', onKeydown);
     };
   }, [viewerAttachment]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const missing = thread.attachments.filter((attachment) => {
+      const path = attachment.urlPath.startsWith('/') ? attachment.urlPath : `/${attachment.urlPath}`;
+      return !attachmentUrls[path];
+    });
+
+    if (missing.length === 0) {
+      return;
+    }
+
+    void (async () => {
+      for (const attachment of missing) {
+        const path = attachment.urlPath.startsWith('/') ? attachment.urlPath : `/${attachment.urlPath}`;
+        const url = await resolveAgentAttachmentUrl(path);
+        if (!url || cancelled) {
+          continue;
+        }
+        setAttachmentUrls((current) => {
+          if (current[path]) {
+            return current;
+          }
+          return {
+            ...current,
+            [path]: url,
+          };
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [attachmentUrls, thread.attachments]);
 
   return (
     <div ref={rootRef} className="group">
@@ -159,7 +183,7 @@ export default function AgentRequestThread({ thread, serverPort }: AgentRequestT
         ) : null}
       </div>
 
-      <AgentTimeline items={thread.items} state={thread.state} serverPort={serverPort} />
+      <AgentTimeline items={thread.items} state={thread.state} serverPort={_serverPort} />
 
       {viewerAttachment && overlayTarget
         ? createPortal(

@@ -9,9 +9,8 @@ import {
 } from 'webpage-mcp-shared';
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
 import type { AgentMessage, RealtimeEvent } from '../types';
-import { AgentToolBridge } from '../tool-bridge';
 import { getProject } from '../project-service';
-import { getWebpageMcpUrl } from '../../constant';
+import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
 
 type TodoListPhase = 'started' | 'update' | 'completed';
 
@@ -36,11 +35,7 @@ interface TodoListItem {
 export class CodexEngine implements AgentEngine {
   public readonly name = 'codex' as const;
   public readonly supportsMcp = false;
-  private readonly toolBridge: AgentToolBridge;
-
-  constructor(toolBridge?: AgentToolBridge) {
-    this.toolBridge = toolBridge ?? new AgentToolBridge();
-  }
+  constructor() {}
 
   /**
    * Maximum number of stderr lines to keep in memory to avoid unbounded growth.
@@ -118,14 +113,18 @@ export class CodexEngine implements AgentEngine {
     // Add Codex configuration arguments
     args.push(...this.buildCodexConfigArgs(resolvedConfig));
 
-    // Inject local Webpage MCP server via runtime config override (no global codex config mutation)
-    // Use a unique server name to avoid collision with any existing global config
+    // Inject local Webpage MCP server via stdio bridge (no HTTP dependency)
     if (enableWebpageMcp) {
-      const webpageMcpUrl = getWebpageMcpUrl();
-      // Set both url and type for complete HTTP MCP server configuration
-      args.push('-c', `mcp_servers.chrome_mcp_http.url=${JSON.stringify(webpageMcpUrl)}`);
-      args.push('-c', `mcp_servers.chrome_mcp_http.type="http"`);
-      console.error(`[CodexEngine] Webpage MCP server enabled: ${webpageMcpUrl}`);
+      const stdioConfig = resolveWebpageMcpStdioConfig();
+      args.push('-c', 'mcp_servers.webpage_mcp.type="stdio"');
+      args.push('-c', `mcp_servers.webpage_mcp.command=${JSON.stringify(stdioConfig.command)}`);
+      args.push('-c', `mcp_servers.webpage_mcp.args=${JSON.stringify(stdioConfig.args)}`);
+      if (stdioConfig.env && Object.keys(stdioConfig.env).length > 0) {
+        args.push('-c', `mcp_servers.webpage_mcp.env=${JSON.stringify(stdioConfig.env)}`);
+      }
+      console.error(
+        `[CodexEngine] Webpage MCP server enabled via stdio: ${stdioConfig.command} ${stdioConfig.args.join(' ')}`,
+      );
     } else {
       console.error('[CodexEngine] Webpage MCP server disabled');
     }

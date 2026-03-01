@@ -3,6 +3,7 @@
  * Handles message sending, receiving, and cancellation.
  */
 import { ref, computed } from '@/entrypoints/shared/reactivity';
+import { agentFetch } from '@/utils/agent-rpc';
 import type {
   AgentMessage,
   AgentActRequest,
@@ -26,7 +27,6 @@ import type {
 export type RequestState = 'idle' | AgentStatusEvent['status'];
 
 export interface UseAgentChatOptions {
-  getServerPort: () => number | null;
   getSessionId: () => string;
   ensureServer: () => Promise<boolean>;
   openEventSource: () => void;
@@ -288,10 +288,9 @@ export function useAgentChat(options: UseAgentChatOptions) {
     if (!userText) return;
 
     const ready = await options.ensureServer();
-    const serverPort = options.getServerPort();
     const sessionId = options.getSessionId();
 
-    if (!ready || !serverPort) {
+    if (!ready) {
       errorMessage.value = 'Agent server is not available.';
       return;
     }
@@ -359,9 +358,9 @@ export function useAgentChat(options: UseAgentChatOptions) {
     attachments.value = [];
 
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/chat/${encodeURIComponent(sessionId)}/act`;
+      const url = `/agent/chat/${encodeURIComponent(sessionId)}/act`;
 
-      const response = await fetch(url, {
+      const response = await agentFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -427,16 +426,13 @@ export function useAgentChat(options: UseAgentChatOptions) {
   async function cancelCurrentRequest(): Promise<void> {
     if (!currentRequestId.value) return;
 
-    const serverPort = options.getServerPort();
     const sessionId = options.getSessionId();
-
-    if (!serverPort) return;
 
     cancelling.value = true;
     try {
-      const url = `http://127.0.0.1:${serverPort}/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(currentRequestId.value)}`;
+      const url = `/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(currentRequestId.value)}`;
 
-      const response = await fetch(url, { method: 'DELETE' });
+      const response = await agentFetch(url, { method: 'DELETE' });
       const data = await response.json().catch(() => null);
 
       // Check if cancel was successful

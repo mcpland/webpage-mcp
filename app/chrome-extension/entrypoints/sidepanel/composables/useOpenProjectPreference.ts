@@ -4,16 +4,13 @@
  */
 import { ref, type Ref } from '@/entrypoints/shared/reactivity';
 import type { OpenProjectTarget, OpenProjectResponse } from 'webpage-mcp-shared';
+import { agentFetch } from '@/utils/agent-rpc';
 
 // Storage key for default open target
 const STORAGE_KEY = 'agent-open-project-default';
 
 export interface UseOpenProjectPreferenceOptions {
-  /**
-   * Server port for API calls.
-   * Should be provided from useAgentServer.
-   */
-  getServerPort: () => number | null;
+  ensureServer: () => Promise<boolean>;
 }
 
 export interface UseOpenProjectPreference {
@@ -71,15 +68,15 @@ export function useOpenProjectPreference(
     sessionId: string,
     target: OpenProjectTarget,
   ): Promise<OpenProjectResponse> {
-    const port = options.getServerPort();
-    if (!port) {
+    const ready = await options.ensureServer();
+    if (!ready) {
       return { success: false, error: 'Server not connected' };
     }
 
     loading.value = true;
     try {
-      const url = `http://127.0.0.1:${port}/agent/sessions/${encodeURIComponent(sessionId)}/open`;
-      const response = await fetch(url, {
+      const url = `/agent/sessions/${encodeURIComponent(sessionId)}/open`;
+      const response = await agentFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target }),
@@ -102,15 +99,15 @@ export function useOpenProjectPreference(
     projectId: string,
     target: OpenProjectTarget,
   ): Promise<OpenProjectResponse> {
-    const port = options.getServerPort();
-    if (!port) {
+    const ready = await options.ensureServer();
+    if (!ready) {
       return { success: false, error: 'Server not connected' };
     }
 
     loading.value = true;
     try {
-      const url = `http://127.0.0.1:${port}/agent/projects/${encodeURIComponent(projectId)}/open`;
-      const response = await fetch(url, {
+      const url = `/agent/projects/${encodeURIComponent(projectId)}/open`;
+      const response = await agentFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target }),

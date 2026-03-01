@@ -6,7 +6,6 @@
 // Native Host Configuration
 export const NATIVE_HOST = {
   NAME: 'com.webpagemcp.nativehost',
-  DEFAULT_PORT: 12306,
 } as const;
 
 // Chrome Extension Icons
@@ -222,7 +221,6 @@ export const STORAGE_KEYS = {
   SERVER_STATUS: 'serverStatus',
   SERVER_STATUSES: 'serverStatuses',
   MCP_SERVER_INSTANCES: 'mcpServerInstances',
-  NATIVE_SERVER_PORT: 'nativeServerPort',
   NATIVE_AUTO_CONNECT_ENABLED: 'nativeAutoConnectEnabled',
   SEMANTIC_MODEL: 'selectedModel',
   USER_PREFERENCES: 'userPreferences',

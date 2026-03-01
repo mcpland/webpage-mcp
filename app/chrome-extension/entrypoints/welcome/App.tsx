@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LINKS, NATIVE_HOST } from "@/common/constants";
+import { LINKS } from "@/common/constants";
 
 import "../sidepanel/styles/agent-chat.css";
 import "./App.css";
@@ -8,7 +8,13 @@ const COMMANDS = {
   npmInstall: "npm install -g webpage-mcp",
   pnpmInstall: "pnpm add -g webpage-mcp",
   yarnInstall: "yarn global add webpage-mcp",
-  mcpUrl: `http://127.0.0.1:${NATIVE_HOST.DEFAULT_PORT}/mcp`,
+  mcpConfig: `{
+  "mcpServers": {
+    "webpage-mcp": {
+      "command": "webpage-mcp-stdio"
+    }
+  }
+}`,
   doctor: "webpage-mcp doctor",
   fix: "webpage-mcp doctor --fix",
   report: "webpage-mcp report --copy",
@@ -160,20 +166,22 @@ export default function WelcomeApp() {
                 className="mt-6 pt-5"
                 style={{ borderTop: "var(--ac-border-width) solid var(--ac-border)" }}
               >
-                <h3 className="welcome-title text-sm font-medium">MCP client URL (streamable HTTP)</h3>
+                <h3 className="welcome-title text-sm font-medium">MCP client config (stdio)</h3>
                 <p className="welcome-muted text-sm mt-1">
-                  Use this URL in your MCP client (e.g., Claude Desktop, CherryStudio).
+                  Use this in your MCP client. No localhost HTTP URL is required.
                 </p>
 
                 <div className="welcome-command-row mt-3 flex items-center justify-between gap-3 px-4 py-3">
-                  <code className="welcome-code text-sm break-all">{COMMANDS.mcpUrl}</code>
+                  <code className="welcome-code text-sm break-all whitespace-pre-wrap">
+                    {COMMANDS.mcpConfig}
+                  </code>
                   <button
                     type="button"
                     className="welcome-mono px-2 py-1 text-xs font-medium ac-btn flex-shrink-0"
-                    style={{ color: copyColor(copiedKey, "mcpUrl") }}
-                    onClick={() => void copyCommand("mcpUrl")}
+                    style={{ color: copyColor(copiedKey, "mcpConfig") }}
+                    onClick={() => void copyCommand("mcpConfig")}
                   >
-                    {copyLabel(copiedKey, "mcpUrl")}
+                    {copyLabel(copiedKey, "mcpConfig")}
                   </button>
                 </div>
 
