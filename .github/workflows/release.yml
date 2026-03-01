@@ -109,10 +109,13 @@ jobs:
 
     steps:
       - name: Ensure NPM token is configured
-        if: ${{ secrets.NPM_AUTH_TOKEN == '' }}
+        env:
+          NPM_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
         run: |
-          echo "NPM_AUTH_TOKEN secret is required to publish."
-          exit 1
+          if [ -z "$NPM_AUTH_TOKEN" ]; then
+            echo "NPM_AUTH_TOKEN secret is required to publish."
+            exit 1
+          fi
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -137,7 +140,6 @@ jobs:
         run: pnpm --filter webpage-mcp-bridge build
 
       - name: Publish package
-        if: ${{ secrets.NPM_AUTH_TOKEN != '' }}
         run: pnpm --filter webpage-mcp-bridge publish --access public --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
