@@ -1,8 +1,12 @@
 import { stdin, stdout } from 'process';
 import { Server } from './server';
 import { v4 as uuidv4 } from 'uuid';
-import { NativeMessageType } from 'webpage-mcp-shared';
-import { TIMEOUTS } from './constant';
+import {
+  DEFAULT_MCP_INSTANCE_ID,
+  NativeMessageType,
+  type McpServerInstanceStatus,
+} from 'webpage-mcp-shared';
+import { NATIVE_SERVER_PORT, TIMEOUTS } from './constant';
 import fileHandler from './file-handler';
 
 interface PendingRequest {
@@ -11,20 +15,54 @@ interface PendingRequest {
   timeoutId: NodeJS.Timeout;
 }
 
+const INSTANCE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
+
+function normalizeInstanceId(raw: unknown): string {
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed && INSTANCE_ID_REGEX.test(trimmed)) {
+      return trimmed;
+    }
+  }
+  return DEFAULT_MCP_INSTANCE_ID;
+}
+
+function normalizePort(raw: unknown): number | undefined {
+  const parsed =
+    typeof raw === 'number' ? raw : typeof raw === 'string' ? Number.parseInt(raw, 10) : Number.NaN;
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  const port = Math.floor(parsed);
+  if (port <= 0 || port > 65535) {
+    return undefined;
+  }
+  return port;
+}
+
 export class NativeMessagingHost {
-  private associatedServer: Server | null = null;
+  private servers: Map<string, Server> = new Map();
+  private instanceStatuses: Map<string, McpServerInstanceStatus> = new Map();
   private pendingRequests: Map<string, PendingRequest> = new Map();
   private static readonly AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
 
   public setServer(serverInstance: Server): void {
-    this.associatedServer = serverInstance;
+    const instanceId = normalizeInstanceId(serverInstance.instanceId);
+    this.servers.set(instanceId, serverInstance);
+    serverInstance.setNativeHost(this);
+    this.instanceStatuses.set(instanceId, {
+      instanceId,
+      isRunning: serverInstance.isRunning,
+      port: serverInstance.getListeningPort() ?? undefined,
+      lastUpdated: Date.now(),
+    });
   }
 
   // add message handler to wait for start server
   public start(): void {
     try {
       this.setupMessageHandling();
-    } catch (error: any) {
+    } catch (_error: any) {
       process.exit(1);
     }
   }
@@ -64,7 +102,7 @@ export class NativeMessagingHost {
 
         try {
           const message = JSON.parse(messageBuffer.toString());
-          this.handleMessage(message);
+          void this.handleMessage(message);
         } catch (error: any) {
           this.sendError(`Failed to parse message: ${error.message}`);
         }
@@ -93,6 +131,163 @@ export class NativeMessagingHost {
     });
   }
 
+  private getOrCreateServer(instanceId: string): Server {
+    const normalized = normalizeInstanceId(instanceId);
+    let server = this.servers.get(normalized);
+    if (server) {
+      return server;
+    }
+    server = new Server({ instanceId: normalized });
+    server.setNativeHost(this);
+    this.servers.set(normalized, server);
+    this.instanceStatuses.set(normalized, {
+      instanceId: normalized,
+      isRunning: false,
+      lastUpdated: Date.now(),
+    });
+    return server;
+  }
+
+  private snapshotInstanceStatus(instanceId: string): McpServerInstanceStatus {
+    const normalized = normalizeInstanceId(instanceId);
+    const server = this.servers.get(normalized);
+    const previous = this.instanceStatuses.get(normalized);
+
+    const status: McpServerInstanceStatus = {
+      instanceId: normalized,
+      isRunning: server?.isRunning ?? previous?.isRunning ?? false,
+      port: server?.getListeningPort() ?? previous?.port,
+      lastUpdated: Date.now(),
+    };
+
+    this.instanceStatuses.set(normalized, status);
+    return status;
+  }
+
+  private listServerInstances(): McpServerInstanceStatus[] {
+    const ids = new Set<string>([...this.instanceStatuses.keys(), ...this.servers.keys()]);
+    const statuses = Array.from(ids).map((instanceId) => this.snapshotInstanceStatus(instanceId));
+    statuses.sort((a, b) => {
+      if (a.instanceId === DEFAULT_MCP_INSTANCE_ID && b.instanceId !== DEFAULT_MCP_INSTANCE_ID) return -1;
+      if (b.instanceId === DEFAULT_MCP_INSTANCE_ID && a.instanceId !== DEFAULT_MCP_INSTANCE_ID) return 1;
+      return a.instanceId.localeCompare(b.instanceId);
+    });
+    return statuses;
+  }
+
+  private async startServer(instanceId: string, port: number): Promise<McpServerInstanceStatus> {
+    const normalized = normalizeInstanceId(instanceId);
+    const requestedPort = normalizePort(port) ?? NATIVE_SERVER_PORT;
+    const server = this.getOrCreateServer(normalized);
+
+    if (server.isRunning) {
+      const listeningPort = server.getListeningPort();
+      if (typeof listeningPort === 'number' && listeningPort === requestedPort) {
+        const runningStatus = this.snapshotInstanceStatus(normalized);
+        this.sendMessage({
+          type: NativeMessageType.SERVER_STARTED,
+          payload: { instanceId: normalized, port: runningStatus.port },
+        });
+        return runningStatus;
+      }
+
+      await server.stop();
+    }
+
+    const actualPort = await server.start(requestedPort, this);
+    const status: McpServerInstanceStatus = {
+      instanceId: normalized,
+      isRunning: true,
+      port: actualPort,
+      lastUpdated: Date.now(),
+    };
+    this.instanceStatuses.set(normalized, status);
+
+    this.sendMessage({
+      type: NativeMessageType.SERVER_STARTED,
+      payload: { instanceId: normalized, port: actualPort },
+    });
+
+    return status;
+  }
+
+  private async stopServer(instanceId: string): Promise<McpServerInstanceStatus> {
+    const normalized = normalizeInstanceId(instanceId);
+    const server = this.servers.get(normalized);
+    const previous = this.instanceStatuses.get(normalized);
+    const port = server?.getListeningPort() ?? previous?.port;
+
+    if (server?.isRunning) {
+      await server.stop();
+    }
+
+    const status: McpServerInstanceStatus = {
+      instanceId: normalized,
+      isRunning: false,
+      port,
+      lastUpdated: Date.now(),
+    };
+    this.instanceStatuses.set(normalized, status);
+
+    this.sendMessage({
+      type: NativeMessageType.SERVER_STOPPED,
+      payload: { instanceId: normalized, port },
+    });
+
+    return status;
+  }
+
+  private sendRequestResponse(requestId: string, payload?: unknown, error?: string): void {
+    const response: Record<string, unknown> = {
+      responseToRequestId: requestId,
+    };
+    if (error) {
+      response.error = error;
+    } else {
+      response.payload = payload;
+    }
+    this.sendMessage(response);
+  }
+
+  private resolveStartDirective(
+    payload: unknown,
+  ): {
+    instanceId: string;
+    port: number;
+  } {
+    if (typeof payload === 'number' || typeof payload === 'string') {
+      return {
+        instanceId: DEFAULT_MCP_INSTANCE_ID,
+        port: normalizePort(payload) ?? NATIVE_SERVER_PORT,
+      };
+    }
+
+    if (payload && typeof payload === 'object') {
+      const obj = payload as Record<string, unknown>;
+      return {
+        instanceId: normalizeInstanceId(obj.instanceId),
+        port: normalizePort(obj.port) ?? NATIVE_SERVER_PORT,
+      };
+    }
+
+    return {
+      instanceId: DEFAULT_MCP_INSTANCE_ID,
+      port: NATIVE_SERVER_PORT,
+    };
+  }
+
+  private resolveStopDirective(payload: unknown): { instanceId: string } {
+    if (payload && typeof payload === 'object') {
+      const obj = payload as Record<string, unknown>;
+      return {
+        instanceId: normalizeInstanceId(obj.instanceId),
+      };
+    }
+    return {
+      instanceId: DEFAULT_MCP_INSTANCE_ID,
+    };
+  }
+
   private async handleMessage(message: any): Promise<void> {
     if (!message || typeof message !== 'object') {
       this.sendError('Invalid message format');
@@ -100,32 +295,53 @@ export class NativeMessagingHost {
     }
 
     if (message.responseToRequestId) {
-      const requestId = message.responseToRequestId;
+      const requestId = String(message.responseToRequestId);
       const pending = this.pendingRequests.get(requestId);
 
       if (pending) {
         clearTimeout(pending.timeoutId);
         if (message.error) {
-          pending.reject(new Error(message.error));
+          pending.reject(new Error(String(message.error)));
         } else {
           pending.resolve(message.payload);
         }
         this.pendingRequests.delete(requestId);
-      } else {
-        // just ignore
       }
       return;
     }
 
+    const requestId = typeof message.requestId === 'string' ? message.requestId : undefined;
+
     // Handle directive messages from Chrome
     try {
       switch (message.type) {
-        case NativeMessageType.START:
-          await this.startServer(message.payload?.port ?? 12306);
+        case NativeMessageType.START: {
+          const directive = this.resolveStartDirective(message.payload);
+          const status = await this.startServer(directive.instanceId, directive.port);
+          if (requestId) {
+            this.sendRequestResponse(requestId, { status: 'success', instance: status });
+          }
           break;
-        case NativeMessageType.STOP:
-          await this.stopServer();
+        }
+        case NativeMessageType.STOP: {
+          const directive = this.resolveStopDirective(message.payload);
+          const status = await this.stopServer(directive.instanceId);
+          if (requestId) {
+            this.sendRequestResponse(requestId, { status: 'success', instance: status });
+          }
           break;
+        }
+        case NativeMessageType.LIST_INSTANCES: {
+          if (!requestId) {
+            this.sendError('list_instances requires requestId');
+            return;
+          }
+          this.sendRequestResponse(requestId, {
+            status: 'success',
+            instances: this.listServerInstances(),
+          });
+          break;
+        }
         case 'auth_get_token':
           this.handleAuthGetToken(message);
           break;
@@ -137,15 +353,19 @@ export class NativeMessagingHost {
           await this.handleFileOperation(message);
           break;
         default:
-          // Double check when message type is not supported
-          if (!message.responseToRequestId) {
-            this.sendError(
-              `Unknown message type or non-response message: ${message.type || 'no type'}`,
-            );
+          if (requestId) {
+            this.sendRequestResponse(requestId, undefined, `Unknown message type: ${message.type || 'no type'}`);
+          } else {
+            this.sendError(`Unknown message type or non-response message: ${message.type || 'no type'}`);
           }
       }
     } catch (error: any) {
-      this.sendError(`Failed to handle directive message: ${error.message}`);
+      const errorMessage = `Failed to handle directive message: ${error.message}`;
+      if (requestId) {
+        this.sendRequestResponse(requestId, undefined, errorMessage);
+      } else {
+        this.sendError(errorMessage);
+      }
     }
   }
 
@@ -246,61 +466,6 @@ export class NativeMessagingHost {
   }
 
   /**
-   * Start Fastify server (now accepts Server instance)
-   */
-  private async startServer(port: number): Promise<void> {
-    if (!this.associatedServer) {
-      this.sendError('Internal error: server instance not set');
-      return;
-    }
-    try {
-      if (this.associatedServer.isRunning) {
-        this.sendMessage({
-          type: NativeMessageType.ERROR,
-          payload: { message: 'Server is already running' },
-        });
-        return;
-      }
-
-      const actualPort = await this.associatedServer.start(port, this);
-
-      this.sendMessage({
-        type: NativeMessageType.SERVER_STARTED,
-        payload: { port: actualPort },
-      });
-    } catch (error: any) {
-      this.sendError(`Failed to start server: ${error.message}`);
-    }
-  }
-
-  /**
-   * Stop Fastify server
-   */
-  private async stopServer(): Promise<void> {
-    if (!this.associatedServer) {
-      this.sendError('Internal error: server instance not set');
-      return;
-    }
-    try {
-      // Check status through associatedServer
-      if (!this.associatedServer.isRunning) {
-        this.sendMessage({
-          type: NativeMessageType.ERROR,
-          payload: { message: 'Server is not running' },
-        });
-        return;
-      }
-
-      await this.associatedServer.stop();
-      // this.serverStarted = false; // Server should update its own status after successful stop
-
-      this.sendMessage({ type: NativeMessageType.SERVER_STOPPED }); // Distinguish from previous 'stopped'
-    } catch (error: any) {
-      this.sendError(`Failed to stop server: ${error.message}`);
-    }
-  }
-
-  /**
    * Send message to Chrome extension
    */
   public sendMessage(message: any): void {
@@ -317,7 +482,7 @@ export class NativeMessagingHost {
           // Message sent successfully, no action needed
         }
       });
-    } catch (error: any) {
+    } catch (_error: any) {
       // Catch JSON.stringify or Buffer operation errors
       // If preparation stage fails, associated request may never be sent
       // Need to consider whether to reject corresponding Promise (if called within sendRequestToExtensionAndWait)
@@ -345,18 +510,28 @@ export class NativeMessagingHost {
     });
     this.pendingRequests.clear();
 
-    if (this.associatedServer && this.associatedServer.isRunning) {
-      this.associatedServer
-        .stop()
-        .then(() => {
-          process.exit(0);
-        })
-        .catch(() => {
-          process.exit(1);
-        });
-    } else {
+    const runningServers = Array.from(this.servers.values()).filter((server) => server.isRunning);
+    if (runningServers.length === 0) {
       process.exit(0);
+      return;
     }
+
+    Promise.allSettled(
+      runningServers.map(async (server) => {
+        try {
+          await server.stop();
+        } catch {
+          // Ignore cleanup failures; we still want process exit.
+        }
+      }),
+    )
+      .then((results) => {
+        const hasRejected = results.some((result) => result.status === 'rejected');
+        process.exit(hasRejected ? 1 : 0);
+      })
+      .catch(() => {
+        process.exit(1);
+      });
   }
 }
 

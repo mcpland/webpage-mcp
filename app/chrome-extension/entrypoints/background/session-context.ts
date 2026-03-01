@@ -1,3 +1,5 @@
+import { DEFAULT_MCP_INSTANCE_ID } from 'webpage-mcp-shared';
+
 export interface SessionContext {
   tabId?: number;
   windowId?: number;
@@ -7,6 +9,15 @@ export interface SessionContext {
 const sessionContexts = new Map<string, SessionContext>();
 const SESSION_CONTEXT_TTL_MS = 30 * 60 * 1000;
 const SESSION_CONTEXT_MAX_ENTRIES = 500;
+
+function normalizeInstanceId(instanceId?: string): string {
+  const trimmed = instanceId?.trim();
+  return trimmed || DEFAULT_MCP_INSTANCE_ID;
+}
+
+function buildSessionKey(sessionId: string, instanceId?: string): string {
+  return `${normalizeInstanceId(instanceId)}:${sessionId}`;
+}
 
 function pruneExpiredSessionContexts(now = Date.now()): void {
   for (const [sessionId, ctx] of sessionContexts.entries()) {
@@ -32,30 +43,32 @@ function enforceSessionContextCapacity(): void {
   }
 }
 
-export function getSessionContext(sessionId: string): SessionContext | undefined {
+export function getSessionContext(sessionId: string, instanceId?: string): SessionContext | undefined {
   pruneExpiredSessionContexts();
-  return sessionContexts.get(sessionId);
+  return sessionContexts.get(buildSessionKey(sessionId, instanceId));
 }
 
 export function patchSessionContext(
   sessionId: string,
   patch: Partial<Pick<SessionContext, 'tabId' | 'windowId'>>,
+  instanceId?: string,
 ): SessionContext {
   const now = Date.now();
   pruneExpiredSessionContexts(now);
-  const current = sessionContexts.get(sessionId) || { updatedAt: Date.now() };
+  const key = buildSessionKey(sessionId, instanceId);
+  const current = sessionContexts.get(key) || { updatedAt: Date.now() };
   const next: SessionContext = {
     ...current,
     ...patch,
     updatedAt: now,
   };
-  sessionContexts.set(sessionId, next);
+  sessionContexts.set(key, next);
   enforceSessionContextCapacity();
   return next;
 }
 
-export function clearSessionContext(sessionId: string): void {
-  sessionContexts.delete(sessionId);
+export function clearSessionContext(sessionId: string, instanceId?: string): void {
+  sessionContexts.delete(buildSessionKey(sessionId, instanceId));
 }
 
 export function clearAllSessionContexts(): void {

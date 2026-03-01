@@ -56,6 +56,7 @@ async function resolveTabIdForExecution(
   toolName: string,
   args: any,
   sessionId?: string,
+  instanceId?: string,
 ): Promise<number | undefined> {
   if (typeof args?.tabId === 'number') return args.tabId;
   if (URL_PRIORITY_TOOLS.has(toolName) && typeof args?.url === 'string' && args.url.trim()) {
@@ -70,7 +71,7 @@ async function resolveTabIdForExecution(
   }
 
   if (sessionId) {
-    const sessionCtx = getSessionContext(sessionId);
+    const sessionCtx = getSessionContext(sessionId, instanceId);
     if (typeof sessionCtx?.tabId === 'number') {
       try {
         const tab = await chrome.tabs.get(sessionCtx.tabId);
@@ -78,7 +79,7 @@ async function resolveTabIdForExecution(
           return tab.id;
         }
       } catch {
-        patchSessionContext(sessionId, { tabId: undefined });
+        patchSessionContext(sessionId, { tabId: undefined }, instanceId);
       }
     }
 
@@ -178,7 +179,8 @@ export const handleCallTool = async (param: ToolCallParam) => {
   }
 
   const sessionId = param.meta?.mcpSessionId?.trim() || undefined;
-  const resolvedTabId = await resolveTabIdForExecution(param.name, param.args, sessionId);
+  const instanceId = param.meta?.instanceId?.trim() || undefined;
+  const resolvedTabId = await resolveTabIdForExecution(param.name, param.args, sessionId, instanceId);
   const mergedArgs = mergeArgsWithResolvedTab(param.args, resolvedTabId);
 
   try {
@@ -194,7 +196,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
       if (typeof tabIdToPersist === 'number') update.tabId = tabIdToPersist;
       if (typeof patch.windowId === 'number') update.windowId = patch.windowId;
       if (Object.keys(update).length > 0) {
-        patchSessionContext(sessionId, update);
+        patchSessionContext(sessionId, update, instanceId);
       }
     }
 

@@ -31,6 +31,7 @@ import { CodexEngine } from '../agent/engines/codex';
 import { ClaudeEngine } from '../agent/engines/claude';
 import { closeDb } from '../agent/db';
 import { registerAgentRoutes } from './routes';
+import { DEFAULT_MCP_INSTANCE_ID } from 'webpage-mcp-shared';
 
 // ============================================================
 // Types
@@ -38,6 +39,10 @@ import { registerAgentRoutes } from './routes';
 
 interface ExtensionRequestPayload {
   data?: unknown;
+}
+
+interface ServerOptions {
+  instanceId?: string;
 }
 
 type McpSessionTransport = StreamableHTTPServerTransport | SSEServerTransport;
@@ -85,14 +90,18 @@ function endRawReplyIfOpen(reply: FastifyReply): void {
 // ============================================================
 
 export class Server {
+  private static activeServerCount = 0;
   private fastify: FastifyInstance;
   public isRunning = false;
+  public readonly instanceId: string;
   private nativeHost: NativeMessagingHost | null = null;
   private mcpSessions: Map<string, McpSession> = new Map();
   private agentStreamManager: AgentStreamManager;
   private agentChatService: AgentChatService;
+  private listeningPort: number | null = null;
 
-  constructor() {
+  constructor(options: ServerOptions = {}) {
+    this.instanceId = options.instanceId?.trim() || DEFAULT_MCP_INSTANCE_ID;
     this.fastify = Fastify({ logger: SERVER_CONFIG.LOGGER_ENABLED });
     this.agentStreamManager = new AgentStreamManager();
     this.agentChatService = new AgentChatService({
@@ -364,6 +373,7 @@ export class Server {
         const sessionId = transport.sessionId;
         const mcpServer = createMcpServer({
           sessionId,
+          instanceId: this.instanceId,
           nativeHost: this.getNativeHostOrThrow(),
         });
         createdSession = {
@@ -421,6 +431,7 @@ export class Server {
         const newSessionId = randomUUID();
         const mcpServer = createMcpServer({
           sessionId: newSessionId,
+          instanceId: this.instanceId,
           nativeHost: this.getNativeHostOrThrow(),
         });
         const transport = new StreamableHTTPServerTransport({
@@ -555,15 +566,20 @@ export class Server {
     try {
       await this.fastify.listen({ port, host: SERVER_CONFIG.HOST });
       const actualPort = this.resolveListeningPort(port);
+      this.listeningPort = actualPort;
 
-      // Set port environment variables after successful listen for Webpage MCP URL resolution
-      process.env.WEBPAGE_MCP_PORT = String(actualPort);
-      process.env.MCP_HTTP_PORT = String(actualPort);
+      // Keep backward compatibility: env URL resolution tracks the default MCP instance only.
+      if (this.instanceId === DEFAULT_MCP_INSTANCE_ID) {
+        process.env.WEBPAGE_MCP_PORT = String(actualPort);
+        process.env.MCP_HTTP_PORT = String(actualPort);
+      }
 
       this.isRunning = true;
+      Server.activeServerCount += 1;
       return actualPort;
     } catch (err) {
       this.isRunning = false;
+      this.listeningPort = null;
       throw err;
     }
   }
@@ -576,12 +592,24 @@ export class Server {
     try {
       await this.disposeAllMcpSessions();
       await this.fastify.close();
-      closeDb();
       this.isRunning = false;
+      this.listeningPort = null;
+      Server.activeServerCount = Math.max(0, Server.activeServerCount - 1);
+      if (Server.activeServerCount === 0) {
+        closeDb();
+      }
+      if (this.instanceId === DEFAULT_MCP_INSTANCE_ID) {
+        delete process.env.WEBPAGE_MCP_PORT;
+        delete process.env.MCP_HTTP_PORT;
+      }
     } catch (err) {
       this.isRunning = false;
+      this.listeningPort = null;
+      Server.activeServerCount = Math.max(0, Server.activeServerCount - 1);
       await this.disposeAllMcpSessions().catch(() => {});
-      closeDb();
+      if (Server.activeServerCount === 0) {
+        closeDb();
+      }
       throw err;
     }
   }
@@ -589,7 +617,11 @@ export class Server {
   public getInstance(): FastifyInstance {
     return this.fastify;
   }
+
+  public getListeningPort(): number | null {
+    return this.listeningPort;
+  }
 }
 
-const serverInstance = new Server();
+const serverInstance = new Server({ instanceId: DEFAULT_MCP_INSTANCE_ID });
 export default serverInstance;

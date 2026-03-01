@@ -21,7 +21,7 @@
     "clean:dist": "pnpm -r exec rm -rf dist .turbo",
     "clean:modules": "pnpm -r exec rm -rf node_modules && rm -rf node_modules",
     "clean": "npm run clean:dist && npm run clean:modules",
-    "typecheck": "pnpm --filter webpage-mcp-bridge --filter webpage-mcp-shared exec tsc --noEmit",
+    "typecheck": "pnpm --filter webpage-mcp-shared build && pnpm --filter webpage-mcp-bridge --filter webpage-mcp-shared exec tsc --noEmit",
     "prepare": "husky"
   },
   "devDependencies": {

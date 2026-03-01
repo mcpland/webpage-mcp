@@ -10,6 +10,7 @@ import type { NativeMessagingHost } from '../native-messaging-host';
 
 export interface McpToolContext {
   sessionId: string;
+  instanceId: string;
   nativeHost: NativeMessagingHost;
 }
 
@@ -127,7 +128,7 @@ async function fetchPublishedFlows(
 
   const requestPromise = (async () => {
     const response = await ctx.nativeHost.sendRequestToExtensionAndWait(
-      { meta: { mcpSessionId: ctx.sessionId } },
+      { meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId } },
       'rr_list_published_flows',
       20000,
     );
@@ -277,7 +278,7 @@ const handleToolCall = async (ctx: McpToolContext, name: string, args: any): Pro
           {
             name: 'record_replay_flow_run',
             args: flowArgs,
-            meta: { mcpSessionId: ctx.sessionId },
+            meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId },
           },
           NativeMessageType.CALL_TOOL,
           120000,
@@ -304,7 +305,7 @@ const handleToolCall = async (ctx: McpToolContext, name: string, args: any): Pro
       {
         name,
         args,
-        meta: { mcpSessionId: ctx.sessionId },
+        meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId },
       },
       NativeMessageType.CALL_TOOL,
       120000, // Extended to 120 seconds to avoid timeout for long tasks such as performance analysis

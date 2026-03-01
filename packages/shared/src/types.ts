@@ -18,6 +18,7 @@ export enum NativeMessageType {
   ENSURE_NATIVE = 'ensure_native',
   PING_NATIVE = 'ping_native',
   DISCONNECT_NATIVE = 'disconnect_native',
+  LIST_INSTANCES = 'list_instances',
 }
 
 export interface NativeMessage<P = any, E = any> {
@@ -25,6 +26,21 @@ export interface NativeMessage<P = any, E = any> {
   responseToRequestId?: string;
   payload?: P;
   error?: E;
+}
+
+export interface McpServerInstanceConfig {
+  instanceId: string;
+  port: number;
+  enabled: boolean;
+  autoStart: boolean;
+  label?: string;
+}
+
+export interface McpServerInstanceStatus {
+  instanceId: string;
+  isRunning: boolean;
+  port?: number;
+  lastUpdated: number;
 }
 
 // ============================================================
