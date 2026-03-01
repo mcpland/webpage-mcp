@@ -21,14 +21,14 @@
     "cosine-similarity",
     "vector-operations"
   ],
-  "author": "hangye",
+  "author": "unadlib",
   "license": "MIT",
   "devDependencies": {
     "rimraf": "^5.0.0"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-repo/webpage-mcp-server.git",
+    "url": "git+https://github.com/mcpland/webpage-mcp.git",
     "directory": "packages/wasm-simd"
   }
 }

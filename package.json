@@ -2,7 +2,7 @@
   "name": "webpage-mcp-monorepo",
   "version": "0.1.0",
   "private": true,
-  "author": "hangye",
+  "author": "unadlib",
   "type": "module",
   "scripts": {
     "build:shared": "pnpm --filter webpage-mcp-shared build",
