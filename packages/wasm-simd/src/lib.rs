@@ -3,7 +3,7 @@ use wide::f32x4;
 
 // Set panic hook for debugging in the browser
 #[wasm_bindgen(start)]
-pub fn main() {
+pub fn init() {
     console_error_panic_hook::set_once();
 }
 
