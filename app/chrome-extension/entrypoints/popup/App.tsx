@@ -145,7 +145,8 @@ export default function PopupApp() {
     const config = {
       mcpServers: {
         'webpage-mcp': {
-          command: 'webpage-mcp-stdio',
+          command: 'npx',
+          args: ['-y', '-p', 'webpage-mcp@latest', 'webpage-mcp-stdio'],
         },
       },
     };

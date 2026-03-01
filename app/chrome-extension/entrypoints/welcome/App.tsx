@@ -5,27 +5,21 @@ import "../sidepanel/styles/agent-chat.css";
 import "./App.css";
 
 const COMMANDS = {
-  npmInstall: "npm install -g webpage-mcp",
-  pnpmInstall: "pnpm add -g webpage-mcp",
-  yarnInstall: "yarn global add webpage-mcp",
+  stdioCommand: "npx -y -p webpage-mcp@latest webpage-mcp-stdio",
   mcpConfig: `{
   "mcpServers": {
     "webpage-mcp": {
-      "command": "webpage-mcp-stdio"
+      "command": "npx",
+      "args": ["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"]
     }
   }
 }`,
-  doctor: "webpage-mcp doctor",
-  fix: "webpage-mcp doctor --fix",
-  report: "webpage-mcp report --copy",
+  doctor: "npx -y webpage-mcp@latest doctor",
+  fix: "npx -y webpage-mcp@latest doctor --fix",
+  report: "npx -y webpage-mcp@latest report --copy",
 } as const;
 
 type CommandKey = keyof typeof COMMANDS;
-
-const ALT_INSTALL = [
-  { label: "pnpm", key: "pnpmInstall" },
-  { label: "yarn", key: "yarnInstall" },
-] as const satisfies ReadonlyArray<{ label: string; key: CommandKey }>;
 
 const DIAGNOSTICS = [
   { label: "Doctor", key: "doctor" },
@@ -113,47 +107,24 @@ export default function WelcomeApp() {
           <div className="max-w-3xl mx-auto space-y-6">
             <section className="welcome-card welcome-card--primary p-6">
               <h2 className="welcome-title text-xl font-medium">
-                Install <code className="welcome-code">webpage-mcp</code>
+                MCP stdio command
               </h2>
               <p className="welcome-muted text-sm mt-2">
-                The Chrome extension uses this local bridge to expose MCP tools to your client.
+                Use this command in your MCP client. No global install and no localhost URL are
+                required.
               </p>
 
               <div className="mt-4 space-y-3">
                 <div className="welcome-command-row flex items-center justify-between gap-3 px-4 py-3">
-                  <code className="welcome-code text-sm break-all">{COMMANDS.npmInstall}</code>
+                  <code className="welcome-code text-sm break-all">{COMMANDS.stdioCommand}</code>
                   <button
                     type="button"
                     className="welcome-mono px-2 py-1 text-xs font-medium ac-btn flex-shrink-0"
-                    style={{ color: copyColor(copiedKey, "npmInstall") }}
-                    onClick={() => void copyCommand("npmInstall")}
+                    style={{ color: copyColor(copiedKey, "stdioCommand") }}
+                    onClick={() => void copyCommand("stdioCommand")}
                   >
-                    {copyLabel(copiedKey, "npmInstall")}
+                    {copyLabel(copiedKey, "stdioCommand")}
                   </button>
-                </div>
-
-                <div className="grid sm:grid-cols-2 gap-3">
-                  {ALT_INSTALL.map((item) => (
-                    <div
-                      key={item.key}
-                      className="welcome-alt-row flex items-center justify-between gap-3 px-4 py-3"
-                    >
-                      <div className="min-w-0">
-                        <div className="welcome-mono welcome-subtle text-[10px] uppercase tracking-widest font-medium">
-                          {item.label}
-                        </div>
-                        <code className="welcome-code text-xs break-all">{COMMANDS[item.key]}</code>
-                      </div>
-                      <button
-                        type="button"
-                        className="welcome-mono px-2 py-1 text-xs font-medium ac-btn flex-shrink-0"
-                        style={{ color: copyColor(copiedKey, item.key) }}
-                        onClick={() => void copyCommand(item.key)}
-                      >
-                        {copyLabel(copiedKey, item.key)}
-                      </button>
-                    </div>
-                  ))}
                 </div>
 
                 <div className="welcome-alt-row welcome-muted px-4 py-3 text-xs">

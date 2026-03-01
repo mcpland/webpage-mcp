@@ -13,18 +13,18 @@ No localhost HTTP port is required.
 1. Verify installation:
 
 ```bash
-webpage-mcp doctor
+npx -y webpage-mcp@latest doctor
 ```
 
 2. Re-register native host if needed:
 
 ```bash
-webpage-mcp register --force --detect
+npx -y webpage-mcp@latest register --force --detect
 ```
 
 3. Keep Chrome open with the extension enabled.
 
-4. Ensure your MCP client is configured to run `webpage-mcp-stdio`.
+4. Ensure your MCP client uses `npx -y -p webpage-mcp@latest webpage-mcp-stdio`.
 
 ## Extension Not Connected
 
@@ -40,13 +40,13 @@ Checks:
 3. Run:
 
 ```bash
-webpage-mcp doctor --fix
+npx -y webpage-mcp@latest doctor --fix
 ```
 
 4. Re-register host:
 
 ```bash
-webpage-mcp register --force --detect
+npx -y webpage-mcp@latest register --force --detect
 ```
 
 ## MCP Client Cannot List/Call Tools
@@ -58,7 +58,7 @@ Symptoms:
 
 Checks:
 
-1. Confirm command path in MCP client config (`webpage-mcp-stdio` or explicit `npx ... webpage-mcp-stdio`).
+1. Confirm MCP client command is `npx` with args `["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"]`.
 2. Ensure extension is connected first (the stdio bridge depends on native host availability).
 3. If needed, set explicit native socket path for both processes:
 
@@ -111,13 +111,13 @@ Checks:
 2. Run:
 
 ```bash
-webpage-mcp fix-permissions
+npx -y webpage-mcp@latest fix-permissions
 ```
 
 3. Re-register host after permission changes:
 
 ```bash
-webpage-mcp register --force --detect
+npx -y webpage-mcp@latest register --force --detect
 ```
 
 ## Diagnostic Report
@@ -125,9 +125,9 @@ webpage-mcp register --force --detect
 Generate a report for issues:
 
 ```bash
-webpage-mcp report
-webpage-mcp report --copy
-webpage-mcp report --json
+npx -y webpage-mcp@latest report
+npx -y webpage-mcp@latest report --copy
+npx -y webpage-mcp@latest report --json
 ```
 
 Include the report and service worker logs when filing an issue.

@@ -118,14 +118,14 @@ Open Chrome and click the extension icon - it should show a connected status.
 
 ### Connecting AI Clients
 
-Use stdio transport with the `webpage-mcp-stdio` binary:
+Use stdio transport via `npx`:
 
 ```json
 {
   "mcpServers": {
     "webpage-mcp": {
       "command": "npx",
-      "args": ["-y", "webpage-mcp@latest", "webpage-mcp-stdio"]
+      "args": ["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"]
     }
   }
 }
@@ -135,33 +135,13 @@ Use stdio transport with the `webpage-mcp-stdio` binary:
 
 Add to your Claude Desktop MCP config (`claude_desktop_config.json`):
 
-```json
-{
-  "mcpServers": {
-    "webpage-mcp": {
-      "command": "webpage-mcp-stdio"
-    }
-  }
-}
-```
-
-Or if using npx:
-
-```json
-{
-  "mcpServers": {
-    "webpage-mcp": {
-      "command": "npx",
-      "args": ["-y", "webpage-mcp@latest", "webpage-mcp-stdio"]
-    }
-  }
-}
-```
+Use the same `npx` stdio config above.
 
 ### Notes
 
 - The current architecture is fully native/stdio and does not expose localhost MCP/agent HTTP endpoints.
 - Multiple instances are identified by `instanceId`; data transport is native/stdio only.
+- For `npx` usage, keep `-p webpage-mcp@latest` in args so `webpage-mcp-stdio` resolves as the executed bin.
 
 ## Project Structure
 
@@ -271,7 +251,7 @@ The `webpage-mcp` CLI provides the following commands:
 ### Register Options
 
 ```bash
-webpage-mcp register [options]
+npx -y webpage-mcp@latest register [options]
 
 Options:
   -f, --force              Force overwrite existing registration
@@ -301,15 +281,15 @@ Options:
 
 ### Extension fails to connect
 
-1. Ensure the native host is registered: `webpage-mcp doctor`
+1. Ensure the native host is registered: `npx -y webpage-mcp@latest doctor`
 2. Check that Node.js >= 20 is available at the registered path
-3. Try re-registering: `webpage-mcp register --force --detect`
+3. Try re-registering: `npx -y webpage-mcp@latest register --force --detect`
 
 ### MCP client can't reach the server
 
 1. Ensure Chrome is open and the extension is enabled
-2. Ensure native host is connected (`webpage-mcp doctor`)
-3. Use stdio config (`webpage-mcp-stdio`) in your MCP client; no localhost endpoint is required
+2. Ensure native host is connected (`npx -y webpage-mcp@latest doctor`)
+3. Use npx stdio config in your MCP client (`command: "npx"`, `args: ["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"]`)
 
 ### Tools return errors or time out
 
@@ -320,8 +300,8 @@ Options:
 ### Generate a diagnostic report
 
 ```bash
-webpage-mcp report --copy    # Copies to clipboard
-webpage-mcp doctor --fix     # Auto-fix common issues
+npx -y webpage-mcp@latest report --copy    # Copies to clipboard
+npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 ```
 
 ## License
