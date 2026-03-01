@@ -3,7 +3,7 @@ import type {
   AttachmentCleanupResponse,
   AttachmentStatsResponse,
 } from 'webpage-mcp-shared';
-import { agentFetch } from '@/utils/agent-rpc';
+import { requestAgentRpcJson } from '@/utils/agent-rpc';
 
 type AttachmentCachePanelProps = {
   open: boolean;
@@ -121,14 +121,10 @@ export default function AttachmentCachePanel({
       }
 
       try {
-        const response = await agentFetch('/agent/attachments/stats', { signal: controller.signal });
-
-        if (!response.ok) {
-          const text = await response.text().catch(() => '');
-          throw new Error(text || `HTTP ${response.status}`);
-        }
-
-        const data = (await response.json().catch(() => null)) as AttachmentStatsResponse | null;
+        const data = await requestAgentRpcJson<AttachmentStatsResponse>({
+          operation: 'agent.attachments.stats',
+        });
+        if (controller.signal.aborted) return;
         if (!data || data.success !== true) {
           throw new Error('Invalid response from server.');
         }
@@ -164,18 +160,10 @@ export default function AttachmentCachePanel({
     setStatusMessage(null);
 
     try {
-      const response = await agentFetch('/agent/attachments', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectIds }),
+      const result = await requestAgentRpcJson<AttachmentCleanupResponse>({
+        operation: 'agent.attachments.deleteAll',
+        body: { projectIds },
       });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `HTTP ${response.status}`);
-      }
-
-      const result = (await response.json().catch(() => null)) as AttachmentCleanupResponse | null;
       if (!result || result.success !== true) {
         throw new Error('Invalid response from server.');
       }

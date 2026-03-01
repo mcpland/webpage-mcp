@@ -5,7 +5,9 @@ import { Server } from './server';
 import { v4 as uuidv4 } from 'uuid';
 import {
   DEFAULT_MCP_INSTANCE_ID,
+  isAgentRpcRequestPayload,
   NativeMessageType,
+  type AgentRpcRequestPayload,
   type McpServerInstanceConfig,
   type McpServerInstanceStatus,
   type NativeSyncInstancesPayload,
@@ -13,7 +15,6 @@ import {
 import { TIMEOUTS } from './constant';
 import fileHandler from './file-handler';
 import type { RealtimeEvent } from './agent/types';
-import type { InternalRouteRequest } from './server';
 import { getNativeSocketPath } from './ipc/socket-path';
 import { callToolForContext, listToolsForContext } from './mcp/register-tools';
 
@@ -63,6 +64,19 @@ function sortInstanceConfigs(instances: McpServerInstanceConfig[]): McpServerIns
     if (b.instanceId === DEFAULT_MCP_INSTANCE_ID && a.instanceId !== DEFAULT_MCP_INSTANCE_ID) return 1;
     return a.instanceId.localeCompare(b.instanceId);
   });
+}
+
+function readStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    ([, entryValue]) => typeof entryValue === 'string',
+  ) as Array<[string, string]>;
+  if (entries.length === 0) {
+    return undefined;
+  }
+  return Object.fromEntries(entries);
 }
 
 export class NativeMessagingHost {
@@ -486,33 +500,33 @@ export class NativeMessagingHost {
 
   private parseAgentRpcPayload(payload: unknown): {
     instanceId: string;
-    request: InternalRouteRequest;
+    request: AgentRpcRequestPayload;
   } {
     const raw = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
-    const instanceId = normalizeInstanceId(raw.instanceId);
-    const method =
-      typeof raw.method === 'string' && raw.method.trim() ? raw.method.trim().toUpperCase() : 'GET';
-    const path = typeof raw.path === 'string' && raw.path.trim() ? raw.path.trim() : '/ping';
-    const query = raw.query && typeof raw.query === 'object' ? (raw.query as Record<string, unknown>) : undefined;
-    const body = raw.body;
-    const headers =
-      raw.headers && typeof raw.headers === 'object'
-        ? Object.fromEntries(
-            Object.entries(raw.headers as Record<string, unknown>)
-              .filter(([, value]) => typeof value === 'string')
-              .map(([key, value]) => [key, String(value)]),
-          )
-        : undefined;
+    const explicitInstanceId = normalizeInstanceId(raw.instanceId);
+
+    if (!isAgentRpcRequestPayload(raw)) {
+      throw new Error('agent_rpc payload must include operation');
+    }
+
+    const request: AgentRpcRequestPayload = {
+      instanceId: explicitInstanceId,
+      operation: raw.operation,
+      params:
+        raw.params && typeof raw.params === 'object' && !Array.isArray(raw.params)
+          ? (raw.params as Record<string, unknown>)
+          : undefined,
+      query:
+        raw.query && typeof raw.query === 'object' && !Array.isArray(raw.query)
+          ? (raw.query as Record<string, unknown>)
+          : undefined,
+      body: raw.body,
+      headers: readStringRecord(raw.headers),
+    };
 
     return {
-      instanceId,
-      request: {
-        method,
-        path,
-        query,
-        body,
-        headers,
-      },
+      instanceId: explicitInstanceId,
+      request,
     };
   }
 
@@ -529,7 +543,7 @@ export class NativeMessagingHost {
       await this.startServer(instanceId);
     }
 
-    const response = await server.invokeInternalRoute(request);
+    const response = await server.invokeAgentRpc(request);
     this.sendRequestResponse(requestId, {
       ok: response.statusCode >= 200 && response.statusCode < 300,
       statusCode: response.statusCode,

@@ -31,7 +31,7 @@ import {
   getDefaultModelForCli,
 } from '@/common/agent-models';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
-import { agentFetch } from '@/utils/agent-rpc';
+import { requestAgentRpcJson } from '@/utils/agent-rpc';
 
 type AgentCli = 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm';
 
@@ -40,7 +40,6 @@ function createAgentChatController() {
   const selectedCli = ref('');
   const model = ref('');
   const reasoningEffort = ref<CodexReasoningEffort>('medium');
-  const useCcr = ref(false);
   const enableWebpageMcp = ref(true);
   const isSavingPreference = ref(false);
 
@@ -284,24 +283,19 @@ function createAgentChatController() {
     };
 
     try {
-      const url = `/agent/sessions/${encodeURIComponent(sessionId)}/history`;
-      const response = await agentFetch(url);
+      const data = await requestAgentRpcJson<{ messages?: AgentStoredMessage[] }>({
+        operation: 'agent.sessions.history',
+        params: { sessionId },
+      });
 
       if (!isStillValid()) return;
 
-      if (response.ok) {
-        const data = await response.json();
+      // Re-check after json parsing (parsing can be slow for large histories)
+      if (!isStillValid()) return;
 
-        // Re-check after json parsing (parsing can be slow for large histories)
-        if (!isStillValid()) return;
-
-        const messages = data.messages || [];
-        const converted = convertStoredMessages(messages);
-        chat.setMessages(converted);
-      } else {
-        if (!isStillValid()) return;
-        chat.setMessages([]);
-      }
+      const messages = data.messages || [];
+      const converted = convertStoredMessages(messages);
+      chat.setMessages(converted);
     } catch (error) {
       if (isStillValid()) {
         console.error('Failed to load session history:', error);
@@ -655,7 +649,6 @@ function createAgentChatController() {
     if (project) {
       selectedCli.value = project.preferredCli ?? '';
       model.value = project.selectedModel ?? '';
-      useCcr.value = project.useCcr ?? false;
       enableWebpageMcp.value = project.enableWebpageMcp !== false;
     }
     // Load sessions for the new project
@@ -689,7 +682,6 @@ function createAgentChatController() {
         if (project) {
           selectedCli.value = project.preferredCli ?? '';
           model.value = project.selectedModel ?? '';
-          useCcr.value = project.useCcr ?? false;
           enableWebpageMcp.value = project.enableWebpageMcp !== false;
 
           // Ensure a default session exists for the new project
@@ -720,17 +712,9 @@ function createAgentChatController() {
     try {
       // Use normalized model to ensure valid value is saved
       const normalizedModel = getNormalizedModel();
-      // Only save CCR if Claude CLI is selected
-      const normalizedCcr = selectedCli.value === 'claude' ? useCcr.value : false;
-      await projects.saveProjectPreference(
-        selectedCli.value,
-        normalizedModel,
-        normalizedCcr,
-        enableWebpageMcp.value,
-      );
+      await projects.saveProjectPreference(selectedCli.value, normalizedModel, enableWebpageMcp.value);
       // Sync local state with normalized values
       model.value = normalizedModel;
-      useCcr.value = normalizedCcr;
 
       // If CLI changed, create a new empty session with the new CLI
       const cliChanged = previousCli !== selectedCli.value;
@@ -810,7 +794,6 @@ function createAgentChatController() {
       if (project) {
         selectedCli.value = project.preferredCli ?? '';
         model.value = project.selectedModel ?? '';
-        useCcr.value = project.useCcr ?? false;
         enableWebpageMcp.value = project.enableWebpageMcp !== false;
       }
 
@@ -1180,7 +1163,6 @@ function createAgentChatController() {
     selectedCli: selectedCli.value,
     model: model.value,
     reasoningEffort: reasoningEffort.value,
-    useCcr: useCcr.value,
     enableWebpageMcp: enableWebpageMcp.value,
     engines: server.engines.value,
     isPickingDirectory: isPickingDirectory.value,
@@ -1202,9 +1184,6 @@ function createAgentChatController() {
     },
     onReasoningEffortUpdate: (value: CodexReasoningEffort) => {
       reasoningEffort.value = value;
-    },
-    onCcrUpdate: (value: boolean) => {
-      useCcr.value = value;
     },
     onWebpageMcpUpdate: (value: boolean) => {
       enableWebpageMcp.value = value;
@@ -1279,7 +1258,6 @@ function createAgentChatController() {
         if (project) {
           selectedCli.value = project.preferredCli ?? '';
           model.value = project.selectedModel ?? '';
-          useCcr.value = project.useCcr ?? false;
           enableWebpageMcp.value = project.enableWebpageMcp !== false;
         }
 

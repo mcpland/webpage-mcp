@@ -1,4 +1,4 @@
-import { agentFetch } from '@/utils/agent-rpc';
+import { requestAgentRpcBlob } from '@/utils/agent-rpc';
 
 const urlCache = new Map<string, Promise<string | null>>();
 
@@ -7,9 +7,28 @@ function normalizePath(path: string): string {
   return path.startsWith('/') ? path : `/${path}`;
 }
 
+function parseAttachmentPath(path: string): { projectId: string; filename: string } | null {
+  const match = path.match(/^\/agent\/attachments\/([^/]+)\/(.+)$/);
+  if (!match) {
+    return null;
+  }
+  try {
+    return {
+      projectId: decodeURIComponent(match[1]),
+      filename: decodeURIComponent(match[2]),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveAgentAttachmentUrl(urlPath: string): Promise<string | null> {
   const path = normalizePath(urlPath.trim());
   if (!path || path === '/') {
+    return null;
+  }
+  const parsed = parseAttachmentPath(path);
+  if (!parsed) {
     return null;
   }
 
@@ -20,11 +39,13 @@ export async function resolveAgentAttachmentUrl(urlPath: string): Promise<string
 
   const pending = (async () => {
     try {
-      const response = await agentFetch(path);
-      if (!response.ok) {
-        return null;
-      }
-      const blob = await response.blob();
+      const blob = await requestAgentRpcBlob({
+        operation: 'agent.attachments.get',
+        params: {
+          projectId: parsed.projectId,
+          filename: parsed.filename,
+        },
+      });
       return URL.createObjectURL(blob);
     } catch {
       return null;

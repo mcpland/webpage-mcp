@@ -28,11 +28,6 @@ export const projects = sqliteTable(
      */
     activeClaudeSessionId: text('active_claude_session_id'),
     /**
-     * Whether to use Claude Code Router (CCR) for this project.
-     * Stored as '1' (true) or '0'/null (false).
-     */
-    useCcr: text('use_ccr'),
-    /**
      * Whether to enable the local Webpage MCP server integration for this project.
      * Stored as '1' (true) or '0' (false). Default: '1' (enabled).
      */

@@ -1028,8 +1028,8 @@ export function initWebEditorListeners(): void {
 
             // Call native-server to open file (server will validate project and path)
             const openResp = await requestAgentRpcFetch({
-              method: 'POST',
-              path: `/agent/projects/${encodeURIComponent(projectId)}/open-file`,
+              operation: 'agent.projects.openFile',
+              params: { projectId },
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 filePath: file,
@@ -1287,8 +1287,8 @@ export function initWebEditorListeners(): void {
           const elementLabels = elements.slice(0, 5).map((e) => e.label);
 
           const resp = await requestAgentRpcFetch({
-            method: 'POST',
-            path: `/agent/chat/${encodeURIComponent(sessionId)}/act`,
+            operation: 'agent.chat.act',
+            params: { sessionId },
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               instruction,
@@ -1484,8 +1484,8 @@ export function initWebEditorListeners(): void {
           const instruction = buildAgentPrompt(payload);
 
           const resp = await requestAgentRpcFetch({
-            method: 'POST',
-            path: `/agent/chat/${encodeURIComponent(sessionId)}/act`,
+            operation: 'agent.chat.act',
+            params: { sessionId },
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               instruction,
@@ -1568,8 +1568,11 @@ export function initWebEditorListeners(): void {
           try {
             // Call cancel API
             const response = await requestAgentRpcFetch({
-              method: 'DELETE',
-              path: `/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(requestId)}`,
+              operation: 'agent.chat.cancelRequest',
+              params: {
+                sessionId,
+                requestId,
+              },
             });
 
             if (!response.ok) {

@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import fetch from 'node-fetch';
 
 /**
  * File handler for managing file uploads through the native messaging host
@@ -22,19 +21,17 @@ export class FileHandler {
    * Handle file preparation request from the extension
    */
   async handleFileRequest(request: any): Promise<any> {
-    const { action, fileUrl, base64Data, fileName, filePath, traceFilePath, insightName } = request;
+    const { action, base64Data, fileName, filePath, traceFilePath, insightName } = request;
 
     try {
       switch (action) {
         case 'prepareFile':
-          if (fileUrl) {
-            return await this.downloadFile(fileUrl, fileName);
-          } else if (base64Data) {
+          if (base64Data) {
             return await this.saveBase64File(base64Data, fileName);
           } else if (filePath) {
             return await this.verifyFile(filePath);
           }
-          break;
+          return { success: false, error: 'Either base64Data or filePath is required' };
 
         case 'readBase64File': {
           if (!filePath) return { success: false, error: 'filePath is required' };
@@ -74,37 +71,6 @@ export class FileHandler {
   }
 
   /**
-   * Download a file from URL and save to temp directory
-   */
-  private async downloadFile(fileUrl: string, fileName?: string): Promise<any> {
-    try {
-      const response = await fetch(fileUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to download file: ${response.statusText}`);
-      }
-
-      // Generate filename if not provided
-      const finalFileName = fileName || this.generateFileName(fileUrl);
-      const filePath = path.join(this.tempDir, finalFileName);
-
-      // Get the file buffer
-      const buffer = await response.buffer();
-
-      // Save to file
-      fs.writeFileSync(filePath, buffer);
-
-      return {
-        success: true,
-        filePath: filePath,
-        fileName: finalFileName,
-        size: buffer.length,
-      };
-    } catch (error) {
-      throw new Error(`Failed to download file from URL: ${error}`);
-    }
-  }
-
-  /**
    * Save base64 data as a file
    */
   private async saveBase64File(base64Data: string, fileName?: string): Promise<any> {
@@ -116,7 +82,7 @@ export class FileHandler {
       const buffer = Buffer.from(base64Content, 'base64');
 
       // Generate filename if not provided
-      const finalFileName = fileName || `upload-${Date.now()}.bin`;
+      const finalFileName = fileName || this.generateFileName();
       const filePath = path.join(this.tempDir, finalFileName);
 
       // Save to file
@@ -224,27 +190,9 @@ export class FileHandler {
   }
 
   /**
-   * Generate a filename from URL or create a unique one
+   * Generate a unique filename.
    */
-  private generateFileName(url?: string): string {
-    if (url) {
-      try {
-        const urlObj = new URL(url);
-        const pathname = urlObj.pathname;
-        const basename = path.basename(pathname);
-        if (basename && basename !== '/') {
-          // Add random suffix to avoid collisions
-          const ext = path.extname(basename);
-          const name = path.basename(basename, ext);
-          const randomSuffix = crypto.randomBytes(4).toString('hex');
-          return `${name}-${randomSuffix}${ext}`;
-        }
-      } catch {
-        // Invalid URL, fall through to generate random name
-      }
-    }
-
-    // Generate random filename
+  private generateFileName(): string {
     return `upload-${crypto.randomBytes(8).toString('hex')}.bin`;
   }
 

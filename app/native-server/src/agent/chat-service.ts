@@ -28,10 +28,10 @@ export interface AgentChatServiceOptions {
 }
 
 /**
- * AgentChatService coordinates incoming /agent/chat requests and delegates to engines.
+ * AgentChatService coordinates incoming agent.chat operations and delegates to engines.
  *
  * Note:This service is responsible for session-level scheduling and is not concerned with specific CLI/SDK implementation details.
- * Dependency inversion is implemented through the Engine interface, so there is no need to modify the HTTP routing layer when replacing or adding new engines.
+ * Dependency inversion is implemented through the Engine interface, so there is no need to modify the RPC dispatch layer when replacing or adding new engines.
  */
 export class AgentChatService {
   private readonly engines = new Map<EngineName, AgentEngine>();
@@ -105,7 +105,6 @@ export class AgentChatService {
     const projectRoot = project.rootPath;
     const projectPreferredCli = project.preferredCli as EngineName | undefined;
     const projectSelectedModel = project.selectedModel;
-    const projectUseCcr = project.useCcr;
 
     // Legacy fallback: if caller does not use sessions table, use project-level resume id
     let resumeClaudeSessionId: string | undefined;
@@ -340,8 +339,6 @@ export class AgentChatService {
       optionsConfig: dbSession?.optionsConfig,
       // Pass Claude session ID for session resumption (ClaudeEngine only)
       resumeClaudeSessionId: engineName === 'claude' ? resumeClaudeSessionId : undefined,
-      // Pass useCcr flag for Claude Code Router support (ClaudeEngine only)
-      useCcr: engineName === 'claude' ? projectUseCcr : undefined,
       // Pass Codex-specific configuration (CodexEngine only)
       codexConfig: engineName === 'codex' ? dbSession?.optionsConfig?.codexConfig : undefined,
     };

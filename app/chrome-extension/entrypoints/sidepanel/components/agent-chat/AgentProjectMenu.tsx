@@ -10,7 +10,6 @@ type AgentProjectMenuProps = {
   selectedCli: string;
   model: string;
   reasoningEffort: CodexReasoningEffort;
-  useCcr: boolean;
   enableWebpageMcp: boolean;
   engines: AgentEngineInfo[];
   isPicking: boolean;
@@ -21,7 +20,6 @@ type AgentProjectMenuProps = {
   onCliUpdate?: (cli: string) => void;
   onModelUpdate?: (model: string) => void;
   onReasoningEffortUpdate?: (effort: CodexReasoningEffort) => void;
-  onCcrUpdate?: (useCcr: boolean) => void;
   onWebpageMcpUpdate?: (enableWebpageMcp: boolean) => void;
   onSave?: () => void;
 };
@@ -33,7 +31,6 @@ export default function AgentProjectMenu({
   selectedCli,
   model,
   reasoningEffort,
-  useCcr,
   enableWebpageMcp,
   engines,
   isPicking,
@@ -44,7 +41,6 @@ export default function AgentProjectMenu({
   onCliUpdate,
   onModelUpdate,
   onReasoningEffortUpdate,
-  onCcrUpdate,
   onWebpageMcpUpdate,
   onSave,
 }: AgentProjectMenuProps) {
@@ -71,7 +67,6 @@ export default function AgentProjectMenu({
         ? reasoningEffort
         : availableReasoningEfforts[availableReasoningEfforts.length - 1];
 
-  const showCcrOption = selectedCli === 'claude';
   const showWebpageMcpOption = !selectedCli || selectedCli === 'claude' || selectedCli === 'codex';
 
   function handleCliChange(event: ChangeEvent<HTMLSelectElement>): void {
@@ -86,14 +81,6 @@ export default function AgentProjectMenu({
     } else {
       onModelUpdate?.('');
     }
-
-    if (cli !== 'claude') {
-      onCcrUpdate?.(false);
-    }
-  }
-
-  function handleCcrChange(event: ChangeEvent<HTMLInputElement>): void {
-    onCcrUpdate?.(event.currentTarget.checked);
   }
 
   function handleWebpageMcpChange(event: ChangeEvent<HTMLInputElement>): void {
@@ -268,28 +255,6 @@ export default function AgentProjectMenu({
           <p className="text-[10px] mt-1 ml-14" style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}>
             Applies to new sessions. Edit existing session in Session Settings.
           </p>
-        </div>
-      ) : null}
-
-      {showCcrOption ? (
-        <div className="px-3 py-2 flex items-center gap-2">
-          <span className="text-xs w-12" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-            CCR
-          </span>
-          <label className="flex items-center gap-2 cursor-pointer" title="Use Claude Code Router for API routing">
-            <input
-              type="checkbox"
-              checked={useCcr}
-              className="w-4 h-4 rounded"
-              style={{
-                accentColor: 'var(--ac-accent, #c87941)',
-              }}
-              onChange={handleCcrChange}
-            />
-            <span className="text-xs" style={{ color: 'var(--ac-text, #1a1a1a)' }}>
-              Use Claude Code Router
-            </span>
-          </label>
         </div>
       ) : null}
 

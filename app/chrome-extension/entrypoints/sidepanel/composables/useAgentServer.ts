@@ -1,12 +1,16 @@
 /**
  * Composable for managing Agent Server connection state.
- * Handles native host connection, server status, and SSE stream.
+ * Handles native host connection, server status, and realtime stream subscription.
  */
 import { ref, computed, onUnmounted } from '@/entrypoints/shared/reactivity';
 import { NativeMessageType } from 'webpage-mcp-shared';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type { AgentEngineInfo, RealtimeEvent } from 'webpage-mcp-shared';
-import { agentFetch, subscribeAgentStream, unsubscribeAgentStream } from '@/utils/agent-rpc';
+import {
+  requestAgentRpcJson,
+  subscribeAgentStream,
+  unsubscribeAgentStream,
+} from '@/utils/agent-rpc';
 
 interface ServerStatus {
   isRunning: boolean;
@@ -16,7 +20,7 @@ interface ServerStatus {
 
 export interface UseAgentServerOptions {
   /**
-   * Get the session ID for SSE routing.
+   * Get the session ID for realtime stream routing.
    * Must be provided by caller (typically DB session ID).
    */
   getSessionId?: () => string;
@@ -43,7 +47,7 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
   const MAX_RECONNECT_ATTEMPTS = 5;
   const BASE_RECONNECT_DELAY = 1000;
 
-  // Track which sessionId the current SSE connection is subscribed to
+  // Track which sessionId the current stream subscription is bound to
   let currentStreamSessionId: string | null = null;
   const streamMessageHandler = (message: unknown): void => {
     const msg = message as {
@@ -181,17 +185,16 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
   // Fetch available engines
   async function fetchEngines(): Promise<void> {
     try {
-      const response = await agentFetch('/agent/engines');
-      if (response.ok) {
-        const data = await response.json();
-        engines.value = data.engines || [];
-      }
+      const data = await requestAgentRpcJson<{ engines?: AgentEngineInfo[] }>({
+        operation: 'agent.engines.list',
+      });
+      engines.value = data.engines || [];
     } catch (error) {
       console.error('Failed to fetch engines:', error);
     }
   }
 
-  // Check if SSE is connected
+  // Check if stream subscription is active
   function isEventSourceConnected(): boolean {
     return eventSource.value !== null;
   }
@@ -203,7 +206,7 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
 
     // Skip if already connected to the same session
     if (isEventSourceConnected() && currentStreamSessionId === targetSessionId) {
-      console.log('[AgentServer] SSE already connected to session, skipping reconnect');
+      console.log('[AgentServer] stream already connected to session, skipping reconnect');
       return;
     }
 
@@ -261,7 +264,7 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
   // Initialize
   async function initialize(): Promise<void> {
     await ensureNativeServer();
-    // Note: SSE connection is now opened explicitly when session is ready
+    // Note: stream subscription is opened explicitly when session is ready
   }
 
   // Cleanup on unmount

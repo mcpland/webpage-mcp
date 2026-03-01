@@ -4,7 +4,7 @@
  * Each session has its own engine configuration, chat history, and resume state.
  */
 import { ref, computed } from '@/entrypoints/shared/reactivity';
-import { agentFetch } from '@/utils/agent-rpc';
+import { requestAgentRpcFetch, requestAgentRpcJson } from '@/utils/agent-rpc';
 import type {
   AgentSession,
   AgentCliPreference,
@@ -98,26 +98,21 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     sessionError.value = null;
 
     try {
-      const url = `/agent/projects/${encodeURIComponent(projectId)}/sessions`;
-      const response = await agentFetch(url);
+      const data = await requestAgentRpcJson<{ sessions?: AgentSessionWithPreviewMeta[] }>({
+        operation: 'agent.projects.sessions.list',
+        params: { projectId },
+      });
 
       if (!isStillValid()) return;
 
-      if (response.ok) {
-        const data = await response.json();
+      if (!isStillValid()) return;
 
-        if (!isStillValid()) return;
+      sessions.value = data.sessions || [];
 
-        sessions.value = data.sessions || [];
-
-        // If we have sessions but no selection, select the most recent one
-        if (sessions.value.length > 0 && !selectedSessionId.value) {
-          selectedSessionId.value = sessions.value[0].id;
-          await saveSelectedSessionId();
-        }
-      } else {
-        const text = await response.text().catch(() => '');
-        sessionError.value = text || `HTTP ${response.status}`;
+      // If we have sessions but no selection, select the most recent one
+      if (sessions.value.length > 0 && !selectedSessionId.value) {
+        selectedSessionId.value = sessions.value[0].id;
+        await saveSelectedSessionId();
       }
     } catch (error) {
       console.error('Failed to fetch sessions:', error);
@@ -145,21 +140,14 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     sessionError.value = null;
 
     try {
-      const url = '/agent/sessions';
-      const response = await agentFetch(url);
+      const data = await requestAgentRpcJson<{ sessions?: AgentSessionWithPreviewMeta[] }>({
+        operation: 'agent.sessions.list',
+      });
 
       if (!isStillValid()) return;
 
-      if (response.ok) {
-        const data = await response.json();
-
-        if (!isStillValid()) return;
-
-        allSessions.value = data.sessions || [];
-      } else {
-        const text = await response.text().catch(() => '');
-        sessionError.value = text || `HTTP ${response.status}`;
-      }
+      if (!isStillValid()) return;
+      allSessions.value = data.sessions || [];
     } catch (error) {
       console.error('Failed to fetch all sessions:', error);
       sessionError.value = error instanceof Error ? error.message : 'Failed to fetch sessions';
@@ -193,11 +181,10 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     sessionError.value = null;
 
     try {
-      const url = `/agent/projects/${encodeURIComponent(projectId)}/sessions`;
-      const response = await agentFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+      const data = await requestAgentRpcJson<{ session?: AgentSession }>({
+        operation: 'agent.projects.sessions.create',
+        params: { projectId },
+        body: input,
       });
 
       // Guard: check if this is still the expected create operation
@@ -205,13 +192,6 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
         // A newer create was initiated - discard this result
         return null;
       }
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
 
       // Re-check after json parsing
       if (myNonce !== createSessionNonce) {
@@ -251,13 +231,11 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     if (!sessionId) return null;
 
     try {
-      const url = `/agent/sessions/${encodeURIComponent(sessionId)}`;
-      const response = await agentFetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        return data.session || null;
-      }
-      return null;
+      const data = await requestAgentRpcJson<{ session?: AgentSession }>({
+        operation: 'agent.sessions.get',
+        params: { sessionId },
+      });
+      return data.session || null;
     } catch (error) {
       console.error('Failed to get session:', error);
       return null;
@@ -272,19 +250,11 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     if (!sessionId) return null;
 
     try {
-      const url = `/agent/sessions/${encodeURIComponent(sessionId)}`;
-      const response = await agentFetch(url, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
+      const data = await requestAgentRpcJson<{ session?: AgentSession }>({
+        operation: 'agent.sessions.update',
+        params: { sessionId },
+        body: updates,
       });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
       const session = data.session as AgentSession | undefined;
 
       if (session?.id) {
@@ -314,10 +284,12 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     if (!sessionId) return false;
 
     try {
-      const url = `/agent/sessions/${encodeURIComponent(sessionId)}`;
-      const response = await agentFetch(url, { method: 'DELETE' });
+      const response = await requestAgentRpcFetch({
+        operation: 'agent.sessions.delete',
+        params: { sessionId },
+      });
 
-      if (response.ok || response.status === 204) {
+      if (response.ok || response.statusCode === 204) {
         // Remove from local list
         sessions.value = sessions.value.filter((s) => s.id !== sessionId);
         // Also remove from allSessions
@@ -396,15 +368,14 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     sessionError.value = null;
 
     try {
-      const url = `/agent/sessions/${encodeURIComponent(sessionId)}/reset`;
-      const response = await agentFetch(url, { method: 'POST' });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await requestAgentRpcJson<{
+        session: AgentSession | null;
+        deletedMessages?: number;
+        clearedEngineSessionId?: boolean;
+      }>({
+        operation: 'agent.sessions.reset',
+        params: { sessionId },
+      });
       const session = data.session as AgentSession | null;
 
       // Update local session state
@@ -436,15 +407,14 @@ export function useAgentSessions(options: UseAgentSessionsOptions) {
     if (!sessionId) return null;
 
     try {
-      const url = `/agent/sessions/${encodeURIComponent(sessionId)}/claude-info`;
-      const response = await agentFetch(url);
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await requestAgentRpcJson<{
+        managementInfo?: AgentManagementInfo | null;
+        sessionId?: string;
+        engineName?: string;
+      }>({
+        operation: 'agent.sessions.claudeInfo',
+        params: { sessionId },
+      });
       return {
         managementInfo: data.managementInfo ?? null,
         sessionId: data.sessionId ?? sessionId,

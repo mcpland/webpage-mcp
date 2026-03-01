@@ -160,12 +160,7 @@ function runMigrations(sqlite: BetterSqlite3.Database): void {
     sqlite.exec('ALTER TABLE projects ADD COLUMN active_claude_session_id TEXT');
   }
 
-  // Migration 2: Add use_ccr column to projects table
-  if (!columnExists(sqlite, 'projects', 'use_ccr')) {
-    sqlite.exec('ALTER TABLE projects ADD COLUMN use_ccr TEXT');
-  }
-
-  // Migration 3: Add enable_chrome_mcp column to projects table (default enabled)
+  // Migration 2: Add enable_chrome_mcp column to projects table (default enabled)
   if (!columnExists(sqlite, 'projects', 'enable_chrome_mcp')) {
     sqlite.exec("ALTER TABLE projects ADD COLUMN enable_chrome_mcp TEXT NOT NULL DEFAULT '1'");
   }

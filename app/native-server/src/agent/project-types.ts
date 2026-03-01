@@ -14,10 +14,6 @@ export interface CreateOrUpdateProjectInput {
   preferredCli?: AgentCliPreference;
   selectedModel?: string;
   /**
-   * Whether to use Claude Code Router (CCR) for this project.
-   */
-  useCcr?: boolean;
-  /**
    * Whether to enable the local Webpage MCP server integration for this project.
    * Defaults to true when omitted.
    */

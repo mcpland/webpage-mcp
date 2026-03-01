@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
 import type { AgentMessage, RealtimeEvent } from '../types';
-import { detectCcr, validateCcrConfig } from '../ccr-detector';
 import { getProject } from '../project-service';
 import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
 
@@ -72,7 +71,6 @@ export class ClaudeEngine implements AgentEngine {
       systemPromptConfig,
       optionsConfig,
       resumeClaudeSessionId,
-      useCcr,
     } = options;
     const repoPath = this.resolveRepoPath(projectRoot);
 
@@ -440,16 +438,8 @@ export class ClaudeEngine implements AgentEngine {
       // pass it as 'resume' to continue a previous Claude conversation.
       // If not provided, SDK will create a new session.
 
-      // Build environment for Claude Code Router support
-      // SDK treats options.env as a complete replacement, so we must merge with process.env
-      // Reference: https://github.com/musistudio/claude-code-router/issues/855
-      const claudeEnv = await this.buildClaudeEnv(useCcr);
-
-      // Validate CCR configuration and emit friendly warning before calling into CCR
-      // This prevents users from seeing cryptic "includes of undefined" errors
-      if (useCcr) {
-        await this.validateAndWarnCcrConfig(sessionId, requestId, ctx);
-      }
+      // SDK treats options.env as a complete replacement, so we must merge with process.env.
+      const claudeEnv = await this.buildClaudeEnv();
 
       // Resolve permission mode from session config or use default
       // SDK default is 'default', but AgentChat defaults to 'bypassPermissions' for headless operation
@@ -616,10 +606,7 @@ export class ClaudeEngine implements AgentEngine {
         systemPrompt: resolvedSystemPrompt,
         // AbortController for cancellation support - SDK uses this to terminate underlying processes
         abortController: internalAbortController,
-        // Pass merged env to support Claude Code Router (CCR)
-        // This allows users to set ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN via:
-        // 1. eval "$(ccr activate)" before launching Chrome
-        // 2. Or setting env vars in shell profile
+        // Pass merged env through to Claude SDK.
         env: claudeEnv,
         stderr: (data: string) => {
           const line = String(data).trimEnd();
@@ -1243,11 +1230,8 @@ export class ClaudeEngine implements AgentEngine {
         }
       }
 
-      // Enhance error message for CCR-related errors
-      const enhancedMessage = await this.enhanceCcrErrorMessage(message, stderrText);
-
       // Classify errors for better UX
-      const errorMessage = this.classifyError(enhancedMessage, stderrBuffer);
+      const errorMessage = this.classifyError(message, stderrBuffer);
       throw new Error(`ClaudeEngine: ${errorMessage}`);
     } finally {
       // Always cleanup temp files, even on error
@@ -1257,16 +1241,9 @@ export class ClaudeEngine implements AgentEngine {
 
   /**
    * Build environment variables for Claude Code.
-   * Supports Claude Code Router (CCR) when useCcr is true:
-   * 1. Auto-detecting CCR from config file (~/.claude-code-router/config.json)
-   * 2. Passing through env vars if already set (via `eval "$(ccr activate)"`)
-   *
-   * SDK treats options.env as a complete replacement (not merged with process.env),
-   * so we must explicitly include all necessary variables.
-   *
-   * @param useCcr - Whether CCR is enabled for this project. When false/undefined, CCR detection is skipped.
+   * SDK treats options.env as a complete replacement, so we explicitly merge process env.
    */
-  private async buildClaudeEnv(useCcr?: boolean): Promise<NodeJS.ProcessEnv> {
+  private async buildClaudeEnv(): Promise<NodeJS.ProcessEnv> {
     const env: NodeJS.ProcessEnv = { ...process.env };
 
     // Ensure Node.js bin directory is in PATH (for child processes)
@@ -1276,28 +1253,7 @@ export class ClaudeEngine implements AgentEngine {
       env.PATH = [nodeBinDir, currentPath].filter(Boolean).join(path.delimiter);
     }
 
-    // Only detect CCR if explicitly enabled for this project
-    if (useCcr && !env.ANTHROPIC_BASE_URL) {
-      try {
-        const ccrResult = await detectCcr();
-        if (ccrResult.detected && ccrResult.baseUrl && ccrResult.authToken) {
-          env.ANTHROPIC_BASE_URL = ccrResult.baseUrl;
-          env.ANTHROPIC_AUTH_TOKEN = ccrResult.authToken;
-          console.error(`[ClaudeEngine] CCR auto-detected (source: ${ccrResult.source})`);
-        } else if (ccrResult.error) {
-          console.error(`[ClaudeEngine] CCR detection failed: ${ccrResult.error}`);
-        } else {
-          console.error(
-            '[ClaudeEngine] CCR enabled but not detected (config not found or service not running)',
-          );
-        }
-      } catch (err) {
-        // CCR detection is best-effort, don't fail the request
-        console.error(`[ClaudeEngine] CCR detection error: ${err}`);
-      }
-    }
-
-    // Log CCR-related env vars for debugging (without exposing full token)
+    // Log configured Anthropic env vars for debugging (without exposing full token).
     const baseUrl = env.ANTHROPIC_BASE_URL;
     const authToken = env.ANTHROPIC_AUTH_TOKEN;
     if (baseUrl) {
@@ -1411,103 +1367,6 @@ export class ClaudeEngine implements AgentEngine {
     }
 
     return message;
-  }
-
-  /**
-   * Validate CCR configuration and emit a warning message if issues are found.
-   * This is a best-effort check to provide actionable guidance before CCR crashes.
-   */
-  private async validateAndWarnCcrConfig(
-    sessionId: string,
-    requestId: string | undefined,
-    ctx: EngineExecutionContext,
-  ): Promise<void> {
-    try {
-      const validation = await validateCcrConfig();
-
-      if (!validation.checked || validation.valid) {
-        return;
-      }
-
-      // Build user-friendly warning message
-      const lines = [
-        '⚠️ Claude Code Router (CCR) configuration issue detected:',
-        validation.issue ?? 'CCR configuration appears invalid.',
-        '',
-        validation.suggestion ?? 'Please check your CCR configuration.',
-      ];
-
-      if (validation.suggestedFix) {
-        lines.push('', `Suggested fix: Router.default = "${validation.suggestedFix}"`);
-      }
-
-      const content = lines.join('\n');
-      console.error(`[ClaudeEngine] CCR config warning: ${validation.issue}`);
-
-      const warningMessage: AgentMessage = {
-        id: randomUUID(),
-        sessionId,
-        role: 'system',
-        content,
-        messageType: 'status',
-        cliSource: this.name,
-        requestId,
-        isStreaming: false,
-        isFinal: true,
-        createdAt: new Date().toISOString(),
-        metadata: {
-          cli_type: 'claude',
-          warning_type: 'ccr_config',
-          ccr_issue: validation.issue,
-          ccr_suggested_fix: validation.suggestedFix,
-        },
-      };
-
-      ctx.emit({ type: 'message', data: warningMessage });
-    } catch (err) {
-      // CCR config validation is best-effort, don't fail the request
-      console.error('[ClaudeEngine] CCR config validation error:', err);
-    }
-  }
-
-  /**
-   * Enhance error messages for CCR-related errors.
-   * Detects the common "includes of undefined" crash and provides actionable guidance.
-   */
-  private async enhanceCcrErrorMessage(message: string, stderrText: string): Promise<string> {
-    const combinedText = `${message}\n${stderrText}`;
-
-    // Detect CCR's "includes of undefined" error pattern
-    const isCcrIncludesError =
-      combinedText.includes('claude-code-router') &&
-      (combinedText.includes("reading 'includes'") || combinedText.includes('transformRequestIn'));
-
-    if (!isCcrIncludesError) {
-      return message;
-    }
-
-    // Try to get specific fix suggestion from CCR config
-    let suggestion =
-      'Edit ~/.claude-code-router/config.json and set Router.default to "provider,model" format (e.g., "venus,claude-4-5-sonnet-20250929"), then restart CCR.';
-
-    try {
-      const validation = await validateCcrConfig();
-      if (validation.checked && !validation.valid && validation.suggestion) {
-        suggestion = validation.suggestion;
-      }
-    } catch {
-      // Use default suggestion if validation fails
-    }
-
-    return [
-      message,
-      '',
-      '💡 CCR Configuration Issue Detected:',
-      'This error is commonly caused by Router.default being set to only a provider name',
-      '(e.g., "venus") instead of the required "provider,model" format.',
-      '',
-      `Fix: ${suggestion}`,
-    ].join('\n');
   }
 
   /**

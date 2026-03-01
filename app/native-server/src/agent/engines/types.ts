@@ -54,11 +54,6 @@ export interface EngineInitOptions {
    */
   resumeClaudeSessionId?: string;
   /**
-   * Whether to use Claude Code Router (CCR) for this request.
-   * Only applicable to ClaudeEngine; when true, CCR will be auto-detected.
-   */
-  useCcr?: boolean;
-  /**
    * Optional Codex-specific configuration overrides.
    * Only applicable to CodexEngine; merged with DEFAULT_CODEX_CONFIG.
    */

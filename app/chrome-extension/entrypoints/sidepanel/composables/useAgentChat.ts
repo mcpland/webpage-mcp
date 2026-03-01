@@ -3,7 +3,7 @@
  * Handles message sending, receiving, and cancellation.
  */
 import { ref, computed } from '@/entrypoints/shared/reactivity';
-import { agentFetch } from '@/utils/agent-rpc';
+import { parseAgentRpcJson, requestAgentRpcFetch, requestAgentRpcJson } from '@/utils/agent-rpc';
 import type {
   AgentMessage,
   AgentActRequest,
@@ -91,7 +91,7 @@ export function useAgentChat(options: UseAgentChatOptions) {
   /**
    * Handle incoming realtime events.
    * Events are filtered by sessionId to prevent cross-session state pollution
-   * when user switches sessions while SSE connection is still active.
+   * when user switches sessions while a stream subscription is still active.
    */
   function handleRealtimeEvent(event: RealtimeEvent): void {
     const currentSessionId = options.getSessionId();
@@ -201,9 +201,9 @@ export function useAgentChat(options: UseAgentChatOptions) {
 
       // If we're receiving model/tool output but requestState hasn't progressed to 'running',
       // update it. This handles:
-      // 1. Edge case where status events were missed due to SSE timing
+      // 1. Edge case where status events were missed due to stream timing
       // 2. User enters AgentChat mid-request (e.g., from Quick Panel/toolbar trigger)
-      // 3. SSE reconnection after temporary disconnect
+      // 3. stream reconnection after temporary disconnect
       if (
         requestState.value === 'idle' ||
         requestState.value === 'starting' ||
@@ -295,11 +295,11 @@ export function useAgentChat(options: UseAgentChatOptions) {
       return;
     }
 
-    // Ensure SSE is connected before sending
+    // Ensure realtime stream is connected before sending
     options.openEventSource();
 
     // Generate requestId on client side for optimistic message matching
-    // Server will use this requestId when echoing user message via SSE
+    // Server will use this requestId when echoing user message via stream events
     const requestId = crypto.randomUUID();
 
     // Create optimistic user message for immediate feedback
@@ -329,7 +329,7 @@ export function useAgentChat(options: UseAgentChatOptions) {
     const payload: AgentActRequest = {
       // Use instructionText which may include injected context (e.g., web editor selection)
       instruction: instructionText,
-      requestId, // Send requestId to server so it can be used in SSE events
+      requestId, // Send requestId to server so it can be used in stream events
       // Optional metadata for special UI rendering (stored with the user message)
       displayText: chatOptions.displayText?.trim() || undefined,
       clientMeta: chatOptions.clientMeta,
@@ -358,20 +358,11 @@ export function useAgentChat(options: UseAgentChatOptions) {
     attachments.value = [];
 
     try {
-      const url = `/agent/chat/${encodeURIComponent(sessionId)}/act`;
-
-      const response = await agentFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      const result = await requestAgentRpcJson<{ requestId?: string }>({
+        operation: 'agent.chat.act',
+        params: { sessionId },
+        body: payload,
       });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `HTTP ${response.status}`);
-      }
-
-      const result = await response.json().catch(() => ({}));
 
       // Guard: only update state if we're still on the same session
       // This prevents cross-session state pollution when user switches during request
@@ -430,10 +421,14 @@ export function useAgentChat(options: UseAgentChatOptions) {
 
     cancelling.value = true;
     try {
-      const url = `/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(currentRequestId.value)}`;
-
-      const response = await agentFetch(url, { method: 'DELETE' });
-      const data = await response.json().catch(() => null);
+      const response = await requestAgentRpcFetch({
+        operation: 'agent.chat.cancelRequest',
+        params: {
+          sessionId,
+          requestId: currentRequestId.value,
+        },
+      });
+      const data = parseAgentRpcJson<{ success?: boolean; message?: string } | null>(response);
 
       // Check if cancel was successful
       // Backend returns { success: boolean, message?: string }
@@ -442,7 +437,7 @@ export function useAgentChat(options: UseAgentChatOptions) {
       if (!isSuccess) {
         // Cancel failed - show error but keep request state intact
         // so user can try again or wait for natural completion
-        const errorMsg = data?.message || `Failed to cancel request (HTTP ${response.status})`;
+        const errorMsg = data?.message || `Failed to cancel request (${response.statusCode})`;
         console.error('Cancel request failed:', errorMsg);
         errorMessage.value = errorMsg;
         return;
@@ -450,9 +445,9 @@ export function useAgentChat(options: UseAgentChatOptions) {
 
       // Cancel request sent successfully
       // Note: We intentionally do NOT clear currentRequestId/requestState here
-      // The actual state cleanup will happen when we receive the 'cancelled' status event via SSE
+      // The actual state cleanup will happen when we receive the 'cancelled' status event via stream
       // This ensures UI stays consistent with backend state and avoids race conditions
-      // Keep cancelling=true so UI shows "Stopping..." until SSE confirms
+      // Keep cancelling=true so UI shows "Stopping..." until stream confirms
       // cancelling will be reset when handleStatusEvent receives 'cancelled' status
     } catch (error) {
       console.error('Failed to cancel request:', error);

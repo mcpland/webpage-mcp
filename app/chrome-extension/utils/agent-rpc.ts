@@ -1,138 +1,68 @@
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import {
+  isAgentRpcRequestPayload,
+  type AgentRpcRequestPayload,
+  type AgentRpcResponsePayload,
+} from 'webpage-mcp-shared';
 
-export interface AgentRpcFetchRequest {
-  instanceId?: string;
-  method: string;
-  path: string;
-  query?: Record<string, unknown>;
-  body?: unknown;
-  headers?: Record<string, string>;
-}
-
-export interface AgentRpcFetchPayload {
-  ok: boolean;
-  statusCode: number;
-  headers?: Record<string, unknown>;
-  body?: string;
-  json?: unknown;
-  isBinary?: boolean;
-  base64Body?: string | null;
-}
-
-class AgentRpcResponse {
-  private readonly payload: AgentRpcFetchPayload;
-
-  constructor(payload: AgentRpcFetchPayload) {
-    this.payload = payload;
-  }
-
-  get ok(): boolean {
-    return this.payload.ok;
-  }
-
-  get status(): number {
-    return this.payload.statusCode;
-  }
-
-  get headers(): Headers {
-    const headers = new Headers();
-    const raw = this.payload.headers || {};
-    for (const [key, value] of Object.entries(raw)) {
-      if (typeof value === 'string') {
-        headers.set(key, value);
-      } else if (Array.isArray(value)) {
-        headers.set(key, value.map((item) => String(item)).join(', '));
-      }
+function readErrorMessage(payload: AgentRpcResponsePayload): string {
+  if (payload.json && typeof payload.json === 'object') {
+    const error = (payload.json as Record<string, unknown>).error;
+    if (typeof error === 'string' && error.trim()) {
+      return error;
     }
-    return headers;
   }
-
-  async json<T = any>(): Promise<T> {
-    if (this.payload.json !== undefined && this.payload.json !== null) {
-      return this.payload.json as T;
-    }
-    if (this.payload.body) {
-      return JSON.parse(this.payload.body) as T;
-    }
-    return {} as T;
+  if (typeof payload.body === 'string' && payload.body.trim()) {
+    return payload.body;
   }
+  return `Agent RPC failed: ${payload.statusCode}`;
+}
 
-  async text(): Promise<string> {
-    if (typeof this.payload.body === 'string') {
-      return this.payload.body;
+function toBlob(payload: AgentRpcResponsePayload): Blob {
+  const headers = new Headers();
+  const rawHeaders = payload.headers || {};
+  for (const [key, value] of Object.entries(rawHeaders)) {
+    if (typeof value === 'string') {
+      headers.set(key, value);
+    } else if (Array.isArray(value)) {
+      headers.set(key, value.map((item) => String(item)).join(', '));
     }
-    return '';
   }
+  const contentType = headers.get('content-type') || 'application/octet-stream';
+  const base64 = payload.base64Body || '';
+  const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+  return new Blob([bytes], { type: contentType });
+}
 
-  async blob(): Promise<Blob> {
-    const contentType = this.headers.get('content-type') || 'application/octet-stream';
-    const base64 = this.payload.base64Body || '';
-    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
-    return new Blob([bytes], { type: contentType });
+export class AgentRpcError extends Error {
+  public readonly statusCode: number;
+  public readonly response: AgentRpcResponsePayload;
+
+  constructor(response: AgentRpcResponsePayload) {
+    super(readErrorMessage(response));
+    this.name = 'AgentRpcError';
+    this.statusCode = response.statusCode;
+    this.response = response;
   }
 }
 
-function parseLocalPathAndQuery(raw: string): {
-  path: string;
-  query?: Record<string, string | string[]>;
-} {
-  if (!raw) {
-    return { path: '/' };
+export function parseAgentRpcJson<T = unknown>(response: AgentRpcResponsePayload): T {
+  if (response.json !== undefined && response.json !== null) {
+    return response.json as T;
   }
-
-  try {
-    const parsed =
-      raw.startsWith('http://') || raw.startsWith('https://')
-        ? new URL(raw)
-        : new URL(raw, 'https://native.bridge.local');
-    const query: Record<string, string | string[]> = {};
-    for (const [key, value] of parsed.searchParams.entries()) {
-      const existing = query[key];
-      if (existing === undefined) {
-        query[key] = value;
-      } else if (Array.isArray(existing)) {
-        existing.push(value);
-      } else {
-        query[key] = [existing, value];
-      }
-    }
-    return {
-      path: parsed.pathname || '/',
-      query: Object.keys(query).length > 0 ? query : undefined,
-    };
-  } catch {
-    return { path: raw.startsWith('/') ? raw : `/${raw}` };
+  if (typeof response.body === 'string' && response.body.length > 0) {
+    return JSON.parse(response.body) as T;
   }
-}
-
-function normalizeHeaders(init?: RequestInit): Record<string, string> | undefined {
-  const headers = new Headers(init?.headers || {});
-  const entries: Record<string, string> = {};
-  headers.forEach((value, key) => {
-    entries[key] = value;
-  });
-  return Object.keys(entries).length > 0 ? entries : undefined;
-}
-
-function normalizeMethod(init?: RequestInit): string {
-  const method = init?.method?.trim();
-  return method ? method.toUpperCase() : 'GET';
-}
-
-function normalizeBody(init?: RequestInit): unknown {
-  const body = init?.body;
-  if (body === undefined || body === null) {
-    return undefined;
-  }
-  if (typeof body === 'string') {
-    return body;
-  }
-  return body;
+  return {} as T;
 }
 
 export async function requestAgentRpcFetch(
-  payload: AgentRpcFetchRequest,
-): Promise<AgentRpcFetchPayload> {
+  payload: AgentRpcRequestPayload,
+): Promise<AgentRpcResponsePayload> {
+  if (!isAgentRpcRequestPayload(payload)) {
+    throw new Error('Invalid agent_rpc payload: operation is required');
+  }
+
   const response = await chrome.runtime.sendMessage({
     type: BACKGROUND_MESSAGE_TYPES.AGENT_RPC_FETCH,
     payload,
@@ -142,33 +72,25 @@ export async function requestAgentRpcFetch(
     throw new Error(response?.error || 'Agent RPC request failed');
   }
 
-  return response.payload as AgentRpcFetchPayload;
+  return response.payload as AgentRpcResponsePayload;
 }
 
-export async function agentFetch(
-  input: string | URL | Request,
-  init?: RequestInit,
-): Promise<AgentRpcResponse> {
-  const rawUrl =
-    typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.toString()
-        : input instanceof Request
-          ? input.url
-          : '';
+export async function requestAgentRpcJson<T = unknown>(
+  payload: AgentRpcRequestPayload,
+): Promise<T> {
+  const response = await requestAgentRpcFetch(payload);
+  if (!response.ok) {
+    throw new AgentRpcError(response);
+  }
+  return parseAgentRpcJson<T>(response);
+}
 
-  const { path, query } = parseLocalPathAndQuery(rawUrl);
-
-  const payload = await requestAgentRpcFetch({
-    method: normalizeMethod(init),
-    path,
-    query,
-    body: normalizeBody(init),
-    headers: normalizeHeaders(init),
-  });
-
-  return new AgentRpcResponse(payload);
+export async function requestAgentRpcBlob(payload: AgentRpcRequestPayload): Promise<Blob> {
+  const response = await requestAgentRpcFetch(payload);
+  if (!response.ok) {
+    throw new AgentRpcError(response);
+  }
+  return toBlob(response);
 }
 
 export async function subscribeAgentStream(

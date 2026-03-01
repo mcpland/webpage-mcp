@@ -146,11 +146,6 @@ export interface AgentProject {
    */
   activeClaudeSessionId?: string;
   /**
-   * Whether to use Claude Code Router (CCR) for this project.
-   * When enabled, the engine will auto-detect CCR configuration.
-   */
-  useCcr?: boolean;
-  /**
    * Whether to enable Webpage MCP integration for this project.
    * Default: true
    */

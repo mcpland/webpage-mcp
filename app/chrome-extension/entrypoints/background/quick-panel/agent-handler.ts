@@ -245,8 +245,8 @@ function cleanupRequest(requestId: string, reason: string): void {
 async function validateSession(sessionId: string): Promise<boolean> {
   try {
     const response = await requestAgentRpcFetch({
-      method: 'GET',
-      path: `/agent/sessions/${encodeURIComponent(sessionId)}`,
+      operation: 'agent.sessions.get',
+      params: { sessionId },
     });
     return response.ok;
   } catch {
@@ -417,8 +417,8 @@ async function postActRequest(request: ActiveRequest): Promise<void> {
   };
 
   const response = await requestAgentRpcFetch({
-    method: 'POST',
-    path: `/agent/chat/${encodeURIComponent(request.sessionId)}/act`,
+    operation: 'agent.chat.act',
+    params: { sessionId: request.sessionId },
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
@@ -438,8 +438,11 @@ async function cancelRequestOnServer(
 ): Promise<void> {
   try {
     await requestAgentRpcFetch({
-      method: 'DELETE',
-      path: `/agent/chat/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(requestId)}`,
+      operation: 'agent.chat.cancelRequest',
+      params: {
+        sessionId,
+        requestId,
+      },
     });
   } catch {
     // Best-effort: cancellation might still succeed if request already ended

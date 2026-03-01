@@ -4,7 +4,7 @@
  */
 import { ref, type Ref } from '@/entrypoints/shared/reactivity';
 import type { OpenProjectTarget, OpenProjectResponse } from 'webpage-mcp-shared';
-import { agentFetch } from '@/utils/agent-rpc';
+import { requestAgentRpcJson } from '@/utils/agent-rpc';
 
 // Storage key for default open target
 const STORAGE_KEY = 'agent-open-project-default';
@@ -75,15 +75,11 @@ export function useOpenProjectPreference(
 
     loading.value = true;
     try {
-      const url = `/agent/sessions/${encodeURIComponent(sessionId)}/open`;
-      const response = await agentFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target }),
+      return await requestAgentRpcJson<OpenProjectResponse>({
+        operation: 'agent.sessions.open',
+        params: { sessionId },
+        body: { target },
       });
-
-      const data = (await response.json()) as OpenProjectResponse;
-      return data;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { success: false, error: message };
@@ -106,15 +102,11 @@ export function useOpenProjectPreference(
 
     loading.value = true;
     try {
-      const url = `/agent/projects/${encodeURIComponent(projectId)}/open`;
-      const response = await agentFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target }),
+      return await requestAgentRpcJson<OpenProjectResponse>({
+        operation: 'agent.projects.open',
+        params: { projectId },
+        body: { target },
       });
-
-      const data = (await response.json()) as OpenProjectResponse;
-      return data;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { success: false, error: message };

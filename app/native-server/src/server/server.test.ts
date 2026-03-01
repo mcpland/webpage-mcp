@@ -1,103 +1,52 @@
-import { describe, expect, test, afterAll, beforeAll } from "@jest/globals";
-import supertest from "supertest";
-import Server from "./index";
+import { afterAll, beforeAll, describe, expect, test } from '@jest/globals';
+import { Server } from './index';
 
-describe("test", () => {
-  // Start a server test instance
+describe('Server agent RPC runtime', () => {
+  const server = new Server({ instanceId: 'unit-test' });
+
   beforeAll(async () => {
-    await Server.getInstance().ready();
-  });
-
-  // Shut down the server
-  afterAll(async () => {
-    await Server.stop();
-  });
-
-  test("GET /ping ok", async () => {
-    const response = await supertest(Server.getInstance().server)
-      .get("/ping")
-      .expect(200)
-      .expect("Content-Type", /json/);
-
-    expect(response.body).toEqual({
-      status: "ok",
-      message: "pong",
+    await server.start({
+      sendRequestToExtensionAndWait: async () => ({ ok: true }),
     });
   });
 
-  test("GET /agent/engines returns 200 when auth is disabled", async () => {
-    const previous = process.env.WEBPAGE_MCP_AUTH_TOKEN;
-    delete process.env.WEBPAGE_MCP_AUTH_TOKEN;
-    try {
-      const response = await supertest(Server.getInstance().server)
-        .get("/agent/engines")
-        .expect(200)
-        .expect("Content-Type", /json/);
-      expect(Array.isArray(response.body.engines)).toBe(true);
-    } finally {
-      if (typeof previous === "string") {
-        process.env.WEBPAGE_MCP_AUTH_TOKEN = previous;
-      } else {
-        delete process.env.WEBPAGE_MCP_AUTH_TOKEN;
-      }
-    }
+  afterAll(async () => {
+    await server.stop();
   });
 
-  test("GET /agent/engines returns 401 when auth token is enabled and missing", async () => {
-    const previous = process.env.WEBPAGE_MCP_AUTH_TOKEN;
-    process.env.WEBPAGE_MCP_AUTH_TOKEN = "unit-test-token";
-    try {
-      const response = await supertest(Server.getInstance().server)
-        .get("/agent/engines")
-        .expect(401)
-        .expect("Content-Type", /json/);
-      expect(response.body).toEqual({ error: "Unauthorized" });
-    } finally {
-      if (typeof previous === "string") {
-        process.env.WEBPAGE_MCP_AUTH_TOKEN = previous;
-      } else {
-        delete process.env.WEBPAGE_MCP_AUTH_TOKEN;
-      }
-    }
+  test('health.ping returns pong', async () => {
+    const response = await server.invokeAgentRpc({ operation: 'health.ping' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json).toEqual({
+      status: 'ok',
+      message: 'pong',
+    });
   });
 
-  test("GET /agent/engines accepts valid auth token and reaches route handler", async () => {
-    const previous = process.env.WEBPAGE_MCP_AUTH_TOKEN;
-    process.env.WEBPAGE_MCP_AUTH_TOKEN = "unit-test-token";
-    try {
-      const response = await supertest(Server.getInstance().server)
-        .get("/agent/engines")
-        .set("Authorization", "Bearer unit-test-token")
-        .expect(200)
-        .expect("Content-Type", /json/);
-      expect(Array.isArray(response.body.engines)).toBe(true);
-    } finally {
-      if (typeof previous === "string") {
-        process.env.WEBPAGE_MCP_AUTH_TOKEN = previous;
-      } else {
-        delete process.env.WEBPAGE_MCP_AUTH_TOKEN;
-      }
-    }
+  test('agent.engines.list returns engines', async () => {
+    const response = await server.invokeAgentRpc({ operation: 'agent.engines.list' });
+
+    expect(response.statusCode).toBe(200);
+    expect(Array.isArray((response.json as { engines?: unknown[] }).engines)).toBe(true);
   });
 
-  test("GET /ping remains unauthenticated when auth token is enabled", async () => {
-    const previous = process.env.WEBPAGE_MCP_AUTH_TOKEN;
-    process.env.WEBPAGE_MCP_AUTH_TOKEN = "unit-test-token";
-    try {
-      const response = await supertest(Server.getInstance().server)
-        .get("/ping")
-        .expect(200)
-        .expect("Content-Type", /json/);
-      expect(response.body).toEqual({
-        status: "ok",
-        message: "pong",
-      });
-    } finally {
-      if (typeof previous === "string") {
-        process.env.WEBPAGE_MCP_AUTH_TOKEN = previous;
-      } else {
-        delete process.env.WEBPAGE_MCP_AUTH_TOKEN;
-      }
-    }
+  test('unsupported operation returns bad request', async () => {
+    const response = await server.invokeAgentRpc({ operation: 'unknown.operation' });
+
+    expect(response.statusCode).toBe(400);
+    expect((response.json as { error?: string }).error).toContain('Unsupported RPC operation');
+  });
+
+  test('agent.chat.stream returns migration guidance', async () => {
+    const response = await server.invokeAgentRpc({
+      operation: 'agent.chat.stream',
+      params: { sessionId: 'session-1' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json).toEqual({
+      error: 'Use agent_stream_subscribe over native messaging instead of chat.stream',
+    });
   });
 });

@@ -554,12 +554,7 @@ function resolveFetch(): FetchFn | null {
   if (typeof globalThis.fetch === 'function') {
     return globalThis.fetch.bind(globalThis) as FetchFn;
   }
-  try {
-    const mod = require('node-fetch');
-    return (mod.default ?? mod) as FetchFn;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 async function checkConnectivity(
@@ -568,7 +563,7 @@ async function checkConnectivity(
 ): Promise<{ ok: boolean; status?: number; error?: string }> {
   const fetchFn = resolveFetch();
   if (!fetchFn) {
-    return { ok: false, error: 'fetch is not available (requires Node.js >=18 or node-fetch)' };
+    return { ok: false, error: 'fetch is not available (requires Node.js >=18)' };
   }
 
   const controller = new AbortController();

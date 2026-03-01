@@ -106,7 +106,6 @@ type AgentChatViewProps = {
   selectedCli: string;
   model: string;
   reasoningEffort: CodexReasoningEffort;
-  useCcr: boolean;
   enableWebpageMcp: boolean;
   engines: AgentEngineInfo[];
   isPickingDirectory: boolean;
@@ -123,7 +122,6 @@ type AgentChatViewProps = {
   onCliUpdate: (cli: string) => void;
   onModelUpdate: (model: string) => void;
   onReasoningEffortUpdate: (effort: CodexReasoningEffort) => void;
-  onCcrUpdate: (useCcr: boolean) => void;
   onWebpageMcpUpdate: (enableWebpageMcp: boolean) => void;
   onSaveSettings: () => void;
 
@@ -246,7 +244,6 @@ export default function AgentChatView(props: AgentChatViewProps) {
         selectedCli={props.selectedCli}
         model={props.model}
         reasoningEffort={props.reasoningEffort}
-        useCcr={props.useCcr}
         enableWebpageMcp={props.enableWebpageMcp}
         engines={props.engines}
         isPicking={props.isPickingDirectory}
@@ -257,7 +254,6 @@ export default function AgentChatView(props: AgentChatViewProps) {
         onCliUpdate={props.onCliUpdate}
         onModelUpdate={props.onModelUpdate}
         onReasoningEffortUpdate={props.onReasoningEffortUpdate}
-        onCcrUpdate={props.onCcrUpdate}
         onWebpageMcpUpdate={props.onWebpageMcpUpdate}
         onSave={props.onSaveSettings}
       />

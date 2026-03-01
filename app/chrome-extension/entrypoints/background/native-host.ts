@@ -1,6 +1,9 @@
 import {
   DEFAULT_MCP_INSTANCE_ID,
+  isAgentRpcRequestPayload,
   NativeMessageType,
+  type AgentRpcRequestPayload,
+  type AgentRpcResponsePayload,
   type McpServerInstanceConfig,
   type McpServerInstanceStatus,
   type NativeInstanceListPayload,
@@ -446,29 +449,14 @@ async function requestNativeHost(
   });
 }
 
-export interface AgentRpcFetchRequest {
-  instanceId?: string;
-  method: string;
-  path: string;
-  query?: Record<string, unknown>;
-  body?: unknown;
-  headers?: Record<string, string>;
-}
-
-export interface AgentRpcFetchResponse {
-  ok: boolean;
-  statusCode: number;
-  headers?: Record<string, unknown>;
-  body?: string;
-  json?: unknown;
-  isBinary?: boolean;
-  base64Body?: string | null;
-}
-
 export async function requestAgentRpcFetch(
-  payload: AgentRpcFetchRequest,
+  payload: AgentRpcRequestPayload,
   timeoutMs: number = 30_000,
-): Promise<AgentRpcFetchResponse> {
+): Promise<AgentRpcResponsePayload> {
+  if (!isAgentRpcRequestPayload(payload)) {
+    throw new Error('Invalid agent_rpc payload: operation is required');
+  }
+
   const connected = nativePort ? true : await ensureNativeConnected('agent_rpc_fetch');
   if (!connected) {
     throw new Error('Native host not connected');
@@ -477,7 +465,7 @@ export async function requestAgentRpcFetch(
     NativeMessageType.AGENT_RPC,
     payload,
     timeoutMs,
-  )) as AgentRpcFetchResponse;
+  )) as AgentRpcResponsePayload;
   return response;
 }
 

@@ -171,7 +171,12 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     base64Data?: string;
     fileName: string;
   }): Promise<string | null> {
-    const { fileUrl, base64Data, fileName } = options;
+    const prepared = await this.resolveFilePayload(options);
+    if (!prepared) {
+      return null;
+    }
+
+    const { base64Data, fileName } = prepared;
 
     return new Promise((resolve) => {
       const requestId = `file-upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -213,7 +218,6 @@ class FileUploadTool extends BaseBrowserToolExecutor {
             requestId: requestId,
             payload: {
               action: 'prepareFile',
-              fileUrl,
               base64Data,
               fileName,
             },
@@ -226,6 +230,68 @@ class FileUploadTool extends BaseBrowserToolExecutor {
           resolve(null);
         });
     });
+  }
+
+  private async resolveFilePayload(options: {
+    fileUrl?: string;
+    base64Data?: string;
+    fileName: string;
+  }): Promise<{ base64Data: string; fileName: string } | null> {
+    const { fileUrl, base64Data, fileName } = options;
+    if (base64Data) {
+      return {
+        base64Data,
+        fileName: fileName || 'uploaded-file',
+      };
+    }
+    if (!fileUrl) {
+      return null;
+    }
+
+    try {
+      const response = await fetch(fileUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch file URL (${response.status})`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const encoded = this.arrayBufferToBase64(arrayBuffer);
+      const normalizedName = fileName || this.inferFileNameFromUrl(fileUrl);
+      return {
+        base64Data: encoded,
+        fileName: normalizedName,
+      };
+    } catch (error) {
+      console.error('Failed to fetch file URL for upload:', error);
+      return null;
+    }
+  }
+
+  private arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    let binary = '';
+
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+
+    return btoa(binary);
+  }
+
+  private inferFileNameFromUrl(url: string): string {
+    try {
+      const parsed = new URL(url);
+      const raw = parsed.pathname.split('/').pop() || '';
+      const decoded = decodeURIComponent(raw).trim();
+      if (decoded) {
+        return decoded;
+      }
+    } catch {
+      // Fall through to default filename
+    }
+    return 'uploaded-file';
   }
 }
 

@@ -163,7 +163,6 @@ function rowToProject(row: ProjectRow): AgentProject {
     preferredCli: row.preferredCli as AgentProject['preferredCli'],
     selectedModel: row.selectedModel ?? undefined,
     activeClaudeSessionId: row.activeClaudeSessionId ?? undefined,
-    useCcr: row.useCcr === '1',
     enableWebpageMcp: row.enableWebpageMcp !== '0',
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -205,11 +204,7 @@ export async function upsertProject(input: CreateOrUpdateProjectInput): Promise<
   const existing = await getProject(id);
 
   // Convert booleans to strings for SQLite storage:
-  // - useCcr: '1' or null (legacy)
   // - enableWebpageMcp: '1' or '0' (non-null; defaults to enabled)
-  const useCcrValue =
-    input.useCcr !== undefined ? (input.useCcr ? '1' : null) : existing?.useCcr ? '1' : null;
-
   let enableWebpageMcpValue: '1' | '0';
   if (typeof input.enableWebpageMcp === 'boolean') {
     enableWebpageMcpValue = input.enableWebpageMcp ? '1' : '0';
@@ -226,7 +221,6 @@ export async function upsertProject(input: CreateOrUpdateProjectInput): Promise<
     selectedModel: input.selectedModel ?? existing?.selectedModel ?? null,
     // Preserve activeClaudeSessionId from existing project (not settable via upsert)
     activeClaudeSessionId: existing?.activeClaudeSessionId ?? null,
-    useCcr: useCcrValue,
     enableWebpageMcp: enableWebpageMcpValue,
     createdAt: existing?.createdAt || now,
     updatedAt: now,

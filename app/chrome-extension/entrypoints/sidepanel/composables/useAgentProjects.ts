@@ -5,7 +5,7 @@
 import { ref, computed } from '@/entrypoints/shared/reactivity';
 import { getMessage } from '@/utils/i18n';
 import type { AgentProject, AgentStoredMessage } from 'webpage-mcp-shared';
-import { agentFetch } from '@/utils/agent-rpc';
+import { parseAgentRpcJson, requestAgentRpcFetch, requestAgentRpcJson } from '@/utils/agent-rpc';
 
 const STORAGE_KEY_SELECTED_PROJECT = 'agent-selected-project-id';
 
@@ -84,12 +84,10 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
   async function fetchProjects(): Promise<void> {
     isLoadingProjects.value = true;
     try {
-      const url = '/agent/projects';
-      const response = await agentFetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        projects.value = data.projects || [];
-      }
+      const data = await requestAgentRpcJson<{ projects?: AgentProject[] }>({
+        operation: 'agent.projects.list',
+      });
+      projects.value = data.projects || [];
     } catch (error) {
       console.error('Failed to fetch projects:', error);
     } finally {
@@ -122,20 +120,19 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     };
 
     try {
-      const url = `/agent/chat/${encodeURIComponent(projectId)}/messages?limit=100`;
-      const response = await agentFetch(url);
+      const result = await requestAgentRpcJson<{ data?: AgentStoredMessage[] }>({
+        operation: 'agent.chat.messages.list',
+        params: { projectId },
+        query: { limit: 100 },
+      });
 
       if (!isStillValid()) return;
 
-      if (response.ok) {
-        const result = await response.json();
+      if (!isStillValid()) return;
 
-        if (!isStillValid()) return;
-
-        // Server returns { success, data: messages[], totalCount, pagination }
-        const stored = result.data || [];
-        options.onHistoryLoaded?.(stored);
-      }
+      // Server returns { success, data: messages[], totalCount, pagination }
+      const stored = result.data || [];
+      options.onHistoryLoaded?.(stored);
     } catch (error) {
       console.error('Failed to load chat history:', error);
     }
@@ -144,19 +141,10 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
   // Validate path before creating project
   async function validatePath(rootPath: string): Promise<PathValidationResult | null> {
     try {
-      const url = '/agent/projects/validate-path';
-      const response = await agentFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rootPath }),
+      return await requestAgentRpcJson<PathValidationResult>({
+        operation: 'agent.projects.validatePath',
+        body: { rootPath },
       });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `Validation failed: HTTP ${response.status}`);
-      }
-
-      return await response.json();
     } catch (error) {
       console.error('Failed to validate path:', error);
       return null;
@@ -206,19 +194,10 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       }
 
       // Step 3: Create the project
-      const url = '/agent/projects';
-      const response = await agentFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, rootPath, allowCreate }),
+      const payload = await requestAgentRpcJson<{ project?: AgentProject }>({
+        operation: 'agent.projects.upsert',
+        body: { name, rootPath, allowCreate },
       });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `HTTP ${response.status}`);
-      }
-
-      const payload = await response.json();
       const project = payload?.project as AgentProject | undefined;
 
       if (project?.id) {
@@ -269,17 +248,11 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     if (!projectName.trim()) return null;
 
     try {
-      const url = '/agent/projects/default-root';
-      const response = await agentFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName: projectName.trim() }),
+      const data = await requestAgentRpcJson<{ path?: string }>({
+        operation: 'agent.projects.defaultRoot',
+        body: { projectName: projectName.trim() },
       });
-      if (response.ok) {
-        const data = await response.json();
-        return data.path || null;
-      }
-      return null;
+      return data.path || null;
     } catch (error) {
       console.error('Failed to get default project root:', error);
       return null;
@@ -295,25 +268,30 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     }
 
     try {
-      const url = '/agent/projects/pick-directory';
-      const response = await agentFetch(url, { method: 'POST' });
+      const response = await requestAgentRpcFetch({
+        operation: 'agent.projects.pickDirectory',
+      });
+      const data = parseAgentRpcJson<{
+        success?: boolean;
+        path?: string;
+        cancelled?: boolean;
+        error?: string;
+      }>(response);
 
-      // Handle HTTP errors (e.g., 404 means server version mismatch)
+      // Handle operation errors (e.g., old native build without this operation)
       if (!response.ok) {
-        if (response.status === 404) {
+        if (response.statusCode === 404) {
           projectError.value = t(
             'agentProjectsPickerUnavailable',
             'Directory picker not available. Please rebuild and restart the native server.',
           );
         } else {
-          projectError.value = t('agentProjectsServerHttpError', 'Server error: HTTP {0}', [
-            String(response.status),
+          projectError.value = t('agentProjectsServerHttpError', 'Server error: {0}', [
+            String(response.statusCode),
           ]);
         }
         return null;
       }
-
-      const data = await response.json();
 
       if (data.success && data.path) {
         return data.path;
@@ -346,13 +324,10 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       }
 
       // Get default workspace directory from server
-      const defaultRootUrl = '/agent/projects/default-root';
-      const defaultRootResponse = await agentFetch(defaultRootUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName: 'default' }),
+      const defaultRootData = await requestAgentRpcJson<{ path?: string }>({
+        operation: 'agent.projects.defaultRoot',
+        body: { projectName: 'default' },
       });
-      const defaultRootData = await defaultRootResponse.json();
       const defaultRoot = defaultRootData.path;
 
       if (!defaultRoot) {
@@ -361,24 +336,14 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       }
 
       // Create default project
-      const createUrl = '/agent/projects';
-      const createResponse = await agentFetch(createUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const payload = await requestAgentRpcJson<{ project?: AgentProject }>({
+        operation: 'agent.projects.upsert',
+        body: {
           name: 'Default',
           rootPath: defaultRoot,
           allowCreate: true,
-        }),
+        },
       });
-
-      if (!createResponse.ok) {
-        const text = await createResponse.text().catch(() => '');
-        console.error('Failed to create default project:', text);
-        return null;
-      }
-
-      const payload = await createResponse.json();
       const project = payload?.project as AgentProject | undefined;
 
       if (project?.id) {
@@ -461,19 +426,10 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
       }
 
       // Create the project
-      const url = '/agent/projects';
-      const response = await agentFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, rootPath, allowCreate }),
+      const payload = await requestAgentRpcJson<{ project?: AgentProject }>({
+        operation: 'agent.projects.upsert',
+        body: { name, rootPath, allowCreate },
       });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `HTTP ${response.status}`);
-      }
-
-      const payload = await response.json();
       const project = payload?.project as AgentProject | undefined;
 
       if (project?.id) {
@@ -504,42 +460,34 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
     }
   }
 
-  // Save project preference (CLI, model, useCcr, enableWebpageMcp)
+  // Save project preference (CLI, model, enableWebpageMcp)
   async function saveProjectPreference(
     cli?: string,
     model?: string,
-    useCcr?: boolean,
     enableWebpageMcp?: boolean,
   ): Promise<void> {
     const project = selectedProject.value;
     if (!project) return;
 
     try {
-      const url = '/agent/projects';
-      const response = await agentFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const payload = await requestAgentRpcJson<{ project?: AgentProject }>({
+        operation: 'agent.projects.upsert',
+        body: {
           id: project.id,
           name: project.name,
           rootPath: project.rootPath,
           // Normalize and allow empty string (means "Auto/Default")
           preferredCli: cli?.trim() ?? project.preferredCli,
           selectedModel: model?.trim() ?? project.selectedModel,
-          useCcr: useCcr ?? project.useCcr,
           enableWebpageMcp: enableWebpageMcp ?? project.enableWebpageMcp,
-        }),
+        },
       });
 
-      // Update local project state if successful
-      if (response.ok) {
-        const payload = await response.json();
-        const updatedProject = payload?.project as AgentProject | undefined;
-        if (updatedProject?.id) {
-          const index = projects.value.findIndex((p) => p.id === updatedProject.id);
-          if (index !== -1) {
-            projects.value[index] = updatedProject;
-          }
+      const updatedProject = payload?.project as AgentProject | undefined;
+      if (updatedProject?.id) {
+        const index = projects.value.findIndex((p) => p.id === updatedProject.id);
+        if (index !== -1) {
+          projects.value[index] = updatedProject;
         }
       }
     } catch (error) {
