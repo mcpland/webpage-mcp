@@ -14,25 +14,25 @@ export const writeFile = promisify(fs.writeFile);
  * Get the log directory path for wrapper scripts.
  * Uses platform-appropriate user directories to avoid permission issues.
  *
- * - macOS: ~/Library/Logs/webpage-mcp-bridge
- * - Windows: %LOCALAPPDATA%/webpage-mcp-bridge/logs
- * - Linux: $XDG_STATE_HOME/webpage-mcp-bridge/logs or ~/.local/state/webpage-mcp-bridge/logs
+ * - macOS: ~/Library/Logs/webpage-mcp
+ * - Windows: %LOCALAPPDATA%/webpage-mcp/logs
+ * - Linux: $XDG_STATE_HOME/webpage-mcp/logs or ~/.local/state/webpage-mcp/logs
  */
 export function getLogDir(): string {
   const homedir = os.homedir();
 
   if (os.platform() === 'darwin') {
-    return path.join(homedir, 'Library', 'Logs', 'webpage-mcp-bridge');
+    return path.join(homedir, 'Library', 'Logs', 'webpage-mcp');
   } else if (os.platform() === 'win32') {
     return path.join(
       process.env.LOCALAPPDATA || path.join(homedir, 'AppData', 'Local'),
-      'webpage-mcp-bridge',
+      'webpage-mcp',
       'logs',
     );
   } else {
     // Linux: XDG_STATE_HOME or ~/.local/state
     const xdgState = process.env.XDG_STATE_HOME || path.join(homedir, '.local', 'state');
-    return path.join(xdgState, 'webpage-mcp-bridge', 'logs');
+    return path.join(xdgState, 'webpage-mcp', 'logs');
   }
 }
 

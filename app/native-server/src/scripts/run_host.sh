@@ -9,12 +9,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NODE_SCRIPT="${SCRIPT_DIR}/index.js"
 
 # Setup log directory - prefer user-writable locations
-# macOS: ~/Library/Logs/webpage-mcp-bridge
-# Linux: $XDG_STATE_HOME/webpage-mcp-bridge/logs or ~/.local/state/webpage-mcp-bridge/logs
+# macOS: ~/Library/Logs/webpage-mcp
+# Linux: $XDG_STATE_HOME/webpage-mcp/logs or ~/.local/state/webpage-mcp/logs
 if [ "$(uname)" = "Darwin" ]; then
-    LOG_DIR="${HOME}/Library/Logs/webpage-mcp-bridge"
+    LOG_DIR="${HOME}/Library/Logs/webpage-mcp"
 else
-    LOG_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/webpage-mcp-bridge/logs"
+    LOG_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/webpage-mcp/logs"
 fi
 
 # Fallback: if user directory is not writable, use package directory
@@ -229,7 +229,7 @@ if [ -z "${NODE_EXEC}" ]; then
     {
         echo "ERROR: Node.js executable not found!"
         echo "Searched: WEBPAGE_MCP_NODE_PATH, node_path.txt, relative path, Volta, asdf, fnm, NVM, common paths, command -v, PATH"
-        echo "To fix: Set WEBPAGE_MCP_NODE_PATH environment variable or run 'webpage-mcp-bridge doctor --fix'"
+        echo "To fix: Set WEBPAGE_MCP_NODE_PATH environment variable or run 'webpage-mcp doctor --fix'"
     } >> "${WRAPPER_LOG}"
     exit 1
 fi

@@ -1,4 +1,4 @@
-# webpage-mcp-bridge (Native Server)
+# webpage-mcp (Native Server)
 
 Node.js Native Messaging host and MCP HTTP server for Webpage MCP.
 
@@ -19,7 +19,7 @@ From the repository root:
 
 ```bash
 pnpm install
-pnpm --filter webpage-mcp-bridge build
+pnpm --filter webpage-mcp build
 ```
 
 Or inside this package directory:
@@ -34,10 +34,10 @@ pnpm build
 
 ```bash
 # Auto-rebuild + auto-register dev host
-pnpm --filter webpage-mcp-bridge dev
+pnpm --filter webpage-mcp dev
 
 # Run tests
-pnpm --filter webpage-mcp-bridge test
+pnpm --filter webpage-mcp test
 ```
 
 ## CLI Commands
@@ -46,21 +46,21 @@ After build (or via `npx`):
 
 ```bash
 # Register Native Messaging host
-webpage-mcp-bridge register --detect
-webpage-mcp-bridge register --browser chrome
-webpage-mcp-bridge register --browser chromium
+webpage-mcp register --detect
+webpage-mcp register --browser chrome
+webpage-mcp register --browser chromium
 
 # Diagnose installation
-webpage-mcp-bridge doctor
+webpage-mcp doctor
 
 # Export diagnostic report
-webpage-mcp-bridge report
+webpage-mcp report
 
 # Update stdio proxy target URL port
-webpage-mcp-bridge update-port 12307
+webpage-mcp update-port 12307
 
 # Fix file execution permissions
-webpage-mcp-bridge fix-permissions
+webpage-mcp fix-permissions
 ```
 
 ## Port Behavior

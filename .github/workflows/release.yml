@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_npm:
-        description: Publish webpage-mcp-bridge to npm
+        description: Publish webpage-mcp to npm
         required: false
         default: false
         type: boolean
@@ -137,9 +137,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build publishable package
-        run: pnpm --filter webpage-mcp-bridge build
+        run: pnpm --filter webpage-mcp build
 
       - name: Publish package
-        run: pnpm --filter webpage-mcp-bridge publish --access public --no-git-checks --provenance
+        run: pnpm --filter webpage-mcp publish --access public --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}

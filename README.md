@@ -94,10 +94,10 @@ pnpm build
 ```bash
 # Register for detected browsers
 cd app/native-server
-npx webpage-mcp-bridge register --detect
+npx webpage-mcp register --detect
 
 # Or specify the browser explicitly
-npx webpage-mcp-bridge register --browser chrome
+npx webpage-mcp register --browser chrome
 ```
 
 This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the browser can launch the native server process.
@@ -106,10 +106,10 @@ This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the
 
 ```bash
 # Diagnose installation issues
-npx webpage-mcp-bridge doctor
+npx webpage-mcp doctor
 
 # Generate a full diagnostic report
-npx webpage-mcp-bridge report
+npx webpage-mcp report
 ```
 
 Open Chrome and click the extension icon - it should show a connected status.
@@ -137,7 +137,7 @@ Use the `webpage-mcp-stdio` binary, which proxies stdio to the HTTP server:
   "mcpServers": {
     "webpage-mcp": {
       "command": "npx",
-      "args": ["-y", "webpage-mcp-bridge@latest", "webpage-mcp-stdio"]
+      "args": ["-y", "webpage-mcp@latest", "webpage-mcp-stdio"]
     }
   }
 }
@@ -170,7 +170,7 @@ Or if using npx:
   "mcpServers": {
     "webpage-mcp": {
       "command": "npx",
-      "args": ["-y", "webpage-mcp-bridge@latest", "webpage-mcp-stdio"]
+      "args": ["-y", "webpage-mcp@latest", "webpage-mcp-stdio"]
     }
   }
 }
@@ -189,7 +189,7 @@ Set this in the extension popup (the "Port" field). The extension passes that va
 This is the URL used by `webpage-mcp-stdio` when forwarding stdio MCP calls to HTTP. Update it with:
 
 ```bash
-npx webpage-mcp-bridge update-port 12307
+npx webpage-mcp update-port 12307
 ```
 
 `update-port` edits `app/native-server/dist/mcp/stdio-config.json` (or packaged equivalent) and does not directly change the native server listen port.
@@ -303,11 +303,11 @@ This repository uses GitHub Actions workflows in `.github/workflows/`:
     - Native server npm tarball (`.tgz`)
     - `SHA256SUMS.txt`
   - On tag pushes, it also creates a GitHub Release and uploads the assets
-  - Optional manual npm publish for `webpage-mcp-bridge` via `workflow_dispatch` input `publish_npm=true` (requires `NPM_TOKEN` secret)
+  - Optional manual npm publish for `webpage-mcp` via `workflow_dispatch` input `publish_npm=true` (requires `NPM_AUTH_TOKEN` secret)
 
 ## CLI Reference
 
-The `webpage-mcp-bridge` CLI provides the following commands:
+The `webpage-mcp` CLI provides the following commands:
 
 | Command | Description |
 |---|---|
@@ -320,7 +320,7 @@ The `webpage-mcp-bridge` CLI provides the following commands:
 ### Register Options
 
 ```bash
-webpage-mcp-bridge register [options]
+webpage-mcp register [options]
 
 Options:
   -f, --force              Force overwrite existing registration
@@ -350,15 +350,15 @@ Options:
 
 ### Extension fails to connect
 
-1. Ensure the native host is registered: `webpage-mcp-bridge doctor`
+1. Ensure the native host is registered: `webpage-mcp doctor`
 2. Check that Node.js >= 20 is available at the registered path
-3. Try re-registering: `webpage-mcp-bridge register --force --detect`
+3. Try re-registering: `webpage-mcp register --force --detect`
 
 ### MCP client can't reach the server
 
 1. Verify the server is running: `curl http://127.0.0.1:12306/ping`
 2. Check if another process is using port 12306
-3. If you use stdio proxy, align proxy target with server port: `webpage-mcp-bridge update-port <port>`
+3. If you use stdio proxy, align proxy target with server port: `webpage-mcp update-port <port>`
 
 ### Tools return errors or time out
 
@@ -369,8 +369,8 @@ Options:
 ### Generate a diagnostic report
 
 ```bash
-webpage-mcp-bridge report --copy    # Copies to clipboard
-webpage-mcp-bridge doctor --fix     # Auto-fix common issues
+webpage-mcp report --copy    # Copies to clipboard
+webpage-mcp doctor --fix     # Auto-fix common issues
 ```
 
 ## License

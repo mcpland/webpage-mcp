@@ -1,11 +1,10 @@
 {
-  "name": "webpage-mcp-bridge",
+  "name": "webpage-mcp",
   "version": "1.0.29",
   "description": "Chrome Native-Messaging host (Node)",
   "main": "dist/index.js",
   "bin": {
     "webpage-mcp": "./dist/cli.js",
-    "webpage-mcp-bridge": "./dist/cli.js",
     "webpage-mcp-stdio": "./dist/mcp/mcp-server-stdio.js"
   },
   "scripts": {

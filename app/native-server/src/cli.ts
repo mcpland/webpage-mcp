@@ -115,8 +115,8 @@ program
               'yellow',
             ),
           );
-          console.log(colorText('  1. sudo webpage-mcp-bridge register', 'yellow'));
-          console.log(colorText('  2. webpage-mcp-bridge register --system', 'yellow'));
+          console.log(colorText('  1. sudo webpage-mcp register', 'yellow'));
+          console.log(colorText('  2. webpage-mcp register --system', 'yellow'));
           process.exit(1);
         }
       }

@@ -35,7 +35,7 @@ function loadBetterSqlite3(): BetterSqlite3Ctor {
     const raw = error instanceof Error ? error.message : String(error);
     throw new Error(
       `Failed to load better-sqlite3 native bindings on ${platform} with Node ${process.version}. ` +
-        `Run: pnpm --filter webpage-mcp-bridge rebuild better-sqlite3 ` +
+        `Run: pnpm --filter webpage-mcp rebuild better-sqlite3 ` +
         `or reinstall dependencies with: pnpm install --force. Original error: ${raw}`,
     );
   }

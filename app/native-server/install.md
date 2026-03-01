@@ -7,11 +7,11 @@ This document details the installation and registration process for Webpage MCP 
 The installation and registration process for Webpage MCP Bridge is as follows:
 
 ```
-npm install -g webpage-mcp-bridge
+npm install -g webpage-mcp
 └─ postinstall.js
    ├─ Copy executable to npm_prefix/bin   ← Always writable (user or root permissions)
    ├─ Attempt user-level registration     ← No sudo needed, succeeds in most cases
-   └─ If failed ➜ Prompt user to run webpage-mcp-bridge register --system
+   └─ If failed ➜ Prompt user to run webpage-mcp register --system
       └─ Requires manual execution with admin privileges
 ```
 
@@ -22,7 +22,7 @@ The flow chart above shows the complete process from global installation to fina
 ### 1. Global Installation
 
 ```bash
-npm install -g webpage-mcp-bridge
+npm install -g webpage-mcp
 ```
 
 After installation, the system will automatically attempt to register the Native Messaging host in the user directory. This does not require admin privileges and is the recommended installation method.
@@ -47,13 +47,13 @@ Manifest File Locations
 If automatic registration fails, or you want to register manually, run:
 
 ```bash
-webpage-mcp-bridge register
+webpage-mcp register
 ```
 
 **Recommended: Run the diagnostic tool to check for issues:**
 
 ```bash
-webpage-mcp-bridge doctor
+webpage-mcp doctor
 ```
 
 ### 3. System-Level Registration
@@ -66,10 +66,10 @@ There are two ways for system-level registration:
 
 ```bash
 # macOS/Linux
-sudo webpage-mcp-bridge register --system
+sudo webpage-mcp register --system
 
 # Windows (run Command Prompt as Administrator)
-webpage-mcp-bridge register --system
+webpage-mcp register --system
 ```
 
 System-level installation requires admin privileges to write to system directories and registry.
@@ -80,14 +80,14 @@ System-level installation requires admin privileges to write to system directori
 Run Command Prompt or PowerShell as Administrator, then execute:
 
 ```
-webpage-mcp-bridge register
+webpage-mcp register
 ```
 
 **macOS/Linux**:
 Use the sudo command:
 
 ```
-sudo webpage-mcp-bridge register
+sudo webpage-mcp register
 ```
 
 ## Registration Process Details
@@ -96,14 +96,14 @@ sudo webpage-mcp-bridge register
 
 ```
 Registration Process
-├─ User-Level Registration (webpage-mcp-bridge register)
+├─ User-Level Registration (webpage-mcp register)
 │  ├─ Get user-level manifest path
 │  ├─ Create user directory
 │  ├─ Generate manifest content
 │  ├─ Write manifest file
 │  └─ Windows: Create user-level registry entry
 │
-└─ System-Level Registration (webpage-mcp-bridge register --system)
+└─ System-Level Registration (webpage-mcp register --system)
    ├─ Check for admin privileges
    │  ├─ Has privileges → Create system directory and write manifest directly
    │  └─ No privileges → Prompt user to run with admin privileges
@@ -147,7 +147,7 @@ manifest.json
    - Create system-level registry entries on Windows
 3. If admin privileges are not available:
    - Prompt user to rerun the command with admin privileges
-   - macOS/Linux: `sudo webpage-mcp-bridge register --system`
+   - macOS/Linux: `sudo webpage-mcp register --system`
    - Windows: Run Command Prompt as Administrator
 
 ## Verify Installation
@@ -200,9 +200,9 @@ Troubleshooting
 │  ├─ Execution permission issues (macOS/Linux)
 │  │  ├─ "Permission denied" error
 │  │  ├─ "Native host has exited" error
-│  │  └─ Run webpage-mcp-bridge fix-permissions
+│  │  └─ Run webpage-mcp fix-permissions
 │  │
-│  └─ Try webpage-mcp-bridge register --system
+│  └─ Try webpage-mcp register --system
 │
 ├─ Path Issues
 │  ├─ Check Node.js installation (node -v)
@@ -243,27 +243,27 @@ If you encounter problems during installation, try the following steps:
    a) **Use built-in fix command (Recommended)**:
 
    ```bash
-   webpage-mcp-bridge fix-permissions
+   webpage-mcp fix-permissions
    ```
 
    b) **Run diagnostic tool to auto-fix**:
 
    ```bash
-   webpage-mcp-bridge doctor --fix
+   webpage-mcp doctor --fix
    ```
 
    c) **Manually set permissions**:
 
    ```bash
    # Find installation path
-   npm list -g webpage-mcp-bridge
+   npm list -g webpage-mcp
    # Or for pnpm
-   pnpm list -g webpage-mcp-bridge
+   pnpm list -g webpage-mcp
 
    # Set execution permissions (replace with actual path)
-   chmod +x /path/to/node_modules/webpage-mcp-bridge/run_host.sh
-   chmod +x /path/to/node_modules/webpage-mcp-bridge/index.js
-   chmod +x /path/to/node_modules/webpage-mcp-bridge/cli.js
+   chmod +x /path/to/node_modules/webpage-mcp/run_host.sh
+   chmod +x /path/to/node_modules/webpage-mcp/index.js
+   chmod +x /path/to/node_modules/webpage-mcp/cli.js
    ```
 
    **Windows Platform**:
@@ -278,20 +278,20 @@ If you encounter problems during installation, try the following steps:
    a) **Use built-in fix command (Recommended)**:
 
    ```cmd
-   webpage-mcp-bridge fix-permissions
+   webpage-mcp fix-permissions
    ```
 
    b) **Run diagnostic tool to auto-fix**:
 
    ```cmd
-   webpage-mcp-bridge doctor --fix
+   webpage-mcp doctor --fix
    ```
 
    c) **Manually check file properties**:
 
    ```cmd
    # Find installation path
-   npm list -g webpage-mcp-bridge
+   npm list -g webpage-mcp
 
    # Check file properties (right-click -> Properties in File Explorer)
    # Make sure run_host.bat is not read-only
@@ -301,15 +301,15 @@ If you encounter problems during installation, try the following steps:
 
    ```bash
    # Uninstall
-   npm uninstall -g webpage-mcp-bridge
-   # or pnpm uninstall -g webpage-mcp-bridge
+   npm uninstall -g webpage-mcp
+   # or pnpm uninstall -g webpage-mcp
 
    # Reinstall
-   npm install -g webpage-mcp-bridge
-   # or pnpm install -g webpage-mcp-bridge
+   npm install -g webpage-mcp
+   # or pnpm install -g webpage-mcp
 
    # If still having issues, run permission fix
-   webpage-mcp-bridge fix-permissions
+   webpage-mcp fix-permissions
    ```
 
 4. On Windows, make sure registry access is not restricted
@@ -317,7 +317,7 @@ If you encounter problems during installation, try the following steps:
    - For system level, check `HKLM\Software\Google\Chrome\NativeMessagingHosts\`
 
 5. Try system-level installation
-   - Use `webpage-mcp-bridge register --system` command
+   - Use `webpage-mcp register --system` command
    - Or run directly with admin privileges
 
 6. Check console error messages

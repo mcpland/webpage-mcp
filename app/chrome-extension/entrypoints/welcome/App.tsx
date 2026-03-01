@@ -5,13 +5,13 @@ import "../sidepanel/styles/agent-chat.css";
 import "./App.css";
 
 const COMMANDS = {
-  npmInstall: "npm install -g webpage-mcp-bridge",
-  pnpmInstall: "pnpm add -g webpage-mcp-bridge",
-  yarnInstall: "yarn global add webpage-mcp-bridge",
+  npmInstall: "npm install -g webpage-mcp",
+  pnpmInstall: "pnpm add -g webpage-mcp",
+  yarnInstall: "yarn global add webpage-mcp",
   mcpUrl: `http://127.0.0.1:${NATIVE_HOST.DEFAULT_PORT}/mcp`,
-  doctor: "webpage-mcp-bridge doctor",
-  fix: "webpage-mcp-bridge doctor --fix",
-  report: "webpage-mcp-bridge report --copy",
+  doctor: "webpage-mcp doctor",
+  fix: "webpage-mcp doctor --fix",
+  report: "webpage-mcp report --copy",
 } as const;
 
 type CommandKey = keyof typeof COMMANDS;
@@ -107,7 +107,7 @@ export default function WelcomeApp() {
           <div className="max-w-3xl mx-auto space-y-6">
             <section className="welcome-card welcome-card--primary p-6">
               <h2 className="welcome-title text-xl font-medium">
-                Install <code className="welcome-code">webpage-mcp-bridge</code>
+                Install <code className="welcome-code">webpage-mcp</code>
               </h2>
               <p className="welcome-muted text-sm mt-2">
                 The Chrome extension uses this local bridge to expose MCP tools to your client.
