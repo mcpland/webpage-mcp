@@ -1288,9 +1288,14 @@ export const initNativeHostListener = () => {
             const synced = await syncManagedInstancesOnNative(managedInstances);
             if (!synced) {
               await refreshStatusesFromNative();
+              throw new Error('Failed to synchronize managed instances with native host');
             }
             if (instance.enabled && message?.startNow === true) {
-              await startManagedInstanceOnNative(instance);
+              const started = await startManagedInstanceOnNative(instance);
+              if (!started) {
+                await refreshStatusesFromNative();
+                throw new Error(`Failed to start instance: ${instance.instanceId}`);
+              }
               await refreshStatusesFromNative();
             }
           }
