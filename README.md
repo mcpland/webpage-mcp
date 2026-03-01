@@ -376,3 +376,8 @@ webpage-mcp doctor --fix     # Auto-fix common issues
 ## License
 
 MIT
+
+## Acknowledgements
+
+This project is based on [hangwin/mcp-chrome](https://github.com/hangwin/mcp-chrome).  
+Special thanks to the original author and all contributors for their foundational work.
