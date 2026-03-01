@@ -3,6 +3,7 @@ import {
   NativeMessageType,
   type McpServerInstanceConfig,
   type McpServerInstanceStatus,
+  type NativeInstanceListPayload,
 } from 'webpage-mcp-shared';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import { NATIVE_HOST, STORAGE_KEYS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/common/constants';
@@ -54,6 +55,12 @@ interface ServerStatus {
 }
 
 type ServerStatusMap = Record<string, ServerStatus>;
+
+interface PortConflictResolution {
+  instanceId: string;
+  previousPort: number;
+  nextPort: number;
+}
 
 let currentServerStatus: ServerStatus = {
   isRunning: false,
@@ -177,6 +184,71 @@ function normalizeInstanceConfig(raw: unknown, fallbackPort: number): McpServerI
   };
 }
 
+function findNextAvailablePort(used: Set<number>, startFrom: number): number {
+  const start = Math.min(65535, Math.max(1, Math.floor(startFrom)));
+  for (let port = start; port <= 65535; port += 1) {
+    if (!used.has(port)) {
+      return port;
+    }
+  }
+  throw new Error('No available port left between 1 and 65535');
+}
+
+function resolveManagedInstancePortConflicts(
+  instances: McpServerInstanceConfig[],
+  options?: { preferredInstanceId?: string; seedPort?: number },
+): { instances: McpServerInstanceConfig[]; resolutions: PortConflictResolution[] } {
+  const preferredInstanceId = options?.preferredInstanceId?.trim();
+  const seedPort = normalizePort(options?.seedPort) ?? NATIVE_HOST.DEFAULT_PORT;
+  const ordered = sortInstances(instances);
+
+  if (preferredInstanceId) {
+    const index = ordered.findIndex((item) => item.instanceId === preferredInstanceId);
+    if (index > 0) {
+      const [preferred] = ordered.splice(index, 1);
+      if (preferred) {
+        ordered.unshift(preferred);
+      }
+    }
+  }
+
+  const usedPorts = new Set<number>();
+  const byId = new Map<string, McpServerInstanceConfig>();
+  const resolutions: PortConflictResolution[] = [];
+
+  for (const current of ordered) {
+    const nextPort = current.port;
+    if (!usedPorts.has(nextPort)) {
+      usedPorts.add(nextPort);
+      byId.set(current.instanceId, current);
+      continue;
+    }
+
+    const reassigned = findNextAvailablePort(usedPorts, Math.max(nextPort + 1, seedPort));
+    usedPorts.add(reassigned);
+    byId.set(current.instanceId, { ...current, port: reassigned });
+    resolutions.push({
+      instanceId: current.instanceId,
+      previousPort: nextPort,
+      nextPort: reassigned,
+    });
+  }
+
+  return {
+    instances: sortInstances(Array.from(byId.values())),
+    resolutions,
+  };
+}
+
+function warnPortResolutions(context: string, resolutions: PortConflictResolution[]): void {
+  if (resolutions.length === 0) return;
+  for (const item of resolutions) {
+    console.warn(
+      `${LOG_PREFIX} ${context}: reassigned instance "${item.instanceId}" port ${item.previousPort} -> ${item.nextPort}`,
+    );
+  }
+}
+
 async function saveServerStatuses(): Promise<void> {
   try {
     await chrome.storage.local.set({
@@ -282,6 +354,34 @@ function applyInstanceStatus(status: McpServerInstanceStatus): void {
   }
 }
 
+function applyInstanceStatusList(rawStatuses: unknown[]): void {
+  const next: ServerStatusMap = {};
+  for (const raw of rawStatuses) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    const instanceId = normalizeInstanceId(item.instanceId);
+    next[instanceId] = {
+      isRunning: Boolean(item.isRunning),
+      port: normalizePort(item.port) ?? next[instanceId]?.port,
+      lastUpdated:
+        typeof item.lastUpdated === 'number' && Number.isFinite(item.lastUpdated)
+          ? item.lastUpdated
+          : Date.now(),
+    };
+  }
+
+  if (!next[DEFAULT_MCP_INSTANCE_ID]) {
+    next[DEFAULT_MCP_INSTANCE_ID] = {
+      isRunning: false,
+      port: currentServerStatuses[DEFAULT_MCP_INSTANCE_ID]?.port ?? currentServerStatus.port,
+      lastUpdated: Date.now(),
+    };
+  }
+
+  currentServerStatuses = next;
+  currentServerStatus = next[DEFAULT_MCP_INSTANCE_ID];
+}
+
 async function markAllServersStopped(reason: string): Promise<void> {
   const now = Date.now();
   const nextEntries = Object.entries(currentServerStatuses).map(([instanceId, status]) => {
@@ -357,19 +457,43 @@ function inferDefaultPort(
 
 async function ensureManagedInstancesLoaded(preferredDefaultPort?: number): Promise<McpServerInstanceConfig[]> {
   if (managedInstancesLoaded) {
+    let nextManaged = managedInstances;
     if (typeof preferredDefaultPort === 'number' && preferredDefaultPort > 0) {
       let changed = false;
-      const updated = managedInstances.map((cfg) => {
+      nextManaged = managedInstances.map((cfg) => {
         if (cfg.instanceId !== DEFAULT_MCP_INSTANCE_ID || cfg.port === preferredDefaultPort) {
           return cfg;
         }
         changed = true;
         return { ...cfg, port: preferredDefaultPort };
       });
-      if (changed) {
-        managedInstances = sortInstances(updated);
-        await persistManagedInstances();
+      if (!changed) {
+        nextManaged = managedInstances;
       }
+    }
+
+    const resolved = resolveManagedInstancePortConflicts(nextManaged, {
+      preferredInstanceId: DEFAULT_MCP_INSTANCE_ID,
+      seedPort: preferredDefaultPort,
+    });
+    warnPortResolutions('resolved in-memory port conflicts', resolved.resolutions);
+    const changed =
+      resolved.resolutions.length > 0 ||
+      resolved.instances.length !== managedInstances.length ||
+      resolved.instances.some((item, index) => {
+        const previous = managedInstances[index];
+        return (
+          !previous ||
+          previous.instanceId !== item.instanceId ||
+          previous.port !== item.port ||
+          previous.enabled !== item.enabled ||
+          previous.autoStart !== item.autoStart ||
+          previous.label !== item.label
+        );
+      });
+    if (changed) {
+      managedInstances = resolved.instances;
+      await persistManagedInstances();
     }
     return managedInstances;
   }
@@ -403,7 +527,12 @@ async function ensureManagedInstancesLoaded(preferredDefaultPort?: number): Prom
     });
   }
 
-  managedInstances = sortInstances(Array.from(byId.values()));
+  const resolved = resolveManagedInstancePortConflicts(Array.from(byId.values()), {
+    preferredInstanceId: DEFAULT_MCP_INSTANCE_ID,
+    seedPort: fallbackPort,
+  });
+  warnPortResolutions('resolved persisted port conflicts', resolved.resolutions);
+  managedInstances = resolved.instances;
   managedInstancesLoaded = true;
 
   await persistManagedInstances();
@@ -431,13 +560,21 @@ async function upsertManagedInstance(raw: unknown): Promise<McpServerInstanceCon
     byId.set(DEFAULT_MCP_INSTANCE_ID, createDefaultInstanceConfig(defaultPort));
   }
 
-  managedInstances = sortInstances(Array.from(byId.values()));
+  const resolved = resolveManagedInstancePortConflicts(Array.from(byId.values()), {
+    preferredInstanceId: normalized.instanceId,
+    seedPort: defaultPort,
+  });
+  warnPortResolutions('resolved upsert port conflicts', resolved.resolutions);
+  managedInstances = resolved.instances;
   await persistManagedInstances();
   if (normalized.instanceId === DEFAULT_MCP_INSTANCE_ID) {
-    await chrome.storage.local.set({ [STORAGE_KEYS.NATIVE_SERVER_PORT]: normalized.port });
+    const defaultInstance = managedInstances.find((item) => item.instanceId === DEFAULT_MCP_INSTANCE_ID);
+    if (defaultInstance) {
+      await chrome.storage.local.set({ [STORAGE_KEYS.NATIVE_SERVER_PORT]: defaultInstance.port });
+    }
   }
   broadcastServerInstancesChanged();
-  return normalized;
+  return managedInstances.find((item) => item.instanceId === normalized.instanceId) ?? normalized;
 }
 
 async function removeManagedInstance(instanceId: string): Promise<void> {
@@ -459,10 +596,6 @@ async function removeManagedInstance(instanceId: string): Promise<void> {
   }
 
   broadcastServerInstancesChanged();
-}
-
-function getAutoStartInstances(instances: McpServerInstanceConfig[]): McpServerInstanceConfig[] {
-  return instances.filter((cfg) => cfg.enabled && cfg.autoStart);
 }
 
 async function requestNativeHost(
@@ -541,42 +674,49 @@ async function stopManagedInstanceOnNative(instanceId: string): Promise<boolean>
   }
 }
 
+async function syncManagedInstancesOnNative(
+  instances: McpServerInstanceConfig[],
+  timeoutMs: number = 20_000,
+): Promise<boolean> {
+  if (!nativePort) {
+    return false;
+  }
+  try {
+    const response = (await requestNativeHost(
+      NativeMessageType.SYNC_INSTANCES,
+      { instances },
+      timeoutMs,
+    )) as NativeInstanceListPayload;
+    if (response?.status !== 'success' || !Array.isArray(response.instances)) {
+      return false;
+    }
+
+    applyInstanceStatusList(response.instances);
+    await saveServerStatuses();
+    broadcastServerStatusChange(DEFAULT_MCP_INSTANCE_ID);
+    broadcastServerInstancesChanged();
+    return true;
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Failed to sync instance states`, error);
+    return false;
+  }
+}
+
 async function refreshStatusesFromNative(): Promise<void> {
   if (!nativePort) {
     return;
   }
   try {
-    const response = await requestNativeHost(NativeMessageType.LIST_INSTANCES, {}, 8000);
+    const response = (await requestNativeHost(
+      NativeMessageType.LIST_INSTANCES,
+      {},
+      8000,
+    )) as NativeInstanceListPayload;
     if (response?.status !== 'success' || !Array.isArray(response.instances)) {
       return;
     }
 
-    const next: ServerStatusMap = {
-      ...currentServerStatuses,
-    };
-    for (const raw of response.instances as unknown[]) {
-      if (!raw || typeof raw !== 'object') continue;
-      const item = raw as Record<string, unknown>;
-      const instanceId = normalizeInstanceId(item.instanceId);
-      next[instanceId] = {
-        isRunning: Boolean(item.isRunning),
-        port: normalizePort(item.port) ?? next[instanceId]?.port,
-        lastUpdated:
-          typeof item.lastUpdated === 'number' && Number.isFinite(item.lastUpdated)
-            ? item.lastUpdated
-            : Date.now(),
-      };
-    }
-
-    if (!next[DEFAULT_MCP_INSTANCE_ID]) {
-      next[DEFAULT_MCP_INSTANCE_ID] = {
-        isRunning: false,
-        lastUpdated: Date.now(),
-      };
-    }
-
-    currentServerStatuses = next;
-    currentServerStatus = next[DEFAULT_MCP_INSTANCE_ID];
+    applyInstanceStatusList(response.instances);
     await saveServerStatuses();
     broadcastServerStatusChange(DEFAULT_MCP_INSTANCE_ID);
     broadcastServerInstancesChanged();
@@ -591,12 +731,14 @@ async function ensureManagedInstancesRunning(preferredDefaultPort?: number): Pro
   }
 
   const loaded = await ensureManagedInstancesLoaded(preferredDefaultPort);
-  const targets = getAutoStartInstances(loaded);
-  for (const instance of targets) {
-    await startManagedInstanceOnNative(instance);
+  const synced = await syncManagedInstancesOnNative(loaded, 25_000);
+  if (!synced) {
+    const targets = loaded.filter((cfg) => cfg.enabled && cfg.autoStart);
+    for (const instance of targets) {
+      await startManagedInstanceOnNative(instance);
+    }
+    await refreshStatusesFromNative();
   }
-
-  await refreshStatusesFromNative();
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -1143,9 +1285,15 @@ export const initNativeHostListener = () => {
     if (message.type === BACKGROUND_MESSAGE_TYPES.UPSERT_SERVER_INSTANCE) {
       void upsertManagedInstance(message?.payload)
         .then(async (instance) => {
-          if (nativePort && instance.enabled && (message?.startNow === true || instance.autoStart)) {
-            await startManagedInstanceOnNative(instance);
-            await refreshStatusesFromNative();
+          if (nativePort) {
+            const synced = await syncManagedInstancesOnNative(managedInstances);
+            if (!synced) {
+              await refreshStatusesFromNative();
+            }
+            if (instance.enabled && message?.startNow === true) {
+              await startManagedInstanceOnNative(instance);
+              await refreshStatusesFromNative();
+            }
           }
           sendResponse({ success: true, instance, instances: managedInstances });
         })
@@ -1162,11 +1310,13 @@ export const initNativeHostListener = () => {
         return true;
       }
       void (async () => {
-        if (nativePort) {
-          await stopManagedInstanceOnNative(instanceId);
-        }
         await removeManagedInstance(instanceId);
-        await refreshStatusesFromNative();
+        if (nativePort) {
+          const synced = await syncManagedInstancesOnNative(managedInstances);
+          if (!synced) {
+            await refreshStatusesFromNative();
+          }
+        }
       })()
         .then(() => {
           sendResponse({ success: true, instances: managedInstances });
@@ -1193,7 +1343,10 @@ export const initNativeHostListener = () => {
         if (!target) {
           throw new Error(`Unknown instance: ${instanceId}`);
         }
-        await startManagedInstanceOnNative(target);
+        const started = await startManagedInstanceOnNative(target);
+        if (!started) {
+          throw new Error(`Failed to start instance: ${instanceId}`);
+        }
         await refreshStatusesFromNative();
       })()
         .then(() => {
@@ -1215,7 +1368,10 @@ export const initNativeHostListener = () => {
         if (!nativePort) {
           throw new Error('Native host not connected');
         }
-        await stopManagedInstanceOnNative(instanceId);
+        const stopped = await stopManagedInstanceOnNative(instanceId);
+        if (!stopped) {
+          throw new Error(`Failed to stop instance: ${instanceId}`);
+        }
         await refreshStatusesFromNative();
       })()
         .then(() => {

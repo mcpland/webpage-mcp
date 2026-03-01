@@ -4,7 +4,9 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   DEFAULT_MCP_INSTANCE_ID,
   NativeMessageType,
+  type McpServerInstanceConfig,
   type McpServerInstanceStatus,
+  type NativeSyncInstancesPayload,
 } from 'webpage-mcp-shared';
 import { NATIVE_SERVER_PORT, TIMEOUTS } from './constant';
 import fileHandler from './file-handler';
@@ -38,6 +40,37 @@ function normalizePort(raw: unknown): number | undefined {
     return undefined;
   }
   return port;
+}
+
+function normalizeInstanceConfig(
+  raw: unknown,
+  fallbackPort: number,
+): McpServerInstanceConfig | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const obj = raw as Record<string, unknown>;
+  const instanceId = normalizeInstanceId(obj.instanceId);
+  const port = normalizePort(obj.port) ?? (instanceId === DEFAULT_MCP_INSTANCE_ID ? fallbackPort : undefined);
+  if (!port) {
+    return null;
+  }
+
+  return {
+    instanceId,
+    port,
+    enabled: typeof obj.enabled === 'boolean' ? obj.enabled : true,
+    autoStart: typeof obj.autoStart === 'boolean' ? obj.autoStart : true,
+    label: typeof obj.label === 'string' && obj.label.trim() ? obj.label.trim() : undefined,
+  };
+}
+
+function sortInstanceConfigs(instances: McpServerInstanceConfig[]): McpServerInstanceConfig[] {
+  return [...instances].sort((a, b) => {
+    if (a.instanceId === DEFAULT_MCP_INSTANCE_ID && b.instanceId !== DEFAULT_MCP_INSTANCE_ID) return -1;
+    if (b.instanceId === DEFAULT_MCP_INSTANCE_ID && a.instanceId !== DEFAULT_MCP_INSTANCE_ID) return 1;
+    return a.instanceId.localeCompare(b.instanceId);
+  });
 }
 
 export class NativeMessagingHost {
@@ -175,6 +208,21 @@ export class NativeMessagingHost {
     return statuses;
   }
 
+  private findRunningInstanceByPort(
+    requestedPort: number,
+    excludedInstanceId?: string,
+  ): { instanceId: string; port: number } | null {
+    for (const [instanceId, server] of this.servers.entries()) {
+      if (instanceId === excludedInstanceId) continue;
+      if (!server.isRunning) continue;
+      const listeningPort = server.getListeningPort();
+      if (typeof listeningPort === 'number' && listeningPort === requestedPort) {
+        return { instanceId, port: listeningPort };
+      }
+    }
+    return null;
+  }
+
   private async startServer(instanceId: string, port: number): Promise<McpServerInstanceStatus> {
     const normalized = normalizeInstanceId(instanceId);
     const requestedPort = normalizePort(port) ?? NATIVE_SERVER_PORT;
@@ -192,6 +240,13 @@ export class NativeMessagingHost {
       }
 
       await server.stop();
+    }
+
+    const conflict = this.findRunningInstanceByPort(requestedPort, normalized);
+    if (conflict) {
+      throw new Error(
+        `Port ${requestedPort} is already in use by instance "${conflict.instanceId}". Each instance must use a unique port.`,
+      );
     }
 
     const actualPort = await server.start(requestedPort, this);
@@ -288,6 +343,76 @@ export class NativeMessagingHost {
     };
   }
 
+  private resolveSyncDirective(payload: unknown): McpServerInstanceConfig[] {
+    const rawPayload = payload && typeof payload === 'object' ? (payload as NativeSyncInstancesPayload) : null;
+    const rawInstances = Array.isArray(rawPayload?.instances) ? rawPayload.instances : [];
+    const defaultPort =
+      this.instanceStatuses.get(DEFAULT_MCP_INSTANCE_ID)?.port ??
+      this.servers.get(DEFAULT_MCP_INSTANCE_ID)?.getListeningPort() ??
+      NATIVE_SERVER_PORT;
+    const byId = new Map<string, McpServerInstanceConfig>();
+
+    for (const raw of rawInstances) {
+      const normalized = normalizeInstanceConfig(raw, defaultPort);
+      if (!normalized) continue;
+      byId.set(normalized.instanceId, normalized);
+    }
+
+    if (!byId.has(DEFAULT_MCP_INSTANCE_ID)) {
+      byId.set(DEFAULT_MCP_INSTANCE_ID, {
+        instanceId: DEFAULT_MCP_INSTANCE_ID,
+        port: defaultPort,
+        enabled: true,
+        autoStart: true,
+        label: 'Default',
+      });
+    }
+
+    return sortInstanceConfigs(Array.from(byId.values()));
+  }
+
+  private ensureUniqueAutoStartPorts(instances: McpServerInstanceConfig[]): void {
+    const byPort = new Map<number, string>();
+    for (const instance of instances) {
+      if (!instance.enabled || !instance.autoStart) {
+        continue;
+      }
+      const existing = byPort.get(instance.port);
+      if (existing && existing !== instance.instanceId) {
+        throw new Error(
+          `Port ${instance.port} is assigned to both "${existing}" and "${instance.instanceId}". Configure unique ports for enabled auto-start instances.`,
+        );
+      }
+      byPort.set(instance.port, instance.instanceId);
+    }
+  }
+
+  private async syncServers(instances: McpServerInstanceConfig[]): Promise<McpServerInstanceStatus[]> {
+    this.ensureUniqueAutoStartPorts(instances);
+
+    const desiredIds = new Set<string>(instances.map((item) => item.instanceId));
+
+    for (const instance of instances) {
+      if (instance.enabled && instance.autoStart) {
+        await this.startServer(instance.instanceId, instance.port);
+      } else {
+        await this.stopServer(instance.instanceId);
+      }
+    }
+
+    const knownIds = new Set<string>([...this.servers.keys(), ...this.instanceStatuses.keys()]);
+    for (const instanceId of knownIds) {
+      if (desiredIds.has(instanceId)) {
+        continue;
+      }
+      await this.stopServer(instanceId);
+      this.servers.delete(instanceId);
+      this.instanceStatuses.delete(instanceId);
+    }
+
+    return this.listServerInstances();
+  }
+
   private async handleMessage(message: any): Promise<void> {
     if (!message || typeof message !== 'object') {
       this.sendError('Invalid message format');
@@ -339,6 +464,19 @@ export class NativeMessagingHost {
           this.sendRequestResponse(requestId, {
             status: 'success',
             instances: this.listServerInstances(),
+          });
+          break;
+        }
+        case NativeMessageType.SYNC_INSTANCES: {
+          if (!requestId) {
+            this.sendError('sync_instances requires requestId');
+            return;
+          }
+          const instances = this.resolveSyncDirective(message.payload);
+          const statuses = await this.syncServers(instances);
+          this.sendRequestResponse(requestId, {
+            status: 'success',
+            instances: statuses,
           });
           break;
         }

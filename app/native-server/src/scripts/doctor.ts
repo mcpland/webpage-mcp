@@ -975,19 +975,25 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
         const configValue = cfg.value as Record<string, unknown>;
         const url = new URL(configValue.url as string);
         const port = Number(url.port);
-        const portOk = port === EXPECTED_PORT;
+        const portIsValid = Number.isInteger(port) && port >= 1 && port <= 65535;
+        const usesDefaultPort = portIsValid && port === EXPECTED_PORT;
         checks.push({
           id: 'port.config',
           title: 'Port config',
-          status: portOk ? 'ok' : 'error',
+          status: !portIsValid ? 'error' : usesDefaultPort ? 'ok' : 'warn',
           message: configValue.url as string,
           details: {
-            expectedPort: EXPECTED_PORT,
+            defaultPort: EXPECTED_PORT,
             actualPort: port,
-            fix: portOk ? undefined : [`${COMMAND_NAME} update-port ${EXPECTED_PORT}`],
+            validPortRange: '1-65535',
+            hint: usesDefaultPort
+              ? 'Using default port.'
+              : 'Non-default port is valid. Keep extension/server/stdio target ports aligned 1:1.',
           },
         });
-        if (!portOk) nextSteps.push(`${COMMAND_NAME} update-port ${EXPECTED_PORT}`);
+        if (!portIsValid) {
+          nextSteps.push(`${COMMAND_NAME} update-port ${EXPECTED_PORT}`);
+        }
 
         // Check constant consistency
         const nativePortOk = NATIVE_SERVER_PORT === EXPECTED_PORT;

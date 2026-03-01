@@ -16,7 +16,7 @@ import { runReport } from './scripts/report';
 
 program
   .version(require('../package.json').version)
-  .description('Webpage MCP Bridge - Local service for communicating with Chrome extension');
+  .description('Webpage MCP - Local service for communicating with Chrome extension');
 
 // Register Native Messaging host
 program

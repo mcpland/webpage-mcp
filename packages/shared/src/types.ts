@@ -3,6 +3,7 @@ export enum NativeMessageType {
   STARTED = 'started',
   STOP = 'stop',
   STOPPED = 'stopped',
+  SYNC_INSTANCES = 'sync_instances',
   PING = 'ping',
   PONG = 'pong',
   ERROR = 'error',
@@ -41,6 +42,15 @@ export interface McpServerInstanceStatus {
   isRunning: boolean;
   port?: number;
   lastUpdated: number;
+}
+
+export interface NativeSyncInstancesPayload {
+  instances: McpServerInstanceConfig[];
+}
+
+export interface NativeInstanceListPayload {
+  status: 'success' | 'error';
+  instances: McpServerInstanceStatus[];
 }
 
 // ============================================================

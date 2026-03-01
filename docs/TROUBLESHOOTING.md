@@ -136,9 +136,9 @@ chmod +x "$(npm root -g)/webpage-mcp/dist/run_host.sh"
    npx -y webpage-mcp@latest webpage-mcp-stdio --help
    ```
 2. Ensure the extension popup is connected and the native server is running.
-3. Check that the stdio proxy port matches the server port:
+3. Check that the stdio proxy port matches the extension popup port:
    ```bash
-   webpage-mcp update-port 12306
+   webpage-mcp update-port <same-port-as-popup>
    ```
 4. You can set the upstream URL explicitly via environment variables:
    ```bash
@@ -190,7 +190,7 @@ chmod +x "$(npm root -g)/webpage-mcp/dist/run_host.sh"
 
 **Steps to fix:**
 
-1. Check if another process is using port 12306:
+1. Check if another process is using your target port (example: `12306`):
    ```bash
    # macOS / Linux
    lsof -i :12306
@@ -204,9 +204,9 @@ chmod +x "$(npm root -g)/webpage-mcp/dist/run_host.sh"
    ```
 3. Update your MCP client config to use the new port.
 
-> **Note:** This guide assumes a single active server endpoint.
-> Keep a 1:1 mapping between the extension port and MCP server port.
-> If you change the port in the extension popup, run `webpage-mcp update-port <same-port>` so `webpage-mcp-stdio` forwards to the same target.
+> Keep a 1:1 mapping between the extension popup port and MCP server port.
+> If you change the popup port, run `webpage-mcp update-port <same-port>`.
+> If you run multiple MCP server instances, each instance must use a unique port.
 
 ---
 

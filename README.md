@@ -178,21 +178,19 @@ Or if using npx:
 
 ### Port Configuration
 
-There are two different port settings:
+Use a strict 1:1 port mapping:
 
-1. **Native server listen port**
-
-Set this in the extension popup (the "Port" field). The extension passes that value when starting the native server. Default: `12306`.
-
-2. **stdio proxy target port**
-
-This is the URL used by `webpage-mcp-stdio` when forwarding stdio MCP calls to HTTP. Update it with:
+1. Set the server port in the extension popup (default `12306`).
+2. Point `webpage-mcp-stdio` to that same port:
 
 ```bash
-npx webpage-mcp update-port 12307
+npx webpage-mcp update-port 12306
 ```
 
-`update-port` edits `app/native-server/dist/mcp/stdio-config.json` (or packaged equivalent) and does not directly change the native server listen port.
+`update-port` edits `app/native-server/dist/mcp/stdio-config.json` (or packaged equivalent).
+If the popup port changes, run `update-port` with the same value.
+
+For multiple MCP server instances, each instance must use a unique port.
 
 ### Optional Local Auth Token
 
