@@ -186,10 +186,9 @@ function normalizeInstanceConfig(raw: unknown, fallbackPort: number): McpServerI
 
 function findNextAvailablePort(used: Set<number>, startFrom: number): number {
   const start = Math.min(65535, Math.max(1, Math.floor(startFrom)));
-  for (let port = start; port <= 65535; port += 1) {
-    if (!used.has(port)) {
-      return port;
-    }
+  for (let offset = 0; offset < 65535; offset += 1) {
+    const port = ((start - 1 + offset) % 65535) + 1;
+    if (!used.has(port)) return port;
   }
   throw new Error('No available port left between 1 and 65535');
 }
