@@ -20,7 +20,7 @@ program
 program
   .command('register')
   .description('Register Native Messaging host')
-  .option('-f, --force', 'Force re-registration')
+  .option('-f, --force', 'Compatibility flag (accepted; registration is currently idempotent)')
   .option('-s, --system', 'Use system-level installation (requires administrator/sudo privileges)')
   .option('-b, --browser <browser>', 'Register for specific browser (chrome, chromium, or all)')
   .option('-d, --detect', 'Auto-detect installed browsers')

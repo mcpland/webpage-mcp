@@ -24,6 +24,33 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **N
 
 ## Features
 
+## ✨ Core Features
+
+- 😁 **Chatbot/Model Agnostic**: Let any LLM or chatbot client or agent you prefer automate your browser
+- ⭐️ **Use Your Original Browser**: Seamlessly integrate with your existing browser environment (your configurations, login states, etc.)
+- 💻 **Fully Local**: Pure local MCP server ensuring user privacy
+- 🔌 **Native Stdio Transport**: Native Messaging + stdio only (no localhost HTTP port)
+- 🏎 **Cross-Tab**: Cross-tab context
+- 🧠 **Semantic Search**: Built-in vector database for intelligent browser tab content discovery
+- 🔍 **Smart Content Analysis**: AI-powered text extraction and similarity matching
+- 🌐 **20+ Tools**: Support for screenshots, network monitoring, interactive operations, bookmark management, browsing history, and 20+ other tools
+- 🚀 **SIMD-Accelerated AI**: Custom WebAssembly SIMD optimization for 4-8x faster vector operations
+
+## Comparison with Similar Projects
+
+| Comparison Dimension | Playwright-based MCP Server | Chrome Extension-based MCP Server |
+| --- | --- | --- |
+| **First-time Setup** | ✅ Usually simpler: install package and run | ⚠️ Requires one-time Native Messaging host registration |
+| **Resource Usage** | ❌ Typically launches/controls a separate automation browser runtime | ✅ Reuses the user's already-open Chrome runtime |
+| **User Session Reuse** | ❌ Often requires separate login/state management | ✅ Reuses existing browser profile session/cookies |
+| **Real-user Environment Fidelity** | ⚠️ More automation-oriented environment by default | ✅ Uses real user profile, settings, extensions, and tabs |
+| **API Access Surface** | ⚠️ Constrained by Playwright automation API boundaries | ✅ Can integrate with Chrome extension platform and native browser APIs |
+| **CI / Headless Fit** | ✅ Strong fit for CI and headless automation workflows | ⚠️ Better suited for local interactive workflows |
+| **Determinism / Reproducibility** | ✅ Usually stronger reproducibility in controlled runs | ⚠️ Affected by live user environment/state changes |
+| **Startup Latency (after setup)** | ❌ Needs browser automation bootstrap path | ✅ After one-time registration, mainly extension/native bridge activation |
+| **Request Overhead (steady state)** | ⚠️ Extra automation/runtime orchestration adds overhead | ✅ Lower overhead in long-lived local sessions |
+| **Post-setup Reliability** | ⚠️ More moving orchestration parts can increase failure surface | ✅ One-time Native Messaging registration; stable across normal OS/Chrome/MCP-client restarts (same profile/install path) |
+
 ### MCP Browser Tools
 
 | Tool                               | Description                                                             |
@@ -236,7 +263,6 @@ webpage-mcp/
 |- packages/
 |  |- shared/                    # Shared library (tool schemas, types, constants)
 |  '- wasm-simd/                 # Rust/WASM SIMD cosine similarity
-'- releases/                     # Release docs and optional artifacts
 ```
 
 ## Development
