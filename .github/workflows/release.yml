@@ -147,7 +147,9 @@ jobs:
           fi
 
       - name: Build publishable package
-        run: pnpm --filter webpage-mcp build
+        run: |
+          pnpm --filter webpage-mcp-shared build
+          pnpm --filter webpage-mcp build
 
       - name: Publish package
         run: pnpm --filter webpage-mcp publish --access public --no-git-checks --provenance
