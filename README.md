@@ -70,16 +70,16 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **N
 ### Quick Start (Published npm Package)
 
 1. Install the Chrome extension first (store package or unpacked build).
-2. Run one command to auto-fix common setup issues (permissions, node path, registration):
+2. Open extension `welcome.html` or popup and copy the one-time registration command (it already includes the current extension ID), then run it in terminal:
+
+```bash
+npx -y webpage-mcp@latest register --browser chrome --force --extension-id <extension_id_from_popup_or_welcome>
+```
+
+3. Run one command to auto-fix common setup issues (permissions, node path, registration):
 
 ```bash
 npx -y webpage-mcp@latest doctor --fix
-```
-
-3. If you are using an unpacked extension, copy its ID from `chrome://extensions` and re-register with explicit ID:
-
-```bash
-npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
 ```
 
 4. Add `webpage-mcp` to your MCP client config:
@@ -96,6 +96,12 @@ npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your
 ```
 
 5. Open Chrome, click the extension popup `Connect` button once, then restart your MCP client.
+
+Register command behavior:
+
+- Registration is typically one-time per machine/profile.
+- You do not need to re-run it for normal restarts (OS/Chrome/MCP client).
+- Re-run only when extension ID changes, manifest path changes, installation path changes, or Chrome profile data is reset.
 
 ### Build From Source (Developers)
 
@@ -324,6 +330,8 @@ For unpacked extensions with a custom ID, you can re-register with:
 npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
 ```
 
+The extension popup and welcome page can generate this command automatically using `chrome.runtime.id`, which avoids manual ID lookup mistakes.
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -347,7 +355,7 @@ npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your
 
 1. Ensure the native host is registered: `npx -y webpage-mcp@latest doctor`
 2. Check that Node.js >= 20 is available at the registered path
-3. Re-register for Chrome channels and your extension ID: `npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>`
+3. Prefer the exact register command generated in extension popup/welcome and run it once
 4. Fully restart Chrome (quit all Chrome processes), then click Connect again
 
 ### MCP client can't reach the server

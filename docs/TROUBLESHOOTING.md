@@ -28,11 +28,22 @@ For Chrome channel mismatches (Stable/Beta/Canary/Chrome for Testing), prefer:
 npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
 ```
 
+Best practice:
+
+- Prefer copying this command directly from extension popup/welcome, because it already includes the current `chrome.runtime.id`.
+
 Then fully restart Chrome (quit all Chrome processes) before retrying.
 
 3. Keep Chrome open with the extension enabled.
 
 4. Ensure your MCP client uses `npx -y -p webpage-mcp@latest webpage-mcp-stdio`.
+
+## Is Register One-Time?
+
+Usually yes.
+
+- Normal restarts (OS/Chrome/MCP client) do not require re-registering.
+- Re-register only when extension ID changes, install path changes, manifest is removed, or browser profile data is reset.
 
 ## Extension Not Connected
 
@@ -56,6 +67,8 @@ npx -y webpage-mcp@latest doctor --fix
 ```bash
 npx -y webpage-mcp@latest register --force --detect
 ```
+
+If you use unpacked extension, use the popup/welcome generated command with explicit `--extension-id`.
 
 ## MCP Client Cannot List/Call Tools
 
@@ -122,7 +135,7 @@ Root cause:
 
 Fix:
 
-1. Copy your extension ID from `chrome://extensions`.
+1. Copy the register command from extension popup/welcome (preferred), or copy extension ID from `chrome://extensions`.
 2. Re-register manifest with explicit extension ID (this also writes Chrome channel-compatible manifest paths):
 
 ```bash
