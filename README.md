@@ -295,8 +295,8 @@ pnpm dev:extension        # Dev mode with HMR
 pnpm build:extension      # Production build
 
 # MCP server
-pnpm dev:native           # Dev mode with auto-reload
-pnpm build:native         # Production build
+pnpm dev:mcp              # Dev mode with auto-reload
+pnpm build:mcp            # Production build
 
 # Shared library
 pnpm dev:shared           # Watch mode
@@ -435,7 +435,7 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 **`ci.yml`**
 
 - Trigger: pushes and pull requests on `main`/`develop`
-- Runs: install, lint, typecheck (native/shared + extension), tests, build
+- Runs: install, lint, typecheck (mcp/shared + extension), tests, build
 
 **`release.yml`**
 

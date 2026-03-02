@@ -48,7 +48,7 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Typecheck (shared + native)
+      - name: Typecheck (shared + mcp)
         run: pnpm typecheck
 
       - name: Typecheck (extension)
@@ -63,10 +63,10 @@ jobs:
       - name: Build extension zip
         run: pnpm --filter webpage-mcp-server zip
 
-      - name: Pack native npm package
+      - name: Pack MCP npm package
         run: |
-          mkdir -p artifacts/native
-          pnpm --dir app/mcp-server pack --pack-destination ../../artifacts/native
+          mkdir -p artifacts/mcp
+          pnpm --dir app/mcp-server pack --pack-destination ../../artifacts/mcp
 
       - name: Collect extension artifacts
         run: |
@@ -96,7 +96,7 @@ jobs:
         with:
           files: |
             artifacts/extension/*.zip
-            artifacts/native/*.tgz
+            artifacts/mcp/*.tgz
             artifacts/SHA256SUMS.txt
           fail_on_unmatched_files: true
 
