@@ -1,7 +1,7 @@
 /**
  * Quick Panel Agent Handler
  *
- * Background service that bridges Quick Panel (content script) with the native-server Agent.
+ * Background service that bridges Quick Panel (content script) with the mcp-server Agent.
  * Handles message routing, SSE streaming, and lifecycle management for AI chat requests.
  *
  * Architecture:
@@ -396,7 +396,7 @@ function createSseSubscription(request: ActiveRequest): SseSubscription {
 // ============================================================
 
 /**
- * Send the act request to native-server.
+ * Send the act request to mcp-server.
  * The server will emit events via SSE which are already being subscribed.
  *
  * @param request - Active request context
@@ -430,7 +430,7 @@ async function postActRequest(request: ActiveRequest): Promise<void> {
 }
 
 /**
- * Cancel an active request on the native-server.
+ * Cancel an active request on the mcp-server.
  */
 async function cancelRequestOnServer(
   sessionId: string,

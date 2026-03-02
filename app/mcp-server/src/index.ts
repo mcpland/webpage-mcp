@@ -5,7 +5,7 @@ import nativeMessagingHostInstance from "./native-messaging-host";
 const exitWithError = (label: string, error: unknown): never => {
   const message =
     error instanceof Error ? error.stack || error.message : String(error);
-  console.error(`[native-server] ${label}: ${message}`);
+  console.error(`[mcp-server] ${label}: ${message}`);
   process.exit(1);
 };
 

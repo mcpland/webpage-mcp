@@ -27,7 +27,7 @@ pnpm --filter webpage-mcp build
 Or inside this package:
 
 ```bash
-cd app/native-server
+cd app/mcp-server
 pnpm install
 pnpm build
 ```
@@ -47,7 +47,7 @@ pnpm --filter webpage-mcp test
 After build:
 
 ```bash
-cd app/native-server
+cd app/mcp-server
 
 # Register Native Messaging host
 node dist/cli.js register --detect

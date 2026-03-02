@@ -66,7 +66,7 @@ jobs:
       - name: Pack native npm package
         run: |
           mkdir -p artifacts/native
-          pnpm --dir app/native-server pack --pack-destination ../../artifacts/native
+          pnpm --dir app/mcp-server pack --pack-destination ../../artifacts/native
 
       - name: Collect extension artifacts
         run: |
@@ -140,9 +140,9 @@ jobs:
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION=$(node -p "require('./app/native-server/package.json').version")
+          PKG_VERSION=$(node -p "require('./app/mcp-server/package.json').version")
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "Tag version (${TAG_VERSION}) does not match app/native-server/package.json version (${PKG_VERSION})."
+            echo "Tag version (${TAG_VERSION}) does not match app/mcp-server/package.json version (${PKG_VERSION})."
             exit 1
           fi
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Get the absolute directory where the script is located
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG_DIR="/Users/hang/code/tencent/ai/webpage-mcp-server/app/native-server/dist/logs" # Or a directory you choose and make sure you have write permissions
+LOG_DIR="/Users/hang/code/tencent/ai/webpage-mcp-server/app/mcp-server/dist/logs" # Or a directory you choose and make sure you have write permissions
 
 # Get the current timestamp for the log file name to avoid overwriting
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")

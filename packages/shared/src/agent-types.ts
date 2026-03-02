@@ -1,6 +1,6 @@
 /**
  * Agent-side shared data contracts.
- * These types are shared between native-server and chrome-extension to ensure consistency.
+ * These types are shared between mcp-server and chrome-extension to ensure consistency.
  *
  * English is used for technical contracts; Chinese comments explain design choices.
  */

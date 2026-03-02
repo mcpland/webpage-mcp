@@ -4,7 +4,7 @@
 
 // // Set log file path
 // const LOG_DIR = path.join(
-//   '/Users/hang/code/ai/webpage-mcp-server/app/native-server/dist/',
+//   '/Users/hang/code/ai/webpage-mcp-server/app/mcp-server/dist/',
 //   '.debug-log',
 // ); // Use different directories to distinguish
 // const LOG_FILE = path.join(

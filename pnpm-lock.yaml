@@ -133,7 +133,7 @@ importers:
         specifier: ^0.20.0
         version: 0.20.18(@types/node@22.19.11)(eslint@9.39.3(jiti@2.6.1))(jiti@2.6.1)(lightningcss@1.31.1)(rollup@4.59.0)(yaml@2.8.2)
 
-  app/native-server:
+  app/mcp-server:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.1.69

@@ -16,7 +16,7 @@
     "lint:fix": "eslint 'src/**/*.{js,ts}' --fix",
     "format": "prettier --write 'src/**/*.{js,ts,json}'",
     "register:dev": "node dist/scripts/register-dev.js",
-    "postinstall": "node -e \"const fs=require('fs');const cp=require('child_process');const dist='dist/scripts/postinstall.js';if(!fs.existsSync(dist)){console.log('Skipping native-server postinstall in source workspace (dist not found).');process.exit(0);}const r=cp.spawnSync(process.execPath,[dist],{stdio:'inherit'});if(r.error)throw r.error;process.exit(r.status??1);\""
+    "postinstall": "node -e \"const fs=require('fs');const cp=require('child_process');const dist='dist/scripts/postinstall.js';if(!fs.existsSync(dist)){console.log('Skipping mcp-server postinstall in source workspace (dist not found).');process.exit(0);}const r=cp.spawnSync(process.execPath,[dist],{stdio:'inherit'});if(r.error)throw r.error;process.exit(r.status??1);\""
   },
   "files": [
     "dist",

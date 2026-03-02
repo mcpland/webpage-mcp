@@ -1026,7 +1026,7 @@ export function initWebEditorListeners(): void {
             const line = Number.isFinite(lineRaw) && lineRaw > 0 ? lineRaw : undefined;
             const column = Number.isFinite(columnRaw) && columnRaw > 0 ? columnRaw : undefined;
 
-            // Call native-server to open file (server will validate project and path)
+            // Call mcp-server to open file (server will validate project and path)
             const openResp = await requestAgentRpcFetch({
               operation: 'agent.projects.openFile',
               params: { projectId },

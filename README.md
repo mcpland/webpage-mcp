@@ -119,7 +119,7 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **M
 
 ### Quick Start (Published npm Package)
 
-**1.** Install the Chrome extension first (store package or unpacked build).
+**1.** Install the Chrome extension first (store package or unpacked build). [https://github.com/mcpland/webpage-mcp/releases](https://github.com/mcpland/webpage-mcp/releases)
 
 **2.** Open extension `welcome.html` or popup and copy the one-time registration command (it already includes the current extension ID), then run it in terminal:
 
@@ -193,10 +193,10 @@ pnpm build
 
 ```bash
 # From repo root, use the built local CLI entry
-node app/native-server/dist/cli.js register --detect
+node app/mcp-server/dist/cli.js register --detect
 
 # Or specify the browser explicitly
-node app/native-server/dist/cli.js register --browser chrome
+node app/mcp-server/dist/cli.js register --browser chrome
 ```
 
 This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the browser can launch the MCP server process.
@@ -205,10 +205,10 @@ This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the
 
 ```bash
 # Diagnose installation issues
-node app/native-server/dist/cli.js doctor
+node app/mcp-server/dist/cli.js doctor
 
 # Generate a full diagnostic report
-node app/native-server/dist/cli.js report
+node app/mcp-server/dist/cli.js report
 ```
 
 Open Chrome and click the extension icon — it should show a connected status.
@@ -251,7 +251,7 @@ For local development, you can point MCP directly to the built stdio entry:
     "webpage-mcp-local": {
       "command": "node",
       "args": [
-        "/Users/your-user/path/to/webpage-mcp/app/native-server/dist/mcp/mcp-server-stdio.js"
+        "/Users/your-user/path/to/webpage-mcp/app/mcp-server/dist/mcp/mcp-server-stdio.js"
       ]
     }
   }
@@ -313,7 +313,7 @@ pnpm build:wasm           # Build and copy to extension
 cd app/chrome-extension && pnpm test
 
 # MCP server tests (Jest)
-cd app/native-server && pnpm test
+cd app/mcp-server && pnpm test
 ```
 
 ### Linting & Formatting
