@@ -295,7 +295,8 @@ This repository uses GitHub Actions workflows in `.github/workflows/`:
     - Native server npm tarball (`.tgz`)
     - `SHA256SUMS.txt`
   - On tag pushes, it also creates a GitHub Release and uploads the assets
-  - Optional manual npm publish for `webpage-mcp` via `workflow_dispatch` input `publish_npm=true` (requires `NPM_AUTH_TOKEN` secret)
+  - On tag pushes (`v*`), it also publishes `webpage-mcp` to npm (requires `NPM_AUTH_TOKEN` secret)
+  - Manual npm publish remains available via `workflow_dispatch` with `publish_npm=true`
 
 ## CLI Reference
 
