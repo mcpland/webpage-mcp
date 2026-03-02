@@ -30,7 +30,7 @@ interface TodoListItem {
  * Note:This engine is based on the event protocol of the Codex adapter in other/cweb and fully handles
  * item.started/item.delta/item.completed/item.failed/error wait for events, and
  * Push the encoded RealtimeEvent to the sidepanel through AgentStreamManager,
- * Ensure that the data link "Sidepanel → Native Server → Codex CLI → Sidepanel" is closed loop.
+ * Ensure that the data link "Sidepanel → MCP Server → Codex CLI → Sidepanel" is closed loop.
  */
 export class CodexEngine implements AgentEngine {
   public readonly name = 'codex' as const;

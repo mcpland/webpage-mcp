@@ -8,8 +8,8 @@
     "description": "Erweiterungsbeschreibung"
   },
   "nativeServerConfigLabel": {
-    "message": "Native Server-Konfiguration",
-    "description": "Hauptabschnittstitel für Native Server-Einstellungen"
+    "message": "MCP Server-Konfiguration",
+    "description": "Hauptabschnittstitel für MCP Server-Einstellungen"
   },
   "semanticEngineLabel": {
     "message": "Semantische Engine",

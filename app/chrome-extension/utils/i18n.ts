@@ -10,7 +10,7 @@ const fallbackMessages: Record<string, string> = {
   extensionDescription: 'Exposes browser capabilities with your own chrome',
 
   // Section headers
-  nativeServerConfigLabel: 'Native Server Configuration',
+  nativeServerConfigLabel: 'MCP Server Configuration',
   semanticEngineLabel: 'Semantic Engine',
   embeddingModelLabel: 'Embedding Model',
   indexDataManagementLabel: 'Index Data Management',
@@ -162,7 +162,7 @@ const fallbackMessages: Record<string, string> = {
   pagesUnit: 'pages',
 
   // Legacy keys for backwards compatibility
-  nativeServerConfig: 'Native Server Configuration',
+  nativeServerConfig: 'MCP Server Configuration',
   runningStatus: 'Running Status',
   refreshStatus: 'Refresh Status',
   lastUpdated: 'Last Updated:',

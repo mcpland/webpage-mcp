@@ -1,4 +1,4 @@
-# webpage-mcp (Native Server)
+# webpage-mcp (MCP Server)
 
 Node.js Native Messaging host for Webpage MCP.
 
@@ -79,8 +79,8 @@ Registration note:
 
 ## Transport Model
 
-- Chrome Extension <-> Native Server: Chrome Native Messaging
-- MCP Client <-> Native Server: stdio (`webpage-mcp-stdio`)
+- Chrome Extension <-> MCP Server: Chrome Native Messaging
+- MCP Client <-> MCP Server: stdio (`webpage-mcp-stdio`)
 - Internal bridge: local IPC socket/pipe (default macOS/Linux: `~/.webpage-mcp/native-<uid>.sock`, configurable by `WEBPAGE_MCP_NATIVE_SOCKET`)
 
 ## Optional Auth Token

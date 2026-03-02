@@ -283,7 +283,7 @@ export function useAgentProjects(options: UseAgentProjectsOptions) {
         if (response.statusCode === 404) {
           projectError.value = t(
             'agentProjectsPickerUnavailable',
-            'Directory picker not available. Please rebuild and restart the native server.',
+            'Directory picker not available. Please rebuild and restart the MCP server.',
           );
         } else {
           projectError.value = t('agentProjectsServerHttpError', 'Server error: {0}', [

@@ -148,7 +148,7 @@ export function useAgentServer(options: UseAgentServerOptions = {}) {
     forceConnect?: boolean;
   }
 
-  // Ensure native server is ready
+  // Ensure MCP server is ready
   async function ensureNativeServer(opts: EnsureNativeServerOptions = {}): Promise<boolean> {
     const { forceConnect = false } = opts;
     connecting.value = true;

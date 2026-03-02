@@ -6,7 +6,7 @@
     "message": "自身のChromeブラウザの機能を外部に公開します"
   },
   "nativeServerConfigLabel": {
-    "message": "ネイティブサーバー設定"
+    "message": "MCPサーバー設定"
   },
   "semanticEngineLabel": {
     "message": "セマンティックエンジン"

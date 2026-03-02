@@ -8,8 +8,8 @@
     "description": "扩展描述"
   },
   "nativeServerConfigLabel": {
-    "message": "Native Server 配置",
-    "description": "本地服务器设置的主要节标题"
+    "message": "MCP 服务器配置",
+    "description": "MCP 服务器设置的主要节标题"
   },
   "semanticEngineLabel": {
     "message": "语义引擎",

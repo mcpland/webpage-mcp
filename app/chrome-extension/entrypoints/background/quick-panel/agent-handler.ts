@@ -239,7 +239,7 @@ function cleanupRequest(requestId: string, reason: string): void {
 // ============================================================
 
 /**
- * Validate that the selected session exists on the native server.
+ * Validate that the selected session exists on the MCP server.
  * Returns false if the session is invalid or server is unreachable.
  */
 async function validateSession(sessionId: string): Promise<boolean> {
@@ -465,7 +465,7 @@ function isRequestStillActive(request: ActiveRequest): boolean {
  * Main orchestration function for starting a Quick Panel AI request.
  *
  * Flow:
- * 1. Ensure native server is running
+ * 1. Ensure MCP server is running
  * 2. Validate session exists
  * 3. Open sidepanel (best-effort)
  * 4. Start SSE subscription (wait for connection)
@@ -477,7 +477,7 @@ function isRequestStillActive(request: ActiveRequest): boolean {
  */
 async function startRequest(request: ActiveRequest): Promise<void> {
   try {
-    // Best-effort: ensure native server is running
+    // Best-effort: ensure MCP server is running
     await chrome.runtime.sendMessage({ type: NativeMessageType.ENSURE_NATIVE }).catch(() => null);
 
     // Guard: check if cancelled during ENSURE_NATIVE

@@ -5,7 +5,7 @@
 <h1 align="center">Webpage MCP</h1>
 
 <p align="center">
-  <strong>Turn your Chrome browser into a fully-featured MCP server</strong>
+  <strong>Turn your webpage into a fully-featured MCP server</strong>
 </p>
 
 <p align="center">
@@ -13,11 +13,11 @@
   <a href="https://www.npmjs.com/package/webpage-mcp"><img src="https://img.shields.io/npm/v/webpage-mcp.svg" alt="npm" /></a>
   <a href="https://github.com/mcpland/webpage-mcp/releases"><img src="https://img.shields.io/github/v/release/mcpland/webpage-mcp.svg" alt="Release" /></a>
   <a href="https://github.com/mcpland/webpage-mcp/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/webpage-mcp" alt="License" /></a>
-  <a href="https://developer.chrome.com/docs/extensions/"><img src="https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Extension" /></a>
+  <a href="https://github.com/mcpland/webpage-mcp/releases"><img src="https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Extension" /></a>
 </p>
 
 <p align="center">
-  Let AI assistants like Claude, Cursor, Windsurf, and other <a href="https://modelcontextprotocol.io/">MCP</a>-compatible clients control your browser — navigate pages, take screenshots, click elements, read content, capture network traffic, run JavaScript, and much more.
+  Let AI assistants like Claude, Cursor, Windsurf, and other <a href="https://modelcontextprotocol.io/">MCP</a>-compatible clients control your webpage — navigate pages, take screenshots, click elements, read content, capture network traffic, run JavaScript, and much more.
 </p>
 
 ---
@@ -25,12 +25,17 @@
 ## How It Works
 
 ```
-┌──────────┐  stdio   ┌───────────────┐  Native Messaging  ┌─────────────────┐  Chrome APIs  ┌─────────────┐
-│ AI Client├─────────►│ Native Server ├───────────────────►│ Chrome Extension├──────────────►│ Your Browser│
-└──────────┘   MCP    └───────────────┘    stdin/stdout    └─────────────────┘   DevTools    └─────────────┘
+┌──────────┐     MCP stdio    ┌───────────────┐
+│ AI Client├─────────────────►│   MCP Server  │
+└──────────┘                  └───────┬───────┘
+       Native Messaging stdin/stdout  │
+                                      │
+┌─────────────┐  Chrome APIs ┌────────▼────────┐
+│ Your Webpage│◄─────────────┤ Chrome Extension│
+└─────────────┘   DevTools   └─────────────────┘
 ```
 
-The **Chrome extension** exposes real browser capabilities as MCP tools. The **Native Server** bridges AI clients and the extension using Chrome [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging). MCP clients connect over stdio only (no localhost HTTP transport).
+The **Chrome extension** exposes real browser capabilities as MCP tools. The **MCP Server** bridges AI clients and the extension using Chrome [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging). MCP clients connect over stdio only (no localhost HTTP transport).
 
 ## Core Features
 
@@ -194,7 +199,7 @@ node app/native-server/dist/cli.js register --detect
 node app/native-server/dist/cli.js register --browser chrome
 ```
 
-This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the browser can launch the native server process.
+This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the browser can launch the MCP server process.
 
 #### 4. Verify Installation
 
@@ -289,7 +294,7 @@ pnpm dev
 pnpm dev:extension        # Dev mode with HMR
 pnpm build:extension      # Production build
 
-# Native server
+# MCP server
 pnpm dev:native           # Dev mode with auto-reload
 pnpm build:native         # Production build
 
@@ -307,7 +312,7 @@ pnpm build:wasm           # Build and copy to extension
 # Chrome extension tests (Vitest)
 cd app/chrome-extension && pnpm test
 
-# Native server tests (Jest)
+# MCP server tests (Jest)
 cd app/native-server && pnpm test
 ```
 
@@ -368,14 +373,14 @@ The extension popup and welcome page can generate this command automatically usi
 | Extension framework | [WXT](https://wxt.dev/) (Vite-based)       |
 | Extension UI        | React 18 + TailwindCSS v4                  |
 | Flow builder        | @xyflow/react (ReactFlow)                  |
-| Native server       | Node.js Native Messaging + local IPC       |
+| MCP server          | Node.js Native Messaging + local IPC       |
 | MCP SDK             | @modelcontextprotocol/sdk                  |
 | Agent SDK           | @anthropic-ai/claude-agent-sdk             |
 | Database            | SQLite (better-sqlite3 + drizzle-orm)      |
 | Semantic search     | @xenova/transformers (ONNX) + hnswlib-wasm |
 | SIMD math           | Rust/WASM (wasm-bindgen + wide)            |
 | GIF recording       | gifenc                                     |
-| Testing             | Vitest (extension), Jest (native server)   |
+| Testing             | Vitest (extension), Jest (MCP server)      |
 | Package manager     | pnpm workspaces                            |
 
 ---
@@ -437,7 +442,7 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 - Trigger: tag push `v*` and manual dispatch
 - Builds release assets:
   - Chrome extension zip (`app/chrome-extension/.output/*.zip`)
-  - Native server npm tarball (`.tgz`)
+  - MCP server npm tarball (`.tgz`)
   - `SHA256SUMS.txt`
 - On tag pushes, creates a GitHub Release and uploads assets
 - On tag pushes (`v*`), publishes `webpage-mcp` to npm (requires `NPM_AUTH_TOKEN` secret)

@@ -101,7 +101,7 @@ jobs:
           fail_on_unmatched_files: true
 
   publish-npm:
-    name: Publish Native Server to npm
+    name: Publish MCP Server to npm
     needs: build-assets
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_npm == true)
     runs-on: ubuntu-latest

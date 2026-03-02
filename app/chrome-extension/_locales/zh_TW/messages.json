@@ -8,8 +8,8 @@
     "description": "擴充功能描述"
   },
   "nativeServerConfigLabel": {
-    "message": "原生伺服器設定",
-    "description": "本機伺服器設定的主要區段標題"
+    "message": "MCP 伺服器設定",
+    "description": "MCP 伺服器設定的主要區段標題"
   },
   "semanticEngineLabel": {
     "message": "語意引擎",

@@ -2,8 +2,8 @@
 
 This project now uses a fully native transport stack:
 
-- Chrome Extension <-> Native Server: Chrome Native Messaging
-- MCP Client <-> Native Server: stdio (`webpage-mcp-stdio`)
+- Chrome Extension <-> MCP Server: Chrome Native Messaging
+- MCP Client <-> MCP Server: stdio (`webpage-mcp-stdio`)
 - Internal bridge: local IPC socket/pipe
 
 No localhost HTTP port is required.

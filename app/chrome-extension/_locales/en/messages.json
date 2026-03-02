@@ -8,8 +8,8 @@
     "description": "Extension description"
   },
   "nativeServerConfigLabel": {
-    "message": "Native Server Configuration",
-    "description": "Main section header for native server settings"
+    "message": "MCP Server Configuration",
+    "description": "Main section header for MCP server settings"
   },
   "semanticEngineLabel": {
     "message": "Semantic Engine",
