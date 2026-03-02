@@ -3,7 +3,7 @@
   "description": "a chrome extension to use your own chrome as a mcp server",
   "author": "unadlib",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "wxt",
