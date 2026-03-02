@@ -44,22 +44,31 @@ pnpm --filter webpage-mcp test
 
 ## CLI Commands
 
-After build (or via `npx`):
+After build:
 
 ```bash
+cd app/native-server
+
 # Register Native Messaging host
-webpage-mcp register --detect
-webpage-mcp register --browser chrome
-webpage-mcp register --browser chromium
+node dist/cli.js register --detect
+node dist/cli.js register --browser chrome
+node dist/cli.js register --browser chromium
 
 # Diagnose installation
-webpage-mcp doctor
+node dist/cli.js doctor
 
 # Export diagnostic report
-webpage-mcp report
+node dist/cli.js report
 
 # Fix file execution permissions
-webpage-mcp fix-permissions
+node dist/cli.js fix-permissions
+```
+
+Published npm package usage:
+
+```bash
+npx -y webpage-mcp@latest register --browser chrome
+npx -y webpage-mcp@latest doctor
 ```
 
 Registration note:
@@ -76,13 +85,12 @@ Registration note:
 
 ## Optional Auth Token
 
-Set `WEBPAGE_MCP_AUTH_TOKEN` to require auth for internal protected routes used by native RPC.
+Set `WEBPAGE_MCP_AUTH_TOKEN` if you want the native host to expose a token to the extension via `auth_get_token` (for display/copy and downstream use).
 
-- Allowed token formats:
-  - `Authorization: Bearer <token>`
-  - `x-webpage-mcp-token: <token>`
+Current behavior:
 
-If `WEBPAGE_MCP_AUTH_TOKEN` is unset, auth is not enforced.
+- The token can be read by the extension through native messaging.
+- It is not currently used as an enforced auth check in the native RPC dispatcher path.
 
 ## Browser Support
 

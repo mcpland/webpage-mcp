@@ -76,6 +76,8 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **N
 npx -y webpage-mcp@latest register --browser chrome --force --extension-id <extension_id_from_popup_or_welcome>
 ```
 
+`--force` in the generated command is optional (registration is currently idempotent).
+
 3. Run one command to auto-fix common setup issues (permissions, node path, registration):
 
 ```bash
@@ -130,12 +132,11 @@ pnpm build
 #### 3. Register the Native Messaging Host
 
 ```bash
-# Register for detected browsers
-cd app/native-server
-npx webpage-mcp register --detect
+# From repo root, use the built local CLI entry
+node app/native-server/dist/cli.js register --detect
 
 # Or specify the browser explicitly
-npx webpage-mcp register --browser chrome
+node app/native-server/dist/cli.js register --browser chrome
 ```
 
 This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the browser can launch the native server process.
@@ -144,10 +145,10 @@ This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the
 
 ```bash
 # Diagnose installation issues
-npx webpage-mcp doctor
+node app/native-server/dist/cli.js doctor
 
 # Generate a full diagnostic report
-npx webpage-mcp report
+node app/native-server/dist/cli.js report
 ```
 
 Open Chrome and click the extension icon - it should show a connected status.
@@ -315,7 +316,7 @@ The `webpage-mcp` CLI provides the following commands:
 npx -y webpage-mcp@latest register [options]
 
 Options:
-  -f, --force              Force overwrite existing registration
+  -f, --force              Compatibility flag (accepted; registration is currently idempotent)
   -s, --system             System-level install (requires sudo/admin)
   -b, --browser <browser>  Target browser: chrome, chromium, or all
   -d, --detect             Auto-detect installed browsers
@@ -328,10 +329,11 @@ The installer also attempts to discover local unpacked Webpage MCP extension IDs
 For unpacked extensions with a custom ID, you can re-register with:
 
 ```bash
-npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
+npx -y webpage-mcp@latest register --browser chrome --extension-id <your_extension_id>
 ```
 
 The extension popup and welcome page can generate this command automatically using `chrome.runtime.id`, which avoids manual ID lookup mistakes.
+The generated command may include `--force`; this flag is optional.
 
 ## Tech Stack
 

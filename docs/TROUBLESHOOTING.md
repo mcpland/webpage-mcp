@@ -19,18 +19,19 @@ npx -y webpage-mcp@latest doctor
 2. Re-register native host if needed:
 
 ```bash
-npx -y webpage-mcp@latest register --force --detect
+npx -y webpage-mcp@latest register --detect
 ```
 
 For Chrome channel mismatches (Stable/Beta/Canary/Chrome for Testing), prefer:
 
 ```bash
-npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
+npx -y webpage-mcp@latest register --browser chrome --extension-id <your_extension_id>
 ```
 
 Best practice:
 
 - Prefer copying this command directly from extension popup/welcome, because it already includes the current `chrome.runtime.id`.
+- The generated command may include `--force`; this flag is optional (registration is currently idempotent).
 
 Then fully restart Chrome (quit all Chrome processes) before retrying.
 
@@ -65,7 +66,7 @@ npx -y webpage-mcp@latest doctor --fix
 4. Re-register host:
 
 ```bash
-npx -y webpage-mcp@latest register --force --detect
+npx -y webpage-mcp@latest register --detect
 ```
 
 If you use unpacked extension, use the popup/welcome generated command with explicit `--extension-id`.
@@ -116,7 +117,7 @@ npx -y webpage-mcp@latest doctor
 5. Upgrade to latest `webpage-mcp`, then run:
 
 ```bash
-npx -y webpage-mcp@latest register --force --detect
+npx -y webpage-mcp@latest register --detect
 ```
 
 6. Fully restart Chrome and retry.
@@ -139,7 +140,7 @@ Fix:
 2. Re-register manifest with explicit extension ID (this also writes Chrome channel-compatible manifest paths):
 
 ```bash
-npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
+npx -y webpage-mcp@latest register --browser chrome --extension-id <your_extension_id>
 ```
 
 Note: `register` also tries to auto-discover local unpacked Webpage MCP extension IDs, but explicit `--extension-id` remains the most reliable fix.
@@ -195,7 +196,7 @@ npx -y webpage-mcp@latest fix-permissions
 3. Re-register host after permission changes:
 
 ```bash
-npx -y webpage-mcp@latest register --force --detect
+npx -y webpage-mcp@latest register --detect
 ```
 
 ## Diagnostic Report
