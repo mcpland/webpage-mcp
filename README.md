@@ -25,13 +25,9 @@
 ## How It Works
 
 ```
-AI Client (Claude Desktop, Cursor, etc.)
-    <-> MCP (stdio)
-Native Server (Node.js, no HTTP port)
-    <-> Chrome Native Messaging (stdin/stdout)
-Chrome Extension (service worker)
-    <-> Chrome APIs / DevTools Protocol
-Your Browser
+┌──────────┐  stdio   ┌───────────────┐  Native Messaging  ┌─────────────────┐  Chrome APIs  ┌─────────────┐
+│ AI Client├─────────►│ Native Server ├───────────────────►│ Chrome Extension├──────────────►│ Your Browser│
+└──────────┘   MCP    └───────────────┘    stdin/stdout    └─────────────────┘   DevTools    └─────────────┘
 ```
 
 The **Chrome extension** exposes real browser capabilities as MCP tools. The **Native Server** bridges AI clients and the extension using Chrome [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging). MCP clients connect over stdio only (no localhost HTTP transport).
