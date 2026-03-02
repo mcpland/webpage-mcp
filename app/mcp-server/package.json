@@ -1,7 +1,7 @@
 {
   "name": "webpage-mcp",
-  "version": "0.1.0",
-  "description": "Chrome Native-Messaging host (Node)",
+  "version": "0.2.0",
+  "description": "Webpage MCP server",
   "main": "dist/index.js",
   "bin": {
     "webpage-mcp": "./dist/cli.js",
@@ -17,6 +17,19 @@
     "format": "prettier --write 'src/**/*.{js,ts,json}'",
     "register:dev": "node dist/scripts/register-dev.js",
     "postinstall": "node -e \"const fs=require('fs');const cp=require('child_process');const dist='dist/scripts/postinstall.js';if(!fs.existsSync(dist)){console.log('Skipping mcp-server postinstall in source workspace (dist not found).');process.exit(0);}const r=cp.spawnSync(process.execPath,[dist],{stdio:'inherit'});if(r.error)throw r.error;process.exit(r.status??1);\""
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "homepage": "https://github.com/mcpland/webpage-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/mcpland/webpage-mcp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mcpland/webpage-mcp.git",
+    "directory": "app/mcp-server"
   },
   "files": [
     "dist",

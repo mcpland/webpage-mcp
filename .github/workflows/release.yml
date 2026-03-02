@@ -152,6 +152,6 @@ jobs:
           pnpm --filter webpage-mcp build
 
       - name: Publish package
-        run: pnpm --filter webpage-mcp publish --access public --no-git-checks --provenance
+        run: pnpm --filter webpage-mcp publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
