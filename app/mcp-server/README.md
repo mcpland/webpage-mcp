@@ -1,5 +1,9 @@
 # webpage-mcp (MCP Server Package)
 
+[![CI](https://github.com/mcpland/webpage-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mcpland/webpage-mcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/webpage-mcp.svg)](https://www.npmjs.com/package/webpage-mcp)
+![license](https://img.shields.io/npm/l/webpage-mcp)
+
 `webpage-mcp` is the Node.js MCP server package used by the Webpage MCP project.
 
 It provides:
