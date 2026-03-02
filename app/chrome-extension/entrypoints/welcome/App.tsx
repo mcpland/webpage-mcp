@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { LINKS } from "@/common/constants";
 
 import "../sidepanel/styles/agent-chat.css";
 import "./App.css";
 
-const COMMANDS = {
+const STATIC_COMMANDS = {
   stdioCommand: "npx -y -p webpage-mcp@latest webpage-mcp-stdio",
   mcpConfig: `{
   "mcpServers": {
@@ -19,7 +19,8 @@ const COMMANDS = {
   report: "npx -y webpage-mcp@latest report --copy",
 } as const;
 
-type CommandKey = keyof typeof COMMANDS;
+type StaticCommandKey = keyof typeof STATIC_COMMANDS;
+type CommandKey = StaticCommandKey | "register";
 
 const DIAGNOSTICS = [
   { label: "Doctor", key: "doctor" },
@@ -36,10 +37,23 @@ function copyColor(copiedKey: CommandKey | null, key: CommandKey): string {
 
 export default function WelcomeApp() {
   const [copiedKey, setCopiedKey] = useState<CommandKey | null>(null);
+  const extensionId = chrome.runtime?.id || "<your_extension_id>";
+  const registerCommand = useMemo(
+    () =>
+      `npx -y webpage-mcp@latest register --browser chrome --force --extension-id ${extensionId}`,
+    [extensionId],
+  );
+  const commands = useMemo(
+    () => ({
+      ...STATIC_COMMANDS,
+      register: registerCommand,
+    }),
+    [registerCommand],
+  );
 
   const copyCommand = async (key: CommandKey): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(COMMANDS[key]);
+      await navigator.clipboard.writeText(commands[key]);
       setCopiedKey(key);
       window.setTimeout(() => {
         setCopiedKey((current) => (current === key ? null : current));
@@ -88,7 +102,7 @@ export default function WelcomeApp() {
                   Webpage MCP Server
                 </h1>
                 <p className="welcome-muted text-sm truncate">
-                  After the extension is installed, this is the only required step.
+                  Extension-aware setup commands (includes this extension ID).
                 </p>
               </div>
             </div>
@@ -107,16 +121,44 @@ export default function WelcomeApp() {
           <div className="max-w-3xl mx-auto space-y-6">
             <section className="welcome-card welcome-card--primary p-6">
               <h2 className="welcome-title text-xl font-medium">
-                MCP stdio command
+                Register Native Host (one-time)
               </h2>
               <p className="welcome-muted text-sm mt-2">
-                Use this command in your MCP client. No global install and no localhost URL are
-                required.
+                Run this command first. It writes the Native Messaging manifest with your current
+                extension ID so Chrome can launch the local host process.
               </p>
 
               <div className="mt-4 space-y-3">
                 <div className="welcome-command-row flex items-center justify-between gap-3 px-4 py-3">
-                  <code className="welcome-code text-sm break-all">{COMMANDS.stdioCommand}</code>
+                  <code className="welcome-code text-sm break-all">{commands.register}</code>
+                  <button
+                    type="button"
+                    className="welcome-mono px-2 py-1 text-xs font-medium ac-btn flex-shrink-0"
+                    style={{ color: copyColor(copiedKey, "register") }}
+                    onClick={() => void copyCommand("register")}
+                  >
+                    {copyLabel(copiedKey, "register")}
+                  </button>
+                </div>
+
+                <div className="welcome-alt-row welcome-muted px-4 py-3 text-xs">
+                  Current extension ID:{" "}
+                  <code className="welcome-code welcome-code-inline px-1 py-0.5">{extensionId}</code>
+                </div>
+              </div>
+
+              <div
+                className="mt-6 pt-5"
+                style={{ borderTop: "var(--ac-border-width) solid var(--ac-border)" }}
+              >
+                <h3 className="welcome-title text-sm font-medium">MCP stdio command</h3>
+                <p className="welcome-muted text-sm mt-1">
+                  Then use this command in your MCP client. No global install and no localhost URL
+                  are required.
+                </p>
+
+                <div className="welcome-command-row mt-3 flex items-center justify-between gap-3 px-4 py-3">
+                  <code className="welcome-code text-sm break-all">{commands.stdioCommand}</code>
                   <button
                     type="button"
                     className="welcome-mono px-2 py-1 text-xs font-medium ac-btn flex-shrink-0"
@@ -127,16 +169,6 @@ export default function WelcomeApp() {
                   </button>
                 </div>
 
-                <div className="welcome-alt-row welcome-muted px-4 py-3 text-xs">
-                  Requires Node.js 20+. Check your version with{" "}
-                  <code className="welcome-code welcome-code-inline px-1 py-0.5">node -v</code>.
-                </div>
-              </div>
-
-              <div
-                className="mt-6 pt-5"
-                style={{ borderTop: "var(--ac-border-width) solid var(--ac-border)" }}
-              >
                 <h3 className="welcome-title text-sm font-medium">MCP client config (stdio)</h3>
                 <p className="welcome-muted text-sm mt-1">
                   Use this in your MCP client. No localhost HTTP URL is required.
@@ -144,7 +176,7 @@ export default function WelcomeApp() {
 
                 <div className="welcome-command-row mt-3 flex items-center justify-between gap-3 px-4 py-3">
                   <code className="welcome-code text-sm break-all whitespace-pre-wrap">
-                    {COMMANDS.mcpConfig}
+                    {commands.mcpConfig}
                   </code>
                   <button
                     type="button"
@@ -194,7 +226,7 @@ export default function WelcomeApp() {
                           <div className="welcome-mono welcome-subtle text-[10px] uppercase tracking-widest font-medium">
                             {item.label}
                           </div>
-                          <code className="welcome-code text-xs break-all">{COMMANDS[item.key]}</code>
+                          <code className="welcome-code text-xs break-all">{commands[item.key]}</code>
                         </div>
                         <button
                           type="button"
@@ -218,7 +250,7 @@ export default function WelcomeApp() {
                   </p>
 
                   <div className="welcome-command-row mt-3 flex items-center justify-between gap-3 px-3 py-2">
-                    <code className="welcome-code text-xs break-all">{COMMANDS.report}</code>
+                    <code className="welcome-code text-xs break-all">{commands.report}</code>
                     <button
                       type="button"
                       className="welcome-mono px-2 py-1 text-xs font-medium ac-btn flex-shrink-0"

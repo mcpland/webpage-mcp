@@ -105,9 +105,11 @@ export default function PopupApp() {
     lastUpdated: Date.now(),
   });
   const [copyButtonText, setCopyButtonText] = useState(getMessage('copyConfigButton'));
+  const [copyRegisterButtonText, setCopyRegisterButtonText] = useState('Copy register command');
   const [authCopyButtonText, setAuthCopyButtonText] = useState('Copy token');
   const [authTokenEnabled, setAuthTokenEnabled] = useState(false);
   const [nativeAuthToken, setNativeAuthToken] = useState<string | null>(null);
+  const [nativeConnectionError, setNativeConnectionError] = useState<string | null>(null);
 
   const [currentModel, setCurrentModel] = useState<ModelPreset | null>(null);
   const [isModelSwitching, setIsModelSwitching] = useState(false);
@@ -140,6 +142,8 @@ export default function PopupApp() {
   const semanticEnginePollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const showMcpConfig = nativeConnectionStatus === 'connected' && serverStatus.isRunning;
+  const showRegisterCommand = !showMcpConfig;
+  const extensionId = chrome.runtime.id;
 
   const mcpConfigJson = useMemo(() => {
     const config = {
@@ -152,6 +156,10 @@ export default function PopupApp() {
     };
     return JSON.stringify(config, null, 2);
   }, []);
+
+  const registerCommand = useMemo(() => {
+    return `npx -y webpage-mcp@latest register --browser chrome --force --extension-id ${extensionId}`;
+  }, [extensionId]);
 
   const availableModels = useMemo(() => {
     return Object.entries(PREDEFINED_MODELS).map(([preset, model]) => ({
@@ -243,7 +251,11 @@ export default function PopupApp() {
   async function checkNativeConnection() {
     try {
       const response = await chrome.runtime.sendMessage({ type: 'ping_native' });
-      setNativeConnectionStatus(response?.connected ? 'connected' : 'disconnected');
+      const connected = Boolean(response?.connected);
+      setNativeConnectionStatus(connected ? 'connected' : 'disconnected');
+      if (connected) {
+        setNativeConnectionError(null);
+      }
     } catch (error) {
       console.error('Failed to detect Native connection status:', error);
       setNativeConnectionStatus('disconnected');
@@ -299,6 +311,23 @@ export default function PopupApp() {
     }, 2000);
   }
 
+  async function copyRegisterCommand() {
+    try {
+      await navigator.clipboard.writeText(registerCommand);
+      setCopyRegisterButtonText('Copied');
+    } catch (error) {
+      console.error('Failed to copy register command:', error);
+      setCopyRegisterButtonText('Copy failed');
+    }
+
+    if (copyTextTimerRef.current) {
+      clearTimeout(copyTextTimerRef.current);
+    }
+    copyTextTimerRef.current = setTimeout(() => {
+      setCopyRegisterButtonText('Copy register command');
+    }, 2000);
+  }
+
   async function refreshNativeAuthToken() {
     try {
       const response = await chrome.runtime.sendMessage({
@@ -344,6 +373,7 @@ export default function PopupApp() {
       if (nativeConnectionStatus === 'connected') {
         await chrome.runtime.sendMessage({ type: 'disconnect_native' });
         setNativeConnectionStatus('disconnected');
+        setNativeConnectionError(null);
       } else {
         const response = await chrome.runtime.sendMessage({
           type: 'connectNative',
@@ -353,14 +383,18 @@ export default function PopupApp() {
           typeof response?.connected === 'boolean' ? response.connected : Boolean(response?.success);
         if (connected) {
           setNativeConnectionStatus('connected');
+          setNativeConnectionError(null);
         } else {
           setNativeConnectionStatus('disconnected');
+          const reason = typeof response?.error === 'string' ? response.error : '';
+          setNativeConnectionError(reason || 'Native host connection failed');
           console.error('Connection failed:', response?.error || response);
         }
       }
     } catch (error) {
       console.error('Test connection failed:', error);
       setNativeConnectionStatus('disconnected');
+      setNativeConnectionError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsConnecting(false);
     }
@@ -974,6 +1008,29 @@ export default function PopupApp() {
                     </div>
                   ) : null}
                 </div>
+
+                {showRegisterCommand ? (
+                  <div className="mcp-config-section">
+                    <div className="mcp-config-header">
+                      <p className="mcp-config-label">One-time host registration (current extension ID)</p>
+                      <button
+                        className="copy-config-button"
+                        type="button"
+                        onClick={() => void copyRegisterCommand()}
+                      >
+                        {copyRegisterButtonText}
+                      </button>
+                    </div>
+                    <div className="mcp-config-content">
+                      <pre className="mcp-config-json">{registerCommand}</pre>
+                    </div>
+                    {nativeConnectionError ? (
+                      <p className="register-command-error">
+                        Connect failed: {nativeConnectionError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {showMcpConfig ? (
                   <div className="mcp-config-section">

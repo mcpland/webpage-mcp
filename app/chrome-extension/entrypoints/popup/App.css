@@ -492,6 +492,13 @@
   overflow-x: auto;
 }
 
+.register-command-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #b91c1c;
+}
+
 .port-section {
   display: flex;
   flex-direction: column;
