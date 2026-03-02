@@ -38,64 +38,64 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **N
 
 ## Core Features
 
-| | Feature | Description |
-|---|---|---|
-| :grinning: | **Chatbot/Model Agnostic** | Let any LLM, chatbot client, or agent automate your browser |
-| :star: | **Use Your Original Browser** | Seamlessly integrate with your existing browser environment (configs, login states, etc.) |
-| :computer: | **Fully Local** | Pure local MCP server ensuring user privacy |
-| :electric_plug: | **Native Stdio Transport** | Native Messaging + stdio only (no localhost HTTP port) |
-| :racing_car: | **Cross-Tab** | Cross-tab context support |
-| :brain: | **Semantic Search** | Built-in vector database for intelligent browser tab content discovery |
-| :mag: | **Smart Content Analysis** | AI-powered text extraction and similarity matching |
-| :globe_with_meridians: | **20+ Tools** | Screenshots, network monitoring, interactive operations, bookmark management, browsing history, and more |
-| :rocket: | **SIMD-Accelerated AI** | Custom WebAssembly SIMD optimization for 4-8x faster vector operations |
+|                        | Feature                       | Description                                                                                              |
+| ---------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| :grinning:             | **Chatbot/Model Agnostic**    | Let any LLM, chatbot client, or agent automate your browser                                              |
+| :star:                 | **Use Your Original Browser** | Seamlessly integrate with your existing browser environment (configs, login states, etc.)                |
+| :computer:             | **Fully Local**               | Pure local MCP server ensuring user privacy                                                              |
+| :electric_plug:        | **Native Stdio Transport**    | Native Messaging + stdio only (no localhost HTTP port)                                                   |
+| :racing_car:           | **Cross-Tab**                 | Cross-tab context support                                                                                |
+| :brain:                | **Semantic Search**           | Built-in vector database for intelligent browser tab content discovery                                   |
+| :mag:                  | **Smart Content Analysis**    | AI-powered text extraction and similarity matching                                                       |
+| :globe_with_meridians: | **20+ Tools**                 | Screenshots, network monitoring, interactive operations, bookmark management, browsing history, and more |
+| :rocket:               | **SIMD-Accelerated AI**       | Custom WebAssembly SIMD optimization for 4-8x faster vector operations                                   |
 
 ## Comparison with Similar Projects
 
-| Dimension | Playwright-based MCP Server | Chrome Extension-based MCP Server |
-| --- | --- | --- |
-| **First-time Setup** | :white_check_mark: Usually simpler: install & run | :warning: Requires one-time Native Messaging host registration |
-| **Resource Usage** | :x: Launches a separate automation browser | :white_check_mark: Reuses the user's already-open Chrome |
-| **User Session Reuse** | :x: Often requires separate login/state management | :white_check_mark: Reuses existing profile session/cookies |
-| **Real-user Environment** | :warning: Automation-oriented environment | :white_check_mark: Real user profile, settings, extensions, tabs |
-| **API Access Surface** | :warning: Constrained by Playwright API boundaries | :white_check_mark: Chrome extension platform + native APIs |
-| **CI / Headless Fit** | :white_check_mark: Strong fit for CI and headless workflows | :warning: Better suited for local interactive workflows |
-| **Determinism** | :white_check_mark: Stronger reproducibility in controlled runs | :warning: Affected by live user environment/state |
-| **Startup Latency** | :x: Needs browser automation bootstrap | :white_check_mark: Mainly extension/native bridge activation |
-| **Request Overhead** | :warning: Extra orchestration adds overhead | :white_check_mark: Lower overhead in long-lived local sessions |
-| **Post-setup Reliability** | :warning: More moving parts can increase failure surface | :white_check_mark: One-time registration; stable across restarts |
+| Dimension                  | Playwright-based MCP Server                                    | Chrome Extension-based MCP Server                                |
+| -------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **First-time Setup**       | :white_check_mark: Usually simpler: install & run              | :warning: Requires one-time Native Messaging host registration   |
+| **Resource Usage**         | :x: Launches a separate automation browser                     | :white_check_mark: Reuses the user's already-open Chrome         |
+| **User Session Reuse**     | :x: Often requires separate login/state management             | :white_check_mark: Reuses existing profile session/cookies       |
+| **Real-user Environment**  | :warning: Automation-oriented environment                      | :white_check_mark: Real user profile, settings, extensions, tabs |
+| **API Access Surface**     | :warning: Constrained by Playwright API boundaries             | :white_check_mark: Chrome extension platform + native APIs       |
+| **CI / Headless Fit**      | :white_check_mark: Strong fit for CI and headless workflows    | :warning: Better suited for local interactive workflows          |
+| **Determinism**            | :white_check_mark: Stronger reproducibility in controlled runs | :warning: Affected by live user environment/state                |
+| **Startup Latency**        | :x: Needs browser automation bootstrap                         | :white_check_mark: Mainly extension/native bridge activation     |
+| **Request Overhead**       | :warning: Extra orchestration adds overhead                    | :white_check_mark: Lower overhead in long-lived local sessions   |
+| **Post-setup Reliability** | :warning: More moving parts can increase failure surface       | :white_check_mark: One-time registration; stable across restarts |
 
 ## MCP Browser Tools
 
-| Tool | Description |
-| --- | --- |
-| `get_windows_and_tabs` | Get all open browser windows and tabs |
-| `chrome_navigate` | Navigate to a URL, refresh, or navigate history (back/forward) |
-| `chrome_screenshot` | Take a screenshot of the page or a specific element |
-| `chrome_read_page` | Get an accessibility tree of visible elements on the page |
-| `chrome_computer` | Mouse and keyboard interaction with the browser (computer use) |
-| `chrome_click_element` | Click elements via CSS selector, XPath, element ref, or coordinates |
-| `chrome_fill_or_select` | Fill or select form elements (input, textarea, select, checkbox, radio) |
-| `chrome_keyboard` | Simulate keyboard input (keys, combinations, or text) |
-| `chrome_javascript` | Execute JavaScript code in a browser tab |
-| `chrome_get_web_content` | Fetch and parse web page content |
-| `chrome_network_request` | Send network requests from the browser context (with cookies) |
-| `chrome_network_capture` | Capture network requests (start/stop, optional response bodies via CDP) |
-| `chrome_console` | Capture console output (snapshot or persistent buffer mode) |
-| `chrome_history` | Search and retrieve browsing history |
-| `chrome_bookmark_search` | Search bookmarks by title and URL |
-| `chrome_bookmark_add` | Add a new bookmark |
-| `chrome_bookmark_delete` | Delete a bookmark |
-| `chrome_switch_tab` | Switch to a specific tab |
-| `chrome_close_tabs` | Close one or more tabs |
-| `chrome_upload_file` | Upload files to web forms via CDP |
-| `chrome_handle_dialog` | Handle JavaScript dialogs (alert/confirm/prompt) |
-| `chrome_handle_download` | Wait for and retrieve download details |
-| `chrome_request_element_selection` | Let the user manually select elements on the page |
-| `chrome_gif_recorder` | Record browser activity as an animated GIF |
-| `performance_start_trace` | Start a performance trace recording |
-| `performance_stop_trace` | Stop the active performance trace |
-| `performance_analyze_insight` | Get a lightweight summary of the last recorded trace |
+| Tool                               | Description                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| `get_windows_and_tabs`             | Get all open browser windows and tabs                                   |
+| `chrome_navigate`                  | Navigate to a URL, refresh, or navigate history (back/forward)          |
+| `chrome_screenshot`                | Take a screenshot of the page or a specific element                     |
+| `chrome_read_page`                 | Get an accessibility tree of visible elements on the page               |
+| `chrome_computer`                  | Mouse and keyboard interaction with the browser (computer use)          |
+| `chrome_click_element`             | Click elements via CSS selector, XPath, element ref, or coordinates     |
+| `chrome_fill_or_select`            | Fill or select form elements (input, textarea, select, checkbox, radio) |
+| `chrome_keyboard`                  | Simulate keyboard input (keys, combinations, or text)                   |
+| `chrome_javascript`                | Execute JavaScript code in a browser tab                                |
+| `chrome_get_web_content`           | Fetch and parse web page content                                        |
+| `chrome_network_request`           | Send network requests from the browser context (with cookies)           |
+| `chrome_network_capture`           | Capture network requests (start/stop, optional response bodies via CDP) |
+| `chrome_console`                   | Capture console output (snapshot or persistent buffer mode)             |
+| `chrome_history`                   | Search and retrieve browsing history                                    |
+| `chrome_bookmark_search`           | Search bookmarks by title and URL                                       |
+| `chrome_bookmark_add`              | Add a new bookmark                                                      |
+| `chrome_bookmark_delete`           | Delete a bookmark                                                       |
+| `chrome_switch_tab`                | Switch to a specific tab                                                |
+| `chrome_close_tabs`                | Close one or more tabs                                                  |
+| `chrome_upload_file`               | Upload files to web forms via CDP                                       |
+| `chrome_handle_dialog`             | Handle JavaScript dialogs (alert/confirm/prompt)                        |
+| `chrome_handle_download`           | Wait for and retrieve download details                                  |
+| `chrome_request_element_selection` | Let the user manually select elements on the page                       |
+| `chrome_gif_recorder`              | Record browser activity as an animated GIF                              |
+| `performance_start_trace`          | Start a performance trace recording                                     |
+| `performance_stop_trace`           | Stop the active performance trace                                       |
+| `performance_analyze_insight`      | Get a lightweight summary of the last recorded trace                    |
 
 ## Additional Capabilities
 
@@ -153,6 +153,7 @@ npx -y webpage-mcp@latest doctor --fix
 <summary><strong>When do I need to re-register?</strong></summary>
 
 Registration is typically one-time per machine/profile. You do **not** need to re-run it for normal restarts (OS/Chrome/MCP client). Re-run only when:
+
 - Extension ID changes
 - Manifest path changes
 - Installation path changes
@@ -273,34 +274,6 @@ Important:
 
 ---
 
-## Project Structure
-
-```
-webpage-mcp/
-|- app/
-|  |- chrome-extension/          # Chrome extension (WXT + React)
-|  |  |- entrypoints/
-|  |  |  |- background/          # Service worker (native host, tools, engines)
-|  |  |  |- popup/               # Extension popup UI
-|  |  |  |- sidepanel/           # AI agent chat sidepanel
-|  |  |  |- options/             # Options page
-|  |  |  |- offscreen/           # GIF encoding, keepalive
-|  |  |  |- web-editor-v2/       # Visual DOM editor
-|  |  |  '- shared/              # Shared composables and utilities
-|  |  '- common/                 # Shared types and constants
-|  '- native-server/             # Node.js native messaging host + MCP server
-|     '- src/
-|        |- mcp/                 # MCP server (stdio + native IPC bridge)
-|        |- server/              # Internal route/runtime layer (no external HTTP listener)
-|        |- cli.ts               # CLI commands (register, doctor, report)
-|        '- native-messaging-host.ts  # Chrome native messaging bridge
-|- packages/
-|  |- shared/                    # Shared library (tool schemas, types, constants)
-|  '- wasm-simd/                 # Rust/WASM SIMD cosine similarity
-```
-
----
-
 ## Development
 
 ### Quick Start
@@ -355,12 +328,12 @@ pnpm typecheck     # TypeScript type checking
 
 ## CLI Reference
 
-| Command | Description |
-| --- | --- |
-| `register` | Register the Native Messaging host manifest |
+| Command           | Description                                     |
+| ----------------- | ----------------------------------------------- |
+| `register`        | Register the Native Messaging host manifest     |
 | `fix-permissions` | Fix execution permissions for native host files |
-| `doctor` | Diagnose installation and environment issues |
-| `report` | Export a diagnostic report for troubleshooting |
+| `doctor`          | Diagnose installation and environment issues    |
+| `report`          | Export a diagnostic report for troubleshooting  |
 
 ### Register Options
 
@@ -394,20 +367,20 @@ The extension popup and welcome page can generate this command automatically usi
 
 ## Tech Stack
 
-| Layer | Technology |
-| --- | --- |
-| Extension framework | [WXT](https://wxt.dev/) (Vite-based) |
-| Extension UI | React 18 + TailwindCSS v4 |
-| Flow builder | @xyflow/react (ReactFlow) |
-| Native server | Node.js Native Messaging + local IPC |
-| MCP SDK | @modelcontextprotocol/sdk |
-| Agent SDK | @anthropic-ai/claude-agent-sdk |
-| Database | SQLite (better-sqlite3 + drizzle-orm) |
-| Semantic search | @xenova/transformers (ONNX) + hnswlib-wasm |
-| SIMD math | Rust/WASM (wasm-bindgen + wide) |
-| GIF recording | gifenc |
-| Testing | Vitest (extension), Jest (native server) |
-| Package manager | pnpm workspaces |
+| Layer               | Technology                                 |
+| ------------------- | ------------------------------------------ |
+| Extension framework | [WXT](https://wxt.dev/) (Vite-based)       |
+| Extension UI        | React 18 + TailwindCSS v4                  |
+| Flow builder        | @xyflow/react (ReactFlow)                  |
+| Native server       | Node.js Native Messaging + local IPC       |
+| MCP SDK             | @modelcontextprotocol/sdk                  |
+| Agent SDK           | @anthropic-ai/claude-agent-sdk             |
+| Database            | SQLite (better-sqlite3 + drizzle-orm)      |
+| Semantic search     | @xenova/transformers (ONNX) + hnswlib-wasm |
+| SIMD math           | Rust/WASM (wasm-bindgen + wide)            |
+| GIF recording       | gifenc                                     |
+| Testing             | Vitest (extension), Jest (native server)   |
+| Package manager     | pnpm workspaces                            |
 
 ---
 
@@ -459,10 +432,12 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 <summary><strong>GitHub Actions workflows</strong></summary>
 
 **`ci.yml`**
+
 - Trigger: pushes and pull requests on `main`/`develop`
 - Runs: install, lint, typecheck (native/shared + extension), tests, build
 
 **`release.yml`**
+
 - Trigger: tag push `v*` and manual dispatch
 - Builds release assets:
   - Chrome extension zip (`app/chrome-extension/.output/*.zip`)
