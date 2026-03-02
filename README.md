@@ -1,5 +1,11 @@
 # Webpage MCP
 
+[![CI](https://github.com/mcpland/webpage-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mcpland/webpage-mcp/actions/workflows/ci.yml)
+![npm](https://img.shields.io/npm/v/webpage-mcp.svg)
+![license](https://img.shields.io/npm/l/webpage-mcp)
+[![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-green.svg)](https://developer.chrome.com/docs/extensions/)
+[![Release](https://img.shields.io/github/v/release/mcpland/webpage-mcp.svg)](https://img.shields.io/github/v/release/mcpland/webpage-mcp.svg)
+
 Turn your Chrome browser into a fully-featured [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server. Let AI assistants like Claude, Cursor, Windsurf, and other MCP-compatible clients control your browser - navigate pages, take screenshots, click elements, read content, capture network traffic, run JavaScript, and much more.
 
 ## How It Works
@@ -20,35 +26,35 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **N
 
 ### MCP Browser Tools
 
-| Tool | Description |
-|---|---|
-| `get_windows_and_tabs` | Get all open browser windows and tabs |
-| `chrome_navigate` | Navigate to a URL, refresh, or navigate history (back/forward) |
-| `chrome_screenshot` | Take a screenshot of the page or a specific element |
-| `chrome_read_page` | Get an accessibility tree of visible elements on the page |
-| `chrome_computer` | Mouse and keyboard interaction with the browser (computer use) |
-| `chrome_click_element` | Click elements via CSS selector, XPath, element ref, or coordinates |
-| `chrome_fill_or_select` | Fill or select form elements (input, textarea, select, checkbox, radio) |
-| `chrome_keyboard` | Simulate keyboard input (keys, combinations, or text) |
-| `chrome_javascript` | Execute JavaScript code in a browser tab |
-| `chrome_get_web_content` | Fetch and parse web page content |
-| `chrome_network_request` | Send network requests from the browser context (with cookies) |
-| `chrome_network_capture` | Capture network requests (start/stop, optional response bodies via CDP) |
-| `chrome_console` | Capture console output (snapshot or persistent buffer mode) |
-| `chrome_history` | Search and retrieve browsing history |
-| `chrome_bookmark_search` | Search bookmarks by title and URL |
-| `chrome_bookmark_add` | Add a new bookmark |
-| `chrome_bookmark_delete` | Delete a bookmark |
-| `chrome_switch_tab` | Switch to a specific tab |
-| `chrome_close_tabs` | Close one or more tabs |
-| `chrome_upload_file` | Upload files to web forms via CDP |
-| `chrome_handle_dialog` | Handle JavaScript dialogs (alert/confirm/prompt) |
-| `chrome_handle_download` | Wait for and retrieve download details |
-| `chrome_request_element_selection` | Let the user manually select elements on the page |
-| `chrome_gif_recorder` | Record browser activity as an animated GIF |
-| `performance_start_trace` | Start a performance trace recording |
-| `performance_stop_trace` | Stop the active performance trace |
-| `performance_analyze_insight` | Get a lightweight summary of the last recorded trace |
+| Tool                               | Description                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| `get_windows_and_tabs`             | Get all open browser windows and tabs                                   |
+| `chrome_navigate`                  | Navigate to a URL, refresh, or navigate history (back/forward)          |
+| `chrome_screenshot`                | Take a screenshot of the page or a specific element                     |
+| `chrome_read_page`                 | Get an accessibility tree of visible elements on the page               |
+| `chrome_computer`                  | Mouse and keyboard interaction with the browser (computer use)          |
+| `chrome_click_element`             | Click elements via CSS selector, XPath, element ref, or coordinates     |
+| `chrome_fill_or_select`            | Fill or select form elements (input, textarea, select, checkbox, radio) |
+| `chrome_keyboard`                  | Simulate keyboard input (keys, combinations, or text)                   |
+| `chrome_javascript`                | Execute JavaScript code in a browser tab                                |
+| `chrome_get_web_content`           | Fetch and parse web page content                                        |
+| `chrome_network_request`           | Send network requests from the browser context (with cookies)           |
+| `chrome_network_capture`           | Capture network requests (start/stop, optional response bodies via CDP) |
+| `chrome_console`                   | Capture console output (snapshot or persistent buffer mode)             |
+| `chrome_history`                   | Search and retrieve browsing history                                    |
+| `chrome_bookmark_search`           | Search bookmarks by title and URL                                       |
+| `chrome_bookmark_add`              | Add a new bookmark                                                      |
+| `chrome_bookmark_delete`           | Delete a bookmark                                                       |
+| `chrome_switch_tab`                | Switch to a specific tab                                                |
+| `chrome_close_tabs`                | Close one or more tabs                                                  |
+| `chrome_upload_file`               | Upload files to web forms via CDP                                       |
+| `chrome_handle_dialog`             | Handle JavaScript dialogs (alert/confirm/prompt)                        |
+| `chrome_handle_download`           | Wait for and retrieve download details                                  |
+| `chrome_request_element_selection` | Let the user manually select elements on the page                       |
+| `chrome_gif_recorder`              | Record browser activity as an animated GIF                              |
+| `performance_start_trace`          | Start a performance trace recording                                     |
+| `performance_stop_trace`           | Stop the active performance trace                                       |
+| `performance_analyze_insight`      | Get a lightweight summary of the last recorded trace                    |
 
 ### Additional Capabilities
 
@@ -185,7 +191,9 @@ For local development, you can point MCP directly to the built stdio entry:
   "mcpServers": {
     "webpage-mcp-local": {
       "command": "node",
-      "args": ["/Users/your-user/path/to/webpage-mcp/app/native-server/dist/mcp/mcp-server-stdio.js"]
+      "args": [
+        "/Users/your-user/path/to/webpage-mcp/app/native-server/dist/mcp/mcp-server-stdio.js"
+      ]
     }
   }
 }
@@ -303,12 +311,12 @@ This repository uses GitHub Actions workflows in `.github/workflows/`:
 
 The `webpage-mcp` CLI provides the following commands:
 
-| Command | Description |
-|---|---|
-| `register` | Register the Native Messaging host manifest |
+| Command           | Description                                     |
+| ----------------- | ----------------------------------------------- |
+| `register`        | Register the Native Messaging host manifest     |
 | `fix-permissions` | Fix execution permissions for native host files |
-| `doctor` | Diagnose installation and environment issues |
-| `report` | Export a diagnostic report for troubleshooting |
+| `doctor`          | Diagnose installation and environment issues    |
+| `report`          | Export a diagnostic report for troubleshooting  |
 
 ### Register Options
 
@@ -337,20 +345,20 @@ The generated command may include `--force`; this flag is optional.
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Extension framework | [WXT](https://wxt.dev/) (Vite-based) |
-| Extension UI | React 18 + TailwindCSS v4 |
-| Flow builder | @xyflow/react (ReactFlow) |
-| Native server | Node.js Native Messaging + local IPC |
-| MCP SDK | @modelcontextprotocol/sdk |
-| Agent SDK | @anthropic-ai/claude-agent-sdk |
-| Database | SQLite (better-sqlite3 + drizzle-orm) |
-| Semantic search | @xenova/transformers (ONNX) + hnswlib-wasm |
-| SIMD math | Rust/WASM (wasm-bindgen + wide) |
-| GIF recording | gifenc |
-| Testing | Vitest (extension), Jest (native server) |
-| Package manager | pnpm workspaces |
+| Layer               | Technology                                 |
+| ------------------- | ------------------------------------------ |
+| Extension framework | [WXT](https://wxt.dev/) (Vite-based)       |
+| Extension UI        | React 18 + TailwindCSS v4                  |
+| Flow builder        | @xyflow/react (ReactFlow)                  |
+| Native server       | Node.js Native Messaging + local IPC       |
+| MCP SDK             | @modelcontextprotocol/sdk                  |
+| Agent SDK           | @anthropic-ai/claude-agent-sdk             |
+| Database            | SQLite (better-sqlite3 + drizzle-orm)      |
+| Semantic search     | @xenova/transformers (ONNX) + hnswlib-wasm |
+| SIMD math           | Rust/WASM (wasm-bindgen + wide)            |
+| GIF recording       | gifenc                                     |
+| Testing             | Vitest (extension), Jest (native server)   |
+| Package manager     | pnpm workspaces                            |
 
 ## Troubleshooting
 
