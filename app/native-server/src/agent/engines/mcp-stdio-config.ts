@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 
 export interface WebpageMcpStdioConfig {
   command: string;
@@ -32,9 +33,13 @@ export function resolveWebpageMcpStdioConfig(): WebpageMcpStdioConfig {
     };
   }
 
-  // Default to running the bundled stdio entry through the current Node executable.
-  // __dirname resolves to dist/agent/engines in packaged builds.
-  const stdioScriptPath = path.resolve(__dirname, '../../mcp/mcp-server-stdio.js');
+  // Locate stdio entry across bundled and non-bundled build layouts.
+  const candidates = [
+    path.resolve(__dirname, '../../mcp/mcp-server-stdio.js'),
+    path.resolve(__dirname, '../mcp/mcp-server-stdio.js'),
+    path.resolve(__dirname, './mcp/mcp-server-stdio.js'),
+  ];
+  const stdioScriptPath = candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
   return {
     command: process.execPath,
     args: [stdioScriptPath],
