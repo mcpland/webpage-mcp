@@ -2,6 +2,7 @@
 
 import { readdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 import pkg from "../package.json" with { type: "json" };
 
