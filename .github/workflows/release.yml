@@ -71,7 +71,14 @@ jobs:
       - name: Collect extension artifacts
         run: |
           mkdir -p artifacts/extension
-          cp app/chrome-extension/.output/*.zip artifacts/extension/
+          EXT_VERSION=$(node -p "require('./app/chrome-extension/package.json').version")
+          EXT_ZIP="app/chrome-extension/.output/webpage-mcp-connector-${EXT_VERSION}-chrome-extension.zip"
+          if [ ! -f "$EXT_ZIP" ]; then
+            echo "Expected extension zip not found: $EXT_ZIP"
+            ls -la app/chrome-extension/.output || true
+            exit 1
+          fi
+          cp "$EXT_ZIP" artifacts/extension/
 
       - name: Generate checksums
         run: |

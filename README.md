@@ -448,7 +448,7 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 
 - Trigger: tag push `v*` and manual dispatch
 - Builds release assets:
-  - Chrome extension zip (`app/chrome-extension/.output/*.zip`)
+  - Chrome extension zip (`app/chrome-extension/.output/webpage-mcp-connector-<version>-chrome-extension.zip`)
   - MCP server npm tarball (`.tgz`)
   - `SHA256SUMS.txt`
 - On tag pushes, creates a GitHub Release and uploads assets
