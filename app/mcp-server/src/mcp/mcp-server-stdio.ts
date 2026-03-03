@@ -14,6 +14,7 @@ import {
 import { TOOL_SCHEMAS } from 'webpage-mcp-shared';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { getLegacyNativeSocketPath, getNativeSocketPath } from '../ipc/socket-path';
+import { autoBootstrapNativeMessagingForStdio } from '../scripts/utils';
 
 function parsePositiveInt(input: string | undefined, fallback: number): number {
   if (!input) {
@@ -413,6 +414,14 @@ function installProcessLifecycleHooks(): void {
 
 async function main(): Promise<void> {
   installProcessLifecycleHooks();
+
+  try {
+    await autoBootstrapNativeMessagingForStdio({
+      output: 'stderr',
+    });
+  } catch (error) {
+    console.warn('[webpage-mcp-stdio] Automatic native registration bootstrap failed:', error);
+  }
 
   const transport = new StdioServerTransport();
   await getStdioMcpServer().connect(transport);

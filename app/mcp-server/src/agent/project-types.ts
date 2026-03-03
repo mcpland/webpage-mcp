@@ -14,7 +14,7 @@ export interface CreateOrUpdateProjectInput {
   preferredCli?: AgentCliPreference;
   selectedModel?: string;
   /**
-   * Whether to enable the local Webpage MCP server integration for this project.
+   * Whether to enable the local Webpage MCP Connector integration for this project.
    * Defaults to true when omitted.
    */
   enableWebpageMcp?: boolean;

@@ -14,7 +14,7 @@ It provides:
 This package uses:
 
 - MCP Client <-> MCP Server: `stdio`
-- Chrome Extension <-> MCP Server: Chrome Native Messaging
+- Webpage MCP Connector (Chrome extension) <-> MCP Server: Chrome Native Messaging
 - Internal bridge: local IPC socket / pipe
 
 No localhost HTTP server or port is required.
@@ -22,26 +22,12 @@ No localhost HTTP server or port is required.
 ## Requirements
 
 - Node.js `>= 20`
-- Chrome/Chromium with Webpage MCP extension installed
+- Chrome/Chromium with the Webpage MCP Connector extension installed
 
 ## Quick Start (npm users)
 
-1. Install the Webpage MCP Chrome extension (release zip or unpacked build).
-2. Register Native Messaging host once:
-
-```bash
-npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
-```
-
-Recommended: copy this command from extension popup/welcome page, because it already contains the current extension ID.
-
-3. Run diagnostics and auto-fix common issues:
-
-```bash
-npx -y webpage-mcp@latest doctor --fix
-```
-
-4. Configure MCP client:
+1. Install the Webpage MCP Connector Chrome extension (release zip or unpacked build).
+2. Configure MCP client:
 
 ```json
 {
@@ -54,11 +40,24 @@ npx -y webpage-mcp@latest doctor --fix
 }
 ```
 
-5. Open Chrome, make sure extension is enabled, and click `Connect` in popup if needed.
+3. Start MCP client (with Chrome open and extension enabled).
+
+`webpage-mcp-stdio` will silently bootstrap Native Messaging on startup (manifest/runtime check + user-level auto-register when needed).
+
+4. If connection still fails, run fallback recovery:
+
+```bash
+npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
+npx -y webpage-mcp@latest doctor --fix
+```
+
+Recommended: copy the register command from extension popup/welcome page, because it already includes the current extension ID.
 
 ## Is Register One-Time?
 
-Usually yes. Re-register only when one of these changes:
+Usually yes. In many cases you do not need manual register because startup bootstrap handles it.
+
+If manual register is used, re-register only when one of these changes:
 
 - extension ID
 - host install path
@@ -89,11 +88,18 @@ Build package:
 pnpm --filter webpage-mcp build
 ```
 
-Register using local build:
+Verify local build health:
 
 ```bash
-node app/mcp-server/dist/cli.js register --browser chrome --extension-id <your_extension_id>
 node app/mcp-server/dist/cli.js doctor
+```
+
+`webpage-mcp-stdio` started from local build also performs silent bootstrap. Only run manual register if connection still fails:
+
+```bash
+node app/mcp-server/dist/cli.js register --detect
+# or
+node app/mcp-server/dist/cli.js register --browser chrome --extension-id <your_extension_id>
 ```
 
 Use local stdio entry in MCP client config:

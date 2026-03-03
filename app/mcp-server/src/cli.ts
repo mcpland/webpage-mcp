@@ -6,7 +6,6 @@ import {
   colorText,
   registerWithElevatedPermissions,
   ensureExecutionPermissions,
-  writeNodePathFile,
 } from './scripts/utils';
 import { BrowserType, parseBrowserType, detectInstalledBrowsers } from './scripts/browser-config';
 import { runDoctor } from './scripts/doctor';
@@ -33,9 +32,6 @@ program
       if (typeof options.extensionId === 'string' && options.extensionId.trim()) {
         process.env.WEBPAGE_MCP_EXTENSION_ID = options.extensionId.trim();
       }
-
-      // Write Node.js path for run_host scripts
-      writeNodePathFile(__dirname);
 
       // Determine which browsers to register
       let targetBrowsers: BrowserType[] | undefined;

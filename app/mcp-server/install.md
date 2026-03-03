@@ -1,10 +1,10 @@
-# Webpage MCP Bridge Installation Guide
+# Webpage MCP Installation Guide
 
-This document details the installation and registration process for Webpage MCP Bridge.
+This document details the installation and registration process for Webpage MCP.
 
 ## Installation Overview
 
-The installation and registration process for Webpage MCP Bridge is as follows:
+The installation and registration process for Webpage MCP is as follows:
 
 ```
 npm install -g webpage-mcp
@@ -115,7 +115,7 @@ Registration Process
 ```
 manifest.json
 ├─ name: "com.webpagemcp.nativehost"
-├─ description: "Node.js Host for Browser Bridge Extension"
+├─ description: "Node.js Host for Webpage MCP Connector"
 ├─ path: "/path/to/run_host.sh"       ← Startup script path
 ├─ type: "stdio"                      ← Communication type
 └─ allowed_origins: [                 ← Allowed extensions

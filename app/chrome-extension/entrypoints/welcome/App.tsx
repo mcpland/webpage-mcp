@@ -101,7 +101,7 @@ export default function WelcomeApp() {
               </div>
               <div className="min-w-0">
                 <h1 className="welcome-title text-lg font-medium tracking-tight truncate">
-                  {t("welcomeHeaderTitle", "Webpage MCP Server")}
+                  {t("welcomeHeaderTitle", "Webpage MCP Connector")}
                 </h1>
                 <p className="welcome-muted text-sm truncate">
                   {t(
@@ -222,7 +222,7 @@ export default function WelcomeApp() {
                   <div className="welcome-muted text-xs truncate">
                     {t(
                       "welcomeTroubleshootingDesc",
-                      "Use these only if the bridge fails to register or connect.",
+                      "Use these only if the Connector fails to register or connect.",
                     )}
                   </div>
                 </div>

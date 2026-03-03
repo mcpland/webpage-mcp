@@ -1,16 +1,272 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { execSync } from 'child_process';
-import { promisify } from 'util';
-import { COMMAND_NAME, DESCRIPTION, EXTENSION_ID, HOST_NAME } from './constant';
-import { BrowserType, getBrowserConfig, detectInstalledBrowsers } from './browser-config';
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { execSync } from "child_process";
+import { promisify } from "util";
+import { COMMAND_NAME, DESCRIPTION, EXTENSION_ID, HOST_NAME } from "./constant";
+import {
+  BrowserType,
+  getBrowserConfig,
+  detectInstalledBrowsers,
+} from "./browser-config";
 
 export const access = promisify(fs.access);
 export const mkdir = promisify(fs.mkdir);
 export const writeFile = promisify(fs.writeFile);
 
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
+const RUNTIME_DIR_NAME = ".webpage-mcp";
+const RUNTIME_SUBDIR = "runtime";
+const RUNTIME_DIST_SUBDIR = "dist";
+const RUNTIME_VERSION_FILE = ".runtime-version";
+
+interface RegistrationLogOptions {
+  silent?: boolean;
+  output?: "stdout" | "stderr";
+}
+
+interface RegistrationLogger {
+  info: (message: string) => void;
+  warn: (message: string) => void;
+  error: (message: string) => void;
+}
+
+interface EnsureRuntimeOptions extends RegistrationLogOptions {
+  forceRefresh?: boolean;
+}
+
+function createRegistrationLogger(
+  options?: RegistrationLogOptions,
+): RegistrationLogger {
+  if (options?.silent) {
+    return {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+    };
+  }
+
+  const infoTarget = options?.output === "stderr" ? console.error : console.log;
+  return {
+    info: (message: string) => {
+      infoTarget(message);
+    },
+    warn: (message: string) => {
+      console.warn(message);
+    },
+    error: (message: string) => {
+      console.error(message);
+    },
+  };
+}
+
+function getWrapperScriptName(): string {
+  return process.platform === "win32" ? "run_host.bat" : "run_host.sh";
+}
+
+function normalizeComparablePath(filePath: string): string {
+  const normalized = path.normalize(filePath);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function resolvePackageVersion(): string {
+  try {
+    const pkg = require("../../package.json") as { version?: string };
+    if (pkg && typeof pkg.version === "string" && pkg.version.trim()) {
+      return pkg.version.trim();
+    }
+  } catch {
+    // ignore and fallback
+  }
+  return "0.0.0";
+}
+
+export function resolvePackageDistDir(): string {
+  const fromDistScripts = path.resolve(__dirname, "..");
+  const fromSrcScripts = path.resolve(__dirname, "..", "..", "dist");
+
+  const looksLikeDist = (dir: string): boolean => {
+    return fs.existsSync(path.join(dir, getWrapperScriptName()));
+  };
+
+  if (looksLikeDist(fromDistScripts)) return fromDistScripts;
+  if (looksLikeDist(fromSrcScripts)) return fromSrcScripts;
+  return fromDistScripts;
+}
+
+export function getStableRuntimeRootDir(): string {
+  if (process.platform === "win32") {
+    const localAppData =
+      process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    return path.join(localAppData, "webpage-mcp", RUNTIME_SUBDIR);
+  }
+  return path.join(os.homedir(), RUNTIME_DIR_NAME, RUNTIME_SUBDIR);
+}
+
+export function getStableRuntimeDistDir(): string {
+  return path.join(getStableRuntimeRootDir(), RUNTIME_DIST_SUBDIR);
+}
+
+export function getExpectedMainPath(): string {
+  return path.join(getStableRuntimeDistDir(), getWrapperScriptName());
+}
+
+interface StableRuntimeInstallResult {
+  distDir: string;
+  wrapperPath: string;
+}
+
+let stableRuntimeInstallPromise: Promise<StableRuntimeInstallResult> | null =
+  null;
+
+function readRuntimeVersionMarker(runtimeDistDir: string): string | null {
+  const markerPath = path.join(runtimeDistDir, RUNTIME_VERSION_FILE);
+  if (!fs.existsSync(markerPath)) {
+    return null;
+  }
+  try {
+    const content = fs.readFileSync(markerPath, "utf8").trim();
+    return content || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRuntimeVersionMarker(
+  runtimeDistDir: string,
+  version: string,
+): void {
+  const markerPath = path.join(runtimeDistDir, RUNTIME_VERSION_FILE);
+  fs.writeFileSync(markerPath, `${version}\n`, "utf8");
+}
+
+async function ensureExecutionPermissionsForDist(
+  distDir: string,
+): Promise<void> {
+  const logger = createRegistrationLogger();
+  await ensureExecutionPermissionsForDistWithOptions(distDir, logger);
+}
+
+async function ensureExecutionPermissionsForDistWithOptions(
+  distDir: string,
+  logger: RegistrationLogger,
+): Promise<void> {
+  if (process.platform === "win32") {
+    await ensureWindowsFilePermissions(distDir, logger);
+    return;
+  }
+
+  const filesToCheck = [
+    path.join(distDir, "index.js"),
+    path.join(distDir, "run_host.sh"),
+    path.join(distDir, "cli.js"),
+  ];
+
+  for (const filePath of filesToCheck) {
+    if (!fs.existsSync(filePath)) {
+      logger.warn(colorText(`⚠️ File not found: ${filePath}`, "yellow"));
+      continue;
+    }
+    try {
+      fs.chmodSync(filePath, "755");
+      logger.info(
+        colorText(
+          `✓ Set execution permissions for ${path.basename(filePath)}`,
+          "green",
+        ),
+      );
+    } catch (err: any) {
+      logger.warn(
+        colorText(
+          `⚠️ Unable to set execution permissions for ${path.basename(filePath)}: ${err.message}`,
+          "yellow",
+        ),
+      );
+    }
+  }
+}
+
+export async function ensureStableRuntimeHostFiles(
+  options?: EnsureRuntimeOptions,
+): Promise<StableRuntimeInstallResult> {
+  if (stableRuntimeInstallPromise) {
+    return await stableRuntimeInstallPromise;
+  }
+
+  const logger = createRegistrationLogger(options);
+
+  stableRuntimeInstallPromise = (async () => {
+    const sourceDistDir = resolvePackageDistDir();
+    const runtimeDistDir = getStableRuntimeDistDir();
+    const wrapperPath = getExpectedMainPath();
+    const packageVersion = resolvePackageVersion();
+    const sourceNormalized = normalizeComparablePath(sourceDistDir);
+    const targetNormalized = normalizeComparablePath(runtimeDistDir);
+
+    if (sourceNormalized === targetNormalized) {
+      writeNodePathFile(runtimeDistDir, process.execPath, options);
+      await ensureExecutionPermissionsForDistWithOptions(
+        runtimeDistDir,
+        logger,
+      );
+      return { distDir: runtimeDistDir, wrapperPath };
+    }
+
+    fs.mkdirSync(path.dirname(runtimeDistDir), { recursive: true });
+
+    const markerVersion = readRuntimeVersionMarker(runtimeDistDir);
+    const sourceWrapperPath = path.join(sourceDistDir, getWrapperScriptName());
+    const runtimeWrapperPath = path.join(
+      runtimeDistDir,
+      getWrapperScriptName(),
+    );
+    const sourceWrapperMtime =
+      fs.existsSync(sourceWrapperPath) &&
+      fs.statSync(sourceWrapperPath).isFile()
+        ? fs.statSync(sourceWrapperPath).mtimeMs
+        : 0;
+    const runtimeWrapperMtime =
+      fs.existsSync(runtimeWrapperPath) &&
+      fs.statSync(runtimeWrapperPath).isFile()
+        ? fs.statSync(runtimeWrapperPath).mtimeMs
+        : 0;
+    const sourceLooksNewer = sourceWrapperMtime > runtimeWrapperMtime + 1;
+    const needsRefresh =
+      Boolean(options?.forceRefresh) ||
+      !fs.existsSync(path.join(runtimeDistDir, "index.js")) ||
+      !fs.existsSync(path.join(runtimeDistDir, getWrapperScriptName())) ||
+      markerVersion !== packageVersion ||
+      sourceLooksNewer;
+
+    if (needsRefresh) {
+      fs.rmSync(runtimeDistDir, { recursive: true, force: true });
+      fs.mkdirSync(runtimeDistDir, { recursive: true });
+      fs.cpSync(sourceDistDir, runtimeDistDir, {
+        recursive: true,
+        force: true,
+        errorOnExist: false,
+        dereference: true,
+      });
+      writeRuntimeVersionMarker(runtimeDistDir, packageVersion);
+    }
+
+    writeNodePathFile(runtimeDistDir, process.execPath, options);
+    await ensureExecutionPermissionsForDistWithOptions(runtimeDistDir, logger);
+
+    if (!fs.existsSync(wrapperPath)) {
+      throw new Error(`Stable runtime wrapper not found: ${wrapperPath}`);
+    }
+
+    return { distDir: runtimeDistDir, wrapperPath };
+  })();
+
+  try {
+    return await stableRuntimeInstallPromise;
+  } catch (error) {
+    stableRuntimeInstallPromise = null;
+    throw error;
+  }
+}
 
 /**
  * Get the log directory path for wrapper scripts.
@@ -23,18 +279,19 @@ const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
 export function getLogDir(): string {
   const homedir = os.homedir();
 
-  if (os.platform() === 'darwin') {
-    return path.join(homedir, 'Library', 'Logs', 'webpage-mcp');
-  } else if (os.platform() === 'win32') {
+  if (os.platform() === "darwin") {
+    return path.join(homedir, "Library", "Logs", "webpage-mcp");
+  } else if (os.platform() === "win32") {
     return path.join(
-      process.env.LOCALAPPDATA || path.join(homedir, 'AppData', 'Local'),
-      'webpage-mcp',
-      'logs',
+      process.env.LOCALAPPDATA || path.join(homedir, "AppData", "Local"),
+      "webpage-mcp",
+      "logs",
     );
   } else {
     // Linux: XDG_STATE_HOME or ~/.local/state
-    const xdgState = process.env.XDG_STATE_HOME || path.join(homedir, '.local', 'state');
-    return path.join(xdgState, 'webpage-mcp', 'logs');
+    const xdgState =
+      process.env.XDG_STATE_HOME || path.join(homedir, ".local", "state");
+    return path.join(xdgState, "webpage-mcp", "logs");
   }
 }
 
@@ -43,11 +300,11 @@ export function getLogDir(): string {
  */
 export function colorText(text: string, color: string): string {
   const colors: Record<string, string> = {
-    red: '\x1b[31m',
-    green: '\x1b[32m',
-    yellow: '\x1b[33m',
-    blue: '\x1b[34m',
-    reset: '\x1b[0m',
+    red: "\x1b[31m",
+    green: "\x1b[32m",
+    yellow: "\x1b[33m",
+    blue: "\x1b[34m",
+    reset: "\x1b[0m",
   };
 
   return colors[color] + text + colors.reset;
@@ -67,8 +324,8 @@ function toOrigin(value: string): string | null {
     return null;
   }
 
-  if (trimmed.startsWith('chrome-extension://')) {
-    const normalized = trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+  if (trimmed.startsWith("chrome-extension://")) {
+    const normalized = trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
     return normalized;
   }
 
@@ -88,36 +345,55 @@ function splitEnvList(raw: string | undefined): string[] {
 }
 
 function detectChromeLikeProfileRoots(): string[] {
-  if (os.platform() === 'darwin') {
+  if (os.platform() === "darwin") {
     const home = os.homedir();
     return [
-      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome'),
-      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome Beta'),
-      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome Canary'),
-      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome for Testing'),
-      path.join(home, 'Library', 'Application Support', 'Chromium'),
+      path.join(home, "Library", "Application Support", "Google", "Chrome"),
+      path.join(
+        home,
+        "Library",
+        "Application Support",
+        "Google",
+        "Chrome Beta",
+      ),
+      path.join(
+        home,
+        "Library",
+        "Application Support",
+        "Google",
+        "Chrome Canary",
+      ),
+      path.join(
+        home,
+        "Library",
+        "Application Support",
+        "Google",
+        "Chrome for Testing",
+      ),
+      path.join(home, "Library", "Application Support", "Chromium"),
     ];
   }
 
-  if (os.platform() === 'linux') {
+  if (os.platform() === "linux") {
     const home = os.homedir();
     return [
-      path.join(home, '.config', 'google-chrome'),
-      path.join(home, '.config', 'google-chrome-beta'),
-      path.join(home, '.config', 'google-chrome-unstable'),
-      path.join(home, '.config', 'google-chrome-for-testing'),
-      path.join(home, '.config', 'chromium'),
+      path.join(home, ".config", "google-chrome"),
+      path.join(home, ".config", "google-chrome-beta"),
+      path.join(home, ".config", "google-chrome-unstable"),
+      path.join(home, ".config", "google-chrome-for-testing"),
+      path.join(home, ".config", "chromium"),
     ];
   }
 
-  if (os.platform() === 'win32') {
-    const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+  if (os.platform() === "win32") {
+    const local =
+      process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
     return [
-      path.join(local, 'Google', 'Chrome', 'User Data'),
-      path.join(local, 'Google', 'Chrome Beta', 'User Data'),
-      path.join(local, 'Google', 'Chrome SxS', 'User Data'),
-      path.join(local, 'Google', 'Chrome for Testing', 'User Data'),
-      path.join(local, 'Chromium', 'User Data'),
+      path.join(local, "Google", "Chrome", "User Data"),
+      path.join(local, "Google", "Chrome Beta", "User Data"),
+      path.join(local, "Google", "Chrome SxS", "User Data"),
+      path.join(local, "Google", "Chrome for Testing", "User Data"),
+      path.join(local, "Chromium", "User Data"),
     ];
   }
 
@@ -125,17 +401,20 @@ function detectChromeLikeProfileRoots(): string[] {
 }
 
 function detectLocalExtensionIds(): string[] {
-  if (process.env.WEBPAGE_MCP_DISABLE_EXTENSION_ID_DISCOVERY === '1') {
+  if (process.env.WEBPAGE_MCP_DISABLE_EXTENSION_ID_DISCOVERY === "1") {
     return [];
   }
 
-  const roots = detectChromeLikeProfileRoots().filter((rootPath) => fs.existsSync(rootPath));
+  const roots = detectChromeLikeProfileRoots().filter((rootPath) =>
+    fs.existsSync(rootPath),
+  );
   if (roots.length === 0) {
     return [];
   }
 
   const matches = new Set<string>();
-  const profileDirPattern = /^(Default|Profile \d+|Guest Profile|System Profile)$/;
+  const profileDirPattern =
+    /^(Default|Profile \d+|Guest Profile|System Profile)$/;
 
   for (const root of roots) {
     let entries: string[] = [];
@@ -150,20 +429,21 @@ function detectLocalExtensionIds(): string[] {
         continue;
       }
 
-      const preferencesPath = path.join(root, name, 'Preferences');
+      const preferencesPath = path.join(root, name, "Preferences");
       if (!fs.existsSync(preferencesPath)) {
         continue;
       }
 
       let parsed: any;
       try {
-        parsed = JSON.parse(fs.readFileSync(preferencesPath, 'utf8'));
+        parsed = JSON.parse(fs.readFileSync(preferencesPath, "utf8"));
       } catch {
         continue;
       }
 
       const settings =
-        parsed?.extensions?.settings && typeof parsed.extensions.settings === 'object'
+        parsed?.extensions?.settings &&
+        typeof parsed.extensions.settings === "object"
           ? (parsed.extensions.settings as Record<string, any>)
           : null;
       if (!settings) {
@@ -176,14 +456,16 @@ function detectLocalExtensionIds(): string[] {
           continue;
         }
 
-        const extensionPath = typeof data?.path === 'string' ? data.path.toLowerCase() : '';
-        const manifestName = typeof data?.manifest?.name === 'string' ? data.manifest.name.toLowerCase() : '';
+        const extensionPath =
+          typeof data?.path === "string" ? data.path.toLowerCase() : "";
+        const manifestName =
+          typeof data?.manifest?.name === "string"
+            ? data.manifest.name.toLowerCase()
+            : "";
         const isWebpageMcp =
-          extensionPath.includes('webpage-mcp') ||
-          extensionPath.includes('webpage_mcp') ||
-          extensionPath.includes('webpage mcp') ||
-          manifestName.includes('webpage') ||
-          manifestName.includes('mcp');
+          extensionPath.includes("webpage-mcp") ||
+          extensionPath.includes("webpage_mcp") ||
+          extensionPath.includes("webpage mcp");
 
         if (isWebpageMcp) {
           matches.add(normalizedId);
@@ -195,7 +477,9 @@ function detectLocalExtensionIds(): string[] {
   return Array.from(matches.values());
 }
 
-export function resolveAllowedOrigins(options?: { includeDetectedExtensionIds?: boolean }): string[] {
+export function resolveAllowedOrigins(options?: {
+  includeDetectedExtensionIds?: boolean;
+}): string[] {
   const origins = new Set<string>([`chrome-extension://${EXTENSION_ID}/`]);
 
   const extensionIds = [
@@ -210,7 +494,9 @@ export function resolveAllowedOrigins(options?: { includeDetectedExtensionIds?: 
     origins.add(`chrome-extension://${extensionId}/`);
   }
 
-  for (const rawOrigin of splitEnvList(process.env.WEBPAGE_MCP_ALLOWED_ORIGINS)) {
+  for (const rawOrigin of splitEnvList(
+    process.env.WEBPAGE_MCP_ALLOWED_ORIGINS,
+  )) {
     const origin = toOrigin(rawOrigin);
     if (!origin) {
       continue;
@@ -231,33 +517,33 @@ export function resolveAllowedOrigins(options?: { includeDetectedExtensionIds?: 
  * Get user-level manifest file path
  */
 export function getUserManifestPath(): string {
-  if (os.platform() === 'win32') {
+  if (os.platform() === "win32") {
     // Windows: %APPDATA%\Google\Chrome\NativeMessagingHosts\
     return path.join(
-      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-      'Google',
-      'Chrome',
-      'NativeMessagingHosts',
+      process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"),
+      "Google",
+      "Chrome",
+      "NativeMessagingHosts",
       `${HOST_NAME}.json`,
     );
-  } else if (os.platform() === 'darwin') {
+  } else if (os.platform() === "darwin") {
     // macOS: ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/
     return path.join(
       os.homedir(),
-      'Library',
-      'Application Support',
-      'Google',
-      'Chrome',
-      'NativeMessagingHosts',
+      "Library",
+      "Application Support",
+      "Google",
+      "Chrome",
+      "NativeMessagingHosts",
       `${HOST_NAME}.json`,
     );
   } else {
     // Linux: ~/.config/google-chrome/NativeMessagingHosts/
     return path.join(
       os.homedir(),
-      '.config',
-      'google-chrome',
-      'NativeMessagingHosts',
+      ".config",
+      "google-chrome",
+      "NativeMessagingHosts",
       `${HOST_NAME}.json`,
     );
   }
@@ -267,21 +553,33 @@ export function getUserManifestPath(): string {
  * Get system-level manifest file path
  */
 export function getSystemManifestPath(): string {
-  if (os.platform() === 'win32') {
+  if (os.platform() === "win32") {
     // Windows: %ProgramFiles%\Google\Chrome\NativeMessagingHosts\
     return path.join(
-      process.env.ProgramFiles || 'C:\\Program Files',
-      'Google',
-      'Chrome',
-      'NativeMessagingHosts',
+      process.env.ProgramFiles || "C:\\Program Files",
+      "Google",
+      "Chrome",
+      "NativeMessagingHosts",
       `${HOST_NAME}.json`,
     );
-  } else if (os.platform() === 'darwin') {
+  } else if (os.platform() === "darwin") {
     // macOS: /Library/Google/Chrome/NativeMessagingHosts/
-    return path.join('/Library', 'Google', 'Chrome', 'NativeMessagingHosts', `${HOST_NAME}.json`);
+    return path.join(
+      "/Library",
+      "Google",
+      "Chrome",
+      "NativeMessagingHosts",
+      `${HOST_NAME}.json`,
+    );
   } else {
     // Linux: /etc/opt/chrome/native-messaging-hosts/
-    return path.join('/etc', 'opt', 'chrome', 'native-messaging-hosts', `${HOST_NAME}.json`);
+    return path.join(
+      "/etc",
+      "opt",
+      "chrome",
+      "native-messaging-hosts",
+      `${HOST_NAME}.json`,
+    );
   }
 }
 
@@ -290,12 +588,15 @@ export function getSystemManifestPath(): string {
  */
 export async function getMainPath(): Promise<string> {
   try {
-    const packageDistDir = path.join(__dirname, '..');
-    const wrapperScriptName = process.platform === 'win32' ? 'run_host.bat' : 'run_host.sh';
-    const absoluteWrapperPath = path.resolve(packageDistDir, wrapperScriptName);
-    return absoluteWrapperPath;
+    const runtime = await ensureStableRuntimeHostFiles();
+    return runtime.wrapperPath;
   } catch (error) {
-    console.log(colorText('Cannot find global package path, using current directory', 'yellow'));
+    console.warn(
+      colorText(
+        "Cannot find global package path, using current directory",
+        "yellow",
+      ),
+    );
     throw error;
   }
 }
@@ -308,72 +609,60 @@ export async function getMainPath(): Promise<string> {
  * @param distDir - The dist directory where node_path.txt should be written
  * @param nodeExecPath - The Node.js executable path to write (defaults to current process.execPath)
  */
-export function writeNodePathFile(distDir: string, nodeExecPath = process.execPath): void {
+export function writeNodePathFile(
+  distDir: string,
+  nodeExecPath = process.execPath,
+  options?: RegistrationLogOptions,
+): void {
+  const logger = createRegistrationLogger(options);
   try {
-    const nodePathFile = path.join(distDir, 'node_path.txt');
+    const nodePathFile = path.join(distDir, "node_path.txt");
     fs.mkdirSync(distDir, { recursive: true });
 
-    console.log(colorText(`Writing Node.js path: ${nodeExecPath}`, 'blue'));
-    fs.writeFileSync(nodePathFile, nodeExecPath, 'utf8');
-    console.log(colorText('✓ Node.js path written for run_host scripts', 'green'));
+    logger.info(colorText(`Writing Node.js path: ${nodeExecPath}`, "blue"));
+    fs.writeFileSync(nodePathFile, nodeExecPath, "utf8");
+    logger.info(
+      colorText("✓ Node.js path written for run_host scripts", "green"),
+    );
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(colorText(`⚠️ Failed to write Node.js path: ${message}`, 'yellow'));
+    logger.warn(
+      colorText(`⚠️ Failed to write Node.js path: ${message}`, "yellow"),
+    );
   }
 }
 
 /**
  * Make sure critical files have execute permissions
  */
-export async function ensureExecutionPermissions(): Promise<void> {
+export async function ensureExecutionPermissions(
+  options?: RegistrationLogOptions,
+): Promise<void> {
+  const logger = createRegistrationLogger(options);
   try {
-    const packageDistDir = path.join(__dirname, '..');
-
-    if (process.platform === 'win32') {
-      // Windows Platform processing
-      await ensureWindowsFilePermissions(packageDistDir);
-      return;
-    }
-
-    // Unix/Linux Platform processing
-    const filesToCheck = [
-      path.join(packageDistDir, 'index.js'),
-      path.join(packageDistDir, 'run_host.sh'),
-      path.join(packageDistDir, 'cli.js'),
-    ];
-
-    for (const filePath of filesToCheck) {
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.chmodSync(filePath, '755');
-          console.log(
-            colorText(`✓ Set execution permissions for ${path.basename(filePath)}`, 'green'),
-          );
-        } catch (err: any) {
-          console.warn(
-            colorText(
-              `⚠️ Unable to set execution permissions for ${path.basename(filePath)}: ${err.message}`,
-              'yellow',
-            ),
-          );
-        }
-      } else {
-        console.warn(colorText(`⚠️ File not found: ${filePath}`, 'yellow'));
-      }
-    }
+    const runtime = await ensureStableRuntimeHostFiles(options);
+    await ensureExecutionPermissionsForDistWithOptions(runtime.distDir, logger);
   } catch (error: any) {
-    console.warn(colorText(`⚠️ Error ensuring execution permissions: ${error.message}`, 'yellow'));
+    logger.warn(
+      colorText(
+        `⚠️ Error ensuring execution permissions: ${error.message}`,
+        "yellow",
+      ),
+    );
   }
 }
 
 /**
  * Windows Platform file permission processing
  */
-async function ensureWindowsFilePermissions(packageDistDir: string): Promise<void> {
+async function ensureWindowsFilePermissions(
+  packageDistDir: string,
+  logger: RegistrationLogger = createRegistrationLogger(),
+): Promise<void> {
   const filesToCheck = [
-    path.join(packageDistDir, 'index.js'),
-    path.join(packageDistDir, 'run_host.bat'),
-    path.join(packageDistDir, 'cli.js'),
+    path.join(packageDistDir, "index.js"),
+    path.join(packageDistDir, "run_host.bat"),
+    path.join(packageDistDir, "cli.js"),
   ];
 
   for (const filePath of filesToCheck) {
@@ -381,30 +670,36 @@ async function ensureWindowsFilePermissions(packageDistDir: string): Promise<voi
       try {
         // Check if the file is read-only, if so remove the read-only attribute
         const stats = fs.statSync(filePath);
-        if (!(stats.mode & parseInt('200', 8))) {
+        if (!(stats.mode & parseInt("200", 8))) {
           // Check write permission
           // Try removing the read-only attribute
-          fs.chmodSync(filePath, stats.mode | parseInt('200', 8));
-          console.log(
-            colorText(`✓ Removed read-only attribute from ${path.basename(filePath)}`, 'green'),
+          fs.chmodSync(filePath, stats.mode | parseInt("200", 8));
+          logger.info(
+            colorText(
+              `✓ Removed read-only attribute from ${path.basename(filePath)}`,
+              "green",
+            ),
           );
         }
 
         // Verify file readability
         fs.accessSync(filePath, fs.constants.R_OK);
-        console.log(
-          colorText(`✓ Verified file accessibility for ${path.basename(filePath)}`, 'green'),
+        logger.info(
+          colorText(
+            `✓ Verified file accessibility for ${path.basename(filePath)}`,
+            "green",
+          ),
         );
       } catch (err: any) {
-        console.warn(
+        logger.warn(
           colorText(
             `⚠️ Unable to verify file permissions for ${path.basename(filePath)}: ${err.message}`,
-            'yellow',
+            "yellow",
           ),
         );
       }
     } else {
-      console.warn(colorText(`⚠️ File not found: ${filePath}`, 'yellow'));
+      logger.warn(colorText(`⚠️ File not found: ${filePath}`, "yellow"));
     }
   }
 }
@@ -412,15 +707,19 @@ async function ensureWindowsFilePermissions(packageDistDir: string): Promise<voi
 /**
  * Create Native Messaging host manifest content
  */
-export async function createManifestContent(): Promise<any> {
+export async function createManifestContent(options?: {
+  includeDetectedExtensionIds?: boolean;
+}): Promise<any> {
   const mainPath = await getMainPath();
-  const allowedOrigins = resolveAllowedOrigins({ includeDetectedExtensionIds: true });
+  const allowedOrigins = resolveAllowedOrigins({
+    includeDetectedExtensionIds: options?.includeDetectedExtensionIds ?? true,
+  });
 
   return {
     name: HOST_NAME,
     description: DESCRIPTION,
     path: mainPath, // Node.jsExecutable file path
-    type: 'stdio',
+    type: "stdio",
     allowed_origins: allowedOrigins,
   };
 }
@@ -428,17 +727,21 @@ export async function createManifestContent(): Promise<any> {
 /**
  * Verify that the Windows registry key exists and points to the correct path
  */
-function verifyWindowsRegistryEntry(registryKey: string, expectedPath: string): boolean {
-  if (os.platform() !== 'win32') {
+function verifyWindowsRegistryEntry(
+  registryKey: string,
+  expectedPath: string,
+): boolean {
+  if (os.platform() !== "win32") {
     return true; // Non-Windows platforms skip verification
   }
 
-  const normalizeForCompare = (filePath: string): string => path.normalize(filePath).toLowerCase();
+  const normalizeForCompare = (filePath: string): string =>
+    path.normalize(filePath).toLowerCase();
 
   try {
     const output = execSync(`reg query "${registryKey}" /ve`, {
-      encoding: 'utf8',
-      stdio: 'pipe',
+      encoding: "utf8",
+      stdio: "pipe",
     });
     const lines = output
       .split(/\r?\n/)
@@ -449,7 +752,9 @@ function verifyWindowsRegistryEntry(registryKey: string, expectedPath: string): 
       const match = line.match(/REG_SZ\s+(.*)$/i);
       if (!match?.[1]) continue;
       const actualPath = match[1].trim();
-      return normalizeForCompare(actualPath) === normalizeForCompare(expectedPath);
+      return (
+        normalizeForCompare(actualPath) === normalizeForCompare(expectedPath)
+      );
     }
   } catch {
     // ignore
@@ -469,34 +774,72 @@ function verifyWindowsRegistryEntry(registryKey: string, expectedPath: string): 
 export async function registerUserLevelHostWithNodePath(
   browsers?: BrowserType[],
 ): Promise<boolean> {
-  writeNodePathFile(path.join(__dirname, '..'));
-  return tryRegisterUserLevelHost(browsers);
+  return tryRegisterUserLevelHost(browsers, {
+    includeDetectedExtensionIds: true,
+  });
 }
 
 /**
  * Try registering a user-level Native Messaging host
  */
-export async function tryRegisterUserLevelHost(targetBrowsers?: BrowserType[]): Promise<boolean> {
+export interface TryRegisterUserLevelOptions extends RegistrationLogOptions {
+  includeDetectedExtensionIds?: boolean;
+}
+
+function resolveBrowsersForRegistration(
+  targetBrowsers?: BrowserType[],
+): BrowserType[] {
+  const candidate = (targetBrowsers || detectInstalledBrowsers()).filter(
+    Boolean,
+  );
+  const deduped = Array.from(new Set(candidate));
+  if (deduped.length > 0) {
+    return deduped;
+  }
+  return [BrowserType.CHROME, BrowserType.CHROMIUM];
+}
+
+export async function tryRegisterUserLevelHost(
+  targetBrowsers?: BrowserType[],
+  options?: TryRegisterUserLevelOptions,
+): Promise<boolean> {
+  const logger = createRegistrationLogger(options);
+
   try {
-    console.log(colorText('Attempting to register user-level Native Messaging host...', 'blue'));
+    logger.info(
+      colorText(
+        "Attempting to register user-level Native Messaging host...",
+        "blue",
+      ),
+    );
 
     // 1. Ensure execution permissions
-    await ensureExecutionPermissions();
+    const runtime = await ensureStableRuntimeHostFiles(options);
+    await ensureExecutionPermissionsForDistWithOptions(runtime.distDir, logger);
+    writeNodePathFile(runtime.distDir, process.execPath, options);
 
     // 2. Determine which browser to register
-    const browsersToRegister = targetBrowsers || detectInstalledBrowsers();
-    if (browsersToRegister.length === 0) {
-      // If no browser is detected, Chrome and Chromium are registered by default
-      browsersToRegister.push(BrowserType.CHROME, BrowserType.CHROMIUM);
-      console.log(
-        colorText('No browsers detected, registering for Chrome and Chromium by default', 'yellow'),
+    const browsersToRegister = resolveBrowsersForRegistration(targetBrowsers);
+    if ((targetBrowsers || detectInstalledBrowsers()).length === 0) {
+      logger.warn(
+        colorText(
+          "No browsers detected, registering for Chrome and Chromium by default",
+          "yellow",
+        ),
       );
     } else {
-      console.log(colorText(`Detected browsers: ${browsersToRegister.join(', ')}`, 'blue'));
+      logger.info(
+        colorText(
+          `Detected browsers: ${browsersToRegister.join(", ")}`,
+          "blue",
+        ),
+      );
     }
 
     // 3. Create manifest content
-    const manifest = await createManifestContent();
+    const manifest = await createManifestContent({
+      includeDetectedExtensionIds: options?.includeDetectedExtensionIds ?? true,
+    });
 
     let successCount = 0;
     const results: { browser: string; success: boolean; error?: string }[] = [];
@@ -504,11 +847,14 @@ export async function tryRegisterUserLevelHost(targetBrowsers?: BrowserType[]): 
     // 4. Register for each browser
     for (const browserType of browsersToRegister) {
       const config = getBrowserConfig(browserType);
-      console.log(colorText(`\nRegistering for ${config.displayName}...`, 'blue'));
+      logger.info(
+        colorText(`\nRegistering for ${config.displayName}...`, "blue"),
+      );
 
       try {
         const manifestPaths =
-          Array.isArray(config.userManifestPaths) && config.userManifestPaths.length > 0
+          Array.isArray(config.userManifestPaths) &&
+          config.userManifestPaths.length > 0
             ? config.userManifestPaths
             : [config.userManifestPath];
         const writtenPaths: string[] = [];
@@ -519,40 +865,55 @@ export async function tryRegisterUserLevelHost(targetBrowsers?: BrowserType[]): 
             await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
             writtenPaths.push(manifestPath);
             if (manifestPath === config.userManifestPath) {
-              console.log(colorText(`✓ Manifest written to ${manifestPath}`, 'green'));
+              logger.info(
+                colorText(`✓ Manifest written to ${manifestPath}`, "green"),
+              );
             } else {
-              console.log(
-                colorText(`✓ Channel manifest written to ${manifestPath}`, 'green'),
+              logger.info(
+                colorText(
+                  `✓ Channel manifest written to ${manifestPath}`,
+                  "green",
+                ),
               );
             }
           } catch (error: any) {
             if (manifestPath === config.userManifestPath) {
               throw error;
             }
-            console.log(
+            logger.warn(
               colorText(
                 `⚠️ Skipped optional channel path ${manifestPath}: ${error?.message || String(error)}`,
-                'yellow',
+                "yellow",
               ),
             );
           }
         }
 
         if (writtenPaths.length === 0) {
-          throw new Error('No manifest paths could be written');
+          throw new Error("No manifest paths could be written");
         }
 
         // WindowsAdditional registry keys required
-        if (os.platform() === 'win32' && config.registryKey) {
+        if (os.platform() === "win32" && config.registryKey) {
           try {
             // NOTE: There is no need to double-write the backslashes manually, the reg command will handle Windows paths correctly
             const regCommand = `reg add "${config.registryKey}" /ve /t REG_SZ /d "${config.userManifestPath}" /f`;
-            execSync(regCommand, { stdio: 'pipe' });
+            execSync(regCommand, { stdio: "pipe" });
 
-            if (verifyWindowsRegistryEntry(config.registryKey, config.userManifestPath)) {
-              console.log(colorText(`✓ Registry entry created for ${config.displayName}`, 'green'));
+            if (
+              verifyWindowsRegistryEntry(
+                config.registryKey,
+                config.userManifestPath,
+              )
+            ) {
+              logger.info(
+                colorText(
+                  `✓ Registry entry created for ${config.displayName}`,
+                  "green",
+                ),
+              );
             } else {
-              throw new Error('Registry verification failed');
+              throw new Error("Registry verification failed");
             }
           } catch (error: any) {
             throw new Error(`Registry error: ${error.message}`);
@@ -561,44 +922,326 @@ export async function tryRegisterUserLevelHost(targetBrowsers?: BrowserType[]): 
 
         successCount++;
         results.push({ browser: config.displayName, success: true });
-        console.log(colorText(`✓ Successfully registered ${config.displayName}`, 'green'));
+        logger.info(
+          colorText(`✓ Successfully registered ${config.displayName}`, "green"),
+        );
       } catch (error: any) {
-        results.push({ browser: config.displayName, success: false, error: error.message });
-        console.log(
-          colorText(`✗ Failed to register ${config.displayName}: ${error.message}`, 'red'),
+        results.push({
+          browser: config.displayName,
+          success: false,
+          error: error.message,
+        });
+        logger.warn(
+          colorText(
+            `✗ Failed to register ${config.displayName}: ${error.message}`,
+            "red",
+          ),
         );
       }
     }
 
     // 5. Report results
-    console.log(colorText('\n===== Registration Summary =====', 'blue'));
+    logger.info(colorText("\n===== Registration Summary =====", "blue"));
     for (const result of results) {
       if (result.success) {
-        console.log(colorText(`✓ ${result.browser}: Success`, 'green'));
+        logger.info(colorText(`✓ ${result.browser}: Success`, "green"));
       } else {
-        console.log(colorText(`✗ ${result.browser}: Failed - ${result.error}`, 'red'));
+        logger.warn(
+          colorText(`✗ ${result.browser}: Failed - ${result.error}`, "red"),
+        );
       }
     }
 
     return successCount > 0;
   } catch (error) {
-    console.log(
+    logger.warn(
       colorText(
         `User-level registration failed: ${error instanceof Error ? error.message : String(error)}`,
-        'yellow',
+        "yellow",
       ),
     );
     return false;
   }
 }
 
+interface ManifestExpectation {
+  wrapperPath: string;
+  baseOrigins: string[];
+  detectedOrigins: string[];
+}
+
+interface BrowserManifestValidation {
+  browser: BrowserType;
+  candidatePaths: string[];
+  validPath?: string;
+  issues: string[];
+}
+
+interface ManifestValidationResult {
+  entries: BrowserManifestValidation[];
+  anyValid: boolean;
+  allValid: boolean;
+}
+
+export interface StdioBootstrapOptions extends RegistrationLogOptions {
+  targetBrowsers?: BrowserType[];
+  forceRegister?: boolean;
+}
+
+export interface StdioBootstrapResult {
+  runtimeDistDir: string;
+  wrapperPath: string;
+  browsers: BrowserType[];
+  registrationAttempted: boolean;
+  registrationSucceeded: boolean;
+  manifestValid: boolean;
+  doctorLiteIssues: string[];
+}
+
+function readJsonFileSafe(filePath: string): Record<string, unknown> | null {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeOriginList(origins: unknown): string[] {
+  if (!Array.isArray(origins)) {
+    return [];
+  }
+  return origins
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => (entry.endsWith("/") ? entry : `${entry}/`));
+}
+
+function validateManifest(
+  manifest: Record<string, unknown>,
+  expectation: ManifestExpectation,
+): string[] {
+  const issues: string[] = [];
+
+  if (manifest.name !== HOST_NAME) {
+    issues.push(`name != ${HOST_NAME}`);
+  }
+  if (manifest.type !== "stdio") {
+    issues.push("type != stdio");
+  }
+
+  const manifestPath =
+    typeof manifest.path === "string" && manifest.path.trim()
+      ? manifest.path.trim()
+      : null;
+  if (!manifestPath) {
+    issues.push("path missing");
+  } else {
+    const actualPath = normalizeComparablePath(manifestPath);
+    const expectedPath = normalizeComparablePath(expectation.wrapperPath);
+    if (actualPath !== expectedPath) {
+      issues.push("path does not match stable runtime wrapper");
+    }
+    if (!fs.existsSync(manifestPath)) {
+      issues.push("path target does not exist");
+    }
+  }
+
+  const allowedOrigins = normalizeOriginList(manifest.allowed_origins);
+  const missingBaseOrigins = expectation.baseOrigins.filter(
+    (origin) => !allowedOrigins.includes(origin),
+  );
+  if (missingBaseOrigins.length > 0) {
+    issues.push(`allowed_origins missing ${missingBaseOrigins.join(", ")}`);
+  }
+
+  if (expectation.detectedOrigins.length > 0) {
+    const hasDetectedOrigin = expectation.detectedOrigins.some((origin) =>
+      allowedOrigins.includes(origin),
+    );
+    if (!hasDetectedOrigin) {
+      issues.push("allowed_origins missing detected extension ID");
+    }
+  }
+
+  return issues;
+}
+
+function validateUserLevelManifests(
+  browsers: BrowserType[],
+  expectation: ManifestExpectation,
+): ManifestValidationResult {
+  const entries: BrowserManifestValidation[] = [];
+
+  for (const browser of browsers) {
+    const config = getBrowserConfig(browser);
+    const candidatePaths = Array.from(
+      new Set(
+        Array.isArray(config.userManifestPaths) &&
+          config.userManifestPaths.length > 0
+          ? config.userManifestPaths
+          : [config.userManifestPath],
+      ),
+    );
+
+    let validPath: string | undefined;
+    const issues: string[] = [];
+
+    for (const candidatePath of candidatePaths) {
+      if (!fs.existsSync(candidatePath)) {
+        continue;
+      }
+
+      const manifest = readJsonFileSafe(candidatePath);
+      if (!manifest) {
+        issues.push(`invalid JSON: ${candidatePath}`);
+        continue;
+      }
+
+      const validationIssues = validateManifest(manifest, expectation);
+      if (validationIssues.length === 0) {
+        validPath = candidatePath;
+        break;
+      }
+
+      issues.push(`${candidatePath}: ${validationIssues.join("; ")}`);
+    }
+
+    if (!validPath && issues.length === 0) {
+      issues.push("manifest not found");
+    }
+
+    entries.push({
+      browser,
+      candidatePaths,
+      validPath,
+      issues,
+    });
+  }
+
+  return {
+    entries,
+    anyValid: entries.some((entry) => Boolean(entry.validPath)),
+    allValid: entries.every((entry) => Boolean(entry.validPath)),
+  };
+}
+
+function runDoctorLiteChecks(
+  runtimeDistDir: string,
+  wrapperPath: string,
+  manifestResult: ManifestValidationResult,
+): string[] {
+  const issues: string[] = [];
+  const indexScriptPath = path.join(runtimeDistDir, "index.js");
+  const nodePathFilePath = path.join(runtimeDistDir, "node_path.txt");
+
+  if (!fs.existsSync(runtimeDistDir)) {
+    issues.push(`runtime dist directory missing: ${runtimeDistDir}`);
+  }
+  if (!fs.existsSync(wrapperPath)) {
+    issues.push(`wrapper missing: ${wrapperPath}`);
+  }
+  if (!fs.existsSync(indexScriptPath)) {
+    issues.push(`host entry missing: ${indexScriptPath}`);
+  }
+  if (!fs.existsSync(nodePathFilePath)) {
+    issues.push(`node_path.txt missing: ${nodePathFilePath}`);
+  }
+  if (process.platform !== "win32" && fs.existsSync(wrapperPath)) {
+    try {
+      fs.accessSync(wrapperPath, fs.constants.X_OK);
+    } catch {
+      issues.push(`wrapper is not executable: ${wrapperPath}`);
+    }
+  }
+  if (!manifestResult.anyValid) {
+    issues.push("no valid user-level Native Messaging manifest found");
+  }
+
+  return issues;
+}
+
+export async function autoBootstrapNativeMessagingForStdio(
+  options?: StdioBootstrapOptions,
+): Promise<StdioBootstrapResult> {
+  const logger = createRegistrationLogger({
+    output: options?.output || "stderr",
+    silent: options?.silent,
+  });
+  const browsers = resolveBrowsersForRegistration(options?.targetBrowsers);
+  const runtime = await ensureStableRuntimeHostFiles({
+    output: options?.output,
+    silent: true,
+  });
+  writeNodePathFile(runtime.distDir, process.execPath, {
+    output: options?.output,
+    silent: true,
+  });
+
+  const baseOrigins = resolveAllowedOrigins();
+  const originsWithDetected = resolveAllowedOrigins({
+    includeDetectedExtensionIds: true,
+  });
+  const detectedOnlyOrigins = originsWithDetected.filter(
+    (origin) => !baseOrigins.includes(origin),
+  );
+  const expectation: ManifestExpectation = {
+    wrapperPath: runtime.wrapperPath,
+    baseOrigins,
+    detectedOrigins: detectedOnlyOrigins,
+  };
+
+  let manifestResult = validateUserLevelManifests(browsers, expectation);
+  let registrationAttempted = Boolean(options?.forceRegister);
+  let registrationSucceeded = false;
+
+  if (options?.forceRegister || !manifestResult.allValid) {
+    registrationAttempted = true;
+    logger.warn(
+      "[webpage-mcp-stdio] Native Messaging manifest missing or outdated; attempting automatic user-level registration.",
+    );
+    registrationSucceeded = await tryRegisterUserLevelHost(browsers, {
+      includeDetectedExtensionIds: true,
+      output: "stderr",
+      silent: true,
+    });
+    manifestResult = validateUserLevelManifests(browsers, expectation);
+  }
+
+  const doctorLiteIssues = runDoctorLiteChecks(
+    runtime.distDir,
+    runtime.wrapperPath,
+    manifestResult,
+  );
+  if (doctorLiteIssues.length > 0) {
+    logger.warn(
+      `[webpage-mcp-stdio] doctor-lite detected issues: ${doctorLiteIssues.join(" | ")}`,
+    );
+  }
+
+  return {
+    runtimeDistDir: runtime.distDir,
+    wrapperPath: runtime.wrapperPath,
+    browsers,
+    registrationAttempted,
+    registrationSucceeded,
+    manifestValid: manifestResult.allValid,
+    doctorLiteIssues,
+  };
+}
+
 // Import the is-admin package (only used on Windows platform)
 let isAdmin: () => boolean = () => false;
-if (process.platform === 'win32') {
+if (process.platform === "win32") {
   try {
-    isAdmin = require('is-admin');
+    isAdmin = require("is-admin");
   } catch (error) {
-    console.warn('Missing is-admin dependency, administrator permissions may not be correctly detected on Windows platform');
+    console.warn(
+      "Missing is-admin dependency, administrator permissions may not be correctly detected on Windows platform",
+    );
     console.warn(error);
   }
 }
@@ -608,7 +1251,9 @@ if (process.platform === 'win32') {
  */
 export async function registerWithElevatedPermissions(): Promise<void> {
   try {
-    console.log(colorText('Attempting to register system-level manifest...', 'blue'));
+    console.log(
+      colorText("Attempting to register system-level manifest...", "blue"),
+    );
 
     // 1. Ensure execution permissions
     await ensureExecutionPermissions();
@@ -625,12 +1270,12 @@ export async function registerWithElevatedPermissions(): Promise<void> {
 
     // 5. Check if you already have administrator rights
     const isRoot = process.getuid && process.getuid() === 0; // Unix/Linux/Mac
-    const hasAdminRights = process.platform === 'win32' ? isAdmin() : false; // WindowsPlatform detection administrator permissions
+    const hasAdminRights = process.platform === "win32" ? isAdmin() : false; // WindowsPlatform detection administrator permissions
     const hasElevatedPermissions = isRoot || hasAdminRights;
 
     // Prepare command
     const command =
-      os.platform() === 'win32'
+      os.platform() === "win32"
         ? `if not exist "${path.dirname(manifestPath)}" mkdir "${path.dirname(manifestPath)}" && copy "${tempManifestPath}" "${manifestPath}"`
         : `mkdir -p "${path.dirname(manifestPath)}" && cp "${tempManifestPath}" "${manifestPath}" && chmod 644 "${manifestPath}"`;
 
@@ -646,95 +1291,142 @@ export async function registerWithElevatedPermissions(): Promise<void> {
         fs.copyFileSync(tempManifestPath, manifestPath);
 
         // Set permissions (non-Windows platforms)
-        if (os.platform() !== 'win32') {
-          fs.chmodSync(manifestPath, '644');
+        if (os.platform() !== "win32") {
+          fs.chmodSync(manifestPath, "644");
         }
 
-        console.log(colorText('System-level manifest registration successful!', 'green'));
+        console.log(
+          colorText("System-level manifest registration successful!", "green"),
+        );
       } catch (error: any) {
         console.error(
-          colorText(`System-level manifest installation failed: ${error.message}`, 'red'),
+          colorText(
+            `System-level manifest installation failed: ${error.message}`,
+            "red",
+          ),
         );
         throw error;
       }
     } else {
       // Without administrator rights, print manual operation prompts
       console.log(
-        colorText('⚠️ Administrator privileges required for system-level installation', 'yellow'),
+        colorText(
+          "⚠️ Administrator privileges required for system-level installation",
+          "yellow",
+        ),
       );
       console.log(
         colorText(
-          'Please run one of the following commands with administrator privileges:',
-          'blue',
+          "Please run one of the following commands with administrator privileges:",
+          "blue",
         ),
       );
 
-      if (os.platform() === 'win32') {
-        console.log(colorText('  1. Open Command Prompt as Administrator and run:', 'blue'));
-        console.log(colorText(`     ${command}`, 'cyan'));
+      if (os.platform() === "win32") {
+        console.log(
+          colorText(
+            "  1. Open Command Prompt as Administrator and run:",
+            "blue",
+          ),
+        );
+        console.log(colorText(`     ${command}`, "cyan"));
       } else {
-        console.log(colorText('  1. Run with sudo:', 'blue'));
-        console.log(colorText(`     sudo ${command}`, 'cyan'));
+        console.log(colorText("  1. Run with sudo:", "blue"));
+        console.log(colorText(`     sudo ${command}`, "cyan"));
       }
 
       console.log(
-        colorText('  2. Or run the registration command with elevated privileges:', 'blue'),
+        colorText(
+          "  2. Or run the registration command with elevated privileges:",
+          "blue",
+        ),
       );
-      console.log(colorText(`     sudo ${COMMAND_NAME} register --system`, 'cyan'));
+      console.log(
+        colorText(`     sudo ${COMMAND_NAME} register --system`, "cyan"),
+      );
 
-      throw new Error('Administrator privileges required for system-level installation');
+      throw new Error(
+        "Administrator privileges required for system-level installation",
+      );
     }
 
     // 6. WindowsSpecial Handling - Setting up the System Level Registry
-    if (os.platform() === 'win32') {
+    if (os.platform() === "win32") {
       const registryKey = `HKLM\\Software\\Google\\Chrome\\NativeMessagingHosts\\${HOST_NAME}`;
       // NOTE: There is no need to double-write the backslashes manually, the reg command will handle Windows paths correctly
       const regCommand = `reg add "${registryKey}" /ve /t REG_SZ /d "${manifestPath}" /f`;
 
-      console.log(colorText(`Creating system registry entry: ${registryKey}`, 'blue'));
-      console.log(colorText(`Manifest path: ${manifestPath}`, 'blue'));
+      console.log(
+        colorText(`Creating system registry entry: ${registryKey}`, "blue"),
+      );
+      console.log(colorText(`Manifest path: ${manifestPath}`, "blue"));
 
       if (hasElevatedPermissions) {
         // Already have administrator rights, directly execute the registry command
         try {
-          execSync(regCommand, { stdio: 'pipe' });
+          execSync(regCommand, { stdio: "pipe" });
 
           // Verify that the registry key is created successfully
           if (verifyWindowsRegistryEntry(registryKey, manifestPath)) {
-            console.log(colorText('Windows registry entry created successfully!', 'green'));
+            console.log(
+              colorText(
+                "Windows registry entry created successfully!",
+                "green",
+              ),
+            );
           } else {
-            console.log(colorText('⚠️ Registry entry created but verification failed', 'yellow'));
+            console.log(
+              colorText(
+                "⚠️ Registry entry created but verification failed",
+                "yellow",
+              ),
+            );
           }
         } catch (error: any) {
           console.error(
-            colorText(`Windows registry entry creation failed: ${error.message}`, 'red'),
+            colorText(
+              `Windows registry entry creation failed: ${error.message}`,
+              "red",
+            ),
           );
-          console.error(colorText(`Command: ${regCommand}`, 'red'));
+          console.error(colorText(`Command: ${regCommand}`, "red"));
           throw error;
         }
       } else {
         // Without administrator rights, print manual operation prompts
         console.log(
           colorText(
-            '⚠️ Administrator privileges required for Windows registry modification',
-            'yellow',
+            "⚠️ Administrator privileges required for Windows registry modification",
+            "yellow",
           ),
         );
-        console.log(colorText('Please run the following command as Administrator:', 'blue'));
-        console.log(colorText(`  ${regCommand}`, 'cyan'));
-        console.log(colorText('Or run the registration command with elevated privileges:', 'blue'));
+        console.log(
+          colorText(
+            "Please run the following command as Administrator:",
+            "blue",
+          ),
+        );
+        console.log(colorText(`  ${regCommand}`, "cyan"));
+        console.log(
+          colorText(
+            "Or run the registration command with elevated privileges:",
+            "blue",
+          ),
+        );
         console.log(
           colorText(
             `  Run Command Prompt as Administrator and execute: ${COMMAND_NAME} register --system`,
-            'cyan',
+            "cyan",
           ),
         );
 
-        throw new Error('Administrator privileges required for Windows registry modification');
+        throw new Error(
+          "Administrator privileges required for Windows registry modification",
+        );
       }
     }
   } catch (error: any) {
-    console.error(colorText(`Registration failed: ${error.message}`, 'red'));
+    console.error(colorText(`Registration failed: ${error.message}`, "red"));
     throw error;
   }
 }

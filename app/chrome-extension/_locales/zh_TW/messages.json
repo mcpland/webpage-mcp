@@ -408,11 +408,11 @@
     "description": "自動生成的 i18n 文案"
   },
   "agentProjectMenuEnableMcpLabel": {
-    "message": "啟用網頁 MCP 伺服器",
+    "message": "啟用 Webpage MCP Connector",
     "description": "自動生成的 i18n 文案"
   },
   "agentProjectMenuEnableMcpTitle": {
-    "message": "啟用本地網頁 MCP 伺服器集成",
+    "message": "啟用本地 Webpage MCP Connector 集成",
     "description": "自動生成的 i18n 文案"
   },
   "agentProjectMenuMcpLabel": {
@@ -1602,7 +1602,7 @@
     "description": "擴充功能描述"
   },
   "extensionName": {
-    "message": "webpage-mcp-server",
+    "message": "Webpage MCP Connector",
     "description": "擴充功能名稱"
   },
   "fastPerformance": {
@@ -2618,7 +2618,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "welcomeHeaderTitle": {
-    "message": "網頁 MCP 伺服器",
+    "message": "Webpage MCP Connector",
     "description": "自動生成的 i18n 文案"
   },
   "welcomeMcpConfigDesc": {
@@ -2670,7 +2670,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "welcomeTroubleshootingDesc": {
-    "message": "僅當網橋無法註冊或連接時才使用這些。",
+    "message": "僅當 Connector 無法註冊或連接時才使用這些。",
     "description": "自動生成的 i18n 文案"
   },
   "welcomeTroubleshootingDocsButton": {

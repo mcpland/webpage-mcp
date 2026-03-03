@@ -28,7 +28,7 @@ export const projects = sqliteTable(
      */
     activeClaudeSessionId: text('active_claude_session_id'),
     /**
-     * Whether to enable the local Webpage MCP server integration for this project.
+     * Whether to enable the local Webpage MCP Connector integration for this project.
      * Stored as '1' (true) or '0' (false). Default: '1' (enabled).
      */
     enableWebpageMcp: text('enable_chrome_mcp').notNull().default('1'),

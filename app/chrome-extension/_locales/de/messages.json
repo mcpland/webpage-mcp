@@ -408,11 +408,11 @@
     "description": "Auto-generated localized message"
   },
   "agentProjectMenuEnableMcpLabel": {
-    "message": "Aktivieren Sie den Webseiten-MCP-Server",
+    "message": "Webpage MCP Connector aktivieren",
     "description": "Auto-generated localized message"
   },
   "agentProjectMenuEnableMcpTitle": {
-    "message": "Aktivieren Sie die Integration des lokalen Webseiten-MCP-Servers",
+    "message": "Aktivieren Sie die Integration des lokalen Webpage MCP Connectors",
     "description": "Auto-generated localized message"
   },
   "agentProjectMenuMcpLabel": {
@@ -1120,7 +1120,7 @@
     "description": "Auto-generated localized message"
   },
   "builderPageTitle": {
-    "message": "Workflow Builder – webpage-mcp-server",
+    "message": "Workflow Builder – Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "builderPickButton": {
@@ -1602,7 +1602,7 @@
     "description": "Erweiterungsbeschreibung"
   },
   "extensionName": {
-    "message": "webpage-mcp-server",
+    "message": "Webpage MCP Connector",
     "description": "Erweiterungsname"
   },
   "fastPerformance": {
@@ -1912,7 +1912,7 @@
     "description": "Auto-generated localized message"
   },
   "popupPageTitle": {
-    "message": "webpage-mcp-server",
+    "message": "Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "popupQuickToolsTitle": {
@@ -2324,7 +2324,7 @@
     "description": "Auto-generated localized message"
   },
   "sidepanelPageTitle": {
-    "message": "webpage-mcp-server",
+    "message": "Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "sidepanelUpdateButton": {
@@ -2618,7 +2618,7 @@
     "description": "Auto-generated localized message"
   },
   "welcomeHeaderTitle": {
-    "message": "Webseiten-MCP-Server",
+    "message": "Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "welcomeMcpConfigDesc": {
@@ -2634,7 +2634,7 @@
     "description": "Auto-generated localized message"
   },
   "welcomePageTitle": {
-    "message": "Willkommen – webpage-mcp-server",
+    "message": "Willkommen – Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "welcomeRegisterHostDesc": {
@@ -2670,7 +2670,7 @@
     "description": "Auto-generated localized message"
   },
   "welcomeTroubleshootingDesc": {
-    "message": "Verwenden Sie diese nur, wenn die Bridge sich nicht registrieren oder keine Verbindung herstellen kann.",
+    "message": "Verwenden Sie diese nur, wenn der Connector sich nicht registrieren oder keine Verbindung herstellen kann.",
     "description": "Auto-generated localized message"
   },
   "welcomeTroubleshootingDocsButton": {

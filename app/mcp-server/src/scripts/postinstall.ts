@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { COMMAND_NAME } from './constant';
-import { colorText, tryRegisterUserLevelHost, writeNodePathFile } from './utils';
+import { colorText, tryRegisterUserLevelHost } from './utils';
 
 // Check if this script is run directly
 const isDirectRun = require.main === module;
@@ -292,9 +292,6 @@ async function main(): Promise<void> {
 
   // Always ensure execution permissions first
   await ensureExecutionPermissions();
-
-  // Write Node.js path for run_host scripts to use
-  writeNodePathFile(path.join(__dirname, '..'));
 
   // If global installation, try automatic registration
   if (isGlobalInstall) {

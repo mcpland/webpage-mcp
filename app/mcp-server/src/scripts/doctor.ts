@@ -24,6 +24,9 @@ import {
   tryRegisterUserLevelHost,
   getLogDir,
   resolveAllowedOrigins,
+  getExpectedMainPath,
+  getStableRuntimeDistDir,
+  resolvePackageDistDir,
 } from './utils';
 import { getNativeSocketPath } from '../ipc/socket-path';
 
@@ -136,20 +139,7 @@ function getCommandInfo(pkg: Record<string, unknown>): { canonical: string; alia
 }
 
 function resolveDistDir(): string {
-  // __dirname is dist/scripts when running from compiled code
-  const candidateFromDistScripts = path.resolve(__dirname, '..');
-  const candidateFromSrcScripts = path.resolve(__dirname, '..', '..', 'dist');
-
-  const looksLikeDist = (dir: string): boolean => {
-    return (
-      fs.existsSync(path.join(dir, 'run_host.sh')) ||
-      fs.existsSync(path.join(dir, 'run_host.bat'))
-    );
-  };
-
-  if (looksLikeDist(candidateFromDistScripts)) return candidateFromDistScripts;
-  if (looksLikeDist(candidateFromSrcScripts)) return candidateFromSrcScripts;
-  return candidateFromDistScripts;
+  return resolvePackageDistDir();
 }
 
 function stringifyError(err: unknown): string {
@@ -513,6 +503,7 @@ async function attemptFixes(
   });
 
   await attempt('node_path', 'Write node_path.txt for run_host scripts', async () => {
+    fs.mkdirSync(path.dirname(nodePathFile), { recursive: true });
     fs.writeFileSync(nodePathFile, process.execPath, 'utf8');
   });
 
@@ -621,8 +612,9 @@ function statusBadge(status: DoctorStatus): string {
  */
 export async function collectDoctorReport(options: DoctorOptions): Promise<DoctorReport> {
   const pkg = readPackageJson();
-  const distDir = resolveDistDir();
-  const rootDir = path.resolve(distDir, '..');
+  const packageDistDir = resolveDistDir();
+  const runtimeDistDir = getStableRuntimeDistDir();
+  const rootDir = path.resolve(packageDistDir, '..');
   const packageName = typeof pkg.name === 'string' ? pkg.name : 'webpage-mcp';
   const packageVersion = typeof pkg.version === 'string' ? pkg.version : 'unknown';
   const commandInfo = getCommandInfo(pkg);
@@ -630,16 +622,15 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
   const targetBrowsers = resolveTargetBrowsers(options.browser);
   const browsersToCheck = resolveBrowsersToCheck(targetBrowsers);
 
-  const wrapperScriptName = process.platform === 'win32' ? 'run_host.bat' : 'run_host.sh';
-  const wrapperPath = path.resolve(distDir, wrapperScriptName);
-  const nodeScriptPath = path.resolve(distDir, 'index.js');
+  const wrapperPath = getExpectedMainPath();
+  const nodeScriptPath = path.resolve(runtimeDistDir, 'index.js');
   const logDir = getLogDir();
 
   // Run fixes if requested
   const fixes = await attemptFixes(
     Boolean(options.fix),
     Boolean(options.json),
-    distDir,
+    runtimeDistDir,
     targetBrowsers,
   );
 
@@ -654,7 +645,8 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
     message: `${packageName}@${packageVersion}, ${process.platform}-${process.arch}, node ${process.version}`,
     details: {
       packageRoot: rootDir,
-      distDir,
+      distDir: packageDistDir,
+      runtimeDistDir,
       execPath: process.execPath,
       aliases: commandInfo.aliases,
     },
@@ -680,7 +672,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
       title: 'Host files',
       status: 'ok',
       message: `Wrapper: ${wrapperPath}`,
-      details: { wrapperPath, nodeScriptPath },
+      details: { wrapperPath, nodeScriptPath, runtimeDistDir },
     });
   }
 
@@ -710,7 +702,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
   }
 
   // Check 4: Node resolution
-  const nodeResolution = resolveNodeCandidate(distDir);
+  const nodeResolution = resolveNodeCandidate(runtimeDistDir);
   if (nodeResolution.nodePath) {
     try {
       nodeResolution.version = execFileSync(nodeResolution.nodePath, ['-v'], {
@@ -1011,7 +1003,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
       platform: process.platform,
       arch: process.arch,
       node: { version: process.version, execPath: process.execPath },
-      package: { name: packageName, version: packageVersion, rootDir, distDir },
+      package: { name: packageName, version: packageVersion, rootDir, distDir: packageDistDir },
       command: { canonical: commandInfo.canonical, aliases: commandInfo.aliases },
       nativeHost: { hostName: HOST_NAME, socketPath: getNativeSocketPath() },
     },

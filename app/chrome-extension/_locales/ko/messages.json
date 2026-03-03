@@ -408,11 +408,11 @@
     "description": "Auto-generated localized message"
   },
   "agentProjectMenuEnableMcpLabel": {
-    "message": "웹페이지 MCP 서버 활성화",
+    "message": "Webpage MCP Connector 활성화",
     "description": "Auto-generated localized message"
   },
   "agentProjectMenuEnableMcpTitle": {
-    "message": "로컬 웹페이지 MCP 서버 통합 활성화",
+    "message": "로컬 Webpage MCP Connector 통합 활성화",
     "description": "Auto-generated localized message"
   },
   "agentProjectMenuMcpLabel": {
@@ -1120,7 +1120,7 @@
     "description": "Auto-generated localized message"
   },
   "builderPageTitle": {
-    "message": "워크플로 빌더 - webpage-mcp-server",
+    "message": "워크플로 빌더 - Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "builderPickButton": {
@@ -1602,7 +1602,7 @@
     "description": "확장 프로그램 설명"
   },
   "extensionName": {
-    "message": "webpage-mcp-server",
+    "message": "Webpage MCP Connector",
     "description": "확장 프로그램 이름"
   },
   "fastPerformance": {
@@ -2618,7 +2618,7 @@
     "description": "Auto-generated localized message"
   },
   "welcomeHeaderTitle": {
-    "message": "웹페이지 MCP 서버",
+    "message": "Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "welcomeMcpConfigDesc": {
@@ -2670,7 +2670,7 @@
     "description": "Auto-generated localized message"
   },
   "welcomeTroubleshootingDesc": {
-    "message": "브리지가 등록 또는 연결에 실패한 경우에만 이를 사용하십시오.",
+    "message": "이 항목은 Connector 등록 또는 연결에 실패한 경우에만 사용하세요.",
     "description": "Auto-generated localized message"
   },
   "welcomeTroubleshootingDocsButton": {

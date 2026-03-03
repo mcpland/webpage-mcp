@@ -408,11 +408,11 @@
     "description": "Auto-generated localized message"
   },
   "agentProjectMenuEnableMcpLabel": {
-    "message": "Web ページ MCP サーバーを有効にする",
+    "message": "Webpage MCP Connector を有効にする",
     "description": "Auto-generated localized message"
   },
   "agentProjectMenuEnableMcpTitle": {
-    "message": "ローカル Web ページ MCP サーバー統合を有効にする",
+    "message": "ローカル Webpage MCP Connector 統合を有効にする",
     "description": "Auto-generated localized message"
   },
   "agentProjectMenuMcpLabel": {
@@ -1120,7 +1120,7 @@
     "description": "Auto-generated localized message"
   },
   "builderPageTitle": {
-    "message": "ワークフロー ビルダー - webpage-mcp-server",
+    "message": "ワークフロー ビルダー - Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "builderPickButton": {
@@ -1602,7 +1602,7 @@
     "description": "Auto-generated localized message"
   },
   "extensionName": {
-    "message": "Webpage MCPサーバー",
+    "message": "Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "fastPerformance": {
@@ -2618,7 +2618,7 @@
     "description": "Auto-generated localized message"
   },
   "welcomeHeaderTitle": {
-    "message": "ウェブページ MCP サーバー",
+    "message": "Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "welcomeMcpConfigDesc": {
@@ -2634,7 +2634,7 @@
     "description": "Auto-generated localized message"
   },
   "welcomePageTitle": {
-    "message": "ようこそ - webpage-mcp-server",
+    "message": "ようこそ - Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
   "welcomeRegisterHostDesc": {
@@ -2670,7 +2670,7 @@
     "description": "Auto-generated localized message"
   },
   "welcomeTroubleshootingDesc": {
-    "message": "これらは、ブリッジが登録または接続に失敗した場合にのみ使用してください。",
+    "message": "これらは、Connector が登録または接続に失敗した場合にのみ使用してください。",
     "description": "Auto-generated localized message"
   },
   "welcomeTroubleshootingDocsButton": {

@@ -6,225 +6,230 @@
 // Fallback messages for when Chrome APIs aren't available (English)
 const fallbackMessages: Record<string, string> = {
   // Extension metadata
-  extensionName: 'webpage-mcp-server',
-  extensionDescription: 'Exposes browser capabilities with your own chrome',
+  extensionName: "Webpage MCP Connector",
+  extensionDescription: "Exposes browser capabilities with your own chrome",
 
   // Section headers
-  nativeServerConfigLabel: 'MCP Server Configuration',
-  semanticEngineLabel: 'Semantic Engine',
-  embeddingModelLabel: 'Embedding Model',
-  indexDataManagementLabel: 'Index Data Management',
-  modelCacheManagementLabel: 'Model Cache Management',
+  nativeServerConfigLabel: "MCP Server Configuration",
+  semanticEngineLabel: "Semantic Engine",
+  embeddingModelLabel: "Embedding Model",
+  indexDataManagementLabel: "Index Data Management",
+  modelCacheManagementLabel: "Model Cache Management",
 
   // Status labels
-  statusLabel: 'Status',
-  runningStatusLabel: 'Running Status',
-  connectionStatusLabel: 'Connection Status',
-  lastUpdatedLabel: 'Last Updated:',
+  statusLabel: "Status",
+  runningStatusLabel: "Running Status",
+  connectionStatusLabel: "Connection Status",
+  lastUpdatedLabel: "Last Updated:",
 
   // Connection states
-  connectButton: 'Connect',
-  disconnectButton: 'Disconnect',
-  connectingStatus: 'Connecting...',
-  connectedStatus: 'Connected',
-  disconnectedStatus: 'Disconnected',
-  detectingStatus: 'Detecting...',
+  connectButton: "Connect",
+  disconnectButton: "Disconnect",
+  connectingStatus: "Connecting...",
+  connectedStatus: "Connected",
+  disconnectedStatus: "Disconnected",
+  detectingStatus: "Detecting...",
 
   // Server states
-  serviceRunningStatus: 'Service Running (Port: {0})',
-  serviceNotConnectedStatus: 'Service Not Connected',
-  connectedServiceNotStartedStatus: 'Connected, Service Not Started',
+  serviceRunningStatus: "Service Running (Port: {0})",
+  serviceNotConnectedStatus: "Service Not Connected",
+  connectedServiceNotStartedStatus: "Connected, Service Not Started",
 
   // Configuration labels
-  mcpServerConfigLabel: 'MCP Server Configuration',
-  connectionPortLabel: 'Connection Port',
-  refreshStatusButton: 'Refresh Status',
-  copyConfigButton: 'Copy Configuration',
+  mcpServerConfigLabel: "MCP Server Configuration",
+  connectionPortLabel: "Connection Port",
+  refreshStatusButton: "Refresh Status",
+  copyConfigButton: "Copy Configuration",
 
   // Action buttons
-  retryButton: 'Retry',
-  cancelButton: 'Cancel',
-  confirmButton: 'Confirm',
-  saveButton: 'Save',
-  closeButton: 'Close',
-  resetButton: 'Reset',
+  retryButton: "Retry",
+  cancelButton: "Cancel",
+  confirmButton: "Confirm",
+  saveButton: "Save",
+  closeButton: "Close",
+  resetButton: "Reset",
 
   // Progress states
-  initializingStatus: 'Initializing...',
-  processingStatus: 'Processing...',
-  loadingStatus: 'Loading...',
-  clearingStatus: 'Clearing...',
-  cleaningStatus: 'Cleaning...',
-  downloadingStatus: 'Downloading...',
+  initializingStatus: "Initializing...",
+  processingStatus: "Processing...",
+  loadingStatus: "Loading...",
+  clearingStatus: "Clearing...",
+  cleaningStatus: "Cleaning...",
+  downloadingStatus: "Downloading...",
 
   // Semantic engine states
-  semanticEngineReadyStatus: 'Semantic Engine Ready',
-  semanticEngineInitializingStatus: 'Semantic Engine Initializing...',
-  semanticEngineInitFailedStatus: 'Semantic Engine Initialization Failed',
-  semanticEngineNotInitStatus: 'Semantic Engine Not Initialized',
-  initSemanticEngineButton: 'Initialize Semantic Engine',
-  reinitializeButton: 'Reinitialize',
+  semanticEngineReadyStatus: "Semantic Engine Ready",
+  semanticEngineInitializingStatus: "Semantic Engine Initializing...",
+  semanticEngineInitFailedStatus: "Semantic Engine Initialization Failed",
+  semanticEngineNotInitStatus: "Semantic Engine Not Initialized",
+  initSemanticEngineButton: "Initialize Semantic Engine",
+  reinitializeButton: "Reinitialize",
 
   // Model states
-  downloadingModelStatus: 'Downloading Model... {0}%',
-  switchingModelStatus: 'Switching Model...',
-  modelLoadedStatus: 'Model Loaded',
-  modelFailedStatus: 'Model Failed to Load',
+  downloadingModelStatus: "Downloading Model... {0}%",
+  switchingModelStatus: "Switching Model...",
+  modelLoadedStatus: "Model Loaded",
+  modelFailedStatus: "Model Failed to Load",
 
   // Model descriptions
-  lightweightModelDescription: 'Lightweight Multilingual Model',
-  betterThanSmallDescription: 'Slightly larger than e5-small, but better performance',
-  multilingualModelDescription: 'Multilingual Semantic Model',
+  lightweightModelDescription: "Lightweight Multilingual Model",
+  betterThanSmallDescription:
+    "Slightly larger than e5-small, but better performance",
+  multilingualModelDescription: "Multilingual Semantic Model",
 
   // Performance levels
-  fastPerformance: 'Fast',
-  balancedPerformance: 'Balanced',
-  accuratePerformance: 'Accurate',
+  fastPerformance: "Fast",
+  balancedPerformance: "Balanced",
+  accuratePerformance: "Accurate",
 
   // Error messages
-  networkErrorMessage: 'Network connection error, please check network and retry',
-  modelCorruptedErrorMessage: 'Model file corrupted or incomplete, please retry download',
-  unknownErrorMessage: 'Unknown error, please check if your network can access HuggingFace',
-  permissionDeniedErrorMessage: 'Permission denied',
-  timeoutErrorMessage: 'Operation timed out',
+  networkErrorMessage:
+    "Network connection error, please check network and retry",
+  modelCorruptedErrorMessage:
+    "Model file corrupted or incomplete, please retry download",
+  unknownErrorMessage:
+    "Unknown error, please check if your network can access HuggingFace",
+  permissionDeniedErrorMessage: "Permission denied",
+  timeoutErrorMessage: "Operation timed out",
 
   // Data statistics
-  indexedPagesLabel: 'Indexed Pages',
-  indexSizeLabel: 'Index Size',
-  activeTabsLabel: 'Active Tabs',
-  vectorDocumentsLabel: 'Vector Documents',
-  cacheSizeLabel: 'Cache Size',
-  cacheEntriesLabel: 'Cache Entries',
+  indexedPagesLabel: "Indexed Pages",
+  indexSizeLabel: "Index Size",
+  activeTabsLabel: "Active Tabs",
+  vectorDocumentsLabel: "Vector Documents",
+  cacheSizeLabel: "Cache Size",
+  cacheEntriesLabel: "Cache Entries",
 
   // Data management
-  clearAllDataButton: 'Clear All Data',
-  clearAllCacheButton: 'Clear All Cache',
-  cleanExpiredCacheButton: 'Clean Expired Cache',
-  exportDataButton: 'Export Data',
-  importDataButton: 'Import Data',
+  clearAllDataButton: "Clear All Data",
+  clearAllCacheButton: "Clear All Cache",
+  cleanExpiredCacheButton: "Clean Expired Cache",
+  exportDataButton: "Export Data",
+  importDataButton: "Import Data",
 
   // Dialog titles
-  confirmClearDataTitle: 'Confirm Clear Data',
-  settingsTitle: 'Settings',
-  aboutTitle: 'About',
-  helpTitle: 'Help',
+  confirmClearDataTitle: "Confirm Clear Data",
+  settingsTitle: "Settings",
+  aboutTitle: "About",
+  helpTitle: "Help",
 
   // Dialog messages
   clearDataWarningMessage:
-    'This operation will clear all indexed webpage content and vector data, including:',
-  clearDataList1: 'All webpage text content index',
-  clearDataList2: 'Vector embedding data',
-  clearDataList3: 'Search history and cache',
+    "This operation will clear all indexed webpage content and vector data, including:",
+  clearDataList1: "All webpage text content index",
+  clearDataList2: "Vector embedding data",
+  clearDataList3: "Search history and cache",
   clearDataIrreversibleWarning:
-    'This operation is irreversible! After clearing, you need to browse webpages again to rebuild the index.',
-  confirmClearButton: 'Confirm Clear',
+    "This operation is irreversible! After clearing, you need to browse webpages again to rebuild the index.",
+  confirmClearButton: "Confirm Clear",
 
   // Cache states
-  cacheDetailsLabel: 'Cache Details',
-  noCacheDataMessage: 'No cache data',
-  loadingCacheInfoStatus: 'Loading cache information...',
-  processingCacheStatus: 'Processing cache...',
-  expiredLabel: 'Expired',
+  cacheDetailsLabel: "Cache Details",
+  noCacheDataMessage: "No cache data",
+  loadingCacheInfoStatus: "Loading cache information...",
+  processingCacheStatus: "Processing cache...",
+  expiredLabel: "Expired",
 
   // Browser integration
-  bookmarksBarLabel: 'Bookmarks Bar',
-  newTabLabel: 'New Tab',
-  currentPageLabel: 'Current Page',
+  bookmarksBarLabel: "Bookmarks Bar",
+  newTabLabel: "New Tab",
+  currentPageLabel: "Current Page",
 
   // Accessibility
-  menuLabel: 'Menu',
-  navigationLabel: 'Navigation',
-  mainContentLabel: 'Main Content',
+  menuLabel: "Menu",
+  navigationLabel: "Navigation",
+  mainContentLabel: "Main Content",
 
   // Future features
-  languageSelectorLabel: 'Language',
-  themeLabel: 'Theme',
-  lightTheme: 'Light',
-  darkTheme: 'Dark',
-  autoTheme: 'Auto',
-  advancedSettingsLabel: 'Advanced Settings',
-  debugModeLabel: 'Debug Mode',
-  verboseLoggingLabel: 'Verbose Logging',
+  languageSelectorLabel: "Language",
+  themeLabel: "Theme",
+  lightTheme: "Light",
+  darkTheme: "Dark",
+  autoTheme: "Auto",
+  advancedSettingsLabel: "Advanced Settings",
+  debugModeLabel: "Debug Mode",
+  verboseLoggingLabel: "Verbose Logging",
 
   // Notifications
-  successNotification: 'Operation completed successfully',
-  warningNotification: 'Warning: Please review before proceeding',
-  infoNotification: 'Information',
-  configCopiedNotification: 'Configuration copied to clipboard',
-  dataClearedNotification: 'Data cleared successfully',
+  successNotification: "Operation completed successfully",
+  warningNotification: "Warning: Please review before proceeding",
+  infoNotification: "Information",
+  configCopiedNotification: "Configuration copied to clipboard",
+  dataClearedNotification: "Data cleared successfully",
 
   // Units
-  bytesUnit: 'bytes',
-  kilobytesUnit: 'KB',
-  megabytesUnit: 'MB',
-  gigabytesUnit: 'GB',
-  itemsUnit: 'items',
-  pagesUnit: 'pages',
+  bytesUnit: "bytes",
+  kilobytesUnit: "KB",
+  megabytesUnit: "MB",
+  gigabytesUnit: "GB",
+  itemsUnit: "items",
+  pagesUnit: "pages",
 
   // Legacy keys for backwards compatibility
-  nativeServerConfig: 'MCP Server Configuration',
-  runningStatus: 'Running Status',
-  refreshStatus: 'Refresh Status',
-  lastUpdated: 'Last Updated:',
-  mcpServerConfig: 'MCP Server Configuration',
-  connectionPort: 'Connection Port',
-  connecting: 'Connecting...',
-  disconnect: 'Disconnect',
-  connect: 'Connect',
-  semanticEngine: 'Semantic Engine',
-  embeddingModel: 'Embedding Model',
-  retry: 'Retry',
-  indexDataManagement: 'Index Data Management',
-  clearing: 'Clearing...',
-  clearAllData: 'Clear All Data',
-  copyConfig: 'Copy Configuration',
-  serviceRunning: 'Service Running (Port: {0})',
-  connectedServiceNotStarted: 'Connected, Service Not Started',
-  serviceNotConnected: 'Service Not Connected',
-  detecting: 'Detecting...',
-  lightweightModel: 'Lightweight Multilingual Model',
-  betterThanSmall: 'Slightly larger than e5-small, but better performance',
-  multilingualModel: 'Multilingual Semantic Model',
-  fast: 'Fast',
-  balanced: 'Balanced',
-  accurate: 'Accurate',
-  semanticEngineReady: 'Semantic Engine Ready',
-  semanticEngineInitializing: 'Semantic Engine Initializing...',
-  semanticEngineInitFailed: 'Semantic Engine Initialization Failed',
-  semanticEngineNotInit: 'Semantic Engine Not Initialized',
-  downloadingModel: 'Downloading Model... {0}%',
-  switchingModel: 'Switching Model...',
-  networkError: 'Network connection error, please check network and retry',
-  modelCorrupted: 'Model file corrupted or incomplete, please retry download',
-  unknownError: 'Unknown error, please check if your network can access HuggingFace',
-  reinitialize: 'Reinitialize',
-  initializing: 'Initializing...',
-  initSemanticEngine: 'Initialize Semantic Engine',
-  indexedPages: 'Indexed Pages',
-  indexSize: 'Index Size',
-  activeTabs: 'Active Tabs',
-  vectorDocuments: 'Vector Documents',
-  confirmClearData: 'Confirm Clear Data',
+  nativeServerConfig: "MCP Server Configuration",
+  runningStatus: "Running Status",
+  refreshStatus: "Refresh Status",
+  lastUpdated: "Last Updated:",
+  mcpServerConfig: "MCP Server Configuration",
+  connectionPort: "Connection Port",
+  connecting: "Connecting...",
+  disconnect: "Disconnect",
+  connect: "Connect",
+  semanticEngine: "Semantic Engine",
+  embeddingModel: "Embedding Model",
+  retry: "Retry",
+  indexDataManagement: "Index Data Management",
+  clearing: "Clearing...",
+  clearAllData: "Clear All Data",
+  copyConfig: "Copy Configuration",
+  serviceRunning: "Service Running (Port: {0})",
+  connectedServiceNotStarted: "Connected, Service Not Started",
+  serviceNotConnected: "Service Not Connected",
+  detecting: "Detecting...",
+  lightweightModel: "Lightweight Multilingual Model",
+  betterThanSmall: "Slightly larger than e5-small, but better performance",
+  multilingualModel: "Multilingual Semantic Model",
+  fast: "Fast",
+  balanced: "Balanced",
+  accurate: "Accurate",
+  semanticEngineReady: "Semantic Engine Ready",
+  semanticEngineInitializing: "Semantic Engine Initializing...",
+  semanticEngineInitFailed: "Semantic Engine Initialization Failed",
+  semanticEngineNotInit: "Semantic Engine Not Initialized",
+  downloadingModel: "Downloading Model... {0}%",
+  switchingModel: "Switching Model...",
+  networkError: "Network connection error, please check network and retry",
+  modelCorrupted: "Model file corrupted or incomplete, please retry download",
+  unknownError:
+    "Unknown error, please check if your network can access HuggingFace",
+  reinitialize: "Reinitialize",
+  initializing: "Initializing...",
+  initSemanticEngine: "Initialize Semantic Engine",
+  indexedPages: "Indexed Pages",
+  indexSize: "Index Size",
+  activeTabs: "Active Tabs",
+  vectorDocuments: "Vector Documents",
+  confirmClearData: "Confirm Clear Data",
   clearDataWarning:
-    'This operation will clear all indexed webpage content and vector data, including:',
+    "This operation will clear all indexed webpage content and vector data, including:",
   clearDataIrreversible:
-    'This operation is irreversible! After clearing, you need to browse webpages again to rebuild the index.',
-  confirmClear: 'Confirm Clear',
-  cancel: 'Cancel',
-  confirm: 'Confirm',
-  processing: 'Processing...',
-  modelCacheManagement: 'Model Cache Management',
-  cacheSize: 'Cache Size',
-  cacheEntries: 'Cache Entries',
-  cacheDetails: 'Cache Details',
-  noCacheData: 'No cache data',
-  loadingCacheInfo: 'Loading cache information...',
-  processingCache: 'Processing cache...',
-  cleaning: 'Cleaning...',
-  cleanExpiredCache: 'Clean Expired Cache',
-  clearAllCache: 'Clear All Cache',
-  expired: 'Expired',
-  bookmarksBar: 'Bookmarks Bar',
+    "This operation is irreversible! After clearing, you need to browse webpages again to rebuild the index.",
+  confirmClear: "Confirm Clear",
+  cancel: "Cancel",
+  confirm: "Confirm",
+  processing: "Processing...",
+  modelCacheManagement: "Model Cache Management",
+  cacheSize: "Cache Size",
+  cacheEntries: "Cache Entries",
+  cacheDetails: "Cache Details",
+  noCacheData: "No cache data",
+  loadingCacheInfo: "Loading cache information...",
+  processingCache: "Processing cache...",
+  cleaning: "Cleaning...",
+  cleanExpiredCache: "Clean Expired Cache",
+  clearAllCache: "Clear All Cache",
+  expired: "Expired",
+  bookmarksBar: "Bookmarks Bar",
 };
 
 /**
@@ -234,10 +239,18 @@ const fallbackMessages: Record<string, string> = {
  * @param defaultValue Optional default message when key is missing
  * @returns Localized message or fallback
  */
-export function getMessage(key: string, substitutions?: string[], defaultValue?: string): string {
+export function getMessage(
+  key: string,
+  substitutions?: string[],
+  defaultValue?: string,
+): string {
   try {
     // Check if Chrome extension APIs are available
-    if (typeof chrome !== 'undefined' && chrome.i18n && chrome.i18n.getMessage) {
+    if (
+      typeof chrome !== "undefined" &&
+      chrome.i18n &&
+      chrome.i18n.getMessage
+    ) {
       const message = chrome.i18n.getMessage(key, substitutions);
       if (message) {
         return message;
@@ -266,7 +279,9 @@ export function getMessage(key: string, substitutions?: string[], defaultValue?:
 export function isI18nAvailable(): boolean {
   try {
     return (
-      typeof chrome !== 'undefined' && chrome.i18n && typeof chrome.i18n.getMessage === 'function'
+      typeof chrome !== "undefined" &&
+      chrome.i18n &&
+      typeof chrome.i18n.getMessage === "function"
     );
   } catch {
     return false;

@@ -31,11 +31,11 @@
        Native Messaging stdin/stdout  │
                                       │
 ┌─────────────┐  Chrome APIs ┌────────▼────────┐
-│ Your Webpage│◄─────────────┤ Chrome Extension│
+│ Your Webpage│◄─────────────┤ MCP Connector   │
 └─────────────┘   DevTools   └─────────────────┘
 ```
 
-The **Chrome extension** exposes real browser capabilities as MCP tools. The **MCP Server** bridges AI clients and the extension using Chrome [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging). MCP clients connect over stdio only (no localhost HTTP transport).
+The **Webpage MCP Connector** (Chrome extension) exposes real browser capabilities as MCP tools. The **MCP Server** bridges AI clients and the connector using Chrome [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging). MCP clients connect over stdio only (no localhost HTTP transport).
 
 ## Core Features
 
@@ -53,7 +53,7 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **M
 
 ## Comparison with Similar Projects
 
-| Dimension                  | Playwright-based MCP Server                                    | Chrome Extension-based MCP Server                                |
+| Dimension                  | Playwright-based MCP Server                                    | Webpage MCP Connector + MCP Server                               |
 | -------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------- |
 | **First-time Setup**       | :white_check_mark: Usually simpler: install & run              | :warning: Requires one-time Native Messaging host registration   |
 | **Resource Usage**         | :x: Launches a separate automation browser                     | :white_check_mark: Reuses the user's already-open Chrome         |
@@ -119,23 +119,9 @@ The **Chrome extension** exposes real browser capabilities as MCP tools. The **M
 
 ### Quick Start (Published npm Package)
 
-**1.** Install the Chrome extension first (store package or unpacked build). [https://github.com/mcpland/webpage-mcp/releases](https://github.com/mcpland/webpage-mcp/releases)
+**1.** Install the **Webpage MCP Connector** Chrome extension first (store package or unpacked build). [https://github.com/mcpland/webpage-mcp/releases](https://github.com/mcpland/webpage-mcp/releases)
 
-**2.** Open extension `welcome.html` or popup and copy the one-time registration command (it already includes the current extension ID), then run it in terminal:
-
-```bash
-npx -y webpage-mcp@latest register --browser chrome --force --extension-id <extension_id_from_popup_or_welcome>
-```
-
-> `--force` in the generated command is optional (registration is currently idempotent).
-
-**3.** Run one command to auto-fix common setup issues (permissions, node path, registration):
-
-```bash
-npx -y webpage-mcp@latest doctor --fix
-```
-
-**4.** Add `webpage-mcp` to your MCP client config:
+**2.** Add `webpage-mcp` to your MCP client config:
 
 ```json
 {
@@ -148,12 +134,32 @@ npx -y webpage-mcp@latest doctor --fix
 }
 ```
 
-**5.** Open Chrome, click the extension popup **Connect** button once, then restart your MCP client.
+**3.** Start your MCP client (with Chrome open and extension enabled).
+
+`webpage-mcp-stdio` now performs silent bootstrap on startup: it checks Native Messaging manifest/runtime and auto-registers user-level host when needed.
+
+**4.** If extension still cannot connect, use fallback recovery:
+
+1. Open extension `welcome.html` or popup and copy the register command (already includes current extension ID), then run it:
+
+```bash
+npx -y webpage-mcp@latest register --browser chrome --force --extension-id <extension_id_from_popup_or_welcome>
+```
+
+2. Run one-shot auto-fix:
+
+```bash
+npx -y webpage-mcp@latest doctor --fix
+```
+
+3. Click extension popup **Connect** once, then restart MCP client.
 
 <details>
 <summary><strong>When do I need to re-register?</strong></summary>
 
-Registration is typically one-time per machine/profile. You do **not** need to re-run it for normal restarts (OS/Chrome/MCP client). Re-run only when:
+For most users, manual registration is not required because startup bootstrap handles it automatically.
+
+If you did run manual registration, it is typically one-time per machine/profile. You do **not** need to re-run it for normal restarts (OS/Chrome/MCP client). Re-run only when:
 
 - Extension ID changes
 - Manifest path changes
@@ -189,19 +195,25 @@ pnpm build
 
 > This repository does not currently commit binary release zip files. To generate one locally, run `pnpm --filter webpage-mcp-server zip` and use the artifact from `app/chrome-extension/.output/`.
 
-#### 3. Register the Native Messaging Host
+#### 3. Start MCP Client First
+
+Use the local stdio entry in your MCP client config (example below). On startup, `mcp-server-stdio` will attempt silent bootstrap (manifest/runtime check + user-level auto-register).
+
+#### 4. Fallback: Manual Register (Only If Needed)
+
+If the extension still cannot connect, run:
 
 ```bash
 # From repo root, use the built local CLI entry
 node app/mcp-server/dist/cli.js register --detect
 
-# Or specify the browser explicitly
-node app/mcp-server/dist/cli.js register --browser chrome
+# Or specify browser/extension id explicitly
+node app/mcp-server/dist/cli.js register --browser chrome --extension-id <your_extension_id>
 ```
 
-This places a JSON manifest in Chrome's `NativeMessagingHosts/` directory so the browser can launch the MCP server process.
+This writes/updates the JSON manifest in Chrome's `NativeMessagingHosts/` directory so Chrome can launch the MCP server process.
 
-#### 4. Verify Installation
+#### 5. Verify Installation
 
 ```bash
 # Diagnose installation issues
@@ -352,7 +364,7 @@ Options:
 <details>
 <summary><strong>Additional registration details</strong></summary>
 
-When `--browser chrome` is used, the installer also writes channel-compatible manifests on macOS/Linux (for example Chrome Stable/Beta/Canary/Chrome for Testing paths) to reduce "native host not found" channel mismatch issues. The installer also attempts to discover local unpacked Webpage MCP extension IDs from browser profiles and add them to `allowed_origins`.
+When `--browser chrome` is used, the installer also writes channel-compatible manifests on macOS/Linux (for example Chrome Stable/Beta/Canary/Chrome for Testing paths) to reduce "native host not found" channel mismatch issues. The installer also attempts to discover local unpacked Webpage MCP Connector extension IDs from browser profiles and add them to `allowed_origins`.
 
 For unpacked extensions with a custom ID, you can re-register with:
 

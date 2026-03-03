@@ -408,11 +408,11 @@
     "description": "Auto-generated i18n message"
   },
   "agentProjectMenuEnableMcpLabel": {
-    "message": "Enable Webpage MCP Server",
+    "message": "Enable Webpage MCP Connector",
     "description": "Auto-generated i18n message"
   },
   "agentProjectMenuEnableMcpTitle": {
-    "message": "Enable local Webpage MCP server integration",
+    "message": "Enable local Webpage MCP Connector integration",
     "description": "Auto-generated i18n message"
   },
   "agentProjectMenuMcpLabel": {
@@ -1120,7 +1120,7 @@
     "description": "Auto-generated i18n message"
   },
   "builderPageTitle": {
-    "message": "Workflow Builder - webpage-mcp-server",
+    "message": "Workflow Builder - Webpage MCP Connector",
     "description": "Auto-generated i18n message"
   },
   "builderPickButton": {
@@ -1602,7 +1602,7 @@
     "description": "Extension description"
   },
   "extensionName": {
-    "message": "webpage-mcp-server",
+    "message": "Webpage MCP Connector",
     "description": "Extension name"
   },
   "fastPerformance": {
@@ -1912,7 +1912,7 @@
     "description": "Auto-generated i18n message"
   },
   "popupPageTitle": {
-    "message": "webpage-mcp-server",
+    "message": "Webpage MCP Connector",
     "description": "Auto-generated i18n message"
   },
   "popupQuickToolsTitle": {
@@ -2324,7 +2324,7 @@
     "description": "No matching markers message"
   },
   "sidepanelPageTitle": {
-    "message": "webpage-mcp-server",
+    "message": "Webpage MCP Connector",
     "description": "Auto-generated i18n message"
   },
   "sidepanelUpdateButton": {
@@ -2618,7 +2618,7 @@
     "description": "Auto-generated i18n message"
   },
   "welcomeHeaderTitle": {
-    "message": "Webpage MCP Server",
+    "message": "Webpage MCP Connector",
     "description": "Auto-generated i18n message"
   },
   "welcomeMcpConfigDesc": {
@@ -2634,7 +2634,7 @@
     "description": "Auto-generated i18n message"
   },
   "welcomePageTitle": {
-    "message": "Welcome - webpage-mcp-server",
+    "message": "Welcome - Webpage MCP Connector",
     "description": "Auto-generated i18n message"
   },
   "welcomeRegisterHostDesc": {
@@ -2670,7 +2670,7 @@
     "description": "Auto-generated i18n message"
   },
   "welcomeTroubleshootingDesc": {
-    "message": "Use these only if the bridge fails to register or connect.",
+    "message": "Use these only if the Connector fails to register or connect.",
     "description": "Auto-generated i18n message"
   },
   "welcomeTroubleshootingDocsButton": {

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { LINKS } from '@/common/constants';
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { LINKS } from "@/common/constants";
+import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
 import {
   PREDEFINED_MODELS,
   clearModelCache,
@@ -9,9 +9,9 @@ import {
   getCacheStats,
   getModelInfo,
   type ModelPreset,
-} from '@/utils/semantic-similarity-engine';
-import { getMessage } from '@/utils/i18n';
-import type { AgentThemeId } from '../sidepanel/composables/useAgentTheme';
+} from "@/utils/semantic-similarity-engine";
+import { getMessage } from "@/utils/i18n";
+import type { AgentThemeId } from "../sidepanel/composables/useAgentTheme";
 import {
   BoltIcon,
   ConfirmDialog,
@@ -22,13 +22,18 @@ import {
   RefreshIcon,
   StopIcon,
   WorkflowIcon,
-} from './react';
-import './App.css';
+} from "./react";
+import "./App.css";
 
-type CurrentView = 'home' | 'local-model';
-type NativeConnectionStatus = 'unknown' | 'connected' | 'disconnected';
-type SemanticEngineStatus = 'idle' | 'initializing' | 'ready' | 'error';
-type ModelInitializationStatus = 'idle' | 'downloading' | 'initializing' | 'ready' | 'error';
+type CurrentView = "home" | "local-model";
+type NativeConnectionStatus = "unknown" | "connected" | "disconnected";
+type SemanticEngineStatus = "idle" | "initializing" | "ready" | "error";
+type ModelInitializationStatus =
+  | "idle"
+  | "downloading"
+  | "initializing"
+  | "ready"
+  | "error";
 
 type ServerStatus = {
   isRunning: boolean;
@@ -62,19 +67,21 @@ type ComingSoonToast = {
   feature: string;
 };
 
-const THEME_STORAGE_KEY = 'agentTheme';
-const DEFAULT_THEME: AgentThemeId = 'warm-editorial';
+const THEME_STORAGE_KEY = "agentTheme";
+const DEFAULT_THEME: AgentThemeId = "warm-editorial";
 const VALID_THEMES: AgentThemeId[] = [
-  'warm-editorial',
-  'blueprint-architect',
-  'zen-journal',
-  'neo-pop',
-  'dark-console',
-  'swiss-grid',
+  "warm-editorial",
+  "blueprint-architect",
+  "zen-journal",
+  "neo-pop",
+  "dark-console",
+  "swiss-grid",
 ];
 
 function isValidTheme(theme: unknown): theme is AgentThemeId {
-  return typeof theme === 'string' && VALID_THEMES.includes(theme as AgentThemeId);
+  return (
+    typeof theme === "string" && VALID_THEMES.includes(theme as AgentThemeId)
+  );
 }
 
 function getThemeFromDocument(): AgentThemeId {
@@ -82,82 +89,116 @@ function getThemeFromDocument(): AgentThemeId {
   return isValidTheme(theme) ? theme : DEFAULT_THEME;
 }
 
-function getErrorTypeByMessage(errorMessage: string): '' | 'network' | 'file' | 'unknown' {
+function getErrorTypeByMessage(
+  errorMessage: string,
+): "" | "network" | "file" | "unknown" {
   const text = errorMessage.toLowerCase();
-  if (text.includes('network') || text.includes('fetch') || text.includes('timeout')) {
-    return 'network';
+  if (
+    text.includes("network") ||
+    text.includes("fetch") ||
+    text.includes("timeout")
+  ) {
+    return "network";
   }
-  if (text.includes('corrupt') || text.includes('invalid') || text.includes('format')) {
-    return 'file';
+  if (
+    text.includes("corrupt") ||
+    text.includes("invalid") ||
+    text.includes("format")
+  ) {
+    return "file";
   }
-  return 'unknown';
+  return "unknown";
 }
 
 export default function PopupApp() {
   const t = (key: string, fallback: string, substitutions?: string[]) =>
     getMessage(key, substitutions, fallback);
 
-  const [agentTheme, setAgentTheme] = useState<AgentThemeId>(() => getThemeFromDocument());
-  const [currentView, setCurrentView] = useState<CurrentView>('home');
-  const [comingSoonToast, setComingSoonToast] = useState<ComingSoonToast>({ show: false, feature: '' });
+  const [agentTheme, setAgentTheme] = useState<AgentThemeId>(() =>
+    getThemeFromDocument(),
+  );
+  const [currentView, setCurrentView] = useState<CurrentView>("home");
+  const [comingSoonToast, setComingSoonToast] = useState<ComingSoonToast>({
+    show: false,
+    feature: "",
+  });
 
-  const [nativeConnectionStatus, setNativeConnectionStatus] = useState<NativeConnectionStatus>('unknown');
+  const [nativeConnectionStatus, setNativeConnectionStatus] =
+    useState<NativeConnectionStatus>("unknown");
   const [isConnecting, setIsConnecting] = useState(false);
   const [serverStatus, setServerStatus] = useState<ServerStatus>({
     isRunning: false,
     lastUpdated: Date.now(),
   });
-  const [copyButtonText, setCopyButtonText] = useState(getMessage('copyConfigButton'));
+  const [copyButtonText, setCopyButtonText] = useState(
+    getMessage("copyConfigButton"),
+  );
   const [copyRegisterButtonText, setCopyRegisterButtonText] = useState(
-    t('popupCopyRegisterCommand', 'Copy register command'),
+    t("popupCopyRegisterCommand", "Copy register command"),
   );
   const [authCopyButtonText, setAuthCopyButtonText] = useState(
-    t('popupCopyToken', 'Copy token'),
+    t("popupCopyToken", "Copy token"),
   );
   const [authTokenEnabled, setAuthTokenEnabled] = useState(false);
   const [nativeAuthToken, setNativeAuthToken] = useState<string | null>(null);
-  const [nativeConnectionError, setNativeConnectionError] = useState<string | null>(null);
+  const [nativeConnectionError, setNativeConnectionError] = useState<
+    string | null
+  >(null);
 
   const [currentModel, setCurrentModel] = useState<ModelPreset | null>(null);
   const [isModelSwitching, setIsModelSwitching] = useState(false);
-  const [modelSwitchProgress, setModelSwitchProgress] = useState('');
+  const [modelSwitchProgress, setModelSwitchProgress] = useState("");
   const [modelDownloadProgress, setModelDownloadProgress] = useState(0);
   const [isModelDownloading, setIsModelDownloading] = useState(false);
   const [modelInitializationStatus, setModelInitializationStatus] =
-    useState<ModelInitializationStatus>('idle');
-  const [modelErrorMessage, setModelErrorMessage] = useState('');
-  const [modelErrorType, setModelErrorType] = useState<'' | 'network' | 'file' | 'unknown'>('');
+    useState<ModelInitializationStatus>("idle");
+  const [modelErrorMessage, setModelErrorMessage] = useState("");
+  const [modelErrorType, setModelErrorType] = useState<
+    "" | "network" | "file" | "unknown"
+  >("");
 
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [isRefreshingStats, setIsRefreshingStats] = useState(false);
   const [isClearingData, setIsClearingData] = useState(false);
   const [showClearConfirmation, setShowClearConfirmation] = useState(false);
-  const [clearDataProgress, setClearDataProgress] = useState('');
+  const [clearDataProgress, setClearDataProgress] = useState("");
 
-  const [semanticEngineStatus, setSemanticEngineStatus] = useState<SemanticEngineStatus>('idle');
-  const [isSemanticEngineInitializing, setIsSemanticEngineInitializing] = useState(false);
-  const [semanticEngineInitProgress, setSemanticEngineInitProgress] = useState('');
-  const [semanticEngineLastUpdated, setSemanticEngineLastUpdated] = useState<number | null>(null);
+  const [semanticEngineStatus, setSemanticEngineStatus] =
+    useState<SemanticEngineStatus>("idle");
+  const [isSemanticEngineInitializing, setIsSemanticEngineInitializing] =
+    useState(false);
+  const [semanticEngineInitProgress, setSemanticEngineInitProgress] =
+    useState("");
+  const [semanticEngineLastUpdated, setSemanticEngineLastUpdated] = useState<
+    number | null
+  >(null);
 
   const [isManagingCache, setIsManagingCache] = useState(false);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const authCopyTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const statusMonitoringIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const semanticEnginePollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const authCopyTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const statusMonitoringIntervalRef = useRef<ReturnType<
+    typeof setInterval
+  > | null>(null);
+  const semanticEnginePollingIntervalRef = useRef<ReturnType<
+    typeof setInterval
+  > | null>(null);
 
-  const showMcpConfig = nativeConnectionStatus === 'connected' && serverStatus.isRunning;
+  const showMcpConfig =
+    nativeConnectionStatus === "connected" && serverStatus.isRunning;
   const showRegisterCommand = !showMcpConfig;
   const extensionId = chrome.runtime.id;
 
   const mcpConfigJson = useMemo(() => {
     const config = {
       mcpServers: {
-        'webpage-mcp': {
-          command: 'npx',
-          args: ['-y', '-p', 'webpage-mcp@latest', 'webpage-mcp-stdio'],
+        "webpage-mcp": {
+          command: "npx",
+          args: ["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"],
         },
       },
     };
@@ -181,46 +222,48 @@ export default function PopupApp() {
       clearTimeout(toastTimerRef.current);
     }
     toastTimerRef.current = setTimeout(() => {
-      setComingSoonToast({ show: false, feature: '' });
+      setComingSoonToast({ show: false, feature: "" });
     }, 2000);
   }
 
   function getStatusClass(): string {
-    if (nativeConnectionStatus === 'connected') {
-      return serverStatus.isRunning ? 'bg-emerald-500' : 'bg-yellow-500';
+    if (nativeConnectionStatus === "connected") {
+      return serverStatus.isRunning ? "bg-emerald-500" : "bg-yellow-500";
     }
-    if (nativeConnectionStatus === 'disconnected') {
-      return 'bg-red-500';
+    if (nativeConnectionStatus === "disconnected") {
+      return "bg-red-500";
     }
-    return 'bg-gray-500';
+    return "bg-gray-500";
   }
 
   function getStatusText(): string {
-    if (nativeConnectionStatus === 'connected') {
+    if (nativeConnectionStatus === "connected") {
       if (serverStatus.isRunning) {
-        return getMessage('connectedStatus');
+        return getMessage("connectedStatus");
       }
-      return getMessage('connectedServiceNotStartedStatus');
+      return getMessage("connectedServiceNotStartedStatus");
     }
-    if (nativeConnectionStatus === 'disconnected') {
-      return getMessage('serviceNotConnectedStatus');
+    if (nativeConnectionStatus === "disconnected") {
+      return getMessage("serviceNotConnectedStatus");
     }
-    return getMessage('detectingStatus');
+    return getMessage("detectingStatus");
   }
 
   async function saveModelPreference(model: ModelPreset) {
     try {
       await chrome.storage.local.set({ selectedModel: model });
     } catch (error) {
-      console.error('Failed to save model preferences:', error);
+      console.error("Failed to save model preferences:", error);
     }
   }
 
-  async function saveVersionPreference(version: 'full' | 'quantized' | 'compressed') {
+  async function saveVersionPreference(
+    version: "full" | "quantized" | "compressed",
+  ) {
     try {
       await chrome.storage.local.set({ selectedVersion: version });
     } catch (error) {
-      console.error('Failed to save version preferences:', error);
+      console.error("Failed to save version preferences:", error);
     }
   }
 
@@ -238,11 +281,14 @@ export default function PopupApp() {
       };
       await chrome.storage.local.set({ modelState });
     } catch (error) {
-      console.error('Failed to save model state:', error);
+      console.error("Failed to save model state:", error);
     }
   }
 
-  async function saveSemanticEngineState(status: SemanticEngineStatus, lastUpdated: number | null) {
+  async function saveSemanticEngineState(
+    status: SemanticEngineStatus,
+    lastUpdated: number | null,
+  ) {
     try {
       await chrome.storage.local.set({
         semanticEngineState: {
@@ -251,21 +297,23 @@ export default function PopupApp() {
         },
       });
     } catch (error) {
-      console.error('Failed to save semantic engine state:', error);
+      console.error("Failed to save semantic engine state:", error);
     }
   }
 
   async function checkNativeConnection() {
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'ping_native' });
+      const response = await chrome.runtime.sendMessage({
+        type: "ping_native",
+      });
       const connected = Boolean(response?.connected);
-      setNativeConnectionStatus(connected ? 'connected' : 'disconnected');
+      setNativeConnectionStatus(connected ? "connected" : "disconnected");
       if (connected) {
         setNativeConnectionError(null);
       }
     } catch (error) {
-      console.error('Failed to detect Native connection status:', error);
-      setNativeConnectionStatus('disconnected');
+      console.error("Failed to detect Native connection status:", error);
+      setNativeConnectionStatus("disconnected");
     }
   }
 
@@ -278,10 +326,12 @@ export default function PopupApp() {
         setServerStatus(response.serverStatus as ServerStatus);
       }
       if (response?.connected !== undefined) {
-        setNativeConnectionStatus(response.connected ? 'connected' : 'disconnected');
+        setNativeConnectionStatus(
+          response.connected ? "connected" : "disconnected",
+        );
       }
     } catch (error) {
-      console.error('Failed to detect server status:', error);
+      console.error("Failed to detect server status:", error);
     }
   }
 
@@ -294,44 +344,48 @@ export default function PopupApp() {
         setServerStatus(response.serverStatus as ServerStatus);
       }
       if (response?.connected !== undefined) {
-        setNativeConnectionStatus(response.connected ? 'connected' : 'disconnected');
+        setNativeConnectionStatus(
+          response.connected ? "connected" : "disconnected",
+        );
       }
     } catch (error) {
-      console.error('Failed to refresh server status:', error);
+      console.error("Failed to refresh server status:", error);
     }
   }
 
   async function copyMcpConfig() {
     try {
       await navigator.clipboard.writeText(mcpConfigJson);
-      setCopyButtonText(`✅${getMessage('configCopiedNotification')}`);
+      setCopyButtonText(`✅${getMessage("configCopiedNotification")}`);
     } catch (error) {
-      console.error('Failed to copy configuration:', error);
-      setCopyButtonText(`❌${getMessage('networkErrorMessage')}`);
+      console.error("Failed to copy configuration:", error);
+      setCopyButtonText(`❌${getMessage("networkErrorMessage")}`);
     }
 
     if (copyTextTimerRef.current) {
       clearTimeout(copyTextTimerRef.current);
     }
     copyTextTimerRef.current = setTimeout(() => {
-      setCopyButtonText(getMessage('copyConfigButton'));
+      setCopyButtonText(getMessage("copyConfigButton"));
     }, 2000);
   }
 
   async function copyRegisterCommand() {
     try {
       await navigator.clipboard.writeText(registerCommand);
-      setCopyRegisterButtonText(t('popupCopiedShort', 'Copied'));
+      setCopyRegisterButtonText(t("popupCopiedShort", "Copied"));
     } catch (error) {
-      console.error('Failed to copy register command:', error);
-      setCopyRegisterButtonText(t('popupCopyFailed', 'Copy failed'));
+      console.error("Failed to copy register command:", error);
+      setCopyRegisterButtonText(t("popupCopyFailed", "Copy failed"));
     }
 
     if (copyTextTimerRef.current) {
       clearTimeout(copyTextTimerRef.current);
     }
     copyTextTimerRef.current = setTimeout(() => {
-      setCopyRegisterButtonText(t('popupCopyRegisterCommand', 'Copy register command'));
+      setCopyRegisterButtonText(
+        t("popupCopyRegisterCommand", "Copy register command"),
+      );
     }, 2000);
   }
 
@@ -342,7 +396,9 @@ export default function PopupApp() {
       });
       if (response?.success) {
         setAuthTokenEnabled(response.enabled === true);
-        setNativeAuthToken(typeof response.token === 'string' ? response.token : null);
+        setNativeAuthToken(
+          typeof response.token === "string" ? response.token : null,
+        );
       } else {
         setAuthTokenEnabled(false);
         setNativeAuthToken(null);
@@ -357,16 +413,16 @@ export default function PopupApp() {
     if (!nativeAuthToken) return;
     try {
       await navigator.clipboard.writeText(nativeAuthToken);
-      setAuthCopyButtonText(t('popupCopiedShort', 'Copied'));
+      setAuthCopyButtonText(t("popupCopiedShort", "Copied"));
     } catch {
-      setAuthCopyButtonText(t('popupCopyFailed', 'Copy failed'));
+      setAuthCopyButtonText(t("popupCopyFailed", "Copy failed"));
     }
 
     if (authCopyTextTimerRef.current) {
       clearTimeout(authCopyTextTimerRef.current);
     }
     authCopyTextTimerRef.current = setTimeout(() => {
-      setAuthCopyButtonText(t('popupCopyToken', 'Copy token'));
+      setAuthCopyButtonText(t("popupCopyToken", "Copy token"));
     }, 2000);
   }
 
@@ -377,31 +433,36 @@ export default function PopupApp() {
 
     setIsConnecting(true);
     try {
-      if (nativeConnectionStatus === 'connected') {
-        await chrome.runtime.sendMessage({ type: 'disconnect_native' });
-        setNativeConnectionStatus('disconnected');
+      if (nativeConnectionStatus === "connected") {
+        await chrome.runtime.sendMessage({ type: "disconnect_native" });
+        setNativeConnectionStatus("disconnected");
         setNativeConnectionError(null);
       } else {
         const response = await chrome.runtime.sendMessage({
-          type: 'connectNative',
+          type: "connectNative",
         });
 
         const connected =
-          typeof response?.connected === 'boolean' ? response.connected : Boolean(response?.success);
+          typeof response?.connected === "boolean"
+            ? response.connected
+            : Boolean(response?.success);
         if (connected) {
-          setNativeConnectionStatus('connected');
+          setNativeConnectionStatus("connected");
           setNativeConnectionError(null);
         } else {
-          setNativeConnectionStatus('disconnected');
-          const reason = typeof response?.error === 'string' ? response.error : '';
-          setNativeConnectionError(reason || 'Native host connection failed');
-          console.error('Connection failed:', response?.error || response);
+          setNativeConnectionStatus("disconnected");
+          const reason =
+            typeof response?.error === "string" ? response.error : "";
+          setNativeConnectionError(reason || "Native host connection failed");
+          console.error("Connection failed:", response?.error || response);
         }
       }
     } catch (error) {
-      console.error('Test connection failed:', error);
-      setNativeConnectionStatus('disconnected');
-      setNativeConnectionError(error instanceof Error ? error.message : String(error));
+      console.error("Test connection failed:", error);
+      setNativeConnectionStatus("disconnected");
+      setNativeConnectionError(
+        error instanceof Error ? error.message : String(error),
+      );
     } finally {
       setIsConnecting(false);
     }
@@ -412,7 +473,7 @@ export default function PopupApp() {
       const stats = await getCacheStats();
       setCacheStats(stats as CacheStats);
     } catch (error) {
-      console.error('Failed to get cache stats:', error);
+      console.error("Failed to get cache stats:", error);
       setCacheStats(null);
     }
   }
@@ -427,7 +488,7 @@ export default function PopupApp() {
       await cleanupModelCache();
       await loadCacheStats();
     } catch (error) {
-      console.error('Failed to cleanup cache:', error);
+      console.error("Failed to cleanup cache:", error);
     } finally {
       setIsManagingCache(false);
     }
@@ -443,7 +504,7 @@ export default function PopupApp() {
       await clearModelCache();
       await loadCacheStats();
     } catch (error) {
-      console.error('Failed to clear cache:', error);
+      console.error("Failed to clear cache:", error);
     } finally {
       setIsManagingCache(false);
     }
@@ -457,7 +518,7 @@ export default function PopupApp() {
     setIsRefreshingStats(true);
     try {
       const response = await chrome.runtime.sendMessage({
-        type: 'get_storage_stats',
+        type: "get_storage_stats",
       });
 
       if (response?.success) {
@@ -478,7 +539,7 @@ export default function PopupApp() {
         });
       }
     } catch (error) {
-      console.error('❌ Error refreshing storage stats:', error);
+      console.error("❌ Error refreshing storage stats:", error);
       setStorageStats({
         indexedPages: 0,
         totalDocuments: 0,
@@ -504,7 +565,7 @@ export default function PopupApp() {
     statusMonitoringIntervalRef.current = setInterval(async () => {
       try {
         const response = await chrome.runtime.sendMessage({
-          type: 'get_model_status',
+          type: "get_model_status",
         });
 
         if (!response?.success) {
@@ -512,7 +573,8 @@ export default function PopupApp() {
         }
 
         const status = response.status;
-        const nextStatus = (status.initializationStatus || 'idle') as ModelInitializationStatus;
+        const nextStatus = (status.initializationStatus ||
+          "idle") as ModelInitializationStatus;
         const nextProgress = status.downloadProgress || 0;
         const nextDownloading = status.isDownloading || false;
 
@@ -520,22 +582,23 @@ export default function PopupApp() {
         setModelDownloadProgress(nextProgress);
         setIsModelDownloading(nextDownloading);
 
-        if (nextStatus === 'error') {
-          const nextErrorMessage = status.errorMessage || getMessage('modelFailedStatus');
+        if (nextStatus === "error") {
+          const nextErrorMessage =
+            status.errorMessage || getMessage("modelFailedStatus");
           setModelErrorMessage(nextErrorMessage);
           setModelErrorType(getErrorTypeByMessage(nextErrorMessage));
         } else {
-          setModelErrorMessage('');
-          setModelErrorType('');
+          setModelErrorMessage("");
+          setModelErrorType("");
         }
 
         await saveModelState(nextStatus, nextProgress, nextDownloading);
 
-        if (nextStatus === 'ready' || nextStatus === 'error') {
+        if (nextStatus === "ready" || nextStatus === "error") {
           stopModelStatusMonitoring();
         }
       } catch (error) {
-        console.error('Failed to get model status:', error);
+        console.error("Failed to get model status:", error);
       }
     }, 1000);
   }
@@ -554,59 +617,63 @@ export default function PopupApp() {
       });
 
       if (!(response?.success && response.status)) {
-        setSemanticEngineStatus('idle');
+        setSemanticEngineStatus("idle");
         setIsSemanticEngineInitializing(false);
-        await saveSemanticEngineState('idle', semanticEngineLastUpdated);
+        await saveSemanticEngineState("idle", semanticEngineLastUpdated);
         return;
       }
 
       const status = response.status.initializationStatus;
-      if (status === 'ready') {
+      if (status === "ready") {
         const lastUpdated = Date.now();
-        setSemanticEngineStatus('ready');
+        setSemanticEngineStatus("ready");
         setSemanticEngineLastUpdated(lastUpdated);
         setIsSemanticEngineInitializing(false);
-        setSemanticEngineInitProgress(getMessage('semanticEngineReadyStatus'));
-        await saveSemanticEngineState('ready', lastUpdated);
+        setSemanticEngineInitProgress(getMessage("semanticEngineReadyStatus"));
+        await saveSemanticEngineState("ready", lastUpdated);
         stopSemanticEngineStatusPolling();
         setTimeout(() => {
-          setSemanticEngineInitProgress('');
+          setSemanticEngineInitProgress("");
         }, 2000);
         return;
       }
 
-      if (status === 'downloading' || status === 'initializing') {
+      if (status === "downloading" || status === "initializing") {
         const lastUpdated = Date.now();
-        setSemanticEngineStatus('initializing');
+        setSemanticEngineStatus("initializing");
         setIsSemanticEngineInitializing(true);
-        setSemanticEngineInitProgress(getMessage('semanticEngineInitializingStatus'));
+        setSemanticEngineInitProgress(
+          getMessage("semanticEngineInitializingStatus"),
+        );
         setSemanticEngineLastUpdated(lastUpdated);
-        await saveSemanticEngineState('initializing', lastUpdated);
+        await saveSemanticEngineState("initializing", lastUpdated);
         return;
       }
 
-      if (status === 'error') {
+      if (status === "error") {
         const lastUpdated = Date.now();
-        setSemanticEngineStatus('error');
+        setSemanticEngineStatus("error");
         setSemanticEngineLastUpdated(lastUpdated);
         setIsSemanticEngineInitializing(false);
-        setSemanticEngineInitProgress(getMessage('semanticEngineInitFailedStatus'));
-        await saveSemanticEngineState('error', lastUpdated);
+        setSemanticEngineInitProgress(
+          getMessage("semanticEngineInitFailedStatus"),
+        );
+        await saveSemanticEngineState("error", lastUpdated);
         stopSemanticEngineStatusPolling();
         setTimeout(() => {
-          setSemanticEngineInitProgress('');
+          setSemanticEngineInitProgress("");
         }, 5000);
         return;
       }
 
-      setSemanticEngineStatus('idle');
+      setSemanticEngineStatus("idle");
       setIsSemanticEngineInitializing(false);
-      await saveSemanticEngineState('idle', semanticEngineLastUpdated);
+      await saveSemanticEngineState("idle", semanticEngineLastUpdated);
     } catch (error) {
-      console.error('Popup: Failed to check semantic engine status:', error);
-      setSemanticEngineStatus('idle');
+      console.error("Popup: Failed to check semantic engine status:", error);
+      setSemanticEngineStatus("idle");
       setIsSemanticEngineInitializing(false);
-      await saveSemanticEngineState('idle', semanticEngineLastUpdated);
+      await saveSemanticEngineState("idle", semanticEngineLastUpdated);
     }
   }
 
@@ -625,10 +692,12 @@ export default function PopupApp() {
 
     const lastUpdated = Date.now();
     setIsSemanticEngineInitializing(true);
-    setSemanticEngineStatus('initializing');
-    setSemanticEngineInitProgress(getMessage('semanticEngineInitializingStatus'));
+    setSemanticEngineStatus("initializing");
+    setSemanticEngineInitProgress(
+      getMessage("semanticEngineInitializingStatus"),
+    );
     setSemanticEngineLastUpdated(lastUpdated);
-    await saveSemanticEngineState('initializing', lastUpdated);
+    await saveSemanticEngineState("initializing", lastUpdated);
 
     try {
       await chrome.runtime.sendMessage({
@@ -636,20 +705,20 @@ export default function PopupApp() {
       });
 
       startSemanticEngineStatusPolling();
-      setSemanticEngineInitProgress(getMessage('processingStatus'));
+      setSemanticEngineInitProgress(getMessage("processingStatus"));
     } catch (error: any) {
-      console.error('❌ Failed to send initialization request:', error);
+      console.error("❌ Failed to send initialization request:", error);
       const now = Date.now();
-      setSemanticEngineStatus('error');
+      setSemanticEngineStatus("error");
       setSemanticEngineInitProgress(
-        `Failed to send initialization request: ${error?.message || 'Unknown error'}`,
+        `Failed to send initialization request: ${error?.message || "Unknown error"}`,
       );
       setSemanticEngineLastUpdated(now);
       setIsSemanticEngineInitializing(false);
-      await saveSemanticEngineState('error', now);
+      await saveSemanticEngineState("error", now);
 
       setTimeout(() => {
-        setSemanticEngineInitProgress('');
+        setSemanticEngineInitProgress("");
       }, 5000);
     }
   }
@@ -661,7 +730,7 @@ export default function PopupApp() {
 
     const currentInfo = currentModel
       ? getModelInfo(currentModel)
-      : getModelInfo('multilingual-e5-small');
+      : getModelInfo("multilingual-e5-small");
     const newInfo = getModelInfo(newModel);
     const isSameModel = newModel === currentModel;
     const isDifferentDimension = currentInfo.dimension !== newInfo.dimension;
@@ -671,60 +740,60 @@ export default function PopupApp() {
     }
 
     setIsModelSwitching(true);
-    setModelSwitchProgress(getMessage('switchingModelStatus'));
-    setModelInitializationStatus('downloading');
+    setModelSwitchProgress(getMessage("switchingModelStatus"));
+    setModelInitializationStatus("downloading");
     setModelDownloadProgress(0);
     setIsModelDownloading(true);
 
     try {
       await saveModelPreference(newModel);
-      await saveVersionPreference('quantized');
-      await saveModelState('downloading', 0, true);
+      await saveVersionPreference("quantized");
+      await saveModelState("downloading", 0, true);
 
-      setModelSwitchProgress(getMessage('semanticEngineInitializingStatus'));
+      setModelSwitchProgress(getMessage("semanticEngineInitializingStatus"));
       startModelStatusMonitoring();
 
       const response = await chrome.runtime.sendMessage({
-        type: 'switch_semantic_model',
+        type: "switch_semantic_model",
         modelPreset: newModel,
-        modelVersion: 'quantized',
+        modelVersion: "quantized",
         modelDimension: newInfo.dimension,
         previousDimension: currentInfo.dimension,
       });
 
       if (!response?.success) {
-        throw new Error(response?.error || 'Model switch failed');
+        throw new Error(response?.error || "Model switch failed");
       }
 
       setCurrentModel(newModel);
-      setModelSwitchProgress(getMessage('successNotification'));
-      setModelInitializationStatus('ready');
+      setModelSwitchProgress(getMessage("successNotification"));
+      setModelInitializationStatus("ready");
       setIsModelDownloading(false);
-      await saveModelState('ready', 100, false);
+      await saveModelState("ready", 100, false);
 
       setTimeout(() => {
-        setModelSwitchProgress('');
+        setModelSwitchProgress("");
       }, 2000);
     } catch (error: any) {
-      const errorMessage = error?.message || 'Unknown error';
+      const errorMessage = error?.message || "Unknown error";
       setModelSwitchProgress(`Model switch failed: ${errorMessage}`);
-      setModelInitializationStatus('error');
+      setModelInitializationStatus("error");
       setIsModelDownloading(false);
 
       const nextErrorType = getErrorTypeByMessage(errorMessage);
       setModelErrorType(nextErrorType);
-      if (nextErrorType === 'network') {
-        setModelErrorMessage(getMessage('networkErrorMessage'));
-      } else if (nextErrorType === 'file') {
-        setModelErrorMessage(getMessage('modelCorruptedErrorMessage'));
+      if (nextErrorType === "network") {
+        setModelErrorMessage(getMessage("networkErrorMessage"));
+      } else if (nextErrorType === "file") {
+        setModelErrorMessage(getMessage("modelCorruptedErrorMessage"));
       } else {
         setModelErrorMessage(errorMessage);
       }
 
-      await saveModelState('error', modelDownloadProgress, false);
+      await saveModelState("error", modelDownloadProgress, false);
 
       setTimeout(() => {
-        setModelSwitchProgress('');
+        setModelSwitchProgress("");
       }, 8000);
     } finally {
       setIsModelSwitching(false);
@@ -736,9 +805,9 @@ export default function PopupApp() {
       return;
     }
 
-    setModelErrorMessage('');
-    setModelErrorType('');
-    setModelInitializationStatus('downloading');
+    setModelErrorMessage("");
+    setModelErrorType("");
+    setModelInitializationStatus("downloading");
     setModelDownloadProgress(0);
     setIsModelDownloading(true);
     await switchModel(currentModel, true);
@@ -747,57 +816,57 @@ export default function PopupApp() {
   async function loadModelPreference() {
     try {
       const result = await chrome.storage.local.get([
-        'selectedModel',
-        'selectedVersion',
-        'modelState',
-        'semanticEngineState',
+        "selectedModel",
+        "selectedVersion",
+        "modelState",
+        "semanticEngineState",
       ]);
 
       const storedModel = result.selectedModel as string | undefined;
       if (storedModel && PREDEFINED_MODELS[storedModel as ModelPreset]) {
         setCurrentModel(storedModel as ModelPreset);
       } else {
-        const defaultModel: ModelPreset = 'multilingual-e5-small';
+        const defaultModel: ModelPreset = "multilingual-e5-small";
         setCurrentModel(defaultModel);
         await saveModelPreference(defaultModel);
       }
 
-      await saveVersionPreference('quantized');
+      await saveVersionPreference("quantized");
 
       if (result.modelState) {
         const modelState = result.modelState;
-        if (modelState.status === 'ready') {
-          setModelInitializationStatus('ready');
+        if (modelState.status === "ready") {
+          setModelInitializationStatus("ready");
           setModelDownloadProgress(modelState.downloadProgress || 100);
           setIsModelDownloading(false);
         } else {
-          setModelInitializationStatus('idle');
+          setModelInitializationStatus("idle");
           setModelDownloadProgress(0);
           setIsModelDownloading(false);
-          await saveModelState('idle', 0, false);
+          await saveModelState("idle", 0, false);
         }
       } else {
-        setModelInitializationStatus('idle');
+        setModelInitializationStatus("idle");
         setModelDownloadProgress(0);
         setIsModelDownloading(false);
       }
 
       if (result.semanticEngineState) {
         const semanticState = result.semanticEngineState;
-        if (semanticState.status === 'ready') {
-          setSemanticEngineStatus('ready');
+        if (semanticState.status === "ready") {
+          setSemanticEngineStatus("ready");
           setSemanticEngineLastUpdated(semanticState.lastUpdated || Date.now());
-        } else if (semanticState.status === 'error') {
-          setSemanticEngineStatus('error');
+        } else if (semanticState.status === "error") {
+          setSemanticEngineStatus("error");
           setSemanticEngineLastUpdated(semanticState.lastUpdated || Date.now());
         } else {
-          setSemanticEngineStatus('idle');
+          setSemanticEngineStatus("idle");
         }
       } else {
-        setSemanticEngineStatus('idle');
+        setSemanticEngineStatus("idle");
       }
     } catch (error) {
-      console.error('❌ Failed to load model preferences:', error);
+      console.error("❌ Failed to load model preferences:", error);
     }
   }
 
@@ -811,38 +880,46 @@ export default function PopupApp() {
     }
 
     setIsClearingData(true);
-    setClearDataProgress(getMessage('clearingStatus'));
+    setClearDataProgress(getMessage("clearingStatus"));
 
     try {
       const response = await chrome.runtime.sendMessage({
-        type: 'clear_all_data',
+        type: "clear_all_data",
       });
 
       if (!response?.success) {
-        throw new Error(response?.error || t('popupClearDataFailedPlain', 'Failed to clear data'));
+        throw new Error(
+          response?.error ||
+            t("popupClearDataFailedPlain", "Failed to clear data"),
+        );
       }
 
-      setClearDataProgress(getMessage('dataClearedNotification'));
+      setClearDataProgress(getMessage("dataClearedNotification"));
       await refreshStorageStats();
 
       setTimeout(() => {
-        setClearDataProgress('');
+        setClearDataProgress("");
         hideClearDataConfirmation();
       }, 2000);
     } catch (error: any) {
-      const errorMessage = error?.message || t('unknownErrorMessage', 'Unknown error');
+      const errorMessage =
+        error?.message || t("unknownErrorMessage", "Unknown error");
       setClearDataProgress(
-        t('popupClearDataFailed', 'Failed to clear data: {0}', [String(errorMessage)]),
+        t("popupClearDataFailed", "Failed to clear data: {0}", [
+          String(errorMessage),
+        ]),
       );
       setTimeout(() => {
-        setClearDataProgress('');
+        setClearDataProgress("");
       }, 5000);
     } finally {
       setIsClearingData(false);
     }
   }
 
-  async function openSidepanelAndClose(tab: 'workflows' | 'element-markers' | 'agent-chat') {
+  async function openSidepanelAndClose(
+    tab: "workflows" | "element-markers" | "agent-chat",
+  ) {
     try {
       const current = await chrome.windows.getCurrent();
       if ((chrome.sidePanel as any)?.setOptions) {
@@ -861,28 +938,33 @@ export default function PopupApp() {
   }
 
   function openWorkflowSidepanel() {
-    showComingSoon(t('popupWorkflowManagementTitle', 'Workflow management'));
+    showComingSoon(t("popupWorkflowManagementTitle", "Workflow management"));
   }
 
   function openElementMarkerSidepanel() {
-    void openSidepanelAndClose('element-markers');
+    void openSidepanelAndClose("element-markers");
   }
 
   function openAgentSidepanel() {
-    void openSidepanelAndClose('agent-chat');
+    void openSidepanelAndClose("agent-chat");
   }
 
   async function toggleWebEditor() {
     try {
-      await chrome.runtime.sendMessage({ type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TOGGLE });
+      await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TOGGLE,
+      });
     } catch (error) {
-      console.warn('Failed to switch web page editing mode:', error);
+      console.warn("Failed to switch web page editing mode:", error);
     }
   }
 
   async function toggleElementMarker() {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       if (!tab?.id) {
         return;
       }
@@ -892,13 +974,13 @@ export default function PopupApp() {
         tabId: tab.id,
       });
     } catch (error) {
-      console.warn('Failed to enable element annotation:', error);
+      console.warn("Failed to enable element annotation:", error);
     }
   }
 
   async function openWelcomePage() {
     try {
-      await chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
+      await chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
     } catch {
       // ignore
     }
@@ -913,16 +995,22 @@ export default function PopupApp() {
   }
 
   function startRecording() {
-    showComingSoon(t('popupRecordPlaybackFeature', 'Record playback'));
+    showComingSoon(t("popupRecordPlaybackFeature", "Record playback"));
   }
 
   function stopRecording() {
-    showComingSoon(t('popupRecordPlaybackFeature', 'Record playback'));
+    showComingSoon(t("popupRecordPlaybackFeature", "Record playback"));
   }
 
   useEffect(() => {
-    const onRuntimeMessage = (message: { type?: string; payload?: unknown }) => {
-      if (message.type === BACKGROUND_MESSAGE_TYPES.SERVER_STATUS_CHANGED && message.payload) {
+    const onRuntimeMessage = (message: {
+      type?: string;
+      payload?: unknown;
+    }) => {
+      if (
+        message.type === BACKGROUND_MESSAGE_TYPES.SERVER_STATUS_CHANGED &&
+        message.payload
+      ) {
         setServerStatus(message.payload as ServerStatus);
       }
     };
@@ -931,7 +1019,7 @@ export default function PopupApp() {
       changes: Record<string, chrome.storage.StorageChange>,
       area: string,
     ) => {
-      if (area !== 'local') {
+      if (area !== "local") {
         return;
       }
 
@@ -984,26 +1072,32 @@ export default function PopupApp() {
 
   return (
     <div className="popup-container agent-theme" data-agent-theme={agentTheme}>
-      {currentView === 'home' ? (
+      {currentView === "home" ? (
         <div className="home-view">
           <div className="header">
             <div className="header-content">
-              <h1 className="header-title">{t('extensionName', 'webpage-mcp-server')}</h1>
+              <h1 className="header-title">
+                {t("extensionName", "Webpage MCP Connector")}
+              </h1>
             </div>
           </div>
 
           <div className="content">
             <div className="section">
-              <h2 className="section-title">{getMessage('nativeServerConfigLabel')}</h2>
+              <h2 className="section-title">
+                {getMessage("nativeServerConfigLabel")}
+              </h2>
               <div className="config-card">
                 <div className="status-section">
                   <div className="status-header">
-                    <p className="status-label">{getMessage('runningStatusLabel')}</p>
+                    <p className="status-label">
+                      {getMessage("runningStatusLabel")}
+                    </p>
                     <button
                       className="refresh-status-button"
                       type="button"
                       onClick={() => void refreshServerStatus()}
-                      title={getMessage('refreshStatusButton')}
+                      title={getMessage("refreshStatusButton")}
                     >
                       <RefreshIcon className="icon-small" />
                     </button>
@@ -1014,7 +1108,8 @@ export default function PopupApp() {
                   </div>
                   {serverStatus.lastUpdated ? (
                     <div className="status-timestamp">
-                      {getMessage('lastUpdatedLabel')} {new Date(serverStatus.lastUpdated).toLocaleTimeString()}
+                      {getMessage("lastUpdatedLabel")}{" "}
+                      {new Date(serverStatus.lastUpdated).toLocaleTimeString()}
                     </div>
                   ) : null}
                 </div>
@@ -1024,8 +1119,8 @@ export default function PopupApp() {
                     <div className="mcp-config-header">
                       <p className="mcp-config-label">
                         {t(
-                          'popupOneTimeHostRegistrationLabel',
-                          'One-time host registration (current extension ID)',
+                          "popupOneTimeHostRegistrationLabel",
+                          "One-time host registration (current extension ID)",
                         )}
                       </p>
                       <button
@@ -1041,7 +1136,8 @@ export default function PopupApp() {
                     </div>
                     {nativeConnectionError ? (
                       <p className="register-command-error">
-                        {t('popupConnectFailedPrefix', 'Connect failed')}: {nativeConnectionError}
+                        {t("popupConnectFailedPrefix", "Connect failed")}:{" "}
+                        {nativeConnectionError}
                       </p>
                     ) : null}
                   </div>
@@ -1050,8 +1146,14 @@ export default function PopupApp() {
                 {showMcpConfig ? (
                   <div className="mcp-config-section">
                     <div className="mcp-config-header">
-                      <p className="mcp-config-label">{getMessage('mcpServerConfigLabel')}</p>
-                      <button className="copy-config-button" type="button" onClick={() => void copyMcpConfig()}>
+                      <p className="mcp-config-label">
+                        {getMessage("mcpServerConfigLabel")}
+                      </p>
+                      <button
+                        className="copy-config-button"
+                        type="button"
+                        onClick={() => void copyMcpConfig()}
+                      >
                         {copyButtonText}
                       </button>
                     </div>
@@ -1064,8 +1166,14 @@ export default function PopupApp() {
                 {showMcpConfig && authTokenEnabled && nativeAuthToken ? (
                   <div className="mcp-config-section">
                     <div className="mcp-config-header">
-                      <p className="mcp-config-label">{t('popupAuthTokenLabel', 'Auth token')}</p>
-                      <button className="copy-config-button" type="button" onClick={() => void copyAuthToken()}>
+                      <p className="mcp-config-label">
+                        {t("popupAuthTokenLabel", "Auth token")}
+                      </p>
+                      <button
+                        className="copy-config-button"
+                        type="button"
+                        onClick={() => void copyAuthToken()}
+                      >
                         {authCopyButtonText}
                       </button>
                     </div>
@@ -1084,25 +1192,27 @@ export default function PopupApp() {
                   <BoltIcon />
                   <span>
                     {isConnecting
-                      ? getMessage('connectingStatus')
-                      : nativeConnectionStatus === 'connected'
-                        ? getMessage('disconnectButton')
-                        : getMessage('connectButton')}
+                      ? getMessage("connectingStatus")
+                      : nativeConnectionStatus === "connected"
+                        ? getMessage("disconnectButton")
+                        : getMessage("connectButton")}
                   </span>
                 </button>
               </div>
             </div>
 
             <div className="section">
-              <h2 className="section-title">{t('popupQuickToolsTitle', 'Quick tools')}</h2>
+              <h2 className="section-title">
+                {t("popupQuickToolsTitle", "Quick tools")}
+              </h2>
               <div className="rr-icon-buttons">
                 <button
                   className="rr-icon-btn rr-icon-btn-record rr-icon-btn-coming-soon has-tooltip"
                   type="button"
                   onClick={startRecording}
                   data-tooltip={t(
-                    'popupRecordingUnderDevelopment',
-                    'The recording function is under development',
+                    "popupRecordingUnderDevelopment",
+                    "The recording function is under development",
                   )}
                 >
                   <RecordIcon recording={false} />
@@ -1112,8 +1222,8 @@ export default function PopupApp() {
                   type="button"
                   onClick={stopRecording}
                   data-tooltip={t(
-                    'popupRecordingUnderDevelopment',
-                    'The recording function is under development',
+                    "popupRecordingUnderDevelopment",
+                    "The recording function is under development",
                   )}
                 >
                   <StopIcon />
@@ -1122,7 +1232,10 @@ export default function PopupApp() {
                   className="rr-icon-btn rr-icon-btn-edit has-tooltip"
                   type="button"
                   onClick={() => void toggleWebEditor()}
-                  data-tooltip={t('popupEnableWebEditorTooltip', 'Turn on page editing mode')}
+                  data-tooltip={t(
+                    "popupEnableWebEditorTooltip",
+                    "Turn on page editing mode",
+                  )}
                 >
                   <EditIcon />
                 </button>
@@ -1130,7 +1243,10 @@ export default function PopupApp() {
                   className="rr-icon-btn rr-icon-btn-marker has-tooltip"
                   type="button"
                   onClick={() => void toggleElementMarker()}
-                  data-tooltip={t('popupEnableElementMarkerTooltip', 'Turn on element annotation')}
+                  data-tooltip={t(
+                    "popupEnableElementMarkerTooltip",
+                    "Turn on element annotation",
+                  )}
                 >
                   <MarkerIcon />
                 </button>
@@ -1138,11 +1254,24 @@ export default function PopupApp() {
             </div>
 
             <div className="section">
-              <h2 className="section-title">{t('popupManagementPortalTitle', 'Management portal')}</h2>
+              <h2 className="section-title">
+                {t("popupManagementPortalTitle", "Management portal")}
+              </h2>
               <div className="entry-card">
-                <button className="entry-item" type="button" onClick={openAgentSidepanel}>
+                <button
+                  className="entry-item"
+                  type="button"
+                  onClick={openAgentSidepanel}
+                >
                   <div className="entry-icon agent">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="20"
+                      height="20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -1152,46 +1281,88 @@ export default function PopupApp() {
                   </div>
                   <div className="entry-content">
                     <span className="entry-title">
-                      {t('popupIntelligentAssistantTitle', 'Intelligent Assistant')}
+                      {t(
+                        "popupIntelligentAssistantTitle",
+                        "Intelligent Assistant",
+                      )}
                     </span>
                     <span className="entry-desc">
                       {t(
-                        'popupIntelligentAssistantDesc',
-                        'AI agent conversations and tasks',
+                        "popupIntelligentAssistantDesc",
+                        "AI agent conversations and tasks",
                       )}
                     </span>
                   </div>
-                  <svg className="entry-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  <svg
+                    className="entry-arrow"
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 5l7 7-7 7"
+                    />
                   </svg>
                 </button>
 
-                <button className="entry-item entry-item-coming-soon" type="button" onClick={openWorkflowSidepanel}>
+                <button
+                  className="entry-item entry-item-coming-soon"
+                  type="button"
+                  onClick={openWorkflowSidepanel}
+                >
                   <div className="entry-icon workflow">
                     <WorkflowIcon />
                   </div>
                   <div className="entry-content">
                     <span className="entry-title">
-                      {t('popupWorkflowManagementTitle', 'Workflow management')}
+                      {t("popupWorkflowManagementTitle", "Workflow management")}
                       <span className="coming-soon-badge">
-                        {t('popupComingSoonBadge', 'Coming Soon')}
+                        {t("popupComingSoonBadge", "Coming Soon")}
                       </span>
                     </span>
                     <span className="entry-desc">
                       {t(
-                        'popupWorkflowManagementDesc',
-                        'Recording and playback automation workflows',
+                        "popupWorkflowManagementDesc",
+                        "Recording and playback automation workflows",
                       )}
                     </span>
                   </div>
-                  <svg className="entry-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  <svg
+                    className="entry-arrow"
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 5l7 7-7 7"
+                    />
                   </svg>
                 </button>
 
-                <button className="entry-item" type="button" onClick={openElementMarkerSidepanel}>
+                <button
+                  className="entry-item"
+                  type="button"
+                  onClick={openElementMarkerSidepanel}
+                >
                   <div className="entry-icon marker">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="20"
+                      height="20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -1201,20 +1372,49 @@ export default function PopupApp() {
                   </div>
                   <div className="entry-content">
                     <span className="entry-title">
-                      {t('popupElementMarkerManagementTitle', 'Element annotation management')}
+                      {t(
+                        "popupElementMarkerManagementTitle",
+                        "Element annotation management",
+                      )}
                     </span>
                     <span className="entry-desc">
-                      {t('popupElementMarkerManagementDesc', 'Manage page element annotations')}
+                      {t(
+                        "popupElementMarkerManagementDesc",
+                        "Manage page element annotations",
+                      )}
                     </span>
                   </div>
-                  <svg className="entry-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  <svg
+                    className="entry-arrow"
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 5l7 7-7 7"
+                    />
                   </svg>
                 </button>
 
-                <button className="entry-item" type="button" onClick={() => setCurrentView('local-model')}>
+                <button
+                  className="entry-item"
+                  type="button"
+                  onClick={() => setCurrentView("local-model")}
+                >
                   <div className="entry-icon model">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="20"
+                      height="20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -1223,13 +1423,30 @@ export default function PopupApp() {
                     </svg>
                   </div>
                   <div className="entry-content">
-                    <span className="entry-title">{t('popupLocalModelTitle', 'Local model')}</span>
+                    <span className="entry-title">
+                      {t("popupLocalModelTitle", "Local model")}
+                    </span>
                     <span className="entry-desc">
-                      {t('popupLocalModelDesc', 'Semantic engine and model management')}
+                      {t(
+                        "popupLocalModelDesc",
+                        "Semantic engine and model management",
+                      )}
                     </span>
                   </div>
-                  <svg className="entry-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  <svg
+                    className="entry-arrow"
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 5l7 7-7 7"
+                    />
                   </svg>
                 </button>
               </div>
@@ -1242,9 +1459,17 @@ export default function PopupApp() {
                 className="footer-link"
                 type="button"
                 onClick={() => void openWelcomePage()}
-                title={t('popupViewInstallGuideTitle', 'View installation guide')}
+                title={t(
+                  "popupViewInstallGuideTitle",
+                  "View installation guide",
+                )}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -1252,15 +1477,20 @@ export default function PopupApp() {
                     d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                {t('popupGuideLink', 'Guide')}
+                {t("popupGuideLink", "Guide")}
               </button>
               <button
                 className="footer-link"
                 type="button"
                 onClick={() => void openTroubleshooting()}
-                title={t('popupTroubleshootingTitle', 'Troubleshooting')}
+                title={t("popupTroubleshootingTitle", "Troubleshooting")}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -1268,15 +1498,17 @@ export default function PopupApp() {
                     d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
                   />
                 </svg>
-                {t('popupDocsLink', 'Docs')}
+                {t("popupDocsLink", "Docs")}
               </button>
             </div>
-            <p className="footer-text">{t('popupFooterTagline', 'webpage mcp server for ai')}</p>
+            <p className="footer-text">
+              {t("popupFooterTagline", "webpage mcp server for ai")}
+            </p>
           </div>
         </div>
       ) : null}
 
-      {currentView === 'local-model' ? (
+      {currentView === "local-model" ? (
         <LocalModelPage
           semanticEngineStatus={semanticEngineStatus}
           isSemanticEngineInitializing={isSemanticEngineInitializing}
@@ -1295,7 +1527,7 @@ export default function PopupApp() {
           clearDataProgress={clearDataProgress}
           cacheStats={cacheStats}
           isManagingCache={isManagingCache}
-          onBack={() => setCurrentView('home')}
+          onBack={() => setCurrentView("home")}
           onInitializeSemanticEngine={() => void initializeSemanticEngine()}
           onSwitchModel={(preset) => void switchModel(preset as ModelPreset)}
           onRetryModelInitialization={() => void retryModelInitialization()}
@@ -1307,14 +1539,18 @@ export default function PopupApp() {
 
       <ConfirmDialog
         visible={showClearConfirmation}
-        title={getMessage('confirmClearDataTitle')}
-        message={getMessage('clearDataWarningMessage')}
-        items={[getMessage('clearDataList1'), getMessage('clearDataList2'), getMessage('clearDataList3')]}
-        warning={getMessage('clearDataIrreversibleWarning')}
+        title={getMessage("confirmClearDataTitle")}
+        message={getMessage("clearDataWarningMessage")}
+        items={[
+          getMessage("clearDataList1"),
+          getMessage("clearDataList2"),
+          getMessage("clearDataList3"),
+        ]}
+        warning={getMessage("clearDataIrreversibleWarning")}
         icon="⚠️"
-        confirmText={getMessage('confirmClearButton')}
-        cancelText={getMessage('cancelButton')}
-        confirmingText={getMessage('clearingStatus')}
+        confirmText={getMessage("confirmClearButton")}
+        cancelText={getMessage("cancelButton")}
+        confirmingText={getMessage("clearingStatus")}
         isConfirming={isClearingData}
         onConfirm={() => void confirmClearAllData()}
         onCancel={hideClearDataConfirmation}
@@ -1322,15 +1558,25 @@ export default function PopupApp() {
 
       {comingSoonToast.show ? (
         <div className="coming-soon-toast">
-          <svg className="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            className="toast-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
             <circle cx="12" cy="12" r="10" />
-            <path d="M12 6v6l4 2" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d="M12 6v6l4 2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
           <span>
-            {comingSoonToast.feature}{' '}
+            {comingSoonToast.feature}{" "}
             {t(
-              'popupFeatureUnderDevelopmentSuffix',
-              'The feature is under development, please stay tuned',
+              "popupFeatureUnderDevelopmentSuffix",
+              "The feature is under development, please stay tuned",
             )}
           </span>
         </div>

@@ -276,7 +276,7 @@ export default function AgentProjectMenu({
             className="flex items-center gap-2 cursor-pointer"
             title={t(
               'agentProjectMenuEnableMcpTitle',
-              'Enable local Webpage MCP server integration',
+              'Enable local Webpage MCP Connector integration',
             )}
           >
             <input
@@ -289,7 +289,7 @@ export default function AgentProjectMenu({
               onChange={handleWebpageMcpChange}
             />
             <span className="text-xs" style={{ color: 'var(--ac-text, #1a1a1a)' }}>
-              {t('agentProjectMenuEnableMcpLabel', 'Enable Webpage MCP Server')}
+              {t('agentProjectMenuEnableMcpLabel', 'Enable Webpage MCP Connector')}
             </span>
           </label>
         </div>
