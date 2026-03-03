@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { resolveAgentAttachmentUrl } from '@/utils/agent-attachment-url';
+import { getMessage } from '@/utils/i18n';
 
 import type { TimelineItem } from '../../../composables/useAgentThreads';
 import MarkdownRenderer from './MarkdownRenderer';
@@ -18,6 +19,9 @@ export default function TimelineUserPromptStep({
   item,
   serverPort: _serverPort,
 }: TimelineUserPromptStepProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [overlayTarget, setOverlayTarget] = useState<Element | null>(null);
   const [viewerAttachment, setViewerAttachment] = useState<UserPromptAttachment | null>(null);
@@ -112,7 +116,10 @@ export default function TimelineUserPromptStep({
 
       {!hasText && item.attachments.length > 0 ? (
         <span className="text-xs italic" style={{ color: 'var(--ac-text-subtle)' }}>
-          Sent {item.attachments.length} image{item.attachments.length === 1 ? '' : 's'}
+          {t('agentSentImagesSummary', 'Sent {0} image{1}', [
+            String(item.attachments.length),
+            item.attachments.length === 1 ? '' : 's',
+          ])}
         </span>
       ) : null}
 
@@ -145,7 +152,7 @@ export default function TimelineUserPromptStep({
                   <div
                     className="w-full h-full flex items-center justify-center"
                     style={{ color: 'var(--ac-text-subtle)' }}
-                    title="Server not ready"
+                    title={t('agentServerNotReadyTitle', 'Server not ready')}
                   >
                     <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path
@@ -179,7 +186,7 @@ export default function TimelineUserPromptStep({
               className="fixed inset-0 z-50 flex items-center justify-center"
               role="dialog"
               aria-modal="true"
-              aria-label="Image preview"
+              aria-label={t('agentImagePreviewAria', 'Image preview')}
             >
               <div className="absolute inset-0 bg-black/60" onClick={() => setViewerAttachment(null)} />
               <div
@@ -195,7 +202,7 @@ export default function TimelineUserPromptStep({
                   type="button"
                   className="absolute top-2 right-2 p-1 rounded-full transition-colors hover:bg-black/20 cursor-pointer"
                   style={{ color: 'white' }}
-                  aria-label="Close image preview"
+                  aria-label={t('agentImagePreviewCloseAria', 'Close image preview')}
                   onClick={() => setViewerAttachment(null)}
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -216,7 +223,10 @@ export default function TimelineUserPromptStep({
                   />
                 ) : (
                   <div className="p-6 text-sm" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-                    Agent server not ready (missing server port).
+                    {t(
+                      'agentServerNotReadyMissingPort',
+                      'Agent server not ready (missing server port).',
+                    )}
                   </div>
                 )}
               </div>

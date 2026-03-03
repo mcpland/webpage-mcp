@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { CodexReasoningEffort } from 'webpage-mcp-shared';
 import type { ModelDefinition } from '@/common/agent-models';
+import { getMessage } from '@/utils/i18n';
 import type { AttachmentWithPreview } from '../../composables/useAttachments';
 import type { RequestState } from '../../composables/useAgentChat';
 import ComposerDrawer from './ComposerDrawer';
@@ -74,6 +75,9 @@ export default function AgentComposer({
   onSessionSettings,
   onSessionReset,
 }: AgentComposerProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const modelWidthRef = useRef<HTMLSpanElement | null>(null);
   const [modelSelectWidth, setModelSelectWidth] = useState('auto');
@@ -101,13 +105,13 @@ export default function AgentComposer({
   }, [selectedModelName, availableModels]);
 
   const statusText = useMemo(() => {
-    if (sending) return 'Sending...';
-    if (cancelling) return 'Stopping...';
-    if (requestState === 'starting') return 'Starting...';
-    if (requestState === 'ready') return 'Preparing...';
-    if (requestState === 'running') return 'Working...';
-    return 'Ready';
-  }, [sending, cancelling, requestState]);
+    if (sending) return t('agentComposerStatusSending', 'Sending...');
+    if (cancelling) return t('agentComposerStatusStopping', 'Stopping...');
+    if (requestState === 'starting') return t('agentComposerStatusStarting', 'Starting...');
+    if (requestState === 'ready') return t('agentComposerStatusPreparing', 'Preparing...');
+    if (requestState === 'running') return t('agentComposerStatusWorking', 'Working...');
+    return t('agentComposerStatusReady', 'Ready');
+  }, [sending, cancelling, requestState, t]);
 
   const statusColor = sending || isRequestActive ? 'var(--ac-accent)' : 'var(--ac-text-subtle)';
 
@@ -193,7 +197,10 @@ export default function AgentComposer({
   function handleReset(): void {
     if (
       window.confirm(
-        'Reset this conversation? All messages will be deleted and the session will start fresh.',
+        t(
+          'agentComposerResetConfirm',
+          'Reset this conversation? All messages will be deleted and the session will start fresh.',
+        ),
       )
     ) {
       onSessionReset?.();
@@ -235,7 +242,7 @@ export default function AgentComposer({
           }}
         >
           <span className="text-sm font-medium" style={{ color: 'var(--ac-accent)' }}>
-            Drop images here
+            {t('agentComposerDropImagesHere', 'Drop images here')}
           </span>
         </div>
       ) : null}
@@ -273,7 +280,7 @@ export default function AgentComposer({
               <button
                 className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                 style={{ backgroundColor: 'var(--ac-error)', color: 'white' }}
-                title="Remove image"
+                title={t('agentComposerRemoveImageTitle', 'Remove image')}
                 onClick={() => onAttachmentRemove?.(index)}
                 type="button"
               >
@@ -369,7 +376,7 @@ export default function AgentComposer({
                 border: 'var(--ac-border-width) solid var(--ac-border)',
                 borderRadius: 'var(--ac-radius-button)',
               }}
-              title="Expand editor"
+              title={t('agentComposerExpandEditorTitle', 'Expand editor')}
               onClick={() => setIsDrawerOpen(true)}
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -390,7 +397,7 @@ export default function AgentComposer({
               <button
                 className="p-1.5 ac-btn"
                 style={{ color: 'var(--ac-text-subtle)', borderRadius: 'var(--ac-radius-button)' }}
-                data-tooltip="Attach image (drag, paste, or click)"
+                data-tooltip={t('agentComposerAttachImageTooltip', 'Attach image (drag, paste, or click)')}
                 onClick={() => onAttachmentAdd?.()}
                 type="button"
               >
@@ -406,7 +413,7 @@ export default function AgentComposer({
             ) : null}
 
             {availableModels.length > 0 ? (
-              <div className="relative" data-tooltip="Switch model">
+              <div className="relative" data-tooltip={t('agentComposerSwitchModelTooltip', 'Switch model')}>
                 <span
                   ref={modelWidthRef}
                   className="invisible absolute whitespace-nowrap px-1.5 text-[10px]"
@@ -452,7 +459,7 @@ export default function AgentComposer({
                   fontFamily: 'var(--ac-font-mono)',
                   borderRadius: 'var(--ac-radius-button)',
                 }}
-                data-tooltip="Reasoning effort"
+                data-tooltip={t('agentComposerReasoningEffortTooltip', 'Reasoning effort')}
                 onChange={(event) =>
                   onReasoningEffortChange?.(
                     (event.currentTarget as HTMLSelectElement).value as CodexReasoningEffort,
@@ -470,7 +477,7 @@ export default function AgentComposer({
             <button
               className="p-1 ac-btn"
               style={{ color: 'var(--ac-text-subtle)', borderRadius: 'var(--ac-radius-button)' }}
-              data-tooltip="Reset conversation"
+              data-tooltip={t('agentComposerResetConversationTooltip', 'Reset conversation')}
               onClick={handleReset}
               type="button"
             >
@@ -487,7 +494,7 @@ export default function AgentComposer({
             <button
               className="p-1 ac-btn"
               style={{ color: 'var(--ac-text-subtle)', borderRadius: 'var(--ac-radius-button)' }}
-              data-tooltip="Session settings"
+              data-tooltip={t('agentComposerSessionSettingsTooltip', 'Session settings')}
               onClick={() => onSessionSettings?.()}
               type="button"
             >
@@ -518,8 +525,16 @@ export default function AgentComposer({
               className="p-1 transition-colors cursor-pointer"
               style={primaryActionButtonStyle}
               disabled={primaryActionDisabled}
-              title={isRequestActive ? 'Stop' : 'Send'}
-              aria-label={isRequestActive ? 'Stop request' : 'Send message'}
+              title={
+                isRequestActive
+                  ? t('agentComposerStopTitle', 'Stop')
+                  : t('agentComposerSendTitle', 'Send')
+              }
+              aria-label={
+                isRequestActive
+                  ? t('agentComposerStopRequestAria', 'Stop request')
+                  : t('agentComposerSendMessageAria', 'Send message')
+              }
               onClick={handlePrimaryAction}
             >
               {isRequestActive ? (
@@ -577,7 +592,7 @@ export default function AgentComposer({
               <button
                 className="p-1.5 ac-btn"
                 style={{ color: 'var(--ac-text-subtle)', borderRadius: 'var(--ac-radius-button)' }}
-                data-tooltip="Attach image"
+                data-tooltip={t('agentComposerAttachImageShortTooltip', 'Attach image')}
                 onClick={() => onAttachmentAdd?.()}
                 type="button"
               >
@@ -593,7 +608,7 @@ export default function AgentComposer({
             ) : null}
 
             {availableModels.length > 0 ? (
-              <div className="relative" data-tooltip="Switch model">
+              <div className="relative" data-tooltip={t('agentComposerSwitchModelTooltip', 'Switch model')}>
                 <select
                   value={selectedModel}
                   className="py-0.5 text-[10px] border-none bg-transparent cursor-pointer appearance-none pr-4 pl-1.5"

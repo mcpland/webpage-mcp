@@ -420,7 +420,7 @@ export default function WorkflowsView({
                                           new Date(run.startedAt).getTime()) /
                                           1000,
                                       )}
-                                      s
+                                      {t('workflowsSecondsUnit', 's')}
                                     </span>
                                   ) : null}
                                 </div>
@@ -438,8 +438,16 @@ export default function WorkflowsView({
                                       : 'var(--ac-text-muted)',
                                 }}
                               >
-                                #{index + 1} {entry.status} - step={entry.stepId}
-                                {entry.tookMs ? <span className="ml-2">{entry.tookMs}ms</span> : null}
+                                {t('workflowsRunEntrySummary', '#{0} {1} - step={2}', [
+                                  String(index + 1),
+                                  String(entry.status || ''),
+                                  String(entry.stepId || ''),
+                                ])}
+                                {entry.tookMs ? (
+                                  <span className="ml-2">
+                                    {t('workflowsMillisecondsValue', '{0}ms', [String(entry.tookMs)])}
+                                  </span>
+                                ) : null}
                               </div>
                             ))}
                           </div>

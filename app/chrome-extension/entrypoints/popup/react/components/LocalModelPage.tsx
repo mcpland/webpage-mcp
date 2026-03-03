@@ -167,6 +167,9 @@ export function LocalModelPage({
   onCleanupCache,
   onClearAllCache,
 }: LocalModelPageProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const progressText = isModelDownloading
     ? getMessage("downloadingModelStatus", [modelDownloadProgress.toString()])
     : isModelSwitching
@@ -176,13 +179,18 @@ export function LocalModelPage({
   return (
     <div className="local-model-page">
       <div className="page-header">
-        <button type="button" className="back-button" onClick={onBack} title="Return to homepage">
+        <button
+          type="button"
+          className="back-button"
+          onClick={onBack}
+          title={t('localModelBackToHomeTitle', 'Return to homepage')}
+        >
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          <span>Return</span>
+          <span>{t('localModelReturnButton', 'Return')}</span>
         </button>
-        <h2 className="page-title">Local model</h2>
+        <h2 className="page-title">{t('popupLocalModelTitle', 'Local model')}</h2>
       </div>
 
       <div className="page-content">

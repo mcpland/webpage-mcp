@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { AgentProject, AgentSession } from 'webpage-mcp-shared';
+import { getMessage } from '@/utils/i18n';
 
 import AgentSessionListItem from './AgentSessionListItem';
 
@@ -42,6 +43,9 @@ export default function AgentSessionsView({
   onSessionRename,
   onSessionOpenProject,
 }: AgentSessionsViewProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredSessions = useMemo(() => {
@@ -105,7 +109,7 @@ export default function AgentSessionsView({
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.currentTarget.value)}
               type="text"
-              placeholder="Search sessions..."
+              placeholder={t('agentSessionsSearchPlaceholder', 'Search sessions...')}
               className="w-full pl-9 pr-3 py-2 text-sm"
               style={{
                 backgroundColor: 'var(--ac-surface-muted)',
@@ -129,13 +133,13 @@ export default function AgentSessionsView({
             type="button"
           >
             {isCreating ? (
-              <span>Creating...</span>
+              <span>{t('agentSessionCreating', 'Creating...')}</span>
             ) : (
               <span className="flex items-center gap-1">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
                 </svg>
-                New
+                {t('agentSessionNewShort', 'New')}
               </span>
             )}
           </button>
@@ -148,7 +152,7 @@ export default function AgentSessionsView({
             className="flex items-center justify-center py-12"
             style={{ color: 'var(--ac-text-muted)' }}
           >
-            <span className="text-sm">Loading sessions...</span>
+            <span className="text-sm">{t('agentSessionsLoading', 'Loading sessions...')}</span>
           </div>
         ) : null}
 
@@ -174,10 +178,14 @@ export default function AgentSessionsView({
               </svg>
             </div>
             <div className="text-sm font-medium mb-1" style={{ color: 'var(--ac-text)' }}>
-              {searchQuery ? 'No matching sessions' : 'No sessions yet'}
+              {searchQuery
+                ? t('agentSessionsNoMatching', 'No matching sessions')
+                : t('agentSessionsEmpty', 'No sessions yet')}
             </div>
             <div className="text-xs text-center mb-4" style={{ color: 'var(--ac-text-muted)' }}>
-              {searchQuery ? 'Try a different search term' : 'Start a new conversation with AI'}
+              {searchQuery
+                ? t('agentSessionsTryDifferentSearch', 'Try a different search term')
+                : t('agentSessionsStartConversation', 'Start a new conversation with AI')}
             </div>
             {!searchQuery ? (
               <button
@@ -190,7 +198,7 @@ export default function AgentSessionsView({
                 onClick={onSessionNew}
                 type="button"
               >
-                Start New Session
+                {t('agentSessionsStartNewButton', 'Start New Session')}
               </button>
             ) : null}
           </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getMessage } from '@/utils/i18n';
 import './FieldSelector.css';
 
 type FieldSelectorProps = {
@@ -27,6 +28,8 @@ async function ensurePickerInjected(tabId: number) {
 }
 
 export default function FieldSelector({ modelValue, field, onUpdateModelValue }: FieldSelectorProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
   const [text, setText] = useState(modelValue ?? '');
   const [error, setError] = useState('');
   const placeholder = field?.placeholder || '.btn.primary';
@@ -40,14 +43,14 @@ export default function FieldSelector({ modelValue, field, onUpdateModelValue }:
       setError('');
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       const tabId = tabs?.[0]?.id;
-      if (!tabId) throw new Error('Event tab not found');
+      if (!tabId) throw new Error(t('builderActiveTabNotFound', 'Active tab not found'));
 
       await ensurePickerInjected(tabId);
       const result: any = await chrome.tabs.sendMessage(tabId, { action: 'rr_picker_start' } as any);
 
       if (!result || !result.success) {
         if (result?.cancelled) return;
-        throw new Error(result?.error || 'Pickup failed');
+        throw new Error(result?.error || t('builderPickFailed', 'Pick failed'));
       }
 
       const candidates = Array.isArray(result.candidates) ? result.candidates : [];
@@ -70,7 +73,12 @@ export default function FieldSelector({ modelValue, field, onUpdateModelValue }:
         setText(selected);
         onUpdateModelValue(selected);
       } else {
-        setError('No valid selector was generated, please enter it manually');
+        setError(
+          t(
+            'builderNoSelectorGenerated',
+            'No valid selector was generated. Please enter it manually.',
+          ),
+        );
       }
     } catch (err: any) {
       setError(err?.message || String(err));
@@ -90,11 +98,21 @@ export default function FieldSelector({ modelValue, field, onUpdateModelValue }:
             onUpdateModelValue(next);
           }}
         />
-        <button className="btn-mini" type="button" title="Picked up from page" onClick={() => void onPick()}>
-          pick up
+        <button
+          className="btn-mini"
+          type="button"
+          title={t('builderPickedFromPageTitle', 'Picked from page')}
+          onClick={() => void onPick()}
+        >
+          {t('builderPickButton', 'Pick')}
         </button>
       </div>
-      <div className="help">You can enter a CSS selector or click Pick to select an element on the page</div>
+      <div className="help">
+        {t(
+          'builderSelectorHelpText',
+          'Enter a CSS selector, or click Pick to select an element on the page.',
+        )}
+      </div>
       {error ? <div className="error-item">{error}</div> : null}
     </div>
   );

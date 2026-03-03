@@ -1,307 +1,1321 @@
 {
-  "extensionName": {
-    "message": "webpage-mcp-server",
-    "description": "확장 프로그램 이름"
-  },
-  "extensionDescription": {
-    "message": "크롬 브라우저와 연동하여 브라우저 기능을 제어하는 MCP 서버입니다.",
-    "description": "확장 프로그램 설명"
-  },
-  "nativeServerConfigLabel": {
-    "message": "MCP 서버 설정",
-    "description": "MCP 서버 설정의 주 섹션 제목"
-  },
-  "semanticEngineLabel": {
-    "message": "시맨틱 엔진",
-    "description": "시맨틱 엔진의 주 섹션 제목"
-  },
-  "embeddingModelLabel": {
-    "message": "임베딩 모델",
-    "description": "모델 선택의 주 섹션 제목"
-  },
-  "indexDataManagementLabel": {
-    "message": "인덱스 데이터 관리",
-    "description": "데이터 관리의 주 섹션 제목"
-  },
-  "modelCacheManagementLabel": {
-    "message": "모델 캐시 관리",
-    "description": "캐시 관리의 주 섹션 제목"
-  },
-  "statusLabel": {
-    "message": "상태",
-    "description": "일반 상태 레이블"
-  },
-  "runningStatusLabel": {
-    "message": "실행 상태",
-    "description": "서버 실행 상태 레이블"
-  },
-  "connectionStatusLabel": {
-    "message": "연결 상태",
-    "description": "연결 상태 레이블"
-  },
-  "lastUpdatedLabel": {
-    "message": "마지막 업데이트:",
-    "description": "마지막 업데이트 타임스탬프 레이블"
-  },
-  "connectButton": {
-    "message": "연결",
-    "description": "연결 버튼 텍스트"
-  },
-  "disconnectButton": {
-    "message": "연결 끊기",
-    "description": "연결 끊기 버튼 텍스트"
-  },
-  "connectingStatus": {
-    "message": "연결 중...",
-    "description": "연결 상태 메시지"
-  },
-  "connectedStatus": {
-    "message": "연결됨",
-    "description": "연결된 상태 메시지"
-  },
-  "disconnectedStatus": {
-    "message": "연결 끊김",
-    "description": "연결이 끊긴 상태 메시지"
-  },
-  "detectingStatus": {
-    "message": "감지 중...",
-    "description": "감지 상태 메시지"
-  },
-  "serviceRunningStatus": {
-    "message": "서비스 실행 중 (포트: $PORT$)",
-    "description": "포트 번호와 함께 서비스 실행 중 상태",
-    "placeholders": {
-      "port": {
-        "content": "$1",
-        "example": "12306"
-      }
-    }
-  },
-  "serviceNotConnectedStatus": {
-    "message": "서비스에 연결되지 않음",
-    "description": "서비스가 연결되지 않은 상태"
-  },
-  "connectedServiceNotStartedStatus": {
-    "message": "연결됨, 서비스 시작되지 않음",
-    "description": "연결되었지만 서비스가 시작되지 않은 상태"
-  },
-  "mcpServerConfigLabel": {
-    "message": "MCP 서버 설정",
-    "description": "MCP 서버 설정 섹션 레이블"
-  },
-  "connectionPortLabel": {
-    "message": "연결 포트",
-    "description": "연결 포트 입력 레이블"
-  },
-  "refreshStatusButton": {
-    "message": "상태 새로고침",
-    "description": "상태 새로고침 버튼 툴팁"
-  },
-  "copyConfigButton": {
-    "message": "설정 복사",
-    "description": "설정 복사 버튼 텍스트"
-  },
-  "retryButton": {
-    "message": "재시도",
-    "description": "재시도 버튼 텍스트"
-  },
-  "cancelButton": {
-    "message": "취소",
-    "description": "취소 버튼 텍스트"
-  },
-  "confirmButton": {
-    "message": "확인",
-    "description": "확인 버튼 텍스트"
-  },
-  "saveButton": {
-    "message": "저장",
-    "description": "저장 버튼 텍스트"
-  },
-  "closeButton": {
-    "message": "닫기",
-    "description": "닫기 버튼 텍스트"
-  },
-  "resetButton": {
-    "message": "초기화",
-    "description": "초기화 버튼 텍스트"
-  },
-  "initializingStatus": {
-    "message": "초기화 중...",
-    "description": "초기화 진행 메시지"
-  },
-  "processingStatus": {
-    "message": "처리 중...",
-    "description": "처리 진행 메시지"
-  },
-  "loadingStatus": {
-    "message": "로드 중...",
-    "description": "로드 진행 메시지"
-  },
-  "clearingStatus": {
-    "message": "삭제 중...",
-    "description": "삭제 진행 메시지"
-  },
-  "cleaningStatus": {
-    "message": "정리 중...",
-    "description": "정리 진행 메시지"
-  },
-  "downloadingStatus": {
-    "message": "다운로드 중...",
-    "description": "다운로드 진행 메시지"
-  },
-  "semanticEngineReadyStatus": {
-    "message": "시맨틱 엔진 준비 완료",
-    "description": "시맨틱 엔진 준비 완료 상태"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "시맨틱 엔진 초기화 중...",
-    "description": "시맨틱 엔진 초기화 상태"
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "시맨틱 엔진 초기화 실패",
-    "description": "시맨틱 엔진 초기화 실패 상태"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "시맨틱 엔진이 초기화되지 않음",
-    "description": "시맨틱 엔진이 초기화되지 않은 상태"
-  },
-  "initSemanticEngineButton": {
-    "message": "시맨틱 엔진 초기화",
-    "description": "시맨틱 엔진 초기화 버튼 텍스트"
-  },
-  "reinitializeButton": {
-    "message": "재초기화",
-    "description": "재초기화 버튼 텍스트"
-  },
-  "downloadingModelStatus": {
-    "message": "모델 다운로드 중... $PROGRESS$%",
-    "description": "백분율이 포함된 모델 다운로드 진행 상태",
-    "placeholders": {
-      "progress": {
-        "content": "$1",
-        "example": "50"
-      }
-    }
-  },
-  "switchingModelStatus": {
-    "message": "모델 전환 중...",
-    "description": "모델 전환 진행 메시지"
-  },
-  "modelLoadedStatus": {
-    "message": "모델 로드 완료",
-    "description": "모델 로드 성공 상태"
-  },
-  "modelFailedStatus": {
-    "message": "모델 로드 실패",
-    "description": "모델 로드 실패 상태"
-  },
-  "lightweightModelDescription": {
-    "message": "경량 다국어 모델",
-    "description": "경량 모델 옵션 설명"
-  },
-  "betterThanSmallDescription": {
-    "message": "e5-small보다 약간 크지만 성능이 더 좋습니다",
-    "description": "중간 모델 옵션 설명"
-  },
-  "multilingualModelDescription": {
-    "message": "다국어 시맨틱 모델",
-    "description": "다국어 모델 옵션 설명"
-  },
-  "fastPerformance": {
-    "message": "빠름",
-    "description": "빠른 성능 표시"
-  },
-  "balancedPerformance": {
-    "message": "균형",
-    "description": "균형 잡힌 성능 표시"
+  "aboutTitle": {
+    "message": "정보",
+    "description": "정보 대화상자 제목"
   },
   "accuratePerformance": {
     "message": "정확",
     "description": "정확한 성능 표시"
   },
-  "networkErrorMessage": {
-    "message": "네트워크 연결 오류, 네트워크를 확인하고 다시 시도하세요",
-    "description": "네트워크 연결 오류 메시지"
-  },
-  "modelCorruptedErrorMessage": {
-    "message": "모델 파일이 손상되었거나 불완전합니다. 다운로드를 다시 시도하세요",
-    "description": "모델 손상 오류 메시지"
-  },
-  "unknownErrorMessage": {
-    "message": "알 수 없는 오류, 네트워크에서 HuggingFace에 접속할 수 있는지 확인하세요",
-    "description": "알 수 없는 오류 대체 메시지"
-  },
-  "permissionDeniedErrorMessage": {
-    "message": "권한이 거부되었습니다",
-    "description": "권한 거부 오류 메시지"
-  },
-  "timeoutErrorMessage": {
-    "message": "작업 시간 초과",
-    "description": "시간 초과 오류 메시지"
-  },
-  "indexedPagesLabel": {
-    "message": "인덱싱된 페이지",
-    "description": "인덱싱된 페이지 수 레이블"
-  },
-  "indexSizeLabel": {
-    "message": "인덱스 크기",
-    "description": "인덱스 크기 레이블"
-  },
   "activeTabsLabel": {
     "message": "활성 탭",
     "description": "활성 탭 수 레이블"
   },
-  "vectorDocumentsLabel": {
-    "message": "벡터 문서",
-    "description": "벡터 문서 수 레이블"
+  "advancedSettingsLabel": {
+    "message": "고급 설정",
+    "description": "고급 설정 섹션 레이블"
   },
-  "cacheSizeLabel": {
-    "message": "캐시 크기",
-    "description": "캐시 크기 레이블"
+  "agentAllChangesExcluded": {
+    "message": "모든 변경 사항이 제외됩니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentApplyChangesDefault": {
+    "message": "변경사항 적용",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentCacheDesc": {
+    "message": "에이전트 서버가 디스크에 저장한 캐시 이미지를 관리합니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentCacheDialogAria": {
+    "message": "첨부파일 캐시 관리",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentCacheTitle": {
+    "message": "첨부파일 캐시",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentClearFailed": {
+    "message": "첨부파일을 삭제하지 못했습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentClearSelected": {
+    "message": "선택 항목 지우기($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentFilesCount": {
+    "message": "$ARG1$ 파일",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentInvalidServerResponse": {
+    "message": "서버의 응답이 잘못되었습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentInvertSelection": {
+    "message": "거꾸로 하다",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentLoadingStats": {
+    "message": "첨부파일 통계 로드 중...",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentLoadStatsFailed": {
+    "message": "첨부파일 통계를 로드하지 못했습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentMissingTag": {
+    "message": "없어진",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentNoData": {
+    "message": "첨부파일 데이터가 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentOrphanProjectsCount": {
+    "message": "$ARG1$ 고아 프로젝트",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentOrphanTag": {
+    "message": "유아",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentRemovedSummary": {
+    "message": "$ARG1$($ARG2$ 파일)을 제거했습니다.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentAttachmentRootDirectoryLabel": {
+    "message": "루트 디렉터리",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentSelectAll": {
+    "message": "모두 선택",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentSelectProjectsHint": {
+    "message": "디스크에서 캐시된 첨부 파일을 제거할 프로젝트를 선택하세요.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentTotalSizeLabel": {
+    "message": "전체 크기",
+    "description": "Auto-generated localized message"
+  },
+  "agentChatComposerPlaceholder": {
+    "message": "클로드에게 코드 작성을 요청하세요...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerAttachImageShortTooltip": {
+    "message": "이미지 첨부",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerAttachImageTooltip": {
+    "message": "이미지 첨부(드래그, 붙여넣기 또는 클릭)",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerDropImagesHere": {
+    "message": "여기에 이미지를 드롭하세요.",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerExpandEditorTitle": {
+    "message": "편집기 확장",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerReasoningEffortTooltip": {
+    "message": "추론 강도",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerRemoveImageTitle": {
+    "message": "이미지 삭제",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerResetConfirm": {
+    "message": "이 대화를 재설정하시겠습니까? 모든 메시지가 삭제되고 세션이 새로 시작됩니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerResetConversationTooltip": {
+    "message": "대화 재설정",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSendMessageAria": {
+    "message": "메시지 보내기",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSendTitle": {
+    "message": "보내기",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSessionSettingsTooltip": {
+    "message": "세션 설정",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusPreparing": {
+    "message": "준비 중...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusReady": {
+    "message": "준비가 된",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusSending": {
+    "message": "배상...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusStarting": {
+    "message": "시작 중...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusStopping": {
+    "message": "멎는...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusWorking": {
+    "message": "일하고 있는...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStopRequestAria": {
+    "message": "요청 중지",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStopTitle": {
+    "message": "멈추다",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSwitchModelTooltip": {
+    "message": "모델 전환",
+    "description": "Auto-generated localized message"
+  },
+  "agentConversationEmptyPrompt": {
+    "message": "오늘 코딩을 어떻게 도와드릴까요?",
+    "description": "Auto-generated localized message"
+  },
+  "agentDismissErrorAria": {
+    "message": "오류 무시",
+    "description": "Auto-generated localized message"
+  },
+  "agentDismissTitle": {
+    "message": "해고하다",
+    "description": "Auto-generated localized message"
+  },
+  "agentEditsCount": {
+    "message": "$ARG1$ 편집$ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentElementsCount": {
+    "message": "$ARG1$ 요소$ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentErrorOccurred": {
+    "message": "오류가 발생했습니다",
+    "description": "Auto-generated localized message"
+  },
+  "agentExcludeCount": {
+    "message": "제외($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentImagePreviewAria": {
+    "message": "이미지 미리보기",
+    "description": "Auto-generated localized message"
+  },
+  "agentImagePreviewCloseAria": {
+    "message": "이미지 미리보기 닫기",
+    "description": "Auto-generated localized message"
+  },
+  "agentIncludeCount": {
+    "message": "($ARG1$) 포함",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentIncludeExcludeSummary": {
+    "message": "$ARG1$ 포함됨 | $ARG2$ 제외됨",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentLinesCount": {
+    "message": "$ARG1$ 라인",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentLinesWord": {
+    "message": "윤곽",
+    "description": "Auto-generated localized message"
+  },
+  "agentLineWord": {
+    "message": "선",
+    "description": "Auto-generated localized message"
+  },
+  "agentModifiedElementsLabel": {
+    "message": "수정된 요소:",
+    "description": "Auto-generated localized message"
+  },
+  "agentMoreCount": {
+    "message": "+$ARG1$ 이상",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreFilesCount": {
+    "message": "+$ARG1$개 이상의 파일",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreLinesCount": {
+    "message": "$ARG1$ 더보기 $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentNoChangesYet": {
+    "message": "아직 변경사항이 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentNoExcludedElements": {
+    "message": "제외된 요소가 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentOpenProjectFailed": {
+    "message": "프로젝트를 열지 못했습니다: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentOpenProjectMenuTerminal": {
+    "message": "단말기",
+    "description": "Auto-generated localized message"
+  },
+  "agentOpenProjectMenuTitle": {
+    "message": "다음에서 열기",
+    "description": "Auto-generated localized message"
+  },
+  "agentOpenProjectMenuVSCode": {
+    "message": "VS 코드",
+    "description": "Auto-generated localized message"
+  },
+  "agentPreviewFooterLabel": {
+    "message": "에이전트 미리보기",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuAutoOption": {
+    "message": "자동",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuCliLabel": {
+    "message": "CLI",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuDefaultOption": {
+    "message": "기본",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEffortHint": {
+    "message": "새 세션에 적용됩니다. 세션 설정에서 기존 세션을 편집하세요.",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEffortLabel": {
+    "message": "추론 강도",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEnableMcpLabel": {
+    "message": "웹페이지 MCP 서버 활성화",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEnableMcpTitle": {
+    "message": "로컬 웹페이지 MCP 서버 통합 활성화",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuMcpLabel": {
+    "message": "MCP",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuModelLabel": {
+    "message": "모델",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuSaveSettings": {
+    "message": "설정 저장",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuSaving": {
+    "message": "저장 중...",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuSettingsTitle": {
+    "message": "설정",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsConfirmCreateDir": {
+    "message": "\"$ARG1$\" 디렉터리가 존재하지 않습니다. 그것을 만드시겠습니까?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsConfirmSwitchExisting": {
+    "message": "\"$ARG1$\"에 대한 프로젝트가 이미 존재합니다: $ARG2$\n\n해당 프로젝트로 전환하시겠습니까?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentProjectsCreateFailed": {
+    "message": "프로젝트를 생성하지 못했습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsInvalidCreateResponse": {
+    "message": "프로젝트가 생성되었지만 응답이 잘못되었습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsInvalidPath": {
+    "message": "잘못된 경로",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsNewButton": {
+    "message": "+ 새 프로젝트",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsPickerOpenFailed": {
+    "message": "디렉터리 선택기를 열지 못했습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsPickerUnavailable": {
+    "message": "디렉터리 선택기를 사용할 수 없습니다. MCP 서버를 다시 빌드하고 다시 시작하십시오.",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsSelecting": {
+    "message": "선택 중...",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsServerHttpError": {
+    "message": "서버 오류: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsServerUnavailable": {
+    "message": "서버를 사용할 수 없습니다",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsTitle": {
+    "message": "프로젝트",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsValidateFailed": {
+    "message": "경로를 검증하지 못했습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentPromptPreviewLabel": {
+    "message": "프롬프트 미리보기:",
+    "description": "Auto-generated localized message"
+  },
+  "agentSelectedHeader": {
+    "message": "선택된",
+    "description": "Auto-generated localized message"
+  },
+  "agentSelectedTag": {
+    "message": "$ARG1$ 선택됨",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSelectionChipShort": {
+    "message": "셀",
+    "description": "Auto-generated localized message"
+  },
+  "agentSentImagesSummary": {
+    "message": "$ARG1$ 이미지$ARG2$을(를) 보냈습니다.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentServerNotReadyMissingPort": {
+    "message": "에이전트 서버가 준비되지 않았습니다(서버 포트 누락).",
+    "description": "Auto-generated localized message"
+  },
+  "agentServerNotReadySimple": {
+    "message": "에이전트 서버가 준비되지 않았습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentServerNotReadyTitle": {
+    "message": "서버가 준비되지 않았습니다",
+    "description": "Auto-generated localized message"
+  },
+  "agentServerReconnectHint": {
+    "message": "서버를 시작하거나 다시 연결한 후 이 패널을 다시 여십시오.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionActiveModelLabel": {
+    "message": "활성 모델",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionAppendCustomText": {
+    "message": "맞춤 텍스트 추가",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionAppendCustomTextPlaceholder": {
+    "message": "추가할 추가 지침...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionClaudeCodeLabel": {
+    "message": "클로드 코드",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionCreating": {
+    "message": "생성 중...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionCustomPromptPlaceholder": {
+    "message": "맞춤 시스템 프롬프트 입력...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionDeleteConfirm": {
+    "message": "이 세션을 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionDeleteNamedConfirm": {
+    "message": "'$ARG1$'을 삭제하시겠습니까?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionDeleteTitle": {
+    "message": "삭제",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionEngineLabel": {
+    "message": "엔진",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionEngineSessionLabel": {
+    "message": "엔진 세션",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionInfoSection": {
+    "message": "세션 정보",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionMcpServersLabel": {
+    "message": "MCP 서버",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionModelDefaultServer": {
+    "message": "기본값(서버 설정)",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionModelLabel": {
+    "message": "모델",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionNewButton": {
+    "message": "+ 새 세션",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionNewShort": {
+    "message": "신규",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionOpenProjectTitle": {
+    "message": "프로젝트 열기",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionAcceptEdits": {
+    "message": "acceptEdits - 파일 편집 내용을 자동으로 수락합니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionBypass": {
+    "message": "bypassPermissions - 모두 자동 승인",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionDefault": {
+    "message": "기본 - 승인 요청",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionDontAsk": {
+    "message": "dontAsk - 확인 없음",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionHint": {
+    "message": "Claude SDK가 도구 승인 요청을 처리하는 방법을 제어합니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionModeLabel": {
+    "message": "권한 모드",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionPlan": {
+    "message": "plan - 계획 모드만 해당",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionReasoningEffortHint": {
+    "message": "추론의 깊이를 제어합니다. 더 많은 노력 = 품질은 향상되지만 속도는 느려집니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionReasoningEffortLabel": {
+    "message": "추론 강도",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionReasoningEffortXhighHint": {
+    "message": "참고: xhigh는 gpt-5.2 및 gpt-5.1-codex-max 모델에서만 사용할 수 있습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionRenameTitle": {
+    "message": "이름 바꾸기",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionRunningBadge": {
+    "message": "실행 중",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSdkInfoLabel": {
+    "message": "SDK 정보",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsEmpty": {
+    "message": "아직 세션이 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSettingsLoading": {
+    "message": "세션 정보 로드 중...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSettingsTitle": {
+    "message": "세션 설정",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsLoading": {
+    "message": "세션 로드 중...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsNoMatching": {
+    "message": "일치하는 세션이 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsSearchPlaceholder": {
+    "message": "세션 검색...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsStartConversation": {
+    "message": "AI와 새로운 대화를 시작해 보세요",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsStartNewButton": {
+    "message": "새 세션 시작",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsTitle": {
+    "message": "세션",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsTryDifferentSearch": {
+    "message": "다른 검색어를 사용해 보세요.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsUnnamed": {
+    "message": "이름이 없는 세션",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSystemPromptLabel": {
+    "message": "시스템 프롬프트",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionThisSession": {
+    "message": "이번 세션",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionToolsLabel": {
+    "message": "도구",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionUseCustomPrompt": {
+    "message": "맞춤 프롬프트 사용",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionUsePresetClaudeCode": {
+    "message": "사전 설정 사용(claude_code)",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionViewMcpServers": {
+    "message": "MCP 서버 보기 ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionViewTools": {
+    "message": "도구 보기 ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSettingsClearAttachmentCache": {
+    "message": "첨부 파일 캐시 지우기",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsCometCaretLabel": {
+    "message": "혜성 캐럿",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsInputSection": {
+    "message": "입력",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsReconnectServer": {
+    "message": "서버 다시 연결",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsStorageSection": {
+    "message": "저장",
+    "description": "Auto-generated localized message"
+  },
+  "agentShowLess": {
+    "message": "간략히 보기",
+    "description": "Auto-generated localized message"
+  },
+  "agentShowMore": {
+    "message": "더 보기...",
+    "description": "Auto-generated localized message"
+  },
+  "agentThinkingStatus": {
+    "message": "생각...",
+    "description": "Auto-generated localized message"
+  },
+  "agentThreadEditComingSoon": {
+    "message": "편집(곧 제공 예정)",
+    "description": "Auto-generated localized message"
+  },
+  "agentTopBarBackToSessionsTitle": {
+    "message": "세션으로 돌아가기",
+    "description": "Auto-generated localized message"
+  },
+  "agentTopBarBrandFallback": {
+    "message": "대리인",
+    "description": "Auto-generated localized message"
+  },
+  "agentTopBarOpenProjectTitle": {
+    "message": "VS Code 또는 터미널에서 프로젝트 열기",
+    "description": "Auto-generated localized message"
+  },
+  "agentUnknownValue": {
+    "message": "알려지지 않은",
+    "description": "Auto-generated localized message"
+  },
+  "agentUsageDurationTurnsTitle": {
+    "message": "지속시간: $ARG1$s, 회전: $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageInputOutputTitle": {
+    "message": "입력: $ARG1$, 출력: $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageTokensSummary": {
+    "message": "$ARG1$ 토큰",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentWebEditorApplyTitle": {
+    "message": "웹에디터 적용",
+    "description": "Auto-generated localized message"
+  },
+  "agentWebEditsHeader": {
+    "message": "웹 편집",
+    "description": "Auto-generated localized message"
+  },
+  "allFramesLabel": {
+    "message": "모든 프레임",
+    "description": "Auto-generated localized message"
+  },
+  "applyButton": {
+    "message": "적용하다",
+    "description": "Auto-generated localized message"
+  },
+  "autoTheme": {
+    "message": "자동",
+    "description": "자동 테마 옵션"
+  },
+  "balancedPerformance": {
+    "message": "균형",
+    "description": "균형 잡힌 성능 표시"
+  },
+  "betterThanSmallDescription": {
+    "message": "e5-small보다 약간 크지만 성능이 더 좋습니다",
+    "description": "중간 모델 옵션 설명"
+  },
+  "bookmarksBarLabel": {
+    "message": "북마크바",
+    "description": "북마크바 폴더 이름"
+  },
+  "builderActiveTabNotFound": {
+    "message": "활성 탭을 찾을 수 없습니다",
+    "description": "Auto-generated localized message"
+  },
+  "builderAutoLayoutTitle": {
+    "message": "자동 레이아웃",
+    "description": "Auto-generated localized message"
+  },
+  "builderConfigurationErrorTitle": {
+    "message": "⚠️ 구성 오류",
+    "description": "Auto-generated localized message"
+  },
+  "builderConfigurationTitle": {
+    "message": "구성",
+    "description": "Auto-generated localized message"
+  },
+  "builderDeleteEdgeTitle": {
+    "message": "가장자리 삭제",
+    "description": "Auto-generated localized message"
+  },
+  "builderDeleteNodeTitle": {
+    "message": "노드 삭제",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeBranchLabel": {
+    "message": "나뭇가지",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeConnectionInvalid": {
+    "message": "유효하지 않은",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeConnectionStatusLabel": {
+    "message": "연결 상태",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeConnectionValid": {
+    "message": "유효한",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeInspectOnlyHint": {
+    "message": "연결만 검사하십시오. 분기/핸들 편집은 이후 단계에서 지원됩니다.",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeSourceLabel": {
+    "message": "원천",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeTargetLabel": {
+    "message": "목표",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeTitle": {
+    "message": "엣지",
+    "description": "Auto-generated localized message"
+  },
+  "builderEditFlowTitle": {
+    "message": "편집: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderEnterJsonPlaceholder": {
+    "message": "JSON 입력",
+    "description": "Auto-generated localized message"
+  },
+  "builderExportFailed": {
+    "message": "내보내기 실패: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderExportJsonTitle": {
+    "message": "JSON 내보내기",
+    "description": "Auto-generated localized message"
+  },
+  "builderFallbackPromotionNotice": {
+    "message": "대체 권장사항 적용됨: $ARG1$ 우선순위가 승격되었습니다.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFieldRequired": {
+    "message": "$ARG1$ 필요",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFitViewTitle": {
+    "message": "적응형 보기",
+    "description": "Auto-generated localized message"
+  },
+  "builderFlowCategory": {
+    "message": "플로우",
+    "description": "Auto-generated localized message"
+  },
+  "builderGeneralSettingsTitle": {
+    "message": "일반 설정",
+    "description": "Auto-generated localized message"
+  },
+  "builderIfConditionLabel": {
+    "message": "조건 $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderIfElseLabel": {
+    "message": "그 외",
+    "description": "Auto-generated localized message"
+  },
+  "builderImportDataNotFound": {
+    "message": "가져오기 실패: 워크플로 데이터를 찾을 수 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "builderImportFailed": {
+    "message": "가져오기 실패: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderImportJsonTitle": {
+    "message": "JSON 가져오기",
+    "description": "Auto-generated localized message"
+  },
+  "builderInsertNodePlaceholder": {
+    "message": "노드 삽입...",
+    "description": "Auto-generated localized message"
+  },
+  "builderJsonFormatError": {
+    "message": "JSON 형식 오류",
+    "description": "Auto-generated localized message"
+  },
+  "builderKeySequenceExample": {
+    "message": "예: 백스페이스 Enter 또는 cmd+a",
+    "description": "Auto-generated localized message"
+  },
+  "builderKeySequencePlaceholder": {
+    "message": "백스페이스 Enter 또는 cmd+a",
+    "description": "Auto-generated localized message"
+  },
+  "builderLoadFlowFailed": {
+    "message": "워크플로를 로드하지 못했습니다: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderLogicCategory": {
+    "message": "논리",
+    "description": "Auto-generated localized message"
+  },
+  "builderManageTriggersTitle": {
+    "message": "트리거 관리",
+    "description": "Auto-generated localized message"
+  },
+  "builderNameLabel": {
+    "message": "이름",
+    "description": "Auto-generated localized message"
+  },
+  "builderNewButton": {
+    "message": "새로운",
+    "description": "Auto-generated localized message"
+  },
+  "builderNewWorkflowName": {
+    "message": "새 워크플로",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeNameLabel": {
+    "message": "노드 이름",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeNamePlaceholder": {
+    "message": "노드 이름을 입력하세요.",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodePropertiesTitle": {
+    "message": "노드 속성",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeSpecFallbackHint": {
+    "message": "노드는 아직 NodeSpec을 제공하지 않으며 기본 속성 패널로 돌아갔습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeSpecNotFound": {
+    "message": "노드 사양을 찾을 수 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "builderNoEdgesSelected": {
+    "message": "선택한 가장자리가 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "builderNoSelectorGenerated": {
+    "message": "유효한 선택기가 생성되지 않았습니다. 수동으로 입력해주세요.",
+    "description": "Auto-generated localized message"
+  },
+  "builderPageTitle": {
+    "message": "워크플로 빌더 - webpage-mcp-server",
+    "description": "Auto-generated localized message"
+  },
+  "builderPickButton": {
+    "message": "선택하다",
+    "description": "Auto-generated localized message"
+  },
+  "builderPickedFromPageTitle": {
+    "message": "페이지에서 선택됨",
+    "description": "Auto-generated localized message"
+  },
+  "builderPickFailed": {
+    "message": "선택 실패",
+    "description": "Auto-generated localized message"
+  },
+  "builderRedoTitle": {
+    "message": "다시 실행(⌘/Ctrl+Shift+Z)",
+    "description": "Auto-generated localized message"
+  },
+  "builderRenameWorkflowTitle": {
+    "message": "워크플로 이름 바꾸기",
+    "description": "Auto-generated localized message"
+  },
+  "builderRunAllTitle": {
+    "message": "처음부터 재생 정정",
+    "description": "Auto-generated localized message"
+  },
+  "builderRunFailed": {
+    "message": "실행 실패: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderRunFromSelectedButton": {
+    "message": "선택한 항목에서 실행",
+    "description": "Auto-generated localized message"
+  },
+  "builderRunFromSelectedTitle": {
+    "message": "선택한 노드에서 재생",
+    "description": "Auto-generated localized message"
+  },
+  "builderSavedStatus": {
+    "message": "저장됨",
+    "description": "Auto-generated localized message"
+  },
+  "builderSaveFailed": {
+    "message": "저장 실패: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderSavingStatus": {
+    "message": "저장 중...",
+    "description": "Auto-generated localized message"
+  },
+  "builderScheduleConvertFailed": {
+    "message": "노드 $ARG1$ 일정 #$ARG2$: cron(유형=$ARG3$)으로 변환할 수 없습니다. 건너뛰었습니다.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "builderScheduleOnceUnsupported": {
+    "message": "노드 $ARG1$ 일정 #$ARG2$: 일회성 일정은 V3에서 지원되지 않으므로 건너뛰었습니다.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "builderScreenshotOnFailure": {
+    "message": "실패 시 스크린샷",
+    "description": "Auto-generated localized message"
+  },
+  "builderSelectNodeHint": {
+    "message": "노드 선택",
+    "description": "Auto-generated localized message"
+  },
+  "builderSelectorHelpText": {
+    "message": "CSS 선택기를 입력하거나 선택을 클릭하여 페이지에서 요소를 선택합니다.",
+    "description": "Auto-generated localized message"
+  },
+  "builderTabsCategory": {
+    "message": "탭",
+    "description": "Auto-generated localized message"
+  },
+  "builderTimeoutMsLabel": {
+    "message": "시간 초과(밀리초)",
+    "description": "Auto-generated localized message"
+  },
+  "builderTimeoutPlaceholder": {
+    "message": "기본적으로 전역 시간 초과 사용",
+    "description": "Auto-generated localized message"
+  },
+  "builderToolsCategory": {
+    "message": "도구",
+    "description": "Auto-generated localized message"
+  },
+  "builderUndoTitle": {
+    "message": "실행 취소(⌘/Ctrl+Z)",
+    "description": "Auto-generated localized message"
+  },
+  "builderViewEditPropertiesHint": {
+    "message": "속성 보기 및 편집",
+    "description": "Auto-generated localized message"
+  },
+  "builderVisualOrchestrationTip": {
+    "message": "워크플로 시각적 오케스트레이션",
+    "description": "Auto-generated localized message"
+  },
+  "builderWorkflowEditorTitle": {
+    "message": "워크플로 편집기",
+    "description": "Auto-generated localized message"
+  },
+  "builderWorkflowNamePlaceholder": {
+    "message": "워크플로 이름",
+    "description": "Auto-generated localized message"
+  },
+  "builderWorkflowNotFoundCreated": {
+    "message": "워크플로 \"$ARG1$\"을(를) 찾을 수 없습니다. 새 워크플로를 만들었습니다.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "bytesUnit": {
+    "message": "바이트",
+    "description": "바이트 단위"
+  },
+  "cacheDetailsLabel": {
+    "message": "캐시 정보",
+    "description": "캐시 정보 섹션 레이블"
   },
   "cacheEntriesLabel": {
     "message": "캐시 항목",
     "description": "캐시 항목 수 레이블"
   },
-  "clearAllDataButton": {
-    "message": "모든 데이터 지우기",
-    "description": "모든 데이터 지우기 버튼 텍스트"
+  "cacheSizeLabel": {
+    "message": "캐시 크기",
+    "description": "캐시 크기 레이블"
   },
-  "clearAllCacheButton": {
-    "message": "모든 캐시 지우기",
-    "description": "모든 캐시 지우기 버튼 텍스트"
+  "cancelButton": {
+    "message": "취소",
+    "description": "취소 버튼 텍스트"
   },
   "cleanExpiredCacheButton": {
     "message": "만료된 캐시 정리",
     "description": "만료된 캐시 정리 버튼 텍스트"
   },
-  "exportDataButton": {
-    "message": "데이터 내보내기",
-    "description": "데이터 내보내기 버튼 텍스트"
+  "cleaningStatus": {
+    "message": "정리 중...",
+    "description": "정리 진행 메시지"
   },
-  "importDataButton": {
-    "message": "데이터 가져오기",
-    "description": "데이터 가져오기 버튼 텍스트"
+  "clearAllCacheButton": {
+    "message": "모든 캐시 지우기",
+    "description": "모든 캐시 지우기 버튼 텍스트"
   },
-  "confirmClearDataTitle": {
-    "message": "데이터 지우기 확인",
-    "description": "데이터 지우기 확인 대화상자 제목"
+  "clearAllDataButton": {
+    "message": "모든 데이터 지우기",
+    "description": "모든 데이터 지우기 버튼 텍스트"
   },
-  "settingsTitle": {
-    "message": "설정",
-    "description": "설정 대화상자 제목"
+  "clearButton": {
+    "message": "분명한",
+    "description": "Auto-generated localized message"
   },
-  "aboutTitle": {
-    "message": "정보",
-    "description": "정보 대화상자 제목"
-  },
-  "helpTitle": {
-    "message": "도움말",
-    "description": "도움말 대화상자 제목"
-  },
-  "clearDataWarningMessage": {
-    "message": "이 작업은 다음을 포함한 모든 인덱싱된 웹페이지 콘텐츠와 벡터 데이터를 지웁니다:",
-    "description": "데이터 지우기 경고 메시지"
+  "clearDataIrreversibleWarning": {
+    "message": "이 작업은 되돌릴 수 없습니다! 삭제 후에는 인덱스를 다시 생성하기 위해 웹페이지를 다시 방문해야 합니다.",
+    "description": "되돌릴 수 없는 작업 경고"
   },
   "clearDataList1": {
     "message": "모든 웹페이지 텍스트 콘텐츠 인덱스",
@@ -315,132 +1329,1552 @@
     "message": "검색 기록 및 캐시",
     "description": "데이터 지우기 목록 세 번째 항목"
   },
-  "clearDataIrreversibleWarning": {
-    "message": "이 작업은 되돌릴 수 없습니다! 삭제 후에는 인덱스를 다시 생성하기 위해 웹페이지를 다시 방문해야 합니다.",
-    "description": "되돌릴 수 없는 작업 경고"
+  "clearDataWarningMessage": {
+    "message": "이 작업은 다음을 포함한 모든 인덱싱된 웹페이지 콘텐츠와 벡터 데이터를 지웁니다:",
+    "description": "데이터 지우기 경고 메시지"
   },
-  "confirmClearButton": {
-    "message": "삭제 확인",
-    "description": "삭제 작업 확인 버튼"
+  "clearingStatus": {
+    "message": "삭제 중...",
+    "description": "삭제 진행 메시지"
   },
-  "cacheDetailsLabel": {
-    "message": "캐시 정보",
-    "description": "캐시 정보 섹션 레이블"
+  "closeButton": {
+    "message": "닫기",
+    "description": "닫기 버튼 텍스트"
   },
-  "noCacheDataMessage": {
-    "message": "캐시 데이터 없음",
-    "description": "사용 가능한 캐시 데이터 없음 메시지"
+  "commandToggleQuickPanelDesc": {
+    "message": "빠른 패널 전환",
+    "description": "Auto-generated localized message"
   },
-  "loadingCacheInfoStatus": {
-    "message": "캐시 정보를 불러오는 중...",
-    "description": "캐시 정보 로드 상태"
+  "commandToggleWebEditorDesc": {
+    "message": "웹 편집기 모드 전환",
+    "description": "Auto-generated localized message"
   },
-  "processingCacheStatus": {
-    "message": "캐시 처리 중...",
-    "description": "캐시 처리 상태"
+  "composerDrawerCloseAria": {
+    "message": "확장된 편집기 닫기",
+    "description": "Auto-generated localized message"
   },
-  "expiredLabel": {
-    "message": "만료됨",
-    "description": "만료된 항목 레이블"
+  "composerDrawerExpandedEditorAria": {
+    "message": "확장된 편집기",
+    "description": "Auto-generated localized message"
   },
-  "bookmarksBarLabel": {
-    "message": "북마크바",
-    "description": "북마크바 폴더 이름"
+  "composerDrawerExpandedEditorTitle": {
+    "message": "확장된 편집기",
+    "description": "Auto-generated localized message"
   },
-  "newTabLabel": {
-    "message": "새 탭",
-    "description": "새 탭 레이블"
-  },
-  "currentPageLabel": {
-    "message": "현재 페이지",
-    "description": "현재 페이지 레이블"
-  },
-  "menuLabel": {
-    "message": "메뉴",
-    "description": "메뉴 접근성 레이블"
-  },
-  "navigationLabel": {
-    "message": "탐색",
-    "description": "탐색 접근성 레이블"
-  },
-  "mainContentLabel": {
-    "message": "주요 콘텐츠",
-    "description": "주요 콘텐츠 접근성 레이블"
-  },
-  "languageSelectorLabel": {
-    "message": "언어",
-    "description": "언어 선택기 레이블"
-  },
-  "themeLabel": {
-    "message": "테마",
-    "description": "테마 선택기 레이블"
-  },
-  "lightTheme": {
-    "message": "라이트",
-    "description": "라이트 테마 옵션"
-  },
-  "darkTheme": {
-    "message": "다크",
-    "description": "다크 테마 옵션"
-  },
-  "autoTheme": {
-    "message": "자동",
-    "description": "자동 테마 옵션"
-  },
-  "advancedSettingsLabel": {
-    "message": "고급 설정",
-    "description": "고급 설정 섹션 레이블"
-  },
-  "debugModeLabel": {
-    "message": "디버그 모드",
-    "description": "디버그 모드 토글 레이블"
-  },
-  "verboseLoggingLabel": {
-    "message": "상세 로깅",
-    "description": "상세 로깅 토글 레이블"
-  },
-  "successNotification": {
-    "message": "작업이 성공적으로 완료되었습니다",
-    "description": "일반 성공 알림"
-  },
-  "warningNotification": {
-    "message": "경고: 계속하기 전에 검토하세요",
-    "description": "일반 경고 알림"
-  },
-  "infoNotification": {
-    "message": "정보",
-    "description": "일반 정보 알림"
+  "composerDrawerShortcutHint": {
+    "message": "보내려면 $ARG1$+Enter를 누르세요.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "configCopiedNotification": {
     "message": "설정이 클립보드에 복사되었습니다",
     "description": "설정 복사 성공 메시지"
   },
+  "confirmButton": {
+    "message": "확인",
+    "description": "확인 버튼 텍스트"
+  },
+  "confirmClearButton": {
+    "message": "삭제 확인",
+    "description": "삭제 작업 확인 버튼"
+  },
+  "confirmClearDataTitle": {
+    "message": "데이터 지우기 확인",
+    "description": "데이터 지우기 확인 대화상자 제목"
+  },
+  "connectButton": {
+    "message": "연결",
+    "description": "연결 버튼 텍스트"
+  },
+  "connectedServiceNotStartedStatus": {
+    "message": "연결됨, 서비스 시작되지 않음",
+    "description": "연결되었지만 서비스가 시작되지 않은 상태"
+  },
+  "connectedStatus": {
+    "message": "연결됨",
+    "description": "연결된 상태 메시지"
+  },
+  "connectingStatus": {
+    "message": "연결 중...",
+    "description": "연결 상태 메시지"
+  },
+  "connectionPortLabel": {
+    "message": "연결 포트",
+    "description": "연결 포트 입력 레이블"
+  },
+  "connectionStatusLabel": {
+    "message": "연결 상태",
+    "description": "연결 상태 레이블"
+  },
+  "copyConfigButton": {
+    "message": "설정 복사",
+    "description": "설정 복사 버튼 텍스트"
+  },
+  "createRunSectionTitle": {
+    "message": "생성/실행",
+    "description": "Auto-generated localized message"
+  },
+  "currentPageLabel": {
+    "message": "현재 페이지",
+    "description": "현재 페이지 레이블"
+  },
+  "darkTheme": {
+    "message": "다크",
+    "description": "다크 테마 옵션"
+  },
   "dataClearedNotification": {
     "message": "데이터가 성공적으로 삭제되었습니다",
     "description": "데이터 삭제 성공 메시지"
   },
-  "bytesUnit": {
-    "message": "바이트",
-    "description": "바이트 단위"
+  "debugModeLabel": {
+    "message": "디버그 모드",
+    "description": "디버그 모드 토글 레이블"
   },
-  "kilobytesUnit": {
-    "message": "KB",
-    "description": "킬로바이트 단위"
+  "deleteButton": {
+    "message": "삭제",
+    "description": "Auto-generated localized message"
   },
-  "megabytesUnit": {
-    "message": "MB",
-    "description": "메가바이트 단위"
+  "detectingStatus": {
+    "message": "감지 중...",
+    "description": "감지 상태 메시지"
+  },
+  "disconnectButton": {
+    "message": "연결 끊기",
+    "description": "연결 끊기 버튼 텍스트"
+  },
+  "disconnectedStatus": {
+    "message": "연결 끊김",
+    "description": "연결이 끊긴 상태 메시지"
+  },
+  "dnrFallbackLabel": {
+    "message": "DNR 대체",
+    "description": "Auto-generated localized message"
+  },
+  "domainLabel": {
+    "message": "도메인",
+    "description": "Auto-generated localized message"
+  },
+  "downloadingModelStatus": {
+    "message": "모델 다운로드 중... $PROGRESS$%",
+    "description": "백분율이 포함된 모델 다운로드 진행 상태",
+    "placeholders": {
+      "progress": {
+        "content": "$1",
+        "example": "50"
+      }
+    }
+  },
+  "downloadingStatus": {
+    "message": "다운로드 중...",
+    "description": "다운로드 진행 메시지"
+  },
+  "elementChipAfterLabel": {
+    "message": "~ 후에",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipAriaLabel": {
+    "message": "$ARG1$($ARG2$ 변경, $ARG3$). 전환하려면 클릭하세요.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "elementChipBeforeLabel": {
+    "message": "~ 전에",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipChangesCount": {
+    "message": "$ARG1$ 변경 사항",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipClassLabel": {
+    "message": "수업",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipEmptyValue": {
+    "message": "(비어 있는)",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipExcluded": {
+    "message": "제외된",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipExcludedLower": {
+    "message": "제외된",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipExcludedShort": {
+    "message": "전- ",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipIncluded": {
+    "message": "포함됨",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipIncludedLower": {
+    "message": "포함됨",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipIncludedShort": {
+    "message": "~에",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipRevertAria": {
+    "message": "$ARG1$의 변경사항 되돌리기",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipRevertTitle": {
+    "message": "모든 변경 사항을 $ARG1$로 되돌리기",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipStyleLabel": {
+    "message": "스타일",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipTagFallback": {
+    "message": "요소",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipTextLabel": {
+    "message": "텍스트",
+    "description": "Auto-generated localized message"
+  },
+  "embeddingModelLabel": {
+    "message": "임베딩 모델",
+    "description": "모델 선택의 주 섹션 제목"
+  },
+  "emergencySwitchLabel": {
+    "message": "비상 스위치",
+    "description": "Auto-generated localized message"
+  },
+  "excludesInputLabel": {
+    "message": "제외(쉼표로 구분)",
+    "description": "Auto-generated localized message"
+  },
+  "expiredLabel": {
+    "message": "만료됨",
+    "description": "만료된 항목 레이블"
+  },
+  "exportAllButton": {
+    "message": "모두 내보내기",
+    "description": "Auto-generated localized message"
+  },
+  "exportDataButton": {
+    "message": "데이터 내보내기",
+    "description": "데이터 내보내기 버튼 텍스트"
+  },
+  "extensionDescription": {
+    "message": "크롬 브라우저와 연동하여 브라우저 기능을 제어하는 MCP 서버입니다.",
+    "description": "확장 프로그램 설명"
+  },
+  "extensionName": {
+    "message": "webpage-mcp-server",
+    "description": "확장 프로그램 이름"
+  },
+  "fastPerformance": {
+    "message": "빠름",
+    "description": "빠른 성능 표시"
   },
   "gigabytesUnit": {
     "message": "GB",
     "description": "기가바이트 단위"
   },
+  "helpTitle": {
+    "message": "도움말",
+    "description": "도움말 대화상자 제목"
+  },
+  "importDataButton": {
+    "message": "데이터 가져오기",
+    "description": "데이터 가져오기 버튼 텍스트"
+  },
+  "indexDataManagementLabel": {
+    "message": "인덱스 데이터 관리",
+    "description": "데이터 관리의 주 섹션 제목"
+  },
+  "indexedPagesLabel": {
+    "message": "인덱싱된 페이지",
+    "description": "인덱싱된 페이지 수 레이블"
+  },
+  "indexSizeLabel": {
+    "message": "인덱스 크기",
+    "description": "인덱스 크기 레이블"
+  },
+  "infoNotification": {
+    "message": "정보",
+    "description": "일반 정보 알림"
+  },
+  "initializingStatus": {
+    "message": "초기화 중...",
+    "description": "초기화 진행 메시지"
+  },
+  "initSemanticEngineButton": {
+    "message": "시맨틱 엔진 초기화",
+    "description": "시맨틱 엔진 초기화 버튼 텍스트"
+  },
   "itemsUnit": {
     "message": "개",
     "description": "항목 개수 단위"
   },
+  "kilobytesUnit": {
+    "message": "KB",
+    "description": "킬로바이트 단위"
+  },
+  "languageSelectorLabel": {
+    "message": "언어",
+    "description": "언어 선택기 레이블"
+  },
+  "lastUpdatedLabel": {
+    "message": "마지막 업데이트:",
+    "description": "마지막 업데이트 타임스탬프 레이블"
+  },
+  "lightTheme": {
+    "message": "라이트",
+    "description": "라이트 테마 옵션"
+  },
+  "lightweightModelDescription": {
+    "message": "경량 다국어 모델",
+    "description": "경량 모델 옵션 설명"
+  },
+  "listSectionTitle": {
+    "message": "목록",
+    "description": "Auto-generated localized message"
+  },
+  "loadingCacheInfoStatus": {
+    "message": "캐시 정보를 불러오는 중...",
+    "description": "캐시 정보 로드 상태"
+  },
+  "loadingStatus": {
+    "message": "로드 중...",
+    "description": "로드 진행 메시지"
+  },
+  "localModelBackToHomeTitle": {
+    "message": "홈페이지로 돌아가기",
+    "description": "Auto-generated localized message"
+  },
+  "localModelReturnButton": {
+    "message": "반품",
+    "description": "Auto-generated localized message"
+  },
+  "mainContentLabel": {
+    "message": "주요 콘텐츠",
+    "description": "주요 콘텐츠 접근성 레이블"
+  },
+  "matchesInputLabel": {
+    "message": "일치(쉼표로 구분)",
+    "description": "Auto-generated localized message"
+  },
+  "mcpServerConfigLabel": {
+    "message": "MCP 서버 설정",
+    "description": "MCP 서버 설정 섹션 레이블"
+  },
+  "megabytesUnit": {
+    "message": "MB",
+    "description": "메가바이트 단위"
+  },
+  "menuLabel": {
+    "message": "메뉴",
+    "description": "메뉴 접근성 레이블"
+  },
+  "modeAuto": {
+    "message": "자동",
+    "description": "Auto-generated localized message"
+  },
+  "modeCss": {
+    "message": "CSS",
+    "description": "Auto-generated localized message"
+  },
+  "modeLabel": {
+    "message": "방법",
+    "description": "Auto-generated localized message"
+  },
+  "modelCacheManagementLabel": {
+    "message": "모델 캐시 관리",
+    "description": "캐시 관리의 주 섹션 제목"
+  },
+  "modelCorruptedErrorMessage": {
+    "message": "모델 파일이 손상되었거나 불완전합니다. 다운로드를 다시 시도하세요",
+    "description": "모델 손상 오류 메시지"
+  },
+  "modelFailedStatus": {
+    "message": "모델 로드 실패",
+    "description": "모델 로드 실패 상태"
+  },
+  "modelLoadedStatus": {
+    "message": "모델 로드 완료",
+    "description": "모델 로드 성공 상태"
+  },
+  "modeOnce": {
+    "message": "한 번",
+    "description": "Auto-generated localized message"
+  },
+  "modePersistent": {
+    "message": "지속성 있는",
+    "description": "Auto-generated localized message"
+  },
+  "multilingualModelDescription": {
+    "message": "다국어 시맨틱 모델",
+    "description": "다국어 모델 옵션 설명"
+  },
+  "nameLabel": {
+    "message": "이름",
+    "description": "Auto-generated localized message"
+  },
+  "nativeServerConfigLabel": {
+    "message": "MCP 서버 설정",
+    "description": "MCP 서버 설정의 주 섹션 제목"
+  },
+  "navigationLabel": {
+    "message": "탐색",
+    "description": "탐색 접근성 레이블"
+  },
+  "networkErrorMessage": {
+    "message": "네트워크 연결 오류, 네트워크를 확인하고 다시 시도하세요",
+    "description": "네트워크 연결 오류 메시지"
+  },
+  "newTabLabel": {
+    "message": "새 탭",
+    "description": "새 탭 레이블"
+  },
+  "noCacheDataMessage": {
+    "message": "캐시 데이터 없음",
+    "description": "사용 가능한 캐시 데이터 없음 메시지"
+  },
   "pagesUnit": {
     "message": "페이지",
     "description": "페이지 수 단위"
+  },
+  "permissionDeniedErrorMessage": {
+    "message": "권한이 거부되었습니다",
+    "description": "권한 거부 오류 메시지"
+  },
+  "persistLabel": {
+    "message": "지속",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderDomainHint": {
+    "message": "example.com",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderMatchesExample": {
+    "message": "예를 들어 https://*.example.com/*",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderOptional": {
+    "message": "선택 과목",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderScriptHint": {
+    "message": "여기에 JS/CSS/TM을 붙여넣으세요.",
+    "description": "Auto-generated localized message"
+  },
+  "popupAddNewAnnotationLabel": {
+    "message": "새 주석 추가",
+    "description": "Auto-generated localized message"
+  },
+  "popupAuthTokenLabel": {
+    "message": "인증 토큰",
+    "description": "Auto-generated localized message"
+  },
+  "popupClearDataFailed": {
+    "message": "데이터를 지우지 못했습니다: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "popupClearDataFailedPlain": {
+    "message": "데이터를 지우지 못했습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "popupComingSoonBadge": {
+    "message": "출시 예정",
+    "description": "Auto-generated localized message"
+  },
+  "popupConnectFailedPrefix": {
+    "message": "연결 실패",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopiedShort": {
+    "message": "복사됨",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopyFailed": {
+    "message": "복사 실패",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopyRegisterCommand": {
+    "message": "레지스터 복사 명령",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopyToken": {
+    "message": "토큰 복사",
+    "description": "Auto-generated localized message"
+  },
+  "popupDocsLink": {
+    "message": "문서",
+    "description": "Auto-generated localized message"
+  },
+  "popupElementMarkerManagementDesc": {
+    "message": "페이지 요소 주석 관리",
+    "description": "Auto-generated localized message"
+  },
+  "popupElementMarkerManagementTitle": {
+    "message": "요소 주석 관리",
+    "description": "Auto-generated localized message"
+  },
+  "popupEnableElementMarkerTooltip": {
+    "message": "요소 주석 켜기",
+    "description": "Auto-generated localized message"
+  },
+  "popupEnableWebEditorTooltip": {
+    "message": "페이지 편집 모드 켜기",
+    "description": "Auto-generated localized message"
+  },
+  "popupFeatureUnderDevelopmentSuffix": {
+    "message": "해당 기능은 개발 중입니다. 계속 지켜봐 주시기 바랍니다.",
+    "description": "Auto-generated localized message"
+  },
+  "popupFooterTagline": {
+    "message": "AI용 웹페이지 mcp 서버",
+    "description": "Auto-generated localized message"
+  },
+  "popupGuideLink": {
+    "message": "가이드",
+    "description": "Auto-generated localized message"
+  },
+  "popupIntelligentAssistantDesc": {
+    "message": "AI 에이전트 대화 및 작업",
+    "description": "Auto-generated localized message"
+  },
+  "popupIntelligentAssistantTitle": {
+    "message": "AI 어시스턴트",
+    "description": "Auto-generated localized message"
+  },
+  "popupLabeledElementsLabel": {
+    "message": "라벨이 지정된 요소",
+    "description": "Auto-generated localized message"
+  },
+  "popupLocalModelDesc": {
+    "message": "의미론적 엔진 및 모델 관리",
+    "description": "Auto-generated localized message"
+  },
+  "popupLocalModelTitle": {
+    "message": "지역모델",
+    "description": "Auto-generated localized message"
+  },
+  "popupManagementPortalTitle": {
+    "message": "관리포털",
+    "description": "Auto-generated localized message"
+  },
+  "popupMarkerNamePlaceholder": {
+    "message": "\"로그인 버튼\"과 같은 이름",
+    "description": "Auto-generated localized message"
+  },
+  "popupOneTimeHostRegistrationLabel": {
+    "message": "일회성 호스트 등록(현재 확장 프로그램 ID)",
+    "description": "Auto-generated localized message"
+  },
+  "popupPageTitle": {
+    "message": "웹페이지-mcp-서버",
+    "description": "Auto-generated localized message"
+  },
+  "popupQuickToolsTitle": {
+    "message": "빠른 도구",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingUnderDevelopment": {
+    "message": "녹음 기능은 개발 중입니다",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordPlaybackFeature": {
+    "message": "녹음 재생",
+    "description": "Auto-generated localized message"
+  },
+  "popupTroubleshootingTitle": {
+    "message": "문제 해결",
+    "description": "Auto-generated localized message"
+  },
+  "popupViewInstallGuideTitle": {
+    "message": "설치 가이드 보기",
+    "description": "Auto-generated localized message"
+  },
+  "popupWorkflowManagementDesc": {
+    "message": "녹음 및 재생 자동화 워크플로",
+    "description": "Auto-generated localized message"
+  },
+  "popupWorkflowManagementTitle": {
+    "message": "워크플로우 관리",
+    "description": "Auto-generated localized message"
+  },
+  "processingCacheStatus": {
+    "message": "캐시 처리 중...",
+    "description": "캐시 처리 상태"
+  },
+  "processingStatus": {
+    "message": "처리 중...",
+    "description": "처리 진행 메시지"
+  },
+  "queryLabel": {
+    "message": "질문",
+    "description": "Auto-generated localized message"
+  },
+  "refreshStatusButton": {
+    "message": "상태 새로고침",
+    "description": "상태 새로고침 버튼 툴팁"
+  },
+  "reinitializeButton": {
+    "message": "재초기화",
+    "description": "재초기화 버튼 텍스트"
+  },
+  "resetButton": {
+    "message": "초기화",
+    "description": "초기화 버튼 텍스트"
+  },
+  "retryButton": {
+    "message": "재시도",
+    "description": "재시도 버튼 텍스트"
+  },
+  "runAtAuto": {
+    "message": "자동",
+    "description": "Auto-generated localized message"
+  },
+  "runAtDocumentEnd": {
+    "message": "document_end",
+    "description": "Auto-generated localized message"
+  },
+  "runAtDocumentIdle": {
+    "message": "document_idle",
+    "description": "Auto-generated localized message"
+  },
+  "runAtDocumentStart": {
+    "message": "document_start",
+    "description": "Auto-generated localized message"
+  },
+  "runAtLabel": {
+    "message": "실행 시각",
+    "description": "Auto-generated localized message"
+  },
+  "runningStatusLabel": {
+    "message": "실행 상태",
+    "description": "서버 실행 상태 레이블"
+  },
+  "runOnceButton": {
+    "message": "한 번 실행(CDP)",
+    "description": "Auto-generated localized message"
+  },
+  "saveButton": {
+    "message": "저장",
+    "description": "저장 버튼 텍스트"
+  },
+  "scheduleDailyTimeLabel": {
+    "message": "시간(HH:mm)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleDailyTimePlaceholder": {
+    "message": "예를 들어 09:30",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleDescribeDaily": {
+    "message": "매일 $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeInterval": {
+    "message": "$ARG1$분마다",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeOnce": {
+    "message": "$ARG1$에 한 번",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDialogTitle": {
+    "message": "예약된 실행",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleEnableLabel": {
+    "message": "할 수 있게 하다",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleEnableTiming": {
+    "message": "타이밍 활성화",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleExistingPlansTitle": {
+    "message": "이미 계획이 있어요",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleIntervalLabel": {
+    "message": "간격(분)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleOnceTimeLabel": {
+    "message": "시간(ISO)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleOnceTimePlaceholder": {
+    "message": "예를 들어 2025-10-05T10:00:00",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleParametersLabel": {
+    "message": "매개변수(JSON)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleParametersPlaceholder": {
+    "message": "{ \"사용자 이름\": \"xx\" }",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeDaily": {
+    "message": "매일 정해진 시간",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeInterval": {
+    "message": "N분마다",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeLabel": {
+    "message": "유형",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeOnce": {
+    "message": "한 번만 실행",
+    "description": "Auto-generated localized message"
+  },
+  "scriptLabel": {
+    "message": "스크립트",
+    "description": "Auto-generated localized message"
+  },
+  "semanticEngineInitFailedStatus": {
+    "message": "시맨틱 엔진 초기화 실패",
+    "description": "시맨틱 엔진 초기화 실패 상태"
+  },
+  "semanticEngineInitializingStatus": {
+    "message": "시맨틱 엔진 초기화 중...",
+    "description": "시맨틱 엔진 초기화 상태"
+  },
+  "semanticEngineLabel": {
+    "message": "시맨틱 엔진",
+    "description": "시맨틱 엔진의 주 섹션 제목"
+  },
+  "semanticEngineNotInitStatus": {
+    "message": "시맨틱 엔진이 초기화되지 않음",
+    "description": "시맨틱 엔진이 초기화되지 않은 상태"
+  },
+  "semanticEngineReadyStatus": {
+    "message": "시맨틱 엔진 준비 완료",
+    "description": "시맨틱 엔진 준비 완료 상태"
+  },
+  "serviceNotConnectedStatus": {
+    "message": "서비스에 연결되지 않음",
+    "description": "서비스가 연결되지 않은 상태"
+  },
+  "serviceRunningStatus": {
+    "message": "서비스 실행 중 (포트: $PORT$)",
+    "description": "포트 번호와 함께 서비스 실행 중 상태",
+    "placeholders": {
+      "port": {
+        "content": "$1",
+        "example": "12306"
+      }
+    }
+  },
+  "settingsTitle": {
+    "message": "설정",
+    "description": "설정 대화상자 제목"
+  },
+  "sidepanelAddMarkerTitle": {
+    "message": "새 마커 추가",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelConfirmDeleteMarker": {
+    "message": "'$ARG1$' 마커를 삭제하시겠습니까?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelConfirmDeleteWorkflow": {
+    "message": "이 워크플로를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateFlowUnavailable": {
+    "message": "V3 빌더는 아직 구현되지 않아 워크플로를 생성할 수 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateMarkerButton": {
+    "message": "마커 만들기",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateMarkerTitle": {
+    "message": "마커 만들기",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateTriggerUnavailable": {
+    "message": "V3 트리거 관리가 아직 구현되지 않아 트리거를 생성할 수 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelEditFlowUnavailable": {
+    "message": "V3 빌더는 아직 구현되지 않았으므로 워크플로를 편집할 수 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelEditMarkerTitle": {
+    "message": "마커 편집",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelEditTriggerUnavailable": {
+    "message": "V3 트리거 관리는 아직 구현되지 않아 트리거를 편집할 수 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerActionDelete": {
+    "message": "삭제",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerActionEdit": {
+    "message": "편집하다",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerActionVerify": {
+    "message": "확인하다",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerDomainCount": {
+    "message": "$ARG1$ 마커",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelMarkerFieldMatchType": {
+    "message": "일치 유형",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldName": {
+    "message": "이름",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldNamePlaceholder": {
+    "message": "예: 로그인 버튼",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldSelector": {
+    "message": "선택자",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldSelectorType": {
+    "message": "선택기 유형",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerMatchExact": {
+    "message": "정확히 일치",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerMatchHost": {
+    "message": "호스트 이름",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerMatchPrefix": {
+    "message": "경로 접두어",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSearchPlaceholder": {
+    "message": "마커 이름 또는 선택기 검색...",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSelectorCss": {
+    "message": "CSS 선택기",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSelectorPlaceholder": {
+    "message": "CSS 선택기 또는 XPath",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSelectorXpath": {
+    "message": "XPath",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerStatsFiltered": {
+    "message": "$ARG3$ 도메인 전체에서 $ARG1$ 마커($ARG2$ 중) 표시",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanelMarkerStatsTotal": {
+    "message": "$ARG2$ 도메인의 총 $ARG1$ 마커",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "sidepanelNavigatorAgentDesc": {
+    "message": "AI 에이전트 대화 및 작업",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorAgentTitle": {
+    "message": "AI 어시스턴트",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorElementMarkersDesc": {
+    "message": "페이지 요소 주석 관리",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorElementMarkersTitle": {
+    "message": "요소 주석 관리",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorTitle": {
+    "message": "페이지 전환",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorToggleTitle": {
+    "message": "페이지 전환(이동하려면 드래그, 위치를 재설정하려면 두 번 클릭)",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorWorkflowsDesc": {
+    "message": "자동화 워크플로 기록 및 재생",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorWorkflowsTitle": {
+    "message": "워크플로우 관리",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNoMarkers": {
+    "message": "아직 마커가 없습니다. 오른쪽 상단 모서리에 있는 +를 클릭하여 첫 번째 마커를 만듭니다.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNoMatchingMarkers": {
+    "message": "일치하는 마커가 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelPageTitle": {
+    "message": "웹페이지-mcp-서버",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelUpdateButton": {
+    "message": "업데이트",
+    "description": "Auto-generated localized message"
+  },
+  "statusAll": {
+    "message": "모두",
+    "description": "Auto-generated localized message"
+  },
+  "statusDisabled": {
+    "message": "장애가 있는",
+    "description": "Auto-generated localized message"
+  },
+  "statusEnabled": {
+    "message": "활성화됨",
+    "description": "Auto-generated localized message"
+  },
+  "statusLabel": {
+    "message": "상태",
+    "description": "일반 상태 레이블"
+  },
+  "successNotification": {
+    "message": "작업이 성공적으로 완료되었습니다",
+    "description": "일반 성공 알림"
+  },
+  "switchingModelStatus": {
+    "message": "모델 전환 중...",
+    "description": "모델 전환 진행 메시지"
+  },
+  "tableHeaderName": {
+    "message": "이름",
+    "description": "Auto-generated localized message"
+  },
+  "tableHeaderRunAt": {
+    "message": "실행 시각",
+    "description": "Auto-generated localized message"
+  },
+  "tableHeaderUpdated": {
+    "message": "업데이트됨",
+    "description": "Auto-generated localized message"
+  },
+  "tableHeaderWorld": {
+    "message": "세계",
+    "description": "Auto-generated localized message"
+  },
+  "tagsInputLabel": {
+    "message": "태그(쉼표로 구분)",
+    "description": "Auto-generated localized message"
+  },
+  "themeLabel": {
+    "message": "테마",
+    "description": "테마 선택기 레이블"
+  },
+  "timeoutErrorMessage": {
+    "message": "작업 시간 초과",
+    "description": "시간 초과 오류 메시지"
+  },
+  "triggerPanelAddInterval": {
+    "message": "+ 간격",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelAddOnce": {
+    "message": "+ 1회",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelCreate": {
+    "message": "생성",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelCurrentTriggers": {
+    "message": "현재 트리거($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDeleteConfirm": {
+    "message": "트리거를 삭제하시겠습니까?\n\n$ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCommandKey": {
+    "message": "명령키: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCron": {
+    "message": "크론: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCronWithTz": {
+    "message": "크론: $ARG1$ ($ARG2$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "triggerPanelDescribeDomSelector": {
+    "message": "선택기: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeInterval": {
+    "message": "$ARG1$분마다",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeManual": {
+    "message": "수동 트리거(버튼으로 실행)",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelDescribeMenuTitle": {
+    "message": "제목: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeOnceAt": {
+    "message": "$ARG1$에",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeUrlRules": {
+    "message": "URL 일치 규칙: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelEditViaNodeHint": {
+    "message": "Builder에서 트리거 노드를 통해 편집",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelEnabledLabel": {
+    "message": "활성화됨",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelFireButton": {
+    "message": "불",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelFlowIdEmpty": {
+    "message": "흐름 ID가 비어 있습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelIntervalHint": {
+    "message": "반복 트리거를 위해 chrome.alarms.기간InMinutes를 사용합니다.",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelIntervalOption": {
+    "message": "간격",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelInvalidTimeFormat": {
+    "message": "잘못된 트리거 시간 형식",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOnceHint": {
+    "message": "발사 후 자동으로 비활성화됩니다. 시간은 현지 시간대입니다.",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOnceOption": {
+    "message": "한 번",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOtherTypesHint": {
+    "message": "다른 유형(url/cron/command/contextMenu/dom)은 트리거 노드를 통해 구성됩니다.",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOwnerExternal": {
+    "message": "외부",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOwnerTriggerNode": {
+    "message": "트리거 노드를 통해",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelPastTimeWarn": {
+    "message": "트리거 시간이 과거입니다. 즉시 발사될 수도 있습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelRunEnqueued": {
+    "message": "실행이 대기열에 추가됨",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelTriggeredToast": {
+    "message": "트리거됨: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelTriggerTimeLabel": {
+    "message": "트리거 시간",
+    "description": "Auto-generated localized message"
+  },
+  "unknownErrorMessage": {
+    "message": "알 수 없는 오류, 네트워크에서 HuggingFace에 접속할 수 있는지 확인하세요",
+    "description": "알 수 없는 오류 대체 메시지"
+  },
+  "userscriptsManagerTitle": {
+    "message": "사용자 스크립트 관리자",
+    "description": "Auto-generated localized message"
+  },
+  "vectorDocumentsLabel": {
+    "message": "벡터 문서",
+    "description": "벡터 문서 수 레이블"
+  },
+  "verboseLoggingLabel": {
+    "message": "상세 로깅",
+    "description": "상세 로깅 토글 레이블"
+  },
+  "warningNotification": {
+    "message": "경고: 계속하기 전에 검토하세요",
+    "description": "일반 경고 알림"
+  },
+  "welcomeConnectTip": {
+    "message": "팁: 확장 팝업을 열고 \"연결\"을 클릭하여 전체 클라이언트 구성 조각을 복사할 수도 있습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeCopyButton": {
+    "message": "복사",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeCurrentExtensionId": {
+    "message": "현재 확장 프로그램 ID:",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeDiagnosticsDesc": {
+    "message": "설치 상태를 확인하려면 \"doctor\"를 실행하세요. 오류가 보고되면 자동 수정 명령을 실행합니다.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeDiagnosticsTitle": {
+    "message": "진단",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeHeaderSubtitle": {
+    "message": "확장 인식 설정 명령(이 확장 ID 포함)",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeHeaderTitle": {
+    "message": "웹페이지 MCP 서버",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpConfigDesc": {
+    "message": "MCP 클라이언트에서 이것을 사용하십시오. localhost HTTP URL은 필요하지 않습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpConfigTitle": {
+    "message": "MCP 클라이언트 구성(stdio)",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeOpenTroubleshootingDocs": {
+    "message": "문제 해결 문서 열기",
+    "description": "Auto-generated localized message"
+  },
+  "welcomePageTitle": {
+    "message": "환영합니다 - 웹페이지-mcp-서버",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeRegisterHostDesc": {
+    "message": "먼저 이 명령을 실행하세요. 현재 확장 ID로 Native Messaging 매니페스트를 작성하여 Chrome이 로컬 호스트 프로세스를 시작할 수 있게 합니다.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeRegisterHostTitle": {
+    "message": "네이티브 호스트 등록(1회)",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeReportIssueDesc": {
+    "message": "진단 보고서를 생성하여 GitHub 문제에 붙여넣습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeReportIssueTip": {
+    "message": "이렇게 하면 보고서가 클립보드에 복사됩니다(민감한 정보는 자동으로 수정됨).",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeReportIssueTitle": {
+    "message": "문제 신고",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeStdioCommandDesc": {
+    "message": "그런 다음 MCP 클라이언트에서 이 명령을 사용하십시오. 전역 설치나 localhost URL이 필요하지 않습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeStdioCommandTitle": {
+    "message": "MCP stdio 명령",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeTroubleshootingCommands": {
+    "message": "doctor | report",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeTroubleshootingDesc": {
+    "message": "브리지가 등록 또는 연결에 실패한 경우에만 이를 사용하십시오.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeTroubleshootingDocsButton": {
+    "message": "문제 해결 문서",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsAddTriggerTitle": {
+    "message": "트리거 추가",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsAdvancedSection": {
+    "message": "고급의",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCountPlural": {
+    "message": "워크플로",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCountSingular": {
+    "message": "작업 흐름",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCreateButton": {
+    "message": "새로운",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCreateWorkflow": {
+    "message": "워크플로우 생성",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCurrentPageOnly": {
+    "message": "현재 페이지만",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsDeleteAction": {
+    "message": "삭제",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsDeleteTriggerTitle": {
+    "message": "삭제",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsDescriptionLabel": {
+    "message": "설명",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEditTriggerTitle": {
+    "message": "편집하다",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEditWorkflowTitle": {
+    "message": "작업 흐름 편집",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptyDesc": {
+    "message": "첫 번째 자동화 작업흐름을 기록하세요",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptySearchDesc": {
+    "message": "다른 검색어를 사용해 보세요.",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptySearchTitle": {
+    "message": "일치하는 워크플로가 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptyTitle": {
+    "message": "아직 워크플로가 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsExportAction": {
+    "message": "내보내기",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsImportAction": {
+    "message": "가져오기",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsMillisecondsValue": {
+    "message": "$ARG1$ms",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsMoreActionsTitle": {
+    "message": "추가 작업",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsNoDescription": {
+    "message": "설명 없음",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsNoRunHistory": {
+    "message": "아직 실행 기록이 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsNoTriggers": {
+    "message": "구성된 트리거가 없습니다.",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsOptionalDescription": {
+    "message": "선택적 설명",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRefreshTitle": {
+    "message": "새로 고치다",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunAction": {
+    "message": "실행",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunCanceled": {
+    "message": "취소",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunDurationPrefix": {
+    "message": "소요시간",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunEntrySummary": {
+    "message": "#$ARG1$ $ARG2$ - 단계=$ARG3$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "workflowsRunFailed": {
+    "message": "실패",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunHistory": {
+    "message": "실행 기록",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunPaused": {
+    "message": "일시중지됨",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunQueued": {
+    "message": "대기 중",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunRunning": {
+    "message": "실행 중",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunStatusPrefix": {
+    "message": "상태",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunSucceeded": {
+    "message": "성공",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunWorkflowTitle": {
+    "message": "워크플로 실행",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsSearchPlaceholder": {
+    "message": "워크플로 검색...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsSecondsUnit": {
+    "message": "에스",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggersSection": {
+    "message": "트리거",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsUntitledName": {
+    "message": "제목 없음",
+    "description": "Auto-generated localized message"
+  },
+  "worldAuto": {
+    "message": "자동",
+    "description": "Auto-generated localized message"
+  },
+  "worldIsolated": {
+    "message": "외딴",
+    "description": "Auto-generated localized message"
+  },
+  "worldLabel": {
+    "message": "세계",
+    "description": "Auto-generated localized message"
+  },
+  "worldMain": {
+    "message": "기본",
+    "description": "Auto-generated localized message"
   }
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 
 import type { Flow as FlowV2, NodeBase } from '@/entrypoints/background/record-replay/types';
 import { NODE_UI_LIST } from '@/entrypoints/popup/components/builder/model/ui-nodes';
+import { getMessage } from '@/utils/i18n';
 import './Sidebar.css';
 
 type SidebarItem = {
@@ -62,6 +63,8 @@ function SidebarGroup({
 }
 
 export default function Sidebar({ paletteTypes, onAddNode }: SidebarProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {
@@ -107,7 +110,7 @@ export default function Sidebar({ paletteTypes, onAddNode }: SidebarProps) {
         </svg>
         <input
           className="builder-sidebar__search-input"
-          placeholder="Insert node..."
+          placeholder={t('builderInsertNodePlaceholder', 'Insert node...')}
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
@@ -116,7 +119,9 @@ export default function Sidebar({ paletteTypes, onAddNode }: SidebarProps) {
       {filtered.Flow.length > 0 ? (
         <>
           <div className="builder-sidebar__section-divider">
-            <span className="builder-sidebar__divider-label">Flow</span>
+            <span className="builder-sidebar__divider-label">
+              {t('builderFlowCategory', 'Flow')}
+            </span>
           </div>
           <SidebarGroup items={filtered.Flow as SidebarItem[]} onAddNode={onAddNode} onDragStart={onDragStart} />
         </>
@@ -125,17 +130,17 @@ export default function Sidebar({ paletteTypes, onAddNode }: SidebarProps) {
       <SidebarGroup items={filtered.Actions as SidebarItem[]} onAddNode={onAddNode} onDragStart={onDragStart} />
 
       <div className="builder-sidebar__section-divider">
-        <span className="builder-sidebar__divider-label">Tools</span>
+        <span className="builder-sidebar__divider-label">{t('builderToolsCategory', 'Tools')}</span>
       </div>
       <SidebarGroup items={filtered.Tools as SidebarItem[]} onAddNode={onAddNode} onDragStart={onDragStart} />
 
       <div className="builder-sidebar__section-divider">
-        <span className="builder-sidebar__divider-label">Tabs</span>
+        <span className="builder-sidebar__divider-label">{t('builderTabsCategory', 'Tabs')}</span>
       </div>
       <SidebarGroup items={filtered.Tabs as SidebarItem[]} onAddNode={onAddNode} onDragStart={onDragStart} />
 
       <div className="builder-sidebar__section-divider">
-        <span className="builder-sidebar__divider-label">Logic</span>
+        <span className="builder-sidebar__divider-label">{t('builderLogicCategory', 'Logic')}</span>
       </div>
       <SidebarGroup items={filtered.Logic as SidebarItem[]} onAddNode={onAddNode} onDragStart={onDragStart} />
     </aside>

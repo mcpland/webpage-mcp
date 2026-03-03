@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AgentSession } from 'webpage-mcp-shared';
+import { getMessage } from '@/utils/i18n';
 
 type AgentSessionMenuProps = {
   open: boolean;
@@ -32,7 +33,7 @@ function getSessionDisplayName(session: AgentSession): string {
   if (session.name) {
     return session.name;
   }
-  return 'Unnamed Session';
+  return getMessage('agentSessionsUnnamed', undefined, 'Unnamed Session');
 }
 
 function formatDate(dateStr: string): string {
@@ -43,10 +44,13 @@ function formatDate(dateStr: string): string {
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
 
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
+  const uiLocale = chrome.i18n?.getUILanguage?.() || undefined;
+  const rtf = new Intl.RelativeTimeFormat(uiLocale, { numeric: 'auto', style: 'short' });
+
+  if (diffMins < 1) return rtf.format(0, 'minute');
+  if (diffMins < 60) return rtf.format(-diffMins, 'minute');
+  if (diffHours < 24) return rtf.format(-diffHours, 'hour');
+  if (diffDays < 7) return rtf.format(-diffDays, 'day');
   return date.toLocaleDateString();
 }
 
@@ -62,6 +66,9 @@ export default function AgentSessionMenu({
   onSessionDelete,
   onSessionRename,
 }: AgentSessionMenuProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const renameInputRef = useRef<HTMLInputElement | null>(null);
@@ -79,7 +86,7 @@ export default function AgentSessionMenu({
   }
 
   function handleDeleteSession(sessionId: string): void {
-    if (confirm('Delete this session? This cannot be undone.')) {
+    if (confirm(t('agentSessionDeleteConfirm', 'Delete this session? This cannot be undone.'))) {
       onSessionDelete?.(sessionId);
     }
   }
@@ -120,18 +127,18 @@ export default function AgentSessionMenu({
         className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider"
         style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
       >
-        Sessions
+        {t('agentSessionsTitle', 'Sessions')}
       </div>
 
       {isLoading ? (
         <div className="px-3 py-4 text-center text-xs" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-          Loading sessions...
+          {t('agentSessionsLoading', 'Loading sessions...')}
         </div>
       ) : null}
 
       {!isLoading && sessions.length === 0 ? (
         <div className="px-3 py-4 text-center text-xs" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-          No sessions yet
+          {t('agentSessionsEmpty', 'No sessions yet')}
         </div>
       ) : null}
 
@@ -214,7 +221,7 @@ export default function AgentSessionMenu({
                         color: 'var(--ac-text-muted, #6e6e6e)',
                         borderRadius: 'var(--ac-radius-button)',
                       }}
-                      title="Rename session"
+                      title={t('agentSessionRenameTitle', 'Rename session')}
                       onClick={(event) => {
                         event.stopPropagation();
                         startRename(session);
@@ -238,7 +245,7 @@ export default function AgentSessionMenu({
                       color: 'var(--ac-danger, #dc2626)',
                       borderRadius: 'var(--ac-radius-button)',
                     }}
-                    title="Delete session"
+                    title={t('agentSessionDeleteTitle', 'Delete session')}
                     onClick={(event) => {
                       event.stopPropagation();
                       handleDeleteSession(session.id);
@@ -274,7 +281,9 @@ export default function AgentSessionMenu({
         onClick={onSessionNew}
         type="button"
       >
-        {isCreating ? 'Creating...' : '+ New Session'}
+        {isCreating
+          ? t('agentSessionCreating', 'Creating...')
+          : t('agentSessionNewButton', '+ New Session')}
       </button>
 
       {error ? (

@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import type { NodeBase, Edge as EdgeV2 } from '@/entrypoints/background/record-replay/types';
+import { getMessage } from '@/utils/i18n';
 import { getTypeGlyph, getTypeLabel, nodeSubtitle } from './node-util';
 
 type BuilderNodeData = {
@@ -33,6 +34,9 @@ function hasElseCase(node: NodeBase): boolean {
 }
 
 export default function NodeIf({ data, selected }: NodeProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const nodeData = data as BuilderNodeData;
   const node = nodeData.node;
   const edges = nodeData.edges || [];
@@ -85,7 +89,10 @@ export default function NodeIf({ data, selected }: NodeProps) {
 
           return (
             <div key={handleId} className="case-row">
-              <div className="case-label">{branch.name || `Condition${index + 1}`}</div>
+              <div className="case-label">
+                {branch.name ||
+                  t('builderIfConditionLabel', 'Condition {0}', [String(index + 1)])}
+              </div>
               <Handle
                 type="source"
                 position={Position.Right}
@@ -98,7 +105,7 @@ export default function NodeIf({ data, selected }: NodeProps) {
 
         {hasElse ? (
           <div className="case-row else-row">
-            <div className="case-label">Else</div>
+            <div className="case-label">{t('builderIfElseLabel', 'Else')}</div>
             <Handle
               type="source"
               position={Position.Right}

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { getMessage } from '@/utils/i18n';
 
 import type { TimelineItem } from '../../../composables/useAgentThreads';
 
@@ -10,6 +11,8 @@ const MAX_LINES = 10;
 const MAX_CHARS = 500;
 
 export default function TimelineToolResultCardStep({ item }: TimelineToolResultCardStepProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
   const [expanded, setExpanded] = useState(false);
 
   const labelColor = item.isError
@@ -107,7 +110,9 @@ export default function TimelineToolResultCardStep({ item }: TimelineToolResultC
             {!item.tool.diffStats?.addedLines &&
             !item.tool.diffStats?.deletedLines &&
             item.tool.diffStats?.totalLines ? (
-              <span>{item.tool.diffStats.totalLines} lines</span>
+              <span>
+                {t('agentLinesCount', '{0} lines', [String(item.tool.diffStats.totalLines)])}
+              </span>
             ) : null}
           </span>
         ) : null}
@@ -159,7 +164,7 @@ export default function TimelineToolResultCardStep({ item }: TimelineToolResultC
                     color: 'var(--ac-text-subtle)',
                   }}
                 >
-                  +{editFiles.length - 5} more files
+                  {t('agentMoreFilesCount', '+{0} more files', [String(editFiles.length - 5)])}
                 </div>
               ) : null}
             </>
@@ -185,7 +190,9 @@ export default function TimelineToolResultCardStep({ item }: TimelineToolResultC
                   }}
                   onClick={() => setExpanded((current) => !current)}
                 >
-                  {expanded ? 'Show less' : 'Show more...'}
+                  {expanded
+                    ? t('agentShowLess', 'Show less')
+                    : t('agentShowMore', 'Show more...')}
                 </button>
               ) : null}
             </>
@@ -211,7 +218,9 @@ export default function TimelineToolResultCardStep({ item }: TimelineToolResultC
                   }}
                   onClick={() => setExpanded((current) => !current)}
                 >
-                  {expanded ? 'Show less' : 'Show more...'}
+                  {expanded
+                    ? t('agentShowLess', 'Show less')
+                    : t('agentShowMore', 'Show more...')}
                 </button>
               ) : null}
             </>
@@ -221,7 +230,7 @@ export default function TimelineToolResultCardStep({ item }: TimelineToolResultC
 
       {item.isError ? (
         <div className="text-[11px]" style={{ color: 'var(--ac-danger)' }}>
-          Error occurred
+          {t('agentErrorOccurred', 'Error occurred')}
         </div>
       ) : null}
     </div>

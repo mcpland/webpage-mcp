@@ -1,307 +1,1321 @@
 {
-  "extensionName": {
-    "message": "webpage-mcp-server",
-    "description": "擴充功能名稱"
-  },
-  "extensionDescription": {
-    "message": "使用您自己的 Chrome 瀏覽器暴露瀏覽器功能",
-    "description": "擴充功能描述"
-  },
-  "nativeServerConfigLabel": {
-    "message": "MCP 伺服器設定",
-    "description": "MCP 伺服器設定的主要區段標題"
-  },
-  "semanticEngineLabel": {
-    "message": "語意引擎",
-    "description": "語意引擎的主要區段標題"
-  },
-  "embeddingModelLabel": {
-    "message": "Embedding 模型",
-    "description": "模型選擇的主要區段標題"
-  },
-  "indexDataManagementLabel": {
-    "message": "索引資料管理",
-    "description": "資料管理主要區段標題"
-  },
-  "modelCacheManagementLabel": {
-    "message": "模型快取管理",
-    "description": "快取管理主要區段標題"
-  },
-  "statusLabel": {
-    "message": "狀態",
-    "description": "通用狀態標籤"
-  },
-  "runningStatusLabel": {
-    "message": "執行狀態",
-    "description": "伺服器執行狀態標籤"
-  },
-  "connectionStatusLabel": {
-    "message": "連線狀態",
-    "description": "連線狀態標籤"
-  },
-  "lastUpdatedLabel": {
-    "message": "最後更新：",
-    "description": "最後更新時間戳標籤"
-  },
-  "connectButton": {
-    "message": "連線",
-    "description": "連線按鈕文字"
-  },
-  "disconnectButton": {
-    "message": "中斷連線",
-    "description": "中斷連線按鈕文字"
-  },
-  "connectingStatus": {
-    "message": "連線中...",
-    "description": "連線狀態訊息"
-  },
-  "connectedStatus": {
-    "message": "已連線",
-    "description": "已連線狀態訊息"
-  },
-  "disconnectedStatus": {
-    "message": "已中斷",
-    "description": "已中斷狀態訊息"
-  },
-  "detectingStatus": {
-    "message": "偵測中...",
-    "description": "偵測狀態訊息"
-  },
-  "serviceRunningStatus": {
-    "message": "服務執行中 (連結埠: $PORT$)",
-    "description": "含連結埠號的服務執行狀態",
-    "placeholders": {
-      "port": {
-        "content": "$1",
-        "example": "12306"
-      }
-    }
-  },
-  "serviceNotConnectedStatus": {
-    "message": "服務未連線",
-    "description": "服務未連線狀態"
-  },
-  "connectedServiceNotStartedStatus": {
-    "message": "已連線，服務未啟動",
-    "description": "已連線但服務未啟動狀態"
-  },
-  "mcpServerConfigLabel": {
-    "message": "MCP 伺服器設定",
-    "description": "MCP 伺服器設定區段標籤"
-  },
-  "connectionPortLabel": {
-    "message": "連結埠",
-    "description": "連結埠輸入標籤"
-  },
-  "refreshStatusButton": {
-    "message": "重新整理狀態",
-    "description": "重新整理狀態按鈕提示"
-  },
-  "copyConfigButton": {
-    "message": "複製設定",
-    "description": "複製設定按鈕文字"
-  },
-  "retryButton": {
-    "message": "重試",
-    "description": "重試按鈕文字"
-  },
-  "cancelButton": {
-    "message": "取消",
-    "description": "取消按鈕文字"
-  },
-  "confirmButton": {
-    "message": "確認",
-    "description": "確認按鈕文字"
-  },
-  "saveButton": {
-    "message": "儲存",
-    "description": "儲存按鈕文字"
-  },
-  "closeButton": {
-    "message": "關閉",
-    "description": "關閉按鈕文字"
-  },
-  "resetButton": {
-    "message": "重設",
-    "description": "重設按鈕文字"
-  },
-  "initializingStatus": {
-    "message": "初始化中...",
-    "description": "初始化進度訊息"
-  },
-  "processingStatus": {
-    "message": "處理中...",
-    "description": "處理進度訊息"
-  },
-  "loadingStatus": {
-    "message": "載入中...",
-    "description": "載入進度訊息"
-  },
-  "clearingStatus": {
-    "message": "清除中...",
-    "description": "清除進度訊息"
-  },
-  "cleaningStatus": {
-    "message": "清理中...",
-    "description": "清理進度訊息"
-  },
-  "downloadingStatus": {
-    "message": "下載中...",
-    "description": "下載進度訊息"
-  },
-  "semanticEngineReadyStatus": {
-    "message": "語意引擎已就緒",
-    "description": "語意引擎就緒狀態"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "語意引擎初始化中...",
-    "description": "語意引擎初始化狀態"
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "語意引擎初始化失敗",
-    "description": "語意引擎初始化失敗狀態"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "語意引擎未初始化",
-    "description": "語意引擎未初始化狀態"
-  },
-  "initSemanticEngineButton": {
-    "message": "初始化語意引擎",
-    "description": "初始化語意引擎按鈕文字"
-  },
-  "reinitializeButton": {
-    "message": "重新初始化",
-    "description": "重新初始化按鈕文字"
-  },
-  "downloadingModelStatus": {
-    "message": "正在下載模型... $PROGRESS$%",
-    "description": "含百分比的模型下載進度",
-    "placeholders": {
-      "progress": {
-        "content": "$1",
-        "example": "50"
-      }
-    }
-  },
-  "switchingModelStatus": {
-    "message": "正在切換模型...",
-    "description": "模型切換進度訊息"
-  },
-  "modelLoadedStatus": {
-    "message": "模型已載入",
-    "description": "模型成功載入狀態"
-  },
-  "modelFailedStatus": {
-    "message": "模型載入失敗",
-    "description": "模型載入失敗狀態"
-  },
-  "lightweightModelDescription": {
-    "message": "輕量級多語言模型",
-    "description": "輕量級模型選項描述"
-  },
-  "betterThanSmallDescription": {
-    "message": "比 e5-small 稍大，但效果更佳",
-    "description": "中等模型選項描述"
-  },
-  "multilingualModelDescription": {
-    "message": "多語言語意模型",
-    "description": "多語言模型選項描述"
-  },
-  "fastPerformance": {
-    "message": "快速",
-    "description": "快速效能指標"
-  },
-  "balancedPerformance": {
-    "message": "平衡",
-    "description": "平衡效能指標"
+  "aboutTitle": {
+    "message": "關於",
+    "description": "關於對話框標題"
   },
   "accuratePerformance": {
     "message": "精確",
     "description": "精確效能指標"
   },
-  "networkErrorMessage": {
-    "message": "網路連線錯誤，請檢查網路後再試一次",
-    "description": "網路連線錯誤訊息"
-  },
-  "modelCorruptedErrorMessage": {
-    "message": "模型檔案毀損或不完整，請重新下載",
-    "description": "模型毀損錯誤訊息"
-  },
-  "unknownErrorMessage": {
-    "message": "未知錯誤，請檢查您的網路是否可存取 HuggingFace",
-    "description": "未知錯誤回退訊息"
-  },
-  "permissionDeniedErrorMessage": {
-    "message": "權限被拒絕",
-    "description": "權限被拒絕錯誤訊息"
-  },
-  "timeoutErrorMessage": {
-    "message": "操作逾時",
-    "description": "逾時錯誤訊息"
-  },
-  "indexedPagesLabel": {
-    "message": "已索引頁面",
-    "description": "已索引頁面數量標籤"
-  },
-  "indexSizeLabel": {
-    "message": "索引大小",
-    "description": "索引大小標籤"
-  },
   "activeTabsLabel": {
     "message": "作用中分頁",
     "description": "作用中分頁數量標籤"
   },
-  "vectorDocumentsLabel": {
-    "message": "向量文件",
-    "description": "向量文件數量標籤"
+  "advancedSettingsLabel": {
+    "message": "進階設定",
+    "description": "進階設定區段標籤"
   },
-  "cacheSizeLabel": {
-    "message": "快取大小",
-    "description": "快取大小標籤"
+  "agentAllChangesExcluded": {
+    "message": "所有更改均被排除。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentApplyChangesDefault": {
+    "message": "應用程式變更",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentCacheDesc": {
+    "message": "管理代理伺服器儲存在磁碟上的快取映像。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentCacheDialogAria": {
+    "message": "附件快取管理",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentCacheTitle": {
+    "message": "附件緩存",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentClearFailed": {
+    "message": "無法清除附件。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentClearSelected": {
+    "message": "清除所選內容 ($ARG1$)",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentFilesCount": {
+    "message": "$ARG1$ 文件",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentInvalidServerResponse": {
+    "message": "來自伺服器的無效回應。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentInvertSelection": {
+    "message": "倒置",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentLoadingStats": {
+    "message": "正在載入附件統計資料...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentLoadStatsFailed": {
+    "message": "無法載入附件統計資料。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentMissingTag": {
+    "message": "遺失的",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentNoData": {
+    "message": "未找到附件資料。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentOrphanProjectsCount": {
+    "message": "$ARG1$ 孤兒項目",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentOrphanTag": {
+    "message": "孤兒",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentRemovedSummary": {
+    "message": "刪除了 $ARG1$ （$ARG2$ 文件）。",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentAttachmentRootDirectoryLabel": {
+    "message": "根目錄",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentSelectAll": {
+    "message": "選擇全部",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentSelectProjectsHint": {
+    "message": "選擇項目以從磁碟中刪除快取的附件檔案。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentAttachmentTotalSizeLabel": {
+    "message": "總尺寸",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentChatComposerPlaceholder": {
+    "message": "請 Claude 幫我寫程式...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerAttachImageShortTooltip": {
+    "message": "附上圖片",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerAttachImageTooltip": {
+    "message": "附加圖像（拖曳、貼上或點擊）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerDropImagesHere": {
+    "message": "將圖像拖放到此處",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerExpandEditorTitle": {
+    "message": "展開編輯器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerReasoningEffortTooltip": {
+    "message": "推理強度",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerRemoveImageTitle": {
+    "message": "刪除影像",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerResetConfirm": {
+    "message": "要重設此對話嗎？所有訊息都會被刪除，工作階段將重新開始。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerResetConversationTooltip": {
+    "message": "重置對話",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerSendMessageAria": {
+    "message": "發送訊息",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerSendTitle": {
+    "message": "傳送",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerSessionSettingsTooltip": {
+    "message": "工作階段設定",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerStatusPreparing": {
+    "message": "正在準備...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerStatusReady": {
+    "message": "準備好",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerStatusSending": {
+    "message": "正在發送...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerStatusStarting": {
+    "message": "開始...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerStatusStopping": {
+    "message": "停止...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerStatusWorking": {
+    "message": "在職的...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerStopRequestAria": {
+    "message": "停止請求",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerStopTitle": {
+    "message": "停止",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentComposerSwitchModelTooltip": {
+    "message": "開關型號",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentConversationEmptyPrompt": {
+    "message": "今天我可以如何幫助您編碼？",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentDismissErrorAria": {
+    "message": "消除錯誤",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentDismissTitle": {
+    "message": "解僱",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentEditsCount": {
+    "message": "$ARG1$ 編輯$ARG2$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentElementsCount": {
+    "message": "$ARG1$ 元素$ARG2$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentErrorOccurred": {
+    "message": "發生錯誤",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentExcludeCount": {
+    "message": "排除 ($ARG1$)",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentImagePreviewAria": {
+    "message": "圖片預覽",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentImagePreviewCloseAria": {
+    "message": "關閉影像預覽",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentIncludeCount": {
+    "message": "包括 ($ARG1$)",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentIncludeExcludeSummary": {
+    "message": "$ARG1$ 包括 | $ARG2$ 除外",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentLinesCount": {
+    "message": "$ARG1$ 行",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentLinesWord": {
+    "message": "線",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentLineWord": {
+    "message": "線",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentModifiedElementsLabel": {
+    "message": "修改元素：",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentMoreCount": {
+    "message": "+$ARG1$ 更多",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreFilesCount": {
+    "message": "+$ARG1$ 更多文件",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreLinesCount": {
+    "message": "$ARG1$ 更多 $ARG2$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentNoChangesYet": {
+    "message": "還沒有任何變化。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentNoExcludedElements": {
+    "message": "沒有排除的元素。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentOpenProjectFailed": {
+    "message": "無法開啟項目：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentOpenProjectMenuTerminal": {
+    "message": "終端",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentOpenProjectMenuTitle": {
+    "message": "打開方式",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentOpenProjectMenuVSCode": {
+    "message": "VS程式碼",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentPreviewFooterLabel": {
+    "message": "Agent 預覽",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuAutoOption": {
+    "message": "汽車",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuCliLabel": {
+    "message": "命令列介面",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuDefaultOption": {
+    "message": "預設",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuEffortHint": {
+    "message": "適用於新工作階段。既有工作階段請在「工作階段設定」中調整。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuEffortLabel": {
+    "message": "推理強度",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuEnableMcpLabel": {
+    "message": "啟用網頁 MCP 伺服器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuEnableMcpTitle": {
+    "message": "啟用本地網頁 MCP 伺服器集成",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuMcpLabel": {
+    "message": "MCP",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuModelLabel": {
+    "message": "模型",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuSaveSettings": {
+    "message": "儲存設定",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuSaving": {
+    "message": "儲存中...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectMenuSettingsTitle": {
+    "message": "設定",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectsConfirmCreateDir": {
+    "message": "目錄“$ARG1$”不存在。創建它？",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsConfirmSwitchExisting": {
+    "message": "「$ARG1$」的項目已存在：$ARG2$\n\n切換到那個項目？",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentProjectsCreateFailed": {
+    "message": "建立專案失敗。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectsInvalidCreateResponse": {
+    "message": "項目已創建，但響應無效。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectsInvalidPath": {
+    "message": "路徑無效",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectsNewButton": {
+    "message": "+ 新項目",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectsPickerOpenFailed": {
+    "message": "無法開啟目錄選擇器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectsPickerUnavailable": {
+    "message": "目錄選擇器不可用。請重建並重新啟動 MCP 伺服器。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectsSelecting": {
+    "message": "正在選擇...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectsServerHttpError": {
+    "message": "伺服器錯誤：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsServerUnavailable": {
+    "message": "伺服器不可用",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectsTitle": {
+    "message": "專案",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentProjectsValidateFailed": {
+    "message": "驗證路徑失敗",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentPromptPreviewLabel": {
+    "message": "提示預覽：",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSelectedHeader": {
+    "message": "已選擇",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSelectedTag": {
+    "message": "已選擇 $ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSelectionChipShort": {
+    "message": "塞爾",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSentImagesSummary": {
+    "message": "已發送 $ARG1$ 圖片$ARG2$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentServerNotReadyMissingPort": {
+    "message": "代理伺服器未準備好（缺少伺服器連接埠）。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentServerNotReadySimple": {
+    "message": "代理伺服器未準備好。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentServerNotReadyTitle": {
+    "message": "伺服器未準備好",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentServerReconnectHint": {
+    "message": "啟動或重新連接伺服器，然後再次開啟此面板。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionActiveModelLabel": {
+    "message": "目前模型",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionAppendCustomText": {
+    "message": "附加自訂文字",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionAppendCustomTextPlaceholder": {
+    "message": "附加說明...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionClaudeCodeLabel": {
+    "message": "Claude Code",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionCreating": {
+    "message": "建立中...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionCustomPromptPlaceholder": {
+    "message": "輸入自訂系統提示...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionDeleteConfirm": {
+    "message": "刪除此工作階段？此操作無法復原。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionDeleteNamedConfirm": {
+    "message": "刪除「$ARG1$」？",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionDeleteTitle": {
+    "message": "刪除",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionEngineLabel": {
+    "message": "引擎",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionEngineSessionLabel": {
+    "message": "引擎工作階段",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionInfoSection": {
+    "message": "工作階段資訊",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionMcpServersLabel": {
+    "message": "MCP伺服器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionModelDefaultServer": {
+    "message": "預設（伺服器設定）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionModelLabel": {
+    "message": "模型",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionNewButton": {
+    "message": "+ 新工作階段",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionNewShort": {
+    "message": "新增",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionOpenProjectTitle": {
+    "message": "開啟專案",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionPermissionAcceptEdits": {
+    "message": "AcceptEdits - 自動接受檔案編輯",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionPermissionBypass": {
+    "message": "bypassPermissions - 自動批准所有操作",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionPermissionDefault": {
+    "message": "預設 - 請求批准",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionPermissionDontAsk": {
+    "message": "dontAsk - 不需確認",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionPermissionHint": {
+    "message": "控制 Claude SDK 如何處理工具批准請求。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionPermissionModeLabel": {
+    "message": "權限模式",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionPermissionPlan": {
+    "message": "計劃 - 僅計劃模式",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionReasoningEffortHint": {
+    "message": "控制推理深度。強度越高，品質越好，但速度越慢。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionReasoningEffortLabel": {
+    "message": "推理強度",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionReasoningEffortXhighHint": {
+    "message": "注意：xhigh 僅適用於 gpt-5.2 和 gpt-5.1-codex-max 型號。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionRenameTitle": {
+    "message": "重新命名",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionRunningBadge": {
+    "message": "執行中",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionSdkInfoLabel": {
+    "message": "SDK 資訊",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionsEmpty": {
+    "message": "尚無工作階段",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionSettingsLoading": {
+    "message": "正在載入工作階段資訊...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionSettingsTitle": {
+    "message": "工作階段設定",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionsLoading": {
+    "message": "正在載入工作階段...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionsNoMatching": {
+    "message": "沒有符合的工作階段",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionsSearchPlaceholder": {
+    "message": "搜尋工作階段...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionsStartConversation": {
+    "message": "與 AI 開始新的對話",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionsStartNewButton": {
+    "message": "開始新工作階段",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionsTitle": {
+    "message": "工作階段",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionsTryDifferentSearch": {
+    "message": "嘗試不同的搜尋字詞",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionsUnnamed": {
+    "message": "未命名工作階段",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionSystemPromptLabel": {
+    "message": "系統提示",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionThisSession": {
+    "message": "目前工作階段",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionToolsLabel": {
+    "message": "工具",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionUseCustomPrompt": {
+    "message": "使用自訂提示",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionUsePresetClaudeCode": {
+    "message": "使用預設（claude_code）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSessionViewMcpServers": {
+    "message": "檢視 MCP 伺服器 ($ARG1$)",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionViewTools": {
+    "message": "檢視工具 ($ARG1$)",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSettingsClearAttachmentCache": {
+    "message": "清除附件快取",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSettingsCometCaretLabel": {
+    "message": "彗星插入符",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSettingsInputSection": {
+    "message": "輸入",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSettingsReconnectServer": {
+    "message": "重新連接伺服器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentSettingsStorageSection": {
+    "message": "貯存",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentShowLess": {
+    "message": "顯示較少",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentShowMore": {
+    "message": "顯示更多...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentThinkingStatus": {
+    "message": "思維...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentThreadEditComingSoon": {
+    "message": "編輯（即將推出）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentTopBarBackToSessionsTitle": {
+    "message": "返回工作階段",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentTopBarBrandFallback": {
+    "message": "代理人",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentTopBarOpenProjectTitle": {
+    "message": "在 VS Code 或終端機中開啟項目",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentUnknownValue": {
+    "message": "未知",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentUsageDurationTurnsTitle": {
+    "message": "持續時間：$ARG1$s，回合數：$ARG2$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageInputOutputTitle": {
+    "message": "輸入：$ARG1$，輸出：$ARG2$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageTokensSummary": {
+    "message": "$ARG1$ 代幣",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentWebEditorApplyTitle": {
+    "message": "網頁編輯器 應用",
+    "description": "自動生成的 i18n 文案"
+  },
+  "agentWebEditsHeader": {
+    "message": "網頁編輯",
+    "description": "自動生成的 i18n 文案"
+  },
+  "allFramesLabel": {
+    "message": "所有鏡框",
+    "description": "自動生成的 i18n 文案"
+  },
+  "applyButton": {
+    "message": "申請",
+    "description": "自動生成的 i18n 文案"
+  },
+  "autoTheme": {
+    "message": "自動",
+    "description": "自動主題選項"
+  },
+  "balancedPerformance": {
+    "message": "平衡",
+    "description": "平衡效能指標"
+  },
+  "betterThanSmallDescription": {
+    "message": "比 e5-small 稍大，但效果更佳",
+    "description": "中等模型選項描述"
+  },
+  "bookmarksBarLabel": {
+    "message": "書籤列",
+    "description": "書籤列資料夾名稱"
+  },
+  "builderActiveTabNotFound": {
+    "message": "未找到活動選項卡",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderAutoLayoutTitle": {
+    "message": "自動佈局",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderConfigurationErrorTitle": {
+    "message": "⚠️ 設定錯誤",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderConfigurationTitle": {
+    "message": "設定",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderDeleteEdgeTitle": {
+    "message": "刪除邊",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderDeleteNodeTitle": {
+    "message": "刪除節點",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderEdgeBranchLabel": {
+    "message": "分支",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderEdgeConnectionInvalid": {
+    "message": "無效的",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderEdgeConnectionStatusLabel": {
+    "message": "連線狀態",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderEdgeConnectionValid": {
+    "message": "有效的",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderEdgeInspectOnlyHint": {
+    "message": "僅檢查連接。稍後將支援編輯分支/句柄。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderEdgeSourceLabel": {
+    "message": "來源",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderEdgeTargetLabel": {
+    "message": "目標",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderEdgeTitle": {
+    "message": "連線",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderEditFlowTitle": {
+    "message": "編輯：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderEnterJsonPlaceholder": {
+    "message": "輸入 JSON",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderExportFailed": {
+    "message": "匯出失敗：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderExportJsonTitle": {
+    "message": "導出 JSON",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderFallbackPromotionNotice": {
+    "message": "應用後備建議：提升 $ARG1$ 優先權。",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFieldRequired": {
+    "message": "需要 $ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFitViewTitle": {
+    "message": "自動調整視圖",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderFlowCategory": {
+    "message": "流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderGeneralSettingsTitle": {
+    "message": "一般設定",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderIfConditionLabel": {
+    "message": "條件 $ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderIfElseLabel": {
+    "message": "否則",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderImportDataNotFound": {
+    "message": "導入失敗：找不到工作流程資料。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderImportFailed": {
+    "message": "導入失敗：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderImportJsonTitle": {
+    "message": "導入 JSON",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderInsertNodePlaceholder": {
+    "message": "插入節點...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderJsonFormatError": {
+    "message": "JSON格式錯誤",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderKeySequenceExample": {
+    "message": "範例：退格鍵 Enter 或 cmd+a",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderKeySequencePlaceholder": {
+    "message": "退格鍵 Enter 或 cmd+a",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderLoadFlowFailed": {
+    "message": "無法載入工作流程：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderLogicCategory": {
+    "message": "邏輯",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderManageTriggersTitle": {
+    "message": "管理觸發器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderNameLabel": {
+    "message": "姓名",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderNewButton": {
+    "message": "新的",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderNewWorkflowName": {
+    "message": "新工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderNodeNameLabel": {
+    "message": "節點名稱",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderNodeNamePlaceholder": {
+    "message": "輸入節點名稱",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderNodePropertiesTitle": {
+    "message": "節點屬性",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderNodeSpecFallbackHint": {
+    "message": "該節點尚未提供 NodeSpec，並已退回至預設屬性面板。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderNodeSpecNotFound": {
+    "message": "未找到節點規範",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderNoEdgesSelected": {
+    "message": "未選擇邊",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderNoSelectorGenerated": {
+    "message": "未產生有效的選擇器。請手動輸入。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderPageTitle": {
+    "message": "工作流程產生器 - 網頁 mcp 伺服器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderPickButton": {
+    "message": "挑選",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderPickedFromPageTitle": {
+    "message": "從頁面中挑選",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderPickFailed": {
+    "message": "挑選失敗",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderRedoTitle": {
+    "message": "重做 (⌘/Ctrl+Shift+Z)",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderRenameWorkflowTitle": {
+    "message": "重新命名工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderRunAllTitle": {
+    "message": "從頭開始執行",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderRunFailed": {
+    "message": "運作失敗：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderRunFromSelectedButton": {
+    "message": "從所選節點執行",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderRunFromSelectedTitle": {
+    "message": "從選取節點執行",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderSavedStatus": {
+    "message": "已儲存",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderSaveFailed": {
+    "message": "儲存失敗：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderSavingStatus": {
+    "message": "儲存中...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderScheduleConvertFailed": {
+    "message": "節點 $ARG1$ 計畫 #$ARG2$：無法轉換為 cron (type=$ARG3$)，已跳過。",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "builderScheduleOnceUnsupported": {
+    "message": "節點 $ARG1$ 調度 #$ARG2$：V3 不支援一次性調度，因此被跳過。",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "builderScreenshotOnFailure": {
+    "message": "失敗時的截圖",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderSelectNodeHint": {
+    "message": "選擇一個節點",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderSelectorHelpText": {
+    "message": "輸入 CSS 選擇器，或按一下「選取」以選擇頁面上的元素。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderTabsCategory": {
+    "message": "選項卡",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderTimeoutMsLabel": {
+    "message": "超時（毫秒）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderTimeoutPlaceholder": {
+    "message": "預設使用全域逾時",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderToolsCategory": {
+    "message": "工具",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderUndoTitle": {
+    "message": "撤銷 (⌘/Ctrl+Z)",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderViewEditPropertiesHint": {
+    "message": "檢視和編輯屬性",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderVisualOrchestrationTip": {
+    "message": "工作流程視覺編排",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderWorkflowEditorTitle": {
+    "message": "工作流程編輯器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderWorkflowNamePlaceholder": {
+    "message": "工作流程名稱",
+    "description": "自動生成的 i18n 文案"
+  },
+  "builderWorkflowNotFoundCreated": {
+    "message": "未找到工作流程“$ARG1$”，已建立新工作流程。",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "bytesUnit": {
+    "message": "bytes",
+    "description": "位元組單位"
+  },
+  "cacheDetailsLabel": {
+    "message": "快取詳細資訊",
+    "description": "快取詳細資訊區段標籤"
   },
   "cacheEntriesLabel": {
     "message": "快取項目",
     "description": "快取項目數量標籤"
   },
-  "clearAllDataButton": {
-    "message": "清除所有資料",
-    "description": "清除所有資料按鈕文字"
+  "cacheSizeLabel": {
+    "message": "快取大小",
+    "description": "快取大小標籤"
   },
-  "clearAllCacheButton": {
-    "message": "清除所有快取",
-    "description": "清除所有快取按鈕文字"
+  "cancelButton": {
+    "message": "取消",
+    "description": "取消按鈕文字"
   },
   "cleanExpiredCacheButton": {
     "message": "清理過期快取",
     "description": "清理過期快取按鈕文字"
   },
-  "exportDataButton": {
-    "message": "匯出資料",
-    "description": "匯出資料按鈕文字"
+  "cleaningStatus": {
+    "message": "清理中...",
+    "description": "清理進度訊息"
   },
-  "importDataButton": {
-    "message": "匯入資料",
-    "description": "匯入資料按鈕文字"
+  "clearAllCacheButton": {
+    "message": "清除所有快取",
+    "description": "清除所有快取按鈕文字"
   },
-  "confirmClearDataTitle": {
-    "message": "確認清除資料",
-    "description": "清除資料確認對話框標題"
+  "clearAllDataButton": {
+    "message": "清除所有資料",
+    "description": "清除所有資料按鈕文字"
   },
-  "settingsTitle": {
-    "message": "設定",
-    "description": "設定對話框標題"
+  "clearButton": {
+    "message": "清除",
+    "description": "自動生成的 i18n 文案"
   },
-  "aboutTitle": {
-    "message": "關於",
-    "description": "關於對話框標題"
-  },
-  "helpTitle": {
-    "message": "說明",
-    "description": "說明對話框標題"
-  },
-  "clearDataWarningMessage": {
-    "message": "此操作將清除所有已索引的網頁內容與向量資料，包括：",
-    "description": "清除資料警告訊息"
+  "clearDataIrreversibleWarning": {
+    "message": "此操作無法復原！清除後需重新瀏覽網頁以重建索引。",
+    "description": "不可逆操作警告"
   },
   "clearDataList1": {
     "message": "所有網頁的文字內容索引",
@@ -315,132 +1329,1552 @@
     "message": "搜尋歷史與快取",
     "description": "清除資料列表第三項"
   },
-  "clearDataIrreversibleWarning": {
-    "message": "此操作無法復原！清除後需重新瀏覽網頁以重建索引。",
-    "description": "不可逆操作警告"
+  "clearDataWarningMessage": {
+    "message": "此操作將清除所有已索引的網頁內容與向量資料，包括：",
+    "description": "清除資料警告訊息"
   },
-  "confirmClearButton": {
-    "message": "確認清除",
-    "description": "確認清除操作按鈕"
+  "clearingStatus": {
+    "message": "清除中...",
+    "description": "清除進度訊息"
   },
-  "cacheDetailsLabel": {
-    "message": "快取詳細資訊",
-    "description": "快取詳細資訊區段標籤"
+  "closeButton": {
+    "message": "關閉",
+    "description": "關閉按鈕文字"
   },
-  "noCacheDataMessage": {
-    "message": "尚無快取資料",
-    "description": "無可用快取資料訊息"
+  "commandToggleQuickPanelDesc": {
+    "message": "切換快速面板",
+    "description": "自動生成的 i18n 文案"
   },
-  "loadingCacheInfoStatus": {
-    "message": "正在載入快取資訊...",
-    "description": "載入快取資訊狀態"
+  "commandToggleWebEditorDesc": {
+    "message": "切換網頁編輯器模式",
+    "description": "自動生成的 i18n 文案"
   },
-  "processingCacheStatus": {
-    "message": "正在處理快取...",
-    "description": "處理快取狀態"
+  "composerDrawerCloseAria": {
+    "message": "關閉擴充編輯器",
+    "description": "自動生成的 i18n 文案"
   },
-  "expiredLabel": {
-    "message": "已過期",
-    "description": "過期項目標籤"
+  "composerDrawerExpandedEditorAria": {
+    "message": "擴充編輯器",
+    "description": "自動生成的 i18n 文案"
   },
-  "bookmarksBarLabel": {
-    "message": "書籤列",
-    "description": "書籤列資料夾名稱"
+  "composerDrawerExpandedEditorTitle": {
+    "message": "擴充編輯器",
+    "description": "自動生成的 i18n 文案"
   },
-  "newTabLabel": {
-    "message": "新分頁",
-    "description": "新分頁標籤"
-  },
-  "currentPageLabel": {
-    "message": "目前頁面",
-    "description": "目前頁面標籤"
-  },
-  "menuLabel": {
-    "message": "功能表",
-    "description": "功能表無障礙標籤"
-  },
-  "navigationLabel": {
-    "message": "導覽",
-    "description": "導覽無障礙標籤"
-  },
-  "mainContentLabel": {
-    "message": "主要內容",
-    "description": "主要內容無障礙標籤"
-  },
-  "languageSelectorLabel": {
-    "message": "語言",
-    "description": "語言選擇器標籤"
-  },
-  "themeLabel": {
-    "message": "主題",
-    "description": "主題選擇器標籤"
-  },
-  "lightTheme": {
-    "message": "淺色",
-    "description": "淺色主題選項"
-  },
-  "darkTheme": {
-    "message": "深色",
-    "description": "深色主題選項"
-  },
-  "autoTheme": {
-    "message": "自動",
-    "description": "自動主題選項"
-  },
-  "advancedSettingsLabel": {
-    "message": "進階設定",
-    "description": "進階設定區段標籤"
-  },
-  "debugModeLabel": {
-    "message": "偵錯模式",
-    "description": "偵錯模式切換標籤"
-  },
-  "verboseLoggingLabel": {
-    "message": "詳細日誌",
-    "description": "詳細日誌切換標籤"
-  },
-  "successNotification": {
-    "message": "操作已成功完成",
-    "description": "通用成功通知"
-  },
-  "warningNotification": {
-    "message": "警告：請在繼續前檢查",
-    "description": "通用警告通知"
-  },
-  "infoNotification": {
-    "message": "資訊",
-    "description": "通用資訊通知"
+  "composerDrawerShortcutHint": {
+    "message": "按 $ARG1$+Enter 發送",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "configCopiedNotification": {
     "message": "設定已複製到剪貼簿",
     "description": "設定複製成功訊息"
   },
+  "confirmButton": {
+    "message": "確認",
+    "description": "確認按鈕文字"
+  },
+  "confirmClearButton": {
+    "message": "確認清除",
+    "description": "確認清除操作按鈕"
+  },
+  "confirmClearDataTitle": {
+    "message": "確認清除資料",
+    "description": "清除資料確認對話框標題"
+  },
+  "connectButton": {
+    "message": "連線",
+    "description": "連線按鈕文字"
+  },
+  "connectedServiceNotStartedStatus": {
+    "message": "已連線，服務未啟動",
+    "description": "已連線但服務未啟動狀態"
+  },
+  "connectedStatus": {
+    "message": "已連線",
+    "description": "已連線狀態訊息"
+  },
+  "connectingStatus": {
+    "message": "連線中...",
+    "description": "連線狀態訊息"
+  },
+  "connectionPortLabel": {
+    "message": "連結埠",
+    "description": "連結埠輸入標籤"
+  },
+  "connectionStatusLabel": {
+    "message": "連線狀態",
+    "description": "連線狀態標籤"
+  },
+  "copyConfigButton": {
+    "message": "複製設定",
+    "description": "複製設定按鈕文字"
+  },
+  "createRunSectionTitle": {
+    "message": "建立 / 執行",
+    "description": "自動生成的 i18n 文案"
+  },
+  "currentPageLabel": {
+    "message": "目前頁面",
+    "description": "目前頁面標籤"
+  },
+  "darkTheme": {
+    "message": "深色",
+    "description": "深色主題選項"
+  },
   "dataClearedNotification": {
     "message": "資料清除成功",
     "description": "資料清除成功訊息"
   },
-  "bytesUnit": {
-    "message": "bytes",
-    "description": "位元組單位"
+  "debugModeLabel": {
+    "message": "偵錯模式",
+    "description": "偵錯模式切換標籤"
   },
-  "kilobytesUnit": {
-    "message": "KB",
-    "description": "千位元組單位"
+  "deleteButton": {
+    "message": "刪除",
+    "description": "自動生成的 i18n 文案"
   },
-  "megabytesUnit": {
-    "message": "MB",
-    "description": "百萬位元組單位"
+  "detectingStatus": {
+    "message": "偵測中...",
+    "description": "偵測狀態訊息"
+  },
+  "disconnectButton": {
+    "message": "中斷連線",
+    "description": "中斷連線按鈕文字"
+  },
+  "disconnectedStatus": {
+    "message": "已中斷",
+    "description": "已中斷狀態訊息"
+  },
+  "dnrFallbackLabel": {
+    "message": "DNR 後備",
+    "description": "自動生成的 i18n 文案"
+  },
+  "domainLabel": {
+    "message": "領域",
+    "description": "自動生成的 i18n 文案"
+  },
+  "downloadingModelStatus": {
+    "message": "正在下載模型... $PROGRESS$%",
+    "description": "含百分比的模型下載進度",
+    "placeholders": {
+      "progress": {
+        "content": "$1",
+        "example": "50"
+      }
+    }
+  },
+  "downloadingStatus": {
+    "message": "下載中...",
+    "description": "下載進度訊息"
+  },
+  "elementChipAfterLabel": {
+    "message": "後",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipAriaLabel": {
+    "message": "$ARG1$（$ARG2$ 更改，$ARG3$）。點擊以切換。",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "elementChipBeforeLabel": {
+    "message": "前",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipChangesCount": {
+    "message": "$ARG1$ 變化",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipClassLabel": {
+    "message": "班級",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipEmptyValue": {
+    "message": "（空的）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipExcluded": {
+    "message": "排除",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipExcludedLower": {
+    "message": "排除",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipExcludedShort": {
+    "message": "前任",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipIncluded": {
+    "message": "包括",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipIncludedLower": {
+    "message": "包括",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipIncludedShort": {
+    "message": "在",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipRevertAria": {
+    "message": "將變更還原為 $ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipRevertTitle": {
+    "message": "將所有變更還原為 $ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipStyleLabel": {
+    "message": "風格",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipTagFallback": {
+    "message": "元素",
+    "description": "自動生成的 i18n 文案"
+  },
+  "elementChipTextLabel": {
+    "message": "文字",
+    "description": "自動生成的 i18n 文案"
+  },
+  "embeddingModelLabel": {
+    "message": "Embedding 模型",
+    "description": "模型選擇的主要區段標題"
+  },
+  "emergencySwitchLabel": {
+    "message": "緊急開關",
+    "description": "自動生成的 i18n 文案"
+  },
+  "excludesInputLabel": {
+    "message": "排除（以逗號分隔）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "expiredLabel": {
+    "message": "已過期",
+    "description": "過期項目標籤"
+  },
+  "exportAllButton": {
+    "message": "全部導出",
+    "description": "自動生成的 i18n 文案"
+  },
+  "exportDataButton": {
+    "message": "匯出資料",
+    "description": "匯出資料按鈕文字"
+  },
+  "extensionDescription": {
+    "message": "使用您自己的 Chrome 瀏覽器暴露瀏覽器功能",
+    "description": "擴充功能描述"
+  },
+  "extensionName": {
+    "message": "webpage-mcp-server",
+    "description": "擴充功能名稱"
+  },
+  "fastPerformance": {
+    "message": "快速",
+    "description": "快速效能指標"
   },
   "gigabytesUnit": {
     "message": "GB",
     "description": "十億位元組單位"
   },
+  "helpTitle": {
+    "message": "說明",
+    "description": "說明對話框標題"
+  },
+  "importDataButton": {
+    "message": "匯入資料",
+    "description": "匯入資料按鈕文字"
+  },
+  "indexDataManagementLabel": {
+    "message": "索引資料管理",
+    "description": "資料管理主要區段標題"
+  },
+  "indexedPagesLabel": {
+    "message": "已索引頁面",
+    "description": "已索引頁面數量標籤"
+  },
+  "indexSizeLabel": {
+    "message": "索引大小",
+    "description": "索引大小標籤"
+  },
+  "infoNotification": {
+    "message": "資訊",
+    "description": "通用資訊通知"
+  },
+  "initializingStatus": {
+    "message": "初始化中...",
+    "description": "初始化進度訊息"
+  },
+  "initSemanticEngineButton": {
+    "message": "初始化語意引擎",
+    "description": "初始化語意引擎按鈕文字"
+  },
   "itemsUnit": {
     "message": "項目",
     "description": "項目計數單位"
   },
+  "kilobytesUnit": {
+    "message": "KB",
+    "description": "千位元組單位"
+  },
+  "languageSelectorLabel": {
+    "message": "語言",
+    "description": "語言選擇器標籤"
+  },
+  "lastUpdatedLabel": {
+    "message": "最後更新：",
+    "description": "最後更新時間戳標籤"
+  },
+  "lightTheme": {
+    "message": "淺色",
+    "description": "淺色主題選項"
+  },
+  "lightweightModelDescription": {
+    "message": "輕量級多語言模型",
+    "description": "輕量級模型選項描述"
+  },
+  "listSectionTitle": {
+    "message": "清單",
+    "description": "自動生成的 i18n 文案"
+  },
+  "loadingCacheInfoStatus": {
+    "message": "正在載入快取資訊...",
+    "description": "載入快取資訊狀態"
+  },
+  "loadingStatus": {
+    "message": "載入中...",
+    "description": "載入進度訊息"
+  },
+  "localModelBackToHomeTitle": {
+    "message": "回首頁",
+    "description": "自動生成的 i18n 文案"
+  },
+  "localModelReturnButton": {
+    "message": "返回",
+    "description": "自動生成的 i18n 文案"
+  },
+  "mainContentLabel": {
+    "message": "主要內容",
+    "description": "主要內容無障礙標籤"
+  },
+  "matchesInputLabel": {
+    "message": "匹配（以逗號分隔）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "mcpServerConfigLabel": {
+    "message": "MCP 伺服器設定",
+    "description": "MCP 伺服器設定區段標籤"
+  },
+  "megabytesUnit": {
+    "message": "MB",
+    "description": "百萬位元組單位"
+  },
+  "menuLabel": {
+    "message": "功能表",
+    "description": "功能表無障礙標籤"
+  },
+  "modeAuto": {
+    "message": "汽車",
+    "description": "自動生成的 i18n 文案"
+  },
+  "modeCss": {
+    "message": "CSS",
+    "description": "自動生成的 i18n 文案"
+  },
+  "modeLabel": {
+    "message": "模式",
+    "description": "自動生成的 i18n 文案"
+  },
+  "modelCacheManagementLabel": {
+    "message": "模型快取管理",
+    "description": "快取管理主要區段標題"
+  },
+  "modelCorruptedErrorMessage": {
+    "message": "模型檔案毀損或不完整，請重新下載",
+    "description": "模型毀損錯誤訊息"
+  },
+  "modelFailedStatus": {
+    "message": "模型載入失敗",
+    "description": "模型載入失敗狀態"
+  },
+  "modelLoadedStatus": {
+    "message": "模型已載入",
+    "description": "模型成功載入狀態"
+  },
+  "modeOnce": {
+    "message": "一次",
+    "description": "自動生成的 i18n 文案"
+  },
+  "modePersistent": {
+    "message": "執著的",
+    "description": "自動生成的 i18n 文案"
+  },
+  "multilingualModelDescription": {
+    "message": "多語言語意模型",
+    "description": "多語言模型選項描述"
+  },
+  "nameLabel": {
+    "message": "姓名",
+    "description": "自動生成的 i18n 文案"
+  },
+  "nativeServerConfigLabel": {
+    "message": "MCP 伺服器設定",
+    "description": "MCP 伺服器設定的主要區段標題"
+  },
+  "navigationLabel": {
+    "message": "導覽",
+    "description": "導覽無障礙標籤"
+  },
+  "networkErrorMessage": {
+    "message": "網路連線錯誤，請檢查網路後再試一次",
+    "description": "網路連線錯誤訊息"
+  },
+  "newTabLabel": {
+    "message": "新分頁",
+    "description": "新分頁標籤"
+  },
+  "noCacheDataMessage": {
+    "message": "尚無快取資料",
+    "description": "無可用快取資料訊息"
+  },
   "pagesUnit": {
     "message": "頁面",
     "description": "頁面計數單位"
+  },
+  "permissionDeniedErrorMessage": {
+    "message": "權限被拒絕",
+    "description": "權限被拒絕錯誤訊息"
+  },
+  "persistLabel": {
+    "message": "堅持",
+    "description": "自動生成的 i18n 文案"
+  },
+  "placeholderDomainHint": {
+    "message": "example.com",
+    "description": "自動生成的 i18n 文案"
+  },
+  "placeholderMatchesExample": {
+    "message": "例如https://*.example.com/*",
+    "description": "自動生成的 i18n 文案"
+  },
+  "placeholderOptional": {
+    "message": "選修的",
+    "description": "自動生成的 i18n 文案"
+  },
+  "placeholderScriptHint": {
+    "message": "將 JS/CSS/TM 貼到此處",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupAddNewAnnotationLabel": {
+    "message": "新增註釋",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupAuthTokenLabel": {
+    "message": "身份驗證令牌",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupClearDataFailed": {
+    "message": "清除資料失敗：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "popupClearDataFailedPlain": {
+    "message": "清除資料失敗",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupComingSoonBadge": {
+    "message": "即將推出",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupConnectFailedPrefix": {
+    "message": "連線失敗",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupCopiedShort": {
+    "message": "已複製",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupCopyFailed": {
+    "message": "複製失敗",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupCopyRegisterCommand": {
+    "message": "複製暫存器命令",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupCopyToken": {
+    "message": "複製令牌",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupDocsLink": {
+    "message": "文件",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupElementMarkerManagementDesc": {
+    "message": "管理頁面元素註釋",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupElementMarkerManagementTitle": {
+    "message": "元素標註管理",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupEnableElementMarkerTooltip": {
+    "message": "打開元素註釋",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupEnableWebEditorTooltip": {
+    "message": "開啟頁面編輯模式",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupFeatureUnderDevelopmentSuffix": {
+    "message": "該功能正在開發中，敬請期待",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupFooterTagline": {
+    "message": "AI 網頁 mcp 伺服器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupGuideLink": {
+    "message": "指導",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupIntelligentAssistantDesc": {
+    "message": "AI 代理對話和任務",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupIntelligentAssistantTitle": {
+    "message": "智慧助理",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupLabeledElementsLabel": {
+    "message": "標記元素",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupLocalModelDesc": {
+    "message": "語意引擎和模型管理",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupLocalModelTitle": {
+    "message": "本地模型",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupManagementPortalTitle": {
+    "message": "管理入口網站",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupMarkerNamePlaceholder": {
+    "message": "名稱，例如“登入按鈕”",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupOneTimeHostRegistrationLabel": {
+    "message": "一次性主機註冊（目前擴充功能 ID）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupPageTitle": {
+    "message": "網頁 mcp 伺服器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupQuickToolsTitle": {
+    "message": "快速工具",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupRecordingUnderDevelopment": {
+    "message": "錄音功能正在開發中",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupRecordPlaybackFeature": {
+    "message": "錄音回放",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupTroubleshootingTitle": {
+    "message": "故障排除",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupViewInstallGuideTitle": {
+    "message": "查看安裝指南",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupWorkflowManagementDesc": {
+    "message": "錄製和播放自動化工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupWorkflowManagementTitle": {
+    "message": "工作流程管理",
+    "description": "自動生成的 i18n 文案"
+  },
+  "processingCacheStatus": {
+    "message": "正在處理快取...",
+    "description": "處理快取狀態"
+  },
+  "processingStatus": {
+    "message": "處理中...",
+    "description": "處理進度訊息"
+  },
+  "queryLabel": {
+    "message": "詢問",
+    "description": "自動生成的 i18n 文案"
+  },
+  "refreshStatusButton": {
+    "message": "重新整理狀態",
+    "description": "重新整理狀態按鈕提示"
+  },
+  "reinitializeButton": {
+    "message": "重新初始化",
+    "description": "重新初始化按鈕文字"
+  },
+  "resetButton": {
+    "message": "重設",
+    "description": "重設按鈕文字"
+  },
+  "retryButton": {
+    "message": "重試",
+    "description": "重試按鈕文字"
+  },
+  "runAtAuto": {
+    "message": "汽車",
+    "description": "自動生成的 i18n 文案"
+  },
+  "runAtDocumentEnd": {
+    "message": "文件結束",
+    "description": "自動生成的 i18n 文案"
+  },
+  "runAtDocumentIdle": {
+    "message": "文件空閒",
+    "description": "自動生成的 i18n 文案"
+  },
+  "runAtDocumentStart": {
+    "message": "文件開始",
+    "description": "自動生成的 i18n 文案"
+  },
+  "runAtLabel": {
+    "message": "執行時間",
+    "description": "自動生成的 i18n 文案"
+  },
+  "runningStatusLabel": {
+    "message": "執行狀態",
+    "description": "伺服器執行狀態標籤"
+  },
+  "runOnceButton": {
+    "message": "運轉一次 (CDP)",
+    "description": "自動生成的 i18n 文案"
+  },
+  "saveButton": {
+    "message": "儲存",
+    "description": "儲存按鈕文字"
+  },
+  "scheduleDailyTimeLabel": {
+    "message": "時間（小時：分鐘）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleDailyTimePlaceholder": {
+    "message": "例如 09:30",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleDescribeDaily": {
+    "message": "每日 $ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeInterval": {
+    "message": "每 $ARG1$ 分鐘",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeOnce": {
+    "message": "一次在 $ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDialogTitle": {
+    "message": "預定執行",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleEnableLabel": {
+    "message": "使能夠",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleEnableTiming": {
+    "message": "啟用計時",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleExistingPlansTitle": {
+    "message": "已經有計劃了",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleIntervalLabel": {
+    "message": "間隔（分鐘）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleOnceTimeLabel": {
+    "message": "時間（ISO）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleOnceTimePlaceholder": {
+    "message": "例如 2025-10-05T10:00:00",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleParametersLabel": {
+    "message": "參數（JSON）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleParametersPlaceholder": {
+    "message": "{“用戶名”：“xx”}",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleTypeDaily": {
+    "message": "每天固定時間",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleTypeInterval": {
+    "message": "每N分鐘",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleTypeLabel": {
+    "message": "類型",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scheduleTypeOnce": {
+    "message": "僅執行一次",
+    "description": "自動生成的 i18n 文案"
+  },
+  "scriptLabel": {
+    "message": "腳本",
+    "description": "自動生成的 i18n 文案"
+  },
+  "semanticEngineInitFailedStatus": {
+    "message": "語意引擎初始化失敗",
+    "description": "語意引擎初始化失敗狀態"
+  },
+  "semanticEngineInitializingStatus": {
+    "message": "語意引擎初始化中...",
+    "description": "語意引擎初始化狀態"
+  },
+  "semanticEngineLabel": {
+    "message": "語意引擎",
+    "description": "語意引擎的主要區段標題"
+  },
+  "semanticEngineNotInitStatus": {
+    "message": "語意引擎未初始化",
+    "description": "語意引擎未初始化狀態"
+  },
+  "semanticEngineReadyStatus": {
+    "message": "語意引擎已就緒",
+    "description": "語意引擎就緒狀態"
+  },
+  "serviceNotConnectedStatus": {
+    "message": "服務未連線",
+    "description": "服務未連線狀態"
+  },
+  "serviceRunningStatus": {
+    "message": "服務執行中 (連結埠: $PORT$)",
+    "description": "含連結埠號的服務執行狀態",
+    "placeholders": {
+      "port": {
+        "content": "$1",
+        "example": "12306"
+      }
+    }
+  },
+  "settingsTitle": {
+    "message": "設定",
+    "description": "設定對話框標題"
+  },
+  "sidepanelAddMarkerTitle": {
+    "message": "新增標記",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelConfirmDeleteMarker": {
+    "message": "刪除標記“$ARG1$”？",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelConfirmDeleteWorkflow": {
+    "message": "您確定要刪除此工作流程嗎？此操作無法撤銷。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelCreateFlowUnavailable": {
+    "message": "V3 建構器尚未實現，因此無法建立工作流程。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelCreateMarkerButton": {
+    "message": "建立標記",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelCreateMarkerTitle": {
+    "message": "建立標記",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelCreateTriggerUnavailable": {
+    "message": "V3觸發器管理尚未實現，因此無法建立觸發器。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelEditFlowUnavailable": {
+    "message": "V3 建構器尚未實現，因此無法編輯工作流程。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelEditMarkerTitle": {
+    "message": "編輯標記",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelEditTriggerUnavailable": {
+    "message": "V3觸發器管理尚未實現，因此無法編輯觸發器。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerActionDelete": {
+    "message": "刪除",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerActionEdit": {
+    "message": "編輯",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerActionVerify": {
+    "message": "核實",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerDomainCount": {
+    "message": "$ARG1$ 標記",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelMarkerFieldMatchType": {
+    "message": "比賽類型",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerFieldName": {
+    "message": "姓名",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerFieldNamePlaceholder": {
+    "message": "例如：登入按鈕",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerFieldSelector": {
+    "message": "選擇器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerFieldSelectorType": {
+    "message": "選擇器類型",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerMatchExact": {
+    "message": "精確匹配",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerMatchHost": {
+    "message": "主機名稱",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerMatchPrefix": {
+    "message": "路徑前綴",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerSearchPlaceholder": {
+    "message": "搜尋標記名稱或選擇器...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerSelectorCss": {
+    "message": "CSS 選擇器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerSelectorPlaceholder": {
+    "message": "CSS 選擇器或 XPath",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerSelectorXpath": {
+    "message": "X路徑",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelMarkerStatsFiltered": {
+    "message": "顯示跨 $ARG3$ 域的 $ARG1$ 標記（在 $ARG2$ 之外）",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanelMarkerStatsTotal": {
+    "message": "跨 $ARG2$ 域的 $ARG1$ 標記總數",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "sidepanelNavigatorAgentDesc": {
+    "message": "AI 代理對話和任務",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelNavigatorAgentTitle": {
+    "message": "人工智慧助手",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelNavigatorElementMarkersDesc": {
+    "message": "管理頁面元素註釋",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelNavigatorElementMarkersTitle": {
+    "message": "元素註釋管理",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelNavigatorTitle": {
+    "message": "切換頁面",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelNavigatorToggleTitle": {
+    "message": "切換頁面（拖曳移動，雙擊重置位置）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelNavigatorWorkflowsDesc": {
+    "message": "記錄和重播自動化工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelNavigatorWorkflowsTitle": {
+    "message": "工作流程管理",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelNoMarkers": {
+    "message": "還沒有標記。點選右上角的 + 建立第一個標記。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelNoMatchingMarkers": {
+    "message": "沒有找到匹配的標記",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelPageTitle": {
+    "message": "網頁 mcp 伺服器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "sidepanelUpdateButton": {
+    "message": "更新",
+    "description": "自動生成的 i18n 文案"
+  },
+  "statusAll": {
+    "message": "全部",
+    "description": "自動生成的 i18n 文案"
+  },
+  "statusDisabled": {
+    "message": "殘障人士",
+    "description": "自動生成的 i18n 文案"
+  },
+  "statusEnabled": {
+    "message": "已啟用",
+    "description": "自動生成的 i18n 文案"
+  },
+  "statusLabel": {
+    "message": "狀態",
+    "description": "通用狀態標籤"
+  },
+  "successNotification": {
+    "message": "操作已成功完成",
+    "description": "通用成功通知"
+  },
+  "switchingModelStatus": {
+    "message": "正在切換模型...",
+    "description": "模型切換進度訊息"
+  },
+  "tableHeaderName": {
+    "message": "姓名",
+    "description": "自動生成的 i18n 文案"
+  },
+  "tableHeaderRunAt": {
+    "message": "執行時間",
+    "description": "自動生成的 i18n 文案"
+  },
+  "tableHeaderUpdated": {
+    "message": "已更新",
+    "description": "自動生成的 i18n 文案"
+  },
+  "tableHeaderWorld": {
+    "message": "世界",
+    "description": "自動生成的 i18n 文案"
+  },
+  "tagsInputLabel": {
+    "message": "標籤（以逗號分隔）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "themeLabel": {
+    "message": "主題",
+    "description": "主題選擇器標籤"
+  },
+  "timeoutErrorMessage": {
+    "message": "操作逾時",
+    "description": "逾時錯誤訊息"
+  },
+  "triggerPanelAddInterval": {
+    "message": "+ 間隔",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelAddOnce": {
+    "message": "+ 一次",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelCreate": {
+    "message": "建立",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelCurrentTriggers": {
+    "message": "目前觸發器 ($ARG1$)",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDeleteConfirm": {
+    "message": "刪除觸發器？\n\n$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCommandKey": {
+    "message": "命令鍵：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCron": {
+    "message": "規劃任務：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCronWithTz": {
+    "message": "規劃任務： $ARG1$ ($ARG2$)",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "triggerPanelDescribeDomSelector": {
+    "message": "選擇器：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeInterval": {
+    "message": "每 $ARG1$ 分鐘",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeManual": {
+    "message": "手動觸發（透過按鈕觸發）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelDescribeMenuTitle": {
+    "message": "標題：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeOnceAt": {
+    "message": "在 $ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeUrlRules": {
+    "message": "URL符合規則：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelEditViaNodeHint": {
+    "message": "透過 Builder 中的觸發器節點進行編輯",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelEnabledLabel": {
+    "message": "啟用",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelFireButton": {
+    "message": "火",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelFlowIdEmpty": {
+    "message": "流ID為空",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelIntervalHint": {
+    "message": "使用 chrome.alarms.periodInMinutes 來重複觸發器。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelIntervalOption": {
+    "message": "間隔",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelInvalidTimeFormat": {
+    "message": "觸發時間格式無效",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelOnceHint": {
+    "message": "發射後會自動停用。時間採用當地時區。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelOnceOption": {
+    "message": "一次",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelOtherTypesHint": {
+    "message": "其他類型（url/cron/command/contextMenu/dom）請透過觸發節點設定。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelOwnerExternal": {
+    "message": "外部的",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelOwnerTriggerNode": {
+    "message": "透過觸發節點",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelPastTimeWarn": {
+    "message": "觸發時間是過去的時間。它可能會立即起火。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelRunEnqueued": {
+    "message": "已加入執行佇列",
+    "description": "自動生成的 i18n 文案"
+  },
+  "triggerPanelTriggeredToast": {
+    "message": "觸發：$ARG1$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelTriggerTimeLabel": {
+    "message": "觸發時間",
+    "description": "自動生成的 i18n 文案"
+  },
+  "unknownErrorMessage": {
+    "message": "未知錯誤，請檢查您的網路是否可存取 HuggingFace",
+    "description": "未知錯誤回退訊息"
+  },
+  "userscriptsManagerTitle": {
+    "message": "使用者腳本管理器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "vectorDocumentsLabel": {
+    "message": "向量文件",
+    "description": "向量文件數量標籤"
+  },
+  "verboseLoggingLabel": {
+    "message": "詳細日誌",
+    "description": "詳細日誌切換標籤"
+  },
+  "warningNotification": {
+    "message": "警告：請在繼續前檢查",
+    "description": "通用警告通知"
+  },
+  "welcomeConnectTip": {
+    "message": "提示：您也可以開啟擴充彈出視窗並點擊「連線」來複製完整的客戶端設定片段。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeCopyButton": {
+    "message": "複製",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeCurrentExtensionId": {
+    "message": "目前擴充功能 ID：",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeDiagnosticsDesc": {
+    "message": "執行「doctor」以檢查安裝狀態。若回報錯誤，請執行自動修復命令。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeDiagnosticsTitle": {
+    "message": "診斷",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeHeaderSubtitle": {
+    "message": "擴展感知設定命令（包括此擴展 ID）。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeHeaderTitle": {
+    "message": "網頁 MCP 伺服器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeMcpConfigDesc": {
+    "message": "在您的 MCP 用戶端中使用它。不需要本機主機 HTTP URL。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeMcpConfigTitle": {
+    "message": "MCP 用戶端設定 (stdio)",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeOpenTroubleshootingDocs": {
+    "message": "開啟疑難排解文件",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomePageTitle": {
+    "message": "歡迎 - 網頁 mcp 伺服器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeRegisterHostDesc": {
+    "message": "請先執行此命令。它會使用目前擴充功能 ID 寫入 Native Messaging 資訊清單，讓 Chrome 可啟動本機主機程序。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeRegisterHostTitle": {
+    "message": "註冊本機主機（一次性）",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeReportIssueDesc": {
+    "message": "產生診斷報告並將其貼到 GitHub 問題中。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeReportIssueTip": {
+    "message": "這會將報告複製到剪貼簿（敏感資訊會自動編輯）。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeReportIssueTitle": {
+    "message": "報告問題",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeStdioCommandDesc": {
+    "message": "然後在 MCP 用戶端中使用此命令。不需要全域安裝，也不需要本地主機 URL。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeStdioCommandTitle": {
+    "message": "MCP stdio 指令",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeTroubleshootingCommands": {
+    "message": "doctor | report",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeTroubleshootingDesc": {
+    "message": "僅當網橋無法註冊或連接時才使用這些。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeTroubleshootingDocsButton": {
+    "message": "疑難排解文件",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsAddTriggerTitle": {
+    "message": "新增觸發器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsAdvancedSection": {
+    "message": "先進的",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsCountPlural": {
+    "message": "工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsCountSingular": {
+    "message": "工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsCreateButton": {
+    "message": "新的",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsCreateWorkflow": {
+    "message": "建立工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsCurrentPageOnly": {
+    "message": "僅當前頁面",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsDeleteAction": {
+    "message": "刪除",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsDeleteTriggerTitle": {
+    "message": "刪除",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsDescriptionLabel": {
+    "message": "描述",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsEditTriggerTitle": {
+    "message": "編輯",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsEditWorkflowTitle": {
+    "message": "編輯工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsEmptyDesc": {
+    "message": "記錄您的第一個自動化工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsEmptySearchDesc": {
+    "message": "嘗試不同的搜尋字詞",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsEmptySearchTitle": {
+    "message": "沒有相符的工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsEmptyTitle": {
+    "message": "還沒有工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsExportAction": {
+    "message": "匯出",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsImportAction": {
+    "message": "匯入",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsMillisecondsValue": {
+    "message": "$ARG1$毫秒",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsMoreActionsTitle": {
+    "message": "更多行動",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsNoDescription": {
+    "message": "無描述",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsNoRunHistory": {
+    "message": "尚無執行歷史記錄",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsNoTriggers": {
+    "message": "尚未設定觸發器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsOptionalDescription": {
+    "message": "選用描述",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRefreshTitle": {
+    "message": "重新整理",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunAction": {
+    "message": "執行",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunCanceled": {
+    "message": "已取消",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunDurationPrefix": {
+    "message": "所用時間",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunEntrySummary": {
+    "message": "#$ARG1$ $ARG2$ - 步驟=$ARG3$",
+    "description": "自動生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "workflowsRunFailed": {
+    "message": "失敗",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunHistory": {
+    "message": "執行歷史",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunPaused": {
+    "message": "已暫停",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunQueued": {
+    "message": "排隊中",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunRunning": {
+    "message": "執行中",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunStatusPrefix": {
+    "message": "狀態",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunSucceeded": {
+    "message": "成功",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsRunWorkflowTitle": {
+    "message": "執行工作流程",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsSearchPlaceholder": {
+    "message": "搜尋工作流程...",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsSecondsUnit": {
+    "message": "s",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsTriggersSection": {
+    "message": "觸發器",
+    "description": "自動生成的 i18n 文案"
+  },
+  "workflowsUntitledName": {
+    "message": "無題",
+    "description": "自動生成的 i18n 文案"
+  },
+  "worldAuto": {
+    "message": "汽車",
+    "description": "自動生成的 i18n 文案"
+  },
+  "worldIsolated": {
+    "message": "孤立",
+    "description": "自動生成的 i18n 文案"
+  },
+  "worldLabel": {
+    "message": "世界",
+    "description": "自動生成的 i18n 文案"
+  },
+  "worldMain": {
+    "message": "主要的",
+    "description": "自動生成的 i18n 文案"
   }
 }

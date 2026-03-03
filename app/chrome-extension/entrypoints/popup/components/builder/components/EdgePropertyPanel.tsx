@@ -1,4 +1,5 @@
 import type { Edge as EdgeV2, NodeBase } from '@/entrypoints/background/record-replay/types';
+import { getMessage } from '@/utils/i18n';
 import './EdgePropertyPanel.css';
 
 type EdgePropertyPanelProps = {
@@ -8,11 +9,14 @@ type EdgePropertyPanelProps = {
 };
 
 export default function EdgePropertyPanel({ edge, nodes, onRemoveEdge }: EdgePropertyPanelProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const src = nodes?.find?.((n) => n.id === (edge as any)?.from) || null;
   const dst = nodes?.find?.((n) => n.id === (edge as any)?.to) || null;
 
-  const srcName = src ? src.name || `${src.type} (${src.id})` : 'Unknown';
-  const dstName = dst ? dst.name || `${dst.type} (${dst.id})` : 'Unknown';
+  const srcName = src ? src.name || `${src.type} (${src.id})` : t('agentUnknownValue', 'Unknown');
+  const dstName = dst ? dst.name || `${dst.type} (${dst.id})` : t('agentUnknownValue', 'Unknown');
   const isValid = !!(src && dst && src.id !== dst.id);
 
   const raw = String((edge as any)?.label || 'default');
@@ -40,13 +44,15 @@ export default function EdgePropertyPanel({ edge, nodes, onRemoveEdge }: EdgePro
         <div className="builder-edge-property-panel__content">
           <div className="builder-edge-property-panel__header">
             <div>
-              <div className="builder-edge-property-panel__header-title">Edge</div>
+              <div className="builder-edge-property-panel__header-title">
+                {t('builderEdgeTitle', 'Edge')}
+              </div>
               <div className="builder-edge-property-panel__header-id">{edge.id}</div>
             </div>
             <button
               className="builder-edge-property-panel__btn-delete"
               type="button"
-              title="Delete edge"
+              title={t('builderDeleteEdgeTitle', 'Delete edge')}
               onClick={onRemove}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -62,15 +68,21 @@ export default function EdgePropertyPanel({ edge, nodes, onRemoveEdge }: EdgePro
 
           <div className="builder-edge-property-panel__section">
             <div className="builder-edge-property-panel__group">
-              <label className="builder-edge-property-panel__label">Source</label>
+              <label className="builder-edge-property-panel__label">
+                {t('builderEdgeSourceLabel', 'Source')}
+              </label>
               <div className="builder-edge-property-panel__text">{srcName}</div>
             </div>
             <div className="builder-edge-property-panel__group">
-              <label className="builder-edge-property-panel__label">Target</label>
+              <label className="builder-edge-property-panel__label">
+                {t('builderEdgeTargetLabel', 'Target')}
+              </label>
               <div className="builder-edge-property-panel__text">{dstName}</div>
             </div>
             <div className="builder-edge-property-panel__group">
-              <label className="builder-edge-property-panel__label">Connection status</label>
+              <label className="builder-edge-property-panel__label">
+                {t('builderEdgeConnectionStatusLabel', 'Connection status')}
+              </label>
               <div
                 className={
                   isValid
@@ -78,11 +90,15 @@ export default function EdgePropertyPanel({ edge, nodes, onRemoveEdge }: EdgePro
                     : 'builder-edge-property-panel__status builder-edge-property-panel__status--bad'
                 }
               >
-                {isValid ? 'Valid' : 'Invalid'}
+                {isValid
+                  ? t('builderEdgeConnectionValid', 'Valid')
+                  : t('builderEdgeConnectionInvalid', 'Invalid')}
               </div>
             </div>
             <div className="builder-edge-property-panel__group">
-              <label className="builder-edge-property-panel__label">Branch</label>
+              <label className="builder-edge-property-panel__label">
+                {t('builderEdgeBranchLabel', 'Branch')}
+              </label>
               <div className="builder-edge-property-panel__text">{labelPretty}</div>
             </div>
           </div>
@@ -91,13 +107,18 @@ export default function EdgePropertyPanel({ edge, nodes, onRemoveEdge }: EdgePro
 
           <div className="builder-edge-property-panel__section">
             <div className="builder-edge-property-panel__helper-text">
-              Inspect connection only. Editing of branch/handles will be supported in a later pass.
+              {t(
+                'builderEdgeInspectOnlyHint',
+                'Inspect connection only. Editing of branch/handles will be supported in a later pass.',
+              )}
             </div>
           </div>
         </div>
       ) : (
         <div className="builder-edge-property-panel__empty">
-          <div className="builder-edge-property-panel__empty-text">No edges selected</div>
+          <div className="builder-edge-property-panel__empty-text">
+            {t('builderNoEdgesSelected', 'No edges selected')}
+          </div>
         </div>
       )}
     </aside>

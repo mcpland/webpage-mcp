@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { ThreadHeader, WebEditorApplyMeta } from '../../composables';
+import { getMessage } from '@/utils/i18n';
 
 type ApplyMessageChipProps = {
   header: ThreadHeader;
@@ -10,6 +11,9 @@ type ApplyMessageChipProps = {
 const HIDE_DELAY_MS = 180;
 
 export default function ApplyMessageChip({ header }: ApplyMessageChipProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const chipRef = useRef<HTMLDivElement | null>(null);
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -20,7 +24,7 @@ export default function ApplyMessageChip({ header }: ApplyMessageChipProps) {
   const [isHoveringTooltip, setIsHoveringTooltip] = useState(false);
 
   const webEditorApply = header.webEditorApply as WebEditorApplyMeta | undefined;
-  const displayText = header.displayText || 'Apply changes';
+  const displayText = header.displayText || t('agentApplyChangesDefault', 'Apply changes');
   const elementCount = webEditorApply?.elementCount;
   const elementLabels = webEditorApply?.elementLabels || [];
   const pageUrl = webEditorApply?.pageUrl;
@@ -174,7 +178,10 @@ export default function ApplyMessageChip({ header }: ApplyMessageChipProps) {
               color: 'var(--ac-text-muted)',
             }}
           >
-            {elementCount} element{elementCount === 1 ? '' : 's'}
+            {t('agentElementsCount', '{0} element{1}', [
+              String(elementCount),
+              elementCount === 1 ? '' : 's',
+            ])}
           </span>
         ) : null}
 
@@ -223,7 +230,7 @@ export default function ApplyMessageChip({ header }: ApplyMessageChipProps) {
               >
                 <div className="flex items-center justify-between gap-4">
                   <span className="font-semibold" style={{ color: 'var(--ac-text)' }}>
-                    Web Editor Apply
+                    {t('agentWebEditorApplyTitle', 'Web Editor Apply')}
                   </span>
                   {pageUrl ? (
                     <span
@@ -238,7 +245,7 @@ export default function ApplyMessageChip({ header }: ApplyMessageChipProps) {
                 {elementLabels.length > 0 ? (
                   <div className="space-y-1">
                     <div className="text-[10px]" style={{ color: 'var(--ac-text-muted)' }}>
-                      Modified elements:
+                      {t('agentModifiedElementsLabel', 'Modified elements:')}
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {displayLabels.map((label, idx) => (
@@ -259,7 +266,7 @@ export default function ApplyMessageChip({ header }: ApplyMessageChipProps) {
                           className="px-1.5 py-0.5 text-[10px] rounded"
                           style={{ color: 'var(--ac-text-subtle)' }}
                         >
-                          +{remainingCount} more
+                          {t('agentMoreCount', '+{0} more', [String(remainingCount)])}
                         </span>
                       ) : null}
                     </div>
@@ -268,7 +275,7 @@ export default function ApplyMessageChip({ header }: ApplyMessageChipProps) {
 
                 <div className="space-y-1">
                   <div className="text-[10px]" style={{ color: 'var(--ac-text-muted)' }}>
-                    Prompt preview:
+                    {t('agentPromptPreviewLabel', 'Prompt preview:')}
                   </div>
                   <pre
                     className="text-[10px] max-h-[100px] overflow-auto whitespace-pre-wrap break-all p-2 rounded"

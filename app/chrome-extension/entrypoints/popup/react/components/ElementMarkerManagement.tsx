@@ -4,8 +4,12 @@ import type {
   UpsertMarkerRequest,
 } from "@/common/element-marker-types";
 import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import { getMessage } from "@/utils/i18n";
 
 export function ElementMarkerManagement() {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const [currentUrl, setCurrentUrl] = useState("");
   const [markers, setMarkers] = useState<ElementMarker[]>([]);
   const [form, setForm] = useState<UpsertMarkerRequest>({
@@ -160,17 +164,19 @@ export function ElementMarkerManagement() {
 
   return (
     <div className="section">
-      <h2 className="section-title">Element annotation management</h2>
+      <h2 className="section-title">
+        {t("popupElementMarkerManagementTitle", "Element annotation management")}
+      </h2>
       <div className="config-card">
         <div className="status-section" style={{ gap: "8px" }}>
           <div className="status-header">
-            <p className="status-label">Current page</p>
+            <p className="status-label">{t("currentPageLabel", "Current page")}</p>
             <span className="status-text" style={{ opacity: 0.85 }}>
               {currentUrl}
             </span>
           </div>
           <div className="status-header">
-            <p className="status-label">Labeled elements</p>
+            <p className="status-label">{t("popupLabeledElementsLabel", "Labeled elements")}</p>
             <span className="status-text">{markers.length}</span>
           </div>
         </div>
@@ -183,12 +189,12 @@ export function ElementMarkerManagement() {
           }}
         >
           <div className="mcp-config-header">
-            <p className="mcp-config-label">Add new annotation</p>
+            <p className="mcp-config-label">{t("popupAddNewAnnotationLabel", "Add new annotation")}</p>
           </div>
           <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
             <input
               className="port-input"
-              placeholder={'Name, such as "Login Button"'}
+              placeholder={t("popupMarkerNamePlaceholder", 'Name, such as "Login Button"')}
               value={form.name}
               onChange={(event) =>
                 setForm((current) => ({
@@ -208,8 +214,8 @@ export function ElementMarkerManagement() {
                 }))
               }
             >
-              <option value="css">CSS</option>
-              <option value="xpath">XPath</option>
+              <option value="css">{t("sidepanelMarkerSelectorCss", "CSS selector")}</option>
+              <option value="xpath">{t("sidepanelMarkerSelectorXpath", "XPath")}</option>
             </select>
             <select
               className="port-input"
@@ -225,14 +231,14 @@ export function ElementMarkerManagement() {
                 }))
               }
             >
-              <option value="prefix">path prefix</option>
-              <option value="exact">Exact match</option>
-              <option value="host">Domain name</option>
+              <option value="prefix">{t("sidepanelMarkerMatchPrefix", "Path prefix")}</option>
+              <option value="exact">{t("sidepanelMarkerMatchExact", "Exact match")}</option>
+              <option value="host">{t("sidepanelMarkerMatchHost", "Hostname")}</option>
             </select>
           </div>
           <input
             className="port-input"
-            placeholder="CSS selector"
+            placeholder={t("sidepanelMarkerSelectorPlaceholder", "CSS selector or XPath")}
             value={form.selector}
             onChange={(event) =>
               setForm((current) => ({
@@ -247,14 +253,14 @@ export function ElementMarkerManagement() {
               disabled={!form.selector}
               type="submit"
             >
-              save
+              {t("saveButton", "Save")}
             </button>
             <button
               className="danger-button"
               type="button"
               onClick={() => resetForm()}
             >
-              Clear
+              {t("clearButton", "Clear")}
             </button>
           </div>
         </form>
@@ -300,21 +306,21 @@ export function ElementMarkerManagement() {
                     type="button"
                     onClick={() => void validate(marker)}
                   >
-                    Verify
+                    {t("sidepanelMarkerActionVerify", "Verify")}
                   </button>
                   <button
                     className="secondary-button"
                     type="button"
                     onClick={() => prefill(marker)}
                   >
-                    Edit
+                    {t("sidepanelMarkerActionEdit", "Edit")}
                   </button>
                   <button
                     className="danger-button"
                     type="button"
                     onClick={() => void remove(marker)}
                   >
-                    Delete
+                    {t("sidepanelMarkerActionDelete", "Delete")}
                   </button>
                 </div>
               </div>

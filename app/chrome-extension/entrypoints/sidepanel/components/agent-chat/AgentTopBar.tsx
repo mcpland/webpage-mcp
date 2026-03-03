@@ -1,3 +1,5 @@
+import { getMessage } from '@/utils/i18n';
+
 export type ConnectionState = 'ready' | 'connecting' | 'disconnected';
 
 type AgentTopBarProps = {
@@ -24,17 +26,6 @@ function getConnectionColor(connectionState: ConnectionState): string {
   }
 }
 
-function getConnectionText(connectionState: ConnectionState): string {
-  switch (connectionState) {
-    case 'ready':
-      return 'Connected';
-    case 'connecting':
-      return 'Connecting...';
-    default:
-      return 'Disconnected';
-  }
-}
-
 export default function AgentTopBar({
   projectLabel,
   sessionLabel,
@@ -47,8 +38,16 @@ export default function AgentTopBar({
   onToggleOpenProjectMenu,
   onBack,
 }: AgentTopBarProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const connectionColor = getConnectionColor(connectionState);
-  const connectionText = getConnectionText(connectionState);
+  const connectionText =
+    connectionState === 'ready'
+      ? t('connectedStatus', 'Connected')
+      : connectionState === 'connecting'
+        ? t('connectingStatus', 'Connecting...')
+        : t('disconnectedStatus', 'Disconnected');
 
   return (
     <div className="flex items-center justify-between w-full">
@@ -60,7 +59,7 @@ export default function AgentTopBar({
               color: 'var(--ac-text-muted)',
               borderRadius: 'var(--ac-radius-button)',
             }}
-            title="Back to sessions"
+            title={t('agentTopBarBackToSessionsTitle', 'Back to sessions')}
             onClick={onBack}
             type="button"
           >
@@ -77,7 +76,7 @@ export default function AgentTopBar({
             color: 'var(--ac-text)',
           }}
         >
-          {brandLabel || 'Agent'}
+          {brandLabel || t('agentTopBarBrandFallback', 'Agent')}
         </h1>
 
         <div className="h-4 w-[1px] flex-shrink-0" style={{ backgroundColor: 'var(--ac-border-strong)' }} />
@@ -141,7 +140,7 @@ export default function AgentTopBar({
         <button
           className="p-1 ac-btn ac-hover-text"
           style={{ color: 'var(--ac-text-subtle)', borderRadius: 'var(--ac-radius-button)' }}
-          title="Open project in VS Code or Terminal"
+          title={t('agentTopBarOpenProjectTitle', 'Open project in VS Code or Terminal')}
           onClick={onToggleOpenProjectMenu}
           type="button"
         >

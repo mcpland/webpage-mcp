@@ -1,338 +1,2880 @@
 {
-  "extensionName": {
-    "message": "Webpage MCPサーバー"
+  "aboutTitle": {
+    "message": "情報",
+    "description": "Auto-generated localized message"
   },
-  "extensionDescription": {
-    "message": "自身のChromeブラウザの機能を外部に公開します"
+  "accuratePerformance": {
+    "message": "高精度",
+    "description": "Auto-generated localized message"
   },
-  "nativeServerConfigLabel": {
-    "message": "MCPサーバー設定"
+  "activeTabsLabel": {
+    "message": "アクティブなタブ",
+    "description": "Auto-generated localized message"
   },
-  "semanticEngineLabel": {
-    "message": "セマンティックエンジン"
+  "advancedSettingsLabel": {
+    "message": "詳細設定",
+    "description": "Auto-generated localized message"
   },
-  "embeddingModelLabel": {
-    "message": "埋め込みモデル"
+  "agentAllChangesExcluded": {
+    "message": "すべての変更は除外されます。",
+    "description": "Auto-generated localized message"
   },
-  "indexDataManagementLabel": {
-    "message": "インデックスデータ管理"
+  "agentApplyChangesDefault": {
+    "message": "変更を適用する",
+    "description": "Auto-generated localized message"
   },
-  "modelCacheManagementLabel": {
-    "message": "モデルキャッシュ管理"
+  "agentAttachmentCacheDesc": {
+    "message": "エージェント サーバーによってディスクに保存されたキャッシュされたイメージを管理します。",
+    "description": "Auto-generated localized message"
   },
-  "statusLabel": {
-    "message": "ステータス"
+  "agentAttachmentCacheDialogAria": {
+    "message": "添付ファイルのキャッシュ管理",
+    "description": "Auto-generated localized message"
   },
-  "runningStatusLabel": {
-    "message": "実行ステータス"
+  "agentAttachmentCacheTitle": {
+    "message": "添付ファイルキャッシュ",
+    "description": "Auto-generated localized message"
   },
-  "connectionStatusLabel": {
-    "message": "接続ステータス"
+  "agentAttachmentClearFailed": {
+    "message": "添付ファイルのクリアに失敗しました。",
+    "description": "Auto-generated localized message"
   },
-  "lastUpdatedLabel": {
-    "message": "最終更新:"
-  },
-  "connectButton": {
-    "message": "接続"
-  },
-  "disconnectButton": {
-    "message": "切断"
-  },
-  "connectingStatus": {
-    "message": "接続中..."
-  },
-  "connectedStatus": {
-    "message": "接続済み"
-  },
-  "disconnectedStatus": {
-    "message": "未接続"
-  },
-  "detectingStatus": {
-    "message": "検出中..."
-  },
-  "serviceRunningStatus": {
-    "message": "サービス実行中 (ポート: $1)",
+  "agentAttachmentClearSelected": {
+    "message": "選択をクリア ($ARG1$)",
+    "description": "Auto-generated localized message",
     "placeholders": {
-      "port": {
-        "content": "$1",
-        "example": "12306"
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
       }
     }
   },
-  "serviceNotConnectedStatus": {
-    "message": "サービス未接続"
+  "agentAttachmentFilesCount": {
+    "message": "$ARG1$ ファイル",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
-  "connectedServiceNotStartedStatus": {
-    "message": "接続済み、サービス未起動"
+  "agentAttachmentInvalidServerResponse": {
+    "message": "サーバーからの応答が無効です。",
+    "description": "Auto-generated localized message"
   },
-  "mcpServerConfigLabel": {
-    "message": "MCPサーバー設定"
+  "agentAttachmentInvertSelection": {
+    "message": "反転",
+    "description": "Auto-generated localized message"
   },
-  "connectionPortLabel": {
-    "message": "接続ポート"
+  "agentAttachmentLoadingStats": {
+    "message": "添付ファイルの統計を読み込んでいます...",
+    "description": "Auto-generated localized message"
   },
-  "refreshStatusButton": {
-    "message": "ステータス更新"
+  "agentAttachmentLoadStatsFailed": {
+    "message": "添付ファイルの統計情報をロードできませんでした。",
+    "description": "Auto-generated localized message"
   },
-  "copyConfigButton": {
-    "message": "設定をコピー"
+  "agentAttachmentMissingTag": {
+    "message": "ない",
+    "description": "Auto-generated localized message"
   },
-  "retryButton": {
-    "message": "再試行"
+  "agentAttachmentNoData": {
+    "message": "添付データが見つかりませんでした。",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentOrphanProjectsCount": {
+    "message": "$ARG1$ 孤立したプロジェクト",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentOrphanTag": {
+    "message": "孤児",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentRemovedSummary": {
+    "message": "$ARG1$ ($ARG2$ ファイル) を削除しました。",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentAttachmentRootDirectoryLabel": {
+    "message": "ルートディレクトリ",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentSelectAll": {
+    "message": "すべて選択",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentSelectProjectsHint": {
+    "message": "キャッシュされた添付ファイルをディスクから削除するプロジェクトを選択します。",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentTotalSizeLabel": {
+    "message": "合計サイズ",
+    "description": "Auto-generated localized message"
+  },
+  "agentChatComposerPlaceholder": {
+    "message": "Claude にコード作成を依頼...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerAttachImageShortTooltip": {
+    "message": "画像を添付",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerAttachImageTooltip": {
+    "message": "画像を添付（ドラッグ、貼り付け、またはクリック）",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerDropImagesHere": {
+    "message": "ここに画像をドロップします",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerExpandEditorTitle": {
+    "message": "エディターを展開する",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerReasoningEffortTooltip": {
+    "message": "推論強度",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerRemoveImageTitle": {
+    "message": "画像を削除",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerResetConfirm": {
+    "message": "この会話をリセットしますか?すべてのメッセージが削除され、セッションが新たに開始されます。",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerResetConversationTooltip": {
+    "message": "会話をリセット",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSendMessageAria": {
+    "message": "メッセージを送信する",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSendTitle": {
+    "message": "送信",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSessionSettingsTooltip": {
+    "message": "セッション設定",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusPreparing": {
+    "message": "準備中...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusReady": {
+    "message": "準備ができて",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusSending": {
+    "message": "送信中...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusStarting": {
+    "message": "起動...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusStopping": {
+    "message": "停止中...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusWorking": {
+    "message": "働く...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStopRequestAria": {
+    "message": "停止要求",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStopTitle": {
+    "message": "停止",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSwitchModelTooltip": {
+    "message": "スイッチモデル",
+    "description": "Auto-generated localized message"
+  },
+  "agentConversationEmptyPrompt": {
+    "message": "今日のコーディングをどのようにお手伝いできますか?",
+    "description": "Auto-generated localized message"
+  },
+  "agentDismissErrorAria": {
+    "message": "エラーを無視",
+    "description": "Auto-generated localized message"
+  },
+  "agentDismissTitle": {
+    "message": "却下する",
+    "description": "Auto-generated localized message"
+  },
+  "agentEditsCount": {
+    "message": "$ARG1$ 編集$ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentElementsCount": {
+    "message": "$ARG1$ 要素$ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentErrorOccurred": {
+    "message": "エラーが発生しました",
+    "description": "Auto-generated localized message"
+  },
+  "agentExcludeCount": {
+    "message": "除外 ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentImagePreviewAria": {
+    "message": "画像プレビュー",
+    "description": "Auto-generated localized message"
+  },
+  "agentImagePreviewCloseAria": {
+    "message": "画像プレビューを閉じる",
+    "description": "Auto-generated localized message"
+  },
+  "agentIncludeCount": {
+    "message": "($ARG1$) を含める",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentIncludeExcludeSummary": {
+    "message": "$ARG1$ が含まれています | $ARG2$ は除外されます",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentLinesCount": {
+    "message": "$ARG1$ 行",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentLinesWord": {
+    "message": "行",
+    "description": "Auto-generated localized message"
+  },
+  "agentLineWord": {
+    "message": "ライン",
+    "description": "Auto-generated localized message"
+  },
+  "agentModifiedElementsLabel": {
+    "message": "変更された要素:",
+    "description": "Auto-generated localized message"
+  },
+  "agentMoreCount": {
+    "message": "+$ARG1$ 詳細",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreFilesCount": {
+    "message": "+$ARG1$ 個以上のファイル",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreLinesCount": {
+    "message": "$ARG1$ もっと見る $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentNoChangesYet": {
+    "message": "まだ変更はありません。",
+    "description": "Auto-generated localized message"
+  },
+  "agentNoExcludedElements": {
+    "message": "除外要素はありません。",
+    "description": "Auto-generated localized message"
+  },
+  "agentOpenProjectFailed": {
+    "message": "プロジェクトを開けませんでした: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentOpenProjectMenuTerminal": {
+    "message": "ターミナル",
+    "description": "Auto-generated localized message"
+  },
+  "agentOpenProjectMenuTitle": {
+    "message": "オープンイン",
+    "description": "Auto-generated localized message"
+  },
+  "agentOpenProjectMenuVSCode": {
+    "message": "VSコード",
+    "description": "Auto-generated localized message"
+  },
+  "agentPreviewFooterLabel": {
+    "message": "エージェントプレビュー",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuAutoOption": {
+    "message": "自動",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuCliLabel": {
+    "message": "CLI",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuDefaultOption": {
+    "message": "デフォルト",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEffortHint": {
+    "message": "新しいセッションに適用されます。セッション設定で既存のセッションを編集します。",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEffortLabel": {
+    "message": "推論強度",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEnableMcpLabel": {
+    "message": "Web ページ MCP サーバーを有効にする",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEnableMcpTitle": {
+    "message": "ローカル Web ページ MCP サーバー統合を有効にする",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuMcpLabel": {
+    "message": "MCP",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuModelLabel": {
+    "message": "モデル",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuSaveSettings": {
+    "message": "設定の保存",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuSaving": {
+    "message": "保存中...",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuSettingsTitle": {
+    "message": "設定",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsConfirmCreateDir": {
+    "message": "ディレクトリ「$ARG1$」は存在しません。作成しますか?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsConfirmSwitchExisting": {
+    "message": "「$ARG1$」のプロジェクトはすでに存在します: $ARG2$\n\nそのプロジェクトに切り替えますか?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentProjectsCreateFailed": {
+    "message": "プロジェクトの作成に失敗しました。",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsInvalidCreateResponse": {
+    "message": "プロジェクトは作成されましたが、応答が無効です。",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsInvalidPath": {
+    "message": "無効なパス",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsNewButton": {
+    "message": "+ 新しいプロジェクト",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsPickerOpenFailed": {
+    "message": "ディレクトリピッカーを開けませんでした",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsPickerUnavailable": {
+    "message": "ディレクトリピッカーは使用できません。 MCP サーバーを再構築して再起動してください。",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsSelecting": {
+    "message": "選択中...",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsServerHttpError": {
+    "message": "サーバー エラー: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsServerUnavailable": {
+    "message": "サーバーが利用できません",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsTitle": {
+    "message": "プロジェクト",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsValidateFailed": {
+    "message": "パスの検証に失敗しました",
+    "description": "Auto-generated localized message"
+  },
+  "agentPromptPreviewLabel": {
+    "message": "プロンプトのプレビュー:",
+    "description": "Auto-generated localized message"
+  },
+  "agentSelectedHeader": {
+    "message": "選択済み",
+    "description": "Auto-generated localized message"
+  },
+  "agentSelectedTag": {
+    "message": "$ARG1$ が選択されました",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSelectionChipShort": {
+    "message": "セル",
+    "description": "Auto-generated localized message"
+  },
+  "agentSentImagesSummary": {
+    "message": "$ARG1$ 画像$ARG2$ を送信しました",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentServerNotReadyMissingPort": {
+    "message": "エージェントサーバーの準備ができていません (サーバーポートがありません)。",
+    "description": "Auto-generated localized message"
+  },
+  "agentServerNotReadySimple": {
+    "message": "エージェントサーバーの準備ができていません。",
+    "description": "Auto-generated localized message"
+  },
+  "agentServerNotReadyTitle": {
+    "message": "サーバーの準備ができていません",
+    "description": "Auto-generated localized message"
+  },
+  "agentServerReconnectHint": {
+    "message": "サーバーを起動または再接続してから、このパネルを再度開きます。",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionActiveModelLabel": {
+    "message": "アクティブモデル",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionAppendCustomText": {
+    "message": "カスタムテキストを追加する",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionAppendCustomTextPlaceholder": {
+    "message": "追加の指示を追加します...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionClaudeCodeLabel": {
+    "message": "Claude Code",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionCreating": {
+    "message": "作成...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionCustomPromptPlaceholder": {
+    "message": "カスタム システム プロンプトを入力してください...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionDeleteConfirm": {
+    "message": "このセッションを削除しますか？この操作は元に戻せません。",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionDeleteNamedConfirm": {
+    "message": "「$ARG1$」を削除しますか?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionDeleteTitle": {
+    "message": "削除",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionEngineLabel": {
+    "message": "エンジン",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionEngineSessionLabel": {
+    "message": "エンジンセッション",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionInfoSection": {
+    "message": "セッション情報",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionMcpServersLabel": {
+    "message": "MCPサーバー",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionModelDefaultServer": {
+    "message": "デフォルト（サーバー設定）",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionModelLabel": {
+    "message": "モデル",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionNewButton": {
+    "message": "+ 新しいセッション",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionNewShort": {
+    "message": "新規",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionOpenProjectTitle": {
+    "message": "プロジェクトを開く",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionAcceptEdits": {
+    "message": "acceptEdits - ファイル編集を自動的に受け入れる",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionBypass": {
+    "message": "bypassPermissions - すべて自動承認",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionDefault": {
+    "message": "デフォルト - 承認を求める",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionDontAsk": {
+    "message": "dontAsk - 確認なし",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionHint": {
+    "message": "Claude SDK がツールの承認リクエストを処理する方法を制御します。",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionModeLabel": {
+    "message": "許可モード",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionPlan": {
+    "message": "plan - プランモードのみ",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionReasoningEffortHint": {
+    "message": "推論の深さを制御します。高いほど品質は向上しますが、時間がかかります。",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionReasoningEffortLabel": {
+    "message": "推論の強度",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionReasoningEffortXhighHint": {
+    "message": "注: xhigh は、gpt-5.2 および gpt-5.1-codex-max モデルでのみ使用できます。",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionRenameTitle": {
+    "message": "名前の変更",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionRunningBadge": {
+    "message": "実行中",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSdkInfoLabel": {
+    "message": "SDK情報",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsEmpty": {
+    "message": "まだセッションはありません",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSettingsLoading": {
+    "message": "セッション情報を読み込んでいます...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSettingsTitle": {
+    "message": "セッション設定",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsLoading": {
+    "message": "セッションを読み込んでいます...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsNoMatching": {
+    "message": "一致するセッションがありません",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsSearchPlaceholder": {
+    "message": "セッションを検索...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsStartConversation": {
+    "message": "AI との新しい会話を始める",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsStartNewButton": {
+    "message": "新しいセッションを開始する",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsTitle": {
+    "message": "セッション",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsTryDifferentSearch": {
+    "message": "別の検索語を試してください",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsUnnamed": {
+    "message": "名前のないセッション",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSystemPromptLabel": {
+    "message": "システムプロンプト",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionThisSession": {
+    "message": "このセッション",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionToolsLabel": {
+    "message": "ツール",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionUseCustomPrompt": {
+    "message": "カスタムプロンプトを使用する",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionUsePresetClaudeCode": {
+    "message": "プリセット（claude_code）を使用する",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionViewMcpServers": {
+    "message": "MCP サーバーを表示 ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionViewTools": {
+    "message": "ツールを表示 ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSettingsClearAttachmentCache": {
+    "message": "添付ファイルキャッシュのクリア",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsCometCaretLabel": {
+    "message": "コメットキャレット",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsInputSection": {
+    "message": "入力",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsReconnectServer": {
+    "message": "サーバーの再接続",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsStorageSection": {
+    "message": "ストレージ",
+    "description": "Auto-generated localized message"
+  },
+  "agentShowLess": {
+    "message": "表示を少なくする",
+    "description": "Auto-generated localized message"
+  },
+  "agentShowMore": {
+    "message": "もっと見る...",
+    "description": "Auto-generated localized message"
+  },
+  "agentThinkingStatus": {
+    "message": "考え...",
+    "description": "Auto-generated localized message"
+  },
+  "agentThreadEditComingSoon": {
+    "message": "編集（近日公開予定）",
+    "description": "Auto-generated localized message"
+  },
+  "agentTopBarBackToSessionsTitle": {
+    "message": "セッションに戻る",
+    "description": "Auto-generated localized message"
+  },
+  "agentTopBarBrandFallback": {
+    "message": "エージェント",
+    "description": "Auto-generated localized message"
+  },
+  "agentTopBarOpenProjectTitle": {
+    "message": "VS Code またはターミナルでプロジェクトを開く",
+    "description": "Auto-generated localized message"
+  },
+  "agentUnknownValue": {
+    "message": "未知",
+    "description": "Auto-generated localized message"
+  },
+  "agentUsageDurationTurnsTitle": {
+    "message": "期間: $ARG1$秒、ターン数: $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageInputOutputTitle": {
+    "message": "入力: $ARG1$、出力: $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageTokensSummary": {
+    "message": "$ARG1$ トークン",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentWebEditorApplyTitle": {
+    "message": "ウェブエディターの応募",
+    "description": "Auto-generated localized message"
+  },
+  "agentWebEditsHeader": {
+    "message": "ウェブ編集",
+    "description": "Auto-generated localized message"
+  },
+  "allFramesLabel": {
+    "message": "すべてのフレーム",
+    "description": "Auto-generated localized message"
+  },
+  "applyButton": {
+    "message": "適用する",
+    "description": "Auto-generated localized message"
+  },
+  "autoTheme": {
+    "message": "自動",
+    "description": "Auto-generated localized message"
+  },
+  "balancedPerformance": {
+    "message": "バランス",
+    "description": "Auto-generated localized message"
+  },
+  "betterThanSmallDescription": {
+    "message": "e5-smallよりわずかに大きいが、性能は向上",
+    "description": "Auto-generated localized message"
+  },
+  "bookmarksBarLabel": {
+    "message": "ブックマークバー",
+    "description": "Auto-generated localized message"
+  },
+  "builderActiveTabNotFound": {
+    "message": "アクティブなタブが見つかりません",
+    "description": "Auto-generated localized message"
+  },
+  "builderAutoLayoutTitle": {
+    "message": "自動レイアウト",
+    "description": "Auto-generated localized message"
+  },
+  "builderConfigurationErrorTitle": {
+    "message": "⚠️設定エラー",
+    "description": "Auto-generated localized message"
+  },
+  "builderConfigurationTitle": {
+    "message": "構成",
+    "description": "Auto-generated localized message"
+  },
+  "builderDeleteEdgeTitle": {
+    "message": "エッジの削除",
+    "description": "Auto-generated localized message"
+  },
+  "builderDeleteNodeTitle": {
+    "message": "ノードの削除",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeBranchLabel": {
+    "message": "支店",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeConnectionInvalid": {
+    "message": "無効",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeConnectionStatusLabel": {
+    "message": "接続状態",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeConnectionValid": {
+    "message": "有効",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeInspectOnlyHint": {
+    "message": "接続のみを検査します。ブランチ/ハンドルの編集は、後のパスでサポートされる予定です。",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeSourceLabel": {
+    "message": "ソース",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeTargetLabel": {
+    "message": "ターゲット",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeTitle": {
+    "message": "エッジ",
+    "description": "Auto-generated localized message"
+  },
+  "builderEditFlowTitle": {
+    "message": "編集: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderEnterJsonPlaceholder": {
+    "message": "JSONを入力してください",
+    "description": "Auto-generated localized message"
+  },
+  "builderExportFailed": {
+    "message": "エクスポートに失敗しました: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderExportJsonTitle": {
+    "message": "JSONのエクスポート",
+    "description": "Auto-generated localized message"
+  },
+  "builderFallbackPromotionNotice": {
+    "message": "フォールバック推奨事項が適用されました: $ARG1$ 優先度が昇格されました。",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFieldRequired": {
+    "message": "$ARG1$は必須です",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFitViewTitle": {
+    "message": "表示を全体に合わせる",
+    "description": "Auto-generated localized message"
+  },
+  "builderFlowCategory": {
+    "message": "フロー",
+    "description": "Auto-generated localized message"
+  },
+  "builderGeneralSettingsTitle": {
+    "message": "一般設定",
+    "description": "Auto-generated localized message"
+  },
+  "builderIfConditionLabel": {
+    "message": "条件 $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderIfElseLabel": {
+    "message": "それ以外",
+    "description": "Auto-generated localized message"
+  },
+  "builderImportDataNotFound": {
+    "message": "インポートに失敗しました: ワークフロー データが見つかりません。",
+    "description": "Auto-generated localized message"
+  },
+  "builderImportFailed": {
+    "message": "インポートに失敗しました: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderImportJsonTitle": {
+    "message": "JSONをインポートする",
+    "description": "Auto-generated localized message"
+  },
+  "builderInsertNodePlaceholder": {
+    "message": "ノードを挿入...",
+    "description": "Auto-generated localized message"
+  },
+  "builderJsonFormatError": {
+    "message": "JSON形式エラー",
+    "description": "Auto-generated localized message"
+  },
+  "builderKeySequenceExample": {
+    "message": "例: Backspace Enter または cmd+a",
+    "description": "Auto-generated localized message"
+  },
+  "builderKeySequencePlaceholder": {
+    "message": "Backspace Enter または cmd+a",
+    "description": "Auto-generated localized message"
+  },
+  "builderLoadFlowFailed": {
+    "message": "ワークフローのロードに失敗しました: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderLogicCategory": {
+    "message": "論理",
+    "description": "Auto-generated localized message"
+  },
+  "builderManageTriggersTitle": {
+    "message": "トリガーの管理",
+    "description": "Auto-generated localized message"
+  },
+  "builderNameLabel": {
+    "message": "名前",
+    "description": "Auto-generated localized message"
+  },
+  "builderNewButton": {
+    "message": "新しい",
+    "description": "Auto-generated localized message"
+  },
+  "builderNewWorkflowName": {
+    "message": "新規ワークフロー",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeNameLabel": {
+    "message": "ノード名",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeNamePlaceholder": {
+    "message": "ノード名を入力してください",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodePropertiesTitle": {
+    "message": "ノードのプロパティ",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeSpecFallbackHint": {
+    "message": "ノードはまだ NodeSpec を提供していないため、デフォルトのプロパティ パネルに戻りました。",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeSpecNotFound": {
+    "message": "ノード仕様が見つかりません",
+    "description": "Auto-generated localized message"
+  },
+  "builderNoEdgesSelected": {
+    "message": "エッジが選択されていません",
+    "description": "Auto-generated localized message"
+  },
+  "builderNoSelectorGenerated": {
+    "message": "有効なセレクターが生成されませんでした。手動で入力してください。",
+    "description": "Auto-generated localized message"
+  },
+  "builderPageTitle": {
+    "message": "ワークフロー ビルダー - webpage-mcp-server",
+    "description": "Auto-generated localized message"
+  },
+  "builderPickButton": {
+    "message": "選ぶ",
+    "description": "Auto-generated localized message"
+  },
+  "builderPickedFromPageTitle": {
+    "message": "ページから選択しました",
+    "description": "Auto-generated localized message"
+  },
+  "builderPickFailed": {
+    "message": "選択に失敗しました",
+    "description": "Auto-generated localized message"
+  },
+  "builderRedoTitle": {
+    "message": "やり直し (⌘/Ctrl+Shift+Z)",
+    "description": "Auto-generated localized message"
+  },
+  "builderRenameWorkflowTitle": {
+    "message": "ワークフロー名の変更",
+    "description": "Auto-generated localized message"
+  },
+  "builderRunAllTitle": {
+    "message": "先頭からの再生補正",
+    "description": "Auto-generated localized message"
+  },
+  "builderRunFailed": {
+    "message": "実行に失敗しました: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderRunFromSelectedButton": {
+    "message": "選択したノードから実行",
+    "description": "Auto-generated localized message"
+  },
+  "builderRunFromSelectedTitle": {
+    "message": "選択したノードからの再生",
+    "description": "Auto-generated localized message"
+  },
+  "builderSavedStatus": {
+    "message": "保存されました",
+    "description": "Auto-generated localized message"
+  },
+  "builderSaveFailed": {
+    "message": "保存に失敗しました: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderSavingStatus": {
+    "message": "保存中...",
+    "description": "Auto-generated localized message"
+  },
+  "builderScheduleConvertFailed": {
+    "message": "ノード $ARG1$ スケジュール #$ARG2$: cron (type=$ARG3$) に変換できません。スキップされました。",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "builderScheduleOnceUnsupported": {
+    "message": "ノード $ARG1$ スケジュール #$ARG2$: ワンタイム スケジュールは V3 ではサポートされていないため、スキップされました。",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "builderScreenshotOnFailure": {
+    "message": "失敗時のスクリーンショット",
+    "description": "Auto-generated localized message"
+  },
+  "builderSelectNodeHint": {
+    "message": "ノードを選択してください",
+    "description": "Auto-generated localized message"
+  },
+  "builderSelectorHelpText": {
+    "message": "CSS セレクターを入力するか、「選択」をクリックしてページ上の要素を選択します。",
+    "description": "Auto-generated localized message"
+  },
+  "builderTabsCategory": {
+    "message": "タブ",
+    "description": "Auto-generated localized message"
+  },
+  "builderTimeoutMsLabel": {
+    "message": "タイムアウト (ミリ秒)",
+    "description": "Auto-generated localized message"
+  },
+  "builderTimeoutPlaceholder": {
+    "message": "デフォルトでグローバルタイムアウトを使用する",
+    "description": "Auto-generated localized message"
+  },
+  "builderToolsCategory": {
+    "message": "ツール",
+    "description": "Auto-generated localized message"
+  },
+  "builderUndoTitle": {
+    "message": "元に戻す (⌘/Ctrl+Z)",
+    "description": "Auto-generated localized message"
+  },
+  "builderViewEditPropertiesHint": {
+    "message": "プロパティの表示と編集",
+    "description": "Auto-generated localized message"
+  },
+  "builderVisualOrchestrationTip": {
+    "message": "ワークフローのビジュアルオーケストレーション",
+    "description": "Auto-generated localized message"
+  },
+  "builderWorkflowEditorTitle": {
+    "message": "ワークフローエディター",
+    "description": "Auto-generated localized message"
+  },
+  "builderWorkflowNamePlaceholder": {
+    "message": "ワークフロー名",
+    "description": "Auto-generated localized message"
+  },
+  "builderWorkflowNotFoundCreated": {
+    "message": "ワークフロー「$ARG1$」が見つかりません。新しいワークフローを作成しました。",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "bytesUnit": {
+    "message": "バイト",
+    "description": "Auto-generated localized message"
+  },
+  "cacheDetailsLabel": {
+    "message": "キャッシュ詳細",
+    "description": "Auto-generated localized message"
+  },
+  "cacheEntriesLabel": {
+    "message": "キャッシュエントリ",
+    "description": "Auto-generated localized message"
+  },
+  "cacheSizeLabel": {
+    "message": "キャッシュサイズ",
+    "description": "Auto-generated localized message"
   },
   "cancelButton": {
-    "message": "キャンセル"
+    "message": "キャンセル",
+    "description": "Auto-generated localized message"
   },
-  "confirmButton": {
-    "message": "確認"
-  },
-  "saveButton": {
-    "message": "保存"
-  },
-  "closeButton": {
-    "message": "閉じる"
-  },
-  "resetButton": {
-    "message": "リセット"
-  },
-  "initializingStatus": {
-    "message": "初期化中..."
-  },
-  "processingStatus": {
-    "message": "処理中..."
-  },
-  "loadingStatus": {
-    "message": "読み込み中..."
-  },
-  "clearingStatus": {
-    "message": "クリア中..."
+  "cleanExpiredCacheButton": {
+    "message": "期限切れキャッシュをクリーンアップ",
+    "description": "Auto-generated localized message"
   },
   "cleaningStatus": {
-    "message": "クリーンアップ中..."
+    "message": "クリーンアップ中...",
+    "description": "Auto-generated localized message"
   },
-  "downloadingStatus": {
-    "message": "ダウンロード中..."
+  "clearAllCacheButton": {
+    "message": "全キャッシュをクリア",
+    "description": "Auto-generated localized message"
   },
-  "semanticEngineReadyStatus": {
-    "message": "セマンティックエンジン準備完了"
+  "clearAllDataButton": {
+    "message": "全データをクリア",
+    "description": "Auto-generated localized message"
   },
-  "semanticEngineInitializingStatus": {
-    "message": "セマンティックエンジン初期化中..."
+  "clearButton": {
+    "message": "クリア",
+    "description": "Auto-generated localized message"
   },
-  "semanticEngineInitFailedStatus": {
-    "message": "セマンティックエンジンの初期化に失敗しました"
+  "clearDataIrreversibleWarning": {
+    "message": "この操作は元に戻せません！クリア後、再度ウェブページを閲覧してインデックスを再構築する必要があります。",
+    "description": "Auto-generated localized message"
   },
-  "semanticEngineNotInitStatus": {
-    "message": "セマンティックエンジン未初期化"
+  "clearDataList1": {
+    "message": "すべてのウェブページテキストコンテンツインデックス",
+    "description": "Auto-generated localized message"
   },
-  "initSemanticEngineButton": {
-    "message": "セマンティックエンジンを初期化"
+  "clearDataList2": {
+    "message": "ベクトル埋め込みデータ",
+    "description": "Auto-generated localized message"
   },
-  "reinitializeButton": {
-    "message": "再初期化"
+  "clearDataList3": {
+    "message": "検索履歴とキャッシュ",
+    "description": "Auto-generated localized message"
+  },
+  "clearDataWarningMessage": {
+    "message": "この操作は、インデックス化されたすべてのウェブページコンテンツとベクトルデータをクリアします。これには以下が含まれます：",
+    "description": "Auto-generated localized message"
+  },
+  "clearingStatus": {
+    "message": "クリア中...",
+    "description": "Auto-generated localized message"
+  },
+  "closeButton": {
+    "message": "閉じる",
+    "description": "Auto-generated localized message"
+  },
+  "commandToggleQuickPanelDesc": {
+    "message": "クイックパネルを切り替える",
+    "description": "Auto-generated localized message"
+  },
+  "commandToggleWebEditorDesc": {
+    "message": "Web エディター モードを切り替える",
+    "description": "Auto-generated localized message"
+  },
+  "composerDrawerCloseAria": {
+    "message": "展開されたエディタを閉じる",
+    "description": "Auto-generated localized message"
+  },
+  "composerDrawerExpandedEditorAria": {
+    "message": "拡張エディタ",
+    "description": "Auto-generated localized message"
+  },
+  "composerDrawerExpandedEditorTitle": {
+    "message": "拡張エディタ",
+    "description": "Auto-generated localized message"
+  },
+  "composerDrawerShortcutHint": {
+    "message": "$ARG1$+Enter を押して送信します",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "configCopiedNotification": {
+    "message": "設定がクリップボードにコピーされました",
+    "description": "Auto-generated localized message"
+  },
+  "confirmButton": {
+    "message": "確認",
+    "description": "Auto-generated localized message"
+  },
+  "confirmClearButton": {
+    "message": "クリアを確認",
+    "description": "Auto-generated localized message"
+  },
+  "confirmClearDataTitle": {
+    "message": "データクリアの確認",
+    "description": "Auto-generated localized message"
+  },
+  "connectButton": {
+    "message": "接続",
+    "description": "Auto-generated localized message"
+  },
+  "connectedServiceNotStartedStatus": {
+    "message": "接続済み、サービス未起動",
+    "description": "Auto-generated localized message"
+  },
+  "connectedStatus": {
+    "message": "接続済み",
+    "description": "Auto-generated localized message"
+  },
+  "connectingStatus": {
+    "message": "接続中...",
+    "description": "Auto-generated localized message"
+  },
+  "connectionPortLabel": {
+    "message": "接続ポート",
+    "description": "Auto-generated localized message"
+  },
+  "connectionStatusLabel": {
+    "message": "接続ステータス",
+    "description": "Auto-generated localized message"
+  },
+  "copyConfigButton": {
+    "message": "設定をコピー",
+    "description": "Auto-generated localized message"
+  },
+  "createRunSectionTitle": {
+    "message": "作成/実行",
+    "description": "Auto-generated localized message"
+  },
+  "currentPageLabel": {
+    "message": "現在のページ",
+    "description": "Auto-generated localized message"
+  },
+  "darkTheme": {
+    "message": "ダーク",
+    "description": "Auto-generated localized message"
+  },
+  "dataClearedNotification": {
+    "message": "データが正常にクリアされました",
+    "description": "Auto-generated localized message"
+  },
+  "debugModeLabel": {
+    "message": "デバッグモード",
+    "description": "Auto-generated localized message"
+  },
+  "deleteButton": {
+    "message": "削除",
+    "description": "Auto-generated localized message"
+  },
+  "detectingStatus": {
+    "message": "検出中...",
+    "description": "Auto-generated localized message"
+  },
+  "disconnectButton": {
+    "message": "切断",
+    "description": "Auto-generated localized message"
+  },
+  "disconnectedStatus": {
+    "message": "未接続",
+    "description": "Auto-generated localized message"
+  },
+  "dnrFallbackLabel": {
+    "message": "DNR フォールバック",
+    "description": "Auto-generated localized message"
+  },
+  "domainLabel": {
+    "message": "ドメイン",
+    "description": "Auto-generated localized message"
   },
   "downloadingModelStatus": {
-    "message": "モデルをダウンロード中... $1%",
+    "message": "モデルをダウンロード中... $PROGRESS$%",
     "placeholders": {
       "progress": {
         "content": "$1",
         "example": "50"
       }
+    },
+    "description": "Auto-generated localized message"
+  },
+  "downloadingStatus": {
+    "message": "ダウンロード中...",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipAfterLabel": {
+    "message": "後",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipAriaLabel": {
+    "message": "$ARG1$ ($ARG2$ 変更、$ARG3$)。クリックして切り替えます。",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
     }
   },
-  "switchingModelStatus": {
-    "message": "モデルを切り替え中..."
+  "elementChipBeforeLabel": {
+    "message": "前に",
+    "description": "Auto-generated localized message"
   },
-  "modelLoadedStatus": {
-    "message": "モデル読み込み完了"
+  "elementChipChangesCount": {
+    "message": "$ARG1$ の変更",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
-  "modelFailedStatus": {
-    "message": "モデルの読み込みに失敗しました"
+  "elementChipClassLabel": {
+    "message": "クラス",
+    "description": "Auto-generated localized message"
   },
-  "lightweightModelDescription": {
-    "message": "軽量多言語モデル"
+  "elementChipEmptyValue": {
+    "message": "（空の）",
+    "description": "Auto-generated localized message"
   },
-  "betterThanSmallDescription": {
-    "message": "e5-smallよりわずかに大きいが、性能は向上"
+  "elementChipExcluded": {
+    "message": "除外される",
+    "description": "Auto-generated localized message"
   },
-  "multilingualModelDescription": {
-    "message": "多言語対応セマンティックモデル"
+  "elementChipExcludedLower": {
+    "message": "除外される",
+    "description": "Auto-generated localized message"
   },
-  "fastPerformance": {
-    "message": "高速"
+  "elementChipExcludedShort": {
+    "message": "元",
+    "description": "Auto-generated localized message"
   },
-  "balancedPerformance": {
-    "message": "バランス"
+  "elementChipIncluded": {
+    "message": "付属",
+    "description": "Auto-generated localized message"
   },
-  "accuratePerformance": {
-    "message": "高精度"
+  "elementChipIncludedLower": {
+    "message": "含まれています",
+    "description": "Auto-generated localized message"
   },
-  "networkErrorMessage": {
-    "message": "ネットワーク接続エラーです。ネットワークを確認して再試行してください"
+  "elementChipIncludedShort": {
+    "message": "で",
+    "description": "Auto-generated localized message"
   },
-  "modelCorruptedErrorMessage": {
-    "message": "モデルファイルが破損しているか不完全です。再ダウンロードしてください"
+  "elementChipRevertAria": {
+    "message": "$ARG1$ への変更を元に戻す",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
-  "unknownErrorMessage": {
-    "message": "不明なエラーです。ネットワークがHuggingFaceにアクセスできるか確認してください"
+  "elementChipRevertTitle": {
+    "message": "すべての変更を $ARG1$ に戻します",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
-  "permissionDeniedErrorMessage": {
-    "message": "権限が拒否されました"
+  "elementChipStyleLabel": {
+    "message": "スタイル",
+    "description": "Auto-generated localized message"
   },
-  "timeoutErrorMessage": {
-    "message": "操作がタイムアウトしました"
+  "elementChipTagFallback": {
+    "message": "要素",
+    "description": "Auto-generated localized message"
   },
-  "indexedPagesLabel": {
-    "message": "インデックス化されたページ"
+  "elementChipTextLabel": {
+    "message": "文章",
+    "description": "Auto-generated localized message"
   },
-  "indexSizeLabel": {
-    "message": "インデックスサイズ"
+  "embeddingModelLabel": {
+    "message": "埋め込みモデル",
+    "description": "Auto-generated localized message"
   },
-  "activeTabsLabel": {
-    "message": "アクティブなタブ"
+  "emergencySwitchLabel": {
+    "message": "緊急スイッチ",
+    "description": "Auto-generated localized message"
   },
-  "vectorDocumentsLabel": {
-    "message": "ベクトルドキュメント"
-  },
-  "cacheSizeLabel": {
-    "message": "キャッシュサイズ"
-  },
-  "cacheEntriesLabel": {
-    "message": "キャッシュエントリ"
-  },
-  "clearAllDataButton": {
-    "message": "全データをクリア"
-  },
-  "clearAllCacheButton": {
-    "message": "全キャッシュをクリア"
-  },
-  "cleanExpiredCacheButton": {
-    "message": "期限切れキャッシュをクリーンアップ"
-  },
-  "exportDataButton": {
-    "message": "データのエクスポート"
-  },
-  "importDataButton": {
-    "message": "データのインポート"
-  },
-  "confirmClearDataTitle": {
-    "message": "データクリアの確認"
-  },
-  "settingsTitle": {
-    "message": "設定"
-  },
-  "aboutTitle": {
-    "message": "情報"
-  },
-  "helpTitle": {
-    "message": "ヘルプ"
-  },
-  "clearDataWarningMessage": {
-    "message": "この操作は、インデックス化されたすべてのウェブページコンテンツとベクトルデータをクリアします。これには以下が含まれます："
-  },
-  "clearDataList1": {
-    "message": "すべてのウェブページテキストコンテンツインデックス"
-  },
-  "clearDataList2": {
-    "message": "ベクトル埋め込みデータ"
-  },
-  "clearDataList3": {
-    "message": "検索履歴とキャッシュ"
-  },
-  "clearDataIrreversibleWarning": {
-    "message": "この操作は元に戻せません！クリア後、再度ウェブページを閲覧してインデックスを再構築する必要があります。"
-  },
-  "confirmClearButton": {
-    "message": "クリアを確認"
-  },
-  "cacheDetailsLabel": {
-    "message": "キャッシュ詳細"
-  },
-  "noCacheDataMessage": {
-    "message": "キャッシュデータがありません"
-  },
-  "loadingCacheInfoStatus": {
-    "message": "キャッシュ情報を読み込み中..."
-  },
-  "processingCacheStatus": {
-    "message": "キャッシュを処理中..."
+  "excludesInputLabel": {
+    "message": "除外する (カンマ区切り)",
+    "description": "Auto-generated localized message"
   },
   "expiredLabel": {
-    "message": "期限切れ"
+    "message": "期限切れ",
+    "description": "Auto-generated localized message"
   },
-  "bookmarksBarLabel": {
-    "message": "ブックマークバー"
+  "exportAllButton": {
+    "message": "すべてエクスポート",
+    "description": "Auto-generated localized message"
   },
-  "newTabLabel": {
-    "message": "新しいタブ"
+  "exportDataButton": {
+    "message": "データのエクスポート",
+    "description": "Auto-generated localized message"
   },
-  "currentPageLabel": {
-    "message": "現在のページ"
+  "extensionDescription": {
+    "message": "自身のChromeブラウザの機能を外部に公開します",
+    "description": "Auto-generated localized message"
   },
-  "menuLabel": {
-    "message": "メニュー"
+  "extensionName": {
+    "message": "Webpage MCPサーバー",
+    "description": "Auto-generated localized message"
   },
-  "navigationLabel": {
-    "message": "ナビゲーション"
-  },
-  "mainContentLabel": {
-    "message": "メインコンテンツ"
-  },
-  "languageSelectorLabel": {
-    "message": "言語"
-  },
-  "themeLabel": {
-    "message": "テーマ"
-  },
-  "lightTheme": {
-    "message": "ライト"
-  },
-  "darkTheme": {
-    "message": "ダーク"
-  },
-  "autoTheme": {
-    "message": "自動"
-  },
-  "advancedSettingsLabel": {
-    "message": "詳細設定"
-  },
-  "debugModeLabel": {
-    "message": "デバッグモード"
-  },
-  "verboseLoggingLabel": {
-    "message": "詳細ロギング"
-  },
-  "successNotification": {
-    "message": "操作が正常に完了しました"
-  },
-  "warningNotification": {
-    "message": "警告：続行する前に確認してください"
-  },
-  "infoNotification": {
-    "message": "情報"
-  },
-  "configCopiedNotification": {
-    "message": "設定がクリップボードにコピーされました"
-  },
-  "dataClearedNotification": {
-    "message": "データが正常にクリアされました"
-  },
-  "bytesUnit": {
-    "message": "バイト"
-  },
-  "kilobytesUnit": {
-    "message": "KB"
-  },
-  "megabytesUnit": {
-    "message": "MB"
+  "fastPerformance": {
+    "message": "高速",
+    "description": "Auto-generated localized message"
   },
   "gigabytesUnit": {
-    "message": "GB"
+    "message": "GB",
+    "description": "Auto-generated localized message"
+  },
+  "helpTitle": {
+    "message": "ヘルプ",
+    "description": "Auto-generated localized message"
+  },
+  "importDataButton": {
+    "message": "データのインポート",
+    "description": "Auto-generated localized message"
+  },
+  "indexDataManagementLabel": {
+    "message": "インデックスデータ管理",
+    "description": "Auto-generated localized message"
+  },
+  "indexedPagesLabel": {
+    "message": "インデックス化されたページ",
+    "description": "Auto-generated localized message"
+  },
+  "indexSizeLabel": {
+    "message": "インデックスサイズ",
+    "description": "Auto-generated localized message"
+  },
+  "infoNotification": {
+    "message": "情報",
+    "description": "Auto-generated localized message"
+  },
+  "initializingStatus": {
+    "message": "初期化中...",
+    "description": "Auto-generated localized message"
+  },
+  "initSemanticEngineButton": {
+    "message": "セマンティックエンジンを初期化",
+    "description": "Auto-generated localized message"
   },
   "itemsUnit": {
-    "message": "項目"
+    "message": "項目",
+    "description": "Auto-generated localized message"
+  },
+  "kilobytesUnit": {
+    "message": "KB",
+    "description": "Auto-generated localized message"
+  },
+  "languageSelectorLabel": {
+    "message": "言語",
+    "description": "Auto-generated localized message"
+  },
+  "lastUpdatedLabel": {
+    "message": "最終更新:",
+    "description": "Auto-generated localized message"
+  },
+  "lightTheme": {
+    "message": "ライト",
+    "description": "Auto-generated localized message"
+  },
+  "lightweightModelDescription": {
+    "message": "軽量多言語モデル",
+    "description": "Auto-generated localized message"
+  },
+  "listSectionTitle": {
+    "message": "リスト",
+    "description": "Auto-generated localized message"
+  },
+  "loadingCacheInfoStatus": {
+    "message": "キャッシュ情報を読み込み中...",
+    "description": "Auto-generated localized message"
+  },
+  "loadingStatus": {
+    "message": "読み込み中...",
+    "description": "Auto-generated localized message"
+  },
+  "localModelBackToHomeTitle": {
+    "message": "ホームページに戻る",
+    "description": "Auto-generated localized message"
+  },
+  "localModelReturnButton": {
+    "message": "戻る",
+    "description": "Auto-generated localized message"
+  },
+  "mainContentLabel": {
+    "message": "メインコンテンツ",
+    "description": "Auto-generated localized message"
+  },
+  "matchesInputLabel": {
+    "message": "一致 (カンマ区切り)",
+    "description": "Auto-generated localized message"
+  },
+  "mcpServerConfigLabel": {
+    "message": "MCPサーバー設定",
+    "description": "Auto-generated localized message"
+  },
+  "megabytesUnit": {
+    "message": "MB",
+    "description": "Auto-generated localized message"
+  },
+  "menuLabel": {
+    "message": "メニュー",
+    "description": "Auto-generated localized message"
+  },
+  "modeAuto": {
+    "message": "自動",
+    "description": "Auto-generated localized message"
+  },
+  "modeCss": {
+    "message": "css",
+    "description": "Auto-generated localized message"
+  },
+  "modeLabel": {
+    "message": "モード",
+    "description": "Auto-generated localized message"
+  },
+  "modelCacheManagementLabel": {
+    "message": "モデルキャッシュ管理",
+    "description": "Auto-generated localized message"
+  },
+  "modelCorruptedErrorMessage": {
+    "message": "モデルファイルが破損しているか不完全です。再ダウンロードしてください",
+    "description": "Auto-generated localized message"
+  },
+  "modelFailedStatus": {
+    "message": "モデルの読み込みに失敗しました",
+    "description": "Auto-generated localized message"
+  },
+  "modelLoadedStatus": {
+    "message": "モデル読み込み完了",
+    "description": "Auto-generated localized message"
+  },
+  "modeOnce": {
+    "message": "一度",
+    "description": "Auto-generated localized message"
+  },
+  "modePersistent": {
+    "message": "持続的",
+    "description": "Auto-generated localized message"
+  },
+  "multilingualModelDescription": {
+    "message": "多言語対応セマンティックモデル",
+    "description": "Auto-generated localized message"
+  },
+  "nameLabel": {
+    "message": "名前",
+    "description": "Auto-generated localized message"
+  },
+  "nativeServerConfigLabel": {
+    "message": "MCPサーバー設定",
+    "description": "Auto-generated localized message"
+  },
+  "navigationLabel": {
+    "message": "ナビゲーション",
+    "description": "Auto-generated localized message"
+  },
+  "networkErrorMessage": {
+    "message": "ネットワーク接続エラーです。ネットワークを確認して再試行してください",
+    "description": "Auto-generated localized message"
+  },
+  "newTabLabel": {
+    "message": "新しいタブ",
+    "description": "Auto-generated localized message"
+  },
+  "noCacheDataMessage": {
+    "message": "キャッシュデータがありません",
+    "description": "Auto-generated localized message"
   },
   "pagesUnit": {
-    "message": "ページ"
+    "message": "ページ",
+    "description": "Auto-generated localized message"
+  },
+  "permissionDeniedErrorMessage": {
+    "message": "権限が拒否されました",
+    "description": "Auto-generated localized message"
+  },
+  "persistLabel": {
+    "message": "持続する",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderDomainHint": {
+    "message": "例.com",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderMatchesExample": {
+    "message": "例えばhttps://*.example.com/*",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderOptional": {
+    "message": "オプション",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderScriptHint": {
+    "message": "ここに JS/CSS/TM を貼り付けます",
+    "description": "Auto-generated localized message"
+  },
+  "popupAddNewAnnotationLabel": {
+    "message": "新しい注釈を追加する",
+    "description": "Auto-generated localized message"
+  },
+  "popupAuthTokenLabel": {
+    "message": "認証トークン",
+    "description": "Auto-generated localized message"
+  },
+  "popupClearDataFailed": {
+    "message": "データをクリアできませんでした: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "popupClearDataFailedPlain": {
+    "message": "データの消去に失敗しました",
+    "description": "Auto-generated localized message"
+  },
+  "popupComingSoonBadge": {
+    "message": "近日公開",
+    "description": "Auto-generated localized message"
+  },
+  "popupConnectFailedPrefix": {
+    "message": "接続に失敗しました",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopiedShort": {
+    "message": "コピーされました",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopyFailed": {
+    "message": "コピーに失敗しました",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopyRegisterCommand": {
+    "message": "コピーレジスタコマンド",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopyToken": {
+    "message": "トークンをコピーする",
+    "description": "Auto-generated localized message"
+  },
+  "popupDocsLink": {
+    "message": "ドキュメント",
+    "description": "Auto-generated localized message"
+  },
+  "popupElementMarkerManagementDesc": {
+    "message": "ページ要素の注釈を管理する",
+    "description": "Auto-generated localized message"
+  },
+  "popupElementMarkerManagementTitle": {
+    "message": "要素の注釈管理",
+    "description": "Auto-generated localized message"
+  },
+  "popupEnableElementMarkerTooltip": {
+    "message": "要素の注釈をオンにする",
+    "description": "Auto-generated localized message"
+  },
+  "popupEnableWebEditorTooltip": {
+    "message": "ページ編集モードをオンにする",
+    "description": "Auto-generated localized message"
+  },
+  "popupFeatureUnderDevelopmentSuffix": {
+    "message": "この機能は開発中ですので、しばらくお待ちください",
+    "description": "Auto-generated localized message"
+  },
+  "popupFooterTagline": {
+    "message": "AI 用の Web ページ mcp サーバー",
+    "description": "Auto-generated localized message"
+  },
+  "popupGuideLink": {
+    "message": "ガイド",
+    "description": "Auto-generated localized message"
+  },
+  "popupIntelligentAssistantDesc": {
+    "message": "AI エージェントの会話とタスク",
+    "description": "Auto-generated localized message"
+  },
+  "popupIntelligentAssistantTitle": {
+    "message": "AIアシスタント",
+    "description": "Auto-generated localized message"
+  },
+  "popupLabeledElementsLabel": {
+    "message": "ラベル付き要素",
+    "description": "Auto-generated localized message"
+  },
+  "popupLocalModelDesc": {
+    "message": "セマンティック エンジンとモデル管理",
+    "description": "Auto-generated localized message"
+  },
+  "popupLocalModelTitle": {
+    "message": "ローカルモデル",
+    "description": "Auto-generated localized message"
+  },
+  "popupManagementPortalTitle": {
+    "message": "管理ポータル",
+    "description": "Auto-generated localized message"
+  },
+  "popupMarkerNamePlaceholder": {
+    "message": "名前（「ログインボタン」など）",
+    "description": "Auto-generated localized message"
+  },
+  "popupOneTimeHostRegistrationLabel": {
+    "message": "ワンタイムホスト登録（現在の拡張機能 ID）",
+    "description": "Auto-generated localized message"
+  },
+  "popupPageTitle": {
+    "message": "ウェブページ-mcp-サーバー",
+    "description": "Auto-generated localized message"
+  },
+  "popupQuickToolsTitle": {
+    "message": "クイックツール",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingUnderDevelopment": {
+    "message": "録音機能は開発中です",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordPlaybackFeature": {
+    "message": "録音再生",
+    "description": "Auto-generated localized message"
+  },
+  "popupTroubleshootingTitle": {
+    "message": "トラブルシューティング",
+    "description": "Auto-generated localized message"
+  },
+  "popupViewInstallGuideTitle": {
+    "message": "インストールガイドを見る",
+    "description": "Auto-generated localized message"
+  },
+  "popupWorkflowManagementDesc": {
+    "message": "録音と再生の自動化ワークフロー",
+    "description": "Auto-generated localized message"
+  },
+  "popupWorkflowManagementTitle": {
+    "message": "ワークフロー管理",
+    "description": "Auto-generated localized message"
+  },
+  "processingCacheStatus": {
+    "message": "キャッシュを処理中...",
+    "description": "Auto-generated localized message"
+  },
+  "processingStatus": {
+    "message": "処理中...",
+    "description": "Auto-generated localized message"
+  },
+  "queryLabel": {
+    "message": "クエリ",
+    "description": "Auto-generated localized message"
+  },
+  "refreshStatusButton": {
+    "message": "ステータス更新",
+    "description": "Auto-generated localized message"
+  },
+  "reinitializeButton": {
+    "message": "再初期化",
+    "description": "Auto-generated localized message"
+  },
+  "resetButton": {
+    "message": "リセット",
+    "description": "Auto-generated localized message"
+  },
+  "retryButton": {
+    "message": "再試行",
+    "description": "Auto-generated localized message"
+  },
+  "runAtAuto": {
+    "message": "自動",
+    "description": "Auto-generated localized message"
+  },
+  "runAtDocumentEnd": {
+    "message": "ドキュメント終了",
+    "description": "Auto-generated localized message"
+  },
+  "runAtDocumentIdle": {
+    "message": "ドキュメントアイドル",
+    "description": "Auto-generated localized message"
+  },
+  "runAtDocumentStart": {
+    "message": "ドキュメントの開始",
+    "description": "Auto-generated localized message"
+  },
+  "runAtLabel": {
+    "message": "実行時刻",
+    "description": "Auto-generated localized message"
+  },
+  "runningStatusLabel": {
+    "message": "実行ステータス",
+    "description": "Auto-generated localized message"
+  },
+  "runOnceButton": {
+    "message": "1 回実行 (CDP)",
+    "description": "Auto-generated localized message"
+  },
+  "saveButton": {
+    "message": "保存",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleDailyTimeLabel": {
+    "message": "時間 (HH:mm)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleDailyTimePlaceholder": {
+    "message": "たとえば、09:30",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleDescribeDaily": {
+    "message": "毎日$ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeInterval": {
+    "message": "$ARG1$分ごと",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeOnce": {
+    "message": "$ARG1$ で 1 回",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDialogTitle": {
+    "message": "スケジュール実行",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleEnableLabel": {
+    "message": "有効にする",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleEnableTiming": {
+    "message": "タイミングを有効にする",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleExistingPlansTitle": {
+    "message": "すでに計画がある",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleIntervalLabel": {
+    "message": "間隔 (分)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleOnceTimeLabel": {
+    "message": "時間(ISO)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleOnceTimePlaceholder": {
+    "message": "たとえば、2025-10-05T10:00:00",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleParametersLabel": {
+    "message": "パラメータ(JSON)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleParametersPlaceholder": {
+    "message": "{ \"ユーザー名\": \"xx\" }",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeDaily": {
+    "message": "毎日決まった時間に",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeInterval": {
+    "message": "N分ごと",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeLabel": {
+    "message": "タイプ",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeOnce": {
+    "message": "一度だけ実行する",
+    "description": "Auto-generated localized message"
+  },
+  "scriptLabel": {
+    "message": "スクリプト",
+    "description": "Auto-generated localized message"
+  },
+  "semanticEngineInitFailedStatus": {
+    "message": "セマンティックエンジンの初期化に失敗しました",
+    "description": "Auto-generated localized message"
+  },
+  "semanticEngineInitializingStatus": {
+    "message": "セマンティックエンジン初期化中...",
+    "description": "Auto-generated localized message"
+  },
+  "semanticEngineLabel": {
+    "message": "セマンティックエンジン",
+    "description": "Auto-generated localized message"
+  },
+  "semanticEngineNotInitStatus": {
+    "message": "セマンティックエンジン未初期化",
+    "description": "Auto-generated localized message"
+  },
+  "semanticEngineReadyStatus": {
+    "message": "セマンティックエンジン準備完了",
+    "description": "Auto-generated localized message"
+  },
+  "serviceNotConnectedStatus": {
+    "message": "サービス未接続",
+    "description": "Auto-generated localized message"
+  },
+  "serviceRunningStatus": {
+    "message": "サービス実行中 (ポート: $PORT$)",
+    "placeholders": {
+      "port": {
+        "content": "$1",
+        "example": "12306"
+      }
+    },
+    "description": "Auto-generated localized message"
+  },
+  "settingsTitle": {
+    "message": "設定",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelAddMarkerTitle": {
+    "message": "新しいマーカーを追加",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelConfirmDeleteMarker": {
+    "message": "マーカー「$ARG1$」を削除しますか?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelConfirmDeleteWorkflow": {
+    "message": "このワークフローを削除してもよろしいですか?この操作は元に戻すことができません。",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateFlowUnavailable": {
+    "message": "V3 ビルダーはまだ実装されていないため、ワークフローを作成できません。",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateMarkerButton": {
+    "message": "マーカーの作成",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateMarkerTitle": {
+    "message": "マーカーの作成",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateTriggerUnavailable": {
+    "message": "V3 トリガー管理はまだ実装されていないため、トリガーを作成できません。",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelEditFlowUnavailable": {
+    "message": "V3 ビルダーはまだ実装されていないため、ワークフローを編集できません。",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelEditMarkerTitle": {
+    "message": "マーカーの編集",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelEditTriggerUnavailable": {
+    "message": "V3 トリガー管理はまだ実装されていないため、トリガーを編集できません。",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerActionDelete": {
+    "message": "削除",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerActionEdit": {
+    "message": "編集",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerActionVerify": {
+    "message": "確認する",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerDomainCount": {
+    "message": "$ARG1$ マーカー",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelMarkerFieldMatchType": {
+    "message": "マッチタイプ",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldName": {
+    "message": "名前",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldNamePlaceholder": {
+    "message": "例: ログインボタン",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldSelector": {
+    "message": "セレクタ",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldSelectorType": {
+    "message": "セレクターの種類",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerMatchExact": {
+    "message": "完全一致",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerMatchHost": {
+    "message": "ホスト名",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerMatchPrefix": {
+    "message": "パスプレフィックス",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSearchPlaceholder": {
+    "message": "マーカー名またはセレクターを検索...",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSelectorCss": {
+    "message": "CSSセレクター",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSelectorPlaceholder": {
+    "message": "CSSセレクターまたはXPath",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSelectorXpath": {
+    "message": "XPath",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerStatsFiltered": {
+    "message": "$ARG3$ ドメイン全体で ($ARG2$ のうち) $ARG1$ マーカーを表示しています",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanelMarkerStatsTotal": {
+    "message": "$ARG2$ ドメインにわたる合計 $ARG1$ マーカー",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "sidepanelNavigatorAgentDesc": {
+    "message": "AI エージェントの会話とタスク",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorAgentTitle": {
+    "message": "AIアシスタント",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorElementMarkersDesc": {
+    "message": "ページ要素の注釈を管理する",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorElementMarkersTitle": {
+    "message": "要素の注釈管理",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorTitle": {
+    "message": "ページを切り替える",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorToggleTitle": {
+    "message": "ページを切り替える (ドラッグして移動、ダブルクリックして位置をリセット)",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorWorkflowsDesc": {
+    "message": "自動化ワークフローの記録と再生",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorWorkflowsTitle": {
+    "message": "ワークフロー管理",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNoMarkers": {
+    "message": "まだマーカーはありません。右上隅の + をクリックして最初のマーカーを作成します。",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNoMatchingMarkers": {
+    "message": "一致するマーカーが見つかりません",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelPageTitle": {
+    "message": "ウェブページ-mcp-サーバー",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelUpdateButton": {
+    "message": "アップデート",
+    "description": "Auto-generated localized message"
+  },
+  "statusAll": {
+    "message": "全て",
+    "description": "Auto-generated localized message"
+  },
+  "statusDisabled": {
+    "message": "無効",
+    "description": "Auto-generated localized message"
+  },
+  "statusEnabled": {
+    "message": "有効",
+    "description": "Auto-generated localized message"
+  },
+  "statusLabel": {
+    "message": "ステータス",
+    "description": "Auto-generated localized message"
+  },
+  "successNotification": {
+    "message": "操作が正常に完了しました",
+    "description": "Auto-generated localized message"
+  },
+  "switchingModelStatus": {
+    "message": "モデルを切り替え中...",
+    "description": "Auto-generated localized message"
+  },
+  "tableHeaderName": {
+    "message": "名前",
+    "description": "Auto-generated localized message"
+  },
+  "tableHeaderRunAt": {
+    "message": "実行時刻",
+    "description": "Auto-generated localized message"
+  },
+  "tableHeaderUpdated": {
+    "message": "更新されました",
+    "description": "Auto-generated localized message"
+  },
+  "tableHeaderWorld": {
+    "message": "世界",
+    "description": "Auto-generated localized message"
+  },
+  "tagsInputLabel": {
+    "message": "タグ (カンマ区切り)",
+    "description": "Auto-generated localized message"
+  },
+  "themeLabel": {
+    "message": "テーマ",
+    "description": "Auto-generated localized message"
+  },
+  "timeoutErrorMessage": {
+    "message": "操作がタイムアウトしました",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelAddInterval": {
+    "message": "+ インターバル",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelAddOnce": {
+    "message": "+ 1 回",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelCreate": {
+    "message": "作成",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelCurrentTriggers": {
+    "message": "現在のトリガー ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDeleteConfirm": {
+    "message": "トリガーを削除しますか?\n\n$ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCommandKey": {
+    "message": "コマンドキー: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCron": {
+    "message": "クロン: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCronWithTz": {
+    "message": "クロン: $ARG1$ ($ARG2$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "triggerPanelDescribeDomSelector": {
+    "message": "セレクター: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeInterval": {
+    "message": "$ARG1$分ごと",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeManual": {
+    "message": "手動トリガー（ボタンで実行）",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelDescribeMenuTitle": {
+    "message": "タイトル: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeOnceAt": {
+    "message": "$ARG1$にて",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeUrlRules": {
+    "message": "URL 一致ルール: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelEditViaNodeHint": {
+    "message": "Builder のトリガー ノード経由で編集する",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelEnabledLabel": {
+    "message": "有効",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelFireButton": {
+    "message": "火",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelFlowIdEmpty": {
+    "message": "フローIDが空です",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelIntervalHint": {
+    "message": "トリガーを繰り返すには chrome.alarms.periodInMinutes を使用します。",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelIntervalOption": {
+    "message": "間隔",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelInvalidTimeFormat": {
+    "message": "無効なトリガー時間形式です",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOnceHint": {
+    "message": "発射後は自動的に無効になります。時間はローカルタイムゾーンです。",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOnceOption": {
+    "message": "一度",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOtherTypesHint": {
+    "message": "他のタイプ (url/cron/command/contextMenu/dom) は、トリガー ノードを介して設定されます。",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOwnerExternal": {
+    "message": "外部の",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOwnerTriggerNode": {
+    "message": "トリガーノード経由",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelPastTimeWarn": {
+    "message": "トリガー時刻が過去になっています。すぐに発火する可能性があります。",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelRunEnqueued": {
+    "message": "実行をキューに追加しました",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelTriggeredToast": {
+    "message": "トリガー: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelTriggerTimeLabel": {
+    "message": "トリガー時間",
+    "description": "Auto-generated localized message"
+  },
+  "unknownErrorMessage": {
+    "message": "不明なエラーです。ネットワークがHuggingFaceにアクセスできるか確認してください",
+    "description": "Auto-generated localized message"
+  },
+  "userscriptsManagerTitle": {
+    "message": "ユーザースクリプトマネージャー",
+    "description": "Auto-generated localized message"
+  },
+  "vectorDocumentsLabel": {
+    "message": "ベクトルドキュメント",
+    "description": "Auto-generated localized message"
+  },
+  "verboseLoggingLabel": {
+    "message": "詳細ロギング",
+    "description": "Auto-generated localized message"
+  },
+  "warningNotification": {
+    "message": "警告：続行する前に確認してください",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeConnectTip": {
+    "message": "ヒント: 拡張機能のポップアップを開いて「接続」をクリックして、完全なクライアント構成スニペットをコピーすることもできます。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeCopyButton": {
+    "message": "コピー",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeCurrentExtensionId": {
+    "message": "現在の拡張機能 ID:",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeDiagnosticsDesc": {
+    "message": "「doctor」を実行してインストール状況を確認します。エラーが報告された場合は、自動修正コマンドを実行します。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeDiagnosticsTitle": {
+    "message": "診断",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeHeaderSubtitle": {
+    "message": "拡張機能対応のセットアップ コマンド (この拡張機能 ID を含む)。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeHeaderTitle": {
+    "message": "ウェブページ MCP サーバー",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpConfigDesc": {
+    "message": "これを MCP クライアントで使用します。ローカルホストの HTTP URL は必要ありません。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpConfigTitle": {
+    "message": "MCP クライアント設定 (stdio)",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeOpenTroubleshootingDocs": {
+    "message": "トラブルシューティングドキュメントを開く",
+    "description": "Auto-generated localized message"
+  },
+  "welcomePageTitle": {
+    "message": "ようこそ - webpage-mcp-server",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeRegisterHostDesc": {
+    "message": "まずこのコマンドを実行してください。現在の拡張機能 ID で Native Messaging マニフェストを書き込み、Chrome がローカルホストプロセスを起動できるようにします。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeRegisterHostTitle": {
+    "message": "ネイティブホストの登録（1回限り）",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeReportIssueDesc": {
+    "message": "診断レポートを生成し、GitHub の問題に貼り付けます。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeReportIssueTip": {
+    "message": "これにより、レポートがクリップボードにコピーされます (機密情報は自動的に編集されます)。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeReportIssueTitle": {
+    "message": "問題を報告する",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeStdioCommandDesc": {
+    "message": "次に、MCP クライアントでこのコマンドを使用します。グローバル インストールやローカルホスト URL は必要ありません。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeStdioCommandTitle": {
+    "message": "MCP標準出力コマンド",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeTroubleshootingCommands": {
+    "message": "doctor | report",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeTroubleshootingDesc": {
+    "message": "これらは、ブリッジが登録または接続に失敗した場合にのみ使用してください。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeTroubleshootingDocsButton": {
+    "message": "トラブルシューティングドキュメント",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsAddTriggerTitle": {
+    "message": "トリガーの追加",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsAdvancedSection": {
+    "message": "高度な",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCountPlural": {
+    "message": "ワークフロー",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCountSingular": {
+    "message": "ワークフロー",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCreateButton": {
+    "message": "新しい",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCreateWorkflow": {
+    "message": "ワークフローの作成",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCurrentPageOnly": {
+    "message": "現在のページのみ",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsDeleteAction": {
+    "message": "削除",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsDeleteTriggerTitle": {
+    "message": "削除",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsDescriptionLabel": {
+    "message": "説明",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEditTriggerTitle": {
+    "message": "編集",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEditWorkflowTitle": {
+    "message": "ワークフローの編集",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptyDesc": {
+    "message": "最初の自動化ワークフローを記録する",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptySearchDesc": {
+    "message": "別の検索語を試してください",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptySearchTitle": {
+    "message": "一致するワークフローがありません",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptyTitle": {
+    "message": "ワークフローはまだありません",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsExportAction": {
+    "message": "エクスポート",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsImportAction": {
+    "message": "インポート",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsMillisecondsValue": {
+    "message": "$ARG1$ms",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsMoreActionsTitle": {
+    "message": "さらなるアクション",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsNoDescription": {
+    "message": "説明なし",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsNoRunHistory": {
+    "message": "まだ実行履歴がありません",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsNoTriggers": {
+    "message": "トリガーが設定されていません",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsOptionalDescription": {
+    "message": "オプションの説明",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRefreshTitle": {
+    "message": "リフレッシュ",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunAction": {
+    "message": "実行",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunCanceled": {
+    "message": "キャンセル",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunDurationPrefix": {
+    "message": "所要時間",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunEntrySummary": {
+    "message": "#$ARG1$ $ARG2$ - ステップ=$ARG3$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "workflowsRunFailed": {
+    "message": "失敗",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunHistory": {
+    "message": "実行履歴",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunPaused": {
+    "message": "一時停止中",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunQueued": {
+    "message": "キューに入れられました",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunRunning": {
+    "message": "実行中",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunStatusPrefix": {
+    "message": "状態",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunSucceeded": {
+    "message": "成功",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunWorkflowTitle": {
+    "message": "ワークフローを実行",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsSearchPlaceholder": {
+    "message": "ワークフローを検索...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsSecondsUnit": {
+    "message": "s",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggersSection": {
+    "message": "トリガー",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsUntitledName": {
+    "message": "無題",
+    "description": "Auto-generated localized message"
+  },
+  "worldAuto": {
+    "message": "自動",
+    "description": "Auto-generated localized message"
+  },
+  "worldIsolated": {
+    "message": "孤立した",
+    "description": "Auto-generated localized message"
+  },
+  "worldLabel": {
+    "message": "世界",
+    "description": "Auto-generated localized message"
+  },
+  "worldMain": {
+    "message": "主要",
+    "description": "Auto-generated localized message"
   }
 }

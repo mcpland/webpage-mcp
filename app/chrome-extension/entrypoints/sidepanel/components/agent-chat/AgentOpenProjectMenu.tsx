@@ -1,4 +1,5 @@
 import type { OpenProjectTarget } from 'webpage-mcp-shared';
+import { getMessage } from '@/utils/i18n';
 
 type AgentOpenProjectMenuProps = {
   open: boolean;
@@ -13,6 +14,9 @@ export default function AgentOpenProjectMenu({
   onSelect,
   onClose,
 }: AgentOpenProjectMenuProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   function handleSelect(target: OpenProjectTarget): void {
     onSelect?.(target);
     onClose?.();
@@ -36,7 +40,7 @@ export default function AgentOpenProjectMenu({
         className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider"
         style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
       >
-        Open In
+        {t('agentOpenProjectMenuTitle', 'Open In')}
       </div>
 
       <button
@@ -50,7 +54,7 @@ export default function AgentOpenProjectMenu({
         <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
           <path d="M17.583 2L6.167 11.667 2 8.5v7l4.167-3.167L17.583 22 22 19.75V4.25L17.583 2zm0 3.5v13l-8-6.5 8-6.5z" />
         </svg>
-        <span className="flex-1">VS Code</span>
+        <span className="flex-1">{t('agentOpenProjectMenuVSCode', 'VS Code')}</span>
         {defaultTarget === 'vscode' ? (
           <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
@@ -80,7 +84,7 @@ export default function AgentOpenProjectMenu({
             d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
           />
         </svg>
-        <span className="flex-1">Terminal</span>
+        <span className="flex-1">{t('agentOpenProjectMenuTerminal', 'Terminal')}</span>
         {defaultTarget === 'terminal' ? (
           <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />

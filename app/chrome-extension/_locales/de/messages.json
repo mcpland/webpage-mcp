@@ -1,307 +1,1321 @@
 {
-  "extensionName": {
-    "message": "webpage-mcp-server",
-    "description": "Erweiterungsname"
-  },
-  "extensionDescription": {
-    "message": "Stellt Browser-Funktionen mit Ihrem eigenen Chrome zur Verfügung",
-    "description": "Erweiterungsbeschreibung"
-  },
-  "nativeServerConfigLabel": {
-    "message": "MCP Server-Konfiguration",
-    "description": "Hauptabschnittstitel für MCP Server-Einstellungen"
-  },
-  "semanticEngineLabel": {
-    "message": "Semantische Engine",
-    "description": "Hauptabschnittstitel für semantische Engine"
-  },
-  "embeddingModelLabel": {
-    "message": "Embedding-Modell",
-    "description": "Hauptabschnittstitel für Modellauswahl"
-  },
-  "indexDataManagementLabel": {
-    "message": "Index-Datenverwaltung",
-    "description": "Hauptabschnittstitel für Datenverwaltung"
-  },
-  "modelCacheManagementLabel": {
-    "message": "Modell-Cache-Verwaltung",
-    "description": "Hauptabschnittstitel für Cache-Verwaltung"
-  },
-  "statusLabel": {
-    "message": "Status",
-    "description": "Allgemeines Statuslabel"
-  },
-  "runningStatusLabel": {
-    "message": "Betriebsstatus",
-    "description": "Server-Betriebsstatuslabel"
-  },
-  "connectionStatusLabel": {
-    "message": "Verbindungsstatus",
-    "description": "Verbindungsstatuslabel"
-  },
-  "lastUpdatedLabel": {
-    "message": "Zuletzt aktualisiert:",
-    "description": "Zeitstempel der letzten Aktualisierung"
-  },
-  "connectButton": {
-    "message": "Verbinden",
-    "description": "Verbinden-Schaltflächentext"
-  },
-  "disconnectButton": {
-    "message": "Trennen",
-    "description": "Trennen-Schaltflächentext"
-  },
-  "connectingStatus": {
-    "message": "Verbindung wird hergestellt...",
-    "description": "Verbindungsstatusmeldung"
-  },
-  "connectedStatus": {
-    "message": "Verbunden",
-    "description": "Verbunden-Statusmeldung"
-  },
-  "disconnectedStatus": {
-    "message": "Getrennt",
-    "description": "Getrennt-Statusmeldung"
-  },
-  "detectingStatus": {
-    "message": "Erkennung läuft...",
-    "description": "Erkennungsstatusmeldung"
-  },
-  "serviceRunningStatus": {
-    "message": "Service läuft (Port: $PORT$)",
-    "description": "Service läuft mit Portnummer",
-    "placeholders": {
-      "port": {
-        "content": "$1",
-        "example": "12306"
-      }
-    }
-  },
-  "serviceNotConnectedStatus": {
-    "message": "Service nicht verbunden",
-    "description": "Service nicht verbunden Status"
-  },
-  "connectedServiceNotStartedStatus": {
-    "message": "Verbunden, Service nicht gestartet",
-    "description": "Verbunden aber Service nicht gestartet Status"
-  },
-  "mcpServerConfigLabel": {
-    "message": "MCP Server-Konfiguration",
-    "description": "MCP Server-Konfigurationsabschnittslabel"
-  },
-  "connectionPortLabel": {
-    "message": "Verbindungsport",
-    "description": "Verbindungsport-Eingabelabel"
-  },
-  "refreshStatusButton": {
-    "message": "Status aktualisieren",
-    "description": "Status aktualisieren Schaltflächen-Tooltip"
-  },
-  "copyConfigButton": {
-    "message": "Konfiguration kopieren",
-    "description": "Konfiguration kopieren Schaltflächentext"
-  },
-  "retryButton": {
-    "message": "Wiederholen",
-    "description": "Wiederholen-Schaltflächentext"
-  },
-  "cancelButton": {
-    "message": "Abbrechen",
-    "description": "Abbrechen-Schaltflächentext"
-  },
-  "confirmButton": {
-    "message": "Bestätigen",
-    "description": "Bestätigen-Schaltflächentext"
-  },
-  "saveButton": {
-    "message": "Speichern",
-    "description": "Speichern-Schaltflächentext"
-  },
-  "closeButton": {
-    "message": "Schließen",
-    "description": "Schließen-Schaltflächentext"
-  },
-  "resetButton": {
-    "message": "Zurücksetzen",
-    "description": "Zurücksetzen-Schaltflächentext"
-  },
-  "initializingStatus": {
-    "message": "Initialisierung...",
-    "description": "Initialisierung-Fortschrittsmeldung"
-  },
-  "processingStatus": {
-    "message": "Verarbeitung...",
-    "description": "Verarbeitung-Fortschrittsmeldung"
-  },
-  "loadingStatus": {
-    "message": "Wird geladen...",
-    "description": "Ladefortschrittsmeldung"
-  },
-  "clearingStatus": {
-    "message": "Wird geleert...",
-    "description": "Leerungsfortschrittsmeldung"
-  },
-  "cleaningStatus": {
-    "message": "Wird bereinigt...",
-    "description": "Bereinigungsfortschrittsmeldung"
-  },
-  "downloadingStatus": {
-    "message": "Wird heruntergeladen...",
-    "description": "Download-Fortschrittsmeldung"
-  },
-  "semanticEngineReadyStatus": {
-    "message": "Semantische Engine bereit",
-    "description": "Semantische Engine bereit Status"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "Semantische Engine wird initialisiert...",
-    "description": "Semantische Engine Initialisierungsstatus"
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "Initialisierung der semantischen Engine fehlgeschlagen",
-    "description": "Semantische Engine Initialisierung fehlgeschlagen Status"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "Semantische Engine nicht initialisiert",
-    "description": "Semantische Engine nicht initialisiert Status"
-  },
-  "initSemanticEngineButton": {
-    "message": "Semantische Engine initialisieren",
-    "description": "Semantische Engine initialisieren Schaltflächentext"
-  },
-  "reinitializeButton": {
-    "message": "Neu initialisieren",
-    "description": "Neu initialisieren Schaltflächentext"
-  },
-  "downloadingModelStatus": {
-    "message": "Modell wird heruntergeladen... $PROGRESS$%",
-    "description": "Modell-Download-Fortschritt mit Prozentsatz",
-    "placeholders": {
-      "progress": {
-        "content": "$1",
-        "example": "50"
-      }
-    }
-  },
-  "switchingModelStatus": {
-    "message": "Modell wird gewechselt...",
-    "description": "Modellwechsel-Fortschrittsmeldung"
-  },
-  "modelLoadedStatus": {
-    "message": "Modell geladen",
-    "description": "Modell erfolgreich geladen Status"
-  },
-  "modelFailedStatus": {
-    "message": "Modell konnte nicht geladen werden",
-    "description": "Modell-Ladefehler Status"
-  },
-  "lightweightModelDescription": {
-    "message": "Leichtgewichtiges mehrsprachiges Modell",
-    "description": "Beschreibung für leichtgewichtige Modelloption"
-  },
-  "betterThanSmallDescription": {
-    "message": "Etwas größer als e5-small, aber bessere Leistung",
-    "description": "Beschreibung für mittlere Modelloption"
-  },
-  "multilingualModelDescription": {
-    "message": "Mehrsprachiges semantisches Modell",
-    "description": "Beschreibung für mehrsprachige Modelloption"
-  },
-  "fastPerformance": {
-    "message": "Schnell",
-    "description": "Schnelle Leistungsanzeige"
-  },
-  "balancedPerformance": {
-    "message": "Ausgewogen",
-    "description": "Ausgewogene Leistungsanzeige"
+  "aboutTitle": {
+    "message": "Über",
+    "description": "Über Dialogtitel"
   },
   "accuratePerformance": {
     "message": "Genau",
     "description": "Genaue Leistungsanzeige"
   },
-  "networkErrorMessage": {
-    "message": "Netzwerkverbindungsfehler, bitte Netzwerk prüfen und erneut versuchen",
-    "description": "Netzwerkverbindungsfehlermeldung"
-  },
-  "modelCorruptedErrorMessage": {
-    "message": "Modelldatei beschädigt oder unvollständig, bitte Download wiederholen",
-    "description": "Modell-Beschädigungsfehlermeldung"
-  },
-  "unknownErrorMessage": {
-    "message": "Unbekannter Fehler, bitte prüfen Sie, ob Ihr Netzwerk auf HuggingFace zugreifen kann",
-    "description": "Unbekannte Fehler-Rückfallmeldung"
-  },
-  "permissionDeniedErrorMessage": {
-    "message": "Zugriff verweigert",
-    "description": "Zugriff verweigert Fehlermeldung"
-  },
-  "timeoutErrorMessage": {
-    "message": "Zeitüberschreitung",
-    "description": "Zeitüberschreitungsfehlermeldung"
-  },
-  "indexedPagesLabel": {
-    "message": "Indizierte Seiten",
-    "description": "Anzahl indizierter Seiten Label"
-  },
-  "indexSizeLabel": {
-    "message": "Indexgröße",
-    "description": "Indexgröße Label"
-  },
   "activeTabsLabel": {
     "message": "Aktive Tabs",
     "description": "Anzahl aktiver Tabs Label"
   },
-  "vectorDocumentsLabel": {
-    "message": "Vektordokumente",
-    "description": "Anzahl Vektordokumente Label"
+  "advancedSettingsLabel": {
+    "message": "Erweiterte Einstellungen",
+    "description": "Erweiterte Einstellungen Abschnittslabel"
   },
-  "cacheSizeLabel": {
-    "message": "Cache-Größe",
-    "description": "Cache-Größe Label"
+  "agentAllChangesExcluded": {
+    "message": "Alle Änderungen sind ausgeschlossen.",
+    "description": "Auto-generated localized message"
+  },
+  "agentApplyChangesDefault": {
+    "message": "Änderungen übernehmen",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentCacheDesc": {
+    "message": "Verwalten Sie zwischengespeicherte Bilder, die vom Agent-Server auf der Festplatte gespeichert werden.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentCacheDialogAria": {
+    "message": "Verwaltung des Anhang-Cache",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentCacheTitle": {
+    "message": "Anhang-Cache",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentClearFailed": {
+    "message": "Anhänge konnten nicht gelöscht werden.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentClearSelected": {
+    "message": "Ausgewählte löschen ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentFilesCount": {
+    "message": "$ARG1$-Dateien",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentInvalidServerResponse": {
+    "message": "Ungültige Antwort vom Server.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentInvertSelection": {
+    "message": "Umkehren",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentLoadingStats": {
+    "message": "Anhangsstatistiken werden geladen...",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentLoadStatsFailed": {
+    "message": "Anhangsstatistiken konnten nicht geladen werden.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentMissingTag": {
+    "message": "fehlen",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentNoData": {
+    "message": "Keine Anhangsdaten gefunden.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentOrphanProjectsCount": {
+    "message": "$ARG1$ verwaiste Projekte",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentOrphanTag": {
+    "message": "Waise",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentRemovedSummary": {
+    "message": "$ARG1$ ($ARG2$-Dateien) entfernt.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentAttachmentRootDirectoryLabel": {
+    "message": "Stammverzeichnis",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentSelectAll": {
+    "message": "Alles auswählen",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentSelectProjectsHint": {
+    "message": "Wählen Sie Projekte aus, um zwischengespeicherte Anhangsdateien von der Festplatte zu entfernen.",
+    "description": "Auto-generated localized message"
+  },
+  "agentAttachmentTotalSizeLabel": {
+    "message": "Gesamtgröße",
+    "description": "Auto-generated localized message"
+  },
+  "agentChatComposerPlaceholder": {
+    "message": "Claude um Code bitten...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerAttachImageShortTooltip": {
+    "message": "Bild anhängen",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerAttachImageTooltip": {
+    "message": "Bild anhängen (ziehen, einfügen oder klicken)",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerDropImagesHere": {
+    "message": "Legen Sie Bilder hier ab",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerExpandEditorTitle": {
+    "message": "Editor erweitern",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerReasoningEffortTooltip": {
+    "message": "Argumentationsaufwand",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerRemoveImageTitle": {
+    "message": "Bild entfernen",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerResetConfirm": {
+    "message": "Diese Konversation zurücksetzen? Alle Nachrichten werden gelöscht und die Sitzung beginnt neu.",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerResetConversationTooltip": {
+    "message": "Konversation zurücksetzen",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSendMessageAria": {
+    "message": "Nachricht senden",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSendTitle": {
+    "message": "Senden",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSessionSettingsTooltip": {
+    "message": "Sitzungseinstellungen",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusPreparing": {
+    "message": "Vorbereiten...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusReady": {
+    "message": "Bereit",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusSending": {
+    "message": "Senden...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusStarting": {
+    "message": "Beginnt...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusStopping": {
+    "message": "Stoppen...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStatusWorking": {
+    "message": "Arbeiten...",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStopRequestAria": {
+    "message": "Stopp-Anfrage",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerStopTitle": {
+    "message": "Stoppen",
+    "description": "Auto-generated localized message"
+  },
+  "agentComposerSwitchModelTooltip": {
+    "message": "Modell wechseln",
+    "description": "Auto-generated localized message"
+  },
+  "agentConversationEmptyPrompt": {
+    "message": "Wie kann ich Ihnen heute beim Codieren helfen?",
+    "description": "Auto-generated localized message"
+  },
+  "agentDismissErrorAria": {
+    "message": "Fehler verwerfen",
+    "description": "Auto-generated localized message"
+  },
+  "agentDismissTitle": {
+    "message": "Zurückweisen",
+    "description": "Auto-generated localized message"
+  },
+  "agentEditsCount": {
+    "message": "$ARG1$ bearbeiten$ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentElementsCount": {
+    "message": "$ARG1$ Element$ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentErrorOccurred": {
+    "message": "Es ist ein Fehler aufgetreten",
+    "description": "Auto-generated localized message"
+  },
+  "agentExcludeCount": {
+    "message": "Ausschließen ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentImagePreviewAria": {
+    "message": "Bildvorschau",
+    "description": "Auto-generated localized message"
+  },
+  "agentImagePreviewCloseAria": {
+    "message": "Bildvorschau schließen",
+    "description": "Auto-generated localized message"
+  },
+  "agentIncludeCount": {
+    "message": "Einschließen ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentIncludeExcludeSummary": {
+    "message": "$ARG1$ enthalten | $ARG2$ ausgeschlossen",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentLinesCount": {
+    "message": "$ARG1$ Zeilen",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentLinesWord": {
+    "message": "Linien",
+    "description": "Auto-generated localized message"
+  },
+  "agentLineWord": {
+    "message": "Linie",
+    "description": "Auto-generated localized message"
+  },
+  "agentModifiedElementsLabel": {
+    "message": "Geänderte Elemente:",
+    "description": "Auto-generated localized message"
+  },
+  "agentMoreCount": {
+    "message": "+$ARG1$ mehr",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreFilesCount": {
+    "message": "+$ARG1$ weitere Dateien",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreLinesCount": {
+    "message": "$ARG1$ mehr $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentNoChangesYet": {
+    "message": "Noch keine Änderungen.",
+    "description": "Auto-generated localized message"
+  },
+  "agentNoExcludedElements": {
+    "message": "Keine ausgeschlossenen Elemente.",
+    "description": "Auto-generated localized message"
+  },
+  "agentOpenProjectFailed": {
+    "message": "Projekt konnte nicht geöffnet werden: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentOpenProjectMenuTerminal": {
+    "message": "Terminal",
+    "description": "Auto-generated localized message"
+  },
+  "agentOpenProjectMenuTitle": {
+    "message": "Öffnen Sie in",
+    "description": "Auto-generated localized message"
+  },
+  "agentOpenProjectMenuVSCode": {
+    "message": "VS-Code",
+    "description": "Auto-generated localized message"
+  },
+  "agentPreviewFooterLabel": {
+    "message": "Agentenvorschau",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuAutoOption": {
+    "message": "Auto",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuCliLabel": {
+    "message": "CLI",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuDefaultOption": {
+    "message": "Standard",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEffortHint": {
+    "message": "Gilt für neue Sitzungen. Bearbeiten Sie die vorhandene Sitzung in den Sitzungseinstellungen.",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEffortLabel": {
+    "message": "Aufwand",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEnableMcpLabel": {
+    "message": "Aktivieren Sie den Webseiten-MCP-Server",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuEnableMcpTitle": {
+    "message": "Aktivieren Sie die Integration des lokalen Webseiten-MCP-Servers",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuMcpLabel": {
+    "message": "MCP",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuModelLabel": {
+    "message": "Modell",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuSaveSettings": {
+    "message": "Einstellungen speichern",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuSaving": {
+    "message": "Speichern...",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectMenuSettingsTitle": {
+    "message": "Einstellungen",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsConfirmCreateDir": {
+    "message": "Das Verzeichnis „$ARG1$“ existiert nicht. Erstellen Sie es?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsConfirmSwitchExisting": {
+    "message": "Für „$ARG1$“ existiert bereits ein Projekt: $ARG2$\n\nZu diesem Projekt wechseln?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentProjectsCreateFailed": {
+    "message": "Projekt konnte nicht erstellt werden.",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsInvalidCreateResponse": {
+    "message": "Projekt erstellt, aber die Antwort ist ungültig.",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsInvalidPath": {
+    "message": "Ungültiger Pfad",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsNewButton": {
+    "message": "+ Neues Projekt",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsPickerOpenFailed": {
+    "message": "Die Verzeichnisauswahl konnte nicht geöffnet werden",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsPickerUnavailable": {
+    "message": "Verzeichnisauswahl nicht verfügbar. Bitte erstellen Sie den MCP-Server neu und starten Sie ihn neu.",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsSelecting": {
+    "message": "Auswählen...",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsServerHttpError": {
+    "message": "Serverfehler: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsServerUnavailable": {
+    "message": "Server nicht verfügbar",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsTitle": {
+    "message": "Projekte",
+    "description": "Auto-generated localized message"
+  },
+  "agentProjectsValidateFailed": {
+    "message": "Pfad konnte nicht validiert werden",
+    "description": "Auto-generated localized message"
+  },
+  "agentPromptPreviewLabel": {
+    "message": "Prompt-Vorschau:",
+    "description": "Auto-generated localized message"
+  },
+  "agentSelectedHeader": {
+    "message": "Ausgewählt",
+    "description": "Auto-generated localized message"
+  },
+  "agentSelectedTag": {
+    "message": "$ARG1$ ausgewählt",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSelectionChipShort": {
+    "message": "sel",
+    "description": "Auto-generated localized message"
+  },
+  "agentSentImagesSummary": {
+    "message": "Gesendet $ARG1$ Bild$ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentServerNotReadyMissingPort": {
+    "message": "Agent-Server nicht bereit (fehlender Server-Port).",
+    "description": "Auto-generated localized message"
+  },
+  "agentServerNotReadySimple": {
+    "message": "Agent-Server nicht bereit.",
+    "description": "Auto-generated localized message"
+  },
+  "agentServerNotReadyTitle": {
+    "message": "Server nicht bereit",
+    "description": "Auto-generated localized message"
+  },
+  "agentServerReconnectHint": {
+    "message": "Starten Sie den Server oder verbinden Sie ihn erneut, und öffnen Sie dann dieses Fenster erneut.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionActiveModelLabel": {
+    "message": "Aktives Modell",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionAppendCustomText": {
+    "message": "Fügen Sie benutzerdefinierten Text hinzu",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionAppendCustomTextPlaceholder": {
+    "message": "Zusätzliche Anweisungen zum Anhängen...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionClaudeCodeLabel": {
+    "message": "Claude Code",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionCreating": {
+    "message": "Erstellen...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionCustomPromptPlaceholder": {
+    "message": "Benutzerdefinierte Systemaufforderung eingeben...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionDeleteConfirm": {
+    "message": "Diese Sitzung löschen? Dies kann nicht rückgängig gemacht werden.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionDeleteNamedConfirm": {
+    "message": "„$ARG1$“ löschen?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionDeleteTitle": {
+    "message": "Löschen",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionEngineLabel": {
+    "message": "Engine",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionEngineSessionLabel": {
+    "message": "Engine-Sitzung",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionInfoSection": {
+    "message": "Sitzungsinformationen",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionMcpServersLabel": {
+    "message": "MCP-Server",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionModelDefaultServer": {
+    "message": "Standard (Servereinstellung)",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionModelLabel": {
+    "message": "Modell",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionNewButton": {
+    "message": "+ Neue Sitzung",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionNewShort": {
+    "message": "Neu",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionOpenProjectTitle": {
+    "message": "Projekt öffnen",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionAcceptEdits": {
+    "message": "AcceptEdits – Dateiänderungen automatisch akzeptieren",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionBypass": {
+    "message": "bypassPermissions – Alle automatisch akzeptieren",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionDefault": {
+    "message": "Standard: Bitten Sie um Genehmigung",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionDontAsk": {
+    "message": "dontAsk – Keine Bestätigung",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionHint": {
+    "message": "Steuert, wie das Claude SDK Tool-Genehmigungsanfragen verarbeitet.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionModeLabel": {
+    "message": "Berechtigungsmodus",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionPermissionPlan": {
+    "message": "Plan – Nur Planmodus",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionReasoningEffortHint": {
+    "message": "Steuert die Argumentationstiefe. Höherer Aufwand = bessere Qualität, aber langsamer.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionReasoningEffortLabel": {
+    "message": "Argumentationsaufwand",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionReasoningEffortXhighHint": {
+    "message": "Hinweis: xhigh ist nur für die Modelle gpt-5.2 und gpt-5.1-codex-max verfügbar.",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionRenameTitle": {
+    "message": "Umbenennen",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionRunningBadge": {
+    "message": "Läuft",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSdkInfoLabel": {
+    "message": "SDK-Info",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsEmpty": {
+    "message": "Noch keine Sitzungen",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSettingsLoading": {
+    "message": "Sitzungsinformationen werden geladen...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSettingsTitle": {
+    "message": "Sitzungseinstellungen",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsLoading": {
+    "message": "Sitzungen werden geladen...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsNoMatching": {
+    "message": "Keine passenden Sitzungen",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsSearchPlaceholder": {
+    "message": "Sitzungen suchen...",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsStartConversation": {
+    "message": "Beginnen Sie ein neues Gespräch mit KI",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsStartNewButton": {
+    "message": "Neue Sitzung starten",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsTitle": {
+    "message": "Sitzungen",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsTryDifferentSearch": {
+    "message": "Versuchen Sie es mit einem anderen Suchbegriff",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionsUnnamed": {
+    "message": "Unbenannte Sitzung",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionSystemPromptLabel": {
+    "message": "Systemaufforderung",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionThisSession": {
+    "message": "diese Sitzung",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionToolsLabel": {
+    "message": "Werkzeuge",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionUseCustomPrompt": {
+    "message": "Benutzerdefinierte Eingabeaufforderung verwenden",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionUsePresetClaudeCode": {
+    "message": "Voreinstellung verwenden (claude_code)",
+    "description": "Auto-generated localized message"
+  },
+  "agentSessionViewMcpServers": {
+    "message": "MCP-Server anzeigen ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionViewTools": {
+    "message": "Werkzeuge anzeigen ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSettingsClearAttachmentCache": {
+    "message": "Anhang-Cache löschen",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsCometCaretLabel": {
+    "message": "Komet-Caret",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsInputSection": {
+    "message": "Eingang",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsReconnectServer": {
+    "message": "Server erneut verbinden",
+    "description": "Auto-generated localized message"
+  },
+  "agentSettingsStorageSection": {
+    "message": "Lagerung",
+    "description": "Auto-generated localized message"
+  },
+  "agentShowLess": {
+    "message": "Weniger anzeigen",
+    "description": "Auto-generated localized message"
+  },
+  "agentShowMore": {
+    "message": "Mehr anzeigen...",
+    "description": "Auto-generated localized message"
+  },
+  "agentThinkingStatus": {
+    "message": "Denken...",
+    "description": "Auto-generated localized message"
+  },
+  "agentThreadEditComingSoon": {
+    "message": "Bearbeiten (bald verfügbar)",
+    "description": "Auto-generated localized message"
+  },
+  "agentTopBarBackToSessionsTitle": {
+    "message": "Zurück zu den Sitzungen",
+    "description": "Auto-generated localized message"
+  },
+  "agentTopBarBrandFallback": {
+    "message": "Agent",
+    "description": "Auto-generated localized message"
+  },
+  "agentTopBarOpenProjectTitle": {
+    "message": "Öffnen Sie das Projekt in VS Code oder Terminal",
+    "description": "Auto-generated localized message"
+  },
+  "agentUnknownValue": {
+    "message": "Unbekannt",
+    "description": "Auto-generated localized message"
+  },
+  "agentUsageDurationTurnsTitle": {
+    "message": "Dauer: $ARG1$s, Runden: $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageInputOutputTitle": {
+    "message": "Eingabe: $ARG1$, Ausgabe: $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageTokensSummary": {
+    "message": "$ARG1$-Token",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentWebEditorApplyTitle": {
+    "message": "Web-Editor anwenden",
+    "description": "Auto-generated localized message"
+  },
+  "agentWebEditsHeader": {
+    "message": "Web-Änderungen",
+    "description": "Auto-generated localized message"
+  },
+  "allFramesLabel": {
+    "message": "Alle Rahmen",
+    "description": "Auto-generated localized message"
+  },
+  "applyButton": {
+    "message": "Anwenden",
+    "description": "Auto-generated localized message"
+  },
+  "autoTheme": {
+    "message": "Automatisch",
+    "description": "Automatisches Design Option"
+  },
+  "balancedPerformance": {
+    "message": "Ausgewogen",
+    "description": "Ausgewogene Leistungsanzeige"
+  },
+  "betterThanSmallDescription": {
+    "message": "Etwas größer als e5-small, aber bessere Leistung",
+    "description": "Beschreibung für mittlere Modelloption"
+  },
+  "bookmarksBarLabel": {
+    "message": "Lesezeichenleiste",
+    "description": "Lesezeichenleiste Ordnername"
+  },
+  "builderActiveTabNotFound": {
+    "message": "Aktive Registerkarte nicht gefunden",
+    "description": "Auto-generated localized message"
+  },
+  "builderAutoLayoutTitle": {
+    "message": "Automatisches Layout",
+    "description": "Auto-generated localized message"
+  },
+  "builderConfigurationErrorTitle": {
+    "message": "⚠️ Konfigurationsfehler",
+    "description": "Auto-generated localized message"
+  },
+  "builderConfigurationTitle": {
+    "message": "Konfiguration",
+    "description": "Auto-generated localized message"
+  },
+  "builderDeleteEdgeTitle": {
+    "message": "Kante löschen",
+    "description": "Auto-generated localized message"
+  },
+  "builderDeleteNodeTitle": {
+    "message": "Knoten löschen",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeBranchLabel": {
+    "message": "Zweig",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeConnectionInvalid": {
+    "message": "Ungültig",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeConnectionStatusLabel": {
+    "message": "Verbindungsstatus",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeConnectionValid": {
+    "message": "Gültig",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeInspectOnlyHint": {
+    "message": "Nur die Verbindung prüfen. Das Bearbeiten von Zweigen/Handles wird in einem späteren Durchgang unterstützt.",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeSourceLabel": {
+    "message": "Quelle",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeTargetLabel": {
+    "message": "Ziel",
+    "description": "Auto-generated localized message"
+  },
+  "builderEdgeTitle": {
+    "message": "Kante",
+    "description": "Auto-generated localized message"
+  },
+  "builderEditFlowTitle": {
+    "message": "Bearbeiten: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderEnterJsonPlaceholder": {
+    "message": "Geben Sie JSON ein",
+    "description": "Auto-generated localized message"
+  },
+  "builderExportFailed": {
+    "message": "Export fehlgeschlagen: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderExportJsonTitle": {
+    "message": "JSON exportieren",
+    "description": "Auto-generated localized message"
+  },
+  "builderFallbackPromotionNotice": {
+    "message": "Angewendete Fallback-Empfehlung: Hochgestufte $ARG1$-Priorität.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFieldRequired": {
+    "message": "$ARG1$ erforderlich",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFitViewTitle": {
+    "message": "Ansicht anpassen",
+    "description": "Auto-generated localized message"
+  },
+  "builderFlowCategory": {
+    "message": "Flow",
+    "description": "Auto-generated localized message"
+  },
+  "builderGeneralSettingsTitle": {
+    "message": "Allgemeine Einstellungen",
+    "description": "Auto-generated localized message"
+  },
+  "builderIfConditionLabel": {
+    "message": "Bedingung $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderIfElseLabel": {
+    "message": "Sonst",
+    "description": "Auto-generated localized message"
+  },
+  "builderImportDataNotFound": {
+    "message": "Import fehlgeschlagen: Workflow-Daten nicht gefunden.",
+    "description": "Auto-generated localized message"
+  },
+  "builderImportFailed": {
+    "message": "Import fehlgeschlagen: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderImportJsonTitle": {
+    "message": "JSON importieren",
+    "description": "Auto-generated localized message"
+  },
+  "builderInsertNodePlaceholder": {
+    "message": "Knoten einfügen...",
+    "description": "Auto-generated localized message"
+  },
+  "builderJsonFormatError": {
+    "message": "JSON-Formatfehler",
+    "description": "Auto-generated localized message"
+  },
+  "builderKeySequenceExample": {
+    "message": "Beispiel: Rücktaste Enter oder cmd+a",
+    "description": "Auto-generated localized message"
+  },
+  "builderKeySequencePlaceholder": {
+    "message": "Rücktaste Enter oder cmd+a",
+    "description": "Auto-generated localized message"
+  },
+  "builderLoadFlowFailed": {
+    "message": "Workflow konnte nicht geladen werden: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderLogicCategory": {
+    "message": "Logik",
+    "description": "Auto-generated localized message"
+  },
+  "builderManageTriggersTitle": {
+    "message": "Auslöser verwalten",
+    "description": "Auto-generated localized message"
+  },
+  "builderNameLabel": {
+    "message": "Name",
+    "description": "Auto-generated localized message"
+  },
+  "builderNewButton": {
+    "message": "Neu",
+    "description": "Auto-generated localized message"
+  },
+  "builderNewWorkflowName": {
+    "message": "Neuer Workflow",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeNameLabel": {
+    "message": "Knotenname",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeNamePlaceholder": {
+    "message": "Geben Sie den Knotennamen ein",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodePropertiesTitle": {
+    "message": "Knoteneigenschaften",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeSpecFallbackHint": {
+    "message": "Der Knoten stellt noch keine NodeSpec bereit und ist auf das Standard-Eigenschaftenfenster zurückgegriffen.",
+    "description": "Auto-generated localized message"
+  },
+  "builderNodeSpecNotFound": {
+    "message": "Knotenspezifikation nicht gefunden",
+    "description": "Auto-generated localized message"
+  },
+  "builderNoEdgesSelected": {
+    "message": "Keine Kanten ausgewählt",
+    "description": "Auto-generated localized message"
+  },
+  "builderNoSelectorGenerated": {
+    "message": "Es wurde kein gültiger Selektor generiert. Bitte geben Sie es manuell ein.",
+    "description": "Auto-generated localized message"
+  },
+  "builderPageTitle": {
+    "message": "Workflow Builder – webpage-mcp-server",
+    "description": "Auto-generated localized message"
+  },
+  "builderPickButton": {
+    "message": "Wählen",
+    "description": "Auto-generated localized message"
+  },
+  "builderPickedFromPageTitle": {
+    "message": "Aus Seite ausgewählt",
+    "description": "Auto-generated localized message"
+  },
+  "builderPickFailed": {
+    "message": "Auswahl fehlgeschlagen",
+    "description": "Auto-generated localized message"
+  },
+  "builderRedoTitle": {
+    "message": "Wiederherstellen (⌘/Strg+Umschalt+Z)",
+    "description": "Auto-generated localized message"
+  },
+  "builderRenameWorkflowTitle": {
+    "message": "Workflow umbenennen",
+    "description": "Auto-generated localized message"
+  },
+  "builderRunAllTitle": {
+    "message": "Ab Anfang wiedergeben und korrigieren",
+    "description": "Auto-generated localized message"
+  },
+  "builderRunFailed": {
+    "message": "Ausführung fehlgeschlagen: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderRunFromSelectedButton": {
+    "message": "Ab ausgewähltem Knoten ausführen",
+    "description": "Auto-generated localized message"
+  },
+  "builderRunFromSelectedTitle": {
+    "message": "Wiedergabe ab ausgewähltem Knoten",
+    "description": "Auto-generated localized message"
+  },
+  "builderSavedStatus": {
+    "message": "Gespeichert",
+    "description": "Auto-generated localized message"
+  },
+  "builderSaveFailed": {
+    "message": "Speichern fehlgeschlagen: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderSavingStatus": {
+    "message": "Speichern...",
+    "description": "Auto-generated localized message"
+  },
+  "builderScheduleConvertFailed": {
+    "message": "Knoten $ARG1$ Zeitplan #$ARG2$: Kann nicht in Cron konvertiert werden (Typ=$ARG3$), übersprungen.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "builderScheduleOnceUnsupported": {
+    "message": "Knoten $ARG1$ Zeitplan #$ARG2$: Ein einmaliger Zeitplan wird in V3 nicht unterstützt und wurde übersprungen.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "builderScreenshotOnFailure": {
+    "message": "Screenshot zum Fehler",
+    "description": "Auto-generated localized message"
+  },
+  "builderSelectNodeHint": {
+    "message": "Wählen Sie einen Knoten aus",
+    "description": "Auto-generated localized message"
+  },
+  "builderSelectorHelpText": {
+    "message": "Geben Sie einen CSS-Selektor ein oder klicken Sie auf „Auswählen“, um ein Element auf der Seite auszuwählen.",
+    "description": "Auto-generated localized message"
+  },
+  "builderTabsCategory": {
+    "message": "Tabs",
+    "description": "Auto-generated localized message"
+  },
+  "builderTimeoutMsLabel": {
+    "message": "Timeout (ms)",
+    "description": "Auto-generated localized message"
+  },
+  "builderTimeoutPlaceholder": {
+    "message": "Verwenden Sie standardmäßig das globale Timeout",
+    "description": "Auto-generated localized message"
+  },
+  "builderToolsCategory": {
+    "message": "Werkzeuge",
+    "description": "Auto-generated localized message"
+  },
+  "builderUndoTitle": {
+    "message": "Rückgängig machen (⌘/Strg+Z)",
+    "description": "Auto-generated localized message"
+  },
+  "builderViewEditPropertiesHint": {
+    "message": "Eigenschaften anzeigen und bearbeiten",
+    "description": "Auto-generated localized message"
+  },
+  "builderVisualOrchestrationTip": {
+    "message": "Visuelle Workflow-Orchestrierung",
+    "description": "Auto-generated localized message"
+  },
+  "builderWorkflowEditorTitle": {
+    "message": "Workflow-Editor",
+    "description": "Auto-generated localized message"
+  },
+  "builderWorkflowNamePlaceholder": {
+    "message": "Workflowname",
+    "description": "Auto-generated localized message"
+  },
+  "builderWorkflowNotFoundCreated": {
+    "message": "Workflow „$ARG1$“ nicht gefunden, neuer Workflow erstellt.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "bytesUnit": {
+    "message": "Bytes",
+    "description": "Bytes Einheit"
+  },
+  "cacheDetailsLabel": {
+    "message": "Cache-Details",
+    "description": "Cache-Details Abschnittslabel"
   },
   "cacheEntriesLabel": {
     "message": "Cache-Einträge",
     "description": "Anzahl Cache-Einträge Label"
   },
-  "clearAllDataButton": {
-    "message": "Alle Daten löschen",
-    "description": "Alle Daten löschen Schaltflächentext"
+  "cacheSizeLabel": {
+    "message": "Cache-Größe",
+    "description": "Cache-Größe Label"
   },
-  "clearAllCacheButton": {
-    "message": "Gesamten Cache löschen",
-    "description": "Gesamten Cache löschen Schaltflächentext"
+  "cancelButton": {
+    "message": "Abbrechen",
+    "description": "Abbrechen-Schaltflächentext"
   },
   "cleanExpiredCacheButton": {
     "message": "Abgelaufenen Cache bereinigen",
     "description": "Abgelaufenen Cache bereinigen Schaltflächentext"
   },
-  "exportDataButton": {
-    "message": "Daten exportieren",
-    "description": "Daten exportieren Schaltflächentext"
+  "cleaningStatus": {
+    "message": "Wird bereinigt...",
+    "description": "Bereinigungsfortschrittsmeldung"
   },
-  "importDataButton": {
-    "message": "Daten importieren",
-    "description": "Daten importieren Schaltflächentext"
+  "clearAllCacheButton": {
+    "message": "Gesamten Cache löschen",
+    "description": "Gesamten Cache löschen Schaltflächentext"
   },
-  "confirmClearDataTitle": {
-    "message": "Datenlöschung bestätigen",
-    "description": "Datenlöschung bestätigen Dialogtitel"
+  "clearAllDataButton": {
+    "message": "Alle Daten löschen",
+    "description": "Alle Daten löschen Schaltflächentext"
   },
-  "settingsTitle": {
-    "message": "Einstellungen",
-    "description": "Einstellungen Dialogtitel"
+  "clearButton": {
+    "message": "Klar",
+    "description": "Auto-generated localized message"
   },
-  "aboutTitle": {
-    "message": "Über",
-    "description": "Über Dialogtitel"
-  },
-  "helpTitle": {
-    "message": "Hilfe",
-    "description": "Hilfe Dialogtitel"
-  },
-  "clearDataWarningMessage": {
-    "message": "Diese Aktion löscht alle indizierten Webseiteninhalte und Vektordaten, einschließlich:",
-    "description": "Datenlöschung Warnmeldung"
+  "clearDataIrreversibleWarning": {
+    "message": "Diese Aktion ist unwiderruflich! Nach dem Löschen müssen Sie Webseiten erneut durchsuchen, um den Index neu aufzubauen.",
+    "description": "Unwiderrufliche Aktion Warnung"
   },
   "clearDataList1": {
     "message": "Alle Webseitentextinhaltsindizes",
@@ -315,132 +1329,1552 @@
     "message": "Suchverlauf und Cache",
     "description": "Dritter Punkt in Datenlöschungsliste"
   },
-  "clearDataIrreversibleWarning": {
-    "message": "Diese Aktion ist unwiderruflich! Nach dem Löschen müssen Sie Webseiten erneut durchsuchen, um den Index neu aufzubauen.",
-    "description": "Unwiderrufliche Aktion Warnung"
+  "clearDataWarningMessage": {
+    "message": "Diese Aktion löscht alle indizierten Webseiteninhalte und Vektordaten, einschließlich:",
+    "description": "Datenlöschung Warnmeldung"
   },
-  "confirmClearButton": {
-    "message": "Löschung bestätigen",
-    "description": "Löschung bestätigen Aktionsschaltfläche"
+  "clearingStatus": {
+    "message": "Wird geleert...",
+    "description": "Leerungsfortschrittsmeldung"
   },
-  "cacheDetailsLabel": {
-    "message": "Cache-Details",
-    "description": "Cache-Details Abschnittslabel"
+  "closeButton": {
+    "message": "Schließen",
+    "description": "Schließen-Schaltflächentext"
   },
-  "noCacheDataMessage": {
-    "message": "Keine Cache-Daten vorhanden",
-    "description": "Keine Cache-Daten verfügbar Meldung"
+  "commandToggleQuickPanelDesc": {
+    "message": "Schalten Sie das Schnellbedienfeld um",
+    "description": "Auto-generated localized message"
   },
-  "loadingCacheInfoStatus": {
-    "message": "Cache-Informationen werden geladen...",
-    "description": "Cache-Informationen laden Status"
+  "commandToggleWebEditorDesc": {
+    "message": "Schalten Sie den Web-Editor-Modus um",
+    "description": "Auto-generated localized message"
   },
-  "processingCacheStatus": {
-    "message": "Cache wird verarbeitet...",
-    "description": "Cache verarbeiten Status"
+  "composerDrawerCloseAria": {
+    "message": "Erweiterten Editor schließen",
+    "description": "Auto-generated localized message"
   },
-  "expiredLabel": {
-    "message": "Abgelaufen",
-    "description": "Abgelaufenes Element Label"
+  "composerDrawerExpandedEditorAria": {
+    "message": "Erweiterter Editor",
+    "description": "Auto-generated localized message"
   },
-  "bookmarksBarLabel": {
-    "message": "Lesezeichenleiste",
-    "description": "Lesezeichenleiste Ordnername"
+  "composerDrawerExpandedEditorTitle": {
+    "message": "Erweiterter Editor",
+    "description": "Auto-generated localized message"
   },
-  "newTabLabel": {
-    "message": "Neuer Tab",
-    "description": "Neuer Tab Label"
-  },
-  "currentPageLabel": {
-    "message": "Aktuelle Seite",
-    "description": "Aktuelle Seite Label"
-  },
-  "menuLabel": {
-    "message": "Menü",
-    "description": "Menü Barrierefreiheitslabel"
-  },
-  "navigationLabel": {
-    "message": "Navigation",
-    "description": "Navigation Barrierefreiheitslabel"
-  },
-  "mainContentLabel": {
-    "message": "Hauptinhalt",
-    "description": "Hauptinhalt Barrierefreiheitslabel"
-  },
-  "languageSelectorLabel": {
-    "message": "Sprache",
-    "description": "Sprachauswahl Label"
-  },
-  "themeLabel": {
-    "message": "Design",
-    "description": "Design-Auswahl Label"
-  },
-  "lightTheme": {
-    "message": "Hell",
-    "description": "Helles Design Option"
-  },
-  "darkTheme": {
-    "message": "Dunkel",
-    "description": "Dunkles Design Option"
-  },
-  "autoTheme": {
-    "message": "Automatisch",
-    "description": "Automatisches Design Option"
-  },
-  "advancedSettingsLabel": {
-    "message": "Erweiterte Einstellungen",
-    "description": "Erweiterte Einstellungen Abschnittslabel"
-  },
-  "debugModeLabel": {
-    "message": "Debug-Modus",
-    "description": "Debug-Modus Umschalter Label"
-  },
-  "verboseLoggingLabel": {
-    "message": "Ausführliche Protokollierung",
-    "description": "Ausführliche Protokollierung Umschalter Label"
-  },
-  "successNotification": {
-    "message": "Vorgang erfolgreich abgeschlossen",
-    "description": "Allgemeine Erfolgsmeldung"
-  },
-  "warningNotification": {
-    "message": "Warnung: Bitte prüfen Sie vor dem Fortfahren",
-    "description": "Allgemeine Warnmeldung"
-  },
-  "infoNotification": {
-    "message": "Information",
-    "description": "Allgemeine Informationsmeldung"
+  "composerDrawerShortcutHint": {
+    "message": "Drücken Sie zum Senden $ARG1$+Enter",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "configCopiedNotification": {
     "message": "Konfiguration in Zwischenablage kopiert",
     "description": "Konfiguration kopiert Erfolgsmeldung"
   },
+  "confirmButton": {
+    "message": "Bestätigen",
+    "description": "Bestätigen-Schaltflächentext"
+  },
+  "confirmClearButton": {
+    "message": "Löschung bestätigen",
+    "description": "Löschung bestätigen Aktionsschaltfläche"
+  },
+  "confirmClearDataTitle": {
+    "message": "Datenlöschung bestätigen",
+    "description": "Datenlöschung bestätigen Dialogtitel"
+  },
+  "connectButton": {
+    "message": "Verbinden",
+    "description": "Verbinden-Schaltflächentext"
+  },
+  "connectedServiceNotStartedStatus": {
+    "message": "Verbunden, Service nicht gestartet",
+    "description": "Verbunden aber Service nicht gestartet Status"
+  },
+  "connectedStatus": {
+    "message": "Verbunden",
+    "description": "Verbunden-Statusmeldung"
+  },
+  "connectingStatus": {
+    "message": "Verbindung wird hergestellt...",
+    "description": "Verbindungsstatusmeldung"
+  },
+  "connectionPortLabel": {
+    "message": "Verbindungsport",
+    "description": "Verbindungsport-Eingabelabel"
+  },
+  "connectionStatusLabel": {
+    "message": "Verbindungsstatus",
+    "description": "Verbindungsstatuslabel"
+  },
+  "copyConfigButton": {
+    "message": "Konfiguration kopieren",
+    "description": "Konfiguration kopieren Schaltflächentext"
+  },
+  "createRunSectionTitle": {
+    "message": "Erstellen / Ausführen",
+    "description": "Auto-generated localized message"
+  },
+  "currentPageLabel": {
+    "message": "Aktuelle Seite",
+    "description": "Aktuelle Seite Label"
+  },
+  "darkTheme": {
+    "message": "Dunkel",
+    "description": "Dunkles Design Option"
+  },
   "dataClearedNotification": {
     "message": "Daten erfolgreich gelöscht",
     "description": "Daten gelöscht Erfolgsmeldung"
   },
-  "bytesUnit": {
-    "message": "Bytes",
-    "description": "Bytes Einheit"
+  "debugModeLabel": {
+    "message": "Debug-Modus",
+    "description": "Debug-Modus Umschalter Label"
   },
-  "kilobytesUnit": {
-    "message": "KB",
-    "description": "Kilobytes Einheit"
+  "deleteButton": {
+    "message": "Löschen",
+    "description": "Auto-generated localized message"
   },
-  "megabytesUnit": {
-    "message": "MB",
-    "description": "Megabytes Einheit"
+  "detectingStatus": {
+    "message": "Erkennung läuft...",
+    "description": "Erkennungsstatusmeldung"
+  },
+  "disconnectButton": {
+    "message": "Trennen",
+    "description": "Trennen-Schaltflächentext"
+  },
+  "disconnectedStatus": {
+    "message": "Getrennt",
+    "description": "Getrennt-Statusmeldung"
+  },
+  "dnrFallbackLabel": {
+    "message": "DNR-Fallback",
+    "description": "Auto-generated localized message"
+  },
+  "domainLabel": {
+    "message": "Domain",
+    "description": "Auto-generated localized message"
+  },
+  "downloadingModelStatus": {
+    "message": "Modell wird heruntergeladen... $PROGRESS$%",
+    "description": "Modell-Download-Fortschritt mit Prozentsatz",
+    "placeholders": {
+      "progress": {
+        "content": "$1",
+        "example": "50"
+      }
+    }
+  },
+  "downloadingStatus": {
+    "message": "Wird heruntergeladen...",
+    "description": "Download-Fortschrittsmeldung"
+  },
+  "elementChipAfterLabel": {
+    "message": "nach",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipAriaLabel": {
+    "message": "$ARG1$ ($ARG2$ Änderung, $ARG3$). Klicken Sie zum Umschalten.",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "elementChipBeforeLabel": {
+    "message": "vor",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipChangesCount": {
+    "message": "$ARG1$ ändert sich",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipClassLabel": {
+    "message": "Klasse",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipEmptyValue": {
+    "message": "(leer)",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipExcluded": {
+    "message": "Ausgeschlossen",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipExcludedLower": {
+    "message": "ausgeschlossen",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipExcludedShort": {
+    "message": "ex",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipIncluded": {
+    "message": "Im Lieferumfang enthalten",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipIncludedLower": {
+    "message": "enthalten",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipIncludedShort": {
+    "message": "In",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipRevertAria": {
+    "message": "Änderungen an $ARG1$ rückgängig machen",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipRevertTitle": {
+    "message": "Alle Änderungen auf $ARG1$ zurücksetzen",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipStyleLabel": {
+    "message": "Stil",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipTagFallback": {
+    "message": "Element",
+    "description": "Auto-generated localized message"
+  },
+  "elementChipTextLabel": {
+    "message": "Text",
+    "description": "Auto-generated localized message"
+  },
+  "embeddingModelLabel": {
+    "message": "Embedding-Modell",
+    "description": "Hauptabschnittstitel für Modellauswahl"
+  },
+  "emergencySwitchLabel": {
+    "message": "Notschalter",
+    "description": "Auto-generated localized message"
+  },
+  "excludesInputLabel": {
+    "message": "Ausschließt (durch Kommas getrennt)",
+    "description": "Auto-generated localized message"
+  },
+  "expiredLabel": {
+    "message": "Abgelaufen",
+    "description": "Abgelaufenes Element Label"
+  },
+  "exportAllButton": {
+    "message": "Alle exportieren",
+    "description": "Auto-generated localized message"
+  },
+  "exportDataButton": {
+    "message": "Daten exportieren",
+    "description": "Daten exportieren Schaltflächentext"
+  },
+  "extensionDescription": {
+    "message": "Stellt Browser-Funktionen mit Ihrem eigenen Chrome zur Verfügung",
+    "description": "Erweiterungsbeschreibung"
+  },
+  "extensionName": {
+    "message": "webpage-mcp-server",
+    "description": "Erweiterungsname"
+  },
+  "fastPerformance": {
+    "message": "Schnell",
+    "description": "Schnelle Leistungsanzeige"
   },
   "gigabytesUnit": {
     "message": "GB",
     "description": "Gigabytes Einheit"
   },
+  "helpTitle": {
+    "message": "Hilfe",
+    "description": "Hilfe Dialogtitel"
+  },
+  "importDataButton": {
+    "message": "Daten importieren",
+    "description": "Daten importieren Schaltflächentext"
+  },
+  "indexDataManagementLabel": {
+    "message": "Index-Datenverwaltung",
+    "description": "Hauptabschnittstitel für Datenverwaltung"
+  },
+  "indexedPagesLabel": {
+    "message": "Indizierte Seiten",
+    "description": "Anzahl indizierter Seiten Label"
+  },
+  "indexSizeLabel": {
+    "message": "Indexgröße",
+    "description": "Indexgröße Label"
+  },
+  "infoNotification": {
+    "message": "Information",
+    "description": "Allgemeine Informationsmeldung"
+  },
+  "initializingStatus": {
+    "message": "Initialisierung...",
+    "description": "Initialisierung-Fortschrittsmeldung"
+  },
+  "initSemanticEngineButton": {
+    "message": "Semantische Engine initialisieren",
+    "description": "Semantische Engine initialisieren Schaltflächentext"
+  },
   "itemsUnit": {
     "message": "Elemente",
     "description": "Elemente Zähleinheit"
   },
+  "kilobytesUnit": {
+    "message": "KB",
+    "description": "Kilobytes Einheit"
+  },
+  "languageSelectorLabel": {
+    "message": "Sprache",
+    "description": "Sprachauswahl Label"
+  },
+  "lastUpdatedLabel": {
+    "message": "Zuletzt aktualisiert:",
+    "description": "Zeitstempel der letzten Aktualisierung"
+  },
+  "lightTheme": {
+    "message": "Hell",
+    "description": "Helles Design Option"
+  },
+  "lightweightModelDescription": {
+    "message": "Leichtgewichtiges mehrsprachiges Modell",
+    "description": "Beschreibung für leichtgewichtige Modelloption"
+  },
+  "listSectionTitle": {
+    "message": "Liste",
+    "description": "Auto-generated localized message"
+  },
+  "loadingCacheInfoStatus": {
+    "message": "Cache-Informationen werden geladen...",
+    "description": "Cache-Informationen laden Status"
+  },
+  "loadingStatus": {
+    "message": "Wird geladen...",
+    "description": "Ladefortschrittsmeldung"
+  },
+  "localModelBackToHomeTitle": {
+    "message": "Zurück zur Startseite",
+    "description": "Auto-generated localized message"
+  },
+  "localModelReturnButton": {
+    "message": "Zurückkehren",
+    "description": "Auto-generated localized message"
+  },
+  "mainContentLabel": {
+    "message": "Hauptinhalt",
+    "description": "Hauptinhalt Barrierefreiheitslabel"
+  },
+  "matchesInputLabel": {
+    "message": "Übereinstimmungen (durch Kommas getrennt)",
+    "description": "Auto-generated localized message"
+  },
+  "mcpServerConfigLabel": {
+    "message": "MCP Server-Konfiguration",
+    "description": "MCP Server-Konfigurationsabschnittslabel"
+  },
+  "megabytesUnit": {
+    "message": "MB",
+    "description": "Megabytes Einheit"
+  },
+  "menuLabel": {
+    "message": "Menü",
+    "description": "Menü Barrierefreiheitslabel"
+  },
+  "modeAuto": {
+    "message": "Auto",
+    "description": "Auto-generated localized message"
+  },
+  "modeCss": {
+    "message": "CSS",
+    "description": "Auto-generated localized message"
+  },
+  "modeLabel": {
+    "message": "Modus",
+    "description": "Auto-generated localized message"
+  },
+  "modelCacheManagementLabel": {
+    "message": "Modell-Cache-Verwaltung",
+    "description": "Hauptabschnittstitel für Cache-Verwaltung"
+  },
+  "modelCorruptedErrorMessage": {
+    "message": "Modelldatei beschädigt oder unvollständig, bitte Download wiederholen",
+    "description": "Modell-Beschädigungsfehlermeldung"
+  },
+  "modelFailedStatus": {
+    "message": "Modell konnte nicht geladen werden",
+    "description": "Modell-Ladefehler Status"
+  },
+  "modelLoadedStatus": {
+    "message": "Modell geladen",
+    "description": "Modell erfolgreich geladen Status"
+  },
+  "modeOnce": {
+    "message": "einmal",
+    "description": "Auto-generated localized message"
+  },
+  "modePersistent": {
+    "message": "hartnäckig",
+    "description": "Auto-generated localized message"
+  },
+  "multilingualModelDescription": {
+    "message": "Mehrsprachiges semantisches Modell",
+    "description": "Beschreibung für mehrsprachige Modelloption"
+  },
+  "nameLabel": {
+    "message": "Name",
+    "description": "Auto-generated localized message"
+  },
+  "nativeServerConfigLabel": {
+    "message": "MCP Server-Konfiguration",
+    "description": "Hauptabschnittstitel für MCP Server-Einstellungen"
+  },
+  "navigationLabel": {
+    "message": "Navigation",
+    "description": "Navigation Barrierefreiheitslabel"
+  },
+  "networkErrorMessage": {
+    "message": "Netzwerkverbindungsfehler, bitte Netzwerk prüfen und erneut versuchen",
+    "description": "Netzwerkverbindungsfehlermeldung"
+  },
+  "newTabLabel": {
+    "message": "Neuer Tab",
+    "description": "Neuer Tab Label"
+  },
+  "noCacheDataMessage": {
+    "message": "Keine Cache-Daten vorhanden",
+    "description": "Keine Cache-Daten verfügbar Meldung"
+  },
   "pagesUnit": {
     "message": "Seiten",
     "description": "Seiten Zähleinheit"
+  },
+  "permissionDeniedErrorMessage": {
+    "message": "Zugriff verweigert",
+    "description": "Zugriff verweigert Fehlermeldung"
+  },
+  "persistLabel": {
+    "message": "Bestehen",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderDomainHint": {
+    "message": "example.com",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderMatchesExample": {
+    "message": "z.B. https://*.example.com/*",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderOptional": {
+    "message": "optional",
+    "description": "Auto-generated localized message"
+  },
+  "placeholderScriptHint": {
+    "message": "Fügen Sie hier JS/CSS/TM ein",
+    "description": "Auto-generated localized message"
+  },
+  "popupAddNewAnnotationLabel": {
+    "message": "Neue Anmerkung hinzufügen",
+    "description": "Auto-generated localized message"
+  },
+  "popupAuthTokenLabel": {
+    "message": "Authentifizierungstoken",
+    "description": "Auto-generated localized message"
+  },
+  "popupClearDataFailed": {
+    "message": "Daten konnten nicht gelöscht werden: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "popupClearDataFailedPlain": {
+    "message": "Daten konnten nicht gelöscht werden",
+    "description": "Auto-generated localized message"
+  },
+  "popupComingSoonBadge": {
+    "message": "Demnächst erhältlich",
+    "description": "Auto-generated localized message"
+  },
+  "popupConnectFailedPrefix": {
+    "message": "Verbindung fehlgeschlagen",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopiedShort": {
+    "message": "Kopiert",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopyFailed": {
+    "message": "Der Kopiervorgang ist fehlgeschlagen",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopyRegisterCommand": {
+    "message": "Befehl zum Kopieren des Registers",
+    "description": "Auto-generated localized message"
+  },
+  "popupCopyToken": {
+    "message": "Token kopieren",
+    "description": "Auto-generated localized message"
+  },
+  "popupDocsLink": {
+    "message": "Dokumente",
+    "description": "Auto-generated localized message"
+  },
+  "popupElementMarkerManagementDesc": {
+    "message": "Anmerkungen zu Seitenelementen verwalten",
+    "description": "Auto-generated localized message"
+  },
+  "popupElementMarkerManagementTitle": {
+    "message": "Elementanmerkungsverwaltung",
+    "description": "Auto-generated localized message"
+  },
+  "popupEnableElementMarkerTooltip": {
+    "message": "Elementanmerkung aktivieren",
+    "description": "Auto-generated localized message"
+  },
+  "popupEnableWebEditorTooltip": {
+    "message": "Aktivieren Sie den Seitenbearbeitungsmodus",
+    "description": "Auto-generated localized message"
+  },
+  "popupFeatureUnderDevelopmentSuffix": {
+    "message": "Die Funktion befindet sich in der Entwicklung, bitte bleiben Sie dran",
+    "description": "Auto-generated localized message"
+  },
+  "popupFooterTagline": {
+    "message": "Webseite MCP-Server für AI",
+    "description": "Auto-generated localized message"
+  },
+  "popupGuideLink": {
+    "message": "Führung",
+    "description": "Auto-generated localized message"
+  },
+  "popupIntelligentAssistantDesc": {
+    "message": "Gespräche und Aufgaben von KI-Agenten",
+    "description": "Auto-generated localized message"
+  },
+  "popupIntelligentAssistantTitle": {
+    "message": "Intelligenter Assistent",
+    "description": "Auto-generated localized message"
+  },
+  "popupLabeledElementsLabel": {
+    "message": "Beschriftete Elemente",
+    "description": "Auto-generated localized message"
+  },
+  "popupLocalModelDesc": {
+    "message": "Semantische Engine und Modellverwaltung",
+    "description": "Auto-generated localized message"
+  },
+  "popupLocalModelTitle": {
+    "message": "Lokales Modell",
+    "description": "Auto-generated localized message"
+  },
+  "popupManagementPortalTitle": {
+    "message": "Verwaltungsportal",
+    "description": "Auto-generated localized message"
+  },
+  "popupMarkerNamePlaceholder": {
+    "message": "Name, z. B. „Anmeldeschaltfläche“",
+    "description": "Auto-generated localized message"
+  },
+  "popupOneTimeHostRegistrationLabel": {
+    "message": "Einmalige Host-Registrierung (aktuelle Erweiterungs-ID)",
+    "description": "Auto-generated localized message"
+  },
+  "popupPageTitle": {
+    "message": "webpage-mcp-server",
+    "description": "Auto-generated localized message"
+  },
+  "popupQuickToolsTitle": {
+    "message": "Schnellwerkzeuge",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingUnderDevelopment": {
+    "message": "Die Aufnahmefunktion ist in der Entwicklung",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordPlaybackFeature": {
+    "message": "Aufnahmewiedergabe",
+    "description": "Auto-generated localized message"
+  },
+  "popupTroubleshootingTitle": {
+    "message": "Fehlerbehebung",
+    "description": "Auto-generated localized message"
+  },
+  "popupViewInstallGuideTitle": {
+    "message": "Installationsanleitung anzeigen",
+    "description": "Auto-generated localized message"
+  },
+  "popupWorkflowManagementDesc": {
+    "message": "Workflows zur Aufnahme- und Wiedergabeautomatisierung",
+    "description": "Auto-generated localized message"
+  },
+  "popupWorkflowManagementTitle": {
+    "message": "Workflow-Management",
+    "description": "Auto-generated localized message"
+  },
+  "processingCacheStatus": {
+    "message": "Cache wird verarbeitet...",
+    "description": "Cache verarbeiten Status"
+  },
+  "processingStatus": {
+    "message": "Verarbeitung...",
+    "description": "Verarbeitung-Fortschrittsmeldung"
+  },
+  "queryLabel": {
+    "message": "Abfrage",
+    "description": "Auto-generated localized message"
+  },
+  "refreshStatusButton": {
+    "message": "Status aktualisieren",
+    "description": "Status aktualisieren Schaltflächen-Tooltip"
+  },
+  "reinitializeButton": {
+    "message": "Neu initialisieren",
+    "description": "Neu initialisieren Schaltflächentext"
+  },
+  "resetButton": {
+    "message": "Zurücksetzen",
+    "description": "Zurücksetzen-Schaltflächentext"
+  },
+  "retryButton": {
+    "message": "Wiederholen",
+    "description": "Wiederholen-Schaltflächentext"
+  },
+  "runAtAuto": {
+    "message": "Auto",
+    "description": "Auto-generated localized message"
+  },
+  "runAtDocumentEnd": {
+    "message": "document_end",
+    "description": "Auto-generated localized message"
+  },
+  "runAtDocumentIdle": {
+    "message": "document_idle",
+    "description": "Auto-generated localized message"
+  },
+  "runAtDocumentStart": {
+    "message": "document_start",
+    "description": "Auto-generated localized message"
+  },
+  "runAtLabel": {
+    "message": "Ausgeführt um",
+    "description": "Auto-generated localized message"
+  },
+  "runningStatusLabel": {
+    "message": "Betriebsstatus",
+    "description": "Server-Betriebsstatuslabel"
+  },
+  "runOnceButton": {
+    "message": "Einmal ausführen (CDP)",
+    "description": "Auto-generated localized message"
+  },
+  "saveButton": {
+    "message": "Speichern",
+    "description": "Speichern-Schaltflächentext"
+  },
+  "scheduleDailyTimeLabel": {
+    "message": "Zeit (HH:mm)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleDailyTimePlaceholder": {
+    "message": "Zum Beispiel 09:30 Uhr",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleDescribeDaily": {
+    "message": "Täglich um $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeInterval": {
+    "message": "Alle $ARG1$ Minuten",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeOnce": {
+    "message": "Einmal um $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDialogTitle": {
+    "message": "Geplante Ausführung",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleEnableLabel": {
+    "message": "Aktivieren",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleEnableTiming": {
+    "message": "Zeitmessung aktivieren",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleExistingPlansTitle": {
+    "message": "Habe schon Pläne",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleIntervalLabel": {
+    "message": "Intervall (Minuten)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleOnceTimeLabel": {
+    "message": "Zeit (ISO)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleOnceTimePlaceholder": {
+    "message": "Zum Beispiel 2025-10-05T10:00:00",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleParametersLabel": {
+    "message": "Parameter (JSON)",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleParametersPlaceholder": {
+    "message": "{ \"Benutzername\": \"xx\" }",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeDaily": {
+    "message": "Jeden Tag eine feste Zeit",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeInterval": {
+    "message": "Alle N Minuten",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeLabel": {
+    "message": "Typ",
+    "description": "Auto-generated localized message"
+  },
+  "scheduleTypeOnce": {
+    "message": "Nur einmal ausführen",
+    "description": "Auto-generated localized message"
+  },
+  "scriptLabel": {
+    "message": "Skript",
+    "description": "Auto-generated localized message"
+  },
+  "semanticEngineInitFailedStatus": {
+    "message": "Initialisierung der semantischen Engine fehlgeschlagen",
+    "description": "Semantische Engine Initialisierung fehlgeschlagen Status"
+  },
+  "semanticEngineInitializingStatus": {
+    "message": "Semantische Engine wird initialisiert...",
+    "description": "Semantische Engine Initialisierungsstatus"
+  },
+  "semanticEngineLabel": {
+    "message": "Semantische Engine",
+    "description": "Hauptabschnittstitel für semantische Engine"
+  },
+  "semanticEngineNotInitStatus": {
+    "message": "Semantische Engine nicht initialisiert",
+    "description": "Semantische Engine nicht initialisiert Status"
+  },
+  "semanticEngineReadyStatus": {
+    "message": "Semantische Engine bereit",
+    "description": "Semantische Engine bereit Status"
+  },
+  "serviceNotConnectedStatus": {
+    "message": "Service nicht verbunden",
+    "description": "Service nicht verbunden Status"
+  },
+  "serviceRunningStatus": {
+    "message": "Service läuft (Port: $PORT$)",
+    "description": "Service läuft mit Portnummer",
+    "placeholders": {
+      "port": {
+        "content": "$1",
+        "example": "12306"
+      }
+    }
+  },
+  "settingsTitle": {
+    "message": "Einstellungen",
+    "description": "Einstellungen Dialogtitel"
+  },
+  "sidepanelAddMarkerTitle": {
+    "message": "Neue Markierung hinzufügen",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelConfirmDeleteMarker": {
+    "message": "Markierung „$ARG1$“ löschen?",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelConfirmDeleteWorkflow": {
+    "message": "Sind Sie sicher, dass Sie diesen Workflow löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateFlowUnavailable": {
+    "message": "Der V3-Builder ist noch nicht implementiert, daher können keine Workflows erstellt werden.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateMarkerButton": {
+    "message": "Markierung erstellen",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateMarkerTitle": {
+    "message": "Markierung erstellen",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelCreateTriggerUnavailable": {
+    "message": "Die V3-Triggerverwaltung ist noch nicht implementiert, daher können keine Trigger erstellt werden.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelEditFlowUnavailable": {
+    "message": "Der V3-Builder ist noch nicht implementiert, daher können Workflows nicht bearbeitet werden.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelEditMarkerTitle": {
+    "message": "Markierung bearbeiten",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelEditTriggerUnavailable": {
+    "message": "Die V3-Triggerverwaltung ist noch nicht implementiert, daher können Trigger nicht bearbeitet werden.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerActionDelete": {
+    "message": "Löschen",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerActionEdit": {
+    "message": "Bearbeiten",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerActionVerify": {
+    "message": "Verifizieren",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerDomainCount": {
+    "message": "$ARG1$-Markierungen",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelMarkerFieldMatchType": {
+    "message": "Übereinstimmungstyp",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldName": {
+    "message": "Name",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldNamePlaceholder": {
+    "message": "Beispiel: Anmeldeschaltfläche",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldSelector": {
+    "message": "Wähler",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerFieldSelectorType": {
+    "message": "Selektortyp",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerMatchExact": {
+    "message": "Genaue Übereinstimmung",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerMatchHost": {
+    "message": "Hostname",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerMatchPrefix": {
+    "message": "Pfadpräfix",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSearchPlaceholder": {
+    "message": "Markernamen oder Selektor suchen...",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSelectorCss": {
+    "message": "CSS-Selektor",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSelectorPlaceholder": {
+    "message": "CSS-Selektor oder XPath",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerSelectorXpath": {
+    "message": "XPath",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelMarkerStatsFiltered": {
+    "message": "Zeigt $ARG1$-Markierungen (von $ARG2$) in $ARG3$-Domänen an",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanelMarkerStatsTotal": {
+    "message": "Gesamtzahl der $ARG1$-Marker in $ARG2$-Domänen",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "sidepanelNavigatorAgentDesc": {
+    "message": "Gespräche und Aufgaben von KI-Agenten",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorAgentTitle": {
+    "message": "KI-Assistent",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorElementMarkersDesc": {
+    "message": "Anmerkungen zu Seitenelementen verwalten",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorElementMarkersTitle": {
+    "message": "Elementanmerkungsverwaltung",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorTitle": {
+    "message": "Seiten wechseln",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorToggleTitle": {
+    "message": "Seiten wechseln (Ziehen zum Verschieben, Doppelklick zum Zurücksetzen der Position)",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorWorkflowsDesc": {
+    "message": "Automatisierungsworkflows aufzeichnen und wiedergeben",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNavigatorWorkflowsTitle": {
+    "message": "Workflow-Management",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNoMarkers": {
+    "message": "Noch keine Markierungen. Klicken Sie oben rechts auf +, um die erste Markierung zu erstellen.",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelNoMatchingMarkers": {
+    "message": "Keine passenden Marker gefunden",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelPageTitle": {
+    "message": "webpage-mcp-server",
+    "description": "Auto-generated localized message"
+  },
+  "sidepanelUpdateButton": {
+    "message": "Aktualisieren",
+    "description": "Auto-generated localized message"
+  },
+  "statusAll": {
+    "message": "alle",
+    "description": "Auto-generated localized message"
+  },
+  "statusDisabled": {
+    "message": "deaktiviert",
+    "description": "Auto-generated localized message"
+  },
+  "statusEnabled": {
+    "message": "ermöglicht",
+    "description": "Auto-generated localized message"
+  },
+  "statusLabel": {
+    "message": "Status",
+    "description": "Allgemeines Statuslabel"
+  },
+  "successNotification": {
+    "message": "Vorgang erfolgreich abgeschlossen",
+    "description": "Allgemeine Erfolgsmeldung"
+  },
+  "switchingModelStatus": {
+    "message": "Modell wird gewechselt...",
+    "description": "Modellwechsel-Fortschrittsmeldung"
+  },
+  "tableHeaderName": {
+    "message": "Name",
+    "description": "Auto-generated localized message"
+  },
+  "tableHeaderRunAt": {
+    "message": "Ausgeführt um",
+    "description": "Auto-generated localized message"
+  },
+  "tableHeaderUpdated": {
+    "message": "Aktualisiert",
+    "description": "Auto-generated localized message"
+  },
+  "tableHeaderWorld": {
+    "message": "Welt",
+    "description": "Auto-generated localized message"
+  },
+  "tagsInputLabel": {
+    "message": "Tags (durch Kommas getrennt)",
+    "description": "Auto-generated localized message"
+  },
+  "themeLabel": {
+    "message": "Design",
+    "description": "Design-Auswahl Label"
+  },
+  "timeoutErrorMessage": {
+    "message": "Zeitüberschreitung",
+    "description": "Zeitüberschreitungsfehlermeldung"
+  },
+  "triggerPanelAddInterval": {
+    "message": "+ Intervall",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelAddOnce": {
+    "message": "+ Einmalig",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelCreate": {
+    "message": "Erstellen",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelCurrentTriggers": {
+    "message": "Aktuelle Auslöser ($ARG1$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDeleteConfirm": {
+    "message": "Trigger löschen?\n\n$ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCommandKey": {
+    "message": "Befehlsschlüssel: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCron": {
+    "message": "Cron: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCronWithTz": {
+    "message": "Cron: $ARG1$ ($ARG2$)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "triggerPanelDescribeDomSelector": {
+    "message": "Selektor: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeInterval": {
+    "message": "Alle $ARG1$ Minute(n)",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeManual": {
+    "message": "Manueller Auslöser (per Schaltfläche auslösen)",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelDescribeMenuTitle": {
+    "message": "Titel: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeOnceAt": {
+    "message": "Um $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeUrlRules": {
+    "message": "URL-Übereinstimmungsregeln: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelEditViaNodeHint": {
+    "message": "Bearbeiten über den Triggerknoten im Builder",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelEnabledLabel": {
+    "message": "Ermöglicht",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelFireButton": {
+    "message": "Feuer",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelFlowIdEmpty": {
+    "message": "Flow-ID ist leer",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelIntervalHint": {
+    "message": "Verwendet chrome.alarms.periodInMinutes für sich wiederholende Trigger.",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelIntervalOption": {
+    "message": "Intervall",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelInvalidTimeFormat": {
+    "message": "Ungültiges Triggerzeitformat",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOnceHint": {
+    "message": "Wird nach dem Abfeuern automatisch deaktiviert. Die Zeit ist in der lokalen Zeitzone angegeben.",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOnceOption": {
+    "message": "einmal",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOtherTypesHint": {
+    "message": "Andere Typen (url/cron/command/contextMenu/dom) werden über Triggerknoten konfiguriert.",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOwnerExternal": {
+    "message": "extern",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelOwnerTriggerNode": {
+    "message": "über Triggerknoten",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelPastTimeWarn": {
+    "message": "Der Auslösezeitpunkt liegt in der Vergangenheit. Es kann sofort ausgelöst werden.",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelRunEnqueued": {
+    "message": "Ausführung zur Warteschlange hinzugefügt",
+    "description": "Auto-generated localized message"
+  },
+  "triggerPanelTriggeredToast": {
+    "message": "Ausgelöst: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelTriggerTimeLabel": {
+    "message": "Triggerzeit",
+    "description": "Auto-generated localized message"
+  },
+  "unknownErrorMessage": {
+    "message": "Unbekannter Fehler, bitte prüfen Sie, ob Ihr Netzwerk auf HuggingFace zugreifen kann",
+    "description": "Unbekannte Fehler-Rückfallmeldung"
+  },
+  "userscriptsManagerTitle": {
+    "message": "Userscripts-Manager",
+    "description": "Auto-generated localized message"
+  },
+  "vectorDocumentsLabel": {
+    "message": "Vektordokumente",
+    "description": "Anzahl Vektordokumente Label"
+  },
+  "verboseLoggingLabel": {
+    "message": "Ausführliche Protokollierung",
+    "description": "Ausführliche Protokollierung Umschalter Label"
+  },
+  "warningNotification": {
+    "message": "Warnung: Bitte prüfen Sie vor dem Fortfahren",
+    "description": "Allgemeine Warnmeldung"
+  },
+  "welcomeConnectTip": {
+    "message": "Tipp: Sie können auch das Erweiterungs-Popup öffnen und auf „Verbinden“ klicken, um einen vollständigen Client-Konfigurationsausschnitt zu kopieren.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeCopyButton": {
+    "message": "Kopieren",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeCurrentExtensionId": {
+    "message": "Aktuelle Erweiterungs-ID:",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeDiagnosticsDesc": {
+    "message": "Führen Sie „doctor“ aus, um den Installationsstatus zu überprüfen. Wenn ein Fehler gemeldet wird, führen Sie den Befehl zur automatischen Korrektur aus.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeDiagnosticsTitle": {
+    "message": "Diagnose",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeHeaderSubtitle": {
+    "message": "Erweiterungsfähige Setup-Befehle (einschließlich dieser Erweiterungs-ID).",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeHeaderTitle": {
+    "message": "Webseiten-MCP-Server",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpConfigDesc": {
+    "message": "Verwenden Sie dies in Ihrem MCP-Client. Es ist keine localhost-HTTP-URL erforderlich.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpConfigTitle": {
+    "message": "MCP-Client-Konfiguration (stdio)",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeOpenTroubleshootingDocs": {
+    "message": "Dokumentation zur Fehlerbehebung öffnen",
+    "description": "Auto-generated localized message"
+  },
+  "welcomePageTitle": {
+    "message": "Willkommen – webpage-mcp-server",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeRegisterHostDesc": {
+    "message": "Führen Sie diesen Befehl zuerst aus. Er schreibt das Native-Messaging-Manifest mit Ihrer aktuellen Erweiterungs-ID, damit Chrome den lokalen Hostprozess starten kann.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeRegisterHostTitle": {
+    "message": "Native Host registrieren (einmalig)",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeReportIssueDesc": {
+    "message": "Erstellen Sie einen Diagnosebericht und fügen Sie ihn in ein GitHub-Problem ein.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeReportIssueTip": {
+    "message": "Dadurch wird der Bericht in Ihre Zwischenablage kopiert (vertrauliche Informationen werden automatisch geschwärzt).",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeReportIssueTitle": {
+    "message": "Melden Sie ein Problem",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeStdioCommandDesc": {
+    "message": "Dann verwenden Sie diesen Befehl in Ihrem MCP-Client. Es sind keine globale Installation und keine Localhost-URL erforderlich.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeStdioCommandTitle": {
+    "message": "MCP stdio-Befehl",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeTroubleshootingCommands": {
+    "message": "doctor | report",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeTroubleshootingDesc": {
+    "message": "Verwenden Sie diese nur, wenn die Bridge sich nicht registrieren oder keine Verbindung herstellen kann.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeTroubleshootingDocsButton": {
+    "message": "Dokumentation zur Fehlerbehebung",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsAddTriggerTitle": {
+    "message": "Auslöser hinzufügen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsAdvancedSection": {
+    "message": "Fortschrittlich",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCountPlural": {
+    "message": "Arbeitsabläufe",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCountSingular": {
+    "message": "Arbeitsablauf",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCreateButton": {
+    "message": "Neu",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCreateWorkflow": {
+    "message": "Workflow erstellen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsCurrentPageOnly": {
+    "message": "Nur aktuelle Seite",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsDeleteAction": {
+    "message": "Löschen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsDeleteTriggerTitle": {
+    "message": "Löschen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsDescriptionLabel": {
+    "message": "Beschreibung",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEditTriggerTitle": {
+    "message": "Bearbeiten",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEditWorkflowTitle": {
+    "message": "Workflow bearbeiten",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptyDesc": {
+    "message": "Zeichnen Sie Ihren ersten Automatisierungsworkflow auf",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptySearchDesc": {
+    "message": "Versuchen Sie es mit einem anderen Suchbegriff",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptySearchTitle": {
+    "message": "Keine passenden Workflows",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsEmptyTitle": {
+    "message": "Noch keine Workflows",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsExportAction": {
+    "message": "Exportieren",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsImportAction": {
+    "message": "Importieren",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsMillisecondsValue": {
+    "message": "$ARG1$ms",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsMoreActionsTitle": {
+    "message": "Weitere Aktionen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsNoDescription": {
+    "message": "Keine Beschreibung",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsNoRunHistory": {
+    "message": "Noch kein Ausführungsverlauf",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsNoTriggers": {
+    "message": "Keine Trigger konfiguriert",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsOptionalDescription": {
+    "message": "Optionale Beschreibung",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRefreshTitle": {
+    "message": "Aktualisieren",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunAction": {
+    "message": "Ausführen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunCanceled": {
+    "message": "Abgesagt",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunDurationPrefix": {
+    "message": "Zeitaufwand",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunEntrySummary": {
+    "message": "#$ARG1$ $ARG2$ - Schritt=$ARG3$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "workflowsRunFailed": {
+    "message": "Fehlgeschlagen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunHistory": {
+    "message": "Ausführungsverlauf",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunPaused": {
+    "message": "Angehalten",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunQueued": {
+    "message": "In der Warteschlange",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunRunning": {
+    "message": "Wird ausgeführt",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunStatusPrefix": {
+    "message": "Status",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunSucceeded": {
+    "message": "Erfolgreich",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRunWorkflowTitle": {
+    "message": "Workflow ausführen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsSearchPlaceholder": {
+    "message": "Suchworkflows...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsSecondsUnit": {
+    "message": "S",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggersSection": {
+    "message": "Auslöser",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsUntitledName": {
+    "message": "Ohne Titel",
+    "description": "Auto-generated localized message"
+  },
+  "worldAuto": {
+    "message": "Auto",
+    "description": "Auto-generated localized message"
+  },
+  "worldIsolated": {
+    "message": "ISOLIERT",
+    "description": "Auto-generated localized message"
+  },
+  "worldLabel": {
+    "message": "Welt",
+    "description": "Auto-generated localized message"
+  },
+  "worldMain": {
+    "message": "HAUPTSÄCHLICH",
+    "description": "Auto-generated localized message"
   }
 }

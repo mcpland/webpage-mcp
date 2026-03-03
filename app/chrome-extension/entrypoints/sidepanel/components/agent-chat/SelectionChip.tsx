@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SelectedElementSummary } from '@/common/web-editor-types';
+import { getMessage } from '@/utils/i18n';
 
 type SelectionChipProps = {
   selected: SelectedElementSummary;
@@ -14,10 +15,12 @@ function getChipTagName(selected: SelectedElementSummary): string {
 
   const label = (selected.label || '').trim();
   const match = label.match(/^([a-zA-Z][a-zA-Z0-9-]*)/);
-  return match?.[1]?.toLowerCase() || 'element';
+  return match?.[1]?.toLowerCase() || getMessage('elementChipTagFallback', undefined, 'element');
 }
 
 export default function SelectionChip({ selected, onHoverStart, onHoverEnd }: SelectionChipProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
   const [isHovering, setIsHovering] = useState(false);
 
   useEffect(() => {
@@ -75,7 +78,7 @@ export default function SelectionChip({ selected, onHoverStart, onHoverEnd }: Se
           fontWeight: '600',
         }}
       >
-        sel
+        {t('agentSelectionChipShort', 'sel')}
       </span>
     </div>
   );

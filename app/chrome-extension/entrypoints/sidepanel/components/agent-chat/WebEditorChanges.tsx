@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { getMessage } from '@/utils/i18n';
 import type {
   ElementChangeSummary,
   ElementLocator,
@@ -28,7 +29,9 @@ function getSelectionTagName(sel: SelectedElementSummary | null): string {
   if (sel.tagName) return sel.tagName.toLowerCase();
   const label = (sel.label || '').trim();
   const match = label.match(/^([a-zA-Z][a-zA-Z0-9-]*)/);
-  return match?.[1]?.toLowerCase() || 'element';
+  return (
+    match?.[1]?.toLowerCase() || getMessage('elementChipTagFallback', undefined, 'element')
+  );
 }
 
 function extractHighlightSelector(locator: ElementLocator): string | null {
@@ -47,6 +50,8 @@ function extractHighlightSelector(locator: ElementLocator): string | null {
 }
 
 export default function WebEditorChanges({ txState: tx }: WebEditorChangesProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
   const [viewMode, setViewMode] = useState<'include' | 'exclude'>('include');
   const [scrollResizeTrigger, setScrollResizeTrigger] = useState(0);
 
@@ -92,7 +97,9 @@ export default function WebEditorChanges({ txState: tx }: WebEditorChangesProps)
     };
   }, []);
 
-  const headerLabel = hasElements ? 'Web Edits' : 'Selected';
+  const headerLabel = hasElements
+    ? t('agentWebEditsHeader', 'Web Edits')
+    : t('agentSelectedHeader', 'Selected');
 
   const summaryText = useMemo(() => {
     const sel = tx.selectedElement.value;
@@ -103,26 +110,37 @@ export default function WebEditorChanges({ txState: tx }: WebEditorChangesProps)
     }
 
     if (sel && !tx.isSelectionInEdits.value) {
-      const parts = [`${selTag} selected`];
+      const parts = [t('agentSelectedTag', '{0} selected', [selTag])];
       if (includedCount > 0 || excludedCount > 0) {
-        parts.push(`${includedCount} edit${includedCount !== 1 ? 's' : ''}`);
+        parts.push(
+          t('agentEditsCount', '{0} edit{1}', [
+            String(includedCount),
+            includedCount !== 1 ? 's' : '',
+          ]),
+        );
       }
       return parts.join(' | ');
     }
 
     if (excludedCount > 0) {
-      return `${includedCount} included | ${excludedCount} excluded`;
+      return t('agentIncludeExcludeSummary', '{0} included | {1} excluded', [
+        String(includedCount),
+        String(excludedCount),
+      ]);
     }
 
-    return `${includedCount} element${includedCount !== 1 ? 's' : ''}`;
+    return t('agentElementsCount', '{0} element{1}', [
+      String(includedCount),
+      includedCount !== 1 ? 's' : '',
+    ]);
   }, [tx.selectedElement.value, tx.isSelectionInEdits.value, hasElements, includedCount, excludedCount]);
 
   const emptyStateText =
     viewMode === 'exclude'
-      ? 'No excluded elements.'
+      ? t('agentNoExcludedElements', 'No excluded elements.')
       : excludedCount > 0
-        ? 'All changes are excluded.'
-        : 'No changes yet.';
+        ? t('agentAllChangesExcluded', 'All changes are excluded.')
+        : t('agentNoChangesYet', 'No changes yet.');
 
   function isExcluded(key: WebEditorElementKey): boolean {
     return excludedKeySet.has(key);
@@ -331,7 +349,7 @@ export default function WebEditorChanges({ txState: tx }: WebEditorChangesProps)
               aria-pressed={viewMode === 'include'}
               onClick={() => setViewMode('include')}
             >
-              Include ({includedCount})
+              {t('agentIncludeCount', 'Include ({0})', [String(includedCount)])}
             </button>
             <button
               type="button"
@@ -345,7 +363,7 @@ export default function WebEditorChanges({ txState: tx }: WebEditorChangesProps)
               aria-pressed={viewMode === 'exclude'}
               onClick={() => setViewMode('exclude')}
             >
-              Exclude ({excludedCount})
+              {t('agentExcludeCount', 'Exclude ({0})', [String(excludedCount)])}
             </button>
           </div>
         ) : null}

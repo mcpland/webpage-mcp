@@ -61,7 +61,7 @@ export default defineConfig({
     },
     action: {
       default_popup: "popup.html",
-      default_title: "Webpage MCP Server",
+      default_title: "__MSG_extensionName__",
     },
     // Chrome Side Panel entry for workflow management
     // Ref: https://developer.chrome.com/docs/extensions/reference/api/sidePanel
@@ -88,11 +88,11 @@ export default defineConfig({
       // },
       toggle_web_editor: {
         suggested_key: { default: "Ctrl+Shift+O", mac: "Command+Shift+O" },
-        description: "Toggle Web Editor mode",
+        description: "__MSG_commandToggleWebEditorDesc__",
       },
       toggle_quick_panel: {
         suggested_key: { default: "Ctrl+Shift+U", mac: "Command+Shift+U" },
-        description: "Toggle Quick Panel AI Chat",
+        description: "__MSG_commandToggleQuickPanelDesc__",
       },
     },
     web_accessible_resources: [

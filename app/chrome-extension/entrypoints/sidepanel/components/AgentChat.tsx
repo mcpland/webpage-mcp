@@ -32,10 +32,14 @@ import {
 } from '@/common/agent-models';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import { requestAgentRpcJson } from '@/utils/agent-rpc';
+import { getMessage } from '@/utils/i18n';
 
 type AgentCli = 'claude' | 'codex' | 'cursor' | 'qwen' | 'glm';
 
 function createAgentChatController() {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   // Local UI state
   const selectedCli = ref('');
   const model = ref('');
@@ -388,7 +392,11 @@ function createAgentChatController() {
       // User has default preference, open directly
       const result = await openProjectPreference.openBySession(sessionId, defaultTarget);
       if (!result.success) {
-        alert(`Failed to open project: ${result.error}`);
+        alert(
+          t('agentOpenProjectFailed', 'Failed to open project: {0}', [
+            String(result.error || t('unknownErrorMessage', 'Unknown error')),
+          ]),
+        );
       }
     } else {
       // No default, show menu
@@ -426,7 +434,11 @@ function createAgentChatController() {
     }
 
     if (!result.success) {
-      alert(`Failed to open project: ${result.error}`);
+      alert(
+        t('agentOpenProjectFailed', 'Failed to open project: {0}', [
+          String(result.error || t('unknownErrorMessage', 'Unknown error')),
+        ]),
+      );
     }
   }
 

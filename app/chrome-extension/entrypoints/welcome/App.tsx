@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { LINKS } from "@/common/constants";
+import { getMessage } from "@/utils/i18n";
 
 import "../sidepanel/styles/agent-chat.css";
 import "./App.css";
@@ -23,19 +24,18 @@ type StaticCommandKey = keyof typeof STATIC_COMMANDS;
 type CommandKey = StaticCommandKey | "register";
 
 const DIAGNOSTICS = [
-  { label: "Doctor", key: "doctor" },
-  { label: "Auto-fix", key: "fix" },
-] as const satisfies ReadonlyArray<{ label: string; key: CommandKey }>;
-
-function copyLabel(copiedKey: CommandKey | null, key: CommandKey): string {
-  return copiedKey === key ? "Copied" : "Copy";
-}
+  { labelKey: "welcomeDoctorLabel", fallback: "Doctor", key: "doctor" },
+  { labelKey: "welcomeAutoFixLabel", fallback: "Auto-fix", key: "fix" },
+] as const satisfies ReadonlyArray<{ labelKey: string; fallback: string; key: CommandKey }>;
 
 function copyColor(copiedKey: CommandKey | null, key: CommandKey): string {
   return copiedKey === key ? "var(--ac-success)" : "var(--ac-text-muted)";
 }
 
 export default function WelcomeApp() {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const [copiedKey, setCopiedKey] = useState<CommandKey | null>(null);
   const extensionId = chrome.runtime?.id || "<your_extension_id>";
   const registerCommand = useMemo(
@@ -50,6 +50,8 @@ export default function WelcomeApp() {
     }),
     [registerCommand],
   );
+  const copyLabel = (key: CommandKey): string =>
+    copiedKey === key ? t("popupCopiedShort", "Copied") : t("welcomeCopyButton", "Copy");
 
   const copyCommand = async (key: CommandKey): Promise<void> => {
     try {
@@ -99,10 +101,13 @@ export default function WelcomeApp() {
               </div>
               <div className="min-w-0">
                 <h1 className="welcome-title text-lg font-medium tracking-tight truncate">
-                  Webpage MCP Server
+                  {t("welcomeHeaderTitle", "Webpage MCP Server")}
                 </h1>
                 <p className="welcome-muted text-sm truncate">
-                  Extension-aware setup commands (includes this extension ID).
+                  {t(
+                    "welcomeHeaderSubtitle",
+                    "Extension-aware setup commands (includes this extension ID).",
+                  )}
                 </p>
               </div>
             </div>
@@ -112,7 +117,7 @@ export default function WelcomeApp() {
               className="welcome-button px-3 py-2 text-xs font-medium ac-btn flex-shrink-0"
               onClick={() => void openDocs()}
             >
-              Troubleshooting Docs
+              {t("welcomeTroubleshootingDocsButton", "Troubleshooting Docs")}
             </button>
           </div>
         </header>
@@ -121,11 +126,13 @@ export default function WelcomeApp() {
           <div className="max-w-3xl mx-auto space-y-6">
             <section className="welcome-card welcome-card--primary p-6">
               <h2 className="welcome-title text-xl font-medium">
-                Register Native Host (one-time)
+                {t("welcomeRegisterHostTitle", "Register Native Host (one-time)")}
               </h2>
               <p className="welcome-muted text-sm mt-2">
-                Run this command first. It writes the Native Messaging manifest with your current
-                extension ID so Chrome can launch the local host process.
+                {t(
+                  "welcomeRegisterHostDesc",
+                  "Run this command first. It writes the Native Messaging manifest with your current extension ID so Chrome can launch the local host process.",
+                )}
               </p>
 
               <div className="mt-4 space-y-3">
@@ -137,12 +144,12 @@ export default function WelcomeApp() {
                     style={{ color: copyColor(copiedKey, "register") }}
                     onClick={() => void copyCommand("register")}
                   >
-                    {copyLabel(copiedKey, "register")}
+                    {copyLabel("register")}
                   </button>
                 </div>
 
                 <div className="welcome-alt-row welcome-muted px-4 py-3 text-xs">
-                  Current extension ID:{" "}
+                  {t("welcomeCurrentExtensionId", "Current extension ID:")}{" "}
                   <code className="welcome-code welcome-code-inline px-1 py-0.5">{extensionId}</code>
                 </div>
               </div>
@@ -151,10 +158,14 @@ export default function WelcomeApp() {
                 className="mt-6 pt-5"
                 style={{ borderTop: "var(--ac-border-width) solid var(--ac-border)" }}
               >
-                <h3 className="welcome-title text-sm font-medium">MCP stdio command</h3>
+                <h3 className="welcome-title text-sm font-medium">
+                  {t("welcomeStdioCommandTitle", "MCP stdio command")}
+                </h3>
                 <p className="welcome-muted text-sm mt-1">
-                  Then use this command in your MCP client. No global install and no localhost URL
-                  are required.
+                  {t(
+                    "welcomeStdioCommandDesc",
+                    "Then use this command in your MCP client. No global install and no localhost URL are required.",
+                  )}
                 </p>
 
                 <div className="welcome-command-row mt-3 flex items-center justify-between gap-3 px-4 py-3">
@@ -165,13 +176,18 @@ export default function WelcomeApp() {
                     style={{ color: copyColor(copiedKey, "stdioCommand") }}
                     onClick={() => void copyCommand("stdioCommand")}
                   >
-                    {copyLabel(copiedKey, "stdioCommand")}
+                    {copyLabel("stdioCommand")}
                   </button>
                 </div>
 
-                <h3 className="welcome-title text-sm font-medium">MCP client config (stdio)</h3>
+                <h3 className="welcome-title text-sm font-medium">
+                  {t("welcomeMcpConfigTitle", "MCP client config (stdio)")}
+                </h3>
                 <p className="welcome-muted text-sm mt-1">
-                  Use this in your MCP client. No localhost HTTP URL is required.
+                  {t(
+                    "welcomeMcpConfigDesc",
+                    "Use this in your MCP client. No localhost HTTP URL is required.",
+                  )}
                 </p>
 
                 <div className="welcome-command-row mt-3 flex items-center justify-between gap-3 px-4 py-3">
@@ -184,13 +200,15 @@ export default function WelcomeApp() {
                     style={{ color: copyColor(copiedKey, "mcpConfig") }}
                     onClick={() => void copyCommand("mcpConfig")}
                   >
-                    {copyLabel(copiedKey, "mcpConfig")}
+                    {copyLabel("mcpConfig")}
                   </button>
                 </div>
 
                 <p className="welcome-subtle text-xs mt-3">
-                  Tip: You can also open the extension popup and click &quot;Connect&quot; to copy a
-                  full client config snippet.
+                  {t(
+                    "welcomeConnectTip",
+                    'Tip: You can also open the extension popup and click "Connect" to copy a full client config snippet.',
+                  )}
                 </p>
               </div>
             </section>
@@ -198,22 +216,31 @@ export default function WelcomeApp() {
             <details className="welcome-card overflow-hidden">
               <summary className="px-6 py-4 cursor-pointer select-none flex items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="welcome-title text-sm font-medium">Troubleshooting</div>
+                  <div className="welcome-title text-sm font-medium">
+                    {t("popupTroubleshootingTitle", "Troubleshooting")}
+                  </div>
                   <div className="welcome-muted text-xs truncate">
-                    Use these only if the bridge fails to register or connect.
+                    {t(
+                      "welcomeTroubleshootingDesc",
+                      "Use these only if the bridge fails to register or connect.",
+                    )}
                   </div>
                 </div>
                 <span className="welcome-mono welcome-subtle text-xs flex-shrink-0">
-                  doctor | report
+                  {t("welcomeTroubleshootingCommands", "doctor | report")}
                 </span>
               </summary>
 
               <div className="px-6 pb-6 space-y-4">
                 <div className="welcome-alt-row p-4">
-                  <div className="text-sm font-medium">Diagnostics</div>
+                  <div className="text-sm font-medium">
+                    {t("welcomeDiagnosticsTitle", "Diagnostics")}
+                  </div>
                   <p className="welcome-muted text-sm mt-1">
-                    Run <code className="welcome-code">doctor</code> to check installation status. If it
-                    reports an error, run the auto-fix command.
+                    {t(
+                      "welcomeDiagnosticsDesc",
+                      'Run "doctor" to check installation status. If it reports an error, run the auto-fix command.',
+                    )}
                   </p>
 
                   <div className="mt-3 space-y-2">
@@ -224,7 +251,7 @@ export default function WelcomeApp() {
                       >
                         <div className="min-w-0">
                           <div className="welcome-mono welcome-subtle text-[10px] uppercase tracking-widest font-medium">
-                            {item.label}
+                            {t(item.labelKey, item.fallback)}
                           </div>
                           <code className="welcome-code text-xs break-all">{commands[item.key]}</code>
                         </div>
@@ -234,7 +261,7 @@ export default function WelcomeApp() {
                           style={{ color: copyColor(copiedKey, item.key) }}
                           onClick={() => void copyCommand(item.key)}
                         >
-                          {copyLabel(copiedKey, item.key)}
+                          {copyLabel(item.key)}
                         </button>
                       </div>
                     ))}
@@ -243,10 +270,13 @@ export default function WelcomeApp() {
 
                 <div className="welcome-report-card p-4">
                   <div className="text-sm font-medium" style={{ color: "var(--ac-danger)" }}>
-                    Report an issue
+                    {t("welcomeReportIssueTitle", "Report an issue")}
                   </div>
                   <p className="welcome-muted text-sm mt-1">
-                    Generate a diagnostic report and paste it into a GitHub issue.
+                    {t(
+                      "welcomeReportIssueDesc",
+                      "Generate a diagnostic report and paste it into a GitHub issue.",
+                    )}
                   </p>
 
                   <div className="welcome-command-row mt-3 flex items-center justify-between gap-3 px-3 py-2">
@@ -257,13 +287,15 @@ export default function WelcomeApp() {
                       style={{ color: copyColor(copiedKey, "report") }}
                       onClick={() => void copyCommand("report")}
                     >
-                      {copyLabel(copiedKey, "report")}
+                      {copyLabel("report")}
                     </button>
                   </div>
 
                   <p className="welcome-subtle text-xs mt-2">
-                    This copies the report to your clipboard (sensitive info is automatically
-                    redacted).
+                    {t(
+                      "welcomeReportIssueTip",
+                      "This copies the report to your clipboard (sensitive info is automatically redacted).",
+                    )}
                   </p>
                 </div>
 
@@ -273,7 +305,7 @@ export default function WelcomeApp() {
                     className="welcome-button px-3 py-2 text-xs font-medium ac-btn"
                     onClick={() => void openDocs()}
                   >
-                    Open troubleshooting docs
+                    {t("welcomeOpenTroubleshootingDocs", "Open troubleshooting docs")}
                   </button>
                 </div>
               </div>

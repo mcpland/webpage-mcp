@@ -8,6 +8,7 @@ import {
 } from '@/entrypoints/popup/components/builder/model/form-widget-registry';
 import VarInput from '@/entrypoints/popup/components/builder/widgets/VarInput';
 import type { VariableOption } from '@/entrypoints/popup/components/builder/model/variables';
+import { getMessage } from '@/utils/i18n';
 import './PropertyFormRenderer.css';
 
 type PropertyFormRendererProps = {
@@ -21,6 +22,9 @@ type FieldRendererProps = {
   variables?: VariableOption[];
   onChange: (value: any) => void;
 };
+
+const t = (key: string, fallback: string, substitutions?: string[]) =>
+  getMessage(key, substitutions, fallback);
 
 function StringField({ field, value, variables, onChange }: FieldRendererProps) {
   return (
@@ -93,7 +97,7 @@ function JsonField({ value, onChange }: FieldRendererProps) {
       <textarea
         className="form-input"
         rows={6}
-        placeholder="Enter JSON"
+        placeholder={t('builderEnterJsonPlaceholder', 'Enter JSON')}
         value={text}
         onChange={(event) => {
           const next = event.currentTarget.value;
@@ -103,7 +107,7 @@ function JsonField({ value, onChange }: FieldRendererProps) {
             setError('');
             onChange(parsed);
           } catch {
-            setError('JSON Format error');
+            setError(t('builderJsonFormatError', 'JSON format error'));
           }
         }}
       />
@@ -196,7 +200,7 @@ function DynamicField({ field, value, variables, onChange }: FieldRendererProps)
                   onChange(nextItems);
                 }}
               >
-                Delete
+                {t('workflowsDeleteAction', 'Delete')}
               </button>
             </div>
           ))}
@@ -208,7 +212,7 @@ function DynamicField({ field, value, variables, onChange }: FieldRendererProps)
               onChange([...items, makeDefaultValue()]);
             }}
           >
-            New
+            {t('builderNewButton', 'New')}
           </button>
         </div>
       );
@@ -253,7 +257,7 @@ export default function PropertyFormRenderer({ node, variables }: PropertyFormRe
 
     for (const field of schema) {
       if (field.required && (cfg[field.key] === undefined || cfg[field.key] === '')) {
-        output.push(`${field.label} Required`);
+        output.push(t('builderFieldRequired', '{0} required', [String(field.label)]));
       }
     }
 
@@ -269,7 +273,7 @@ export default function PropertyFormRenderer({ node, variables }: PropertyFormRe
 
   return (
     <div className="form-section">
-      <div className="section-title">Configuration</div>
+      <div className="section-title">{t('builderConfigurationTitle', 'Configuration')}</div>
 
       {schema.map((field) => (
         <div key={field.key} className="form-group" data-field={field.key}>
@@ -286,7 +290,9 @@ export default function PropertyFormRenderer({ node, variables }: PropertyFormRe
 
       {errors.length ? (
         <div className="error-box">
-          <div className="error-title">⚠️ Configuration error</div>
+          <div className="error-title">
+            {t('builderConfigurationErrorTitle', '⚠️ Configuration error')}
+          </div>
           {errors.map((error) => (
             <div key={error} className="error-item">
               {error}

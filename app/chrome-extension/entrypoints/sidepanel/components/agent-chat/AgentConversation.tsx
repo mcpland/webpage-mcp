@@ -1,4 +1,5 @@
 import type { AgentThread } from '../../composables/useAgentThreads';
+import { getMessage } from '@/utils/i18n';
 import AgentRequestThread from './AgentRequestThread';
 
 type AgentConversationProps = {
@@ -7,6 +8,9 @@ type AgentConversationProps = {
 };
 
 export default function AgentConversation({ threads, serverPort }: AgentConversationProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   return (
     <div className="px-5 py-6 space-y-8">
       {threads.length === 0 ? (
@@ -18,7 +22,7 @@ export default function AgentConversation({ threads, serverPort }: AgentConversa
               color: 'var(--ac-text-subtle)',
             }}
           >
-            How can I help you code today?
+            {t('agentConversationEmptyPrompt', 'How can I help you code today?')}
           </p>
         </div>
       ) : null}

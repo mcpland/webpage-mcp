@@ -1,4 +1,5 @@
 import { type CSSProperties, useEffect, useState } from 'react';
+import { getMessage } from '@/utils/i18n';
 import './WorkflowListItem.css';
 
 export interface WorkflowFlowLite {
@@ -79,6 +80,8 @@ export default function WorkflowListItem({
   onDelete,
   onExport,
 }: WorkflowListItemProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
   const [showActions, setShowActions] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
@@ -107,10 +110,10 @@ export default function WorkflowListItem({
       <div className="workflow-content">
         <div className="workflow-info">
           <div className="workflow-name" style={nameStyle}>
-            {flow.name || 'Untitled'}
+            {flow.name || t('workflowsUntitledName', 'Untitled')}
           </div>
           <div className="workflow-desc" style={descStyle}>
-            {flow.description || 'No description'}
+            {flow.description || t('workflowsNoDescription', 'No description')}
           </div>
 
           {hasTags ? (
@@ -138,7 +141,7 @@ export default function WorkflowListItem({
               event.stopPropagation();
               onRun(flow.id);
             }}
-            title="Run workflow"
+            title={t('workflowsRunWorkflowTitle', 'Run workflow')}
             type="button"
           >
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
@@ -153,7 +156,7 @@ export default function WorkflowListItem({
               event.stopPropagation();
               onEdit(flow.id);
             }}
-            title="Edit workflow"
+            title={t('workflowsEditWorkflowTitle', 'Edit workflow')}
             type="button"
           >
             <svg
@@ -179,7 +182,7 @@ export default function WorkflowListItem({
               event.stopPropagation();
               setShowMoreMenu((current) => !current);
             }}
-            title="More actions"
+            title={t('workflowsMoreActionsTitle', 'More actions')}
             type="button"
           >
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
@@ -214,7 +217,7 @@ export default function WorkflowListItem({
                     d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
                   />
                 </svg>
-                <span>Export</span>
+                <span>{t('workflowsExportAction', 'Export')}</span>
               </button>
 
               <button
@@ -240,7 +243,7 @@ export default function WorkflowListItem({
                     d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
                   />
                 </svg>
-                <span>Delete</span>
+                <span>{t('workflowsDeleteAction', 'Delete')}</span>
               </button>
             </div>
           ) : null}

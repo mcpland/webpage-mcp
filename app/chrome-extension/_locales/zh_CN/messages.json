@@ -1,307 +1,1321 @@
 {
-  "extensionName": {
-    "message": "webpage-mcp-server",
-    "description": "扩展名称"
-  },
-  "extensionDescription": {
-    "message": "使用你自己的 Chrome 浏览器暴露浏览器功能",
-    "description": "扩展描述"
-  },
-  "nativeServerConfigLabel": {
-    "message": "MCP 服务器配置",
-    "description": "MCP 服务器设置的主要节标题"
-  },
-  "semanticEngineLabel": {
-    "message": "语义引擎",
-    "description": "语义引擎的主要节标题"
-  },
-  "embeddingModelLabel": {
-    "message": "Embedding模型",
-    "description": "模型选择的主要节标题"
-  },
-  "indexDataManagementLabel": {
-    "message": "索引数据管理",
-    "description": "数据管理的主要节标题"
-  },
-  "modelCacheManagementLabel": {
-    "message": "模型缓存管理",
-    "description": "缓存管理的主要节标题"
-  },
-  "statusLabel": {
-    "message": "状态",
-    "description": "通用状态标签"
-  },
-  "runningStatusLabel": {
-    "message": "运行状态",
-    "description": "服务器运行状态标签"
-  },
-  "connectionStatusLabel": {
-    "message": "连接状态",
-    "description": "连接状态标签"
-  },
-  "lastUpdatedLabel": {
-    "message": "最后更新:",
-    "description": "最后更新时间戳标签"
-  },
-  "connectButton": {
-    "message": "连接",
-    "description": "连接按钮文本"
-  },
-  "disconnectButton": {
-    "message": "断开",
-    "description": "断开连接按钮文本"
-  },
-  "connectingStatus": {
-    "message": "连接中...",
-    "description": "连接状态消息"
-  },
-  "connectedStatus": {
-    "message": "已连接",
-    "description": "已连接状态消息"
-  },
-  "disconnectedStatus": {
-    "message": "已断开",
-    "description": "已断开状态消息"
-  },
-  "detectingStatus": {
-    "message": "检测中...",
-    "description": "检测状态消息"
-  },
-  "serviceRunningStatus": {
-    "message": "服务运行中 (端口: $PORT$)",
-    "description": "带端口号的服务运行状态",
-    "placeholders": {
-      "port": {
-        "content": "$1",
-        "example": "12306"
-      }
-    }
-  },
-  "serviceNotConnectedStatus": {
-    "message": "服务未连接",
-    "description": "服务未连接状态"
-  },
-  "connectedServiceNotStartedStatus": {
-    "message": "已连接，服务未启动",
-    "description": "已连接但服务未启动状态"
-  },
-  "mcpServerConfigLabel": {
-    "message": "MCP 服务器配置",
-    "description": "MCP 服务器配置节标签"
-  },
-  "connectionPortLabel": {
-    "message": "连接端口",
-    "description": "连接端口输入标签"
-  },
-  "refreshStatusButton": {
-    "message": "刷新状态",
-    "description": "刷新状态按钮提示"
-  },
-  "copyConfigButton": {
-    "message": "复制配置",
-    "description": "复制配置按钮文本"
-  },
-  "retryButton": {
-    "message": "重试",
-    "description": "重试按钮文本"
-  },
-  "cancelButton": {
-    "message": "取消",
-    "description": "取消按钮文本"
-  },
-  "confirmButton": {
-    "message": "确认",
-    "description": "确认按钮文本"
-  },
-  "saveButton": {
-    "message": "保存",
-    "description": "保存按钮文本"
-  },
-  "closeButton": {
-    "message": "关闭",
-    "description": "关闭按钮文本"
-  },
-  "resetButton": {
-    "message": "重置",
-    "description": "重置按钮文本"
-  },
-  "initializingStatus": {
-    "message": "初始化中...",
-    "description": "初始化进度消息"
-  },
-  "processingStatus": {
-    "message": "处理中...",
-    "description": "处理进度消息"
-  },
-  "loadingStatus": {
-    "message": "加载中...",
-    "description": "加载进度消息"
-  },
-  "clearingStatus": {
-    "message": "清空中...",
-    "description": "清空进度消息"
-  },
-  "cleaningStatus": {
-    "message": "清理中...",
-    "description": "清理进度消息"
-  },
-  "downloadingStatus": {
-    "message": "下载中...",
-    "description": "下载进度消息"
-  },
-  "semanticEngineReadyStatus": {
-    "message": "语义引擎已就绪",
-    "description": "语义引擎就绪状态"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "语义引擎初始化中...",
-    "description": "语义引擎初始化状态"
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "语义引擎初始化失败",
-    "description": "语义引擎初始化失败状态"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "语义引擎未初始化",
-    "description": "语义引擎未初始化状态"
-  },
-  "initSemanticEngineButton": {
-    "message": "初始化语义引擎",
-    "description": "初始化语义引擎按钮文本"
-  },
-  "reinitializeButton": {
-    "message": "重新初始化",
-    "description": "重新初始化按钮文本"
-  },
-  "downloadingModelStatus": {
-    "message": "下载模型中... $PROGRESS$%",
-    "description": "带百分比的模型下载进度",
-    "placeholders": {
-      "progress": {
-        "content": "$1",
-        "example": "50"
-      }
-    }
-  },
-  "switchingModelStatus": {
-    "message": "切换模型中...",
-    "description": "模型切换进度消息"
-  },
-  "modelLoadedStatus": {
-    "message": "模型已加载",
-    "description": "模型成功加载状态"
-  },
-  "modelFailedStatus": {
-    "message": "模型加载失败",
-    "description": "模型加载失败状态"
-  },
-  "lightweightModelDescription": {
-    "message": "轻量级多语言模型",
-    "description": "轻量级模型选项的描述"
-  },
-  "betterThanSmallDescription": {
-    "message": "比e5-small稍大，但效果更好",
-    "description": "中等模型选项的描述"
-  },
-  "multilingualModelDescription": {
-    "message": "多语言语义模型",
-    "description": "多语言模型选项的描述"
-  },
-  "fastPerformance": {
-    "message": "快速",
-    "description": "快速性能指示器"
-  },
-  "balancedPerformance": {
-    "message": "平衡",
-    "description": "平衡性能指示器"
+  "aboutTitle": {
+    "message": "关于",
+    "description": "关于对话框标题"
   },
   "accuratePerformance": {
     "message": "精确",
     "description": "精确性能指示器"
   },
-  "networkErrorMessage": {
-    "message": "网络连接错误，请检查网络连接后重试",
-    "description": "网络连接错误消息"
-  },
-  "modelCorruptedErrorMessage": {
-    "message": "模型文件损坏或不完整，请重试下载",
-    "description": "模型损坏错误消息"
-  },
-  "unknownErrorMessage": {
-    "message": "未知错误，请检查你的网络是否可以访问HuggingFace",
-    "description": "未知错误回退消息"
-  },
-  "permissionDeniedErrorMessage": {
-    "message": "权限被拒绝",
-    "description": "权限被拒绝错误消息"
-  },
-  "timeoutErrorMessage": {
-    "message": "操作超时",
-    "description": "超时错误消息"
-  },
-  "indexedPagesLabel": {
-    "message": "已索引页面",
-    "description": "已索引页面数量标签"
-  },
-  "indexSizeLabel": {
-    "message": "索引大小",
-    "description": "索引大小标签"
-  },
   "activeTabsLabel": {
     "message": "活跃标签页",
     "description": "活跃标签页数量标签"
   },
-  "vectorDocumentsLabel": {
-    "message": "向量文档",
-    "description": "向量文档数量标签"
+  "advancedSettingsLabel": {
+    "message": "高级设置",
+    "description": "高级设置节标签"
   },
-  "cacheSizeLabel": {
-    "message": "缓存大小",
-    "description": "缓存大小标签"
+  "agentAllChangesExcluded": {
+    "message": "所有更改均被排除。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentApplyChangesDefault": {
+    "message": "应用更改",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentCacheDesc": {
+    "message": "管理代理服务器存储在磁盘上的缓存图像。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentCacheDialogAria": {
+    "message": "附件缓存管理",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentCacheTitle": {
+    "message": "附件缓存",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentClearFailed": {
+    "message": "无法清除附件。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentClearSelected": {
+    "message": "清除所选内容 ($ARG1$)",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentFilesCount": {
+    "message": "$ARG1$ 文件",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentInvalidServerResponse": {
+    "message": "来自服务器的无效响应。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentInvertSelection": {
+    "message": "倒置",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentLoadingStats": {
+    "message": "正在加载附件统计信息...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentLoadStatsFailed": {
+    "message": "无法加载附件统计信息。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentMissingTag": {
+    "message": "丢失的",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentNoData": {
+    "message": "未找到附件数据。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentOrphanProjectsCount": {
+    "message": "$ARG1$ 孤儿项目",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentOrphanTag": {
+    "message": "孤儿",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentRemovedSummary": {
+    "message": "删除了 $ARG1$ （$ARG2$ 文件）。",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentAttachmentRootDirectoryLabel": {
+    "message": "根目录",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentSelectAll": {
+    "message": "选择全部",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentSelectProjectsHint": {
+    "message": "选择项目以从磁盘中删除缓存的附件文件。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentAttachmentTotalSizeLabel": {
+    "message": "总尺寸",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentChatComposerPlaceholder": {
+    "message": "请克劳德写代码...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerAttachImageShortTooltip": {
+    "message": "附上图片",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerAttachImageTooltip": {
+    "message": "附加图像（拖动、粘贴或单击）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerDropImagesHere": {
+    "message": "将图像拖放到此处",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerExpandEditorTitle": {
+    "message": "展开编辑器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerReasoningEffortTooltip": {
+    "message": "推理强度",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerRemoveImageTitle": {
+    "message": "删除图像",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerResetConfirm": {
+    "message": "重置此对话？所有消息都将被删除，会话将重新开始。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerResetConversationTooltip": {
+    "message": "重置对话",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerSendMessageAria": {
+    "message": "发送消息",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerSendTitle": {
+    "message": "发送",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerSessionSettingsTooltip": {
+    "message": "会话设置",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerStatusPreparing": {
+    "message": "正在准备...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerStatusReady": {
+    "message": "准备好",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerStatusSending": {
+    "message": "正在发送...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerStatusStarting": {
+    "message": "开始...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerStatusStopping": {
+    "message": "停止...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerStatusWorking": {
+    "message": "在职的...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerStopRequestAria": {
+    "message": "停止请求",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerStopTitle": {
+    "message": "停止",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentComposerSwitchModelTooltip": {
+    "message": "开关型号",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentConversationEmptyPrompt": {
+    "message": "今天我可以如何帮助您编码？",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentDismissErrorAria": {
+    "message": "消除错误",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentDismissTitle": {
+    "message": "解雇",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentEditsCount": {
+    "message": "$ARG1$ 编辑$ARG2$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentElementsCount": {
+    "message": "$ARG1$ 元素$ARG2$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentErrorOccurred": {
+    "message": "发生错误",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentExcludeCount": {
+    "message": "排除 ($ARG1$)",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentImagePreviewAria": {
+    "message": "图片预览",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentImagePreviewCloseAria": {
+    "message": "关闭图像预览",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentIncludeCount": {
+    "message": "包括 ($ARG1$)",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentIncludeExcludeSummary": {
+    "message": "$ARG1$ 包括 | $ARG2$ 除外",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentLinesCount": {
+    "message": "$ARG1$ 行",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentLinesWord": {
+    "message": "线",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentLineWord": {
+    "message": "线",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentModifiedElementsLabel": {
+    "message": "修改元素：",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentMoreCount": {
+    "message": "+$ARG1$ 更多",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreFilesCount": {
+    "message": "+$ARG1$ 更多文件",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreLinesCount": {
+    "message": "$ARG1$ 更多 $ARG2$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentNoChangesYet": {
+    "message": "还没有任何变化。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentNoExcludedElements": {
+    "message": "没有排除的元素。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentOpenProjectFailed": {
+    "message": "无法打开项目：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentOpenProjectMenuTerminal": {
+    "message": "终端",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentOpenProjectMenuTitle": {
+    "message": "打开方式",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentOpenProjectMenuVSCode": {
+    "message": "VS代码",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentPreviewFooterLabel": {
+    "message": "代理预览",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuAutoOption": {
+    "message": "汽车",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuCliLabel": {
+    "message": "命令行界面",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuDefaultOption": {
+    "message": "默认",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuEffortHint": {
+    "message": "适用于新会话。已有会话请在“会话设置”中编辑。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuEffortLabel": {
+    "message": "推理强度",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuEnableMcpLabel": {
+    "message": "启用网页 MCP 服务器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuEnableMcpTitle": {
+    "message": "启用本地网页 MCP 服务器集成",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuMcpLabel": {
+    "message": "MCP",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuModelLabel": {
+    "message": "模型",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuSaveSettings": {
+    "message": "保存设置",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuSaving": {
+    "message": "保存中...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectMenuSettingsTitle": {
+    "message": "设置",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectsConfirmCreateDir": {
+    "message": "目录“$ARG1$”不存在。是否创建？",
+    "description": "Confirm creating missing project directory",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsConfirmSwitchExisting": {
+    "message": "“$ARG1$”已存在项目：$ARG2$\n\n是否切换到该项目？",
+    "description": "Confirm switching to existing project with same root path",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentProjectsCreateFailed": {
+    "message": "创建项目失败。",
+    "description": "Failed to create project message"
+  },
+  "agentProjectsInvalidCreateResponse": {
+    "message": "项目已创建，但返回结果无效。",
+    "description": "Project created but response payload invalid"
+  },
+  "agentProjectsInvalidPath": {
+    "message": "无效路径",
+    "description": "Invalid project path message"
+  },
+  "agentProjectsNewButton": {
+    "message": "+ 新项目",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectsPickerOpenFailed": {
+    "message": "打开目录选择器失败",
+    "description": "Failed to open directory picker message"
+  },
+  "agentProjectsPickerUnavailable": {
+    "message": "目录选择器不可用。请重新构建并重启 MCP 服务。",
+    "description": "Directory picker unavailable guidance"
+  },
+  "agentProjectsSelecting": {
+    "message": "正在选择...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectsServerHttpError": {
+    "message": "服务错误：$ARG1$",
+    "description": "Server HTTP status error message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsServerUnavailable": {
+    "message": "服务不可用",
+    "description": "Agent server unavailable message"
+  },
+  "agentProjectsTitle": {
+    "message": "项目",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentProjectsValidateFailed": {
+    "message": "路径校验失败",
+    "description": "Project path validation failed message"
+  },
+  "agentPromptPreviewLabel": {
+    "message": "提示预览：",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSelectedHeader": {
+    "message": "已选择",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSelectedTag": {
+    "message": "已选择 $ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSelectionChipShort": {
+    "message": "塞尔",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSentImagesSummary": {
+    "message": "已发送 $ARG1$ 图片$ARG2$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentServerNotReadyMissingPort": {
+    "message": "代理服务器未准备好（缺少服务器端口）。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentServerNotReadySimple": {
+    "message": "代理服务器未准备好。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentServerNotReadyTitle": {
+    "message": "服务器未准备好",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentServerReconnectHint": {
+    "message": "启动或重新连接服务器，然后再次打开此面板。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionActiveModelLabel": {
+    "message": "主动模型",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionAppendCustomText": {
+    "message": "附加自定义文本",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionAppendCustomTextPlaceholder": {
+    "message": "附加说明...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionClaudeCodeLabel": {
+    "message": "克劳德·科德",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionCreating": {
+    "message": "创造...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionCustomPromptPlaceholder": {
+    "message": "输入自定义系统提示...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionDeleteConfirm": {
+    "message": "删除此会话？此操作无法撤消。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionDeleteNamedConfirm": {
+    "message": "删除“$ARG1$”？",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionDeleteTitle": {
+    "message": "删除",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionEngineLabel": {
+    "message": "引擎",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionEngineSessionLabel": {
+    "message": "引擎会议",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionInfoSection": {
+    "message": "会议信息",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionMcpServersLabel": {
+    "message": "MCP服务器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionModelDefaultServer": {
+    "message": "默认（服务器设置）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionModelLabel": {
+    "message": "模型",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionNewButton": {
+    "message": "+ 新会话",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionNewShort": {
+    "message": "新的",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionOpenProjectTitle": {
+    "message": "打开项目",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionPermissionAcceptEdits": {
+    "message": "AcceptEdits - 自动接受文件编辑",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionPermissionBypass": {
+    "message": "bypassPermissions - 自动接受所有",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionPermissionDefault": {
+    "message": "默认 - 请求批准",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionPermissionDontAsk": {
+    "message": "不要问 - 没有确认",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionPermissionHint": {
+    "message": "控制 Claude SDK 如何处理工具批准请求。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionPermissionModeLabel": {
+    "message": "权限模式",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionPermissionPlan": {
+    "message": "计划 - 仅计划模式",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionReasoningEffortHint": {
+    "message": "控制推理深度。强度越高，质量越好，但速度越慢。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionReasoningEffortLabel": {
+    "message": "推理强度",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionReasoningEffortXhighHint": {
+    "message": "注意：xhigh 仅适用于 gpt-5.2 和 gpt-5.1-codex-max 型号。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionRenameTitle": {
+    "message": "重命名",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionRunningBadge": {
+    "message": "跑步",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionSdkInfoLabel": {
+    "message": "SDK信息",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionsEmpty": {
+    "message": "还没有会议",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionSettingsLoading": {
+    "message": "正在加载会话信息...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionSettingsTitle": {
+    "message": "会话设置",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionsLoading": {
+    "message": "正在加载会话...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionsNoMatching": {
+    "message": "没有匹配的会话",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionsSearchPlaceholder": {
+    "message": "搜索会话...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionsStartConversation": {
+    "message": "与 AI 开始新的对话",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionsStartNewButton": {
+    "message": "开始新会话",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionsTitle": {
+    "message": "会议",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionsTryDifferentSearch": {
+    "message": "尝试不同的搜索词",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionsUnnamed": {
+    "message": "未命名会话",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionSystemPromptLabel": {
+    "message": "系统提示",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionThisSession": {
+    "message": "本次会议",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionToolsLabel": {
+    "message": "工具",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionUseCustomPrompt": {
+    "message": "使用自定义提示",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionUsePresetClaudeCode": {
+    "message": "使用预设（claude_code）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSessionViewMcpServers": {
+    "message": "查看 MCP 服务器 ($ARG1$)",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionViewTools": {
+    "message": "查看工具 ($ARG1$)",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSettingsClearAttachmentCache": {
+    "message": "清除附件缓存",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSettingsCometCaretLabel": {
+    "message": "彗星插入符",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSettingsInputSection": {
+    "message": "输入",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSettingsReconnectServer": {
+    "message": "重新连接服务器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentSettingsStorageSection": {
+    "message": "贮存",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentShowLess": {
+    "message": "显示较少",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentShowMore": {
+    "message": "显示更多...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentThinkingStatus": {
+    "message": "思维...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentThreadEditComingSoon": {
+    "message": "编辑（即将推出）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentTopBarBackToSessionsTitle": {
+    "message": "返回会议",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentTopBarBrandFallback": {
+    "message": "代理人",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentTopBarOpenProjectTitle": {
+    "message": "在 VS Code 或终端中打开项目",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentUnknownValue": {
+    "message": "未知",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentUsageDurationTurnsTitle": {
+    "message": "持续时间：$ARG1$s，回合数：$ARG2$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageInputOutputTitle": {
+    "message": "输入：$ARG1$，输出：$ARG2$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageTokensSummary": {
+    "message": "$ARG1$ 代币",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentWebEditorApplyTitle": {
+    "message": "网页编辑器 应用",
+    "description": "自动生成的 i18n 文案"
+  },
+  "agentWebEditsHeader": {
+    "message": "网页编辑",
+    "description": "自动生成的 i18n 文案"
+  },
+  "allFramesLabel": {
+    "message": "全部 frame",
+    "description": "allFrames 复选框"
+  },
+  "applyButton": {
+    "message": "应用",
+    "description": "应用按钮"
+  },
+  "autoTheme": {
+    "message": "自动",
+    "description": "自动主题选项"
+  },
+  "balancedPerformance": {
+    "message": "平衡",
+    "description": "平衡性能指示器"
+  },
+  "betterThanSmallDescription": {
+    "message": "比e5-small稍大，但效果更好",
+    "description": "中等模型选项的描述"
+  },
+  "bookmarksBarLabel": {
+    "message": "书签栏",
+    "description": "书签栏文件夹名称"
+  },
+  "builderActiveTabNotFound": {
+    "message": "未找到活动选项卡",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderAutoLayoutTitle": {
+    "message": "自动布局",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderConfigurationErrorTitle": {
+    "message": "⚠️配置错误",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderConfigurationTitle": {
+    "message": "配置",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderDeleteEdgeTitle": {
+    "message": "删除边",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderDeleteNodeTitle": {
+    "message": "删除节点",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderEdgeBranchLabel": {
+    "message": "分支",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderEdgeConnectionInvalid": {
+    "message": "无效的",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderEdgeConnectionStatusLabel": {
+    "message": "连接状态",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderEdgeConnectionValid": {
+    "message": "有效的",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderEdgeInspectOnlyHint": {
+    "message": "仅检查连接。稍后将支持编辑分支/句柄。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderEdgeSourceLabel": {
+    "message": "来源",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderEdgeTargetLabel": {
+    "message": "目标",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderEdgeTitle": {
+    "message": "连线",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderEditFlowTitle": {
+    "message": "编辑：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderEnterJsonPlaceholder": {
+    "message": "输入 JSON",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderExportFailed": {
+    "message": "导出失败：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderExportJsonTitle": {
+    "message": "导出 JSON",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderFallbackPromotionNotice": {
+    "message": "应用后备建议：提升 $ARG1$ 优先级。",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFieldRequired": {
+    "message": "需要 $ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFitViewTitle": {
+    "message": "自适应视图",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderFlowCategory": {
+    "message": "流程",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderGeneralSettingsTitle": {
+    "message": "常规设置",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderIfConditionLabel": {
+    "message": "条件 $ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderIfElseLabel": {
+    "message": "否则",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderImportDataNotFound": {
+    "message": "导入失败：找不到工作流程数据。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderImportFailed": {
+    "message": "导入失败：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderImportJsonTitle": {
+    "message": "导入 JSON",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderInsertNodePlaceholder": {
+    "message": "插入节点...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderJsonFormatError": {
+    "message": "JSON格式错误",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderKeySequenceExample": {
+    "message": "示例：退格键 Enter 或 cmd+a",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderKeySequencePlaceholder": {
+    "message": "退格键 Enter 或 cmd+a",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderLoadFlowFailed": {
+    "message": "无法加载工作流程：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderLogicCategory": {
+    "message": "逻辑",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderManageTriggersTitle": {
+    "message": "管理触发器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderNameLabel": {
+    "message": "姓名",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderNewButton": {
+    "message": "新的",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderNewWorkflowName": {
+    "message": "新建工作流",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderNodeNameLabel": {
+    "message": "节点名称",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderNodeNamePlaceholder": {
+    "message": "输入节点名称",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderNodePropertiesTitle": {
+    "message": "节点属性",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderNodeSpecFallbackHint": {
+    "message": "该节点尚未提供 NodeSpec，并已退回到默认属性面板。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderNodeSpecNotFound": {
+    "message": "未找到节点规范",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderNoEdgesSelected": {
+    "message": "未选择边",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderNoSelectorGenerated": {
+    "message": "未生成有效的选择器。请手动输入。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderPageTitle": {
+    "message": "工作流程生成器 - 网页 mcp 服务器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderPickButton": {
+    "message": "挑选",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderPickedFromPageTitle": {
+    "message": "从页面中挑选",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderPickFailed": {
+    "message": "挑选失败",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderRedoTitle": {
+    "message": "重做 (⌘/Ctrl+Shift+Z)",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderRenameWorkflowTitle": {
+    "message": "重命名工作流程",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderRunAllTitle": {
+    "message": "从头开始播放校正",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderRunFailed": {
+    "message": "运行失败：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderRunFromSelectedButton": {
+    "message": "从选定的运行",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderRunFromSelectedTitle": {
+    "message": "从选定的节点播放",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderSavedStatus": {
+    "message": "已保存",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderSaveFailed": {
+    "message": "保存失败：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderSavingStatus": {
+    "message": "保存中...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderScheduleConvertFailed": {
+    "message": "节点 $ARG1$ 计划 #$ARG2$：无法转换为 cron (type=$ARG3$)，已跳过。",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "builderScheduleOnceUnsupported": {
+    "message": "节点 $ARG1$ 调度 #$ARG2$：V3 不支持一次性调度，因此被跳过。",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "builderScreenshotOnFailure": {
+    "message": "失败时的截图",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderSelectNodeHint": {
+    "message": "选择一个节点",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderSelectorHelpText": {
+    "message": "输入 CSS 选择器，或单击“选取”以选择页面上的元素。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderTabsCategory": {
+    "message": "选项卡",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderTimeoutMsLabel": {
+    "message": "超时（毫秒）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderTimeoutPlaceholder": {
+    "message": "默认使用全局超时",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderToolsCategory": {
+    "message": "工具",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderUndoTitle": {
+    "message": "撤消 (⌘/Ctrl+Z)",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderViewEditPropertiesHint": {
+    "message": "查看和编辑属性",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderVisualOrchestrationTip": {
+    "message": "工作流程视觉编排",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderWorkflowEditorTitle": {
+    "message": "工作流程编辑器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderWorkflowNamePlaceholder": {
+    "message": "工作流程名称",
+    "description": "自动生成的 i18n 文案"
+  },
+  "builderWorkflowNotFoundCreated": {
+    "message": "未找到工作流“$ARG1$”，已创建新工作流。",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "bytesUnit": {
+    "message": "字节",
+    "description": "字节单位"
+  },
+  "cacheDetailsLabel": {
+    "message": "缓存详情",
+    "description": "缓存详情节标签"
   },
   "cacheEntriesLabel": {
     "message": "缓存条目",
     "description": "缓存条目数量标签"
   },
-  "clearAllDataButton": {
-    "message": "清空所有数据",
-    "description": "清空所有数据按钮文本"
+  "cacheSizeLabel": {
+    "message": "缓存大小",
+    "description": "缓存大小标签"
   },
-  "clearAllCacheButton": {
-    "message": "清空所有缓存",
-    "description": "清空所有缓存按钮文本"
+  "cancelButton": {
+    "message": "取消",
+    "description": "取消按钮文本"
   },
   "cleanExpiredCacheButton": {
     "message": "清理过期缓存",
     "description": "清理过期缓存按钮文本"
   },
-  "exportDataButton": {
-    "message": "导出数据",
-    "description": "导出数据按钮文本"
+  "cleaningStatus": {
+    "message": "清理中...",
+    "description": "清理进度消息"
   },
-  "importDataButton": {
-    "message": "导入数据",
-    "description": "导入数据按钮文本"
+  "clearAllCacheButton": {
+    "message": "清空所有缓存",
+    "description": "清空所有缓存按钮文本"
   },
-  "confirmClearDataTitle": {
-    "message": "确认清空数据",
-    "description": "清空数据确认对话框标题"
+  "clearAllDataButton": {
+    "message": "清空所有数据",
+    "description": "清空所有数据按钮文本"
   },
-  "settingsTitle": {
-    "message": "设置",
-    "description": "设置对话框标题"
+  "clearButton": {
+    "message": "清除",
+    "description": "自动生成的 i18n 文案"
   },
-  "aboutTitle": {
-    "message": "关于",
-    "description": "关于对话框标题"
-  },
-  "helpTitle": {
-    "message": "帮助",
-    "description": "帮助对话框标题"
-  },
-  "clearDataWarningMessage": {
-    "message": "此操作将清空所有已索引的网页内容和向量数据，包括：",
-    "description": "清空数据警告消息"
+  "clearDataIrreversibleWarning": {
+    "message": "此操作不可撤销！清空后需要重新浏览网页来重建索引。",
+    "description": "不可逆操作警告"
   },
   "clearDataList1": {
     "message": "所有网页的文本内容索引",
@@ -315,178 +1329,1552 @@
     "message": "搜索历史和缓存",
     "description": "清空数据列表第三项"
   },
-  "clearDataIrreversibleWarning": {
-    "message": "此操作不可撤销！清空后需要重新浏览网页来重建索引。",
-    "description": "不可逆操作警告"
+  "clearDataWarningMessage": {
+    "message": "此操作将清空所有已索引的网页内容和向量数据，包括：",
+    "description": "清空数据警告消息"
   },
-  "confirmClearButton": {
-    "message": "确认清空",
-    "description": "确认清空操作按钮"
+  "clearingStatus": {
+    "message": "清空中...",
+    "description": "清空进度消息"
   },
-  "cacheDetailsLabel": {
-    "message": "缓存详情",
-    "description": "缓存详情节标签"
+  "closeButton": {
+    "message": "关闭",
+    "description": "关闭按钮文本"
   },
-  "noCacheDataMessage": {
-    "message": "暂无缓存数据",
-    "description": "无缓存数据可用消息"
+  "commandToggleQuickPanelDesc": {
+    "message": "切换快速面板",
+    "description": "自动生成的 i18n 文案"
   },
-  "loadingCacheInfoStatus": {
-    "message": "正在加载缓存信息...",
-    "description": "加载缓存信息状态"
+  "commandToggleWebEditorDesc": {
+    "message": "切换网页编辑器模式",
+    "description": "自动生成的 i18n 文案"
   },
-  "processingCacheStatus": {
-    "message": "处理缓存中...",
-    "description": "处理缓存状态"
+  "composerDrawerCloseAria": {
+    "message": "关闭扩展编辑器",
+    "description": "自动生成的 i18n 文案"
   },
-  "expiredLabel": {
-    "message": "已过期",
-    "description": "过期项标签"
+  "composerDrawerExpandedEditorAria": {
+    "message": "扩展编辑器",
+    "description": "自动生成的 i18n 文案"
   },
-  "bookmarksBarLabel": {
-    "message": "书签栏",
-    "description": "书签栏文件夹名称"
+  "composerDrawerExpandedEditorTitle": {
+    "message": "扩展编辑器",
+    "description": "自动生成的 i18n 文案"
   },
-  "newTabLabel": {
-    "message": "新标签页",
-    "description": "新标签页标签"
-  },
-  "currentPageLabel": {
-    "message": "当前页面",
-    "description": "当前页面标签"
-  },
-  "menuLabel": {
-    "message": "菜单",
-    "description": "菜单辅助功能标签"
-  },
-  "navigationLabel": {
-    "message": "导航",
-    "description": "导航辅助功能标签"
-  },
-  "mainContentLabel": {
-    "message": "主要内容",
-    "description": "主要内容辅助功能标签"
-  },
-  "languageSelectorLabel": {
-    "message": "语言",
-    "description": "语言选择器标签"
-  },
-  "themeLabel": {
-    "message": "主题",
-    "description": "主题选择器标签"
-  },
-  "lightTheme": {
-    "message": "浅色",
-    "description": "浅色主题选项"
-  },
-  "darkTheme": {
-    "message": "深色",
-    "description": "深色主题选项"
-  },
-  "autoTheme": {
-    "message": "自动",
-    "description": "自动主题选项"
-  },
-  "advancedSettingsLabel": {
-    "message": "高级设置",
-    "description": "高级设置节标签"
-  },
-  "debugModeLabel": {
-    "message": "调试模式",
-    "description": "调试模式切换标签"
-  },
-  "verboseLoggingLabel": {
-    "message": "详细日志",
-    "description": "详细日志切换标签"
-  },
-  "successNotification": {
-    "message": "操作成功完成",
-    "description": "通用成功通知"
-  },
-  "warningNotification": {
-    "message": "警告：请在继续之前检查",
-    "description": "通用警告通知"
-  },
-  "infoNotification": {
-    "message": "信息",
-    "description": "通用信息通知"
+  "composerDrawerShortcutHint": {
+    "message": "按 $ARG1$+Enter 发送",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "configCopiedNotification": {
     "message": "配置已复制到剪贴板",
     "description": "配置复制成功消息"
   },
+  "confirmButton": {
+    "message": "确认",
+    "description": "确认按钮文本"
+  },
+  "confirmClearButton": {
+    "message": "确认清空",
+    "description": "确认清空操作按钮"
+  },
+  "confirmClearDataTitle": {
+    "message": "确认清空数据",
+    "description": "清空数据确认对话框标题"
+  },
+  "connectButton": {
+    "message": "连接",
+    "description": "连接按钮文本"
+  },
+  "connectedServiceNotStartedStatus": {
+    "message": "已连接，服务未启动",
+    "description": "已连接但服务未启动状态"
+  },
+  "connectedStatus": {
+    "message": "已连接",
+    "description": "已连接状态消息"
+  },
+  "connectingStatus": {
+    "message": "连接中...",
+    "description": "连接状态消息"
+  },
+  "connectionPortLabel": {
+    "message": "连接端口",
+    "description": "连接端口输入标签"
+  },
+  "connectionStatusLabel": {
+    "message": "连接状态",
+    "description": "连接状态标签"
+  },
+  "copyConfigButton": {
+    "message": "复制配置",
+    "description": "复制配置按钮文本"
+  },
+  "createRunSectionTitle": {
+    "message": "创建 / 运行",
+    "description": "创建与运行分区标题"
+  },
+  "currentPageLabel": {
+    "message": "当前页面",
+    "description": "当前页面标签"
+  },
+  "darkTheme": {
+    "message": "深色",
+    "description": "深色主题选项"
+  },
   "dataClearedNotification": {
     "message": "数据清空成功",
     "description": "数据清空成功消息"
   },
-  "bytesUnit": {
-    "message": "字节",
-    "description": "字节单位"
+  "debugModeLabel": {
+    "message": "调试模式",
+    "description": "调试模式切换标签"
   },
-  "kilobytesUnit": {
-    "message": "KB",
-    "description": "千字节单位"
+  "deleteButton": {
+    "message": "删除",
+    "description": "删除按钮"
   },
-  "megabytesUnit": {
-    "message": "MB",
-    "description": "兆字节单位"
+  "detectingStatus": {
+    "message": "检测中...",
+    "description": "检测状态消息"
+  },
+  "disconnectButton": {
+    "message": "断开",
+    "description": "断开连接按钮文本"
+  },
+  "disconnectedStatus": {
+    "message": "已断开",
+    "description": "已断开状态消息"
+  },
+  "dnrFallbackLabel": {
+    "message": "DNR 回退",
+    "description": "DNR fallback 复选框"
+  },
+  "domainLabel": {
+    "message": "域名",
+    "description": "域名过滤标签"
+  },
+  "downloadingModelStatus": {
+    "message": "下载模型中... $PROGRESS$%",
+    "description": "带百分比的模型下载进度",
+    "placeholders": {
+      "progress": {
+        "content": "$1",
+        "example": "50"
+      }
+    }
+  },
+  "downloadingStatus": {
+    "message": "下载中...",
+    "description": "下载进度消息"
+  },
+  "elementChipAfterLabel": {
+    "message": "后",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipAriaLabel": {
+    "message": "$ARG1$（$ARG2$ 更改，$ARG3$）。单击以切换。",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "elementChipBeforeLabel": {
+    "message": "前",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipChangesCount": {
+    "message": "$ARG1$ 变化",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipClassLabel": {
+    "message": "班级",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipEmptyValue": {
+    "message": "（空的）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipExcluded": {
+    "message": "排除",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipExcludedLower": {
+    "message": "排除",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipExcludedShort": {
+    "message": "前任",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipIncluded": {
+    "message": "包括",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipIncludedLower": {
+    "message": "包括",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipIncludedShort": {
+    "message": "在",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipRevertAria": {
+    "message": "将更改恢复为 $ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipRevertTitle": {
+    "message": "将所有更改恢复为 $ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipStyleLabel": {
+    "message": "风格",
+    "description": "自动生成的 i18n 文案"
+  },
+  "elementChipTagFallback": {
+    "message": "元素",
+    "description": "元素标签回退文本"
+  },
+  "elementChipTextLabel": {
+    "message": "文本",
+    "description": "自动生成的 i18n 文案"
+  },
+  "embeddingModelLabel": {
+    "message": "Embedding模型",
+    "description": "模型选择的主要节标题"
+  },
+  "emergencySwitchLabel": {
+    "message": "紧急开关",
+    "description": "紧急关闭开关"
+  },
+  "excludesInputLabel": {
+    "message": "排除（逗号分隔）",
+    "description": "excludes 输入"
+  },
+  "expiredLabel": {
+    "message": "已过期",
+    "description": "过期项标签"
+  },
+  "exportAllButton": {
+    "message": "导出全部",
+    "description": "导出按钮"
+  },
+  "exportDataButton": {
+    "message": "导出数据",
+    "description": "导出数据按钮文本"
+  },
+  "extensionDescription": {
+    "message": "使用你自己的 Chrome 浏览器暴露浏览器功能",
+    "description": "扩展描述"
+  },
+  "extensionName": {
+    "message": "webpage-mcp-server",
+    "description": "扩展名称"
+  },
+  "fastPerformance": {
+    "message": "快速",
+    "description": "快速性能指示器"
   },
   "gigabytesUnit": {
     "message": "GB",
     "description": "吉字节单位"
   },
+  "helpTitle": {
+    "message": "帮助",
+    "description": "帮助对话框标题"
+  },
+  "importDataButton": {
+    "message": "导入数据",
+    "description": "导入数据按钮文本"
+  },
+  "indexDataManagementLabel": {
+    "message": "索引数据管理",
+    "description": "数据管理的主要节标题"
+  },
+  "indexedPagesLabel": {
+    "message": "已索引页面",
+    "description": "已索引页面数量标签"
+  },
+  "indexSizeLabel": {
+    "message": "索引大小",
+    "description": "索引大小标签"
+  },
+  "infoNotification": {
+    "message": "信息",
+    "description": "通用信息通知"
+  },
+  "initializingStatus": {
+    "message": "初始化中...",
+    "description": "初始化进度消息"
+  },
+  "initSemanticEngineButton": {
+    "message": "初始化语义引擎",
+    "description": "初始化语义引擎按钮文本"
+  },
   "itemsUnit": {
     "message": "项",
     "description": "项目计数单位"
+  },
+  "kilobytesUnit": {
+    "message": "KB",
+    "description": "千字节单位"
+  },
+  "languageSelectorLabel": {
+    "message": "语言",
+    "description": "语言选择器标签"
+  },
+  "lastUpdatedLabel": {
+    "message": "最后更新:",
+    "description": "最后更新时间戳标签"
+  },
+  "lightTheme": {
+    "message": "浅色",
+    "description": "浅色主题选项"
+  },
+  "lightweightModelDescription": {
+    "message": "轻量级多语言模型",
+    "description": "轻量级模型选项的描述"
+  },
+  "listSectionTitle": {
+    "message": "脚本列表",
+    "description": "列表分区标题"
+  },
+  "loadingCacheInfoStatus": {
+    "message": "正在加载缓存信息...",
+    "description": "加载缓存信息状态"
+  },
+  "loadingStatus": {
+    "message": "加载中...",
+    "description": "加载进度消息"
+  },
+  "localModelBackToHomeTitle": {
+    "message": "返回首页",
+    "description": "自动生成的 i18n 文案"
+  },
+  "localModelReturnButton": {
+    "message": "返回",
+    "description": "自动生成的 i18n 文案"
+  },
+  "mainContentLabel": {
+    "message": "主要内容",
+    "description": "主要内容辅助功能标签"
+  },
+  "matchesInputLabel": {
+    "message": "匹配（逗号分隔）",
+    "description": "matches 输入"
+  },
+  "mcpServerConfigLabel": {
+    "message": "MCP 服务器配置",
+    "description": "MCP 服务器配置节标签"
+  },
+  "megabytesUnit": {
+    "message": "MB",
+    "description": "兆字节单位"
+  },
+  "menuLabel": {
+    "message": "菜单",
+    "description": "菜单辅助功能标签"
+  },
+  "modeAuto": {
+    "message": "自动",
+    "description": "mode auto"
+  },
+  "modeCss": {
+    "message": "仅样式 (CSS)",
+    "description": "mode css"
+  },
+  "modeLabel": {
+    "message": "模式",
+    "description": "模式选择标签"
+  },
+  "modelCacheManagementLabel": {
+    "message": "模型缓存管理",
+    "description": "缓存管理的主要节标题"
+  },
+  "modelCorruptedErrorMessage": {
+    "message": "模型文件损坏或不完整，请重试下载",
+    "description": "模型损坏错误消息"
+  },
+  "modelFailedStatus": {
+    "message": "模型加载失败",
+    "description": "模型加载失败状态"
+  },
+  "modelLoadedStatus": {
+    "message": "模型已加载",
+    "description": "模型成功加载状态"
+  },
+  "modeOnce": {
+    "message": "一次运行 (CDP)",
+    "description": "mode once"
+  },
+  "modePersistent": {
+    "message": "持久",
+    "description": "mode persistent"
+  },
+  "multilingualModelDescription": {
+    "message": "多语言语义模型",
+    "description": "多语言模型选项的描述"
+  },
+  "nameLabel": {
+    "message": "名称",
+    "description": "名称输入标签"
+  },
+  "nativeServerConfigLabel": {
+    "message": "MCP 服务器配置",
+    "description": "MCP 服务器设置的主要节标题"
+  },
+  "navigationLabel": {
+    "message": "导航",
+    "description": "导航辅助功能标签"
+  },
+  "networkErrorMessage": {
+    "message": "网络连接错误，请检查网络连接后重试",
+    "description": "网络连接错误消息"
+  },
+  "newTabLabel": {
+    "message": "新标签页",
+    "description": "新标签页标签"
+  },
+  "noCacheDataMessage": {
+    "message": "暂无缓存数据",
+    "description": "无缓存数据可用消息"
   },
   "pagesUnit": {
     "message": "页",
     "description": "页面计数单位"
   },
-  "userscriptsManagerTitle": { "message": "脚本管理器", "description": "Options 页标题" },
-  "emergencySwitchLabel": { "message": "紧急开关", "description": "紧急关闭开关" },
-  "createRunSectionTitle": { "message": "创建 / 运行", "description": "创建与运行分区标题" },
-  "nameLabel": { "message": "名称", "description": "名称输入标签" },
-  "runAtLabel": { "message": "运行时机", "description": "runAt 选择标签" },
-  "runAtAuto": { "message": "自动", "description": "runAt auto" },
-  "runAtDocumentStart": { "message": "document_start", "description": "runAt document_start" },
-  "runAtDocumentEnd": { "message": "document_end", "description": "runAt document_end" },
-  "runAtDocumentIdle": { "message": "document_idle", "description": "runAt document_idle" },
-  "worldLabel": { "message": "执行上下文", "description": "world 选择标签" },
-  "worldAuto": { "message": "自动", "description": "world auto" },
-  "worldIsolated": { "message": "隔离 (ISOLATED)", "description": "ISOLATED world" },
-  "worldMain": { "message": "页面 (MAIN)", "description": "MAIN world" },
-  "modeLabel": { "message": "模式", "description": "模式选择标签" },
-  "modeAuto": { "message": "自动", "description": "mode auto" },
-  "modePersistent": { "message": "持久", "description": "mode persistent" },
-  "modeCss": { "message": "仅样式 (CSS)", "description": "mode css" },
-  "modeOnce": { "message": "一次运行 (CDP)", "description": "mode once" },
-  "allFramesLabel": { "message": "全部 frame", "description": "allFrames 复选框" },
-  "persistLabel": { "message": "持久化", "description": "persist 复选框" },
-  "dnrFallbackLabel": { "message": "DNR 回退", "description": "DNR fallback 复选框" },
-  "matchesInputLabel": { "message": "匹配（逗号分隔）", "description": "matches 输入" },
-  "excludesInputLabel": { "message": "排除（逗号分隔）", "description": "excludes 输入" },
-  "tagsInputLabel": { "message": "标签（逗号分隔）", "description": "tags 输入" },
-  "scriptLabel": { "message": "脚本", "description": "脚本文本标签" },
-  "applyButton": { "message": "应用", "description": "应用按钮" },
-  "runOnceButton": { "message": "一次运行（CDP）", "description": "一次运行按钮" },
-  "listSectionTitle": { "message": "脚本列表", "description": "列表分区标题" },
-  "queryLabel": { "message": "搜索", "description": "查询输入标签" },
-  "statusAll": { "message": "全部", "description": "状态-全部" },
-  "statusEnabled": { "message": "启用", "description": "状态-启用" },
-  "statusDisabled": { "message": "禁用", "description": "状态-禁用" },
-  "domainLabel": { "message": "域名", "description": "域名过滤标签" },
-  "exportAllButton": { "message": "导出全部", "description": "导出按钮" },
-  "tableHeaderName": { "message": "名称", "description": "表头-名称" },
-  "tableHeaderWorld": { "message": "执行上下文", "description": "表头-World" },
-  "tableHeaderRunAt": { "message": "运行时机", "description": "表头-RunAt" },
-  "tableHeaderUpdated": { "message": "更新时间", "description": "表头-更新时间" },
-  "deleteButton": { "message": "删除", "description": "删除按钮" },
-  "placeholderOptional": { "message": "可选", "description": "通用可选占位符" },
+  "permissionDeniedErrorMessage": {
+    "message": "权限被拒绝",
+    "description": "权限被拒绝错误消息"
+  },
+  "persistLabel": {
+    "message": "持久化",
+    "description": "persist 复选框"
+  },
+  "placeholderDomainHint": {
+    "message": "example.com",
+    "description": "域名筛选占位符"
+  },
   "placeholderMatchesExample": {
     "message": "例如：https://*.example.com/*",
     "description": "匹配示例占位符"
   },
-  "placeholderScriptHint": { "message": "在此粘贴 JS/CSS/TM", "description": "脚本文本域占位符" },
-  "placeholderDomainHint": { "message": "example.com", "description": "域名筛选占位符" }
+  "placeholderOptional": {
+    "message": "可选",
+    "description": "通用可选占位符"
+  },
+  "placeholderScriptHint": {
+    "message": "在此粘贴 JS/CSS/TM",
+    "description": "脚本文本域占位符"
+  },
+  "popupAddNewAnnotationLabel": {
+    "message": "添加新注释",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupAuthTokenLabel": {
+    "message": "身份验证令牌",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupClearDataFailed": {
+    "message": "清除数据失败：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "popupClearDataFailedPlain": {
+    "message": "清除数据失败",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupComingSoonBadge": {
+    "message": "即将推出",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupConnectFailedPrefix": {
+    "message": "连接失败",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupCopiedShort": {
+    "message": "已复制",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupCopyFailed": {
+    "message": "复制失败",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupCopyRegisterCommand": {
+    "message": "复制寄存器命令",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupCopyToken": {
+    "message": "复制令牌",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupDocsLink": {
+    "message": "文档",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupElementMarkerManagementDesc": {
+    "message": "管理页面元素注释",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupElementMarkerManagementTitle": {
+    "message": "元素注释管理",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupEnableElementMarkerTooltip": {
+    "message": "打开元素注释",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupEnableWebEditorTooltip": {
+    "message": "开启页面编辑模式",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupFeatureUnderDevelopmentSuffix": {
+    "message": "该功能正在开发中，敬请期待",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupFooterTagline": {
+    "message": "AI 网页 mcp 服务器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupGuideLink": {
+    "message": "指导",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupIntelligentAssistantDesc": {
+    "message": "AI 代理对话和任务",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupIntelligentAssistantTitle": {
+    "message": "智能助手",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupLabeledElementsLabel": {
+    "message": "标记元素",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupLocalModelDesc": {
+    "message": "语义引擎和模型管理",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupLocalModelTitle": {
+    "message": "本地模型",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupManagementPortalTitle": {
+    "message": "管理门户",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupMarkerNamePlaceholder": {
+    "message": "名称，例如“登录按钮”",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupOneTimeHostRegistrationLabel": {
+    "message": "一次性主机注册（当前扩展程序 ID）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupPageTitle": {
+    "message": "网页 mcp 服务器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupQuickToolsTitle": {
+    "message": "快速工具",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupRecordingUnderDevelopment": {
+    "message": "录音功能正在开发中",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupRecordPlaybackFeature": {
+    "message": "录音回放",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupTroubleshootingTitle": {
+    "message": "故障排除",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupViewInstallGuideTitle": {
+    "message": "查看安装指南",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupWorkflowManagementDesc": {
+    "message": "录制和播放自动化工作流程",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupWorkflowManagementTitle": {
+    "message": "工作流程管理",
+    "description": "自动生成的 i18n 文案"
+  },
+  "processingCacheStatus": {
+    "message": "处理缓存中...",
+    "description": "处理缓存状态"
+  },
+  "processingStatus": {
+    "message": "处理中...",
+    "description": "处理进度消息"
+  },
+  "queryLabel": {
+    "message": "搜索",
+    "description": "查询输入标签"
+  },
+  "refreshStatusButton": {
+    "message": "刷新状态",
+    "description": "刷新状态按钮提示"
+  },
+  "reinitializeButton": {
+    "message": "重新初始化",
+    "description": "重新初始化按钮文本"
+  },
+  "resetButton": {
+    "message": "重置",
+    "description": "重置按钮文本"
+  },
+  "retryButton": {
+    "message": "重试",
+    "description": "重试按钮文本"
+  },
+  "runAtAuto": {
+    "message": "自动",
+    "description": "runAt auto"
+  },
+  "runAtDocumentEnd": {
+    "message": "document_end",
+    "description": "runAt document_end"
+  },
+  "runAtDocumentIdle": {
+    "message": "document_idle",
+    "description": "runAt document_idle"
+  },
+  "runAtDocumentStart": {
+    "message": "document_start",
+    "description": "runAt document_start"
+  },
+  "runAtLabel": {
+    "message": "运行时机",
+    "description": "runAt 选择标签"
+  },
+  "runningStatusLabel": {
+    "message": "运行状态",
+    "description": "服务器运行状态标签"
+  },
+  "runOnceButton": {
+    "message": "一次运行（CDP）",
+    "description": "一次运行按钮"
+  },
+  "saveButton": {
+    "message": "保存",
+    "description": "保存按钮文本"
+  },
+  "scheduleDailyTimeLabel": {
+    "message": "时间（小时：分钟）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleDailyTimePlaceholder": {
+    "message": "例如 09:30",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleDescribeDaily": {
+    "message": "每日 $ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeInterval": {
+    "message": "每 $ARG1$ 分钟",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeOnce": {
+    "message": "一次在 $ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDialogTitle": {
+    "message": "预定执行",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleEnableLabel": {
+    "message": "使能够",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleEnableTiming": {
+    "message": "启用计时",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleExistingPlansTitle": {
+    "message": "已经有计划了",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleIntervalLabel": {
+    "message": "间隔（分钟）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleOnceTimeLabel": {
+    "message": "时间（ISO）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleOnceTimePlaceholder": {
+    "message": "例如 2025-10-05T10:00:00",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleParametersLabel": {
+    "message": "参数（JSON）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleParametersPlaceholder": {
+    "message": "{“用户名”：“xx”}",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleTypeDaily": {
+    "message": "每天固定时间",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleTypeInterval": {
+    "message": "每N分钟",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleTypeLabel": {
+    "message": "类型",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scheduleTypeOnce": {
+    "message": "仅执行一次",
+    "description": "自动生成的 i18n 文案"
+  },
+  "scriptLabel": {
+    "message": "脚本",
+    "description": "脚本文本标签"
+  },
+  "semanticEngineInitFailedStatus": {
+    "message": "语义引擎初始化失败",
+    "description": "语义引擎初始化失败状态"
+  },
+  "semanticEngineInitializingStatus": {
+    "message": "语义引擎初始化中...",
+    "description": "语义引擎初始化状态"
+  },
+  "semanticEngineLabel": {
+    "message": "语义引擎",
+    "description": "语义引擎的主要节标题"
+  },
+  "semanticEngineNotInitStatus": {
+    "message": "语义引擎未初始化",
+    "description": "语义引擎未初始化状态"
+  },
+  "semanticEngineReadyStatus": {
+    "message": "语义引擎已就绪",
+    "description": "语义引擎就绪状态"
+  },
+  "serviceNotConnectedStatus": {
+    "message": "服务未连接",
+    "description": "服务未连接状态"
+  },
+  "serviceRunningStatus": {
+    "message": "服务运行中 (端口: $PORT$)",
+    "description": "带端口号的服务运行状态",
+    "placeholders": {
+      "port": {
+        "content": "$1",
+        "example": "12306"
+      }
+    }
+  },
+  "settingsTitle": {
+    "message": "设置",
+    "description": "设置对话框标题"
+  },
+  "sidepanelAddMarkerTitle": {
+    "message": "添加新标注",
+    "description": "Add marker button title"
+  },
+  "sidepanelConfirmDeleteMarker": {
+    "message": "删除标注“$ARG1$”？",
+    "description": "Confirm deleting marker dialog text",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelConfirmDeleteWorkflow": {
+    "message": "确认删除该工作流吗？此操作不可撤销。",
+    "description": "Confirm deleting workflow dialog text"
+  },
+  "sidepanelCreateFlowUnavailable": {
+    "message": "V3 构建器尚未实现，暂时无法创建工作流。",
+    "description": "Workflow creation unavailable message"
+  },
+  "sidepanelCreateMarkerButton": {
+    "message": "创建标注",
+    "description": "Create marker CTA text"
+  },
+  "sidepanelCreateMarkerTitle": {
+    "message": "创建标注",
+    "description": "Create marker dialog title"
+  },
+  "sidepanelCreateTriggerUnavailable": {
+    "message": "V3 触发器管理尚未实现，暂时无法创建触发器。",
+    "description": "Trigger creation unavailable message"
+  },
+  "sidepanelEditFlowUnavailable": {
+    "message": "V3 构建器尚未实现，暂时无法编辑工作流。",
+    "description": "Workflow edit unavailable message"
+  },
+  "sidepanelEditMarkerTitle": {
+    "message": "编辑标注",
+    "description": "Edit marker dialog title"
+  },
+  "sidepanelEditTriggerUnavailable": {
+    "message": "V3 触发器管理尚未实现，暂时无法编辑触发器。",
+    "description": "Trigger edit unavailable message"
+  },
+  "sidepanelMarkerActionDelete": {
+    "message": "删除",
+    "description": "Delete marker action title"
+  },
+  "sidepanelMarkerActionEdit": {
+    "message": "编辑",
+    "description": "Edit marker action title"
+  },
+  "sidepanelMarkerActionVerify": {
+    "message": "验证",
+    "description": "Verify marker action title"
+  },
+  "sidepanelMarkerDomainCount": {
+    "message": "$ARG1$ 个标注",
+    "description": "Marker count per domain",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelMarkerFieldMatchType": {
+    "message": "匹配方式",
+    "description": "Marker match type field label"
+  },
+  "sidepanelMarkerFieldName": {
+    "message": "名称",
+    "description": "Marker name field label"
+  },
+  "sidepanelMarkerFieldNamePlaceholder": {
+    "message": "例如：登录按钮",
+    "description": "Marker name input placeholder"
+  },
+  "sidepanelMarkerFieldSelector": {
+    "message": "选择器",
+    "description": "Marker selector field label"
+  },
+  "sidepanelMarkerFieldSelectorType": {
+    "message": "选择器类型",
+    "description": "Marker selector type field label"
+  },
+  "sidepanelMarkerMatchExact": {
+    "message": "精确匹配",
+    "description": "Marker match type exact option"
+  },
+  "sidepanelMarkerMatchHost": {
+    "message": "主机名",
+    "description": "Marker match type host option"
+  },
+  "sidepanelMarkerMatchPrefix": {
+    "message": "路径前缀",
+    "description": "Marker match type prefix option"
+  },
+  "sidepanelMarkerSearchPlaceholder": {
+    "message": "搜索标注名称或选择器...",
+    "description": "Marker search input placeholder"
+  },
+  "sidepanelMarkerSelectorCss": {
+    "message": "CSS 选择器",
+    "description": "Marker selector type option CSS"
+  },
+  "sidepanelMarkerSelectorPlaceholder": {
+    "message": "CSS 选择器或 XPath",
+    "description": "Marker selector input placeholder"
+  },
+  "sidepanelMarkerSelectorXpath": {
+    "message": "XPath",
+    "description": "Marker selector type option XPath"
+  },
+  "sidepanelMarkerStatsFiltered": {
+    "message": "在 $ARG3$ 个域名中显示 $ARG1$ 个标注（共 $ARG2$ 个）",
+    "description": "Marker filtered statistics text",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanelMarkerStatsTotal": {
+    "message": "共 $ARG2$ 个域名，$ARG1$ 个标注",
+    "description": "Marker total statistics text",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "sidepanelNavigatorAgentDesc": {
+    "message": "AI 代理对话与任务",
+    "description": "Navigator AI agent tab description"
+  },
+  "sidepanelNavigatorAgentTitle": {
+    "message": "AI 助手",
+    "description": "Navigator AI agent tab title"
+  },
+  "sidepanelNavigatorElementMarkersDesc": {
+    "message": "管理页面元素标注",
+    "description": "Navigator element marker tab description"
+  },
+  "sidepanelNavigatorElementMarkersTitle": {
+    "message": "元素标注管理",
+    "description": "Navigator element marker tab title"
+  },
+  "sidepanelNavigatorTitle": {
+    "message": "切换页面",
+    "description": "Sidepanel navigator menu title"
+  },
+  "sidepanelNavigatorToggleTitle": {
+    "message": "切换页面（可拖拽移动，双击重置位置）",
+    "description": "Sidepanel navigator toggle button tooltip"
+  },
+  "sidepanelNavigatorWorkflowsDesc": {
+    "message": "录制并回放自动化工作流",
+    "description": "Navigator workflows tab description"
+  },
+  "sidepanelNavigatorWorkflowsTitle": {
+    "message": "工作流管理",
+    "description": "Navigator workflows tab title"
+  },
+  "sidepanelNoMarkers": {
+    "message": "还没有标注。点击右上角 + 创建第一个标注。",
+    "description": "No markers empty-state message"
+  },
+  "sidepanelNoMatchingMarkers": {
+    "message": "未找到匹配的标注",
+    "description": "No matching markers message"
+  },
+  "sidepanelPageTitle": {
+    "message": "网页 mcp 服务器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "sidepanelUpdateButton": {
+    "message": "更新",
+    "description": "Update marker button text"
+  },
+  "statusAll": {
+    "message": "全部",
+    "description": "状态-全部"
+  },
+  "statusDisabled": {
+    "message": "禁用",
+    "description": "状态-禁用"
+  },
+  "statusEnabled": {
+    "message": "启用",
+    "description": "状态-启用"
+  },
+  "statusLabel": {
+    "message": "状态",
+    "description": "通用状态标签"
+  },
+  "successNotification": {
+    "message": "操作成功完成",
+    "description": "通用成功通知"
+  },
+  "switchingModelStatus": {
+    "message": "切换模型中...",
+    "description": "模型切换进度消息"
+  },
+  "tableHeaderName": {
+    "message": "名称",
+    "description": "表头-名称"
+  },
+  "tableHeaderRunAt": {
+    "message": "运行时机",
+    "description": "表头-RunAt"
+  },
+  "tableHeaderUpdated": {
+    "message": "更新时间",
+    "description": "表头-更新时间"
+  },
+  "tableHeaderWorld": {
+    "message": "执行上下文",
+    "description": "表头-World"
+  },
+  "tagsInputLabel": {
+    "message": "标签（逗号分隔）",
+    "description": "tags 输入"
+  },
+  "themeLabel": {
+    "message": "主题",
+    "description": "主题选择器标签"
+  },
+  "timeoutErrorMessage": {
+    "message": "操作超时",
+    "description": "超时错误消息"
+  },
+  "triggerPanelAddInterval": {
+    "message": "+ 间隔",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelAddOnce": {
+    "message": "+ 一次",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelCreate": {
+    "message": "创造",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelCurrentTriggers": {
+    "message": "当前触发器 ($ARG1$)",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDeleteConfirm": {
+    "message": "删除触发器？\n\n$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCommandKey": {
+    "message": "命令键：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCron": {
+    "message": "计划任务：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCronWithTz": {
+    "message": "计划任务： $ARG1$ ($ARG2$)",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "triggerPanelDescribeDomSelector": {
+    "message": "选择器：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeInterval": {
+    "message": "每 $ARG1$ 分钟",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeManual": {
+    "message": "手动触发（通过按钮触发）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelDescribeMenuTitle": {
+    "message": "标题：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeOnceAt": {
+    "message": "在 $ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeUrlRules": {
+    "message": "URL匹配规则：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelEditViaNodeHint": {
+    "message": "通过 Builder 中的触发器节点进行编辑",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelEnabledLabel": {
+    "message": "启用",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelFireButton": {
+    "message": "火",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelFlowIdEmpty": {
+    "message": "流ID为空",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelIntervalHint": {
+    "message": "使用 chrome.alarms.periodInMinutes 来重复触发器。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelIntervalOption": {
+    "message": "间隔",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelInvalidTimeFormat": {
+    "message": "触发时间格式无效",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelOnceHint": {
+    "message": "发射后会自动禁用。时间采用当地时区。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelOnceOption": {
+    "message": "一次",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelOtherTypesHint": {
+    "message": "其他类型（url/cron/command/contextMenu/dom）通过触发节点进行配置。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelOwnerExternal": {
+    "message": "外部的",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelOwnerTriggerNode": {
+    "message": "通过触发节点",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelPastTimeWarn": {
+    "message": "触发时间是过去的时间。它可能会立即起火。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelRunEnqueued": {
+    "message": "排队运行",
+    "description": "自动生成的 i18n 文案"
+  },
+  "triggerPanelTriggeredToast": {
+    "message": "触发：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelTriggerTimeLabel": {
+    "message": "触发时间",
+    "description": "自动生成的 i18n 文案"
+  },
+  "unknownErrorMessage": {
+    "message": "未知错误，请检查你的网络是否可以访问HuggingFace",
+    "description": "未知错误回退消息"
+  },
+  "userscriptsManagerTitle": {
+    "message": "脚本管理器",
+    "description": "Options 页标题"
+  },
+  "vectorDocumentsLabel": {
+    "message": "向量文档",
+    "description": "向量文档数量标签"
+  },
+  "verboseLoggingLabel": {
+    "message": "详细日志",
+    "description": "详细日志切换标签"
+  },
+  "warningNotification": {
+    "message": "警告：请在继续之前检查",
+    "description": "通用警告通知"
+  },
+  "welcomeConnectTip": {
+    "message": "提示：您还可以打开扩展弹出窗口并单击“连接”来复制完整的客户端配置片段。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeCopyButton": {
+    "message": "复制",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeCurrentExtensionId": {
+    "message": "当前扩展程序 ID：",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeDiagnosticsDesc": {
+    "message": "运行“doctor”检查安装状态。如果报告错误，请运行自动修复命令。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeDiagnosticsTitle": {
+    "message": "诊断",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeHeaderSubtitle": {
+    "message": "扩展感知设置命令（包括此扩展 ID）。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeHeaderTitle": {
+    "message": "网页 MCP 服务器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeMcpConfigDesc": {
+    "message": "在您的 MCP 客户端中使用它。不需要本地主机 HTTP URL。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeMcpConfigTitle": {
+    "message": "MCP 客户端配置 (stdio)",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeOpenTroubleshootingDocs": {
+    "message": "打开故障排除文档",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomePageTitle": {
+    "message": "欢迎 - 网页 mcp 服务器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeRegisterHostDesc": {
+    "message": "首先运行此命令。它会使用您当前的扩展 ID 写入本机消息传递清单，以便 Chrome 可以启动本地主机进程。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeRegisterHostTitle": {
+    "message": "注册本机主机（一次性）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeReportIssueDesc": {
+    "message": "生成诊断报告并将其粘贴到 GitHub 问题中。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeReportIssueTip": {
+    "message": "这会将报告复制到剪贴板（敏感信息会自动编辑）。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeReportIssueTitle": {
+    "message": "报告问题",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeStdioCommandDesc": {
+    "message": "然后在 MCP 客户端中使用此命令。不需要全局安装，也不需要本地主机 URL。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeStdioCommandTitle": {
+    "message": "MCP stdio 命令",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeTroubleshootingCommands": {
+    "message": "doctor | report",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeTroubleshootingDesc": {
+    "message": "仅当网桥无法注册或连接时才使用这些。",
+    "description": "自动生成的 i18n 文案"
+  },
+  "welcomeTroubleshootingDocsButton": {
+    "message": "故障排除文档",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsAddTriggerTitle": {
+    "message": "添加触发器",
+    "description": "Add trigger button tooltip"
+  },
+  "workflowsAdvancedSection": {
+    "message": "高级",
+    "description": "Workflow advanced section title"
+  },
+  "workflowsCountPlural": {
+    "message": "个工作流",
+    "description": "Workflow count plural unit"
+  },
+  "workflowsCountSingular": {
+    "message": "个工作流",
+    "description": "Workflow count singular unit"
+  },
+  "workflowsCreateButton": {
+    "message": "新建",
+    "description": "Create workflow button text"
+  },
+  "workflowsCreateWorkflow": {
+    "message": "创建工作流",
+    "description": "Create workflow action text"
+  },
+  "workflowsCurrentPageOnly": {
+    "message": "仅当前页面",
+    "description": "Workflow filter current page only label"
+  },
+  "workflowsDeleteAction": {
+    "message": "删除",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsDeleteTriggerTitle": {
+    "message": "删除",
+    "description": "Delete trigger button tooltip"
+  },
+  "workflowsDescriptionLabel": {
+    "message": "描述",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsEditTriggerTitle": {
+    "message": "编辑",
+    "description": "Edit trigger button tooltip"
+  },
+  "workflowsEditWorkflowTitle": {
+    "message": "编辑工作流程",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsEmptyDesc": {
+    "message": "录制你的第一个自动化工作流",
+    "description": "Workflow empty state description"
+  },
+  "workflowsEmptySearchDesc": {
+    "message": "试试其他搜索词",
+    "description": "Workflow empty search description"
+  },
+  "workflowsEmptySearchTitle": {
+    "message": "没有匹配的工作流",
+    "description": "Workflow empty state title for filtered search"
+  },
+  "workflowsEmptyTitle": {
+    "message": "还没有工作流",
+    "description": "Workflow empty state title"
+  },
+  "workflowsExportAction": {
+    "message": "出口",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsImportAction": {
+    "message": "进口",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsMillisecondsValue": {
+    "message": "$ARG1$毫秒",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsMoreActionsTitle": {
+    "message": "更多行动",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsNoDescription": {
+    "message": "无描述",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsNoRunHistory": {
+    "message": "暂无运行历史",
+    "description": "Workflow run history empty text"
+  },
+  "workflowsNoTriggers": {
+    "message": "未配置触发器",
+    "description": "Workflow triggers empty text"
+  },
+  "workflowsOptionalDescription": {
+    "message": "可选描述",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRefreshTitle": {
+    "message": "刷新",
+    "description": "Workflow list refresh button tooltip"
+  },
+  "workflowsRunAction": {
+    "message": "跑步",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRunCanceled": {
+    "message": "已取消",
+    "description": "Workflow run status canceled"
+  },
+  "workflowsRunDurationPrefix": {
+    "message": "耗时",
+    "description": "Workflow run duration label prefix"
+  },
+  "workflowsRunEntrySummary": {
+    "message": "#$ARG1$ $ARG2$ - 步骤=$ARG3$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "workflowsRunFailed": {
+    "message": "失败",
+    "description": "Workflow run status failed"
+  },
+  "workflowsRunHistory": {
+    "message": "运行历史",
+    "description": "Workflow run history section title"
+  },
+  "workflowsRunPaused": {
+    "message": "已暂停",
+    "description": "Workflow run status paused"
+  },
+  "workflowsRunQueued": {
+    "message": "排队中",
+    "description": "Workflow run status queued"
+  },
+  "workflowsRunRunning": {
+    "message": "运行中",
+    "description": "Workflow run status running"
+  },
+  "workflowsRunStatusPrefix": {
+    "message": "状态",
+    "description": "Workflow run status label prefix"
+  },
+  "workflowsRunSucceeded": {
+    "message": "成功",
+    "description": "Workflow run status succeeded"
+  },
+  "workflowsRunWorkflowTitle": {
+    "message": "运行工作流程",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsSearchPlaceholder": {
+    "message": "搜索工作流...",
+    "description": "Workflow search input placeholder"
+  },
+  "workflowsSecondsUnit": {
+    "message": "s",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggersSection": {
+    "message": "触发器",
+    "description": "Workflow triggers section title"
+  },
+  "workflowsUntitledName": {
+    "message": "无题",
+    "description": "自动生成的 i18n 文案"
+  },
+  "worldAuto": {
+    "message": "自动",
+    "description": "world auto"
+  },
+  "worldIsolated": {
+    "message": "隔离 (ISOLATED)",
+    "description": "ISOLATED world"
+  },
+  "worldLabel": {
+    "message": "执行上下文",
+    "description": "world 选择标签"
+  },
+  "worldMain": {
+    "message": "页面 (MAIN)",
+    "description": "MAIN world"
+  }
 }

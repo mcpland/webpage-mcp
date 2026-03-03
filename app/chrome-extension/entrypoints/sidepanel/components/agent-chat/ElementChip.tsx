@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { ElementChangeSummary, WebEditorElementKey } from '@/common/web-editor-types';
+import { getMessage } from '@/utils/i18n';
 
 type ElementChipProps = {
   element: ElementChangeSummary;
@@ -83,6 +84,9 @@ export default function ElementChip({
   onHoverStart,
   onHoverEnd,
 }: ElementChipProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const chipRef = useRef<HTMLDivElement | null>(null);
   const [isHovering, setIsHovering] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
@@ -136,7 +140,17 @@ export default function ElementChip({
     };
   }, [isHovering, onHoverEnd, element]);
 
-  const ariaLabel = `${element.label} (${element.type} change, ${excluded ? 'excluded' : 'included'}). Click to toggle.`;
+  const ariaLabel = t(
+    'elementChipAriaLabel',
+    '{0} ({1} change, {2}). Click to toggle.',
+    [
+      element.label,
+      element.type,
+      excluded
+        ? t('elementChipExcludedLower', 'excluded')
+        : t('elementChipIncludedLower', 'included'),
+    ],
+  );
 
   const borderColor = selected
     ? 'var(--ac-accent)'
@@ -192,17 +206,23 @@ export default function ElementChip({
               <div className="text-[10px] flex items-center gap-2" style={{ color: 'var(--ac-text-subtle)' }}>
                 <span style={{ fontFamily: 'var(--ac-font-mono)' }}>{element.type}</span>
                 <span className="opacity-50">&middot;</span>
-                <span>{excluded ? 'Excluded' : 'Included'}</span>
+                <span>
+                  {excluded
+                    ? t('elementChipExcluded', 'Excluded')
+                    : t('elementChipIncluded', 'Included')}
+                </span>
                 <span className="opacity-50">&middot;</span>
                 <span>
-                  {element.transactionIds.length} change{element.transactionIds.length !== 1 ? 's' : ''}
+                  {t('elementChipChangesCount', '{0} changes', [
+                    String(element.transactionIds.length),
+                  ])}
                 </span>
               </div>
 
               {element.changes.style ? (
                 <div className="text-[10px] space-y-0.5">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">Style</span>
+                    <span className="font-medium">{t('elementChipStyleLabel', 'Style')}</span>
                     <span style={{ fontFamily: 'var(--ac-font-mono)', color: 'var(--ac-text-muted)' }}>
                       {element.changes.style.added > 0 ? (
                         <span style={{ color: 'var(--ac-success, #10b981)' }}>+{element.changes.style.added}</span>
@@ -233,9 +253,11 @@ export default function ElementChip({
 
               {element.changes.text ? (
                 <div className="text-[10px] space-y-0.5">
-                  <div className="font-medium">Text</div>
+                  <div className="font-medium">{t('elementChipTextLabel', 'Text')}</div>
                   <div className="flex items-start gap-2">
-                    <span className="opacity-60 w-10 flex-shrink-0">before</span>
+                    <span className="opacity-60 w-10 flex-shrink-0">
+                      {t('elementChipBeforeLabel', 'before')}
+                    </span>
                     <code
                       className="truncate max-w-[260px]"
                       style={{
@@ -246,11 +268,13 @@ export default function ElementChip({
                         color: 'var(--ac-text)',
                       }}
                     >
-                      {element.changes.text.beforePreview || '(empty)'}
+                      {element.changes.text.beforePreview || t('elementChipEmptyValue', '(empty)')}
                     </code>
                   </div>
                   <div className="flex items-start gap-2">
-                    <span className="opacity-60 w-10 flex-shrink-0">after</span>
+                    <span className="opacity-60 w-10 flex-shrink-0">
+                      {t('elementChipAfterLabel', 'after')}
+                    </span>
                     <code
                       className="truncate max-w-[260px]"
                       style={{
@@ -261,7 +285,7 @@ export default function ElementChip({
                         color: 'var(--ac-text)',
                       }}
                     >
-                      {element.changes.text.afterPreview || '(empty)'}
+                      {element.changes.text.afterPreview || t('elementChipEmptyValue', '(empty)')}
                     </code>
                   </div>
                 </div>
@@ -269,7 +293,7 @@ export default function ElementChip({
 
               {element.changes.class && hasClassChanges ? (
                 <div className="text-[10px] space-y-0.5">
-                  <div className="font-medium">Class</div>
+                  <div className="font-medium">{t('elementChipClassLabel', 'Class')}</div>
                   {classAddedText ? (
                     <div style={{ fontFamily: 'var(--ac-font-mono)', color: 'var(--ac-text-subtle)' }}>
                       <span style={{ color: 'var(--ac-success, #10b981)' }}>+</span> {classAddedText}
@@ -344,7 +368,7 @@ export default function ElementChip({
               fontWeight: 600,
             }}
           >
-            {excluded ? 'ex' : 'in'}
+            {excluded ? t('elementChipExcludedShort', 'ex') : t('elementChipIncludedShort', 'in')}
           </span>
         </button>
 
@@ -357,8 +381,8 @@ export default function ElementChip({
             opacity: isHovering ? 1 : 0,
             pointerEvents: isHovering ? 'auto' : 'none',
           }}
-          aria-label={`Revert changes to ${element.label}`}
-          title={`Revert all changes to ${element.label}`}
+          aria-label={t('elementChipRevertAria', 'Revert changes to {0}', [element.label])}
+          title={t('elementChipRevertTitle', 'Revert all changes to {0}', [element.label])}
           onClick={(event) => {
             event.stopPropagation();
             event.preventDefault();

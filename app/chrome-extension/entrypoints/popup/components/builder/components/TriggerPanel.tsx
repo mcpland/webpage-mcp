@@ -5,6 +5,7 @@ import type { JsonObject } from '@/entrypoints/background/record-replay-v3/domai
 import type { TriggerSpec } from '@/entrypoints/background/record-replay-v3/domain/triggers';
 import { toast } from '@/entrypoints/popup/components/builder/model/toast';
 import { useRRV3Rpc } from '@/entrypoints/shared/react/useRRV3Rpc';
+import { getMessage } from '@/utils/i18n';
 import './TriggerPanel.css';
 
 type PanelEditableKind = 'interval' | 'once';
@@ -56,6 +57,9 @@ function datetimeLocalToUnixMs(value: string): number | null {
 }
 
 export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const rpc = useRRV3Rpc({ autoConnect: true });
 
   const [loading, setLoading] = useState(false);
@@ -79,7 +83,7 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
     });
   }, [triggers]);
 
-  const editorTitle = `${editorMode === 'create' ? 'Create' : 'Edit'} ${editorKind} Trigger`;
+  const editorTitle = `${editorMode === 'create' ? t('triggerPanelCreate', 'Create') : t('workflowsEditTriggerTitle', 'Edit')} ${editorKind} ${t('workflowsTriggersSection', 'Triggers')}`;
 
   function setBusy(triggerId: string, value: boolean) {
     setBusyIds((current) => ({ ...current, [triggerId]: value }));
@@ -108,9 +112,9 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
   function ownerLabel(owner: TriggerOwner): string {
     switch (owner) {
       case 'triggerNode':
-        return 'via trigger node';
+        return t('triggerPanelOwnerTriggerNode', 'via trigger node');
       case 'external':
-        return 'external';
+        return t('triggerPanelOwnerExternal', 'external');
       default:
         return '';
     }
@@ -121,34 +125,40 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
       case 'url': {
         const spec = trigger as Extract<TriggerSpec, { kind: 'url' }>;
         const rules = spec.match || [];
-        return `URL match rules: ${rules.length}`;
+        return t('triggerPanelDescribeUrlRules', 'URL match rules: {0}', [String(rules.length)]);
       }
       case 'cron': {
         const spec = trigger as Extract<TriggerSpec, { kind: 'cron' }>;
-        return spec.timezone ? `cron: ${spec.cron} (${spec.timezone})` : `cron: ${spec.cron}`;
+        return spec.timezone
+          ? t('triggerPanelDescribeCronWithTz', 'cron: {0} ({1})', [spec.cron, spec.timezone])
+          : t('triggerPanelDescribeCron', 'cron: {0}', [spec.cron]);
       }
       case 'interval': {
         const spec = trigger as Extract<TriggerSpec, { kind: 'interval' }>;
-        return `Every ${spec.periodMinutes} minute(s)`;
+        return t('triggerPanelDescribeInterval', 'Every {0} minute(s)', [
+          String(spec.periodMinutes),
+        ]);
       }
       case 'once': {
         const spec = trigger as Extract<TriggerSpec, { kind: 'once' }>;
-        return `At ${formatLocalDateTime(Number(spec.whenMs))}`;
+        return t('triggerPanelDescribeOnceAt', 'At {0}', [
+          formatLocalDateTime(Number(spec.whenMs)),
+        ]);
       }
       case 'command': {
         const spec = trigger as Extract<TriggerSpec, { kind: 'command' }>;
-        return `commandKey: ${spec.commandKey}`;
+        return t('triggerPanelDescribeCommandKey', 'commandKey: {0}', [spec.commandKey]);
       }
       case 'contextMenu': {
         const spec = trigger as Extract<TriggerSpec, { kind: 'contextMenu' }>;
-        return `title: ${spec.title}`;
+        return t('triggerPanelDescribeMenuTitle', 'title: {0}', [spec.title]);
       }
       case 'dom': {
         const spec = trigger as Extract<TriggerSpec, { kind: 'dom' }>;
-        return `selector: ${spec.selector}`;
+        return t('triggerPanelDescribeDomSelector', 'selector: {0}', [spec.selector]);
       }
       case 'manual':
-        return 'Manual trigger (fire via button)';
+        return t('triggerPanelDescribeManual', 'Manual trigger (fire via button)');
       default:
         return '';
     }
@@ -198,7 +208,12 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
       const result = (await rpc.request('rr_v3.fireTrigger', {
         triggerId: trigger.id as TriggerId,
       })) as { runId?: string } | null;
-      toast(`Triggered: ${result?.runId ?? 'run enqueued'}`, 'info');
+      toast(
+        t('triggerPanelTriggeredToast', 'Triggered: {0}', [
+          result?.runId ?? t('triggerPanelRunEnqueued', 'run enqueued'),
+        ]),
+        'info',
+      );
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), 'error');
     } finally {
@@ -245,7 +260,7 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
 
     const normalizedFlowId = String(flowId || '').trim();
     if (!normalizedFlowId) {
-      toast('Flow ID is empty', 'error');
+      toast(t('triggerPanelFlowIdEmpty', 'Flow ID is empty'), 'error');
       return;
     }
 
@@ -269,12 +284,15 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
       } else {
         const whenMs = datetimeLocalToUnixMs(editorWhenLocal);
         if (whenMs === null) {
-          toast('Invalid trigger time format', 'error');
+          toast(t('triggerPanelInvalidTimeFormat', 'Invalid trigger time format'), 'error');
           return;
         }
 
         if (whenMs < Date.now()) {
-          toast('Trigger time is in the past. It may fire immediately.', 'warn');
+          toast(
+            t('triggerPanelPastTimeWarn', 'Trigger time is in the past. It may fire immediately.'),
+            'warn',
+          );
         }
 
         payload = {
@@ -306,7 +324,9 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
   async function removePanelTrigger(trigger: TriggerSpec): Promise<void> {
     if (!isPanelManaged(trigger)) return;
 
-    const confirmed = confirm(`Delete trigger?\n\n${trigger.id}`);
+    const confirmed = confirm(
+      t('triggerPanelDeleteConfirm', 'Delete trigger?\n\n{0}', [trigger.id]),
+    );
     if (!confirmed) return;
     if (busyIds[trigger.id]) return;
 
@@ -330,7 +350,9 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
     <aside className="builder-trigger-panel">
       <div className="builder-trigger-panel__header">
         <div className="builder-trigger-panel__header-left">
-          <div className="builder-trigger-panel__header-title">Triggers</div>
+          <div className="builder-trigger-panel__header-title">
+            {t('workflowsTriggersSection', 'Triggers')}
+          </div>
           <div className="builder-trigger-panel__header-sub">{flowId}</div>
         </div>
         <div className="builder-trigger-panel__header-right">
@@ -340,9 +362,14 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
             disabled={loading}
             onClick={() => void refresh()}
           >
-            Refresh
+            {t('workflowsRefreshTitle', 'Refresh')}
           </button>
-          <button className="builder-trigger-panel__btn-close" type="button" title="Close" onClick={onClose}>
+          <button
+            className="builder-trigger-panel__btn-close"
+            type="button"
+            title={t('closeButton', 'Close')}
+            onClick={onClose}
+          >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path
                 d="m4 4 8 8M12 4 4 12"
@@ -358,26 +385,31 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
       <div className="builder-trigger-panel__content">
         <div className="builder-trigger-panel__section">
           <div className="builder-trigger-panel__section-header">
-            <div className="builder-trigger-panel__section-title">Add Trigger</div>
+            <div className="builder-trigger-panel__section-title">
+              {t('workflowsAddTriggerTitle', 'Add trigger')}
+            </div>
             <div className="builder-trigger-panel__section-actions">
               <button
                 className="builder-trigger-panel__btn-sm"
                 type="button"
                 onClick={() => openCreate('interval')}
               >
-                + Interval
+                {t('triggerPanelAddInterval', '+ Interval')}
               </button>
               <button
                 className="builder-trigger-panel__btn-sm"
                 type="button"
                 onClick={() => openCreate('once')}
               >
-                + Once
+                {t('triggerPanelAddOnce', '+ Once')}
               </button>
             </div>
           </div>
           <div className="builder-trigger-panel__hint">
-            Other types (url/cron/command/contextMenu/dom) are configured via trigger nodes.
+            {t(
+              'triggerPanelOtherTypesHint',
+              'Other types (url/cron/command/contextMenu/dom) are configured via trigger nodes.',
+            )}
           </div>
         </div>
 
@@ -386,13 +418,21 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
         <div className="builder-trigger-panel__section">
           <div className="builder-trigger-panel__section-header">
             <div className="builder-trigger-panel__section-title">
-              Current Triggers ({triggers.length})
+              {t('triggerPanelCurrentTriggers', 'Current Triggers ({0})', [
+                String(triggers.length),
+              ])}
             </div>
           </div>
 
-          {loading ? <div className="builder-trigger-panel__muted">Loading...</div> : null}
+          {loading ? (
+            <div className="builder-trigger-panel__muted">
+              {t('loadingStatus', 'Loading...')}
+            </div>
+          ) : null}
           {!loading && triggers.length === 0 ? (
-            <div className="builder-trigger-panel__muted">No triggers configured</div>
+            <div className="builder-trigger-panel__muted">
+              {t('workflowsNoTriggers', 'No triggers configured')}
+            </div>
           ) : null}
 
           {!loading && triggers.length > 0 ? (
@@ -423,7 +463,14 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
                             ? 'builder-trigger-panel__toggle builder-trigger-panel__toggle--readonly'
                             : 'builder-trigger-panel__toggle'
                         }
-                        title={owner === 'triggerNode' ? 'Edit via trigger node in Builder' : ''}
+                        title={
+                          owner === 'triggerNode'
+                            ? t(
+                                'triggerPanelEditViaNodeHint',
+                                'Edit via trigger node in Builder',
+                              )
+                            : ''
+                        }
                       >
                         <input
                           type="checkbox"
@@ -431,7 +478,7 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
                           disabled={!!busyIds[trigger.id] || owner === 'triggerNode'}
                           onChange={(event) => void onToggleEnabled(trigger, event.currentTarget.checked)}
                         />
-                        <span>Enabled</span>
+                        <span>{t('triggerPanelEnabledLabel', 'Enabled')}</span>
                       </label>
 
                       {trigger.kind === 'manual' ? (
@@ -441,7 +488,7 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
                           disabled={!!busyIds[trigger.id] || !trigger.enabled}
                           onClick={() => void fireManual(trigger)}
                         >
-                          Fire
+                          {t('triggerPanelFireButton', 'Fire')}
                         </button>
                       ) : null}
 
@@ -450,7 +497,7 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
                           <button
                             className="builder-trigger-panel__btn-icon-sm"
                             type="button"
-                            title="Edit"
+                            title={t('workflowsEditTriggerTitle', 'Edit')}
                             disabled={!!busyIds[trigger.id]}
                             onClick={() => openEdit(trigger)}
                           >
@@ -462,7 +509,7 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
                           <button
                             className="builder-trigger-panel__btn-icon-sm builder-trigger-panel__btn-icon-sm--danger"
                             type="button"
-                            title="Delete"
+                            title={t('workflowsDeleteTriggerTitle', 'Delete')}
                             disabled={!!busyIds[trigger.id]}
                             onClick={() => void removePanelTrigger(trigger)}
                           >
@@ -500,15 +547,17 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
 
             <div className="builder-trigger-modal__body">
               <div className="builder-trigger-modal__form-group">
-                <label className="builder-trigger-modal__form-label">Type</label>
+                <label className="builder-trigger-modal__form-label">
+                  {t('scheduleTypeLabel', 'Type')}
+                </label>
                 <select
                   className="builder-trigger-modal__form-input"
                   value={editorKind}
                   disabled={editorMode === 'edit'}
                   onChange={(event) => setEditorKind(event.currentTarget.value as PanelEditableKind)}
                 >
-                  <option value="interval">interval</option>
-                  <option value="once">once</option>
+                  <option value="interval">{t('triggerPanelIntervalOption', 'interval')}</option>
+                  <option value="once">{t('triggerPanelOnceOption', 'once')}</option>
                 </select>
               </div>
 
@@ -519,14 +568,16 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
                     checked={editorEnabled}
                     onChange={(event) => setEditorEnabled(event.currentTarget.checked)}
                   />
-                  <span>Enabled</span>
+                  <span>{t('triggerPanelEnabledLabel', 'Enabled')}</span>
                 </label>
               </div>
 
               {editorKind === 'interval' ? (
                 <>
                   <div className="builder-trigger-modal__form-group">
-                    <label className="builder-trigger-modal__form-label">Interval (minutes)</label>
+                    <label className="builder-trigger-modal__form-label">
+                      {t('scheduleIntervalLabel', 'Interval (minutes)')}
+                    </label>
                     <input
                       className="builder-trigger-modal__form-input"
                       type="number"
@@ -537,13 +588,18 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
                     />
                   </div>
                   <div className="builder-trigger-panel__hint">
-                    Uses chrome.alarms.periodInMinutes for repeating triggers.
+                    {t(
+                      'triggerPanelIntervalHint',
+                      'Uses chrome.alarms.periodInMinutes for repeating triggers.',
+                    )}
                   </div>
                 </>
               ) : (
                 <>
                   <div className="builder-trigger-modal__form-group">
-                    <label className="builder-trigger-modal__form-label">Trigger Time</label>
+                    <label className="builder-trigger-modal__form-label">
+                      {t('triggerPanelTriggerTimeLabel', 'Trigger Time')}
+                    </label>
                     <input
                       className="builder-trigger-modal__form-input"
                       type="datetime-local"
@@ -552,7 +608,10 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
                     />
                   </div>
                   <div className="builder-trigger-panel__hint">
-                    Will auto-disable after firing. Time is in local timezone.
+                    {t(
+                      'triggerPanelOnceHint',
+                      'Will auto-disable after firing. Time is in local timezone.',
+                    )}
                   </div>
                 </>
               )}
@@ -560,7 +619,7 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
 
             <div className="builder-trigger-modal__footer">
               <button className="builder-trigger-modal__btn-cancel" type="button" onClick={closeEditor}>
-                Cancel
+                {t('cancelButton', 'Cancel')}
               </button>
               <button
                 className="builder-trigger-modal__btn-primary"
@@ -568,7 +627,7 @@ export default function TriggerPanel({ flowId, onClose }: TriggerPanelProps) {
                 disabled={editorSaving}
                 onClick={() => void submitEditor()}
               >
-                Save
+                {t('saveButton', 'Save')}
               </button>
             </div>
           </div>

@@ -94,6 +94,9 @@ function getErrorTypeByMessage(errorMessage: string): '' | 'network' | 'file' | 
 }
 
 export default function PopupApp() {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const [agentTheme, setAgentTheme] = useState<AgentThemeId>(() => getThemeFromDocument());
   const [currentView, setCurrentView] = useState<CurrentView>('home');
   const [comingSoonToast, setComingSoonToast] = useState<ComingSoonToast>({ show: false, feature: '' });
@@ -105,8 +108,12 @@ export default function PopupApp() {
     lastUpdated: Date.now(),
   });
   const [copyButtonText, setCopyButtonText] = useState(getMessage('copyConfigButton'));
-  const [copyRegisterButtonText, setCopyRegisterButtonText] = useState('Copy register command');
-  const [authCopyButtonText, setAuthCopyButtonText] = useState('Copy token');
+  const [copyRegisterButtonText, setCopyRegisterButtonText] = useState(
+    t('popupCopyRegisterCommand', 'Copy register command'),
+  );
+  const [authCopyButtonText, setAuthCopyButtonText] = useState(
+    t('popupCopyToken', 'Copy token'),
+  );
   const [authTokenEnabled, setAuthTokenEnabled] = useState(false);
   const [nativeAuthToken, setNativeAuthToken] = useState<string | null>(null);
   const [nativeConnectionError, setNativeConnectionError] = useState<string | null>(null);
@@ -314,17 +321,17 @@ export default function PopupApp() {
   async function copyRegisterCommand() {
     try {
       await navigator.clipboard.writeText(registerCommand);
-      setCopyRegisterButtonText('Copied');
+      setCopyRegisterButtonText(t('popupCopiedShort', 'Copied'));
     } catch (error) {
       console.error('Failed to copy register command:', error);
-      setCopyRegisterButtonText('Copy failed');
+      setCopyRegisterButtonText(t('popupCopyFailed', 'Copy failed'));
     }
 
     if (copyTextTimerRef.current) {
       clearTimeout(copyTextTimerRef.current);
     }
     copyTextTimerRef.current = setTimeout(() => {
-      setCopyRegisterButtonText('Copy register command');
+      setCopyRegisterButtonText(t('popupCopyRegisterCommand', 'Copy register command'));
     }, 2000);
   }
 
@@ -350,16 +357,16 @@ export default function PopupApp() {
     if (!nativeAuthToken) return;
     try {
       await navigator.clipboard.writeText(nativeAuthToken);
-      setAuthCopyButtonText('Copied');
+      setAuthCopyButtonText(t('popupCopiedShort', 'Copied'));
     } catch {
-      setAuthCopyButtonText('Copy failed');
+      setAuthCopyButtonText(t('popupCopyFailed', 'Copy failed'));
     }
 
     if (authCopyTextTimerRef.current) {
       clearTimeout(authCopyTextTimerRef.current);
     }
     authCopyTextTimerRef.current = setTimeout(() => {
-      setAuthCopyButtonText('Copy token');
+      setAuthCopyButtonText(t('popupCopyToken', 'Copy token'));
     }, 2000);
   }
 
@@ -812,7 +819,7 @@ export default function PopupApp() {
       });
 
       if (!response?.success) {
-        throw new Error(response?.error || 'Failed to clear data');
+        throw new Error(response?.error || t('popupClearDataFailedPlain', 'Failed to clear data'));
       }
 
       setClearDataProgress(getMessage('dataClearedNotification'));
@@ -823,7 +830,10 @@ export default function PopupApp() {
         hideClearDataConfirmation();
       }, 2000);
     } catch (error: any) {
-      setClearDataProgress(`Failed to clear data: ${error?.message || 'Unknown error'}`);
+      const errorMessage = error?.message || t('unknownErrorMessage', 'Unknown error');
+      setClearDataProgress(
+        t('popupClearDataFailed', 'Failed to clear data: {0}', [String(errorMessage)]),
+      );
       setTimeout(() => {
         setClearDataProgress('');
       }, 5000);
@@ -851,7 +861,7 @@ export default function PopupApp() {
   }
 
   function openWorkflowSidepanel() {
-    showComingSoon('Workflow management');
+    showComingSoon(t('popupWorkflowManagementTitle', 'Workflow management'));
   }
 
   function openElementMarkerSidepanel() {
@@ -903,11 +913,11 @@ export default function PopupApp() {
   }
 
   function startRecording() {
-    showComingSoon('Record playback');
+    showComingSoon(t('popupRecordPlaybackFeature', 'Record playback'));
   }
 
   function stopRecording() {
-    showComingSoon('Record playback');
+    showComingSoon(t('popupRecordPlaybackFeature', 'Record playback'));
   }
 
   useEffect(() => {
@@ -978,7 +988,7 @@ export default function PopupApp() {
         <div className="home-view">
           <div className="header">
             <div className="header-content">
-              <h1 className="header-title">Webpage MCP Server</h1>
+              <h1 className="header-title">{t('extensionName', 'webpage-mcp-server')}</h1>
             </div>
           </div>
 
@@ -1012,7 +1022,12 @@ export default function PopupApp() {
                 {showRegisterCommand ? (
                   <div className="mcp-config-section">
                     <div className="mcp-config-header">
-                      <p className="mcp-config-label">One-time host registration (current extension ID)</p>
+                      <p className="mcp-config-label">
+                        {t(
+                          'popupOneTimeHostRegistrationLabel',
+                          'One-time host registration (current extension ID)',
+                        )}
+                      </p>
                       <button
                         className="copy-config-button"
                         type="button"
@@ -1026,7 +1041,7 @@ export default function PopupApp() {
                     </div>
                     {nativeConnectionError ? (
                       <p className="register-command-error">
-                        Connect failed: {nativeConnectionError}
+                        {t('popupConnectFailedPrefix', 'Connect failed')}: {nativeConnectionError}
                       </p>
                     ) : null}
                   </div>
@@ -1049,7 +1064,7 @@ export default function PopupApp() {
                 {showMcpConfig && authTokenEnabled && nativeAuthToken ? (
                   <div className="mcp-config-section">
                     <div className="mcp-config-header">
-                      <p className="mcp-config-label">Auth token</p>
+                      <p className="mcp-config-label">{t('popupAuthTokenLabel', 'Auth token')}</p>
                       <button className="copy-config-button" type="button" onClick={() => void copyAuthToken()}>
                         {authCopyButtonText}
                       </button>
@@ -1079,13 +1094,16 @@ export default function PopupApp() {
             </div>
 
             <div className="section">
-              <h2 className="section-title">Quick tools</h2>
+              <h2 className="section-title">{t('popupQuickToolsTitle', 'Quick tools')}</h2>
               <div className="rr-icon-buttons">
                 <button
                   className="rr-icon-btn rr-icon-btn-record rr-icon-btn-coming-soon has-tooltip"
                   type="button"
                   onClick={startRecording}
-                  data-tooltip="The recording function is under development"
+                  data-tooltip={t(
+                    'popupRecordingUnderDevelopment',
+                    'The recording function is under development',
+                  )}
                 >
                   <RecordIcon recording={false} />
                 </button>
@@ -1093,7 +1111,10 @@ export default function PopupApp() {
                   className="rr-icon-btn rr-icon-btn-stop rr-icon-btn-coming-soon has-tooltip"
                   type="button"
                   onClick={stopRecording}
-                  data-tooltip="The recording function is under development"
+                  data-tooltip={t(
+                    'popupRecordingUnderDevelopment',
+                    'The recording function is under development',
+                  )}
                 >
                   <StopIcon />
                 </button>
@@ -1101,7 +1122,7 @@ export default function PopupApp() {
                   className="rr-icon-btn rr-icon-btn-edit has-tooltip"
                   type="button"
                   onClick={() => void toggleWebEditor()}
-                  data-tooltip="Turn on page editing mode"
+                  data-tooltip={t('popupEnableWebEditorTooltip', 'Turn on page editing mode')}
                 >
                   <EditIcon />
                 </button>
@@ -1109,7 +1130,7 @@ export default function PopupApp() {
                   className="rr-icon-btn rr-icon-btn-marker has-tooltip"
                   type="button"
                   onClick={() => void toggleElementMarker()}
-                  data-tooltip="Turn on element annotation"
+                  data-tooltip={t('popupEnableElementMarkerTooltip', 'Turn on element annotation')}
                 >
                   <MarkerIcon />
                 </button>
@@ -1117,7 +1138,7 @@ export default function PopupApp() {
             </div>
 
             <div className="section">
-              <h2 className="section-title">Management portal</h2>
+              <h2 className="section-title">{t('popupManagementPortalTitle', 'Management portal')}</h2>
               <div className="entry-card">
                 <button className="entry-item" type="button" onClick={openAgentSidepanel}>
                   <div className="entry-icon agent">
@@ -1130,8 +1151,15 @@ export default function PopupApp() {
                     </svg>
                   </div>
                   <div className="entry-content">
-                    <span className="entry-title">Intelligent Assistant</span>
-                    <span className="entry-desc">AI Agent Conversations and Quests</span>
+                    <span className="entry-title">
+                      {t('popupIntelligentAssistantTitle', 'Intelligent Assistant')}
+                    </span>
+                    <span className="entry-desc">
+                      {t(
+                        'popupIntelligentAssistantDesc',
+                        'AI agent conversations and tasks',
+                      )}
+                    </span>
                   </div>
                   <svg className="entry-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -1144,10 +1172,17 @@ export default function PopupApp() {
                   </div>
                   <div className="entry-content">
                     <span className="entry-title">
-                      Workflow management
-                      <span className="coming-soon-badge">Coming Soon</span>
+                      {t('popupWorkflowManagementTitle', 'Workflow management')}
+                      <span className="coming-soon-badge">
+                        {t('popupComingSoonBadge', 'Coming Soon')}
+                      </span>
                     </span>
-                    <span className="entry-desc">Recording and playback automation process</span>
+                    <span className="entry-desc">
+                      {t(
+                        'popupWorkflowManagementDesc',
+                        'Recording and playback automation workflows',
+                      )}
+                    </span>
                   </div>
                   <svg className="entry-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -1165,8 +1200,12 @@ export default function PopupApp() {
                     </svg>
                   </div>
                   <div className="entry-content">
-                    <span className="entry-title">Element annotation management</span>
-                    <span className="entry-desc">Manage page element annotations</span>
+                    <span className="entry-title">
+                      {t('popupElementMarkerManagementTitle', 'Element annotation management')}
+                    </span>
+                    <span className="entry-desc">
+                      {t('popupElementMarkerManagementDesc', 'Manage page element annotations')}
+                    </span>
                   </div>
                   <svg className="entry-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -1184,8 +1223,10 @@ export default function PopupApp() {
                     </svg>
                   </div>
                   <div className="entry-content">
-                    <span className="entry-title">Local model</span>
-                    <span className="entry-desc">Semantic engine and model management</span>
+                    <span className="entry-title">{t('popupLocalModelTitle', 'Local model')}</span>
+                    <span className="entry-desc">
+                      {t('popupLocalModelDesc', 'Semantic engine and model management')}
+                    </span>
                   </div>
                   <svg className="entry-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -1197,7 +1238,12 @@ export default function PopupApp() {
 
           <div className="footer">
             <div className="footer-links">
-              <button className="footer-link" type="button" onClick={() => void openWelcomePage()} title="View installation guide">
+              <button
+                className="footer-link"
+                type="button"
+                onClick={() => void openWelcomePage()}
+                title={t('popupViewInstallGuideTitle', 'View installation guide')}
+              >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
@@ -1206,9 +1252,14 @@ export default function PopupApp() {
                     d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                Guide
+                {t('popupGuideLink', 'Guide')}
               </button>
-              <button className="footer-link" type="button" onClick={() => void openTroubleshooting()} title="Troubleshooting">
+              <button
+                className="footer-link"
+                type="button"
+                onClick={() => void openTroubleshooting()}
+                title={t('popupTroubleshootingTitle', 'Troubleshooting')}
+              >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
@@ -1217,10 +1268,10 @@ export default function PopupApp() {
                     d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
                   />
                 </svg>
-                Docs
+                {t('popupDocsLink', 'Docs')}
               </button>
             </div>
-            <p className="footer-text">webpage mcp server for ai</p>
+            <p className="footer-text">{t('popupFooterTagline', 'webpage mcp server for ai')}</p>
           </div>
         </div>
       ) : null}
@@ -1275,7 +1326,13 @@ export default function PopupApp() {
             <circle cx="12" cy="12" r="10" />
             <path d="M12 6v6l4 2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <span>{comingSoonToast.feature} The function is under development, please stay tuned</span>
+          <span>
+            {comingSoonToast.feature}{' '}
+            {t(
+              'popupFeatureUnderDevelopmentSuffix',
+              'The feature is under development, please stay tuned',
+            )}
+          </span>
         </div>
       ) : null}
     </div>

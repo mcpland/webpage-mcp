@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getMessage } from "@/utils/i18n";
 
 import "./ScheduleDialog.css";
 
@@ -31,13 +32,6 @@ function safeParse(input: string): Record<string, unknown> {
   }
 }
 
-function describe(schedule: PopupSchedule): string {
-  if (schedule.type === "interval") return `per ${schedule.when} minutes`;
-  if (schedule.type === "daily") return `$ per day{schedule.when}`;
-  if (schedule.type === "once") return `one time ${schedule.when}`;
-  return "";
-}
-
 export function ScheduleDialog({
   visible,
   flowId,
@@ -46,6 +40,9 @@ export function ScheduleDialog({
   onSave,
   onRemove,
 }: ScheduleDialogProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const [enabled, setEnabled] = useState(true);
   const [type, setType] = useState<ScheduleType>("interval");
   const [intervalMinutes, setIntervalMinutes] = useState(30);
@@ -69,6 +66,19 @@ export function ScheduleDialog({
     return null;
   }
 
+  const describe = (schedule: PopupSchedule): string => {
+    if (schedule.type === "interval") {
+      return t("scheduleDescribeInterval", "Every {0} minutes", [schedule.when]);
+    }
+    if (schedule.type === "daily") {
+      return t("scheduleDescribeDaily", "Daily at {0}", [schedule.when]);
+    }
+    if (schedule.type === "once") {
+      return t("scheduleDescribeOnce", "One time at {0}", [schedule.when]);
+    }
+    return "";
+  };
+
   const save = () => {
     if (!flowId) {
       return;
@@ -90,30 +100,30 @@ export function ScheduleDialog({
     <div className="rr-modal" onClick={onClose}>
       <div className="rr-dialog" onClick={(event) => event.stopPropagation()}>
         <div className="rr-header">
-          <div className="title">Scheduled execution</div>
+          <div className="title">{t("scheduleDialogTitle", "Scheduled execution")}</div>
           <button type="button" className="close" onClick={onClose}>
             ✕
           </button>
         </div>
         <div className="rr-body">
           <div className="row">
-            <label>Enable</label>
+            <label>{t("scheduleEnableLabel", "Enable")}</label>
             <label className="chk">
               <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.currentTarget.checked)} />
-              Enable timing
+              {t("scheduleEnableTiming", "Enable timing")}
             </label>
           </div>
           <div className="row">
-            <label>Type</label>
+            <label>{t("scheduleTypeLabel", "Type")}</label>
             <select value={type} onChange={(event) => setType(event.currentTarget.value as ScheduleType)}>
-              <option value="interval">Every N minutes</option>
-              <option value="daily">Fixed time every day</option>
-              <option value="once">Execute only once</option>
+              <option value="interval">{t("scheduleTypeInterval", "Every N minutes")}</option>
+              <option value="daily">{t("scheduleTypeDaily", "Fixed time every day")}</option>
+              <option value="once">{t("scheduleTypeOnce", "Execute only once")}</option>
             </select>
           </div>
           {type === "interval" ? (
             <div className="row">
-              <label>Interval (minutes)</label>
+              <label>{t("scheduleIntervalLabel", "Interval (minutes)")}</label>
               <input
                 type="number"
                 value={intervalMinutes}
@@ -123,30 +133,34 @@ export function ScheduleDialog({
           ) : null}
           {type === "daily" ? (
             <div className="row">
-              <label>Time(HH:mm)</label>
-              <input value={dailyTime} placeholder="For example 09:30" onChange={(event) => setDailyTime(event.currentTarget.value)} />
+              <label>{t("scheduleDailyTimeLabel", "Time (HH:mm)")}</label>
+              <input
+                value={dailyTime}
+                placeholder={t("scheduleDailyTimePlaceholder", "For example 09:30")}
+                onChange={(event) => setDailyTime(event.currentTarget.value)}
+              />
             </div>
           ) : null}
           {type === "once" ? (
             <div className="row">
-              <label>Time(ISO)</label>
+              <label>{t("scheduleOnceTimeLabel", "Time (ISO)")}</label>
               <input
                 value={onceAt}
-                placeholder="For example 2025-10-05T10:00:00"
+                placeholder={t("scheduleOnceTimePlaceholder", "For example 2025-10-05T10:00:00")}
                 onChange={(event) => setOnceAt(event.currentTarget.value)}
               />
             </div>
           ) : null}
           <div className="row">
-            <label>Parameters (JSON)</label>
+            <label>{t("scheduleParametersLabel", "Parameters (JSON)")}</label>
             <textarea
               value={argsJson}
-              placeholder='{ "username": "xx" }'
+              placeholder={t("scheduleParametersPlaceholder", '{ "username": "xx" }')}
               onChange={(event) => setArgsJson(event.currentTarget.value)}
             />
           </div>
           <div className="section">
-            <div className="section-title">Already have plans</div>
+            <div className="section-title">{t("scheduleExistingPlansTitle", "Already have plans")}</div>
             <div className="sched-list">
               {schedules.map((schedule) => (
                 <div className="sched-row" key={schedule.id}>
@@ -156,7 +170,7 @@ export function ScheduleDialog({
                   </div>
                   <div className="actions">
                     <button type="button" className="small danger" onClick={() => onRemove(schedule.id)}>
-                      Delete
+                      {t("deleteButton", "Delete")}
                     </button>
                   </div>
                 </div>
@@ -166,7 +180,7 @@ export function ScheduleDialog({
         </div>
         <div className="rr-footer">
           <button type="button" className="primary" onClick={save}>
-            save
+            {t("saveButton", "Save")}
           </button>
         </div>
       </div>

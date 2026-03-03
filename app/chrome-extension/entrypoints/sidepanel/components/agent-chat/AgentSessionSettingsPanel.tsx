@@ -8,6 +8,7 @@ import type {
 } from 'webpage-mcp-shared';
 
 import { getCodexReasoningEfforts, getDefaultModelForCli, getModelsForCli } from '@/common/agent-models';
+import { getMessage } from '@/utils/i18n';
 
 export interface SessionSettings {
   model: string;
@@ -46,6 +47,9 @@ export default function AgentSessionSettingsPanel({
   onClose,
   onSave,
 }: AgentSessionSettingsPanelProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const [localModel, setLocalModel] = useState('');
   const [localPermissionMode, setLocalPermissionMode] = useState('');
   const [localReasoningEffort, setLocalReasoningEffort] = useState<CodexReasoningEffort>('medium');
@@ -184,7 +188,7 @@ export default function AgentSessionSettingsPanel({
           style={{ borderBottom: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)' }}
         >
           <h2 className="text-sm font-semibold" style={{ color: 'var(--ac-text, #1a1a1a)' }}>
-            Session Settings
+            {t('agentSessionSettingsTitle', 'Session Settings')}
           </h2>
           <button
             className="p-1 ac-btn"
@@ -205,7 +209,7 @@ export default function AgentSessionSettingsPanel({
           {isLoading ? (
             <div className="py-8 text-center">
               <div className="text-sm" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-                Loading session info...
+                {t('agentSessionSettingsLoading', 'Loading session info...')}
               </div>
             </div>
           ) : (
@@ -215,11 +219,13 @@ export default function AgentSessionSettingsPanel({
                   className="text-[10px] font-bold uppercase tracking-wider"
                   style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
                 >
-                  Session Info
+                  {t('agentSessionInfoSection', 'Session Info')}
                 </label>
                 <div className="text-xs space-y-1" style={{ color: 'var(--ac-text, #1a1a1a)' }}>
                   <div className="flex justify-between">
-                    <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>Engine</span>
+                    <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
+                      {t('agentSessionEngineLabel', 'Engine')}
+                    </span>
                     <span
                       className="px-1.5 py-0.5 text-[10px]"
                       style={{
@@ -228,18 +234,22 @@ export default function AgentSessionSettingsPanel({
                         borderRadius: 'var(--ac-radius-button, 8px)',
                       }}
                     >
-                      {session?.engineName || 'Unknown'}
+                      {session?.engineName || t('agentUnknownValue', 'Unknown')}
                     </span>
                   </div>
                   {localModel ? (
                     <div className="flex justify-between">
-                      <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>Model</span>
+                      <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
+                        {t('agentSessionModelLabel', 'Model')}
+                      </span>
                       <span className="font-mono text-[10px]">{localModel}</span>
                     </div>
                   ) : null}
                   {session?.engineSessionId ? (
                     <div className="flex justify-between">
-                      <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>Engine Session</span>
+                      <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
+                        {t('agentSessionEngineSessionLabel', 'Engine Session')}
+                      </span>
                       <span className="font-mono text-[10px] truncate max-w-[180px]">{session.engineSessionId}</span>
                     </div>
                   ) : null}
@@ -251,7 +261,7 @@ export default function AgentSessionSettingsPanel({
                   className="text-[10px] font-bold uppercase tracking-wider"
                   style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
                 >
-                  Model
+                  {t('agentSessionModelLabel', 'Model')}
                 </label>
                 <select
                   value={localModel}
@@ -264,7 +274,9 @@ export default function AgentSessionSettingsPanel({
                     color: 'var(--ac-text, #1a1a1a)',
                   }}
                 >
-                  <option value="">Default (server setting)</option>
+                  <option value="">
+                    {t('agentSessionModelDefaultServer', 'Default (server setting)')}
+                  </option>
                   {availableModels.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.name}
@@ -279,7 +291,7 @@ export default function AgentSessionSettingsPanel({
                     className="text-[10px] font-bold uppercase tracking-wider"
                     style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
                   >
-                    Reasoning Effort
+                    {t('agentSessionReasoningEffortLabel', 'Reasoning Effort')}
                   </label>
                   <select
                     value={localReasoningEffort}
@@ -301,10 +313,16 @@ export default function AgentSessionSettingsPanel({
                     ))}
                   </select>
                   <p className="text-[10px]" style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}>
-                    Controls the reasoning depth. Higher effort = better quality but slower.
+                    {t(
+                      'agentSessionReasoningEffortHint',
+                      'Controls the reasoning depth. Higher effort = better quality but slower.',
+                    )}
                     {!availableReasoningEfforts.includes('xhigh') ? (
                       <span className="block mt-1">
-                        Note: xhigh is only available for gpt-5.2 and gpt-5.1-codex-max models.
+                        {t(
+                          'agentSessionReasoningEffortXhighHint',
+                          'Note: xhigh is only available for gpt-5.2 and gpt-5.1-codex-max models.',
+                        )}
                       </span>
                     ) : null}
                   </p>
@@ -317,7 +335,7 @@ export default function AgentSessionSettingsPanel({
                     className="text-[10px] font-bold uppercase tracking-wider"
                     style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
                   >
-                    Permission Mode
+                    {t('agentSessionPermissionModeLabel', 'Permission Mode')}
                   </label>
                   <select
                     value={localPermissionMode}
@@ -330,15 +348,31 @@ export default function AgentSessionSettingsPanel({
                       color: 'var(--ac-text, #1a1a1a)',
                     }}
                   >
-                    <option value="">Default</option>
-                    <option value="default">default - Ask for approval</option>
-                    <option value="acceptEdits">acceptEdits - Auto-accept file edits</option>
-                    <option value="bypassPermissions">bypassPermissions - Auto-accept all</option>
-                    <option value="plan">plan - Plan mode only</option>
-                    <option value="dontAsk">dontAsk - No confirmation</option>
+                    <option value="">{t('agentProjectMenuDefaultOption', 'Default')}</option>
+                    <option value="default">
+                      {t('agentSessionPermissionDefault', 'default - Ask for approval')}
+                    </option>
+                    <option value="acceptEdits">
+                      {t(
+                        'agentSessionPermissionAcceptEdits',
+                        'acceptEdits - Auto-accept file edits',
+                      )}
+                    </option>
+                    <option value="bypassPermissions">
+                      {t('agentSessionPermissionBypass', 'bypassPermissions - Auto-accept all')}
+                    </option>
+                    <option value="plan">
+                      {t('agentSessionPermissionPlan', 'plan - Plan mode only')}
+                    </option>
+                    <option value="dontAsk">
+                      {t('agentSessionPermissionDontAsk', 'dontAsk - No confirmation')}
+                    </option>
                   </select>
                   <p className="text-[10px]" style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}>
-                    Controls how the Claude SDK handles tool approval requests.
+                    {t(
+                      'agentSessionPermissionHint',
+                      'Controls how the Claude SDK handles tool approval requests.',
+                    )}
                   </p>
                 </div>
               ) : null}
@@ -349,7 +383,7 @@ export default function AgentSessionSettingsPanel({
                     className="text-[10px] font-bold uppercase tracking-wider"
                     style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
                   >
-                    System Prompt
+                    {t('agentSessionSystemPromptLabel', 'System Prompt')}
                   </label>
                   <div className="space-y-2">
                     <label className="flex items-center gap-2 text-xs cursor-pointer">
@@ -358,7 +392,9 @@ export default function AgentSessionSettingsPanel({
                         checked={!localUseCustomPrompt}
                         onChange={() => setLocalUseCustomPrompt(false)}
                       />
-                      <span style={{ color: 'var(--ac-text, #1a1a1a)' }}>Use preset (claude_code)</span>
+                      <span style={{ color: 'var(--ac-text, #1a1a1a)' }}>
+                        {t('agentSessionUsePresetClaudeCode', 'Use preset (claude_code)')}
+                      </span>
                     </label>
                     {!localUseCustomPrompt ? (
                       <div className="pl-5">
@@ -368,7 +404,9 @@ export default function AgentSessionSettingsPanel({
                             checked={localAppendToPrompt}
                             onChange={(event) => setLocalAppendToPrompt(event.currentTarget.checked)}
                           />
-                          <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>Append custom text</span>
+                          <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
+                            {t('agentSessionAppendCustomText', 'Append custom text')}
+                          </span>
                         </label>
                         {localAppendToPrompt ? (
                           <textarea
@@ -383,7 +421,10 @@ export default function AgentSessionSettingsPanel({
                               fontFamily: 'var(--ac-font-mono, monospace)',
                             }}
                             rows={3}
-                            placeholder="Additional instructions to append..."
+                            placeholder={t(
+                              'agentSessionAppendCustomTextPlaceholder',
+                              'Additional instructions to append...',
+                            )}
                           />
                         ) : null}
                       </div>
@@ -395,7 +436,9 @@ export default function AgentSessionSettingsPanel({
                         checked={localUseCustomPrompt}
                         onChange={() => setLocalUseCustomPrompt(true)}
                       />
-                      <span style={{ color: 'var(--ac-text, #1a1a1a)' }}>Use custom prompt</span>
+                      <span style={{ color: 'var(--ac-text, #1a1a1a)' }}>
+                        {t('agentSessionUseCustomPrompt', 'Use custom prompt')}
+                      </span>
                     </label>
                     {localUseCustomPrompt ? (
                       <textarea
@@ -410,7 +453,10 @@ export default function AgentSessionSettingsPanel({
                           fontFamily: 'var(--ac-font-mono, monospace)',
                         }}
                         rows={4}
-                        placeholder="Enter custom system prompt..."
+                        placeholder={t(
+                          'agentSessionCustomPromptPlaceholder',
+                          'Enter custom system prompt...',
+                        )}
                       />
                     ) : null}
                   </div>
@@ -423,7 +469,7 @@ export default function AgentSessionSettingsPanel({
                     className="text-[10px] font-bold uppercase tracking-wider"
                     style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
                   >
-                    SDK Info
+                    {t('agentSessionSdkInfoLabel', 'SDK Info')}
                   </label>
                   <div
                     className="text-[10px] space-y-1 p-2"
@@ -434,7 +480,9 @@ export default function AgentSessionSettingsPanel({
                   >
                     {managementInfo.model ? (
                       <div className="flex justify-between">
-                        <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>Active Model</span>
+                        <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
+                          {t('agentSessionActiveModelLabel', 'Active Model')}
+                        </span>
                         <span className="font-mono" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
                           {managementInfo.model}
                         </span>
@@ -442,7 +490,9 @@ export default function AgentSessionSettingsPanel({
                     ) : null}
                     {managementInfo.claudeCodeVersion ? (
                       <div className="flex justify-between">
-                        <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>Claude Code</span>
+                        <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
+                          {t('agentSessionClaudeCodeLabel', 'Claude Code')}
+                        </span>
                         <span className="font-mono" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
                           {managementInfo.claudeCodeVersion}
                         </span>
@@ -450,7 +500,9 @@ export default function AgentSessionSettingsPanel({
                     ) : null}
                     {managementInfo.tools?.length ? (
                       <div className="flex justify-between">
-                        <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>Tools</span>
+                        <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
+                          {t('agentSessionToolsLabel', 'Tools')}
+                        </span>
                         <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
                           {managementInfo.tools.length}
                         </span>
@@ -458,7 +510,9 @@ export default function AgentSessionSettingsPanel({
                     ) : null}
                     {managementInfo.mcpServers?.length ? (
                       <div className="flex justify-between">
-                        <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>MCP Servers</span>
+                        <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
+                          {t('agentSessionMcpServersLabel', 'MCP Servers')}
+                        </span>
                         <span style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
                           {managementInfo.mcpServers.length}
                         </span>
@@ -469,7 +523,9 @@ export default function AgentSessionSettingsPanel({
                   {managementInfo.tools?.length ? (
                     <details className="text-[10px]">
                       <summary className="cursor-pointer" style={{ color: 'var(--ac-link, #3b82f6)' }}>
-                        View tools ({managementInfo.tools.length})
+                        {t('agentSessionViewTools', 'View tools ({0})', [
+                          String(managementInfo.tools.length),
+                        ])}
                       </summary>
                       <div
                         className="mt-1 p-2 max-h-32 overflow-y-auto ac-scroll"
@@ -494,7 +550,9 @@ export default function AgentSessionSettingsPanel({
                   {managementInfo.mcpServers?.length ? (
                     <details className="text-[10px]">
                       <summary className="cursor-pointer" style={{ color: 'var(--ac-link, #3b82f6)' }}>
-                        View MCP servers ({managementInfo.mcpServers.length})
+                        {t('agentSessionViewMcpServers', 'View MCP servers ({0})', [
+                          String(managementInfo.mcpServers.length),
+                        ])}
                       </summary>
                       <div
                         className="mt-1 p-2 max-h-32 overflow-y-auto ac-scroll"
@@ -545,7 +603,7 @@ export default function AgentSessionSettingsPanel({
             onClick={onClose}
             type="button"
           >
-            Cancel
+            {t('cancelButton', 'Cancel')}
           </button>
           <button
             className="px-3 py-1.5 text-xs ac-btn"
@@ -558,7 +616,7 @@ export default function AgentSessionSettingsPanel({
             onClick={handleSave}
             type="button"
           >
-            {isSaving ? 'Saving...' : 'Save'}
+            {isSaving ? t('agentProjectMenuSaving', 'Saving...') : t('saveButton', 'Save')}
           </button>
         </div>
       </div>

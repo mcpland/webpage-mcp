@@ -1,307 +1,1321 @@
 {
-  "extensionName": {
-    "message": "webpage-mcp-server",
-    "description": "Extension name"
-  },
-  "extensionDescription": {
-    "message": "Exposes browser capabilities with your own chrome",
-    "description": "Extension description"
-  },
-  "nativeServerConfigLabel": {
-    "message": "MCP Server Configuration",
-    "description": "Main section header for MCP server settings"
-  },
-  "semanticEngineLabel": {
-    "message": "Semantic Engine",
-    "description": "Main section header for semantic engine"
-  },
-  "embeddingModelLabel": {
-    "message": "Embedding Model",
-    "description": "Main section header for model selection"
-  },
-  "indexDataManagementLabel": {
-    "message": "Index Data Management",
-    "description": "Main section header for data management"
-  },
-  "modelCacheManagementLabel": {
-    "message": "Model Cache Management",
-    "description": "Main section header for cache management"
-  },
-  "statusLabel": {
-    "message": "Status",
-    "description": "Generic status label"
-  },
-  "runningStatusLabel": {
-    "message": "Running Status",
-    "description": "Server running status label"
-  },
-  "connectionStatusLabel": {
-    "message": "Connection Status",
-    "description": "Connection status label"
-  },
-  "lastUpdatedLabel": {
-    "message": "Last Updated:",
-    "description": "Last updated timestamp label"
-  },
-  "connectButton": {
-    "message": "Connect",
-    "description": "Connect button text"
-  },
-  "disconnectButton": {
-    "message": "Disconnect",
-    "description": "Disconnect button text"
-  },
-  "connectingStatus": {
-    "message": "Connecting...",
-    "description": "Connecting status message"
-  },
-  "connectedStatus": {
-    "message": "Connected",
-    "description": "Connected status message"
-  },
-  "disconnectedStatus": {
-    "message": "Disconnected",
-    "description": "Disconnected status message"
-  },
-  "detectingStatus": {
-    "message": "Detecting...",
-    "description": "Detecting status message"
-  },
-  "serviceRunningStatus": {
-    "message": "Service Running (Port: $PORT$)",
-    "description": "Service running with port number",
-    "placeholders": {
-      "port": {
-        "content": "$1",
-        "example": "12306"
-      }
-    }
-  },
-  "serviceNotConnectedStatus": {
-    "message": "Service Not Connected",
-    "description": "Service not connected status"
-  },
-  "connectedServiceNotStartedStatus": {
-    "message": "Connected, Service Not Started",
-    "description": "Connected but service not started status"
-  },
-  "mcpServerConfigLabel": {
-    "message": "MCP Server Configuration",
-    "description": "MCP server configuration section label"
-  },
-  "connectionPortLabel": {
-    "message": "Connection Port",
-    "description": "Connection port input label"
-  },
-  "refreshStatusButton": {
-    "message": "Refresh Status",
-    "description": "Refresh status button tooltip"
-  },
-  "copyConfigButton": {
-    "message": "Copy Configuration",
-    "description": "Copy configuration button text"
-  },
-  "retryButton": {
-    "message": "Retry",
-    "description": "Retry button text"
-  },
-  "cancelButton": {
-    "message": "Cancel",
-    "description": "Cancel button text"
-  },
-  "confirmButton": {
-    "message": "Confirm",
-    "description": "Confirm button text"
-  },
-  "saveButton": {
-    "message": "Save",
-    "description": "Save button text"
-  },
-  "closeButton": {
-    "message": "Close",
-    "description": "Close button text"
-  },
-  "resetButton": {
-    "message": "Reset",
-    "description": "Reset button text"
-  },
-  "initializingStatus": {
-    "message": "Initializing...",
-    "description": "Initializing progress message"
-  },
-  "processingStatus": {
-    "message": "Processing...",
-    "description": "Processing progress message"
-  },
-  "loadingStatus": {
-    "message": "Loading...",
-    "description": "Loading progress message"
-  },
-  "clearingStatus": {
-    "message": "Clearing...",
-    "description": "Clearing progress message"
-  },
-  "cleaningStatus": {
-    "message": "Cleaning...",
-    "description": "Cleaning progress message"
-  },
-  "downloadingStatus": {
-    "message": "Downloading...",
-    "description": "Downloading progress message"
-  },
-  "semanticEngineReadyStatus": {
-    "message": "Semantic Engine Ready",
-    "description": "Semantic engine ready status"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "Semantic Engine Initializing...",
-    "description": "Semantic engine initializing status"
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "Semantic Engine Initialization Failed",
-    "description": "Semantic engine initialization failed status"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "Semantic Engine Not Initialized",
-    "description": "Semantic engine not initialized status"
-  },
-  "initSemanticEngineButton": {
-    "message": "Initialize Semantic Engine",
-    "description": "Initialize semantic engine button text"
-  },
-  "reinitializeButton": {
-    "message": "Reinitialize",
-    "description": "Reinitialize button text"
-  },
-  "downloadingModelStatus": {
-    "message": "Downloading Model... $PROGRESS$%",
-    "description": "Model download progress with percentage",
-    "placeholders": {
-      "progress": {
-        "content": "$1",
-        "example": "50"
-      }
-    }
-  },
-  "switchingModelStatus": {
-    "message": "Switching Model...",
-    "description": "Model switching progress message"
-  },
-  "modelLoadedStatus": {
-    "message": "Model Loaded",
-    "description": "Model successfully loaded status"
-  },
-  "modelFailedStatus": {
-    "message": "Model Failed to Load",
-    "description": "Model failed to load status"
-  },
-  "lightweightModelDescription": {
-    "message": "Lightweight Multilingual Model",
-    "description": "Description for lightweight model option"
-  },
-  "betterThanSmallDescription": {
-    "message": "Slightly larger than e5-small, but better performance",
-    "description": "Description for medium model option"
-  },
-  "multilingualModelDescription": {
-    "message": "Multilingual Semantic Model",
-    "description": "Description for multilingual model option"
-  },
-  "fastPerformance": {
-    "message": "Fast",
-    "description": "Fast performance indicator"
-  },
-  "balancedPerformance": {
-    "message": "Balanced",
-    "description": "Balanced performance indicator"
+  "aboutTitle": {
+    "message": "About",
+    "description": "About dialog title"
   },
   "accuratePerformance": {
     "message": "Accurate",
     "description": "Accurate performance indicator"
   },
-  "networkErrorMessage": {
-    "message": "Network connection error, please check network and retry",
-    "description": "Network connection error message"
-  },
-  "modelCorruptedErrorMessage": {
-    "message": "Model file corrupted or incomplete, please retry download",
-    "description": "Model corruption error message"
-  },
-  "unknownErrorMessage": {
-    "message": "Unknown error, please check if your network can access HuggingFace",
-    "description": "Unknown error fallback message"
-  },
-  "permissionDeniedErrorMessage": {
-    "message": "Permission denied",
-    "description": "Permission denied error message"
-  },
-  "timeoutErrorMessage": {
-    "message": "Operation timed out",
-    "description": "Timeout error message"
-  },
-  "indexedPagesLabel": {
-    "message": "Indexed Pages",
-    "description": "Number of indexed pages label"
-  },
-  "indexSizeLabel": {
-    "message": "Index Size",
-    "description": "Index size label"
-  },
   "activeTabsLabel": {
     "message": "Active Tabs",
     "description": "Number of active tabs label"
   },
-  "vectorDocumentsLabel": {
-    "message": "Vector Documents",
-    "description": "Number of vector documents label"
+  "advancedSettingsLabel": {
+    "message": "Advanced Settings",
+    "description": "Advanced settings section label"
   },
-  "cacheSizeLabel": {
-    "message": "Cache Size",
-    "description": "Cache size label"
+  "agentAllChangesExcluded": {
+    "message": "All changes are excluded.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentApplyChangesDefault": {
+    "message": "Apply changes",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentCacheDesc": {
+    "message": "Manage cached images stored on disk by the agent server.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentCacheDialogAria": {
+    "message": "Attachment cache management",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentCacheTitle": {
+    "message": "Attachment Cache",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentClearFailed": {
+    "message": "Failed to clear attachments.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentClearSelected": {
+    "message": "Clear Selected ($ARG1$)",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentFilesCount": {
+    "message": "$ARG1$ files",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentInvalidServerResponse": {
+    "message": "Invalid response from server.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentInvertSelection": {
+    "message": "Invert",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentLoadingStats": {
+    "message": "Loading attachment stats...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentLoadStatsFailed": {
+    "message": "Failed to load attachment stats.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentMissingTag": {
+    "message": "missing",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentNoData": {
+    "message": "No attachment data found.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentOrphanProjectsCount": {
+    "message": "$ARG1$ orphan projects",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentAttachmentOrphanTag": {
+    "message": "orphan",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentRemovedSummary": {
+    "message": "Removed $ARG1$ ($ARG2$ files).",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentAttachmentRootDirectoryLabel": {
+    "message": "Root Directory",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentSelectAll": {
+    "message": "Select all",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentSelectProjectsHint": {
+    "message": "Select projects to remove cached attachment files from disk.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentAttachmentTotalSizeLabel": {
+    "message": "Total Size",
+    "description": "Auto-generated i18n message"
+  },
+  "agentChatComposerPlaceholder": {
+    "message": "Ask Claude to write code...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerAttachImageShortTooltip": {
+    "message": "Attach image",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerAttachImageTooltip": {
+    "message": "Attach image (drag, paste, or click)",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerDropImagesHere": {
+    "message": "Drop images here",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerExpandEditorTitle": {
+    "message": "Expand editor",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerReasoningEffortTooltip": {
+    "message": "Reasoning effort",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerRemoveImageTitle": {
+    "message": "Remove image",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerResetConfirm": {
+    "message": "Reset this conversation? All messages will be deleted and the session will start fresh.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerResetConversationTooltip": {
+    "message": "Reset conversation",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerSendMessageAria": {
+    "message": "Send message",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerSendTitle": {
+    "message": "Send",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerSessionSettingsTooltip": {
+    "message": "Session settings",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerStatusPreparing": {
+    "message": "Preparing...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerStatusReady": {
+    "message": "Ready",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerStatusSending": {
+    "message": "Sending...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerStatusStarting": {
+    "message": "Starting...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerStatusStopping": {
+    "message": "Stopping...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerStatusWorking": {
+    "message": "Working...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerStopRequestAria": {
+    "message": "Stop request",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerStopTitle": {
+    "message": "Stop",
+    "description": "Auto-generated i18n message"
+  },
+  "agentComposerSwitchModelTooltip": {
+    "message": "Switch model",
+    "description": "Auto-generated i18n message"
+  },
+  "agentConversationEmptyPrompt": {
+    "message": "How can I help you code today?",
+    "description": "Auto-generated i18n message"
+  },
+  "agentDismissErrorAria": {
+    "message": "Dismiss error",
+    "description": "Auto-generated i18n message"
+  },
+  "agentDismissTitle": {
+    "message": "Dismiss",
+    "description": "Auto-generated i18n message"
+  },
+  "agentEditsCount": {
+    "message": "$ARG1$ edit$ARG2$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentElementsCount": {
+    "message": "$ARG1$ element$ARG2$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentErrorOccurred": {
+    "message": "Error occurred",
+    "description": "Auto-generated i18n message"
+  },
+  "agentExcludeCount": {
+    "message": "Exclude ($ARG1$)",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentImagePreviewAria": {
+    "message": "Image preview",
+    "description": "Auto-generated i18n message"
+  },
+  "agentImagePreviewCloseAria": {
+    "message": "Close image preview",
+    "description": "Auto-generated i18n message"
+  },
+  "agentIncludeCount": {
+    "message": "Include ($ARG1$)",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentIncludeExcludeSummary": {
+    "message": "$ARG1$ included | $ARG2$ excluded",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentLinesCount": {
+    "message": "$ARG1$ lines",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentLinesWord": {
+    "message": "lines",
+    "description": "Auto-generated i18n message"
+  },
+  "agentLineWord": {
+    "message": "line",
+    "description": "Auto-generated i18n message"
+  },
+  "agentModifiedElementsLabel": {
+    "message": "Modified elements:",
+    "description": "Auto-generated i18n message"
+  },
+  "agentMoreCount": {
+    "message": "+$ARG1$ more",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreFilesCount": {
+    "message": "+$ARG1$ more files",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentMoreLinesCount": {
+    "message": "$ARG1$ more $ARG2$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentNoChangesYet": {
+    "message": "No changes yet.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentNoExcludedElements": {
+    "message": "No excluded elements.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentOpenProjectFailed": {
+    "message": "Failed to open project: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentOpenProjectMenuTerminal": {
+    "message": "Terminal",
+    "description": "Auto-generated i18n message"
+  },
+  "agentOpenProjectMenuTitle": {
+    "message": "Open In",
+    "description": "Auto-generated i18n message"
+  },
+  "agentOpenProjectMenuVSCode": {
+    "message": "VS Code",
+    "description": "Auto-generated i18n message"
+  },
+  "agentPreviewFooterLabel": {
+    "message": "Agent Preview",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuAutoOption": {
+    "message": "Auto",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuCliLabel": {
+    "message": "CLI",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuDefaultOption": {
+    "message": "Default",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuEffortHint": {
+    "message": "Applies to new sessions. Edit existing session in Session Settings.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuEffortLabel": {
+    "message": "Effort",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuEnableMcpLabel": {
+    "message": "Enable Webpage MCP Server",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuEnableMcpTitle": {
+    "message": "Enable local Webpage MCP server integration",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuMcpLabel": {
+    "message": "MCP",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuModelLabel": {
+    "message": "Model",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuSaveSettings": {
+    "message": "Save Settings",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuSaving": {
+    "message": "Saving...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectMenuSettingsTitle": {
+    "message": "Settings",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectsConfirmCreateDir": {
+    "message": "The directory \"$ARG1$\" does not exist. Create it?",
+    "description": "Confirm creating missing project directory",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsConfirmSwitchExisting": {
+    "message": "A project already exists for \"$ARG1$\": $ARG2$\n\nSwitch to that project?",
+    "description": "Confirm switching to existing project with same root path",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentProjectsCreateFailed": {
+    "message": "Failed to create project.",
+    "description": "Failed to create project message"
+  },
+  "agentProjectsInvalidCreateResponse": {
+    "message": "Project created but response is invalid.",
+    "description": "Project created but response payload invalid"
+  },
+  "agentProjectsInvalidPath": {
+    "message": "Invalid path",
+    "description": "Invalid project path message"
+  },
+  "agentProjectsNewButton": {
+    "message": "+ New Project",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectsPickerOpenFailed": {
+    "message": "Failed to open directory picker",
+    "description": "Failed to open directory picker message"
+  },
+  "agentProjectsPickerUnavailable": {
+    "message": "Directory picker not available. Please rebuild and restart the MCP server.",
+    "description": "Directory picker unavailable guidance"
+  },
+  "agentProjectsSelecting": {
+    "message": "Selecting...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectsServerHttpError": {
+    "message": "Server error: $ARG1$",
+    "description": "Server HTTP status error message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentProjectsServerUnavailable": {
+    "message": "Server not available",
+    "description": "Agent server unavailable message"
+  },
+  "agentProjectsTitle": {
+    "message": "Projects",
+    "description": "Auto-generated i18n message"
+  },
+  "agentProjectsValidateFailed": {
+    "message": "Failed to validate path",
+    "description": "Project path validation failed message"
+  },
+  "agentPromptPreviewLabel": {
+    "message": "Prompt preview:",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSelectedHeader": {
+    "message": "Selected",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSelectedTag": {
+    "message": "$ARG1$ selected",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSelectionChipShort": {
+    "message": "sel",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSentImagesSummary": {
+    "message": "Sent $ARG1$ image$ARG2$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentServerNotReadyMissingPort": {
+    "message": "Agent server not ready (missing server port).",
+    "description": "Auto-generated i18n message"
+  },
+  "agentServerNotReadySimple": {
+    "message": "Agent server not ready.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentServerNotReadyTitle": {
+    "message": "Server not ready",
+    "description": "Auto-generated i18n message"
+  },
+  "agentServerReconnectHint": {
+    "message": "Start or reconnect the server, then open this panel again.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionActiveModelLabel": {
+    "message": "Active Model",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionAppendCustomText": {
+    "message": "Append custom text",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionAppendCustomTextPlaceholder": {
+    "message": "Additional instructions to append...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionClaudeCodeLabel": {
+    "message": "Claude Code",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionCreating": {
+    "message": "Creating...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionCustomPromptPlaceholder": {
+    "message": "Enter custom system prompt...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionDeleteConfirm": {
+    "message": "Delete this session? This cannot be undone.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionDeleteNamedConfirm": {
+    "message": "Delete \"$ARG1$\"?",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionDeleteTitle": {
+    "message": "Delete",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionEngineLabel": {
+    "message": "Engine",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionEngineSessionLabel": {
+    "message": "Engine Session",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionInfoSection": {
+    "message": "Session Info",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionMcpServersLabel": {
+    "message": "MCP Servers",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionModelDefaultServer": {
+    "message": "Default (server setting)",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionModelLabel": {
+    "message": "Model",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionNewButton": {
+    "message": "+ New Session",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionNewShort": {
+    "message": "New",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionOpenProjectTitle": {
+    "message": "Open project",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionPermissionAcceptEdits": {
+    "message": "acceptEdits - Auto-accept file edits",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionPermissionBypass": {
+    "message": "bypassPermissions - Auto-accept all",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionPermissionDefault": {
+    "message": "default - Ask for approval",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionPermissionDontAsk": {
+    "message": "dontAsk - No confirmation",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionPermissionHint": {
+    "message": "Controls how the Claude SDK handles tool approval requests.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionPermissionModeLabel": {
+    "message": "Permission Mode",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionPermissionPlan": {
+    "message": "plan - Plan mode only",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionReasoningEffortHint": {
+    "message": "Controls the reasoning depth. Higher effort = better quality but slower.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionReasoningEffortLabel": {
+    "message": "Reasoning Effort",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionReasoningEffortXhighHint": {
+    "message": "Note: xhigh is only available for gpt-5.2 and gpt-5.1-codex-max models.",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionRenameTitle": {
+    "message": "Rename",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionRunningBadge": {
+    "message": "Running",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionSdkInfoLabel": {
+    "message": "SDK Info",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionsEmpty": {
+    "message": "No sessions yet",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionSettingsLoading": {
+    "message": "Loading session info...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionSettingsTitle": {
+    "message": "Session Settings",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionsLoading": {
+    "message": "Loading sessions...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionsNoMatching": {
+    "message": "No matching sessions",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionsSearchPlaceholder": {
+    "message": "Search sessions...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionsStartConversation": {
+    "message": "Start a new conversation with AI",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionsStartNewButton": {
+    "message": "Start New Session",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionsTitle": {
+    "message": "Sessions",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionsTryDifferentSearch": {
+    "message": "Try a different search term",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionsUnnamed": {
+    "message": "Unnamed Session",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionSystemPromptLabel": {
+    "message": "System Prompt",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionThisSession": {
+    "message": "this session",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionToolsLabel": {
+    "message": "Tools",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionUseCustomPrompt": {
+    "message": "Use custom prompt",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionUsePresetClaudeCode": {
+    "message": "Use preset (claude_code)",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSessionViewMcpServers": {
+    "message": "View MCP servers ($ARG1$)",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSessionViewTools": {
+    "message": "View tools ($ARG1$)",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentSettingsClearAttachmentCache": {
+    "message": "Clear Attachment Cache",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSettingsCometCaretLabel": {
+    "message": "Comet caret",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSettingsInputSection": {
+    "message": "Input",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSettingsReconnectServer": {
+    "message": "Reconnect Server",
+    "description": "Auto-generated i18n message"
+  },
+  "agentSettingsStorageSection": {
+    "message": "Storage",
+    "description": "Auto-generated i18n message"
+  },
+  "agentShowLess": {
+    "message": "Show less",
+    "description": "Auto-generated i18n message"
+  },
+  "agentShowMore": {
+    "message": "Show more...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentThinkingStatus": {
+    "message": "Thinking...",
+    "description": "Auto-generated i18n message"
+  },
+  "agentThreadEditComingSoon": {
+    "message": "Edit (coming soon)",
+    "description": "Auto-generated i18n message"
+  },
+  "agentTopBarBackToSessionsTitle": {
+    "message": "Back to sessions",
+    "description": "Auto-generated i18n message"
+  },
+  "agentTopBarBrandFallback": {
+    "message": "Agent",
+    "description": "Auto-generated i18n message"
+  },
+  "agentTopBarOpenProjectTitle": {
+    "message": "Open project in VS Code or Terminal",
+    "description": "Auto-generated i18n message"
+  },
+  "agentUnknownValue": {
+    "message": "Unknown",
+    "description": "Auto-generated i18n message"
+  },
+  "agentUsageDurationTurnsTitle": {
+    "message": "Duration: $ARG1$s, Turns: $ARG2$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageInputOutputTitle": {
+    "message": "Input: $ARG1$, Output: $ARG2$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "agentUsageTokensSummary": {
+    "message": "$ARG1$ tokens",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "agentWebEditorApplyTitle": {
+    "message": "Web Editor Apply",
+    "description": "Auto-generated i18n message"
+  },
+  "agentWebEditsHeader": {
+    "message": "Web Edits",
+    "description": "Auto-generated i18n message"
+  },
+  "allFramesLabel": {
+    "message": "All Frames",
+    "description": "allFrames checkbox"
+  },
+  "applyButton": {
+    "message": "Apply",
+    "description": "apply button"
+  },
+  "autoTheme": {
+    "message": "Auto",
+    "description": "Auto theme option"
+  },
+  "balancedPerformance": {
+    "message": "Balanced",
+    "description": "Balanced performance indicator"
+  },
+  "betterThanSmallDescription": {
+    "message": "Slightly larger than e5-small, but better performance",
+    "description": "Description for medium model option"
+  },
+  "bookmarksBarLabel": {
+    "message": "Bookmarks Bar",
+    "description": "Bookmarks bar folder name"
+  },
+  "builderActiveTabNotFound": {
+    "message": "Active tab not found",
+    "description": "Auto-generated i18n message"
+  },
+  "builderAutoLayoutTitle": {
+    "message": "Automatic typesetting",
+    "description": "Auto-generated i18n message"
+  },
+  "builderConfigurationErrorTitle": {
+    "message": "⚠️ Configuration error",
+    "description": "Auto-generated i18n message"
+  },
+  "builderConfigurationTitle": {
+    "message": "Configuration",
+    "description": "Auto-generated i18n message"
+  },
+  "builderDeleteEdgeTitle": {
+    "message": "Delete edge",
+    "description": "Auto-generated i18n message"
+  },
+  "builderDeleteNodeTitle": {
+    "message": "Delete node",
+    "description": "Auto-generated i18n message"
+  },
+  "builderEdgeBranchLabel": {
+    "message": "Branch",
+    "description": "Auto-generated i18n message"
+  },
+  "builderEdgeConnectionInvalid": {
+    "message": "Invalid",
+    "description": "Auto-generated i18n message"
+  },
+  "builderEdgeConnectionStatusLabel": {
+    "message": "Connection status",
+    "description": "Auto-generated i18n message"
+  },
+  "builderEdgeConnectionValid": {
+    "message": "Valid",
+    "description": "Auto-generated i18n message"
+  },
+  "builderEdgeInspectOnlyHint": {
+    "message": "Inspect connection only. Editing of branch/handles will be supported in a later pass.",
+    "description": "Auto-generated i18n message"
+  },
+  "builderEdgeSourceLabel": {
+    "message": "Source",
+    "description": "Auto-generated i18n message"
+  },
+  "builderEdgeTargetLabel": {
+    "message": "Target",
+    "description": "Auto-generated i18n message"
+  },
+  "builderEdgeTitle": {
+    "message": "Edge",
+    "description": "Auto-generated i18n message"
+  },
+  "builderEditFlowTitle": {
+    "message": "Edit: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderEnterJsonPlaceholder": {
+    "message": "Enter JSON",
+    "description": "Auto-generated i18n message"
+  },
+  "builderExportFailed": {
+    "message": "Export failed: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderExportJsonTitle": {
+    "message": "Export JSON",
+    "description": "Auto-generated i18n message"
+  },
+  "builderFallbackPromotionNotice": {
+    "message": "Fallback recommendation applied: promoted $ARG1$ priority.",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFieldRequired": {
+    "message": "$ARG1$ required",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderFitViewTitle": {
+    "message": "Adaptive view",
+    "description": "Auto-generated i18n message"
+  },
+  "builderFlowCategory": {
+    "message": "Flow",
+    "description": "Auto-generated i18n message"
+  },
+  "builderGeneralSettingsTitle": {
+    "message": "General settings",
+    "description": "Auto-generated i18n message"
+  },
+  "builderIfConditionLabel": {
+    "message": "Condition $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderIfElseLabel": {
+    "message": "Else",
+    "description": "Auto-generated i18n message"
+  },
+  "builderImportDataNotFound": {
+    "message": "Import failed: workflow data not found.",
+    "description": "Auto-generated i18n message"
+  },
+  "builderImportFailed": {
+    "message": "Import failed: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderImportJsonTitle": {
+    "message": "Import JSON",
+    "description": "Auto-generated i18n message"
+  },
+  "builderInsertNodePlaceholder": {
+    "message": "Insert node...",
+    "description": "Auto-generated i18n message"
+  },
+  "builderJsonFormatError": {
+    "message": "JSON format error",
+    "description": "Auto-generated i18n message"
+  },
+  "builderKeySequenceExample": {
+    "message": "Example: Backspace Enter or cmd+a",
+    "description": "Auto-generated i18n message"
+  },
+  "builderKeySequencePlaceholder": {
+    "message": "Backspace Enter or cmd+a",
+    "description": "Auto-generated i18n message"
+  },
+  "builderLoadFlowFailed": {
+    "message": "Failed to load workflow: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderLogicCategory": {
+    "message": "Logic",
+    "description": "Auto-generated i18n message"
+  },
+  "builderManageTriggersTitle": {
+    "message": "Manage triggers",
+    "description": "Auto-generated i18n message"
+  },
+  "builderNameLabel": {
+    "message": "Name",
+    "description": "Auto-generated i18n message"
+  },
+  "builderNewButton": {
+    "message": "New",
+    "description": "Auto-generated i18n message"
+  },
+  "builderNewWorkflowName": {
+    "message": "New workflow",
+    "description": "Auto-generated i18n message"
+  },
+  "builderNodeNameLabel": {
+    "message": "Node name",
+    "description": "Auto-generated i18n message"
+  },
+  "builderNodeNamePlaceholder": {
+    "message": "Enter node name",
+    "description": "Auto-generated i18n message"
+  },
+  "builderNodePropertiesTitle": {
+    "message": "Node properties",
+    "description": "Auto-generated i18n message"
+  },
+  "builderNodeSpecFallbackHint": {
+    "message": "The node does not yet provide a NodeSpec and has fallen back to the default properties panel.",
+    "description": "Auto-generated i18n message"
+  },
+  "builderNodeSpecNotFound": {
+    "message": "Node specification not found",
+    "description": "Auto-generated i18n message"
+  },
+  "builderNoEdgesSelected": {
+    "message": "No edges selected",
+    "description": "Auto-generated i18n message"
+  },
+  "builderNoSelectorGenerated": {
+    "message": "No valid selector was generated. Please enter it manually.",
+    "description": "Auto-generated i18n message"
+  },
+  "builderPageTitle": {
+    "message": "Workflow Builder - webpage-mcp-server",
+    "description": "Auto-generated i18n message"
+  },
+  "builderPickButton": {
+    "message": "Pick",
+    "description": "Auto-generated i18n message"
+  },
+  "builderPickedFromPageTitle": {
+    "message": "Picked from page",
+    "description": "Auto-generated i18n message"
+  },
+  "builderPickFailed": {
+    "message": "Pick failed",
+    "description": "Auto-generated i18n message"
+  },
+  "builderRedoTitle": {
+    "message": "Redo (⌘/Ctrl+Shift+Z)",
+    "description": "Auto-generated i18n message"
+  },
+  "builderRenameWorkflowTitle": {
+    "message": "Rename workflow",
+    "description": "Auto-generated i18n message"
+  },
+  "builderRunAllTitle": {
+    "message": "Playback rectification from the beginning",
+    "description": "Auto-generated i18n message"
+  },
+  "builderRunFailed": {
+    "message": "Run failed: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderRunFromSelectedButton": {
+    "message": "Run from selected",
+    "description": "Auto-generated i18n message"
+  },
+  "builderRunFromSelectedTitle": {
+    "message": "Playback from selected node",
+    "description": "Auto-generated i18n message"
+  },
+  "builderSavedStatus": {
+    "message": "Saved",
+    "description": "Auto-generated i18n message"
+  },
+  "builderSaveFailed": {
+    "message": "Save failed: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "builderSavingStatus": {
+    "message": "Saving...",
+    "description": "Auto-generated i18n message"
+  },
+  "builderScheduleConvertFailed": {
+    "message": "Node $ARG1$ schedule #$ARG2$: cannot convert to cron (type=$ARG3$), skipped.",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "builderScheduleOnceUnsupported": {
+    "message": "Node $ARG1$ schedule #$ARG2$: one-time schedule is not supported in V3 and was skipped.",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "builderScreenshotOnFailure": {
+    "message": "Screenshot on failure",
+    "description": "Auto-generated i18n message"
+  },
+  "builderSelectNodeHint": {
+    "message": "Select a node",
+    "description": "Auto-generated i18n message"
+  },
+  "builderSelectorHelpText": {
+    "message": "Enter a CSS selector, or click Pick to select an element on the page.",
+    "description": "Auto-generated i18n message"
+  },
+  "builderTabsCategory": {
+    "message": "Tabs",
+    "description": "Auto-generated i18n message"
+  },
+  "builderTimeoutMsLabel": {
+    "message": "Timeout (ms)",
+    "description": "Auto-generated i18n message"
+  },
+  "builderTimeoutPlaceholder": {
+    "message": "Use global timeout by default",
+    "description": "Auto-generated i18n message"
+  },
+  "builderToolsCategory": {
+    "message": "Tools",
+    "description": "Auto-generated i18n message"
+  },
+  "builderUndoTitle": {
+    "message": "Undo (⌘/Ctrl+Z)",
+    "description": "Auto-generated i18n message"
+  },
+  "builderViewEditPropertiesHint": {
+    "message": "View and edit properties",
+    "description": "Auto-generated i18n message"
+  },
+  "builderVisualOrchestrationTip": {
+    "message": "Workflow visual orchestration",
+    "description": "Auto-generated i18n message"
+  },
+  "builderWorkflowEditorTitle": {
+    "message": "Workflow Editor",
+    "description": "Auto-generated i18n message"
+  },
+  "builderWorkflowNamePlaceholder": {
+    "message": "Workflow name",
+    "description": "Auto-generated i18n message"
+  },
+  "builderWorkflowNotFoundCreated": {
+    "message": "Workflow \"$ARG1$\" not found, created a new workflow.",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "bytesUnit": {
+    "message": "bytes",
+    "description": "Bytes unit"
+  },
+  "cacheDetailsLabel": {
+    "message": "Cache Details",
+    "description": "Cache details section label"
   },
   "cacheEntriesLabel": {
     "message": "Cache Entries",
     "description": "Number of cache entries label"
   },
-  "clearAllDataButton": {
-    "message": "Clear All Data",
-    "description": "Clear all data button text"
+  "cacheSizeLabel": {
+    "message": "Cache Size",
+    "description": "Cache size label"
   },
-  "clearAllCacheButton": {
-    "message": "Clear All Cache",
-    "description": "Clear all cache button text"
+  "cancelButton": {
+    "message": "Cancel",
+    "description": "Cancel button text"
   },
   "cleanExpiredCacheButton": {
     "message": "Clean Expired Cache",
     "description": "Clean expired cache button text"
   },
-  "exportDataButton": {
-    "message": "Export Data",
-    "description": "Export data button text"
+  "cleaningStatus": {
+    "message": "Cleaning...",
+    "description": "Cleaning progress message"
   },
-  "importDataButton": {
-    "message": "Import Data",
-    "description": "Import data button text"
+  "clearAllCacheButton": {
+    "message": "Clear All Cache",
+    "description": "Clear all cache button text"
   },
-  "confirmClearDataTitle": {
-    "message": "Confirm Clear Data",
-    "description": "Clear data confirmation dialog title"
+  "clearAllDataButton": {
+    "message": "Clear All Data",
+    "description": "Clear all data button text"
   },
-  "settingsTitle": {
-    "message": "Settings",
-    "description": "Settings dialog title"
+  "clearButton": {
+    "message": "Clear",
+    "description": "Auto-generated i18n message"
   },
-  "aboutTitle": {
-    "message": "About",
-    "description": "About dialog title"
-  },
-  "helpTitle": {
-    "message": "Help",
-    "description": "Help dialog title"
-  },
-  "clearDataWarningMessage": {
-    "message": "This operation will clear all indexed webpage content and vector data, including:",
-    "description": "Clear data warning message"
+  "clearDataIrreversibleWarning": {
+    "message": "This operation is irreversible! After clearing, you need to browse webpages again to rebuild the index.",
+    "description": "Irreversible operation warning"
   },
   "clearDataList1": {
     "message": "All webpage text content index",
@@ -315,190 +1329,1552 @@
     "message": "Search history and cache",
     "description": "Third item in clear data list"
   },
-  "clearDataIrreversibleWarning": {
-    "message": "This operation is irreversible! After clearing, you need to browse webpages again to rebuild the index.",
-    "description": "Irreversible operation warning"
+  "clearDataWarningMessage": {
+    "message": "This operation will clear all indexed webpage content and vector data, including:",
+    "description": "Clear data warning message"
   },
-  "confirmClearButton": {
-    "message": "Confirm Clear",
-    "description": "Confirm clear action button"
+  "clearingStatus": {
+    "message": "Clearing...",
+    "description": "Clearing progress message"
   },
-  "cacheDetailsLabel": {
-    "message": "Cache Details",
-    "description": "Cache details section label"
+  "closeButton": {
+    "message": "Close",
+    "description": "Close button text"
   },
-  "noCacheDataMessage": {
-    "message": "No cache data",
-    "description": "No cache data available message"
+  "commandToggleQuickPanelDesc": {
+    "message": "Toggle quick panel",
+    "description": "Auto-generated i18n message"
   },
-  "loadingCacheInfoStatus": {
-    "message": "Loading cache information...",
-    "description": "Loading cache information status"
+  "commandToggleWebEditorDesc": {
+    "message": "Toggle web editor mode",
+    "description": "Auto-generated i18n message"
   },
-  "processingCacheStatus": {
-    "message": "Processing cache...",
-    "description": "Processing cache status"
+  "composerDrawerCloseAria": {
+    "message": "Close expanded editor",
+    "description": "Auto-generated i18n message"
   },
-  "expiredLabel": {
-    "message": "Expired",
-    "description": "Expired item label"
+  "composerDrawerExpandedEditorAria": {
+    "message": "Expanded editor",
+    "description": "Auto-generated i18n message"
   },
-  "bookmarksBarLabel": {
-    "message": "Bookmarks Bar",
-    "description": "Bookmarks bar folder name"
+  "composerDrawerExpandedEditorTitle": {
+    "message": "Expanded editor",
+    "description": "Auto-generated i18n message"
   },
-  "newTabLabel": {
-    "message": "New Tab",
-    "description": "New tab label"
-  },
-  "currentPageLabel": {
-    "message": "Current Page",
-    "description": "Current page label"
-  },
-  "menuLabel": {
-    "message": "Menu",
-    "description": "Menu accessibility label"
-  },
-  "navigationLabel": {
-    "message": "Navigation",
-    "description": "Navigation accessibility label"
-  },
-  "mainContentLabel": {
-    "message": "Main Content",
-    "description": "Main content accessibility label"
-  },
-  "languageSelectorLabel": {
-    "message": "Language",
-    "description": "Language selector label"
-  },
-  "themeLabel": {
-    "message": "Theme",
-    "description": "Theme selector label"
-  },
-  "lightTheme": {
-    "message": "Light",
-    "description": "Light theme option"
-  },
-  "darkTheme": {
-    "message": "Dark",
-    "description": "Dark theme option"
-  },
-  "autoTheme": {
-    "message": "Auto",
-    "description": "Auto theme option"
-  },
-  "advancedSettingsLabel": {
-    "message": "Advanced Settings",
-    "description": "Advanced settings section label"
-  },
-  "debugModeLabel": {
-    "message": "Debug Mode",
-    "description": "Debug mode toggle label"
-  },
-  "verboseLoggingLabel": {
-    "message": "Verbose Logging",
-    "description": "Verbose logging toggle label"
-  },
-  "successNotification": {
-    "message": "Operation completed successfully",
-    "description": "Generic success notification"
-  },
-  "warningNotification": {
-    "message": "Warning: Please review before proceeding",
-    "description": "Generic warning notification"
-  },
-  "infoNotification": {
-    "message": "Information",
-    "description": "Generic info notification"
+  "composerDrawerShortcutHint": {
+    "message": "Press $ARG1$+Enter to send",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "configCopiedNotification": {
     "message": "Configuration copied to clipboard",
     "description": "Configuration copied success message"
   },
+  "confirmButton": {
+    "message": "Confirm",
+    "description": "Confirm button text"
+  },
+  "confirmClearButton": {
+    "message": "Confirm Clear",
+    "description": "Confirm clear action button"
+  },
+  "confirmClearDataTitle": {
+    "message": "Confirm Clear Data",
+    "description": "Clear data confirmation dialog title"
+  },
+  "connectButton": {
+    "message": "Connect",
+    "description": "Connect button text"
+  },
+  "connectedServiceNotStartedStatus": {
+    "message": "Connected, Service Not Started",
+    "description": "Connected but service not started status"
+  },
+  "connectedStatus": {
+    "message": "Connected",
+    "description": "Connected status message"
+  },
+  "connectingStatus": {
+    "message": "Connecting...",
+    "description": "Connecting status message"
+  },
+  "connectionPortLabel": {
+    "message": "Connection Port",
+    "description": "Connection port input label"
+  },
+  "connectionStatusLabel": {
+    "message": "Connection Status",
+    "description": "Connection status label"
+  },
+  "copyConfigButton": {
+    "message": "Copy Configuration",
+    "description": "Copy configuration button text"
+  },
+  "createRunSectionTitle": {
+    "message": "Create / Run",
+    "description": "Create & run section title"
+  },
+  "currentPageLabel": {
+    "message": "Current Page",
+    "description": "Current page label"
+  },
+  "darkTheme": {
+    "message": "Dark",
+    "description": "Dark theme option"
+  },
   "dataClearedNotification": {
     "message": "Data cleared successfully",
     "description": "Data cleared success message"
   },
-  "bytesUnit": {
-    "message": "bytes",
-    "description": "Bytes unit"
+  "debugModeLabel": {
+    "message": "Debug Mode",
+    "description": "Debug mode toggle label"
   },
-  "kilobytesUnit": {
-    "message": "KB",
-    "description": "Kilobytes unit"
+  "deleteButton": {
+    "message": "Delete",
+    "description": "delete button"
   },
-  "megabytesUnit": {
-    "message": "MB",
-    "description": "Megabytes unit"
+  "detectingStatus": {
+    "message": "Detecting...",
+    "description": "Detecting status message"
+  },
+  "disconnectButton": {
+    "message": "Disconnect",
+    "description": "Disconnect button text"
+  },
+  "disconnectedStatus": {
+    "message": "Disconnected",
+    "description": "Disconnected status message"
+  },
+  "dnrFallbackLabel": {
+    "message": "DNR Fallback",
+    "description": "dnr fallback checkbox"
+  },
+  "domainLabel": {
+    "message": "Domain",
+    "description": "domain filter label"
+  },
+  "downloadingModelStatus": {
+    "message": "Downloading Model... $PROGRESS$%",
+    "description": "Model download progress with percentage",
+    "placeholders": {
+      "progress": {
+        "content": "$1",
+        "example": "50"
+      }
+    }
+  },
+  "downloadingStatus": {
+    "message": "Downloading...",
+    "description": "Downloading progress message"
+  },
+  "elementChipAfterLabel": {
+    "message": "after",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipAriaLabel": {
+    "message": "$ARG1$ ($ARG2$ change, $ARG3$). Click to toggle.",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "elementChipBeforeLabel": {
+    "message": "before",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipChangesCount": {
+    "message": "$ARG1$ changes",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipClassLabel": {
+    "message": "Class",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipEmptyValue": {
+    "message": "(empty)",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipExcluded": {
+    "message": "Excluded",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipExcludedLower": {
+    "message": "excluded",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipExcludedShort": {
+    "message": "ex",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipIncluded": {
+    "message": "Included",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipIncludedLower": {
+    "message": "included",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipIncludedShort": {
+    "message": "in",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipRevertAria": {
+    "message": "Revert changes to $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipRevertTitle": {
+    "message": "Revert all changes to $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "elementChipStyleLabel": {
+    "message": "Style",
+    "description": "Auto-generated i18n message"
+  },
+  "elementChipTagFallback": {
+    "message": "element",
+    "description": "Fallback tag label for selected element chip"
+  },
+  "elementChipTextLabel": {
+    "message": "Text",
+    "description": "Auto-generated i18n message"
+  },
+  "embeddingModelLabel": {
+    "message": "Embedding Model",
+    "description": "Main section header for model selection"
+  },
+  "emergencySwitchLabel": {
+    "message": "Emergency Switch",
+    "description": "Global disable switch"
+  },
+  "excludesInputLabel": {
+    "message": "Excludes (comma-separated)",
+    "description": "excludes input"
+  },
+  "expiredLabel": {
+    "message": "Expired",
+    "description": "Expired item label"
+  },
+  "exportAllButton": {
+    "message": "Export All",
+    "description": "export button"
+  },
+  "exportDataButton": {
+    "message": "Export Data",
+    "description": "Export data button text"
+  },
+  "extensionDescription": {
+    "message": "Exposes browser capabilities with your own chrome",
+    "description": "Extension description"
+  },
+  "extensionName": {
+    "message": "webpage-mcp-server",
+    "description": "Extension name"
+  },
+  "fastPerformance": {
+    "message": "Fast",
+    "description": "Fast performance indicator"
   },
   "gigabytesUnit": {
     "message": "GB",
     "description": "Gigabytes unit"
   },
+  "helpTitle": {
+    "message": "Help",
+    "description": "Help dialog title"
+  },
+  "importDataButton": {
+    "message": "Import Data",
+    "description": "Import data button text"
+  },
+  "indexDataManagementLabel": {
+    "message": "Index Data Management",
+    "description": "Main section header for data management"
+  },
+  "indexedPagesLabel": {
+    "message": "Indexed Pages",
+    "description": "Number of indexed pages label"
+  },
+  "indexSizeLabel": {
+    "message": "Index Size",
+    "description": "Index size label"
+  },
+  "infoNotification": {
+    "message": "Information",
+    "description": "Generic info notification"
+  },
+  "initializingStatus": {
+    "message": "Initializing...",
+    "description": "Initializing progress message"
+  },
+  "initSemanticEngineButton": {
+    "message": "Initialize Semantic Engine",
+    "description": "Initialize semantic engine button text"
+  },
   "itemsUnit": {
     "message": "items",
     "description": "Items count unit"
+  },
+  "kilobytesUnit": {
+    "message": "KB",
+    "description": "Kilobytes unit"
+  },
+  "languageSelectorLabel": {
+    "message": "Language",
+    "description": "Language selector label"
+  },
+  "lastUpdatedLabel": {
+    "message": "Last Updated:",
+    "description": "Last updated timestamp label"
+  },
+  "lightTheme": {
+    "message": "Light",
+    "description": "Light theme option"
+  },
+  "lightweightModelDescription": {
+    "message": "Lightweight Multilingual Model",
+    "description": "Description for lightweight model option"
+  },
+  "listSectionTitle": {
+    "message": "List",
+    "description": "list section title"
+  },
+  "loadingCacheInfoStatus": {
+    "message": "Loading cache information...",
+    "description": "Loading cache information status"
+  },
+  "loadingStatus": {
+    "message": "Loading...",
+    "description": "Loading progress message"
+  },
+  "localModelBackToHomeTitle": {
+    "message": "Return to homepage",
+    "description": "Auto-generated i18n message"
+  },
+  "localModelReturnButton": {
+    "message": "Return",
+    "description": "Auto-generated i18n message"
+  },
+  "mainContentLabel": {
+    "message": "Main Content",
+    "description": "Main content accessibility label"
+  },
+  "matchesInputLabel": {
+    "message": "Matches (comma-separated)",
+    "description": "matches input"
+  },
+  "mcpServerConfigLabel": {
+    "message": "MCP Server Configuration",
+    "description": "MCP server configuration section label"
+  },
+  "megabytesUnit": {
+    "message": "MB",
+    "description": "Megabytes unit"
+  },
+  "menuLabel": {
+    "message": "Menu",
+    "description": "Menu accessibility label"
+  },
+  "modeAuto": {
+    "message": "auto",
+    "description": "mode auto"
+  },
+  "modeCss": {
+    "message": "css",
+    "description": "mode css"
+  },
+  "modeLabel": {
+    "message": "Mode",
+    "description": "mode select label"
+  },
+  "modelCacheManagementLabel": {
+    "message": "Model Cache Management",
+    "description": "Main section header for cache management"
+  },
+  "modelCorruptedErrorMessage": {
+    "message": "Model file corrupted or incomplete, please retry download",
+    "description": "Model corruption error message"
+  },
+  "modelFailedStatus": {
+    "message": "Model Failed to Load",
+    "description": "Model failed to load status"
+  },
+  "modelLoadedStatus": {
+    "message": "Model Loaded",
+    "description": "Model successfully loaded status"
+  },
+  "modeOnce": {
+    "message": "once",
+    "description": "mode once"
+  },
+  "modePersistent": {
+    "message": "persistent",
+    "description": "mode persistent"
+  },
+  "multilingualModelDescription": {
+    "message": "Multilingual Semantic Model",
+    "description": "Description for multilingual model option"
+  },
+  "nameLabel": {
+    "message": "Name",
+    "description": "Name input label"
+  },
+  "nativeServerConfigLabel": {
+    "message": "MCP Server Configuration",
+    "description": "Main section header for MCP server settings"
+  },
+  "navigationLabel": {
+    "message": "Navigation",
+    "description": "Navigation accessibility label"
+  },
+  "networkErrorMessage": {
+    "message": "Network connection error, please check network and retry",
+    "description": "Network connection error message"
+  },
+  "newTabLabel": {
+    "message": "New Tab",
+    "description": "New tab label"
+  },
+  "noCacheDataMessage": {
+    "message": "No cache data",
+    "description": "No cache data available message"
   },
   "pagesUnit": {
     "message": "pages",
     "description": "Pages count unit"
   },
-  "userscriptsManagerTitle": {
-    "message": "Userscripts Manager",
-    "description": "Options page title"
+  "permissionDeniedErrorMessage": {
+    "message": "Permission denied",
+    "description": "Permission denied error message"
   },
-  "emergencySwitchLabel": { "message": "Emergency Switch", "description": "Global disable switch" },
-  "createRunSectionTitle": {
-    "message": "Create / Run",
-    "description": "Create & run section title"
+  "persistLabel": {
+    "message": "Persist",
+    "description": "persist checkbox"
   },
-  "nameLabel": { "message": "Name", "description": "Name input label" },
-  "runAtLabel": { "message": "Run At", "description": "runAt select label" },
-  "runAtAuto": { "message": "auto", "description": "runAt auto" },
-  "runAtDocumentStart": { "message": "document_start", "description": "runAt document_start" },
-  "runAtDocumentEnd": { "message": "document_end", "description": "runAt document_end" },
-  "runAtDocumentIdle": { "message": "document_idle", "description": "runAt document_idle" },
-  "worldLabel": { "message": "World", "description": "world select label" },
-  "worldAuto": { "message": "auto", "description": "world auto" },
-  "worldIsolated": { "message": "ISOLATED", "description": "ISOLATED world" },
-  "worldMain": { "message": "MAIN", "description": "MAIN world" },
-  "modeLabel": { "message": "Mode", "description": "mode select label" },
-  "modeAuto": { "message": "auto", "description": "mode auto" },
-  "modePersistent": { "message": "persistent", "description": "mode persistent" },
-  "modeCss": { "message": "css", "description": "mode css" },
-  "modeOnce": { "message": "once", "description": "mode once" },
-  "allFramesLabel": { "message": "All Frames", "description": "allFrames checkbox" },
-  "persistLabel": { "message": "Persist", "description": "persist checkbox" },
-  "dnrFallbackLabel": { "message": "DNR Fallback", "description": "dnr fallback checkbox" },
-  "matchesInputLabel": { "message": "Matches (comma-separated)", "description": "matches input" },
-  "excludesInputLabel": {
-    "message": "Excludes (comma-separated)",
-    "description": "excludes input"
+  "placeholderDomainHint": {
+    "message": "example.com",
+    "description": "domain filter placeholder"
   },
-  "tagsInputLabel": { "message": "Tags (comma-separated)", "description": "tags input" },
-  "scriptLabel": { "message": "Script", "description": "script textarea label" },
-  "applyButton": { "message": "Apply", "description": "apply button" },
-  "runOnceButton": { "message": "Run Once (CDP)", "description": "run once button" },
-  "listSectionTitle": { "message": "List", "description": "list section title" },
-  "queryLabel": { "message": "Query", "description": "query input label" },
-  "statusAll": { "message": "all", "description": "status all" },
-  "statusEnabled": { "message": "enabled", "description": "status enabled" },
-  "statusDisabled": { "message": "disabled", "description": "status disabled" },
-  "domainLabel": { "message": "Domain", "description": "domain filter label" },
-  "exportAllButton": { "message": "Export All", "description": "export button" },
-  "tableHeaderName": { "message": "Name", "description": "table header name" },
-  "tableHeaderWorld": { "message": "World", "description": "table header world" },
-  "tableHeaderRunAt": { "message": "Run At", "description": "table header runAt" },
-  "tableHeaderUpdated": { "message": "Updated", "description": "table header updated" },
-  "deleteButton": { "message": "Delete", "description": "delete button" },
-  "placeholderOptional": { "message": "optional", "description": "generic optional placeholder" },
   "placeholderMatchesExample": {
     "message": "e.g. https://*.example.com/*",
     "description": "matches example placeholder"
+  },
+  "placeholderOptional": {
+    "message": "optional",
+    "description": "generic optional placeholder"
   },
   "placeholderScriptHint": {
     "message": "Paste JS/CSS/TM here",
     "description": "script textarea placeholder"
   },
-  "placeholderDomainHint": { "message": "example.com", "description": "domain filter placeholder" }
+  "popupAddNewAnnotationLabel": {
+    "message": "Add new annotation",
+    "description": "Auto-generated i18n message"
+  },
+  "popupAuthTokenLabel": {
+    "message": "Auth token",
+    "description": "Auto-generated i18n message"
+  },
+  "popupClearDataFailed": {
+    "message": "Failed to clear data: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "popupClearDataFailedPlain": {
+    "message": "Failed to clear data",
+    "description": "Auto-generated i18n message"
+  },
+  "popupComingSoonBadge": {
+    "message": "Coming Soon",
+    "description": "Auto-generated i18n message"
+  },
+  "popupConnectFailedPrefix": {
+    "message": "Connect failed",
+    "description": "Auto-generated i18n message"
+  },
+  "popupCopiedShort": {
+    "message": "Copied",
+    "description": "Auto-generated i18n message"
+  },
+  "popupCopyFailed": {
+    "message": "Copy failed",
+    "description": "Auto-generated i18n message"
+  },
+  "popupCopyRegisterCommand": {
+    "message": "Copy register command",
+    "description": "Auto-generated i18n message"
+  },
+  "popupCopyToken": {
+    "message": "Copy token",
+    "description": "Auto-generated i18n message"
+  },
+  "popupDocsLink": {
+    "message": "Docs",
+    "description": "Auto-generated i18n message"
+  },
+  "popupElementMarkerManagementDesc": {
+    "message": "Manage page element annotations",
+    "description": "Auto-generated i18n message"
+  },
+  "popupElementMarkerManagementTitle": {
+    "message": "Element annotation management",
+    "description": "Auto-generated i18n message"
+  },
+  "popupEnableElementMarkerTooltip": {
+    "message": "Turn on element annotation",
+    "description": "Auto-generated i18n message"
+  },
+  "popupEnableWebEditorTooltip": {
+    "message": "Turn on page editing mode",
+    "description": "Auto-generated i18n message"
+  },
+  "popupFeatureUnderDevelopmentSuffix": {
+    "message": "The feature is under development, please stay tuned",
+    "description": "Auto-generated i18n message"
+  },
+  "popupFooterTagline": {
+    "message": "webpage mcp server for ai",
+    "description": "Auto-generated i18n message"
+  },
+  "popupGuideLink": {
+    "message": "Guide",
+    "description": "Auto-generated i18n message"
+  },
+  "popupIntelligentAssistantDesc": {
+    "message": "AI agent conversations and tasks",
+    "description": "Auto-generated i18n message"
+  },
+  "popupIntelligentAssistantTitle": {
+    "message": "Intelligent Assistant",
+    "description": "Auto-generated i18n message"
+  },
+  "popupLabeledElementsLabel": {
+    "message": "Labeled elements",
+    "description": "Auto-generated i18n message"
+  },
+  "popupLocalModelDesc": {
+    "message": "Semantic engine and model management",
+    "description": "Auto-generated i18n message"
+  },
+  "popupLocalModelTitle": {
+    "message": "Local model",
+    "description": "Auto-generated i18n message"
+  },
+  "popupManagementPortalTitle": {
+    "message": "Management portal",
+    "description": "Auto-generated i18n message"
+  },
+  "popupMarkerNamePlaceholder": {
+    "message": "Name, such as \"Login Button\"",
+    "description": "Auto-generated i18n message"
+  },
+  "popupOneTimeHostRegistrationLabel": {
+    "message": "One-time host registration (current extension ID)",
+    "description": "Auto-generated i18n message"
+  },
+  "popupPageTitle": {
+    "message": "webpage-mcp-server",
+    "description": "Auto-generated i18n message"
+  },
+  "popupQuickToolsTitle": {
+    "message": "Quick tools",
+    "description": "Auto-generated i18n message"
+  },
+  "popupRecordingUnderDevelopment": {
+    "message": "The recording function is under development",
+    "description": "Auto-generated i18n message"
+  },
+  "popupRecordPlaybackFeature": {
+    "message": "Record playback",
+    "description": "Auto-generated i18n message"
+  },
+  "popupTroubleshootingTitle": {
+    "message": "Troubleshooting",
+    "description": "Auto-generated i18n message"
+  },
+  "popupViewInstallGuideTitle": {
+    "message": "View installation guide",
+    "description": "Auto-generated i18n message"
+  },
+  "popupWorkflowManagementDesc": {
+    "message": "Recording and playback automation workflows",
+    "description": "Auto-generated i18n message"
+  },
+  "popupWorkflowManagementTitle": {
+    "message": "Workflow management",
+    "description": "Auto-generated i18n message"
+  },
+  "processingCacheStatus": {
+    "message": "Processing cache...",
+    "description": "Processing cache status"
+  },
+  "processingStatus": {
+    "message": "Processing...",
+    "description": "Processing progress message"
+  },
+  "queryLabel": {
+    "message": "Query",
+    "description": "query input label"
+  },
+  "refreshStatusButton": {
+    "message": "Refresh Status",
+    "description": "Refresh status button tooltip"
+  },
+  "reinitializeButton": {
+    "message": "Reinitialize",
+    "description": "Reinitialize button text"
+  },
+  "resetButton": {
+    "message": "Reset",
+    "description": "Reset button text"
+  },
+  "retryButton": {
+    "message": "Retry",
+    "description": "Retry button text"
+  },
+  "runAtAuto": {
+    "message": "auto",
+    "description": "runAt auto"
+  },
+  "runAtDocumentEnd": {
+    "message": "document_end",
+    "description": "runAt document_end"
+  },
+  "runAtDocumentIdle": {
+    "message": "document_idle",
+    "description": "runAt document_idle"
+  },
+  "runAtDocumentStart": {
+    "message": "document_start",
+    "description": "runAt document_start"
+  },
+  "runAtLabel": {
+    "message": "Run At",
+    "description": "runAt select label"
+  },
+  "runningStatusLabel": {
+    "message": "Running Status",
+    "description": "Server running status label"
+  },
+  "runOnceButton": {
+    "message": "Run Once (CDP)",
+    "description": "run once button"
+  },
+  "saveButton": {
+    "message": "Save",
+    "description": "Save button text"
+  },
+  "scheduleDailyTimeLabel": {
+    "message": "Time (HH:mm)",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleDailyTimePlaceholder": {
+    "message": "For example 09:30",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleDescribeDaily": {
+    "message": "Daily at $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeInterval": {
+    "message": "Every $ARG1$ minutes",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDescribeOnce": {
+    "message": "One time at $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "scheduleDialogTitle": {
+    "message": "Scheduled execution",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleEnableLabel": {
+    "message": "Enable",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleEnableTiming": {
+    "message": "Enable timing",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleExistingPlansTitle": {
+    "message": "Already have plans",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleIntervalLabel": {
+    "message": "Interval (minutes)",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleOnceTimeLabel": {
+    "message": "Time (ISO)",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleOnceTimePlaceholder": {
+    "message": "For example 2025-10-05T10:00:00",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleParametersLabel": {
+    "message": "Parameters (JSON)",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleParametersPlaceholder": {
+    "message": "{ \"username\": \"xx\" }",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleTypeDaily": {
+    "message": "Fixed time every day",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleTypeInterval": {
+    "message": "Every N minutes",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleTypeLabel": {
+    "message": "Type",
+    "description": "Auto-generated i18n message"
+  },
+  "scheduleTypeOnce": {
+    "message": "Execute only once",
+    "description": "Auto-generated i18n message"
+  },
+  "scriptLabel": {
+    "message": "Script",
+    "description": "script textarea label"
+  },
+  "semanticEngineInitFailedStatus": {
+    "message": "Semantic Engine Initialization Failed",
+    "description": "Semantic engine initialization failed status"
+  },
+  "semanticEngineInitializingStatus": {
+    "message": "Semantic Engine Initializing...",
+    "description": "Semantic engine initializing status"
+  },
+  "semanticEngineLabel": {
+    "message": "Semantic Engine",
+    "description": "Main section header for semantic engine"
+  },
+  "semanticEngineNotInitStatus": {
+    "message": "Semantic Engine Not Initialized",
+    "description": "Semantic engine not initialized status"
+  },
+  "semanticEngineReadyStatus": {
+    "message": "Semantic Engine Ready",
+    "description": "Semantic engine ready status"
+  },
+  "serviceNotConnectedStatus": {
+    "message": "Service Not Connected",
+    "description": "Service not connected status"
+  },
+  "serviceRunningStatus": {
+    "message": "Service Running (Port: $PORT$)",
+    "description": "Service running with port number",
+    "placeholders": {
+      "port": {
+        "content": "$1",
+        "example": "12306"
+      }
+    }
+  },
+  "settingsTitle": {
+    "message": "Settings",
+    "description": "Settings dialog title"
+  },
+  "sidepanelAddMarkerTitle": {
+    "message": "Add new marker",
+    "description": "Add marker button title"
+  },
+  "sidepanelConfirmDeleteMarker": {
+    "message": "Delete marker \"$ARG1$\"?",
+    "description": "Confirm deleting marker dialog text",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelConfirmDeleteWorkflow": {
+    "message": "Are you sure you want to delete this workflow? This action cannot be undone.",
+    "description": "Confirm deleting workflow dialog text"
+  },
+  "sidepanelCreateFlowUnavailable": {
+    "message": "V3 builder is not implemented yet, so workflows cannot be created.",
+    "description": "Workflow creation unavailable message"
+  },
+  "sidepanelCreateMarkerButton": {
+    "message": "Create marker",
+    "description": "Create marker CTA text"
+  },
+  "sidepanelCreateMarkerTitle": {
+    "message": "Create marker",
+    "description": "Create marker dialog title"
+  },
+  "sidepanelCreateTriggerUnavailable": {
+    "message": "V3 trigger management is not implemented yet, so triggers cannot be created.",
+    "description": "Trigger creation unavailable message"
+  },
+  "sidepanelEditFlowUnavailable": {
+    "message": "V3 builder is not implemented yet, so workflows cannot be edited.",
+    "description": "Workflow edit unavailable message"
+  },
+  "sidepanelEditMarkerTitle": {
+    "message": "Edit marker",
+    "description": "Edit marker dialog title"
+  },
+  "sidepanelEditTriggerUnavailable": {
+    "message": "V3 trigger management is not implemented yet, so triggers cannot be edited.",
+    "description": "Trigger edit unavailable message"
+  },
+  "sidepanelMarkerActionDelete": {
+    "message": "Delete",
+    "description": "Delete marker action title"
+  },
+  "sidepanelMarkerActionEdit": {
+    "message": "Edit",
+    "description": "Edit marker action title"
+  },
+  "sidepanelMarkerActionVerify": {
+    "message": "Verify",
+    "description": "Verify marker action title"
+  },
+  "sidepanelMarkerDomainCount": {
+    "message": "$ARG1$ markers",
+    "description": "Marker count per domain",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "sidepanelMarkerFieldMatchType": {
+    "message": "Match type",
+    "description": "Marker match type field label"
+  },
+  "sidepanelMarkerFieldName": {
+    "message": "Name",
+    "description": "Marker name field label"
+  },
+  "sidepanelMarkerFieldNamePlaceholder": {
+    "message": "For example: Login button",
+    "description": "Marker name input placeholder"
+  },
+  "sidepanelMarkerFieldSelector": {
+    "message": "Selector",
+    "description": "Marker selector field label"
+  },
+  "sidepanelMarkerFieldSelectorType": {
+    "message": "Selector type",
+    "description": "Marker selector type field label"
+  },
+  "sidepanelMarkerMatchExact": {
+    "message": "Exact match",
+    "description": "Marker match type exact option"
+  },
+  "sidepanelMarkerMatchHost": {
+    "message": "Hostname",
+    "description": "Marker match type host option"
+  },
+  "sidepanelMarkerMatchPrefix": {
+    "message": "Path prefix",
+    "description": "Marker match type prefix option"
+  },
+  "sidepanelMarkerSearchPlaceholder": {
+    "message": "Search marker name or selector...",
+    "description": "Marker search input placeholder"
+  },
+  "sidepanelMarkerSelectorCss": {
+    "message": "CSS selector",
+    "description": "Marker selector type option CSS"
+  },
+  "sidepanelMarkerSelectorPlaceholder": {
+    "message": "CSS selector or XPath",
+    "description": "Marker selector input placeholder"
+  },
+  "sidepanelMarkerSelectorXpath": {
+    "message": "XPath",
+    "description": "Marker selector type option XPath"
+  },
+  "sidepanelMarkerStatsFiltered": {
+    "message": "Showing $ARG1$ markers (out of $ARG2$) across $ARG3$ domains",
+    "description": "Marker filtered statistics text",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "sidepanelMarkerStatsTotal": {
+    "message": "Total $ARG1$ markers across $ARG2$ domains",
+    "description": "Marker total statistics text",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "sidepanelNavigatorAgentDesc": {
+    "message": "AI agent conversations and tasks",
+    "description": "Navigator AI agent tab description"
+  },
+  "sidepanelNavigatorAgentTitle": {
+    "message": "AI Assistant",
+    "description": "Navigator AI agent tab title"
+  },
+  "sidepanelNavigatorElementMarkersDesc": {
+    "message": "Manage page element annotations",
+    "description": "Navigator element marker tab description"
+  },
+  "sidepanelNavigatorElementMarkersTitle": {
+    "message": "Element annotation management",
+    "description": "Navigator element marker tab title"
+  },
+  "sidepanelNavigatorTitle": {
+    "message": "Switch pages",
+    "description": "Sidepanel navigator menu title"
+  },
+  "sidepanelNavigatorToggleTitle": {
+    "message": "Switch pages (drag to move, double-click to reset position)",
+    "description": "Sidepanel navigator toggle button tooltip"
+  },
+  "sidepanelNavigatorWorkflowsDesc": {
+    "message": "Record and replay automation workflows",
+    "description": "Navigator workflows tab description"
+  },
+  "sidepanelNavigatorWorkflowsTitle": {
+    "message": "Workflow management",
+    "description": "Navigator workflows tab title"
+  },
+  "sidepanelNoMarkers": {
+    "message": "No markers yet. Click + in the top-right corner to create the first marker.",
+    "description": "No markers empty-state message"
+  },
+  "sidepanelNoMatchingMarkers": {
+    "message": "No matching markers found",
+    "description": "No matching markers message"
+  },
+  "sidepanelPageTitle": {
+    "message": "webpage-mcp-server",
+    "description": "Auto-generated i18n message"
+  },
+  "sidepanelUpdateButton": {
+    "message": "Update",
+    "description": "Update marker button text"
+  },
+  "statusAll": {
+    "message": "all",
+    "description": "status all"
+  },
+  "statusDisabled": {
+    "message": "disabled",
+    "description": "status disabled"
+  },
+  "statusEnabled": {
+    "message": "enabled",
+    "description": "status enabled"
+  },
+  "statusLabel": {
+    "message": "Status",
+    "description": "Generic status label"
+  },
+  "successNotification": {
+    "message": "Operation completed successfully",
+    "description": "Generic success notification"
+  },
+  "switchingModelStatus": {
+    "message": "Switching Model...",
+    "description": "Model switching progress message"
+  },
+  "tableHeaderName": {
+    "message": "Name",
+    "description": "table header name"
+  },
+  "tableHeaderRunAt": {
+    "message": "Run At",
+    "description": "table header runAt"
+  },
+  "tableHeaderUpdated": {
+    "message": "Updated",
+    "description": "table header updated"
+  },
+  "tableHeaderWorld": {
+    "message": "World",
+    "description": "table header world"
+  },
+  "tagsInputLabel": {
+    "message": "Tags (comma-separated)",
+    "description": "tags input"
+  },
+  "themeLabel": {
+    "message": "Theme",
+    "description": "Theme selector label"
+  },
+  "timeoutErrorMessage": {
+    "message": "Operation timed out",
+    "description": "Timeout error message"
+  },
+  "triggerPanelAddInterval": {
+    "message": "+ Interval",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelAddOnce": {
+    "message": "+ Once",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelCreate": {
+    "message": "Create",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelCurrentTriggers": {
+    "message": "Current Triggers ($ARG1$)",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDeleteConfirm": {
+    "message": "Delete trigger?\n\n$ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCommandKey": {
+    "message": "commandKey: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCron": {
+    "message": "cron: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeCronWithTz": {
+    "message": "cron: $ARG1$ ($ARG2$)",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
+  },
+  "triggerPanelDescribeDomSelector": {
+    "message": "selector: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeInterval": {
+    "message": "Every $ARG1$ minute(s)",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeManual": {
+    "message": "Manual trigger (fire via button)",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelDescribeMenuTitle": {
+    "message": "title: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeOnceAt": {
+    "message": "At $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelDescribeUrlRules": {
+    "message": "URL match rules: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelEditViaNodeHint": {
+    "message": "Edit via trigger node in Builder",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelEnabledLabel": {
+    "message": "Enabled",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelFireButton": {
+    "message": "Fire",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelFlowIdEmpty": {
+    "message": "Flow ID is empty",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelIntervalHint": {
+    "message": "Uses chrome.alarms.periodInMinutes for repeating triggers.",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelIntervalOption": {
+    "message": "interval",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelInvalidTimeFormat": {
+    "message": "Invalid trigger time format",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelOnceHint": {
+    "message": "Will auto-disable after firing. Time is in local timezone.",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelOnceOption": {
+    "message": "once",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelOtherTypesHint": {
+    "message": "Other types (url/cron/command/contextMenu/dom) are configured via trigger nodes.",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelOwnerExternal": {
+    "message": "external",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelOwnerTriggerNode": {
+    "message": "via trigger node",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelPastTimeWarn": {
+    "message": "Trigger time is in the past. It may fire immediately.",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelRunEnqueued": {
+    "message": "run enqueued",
+    "description": "Auto-generated i18n message"
+  },
+  "triggerPanelTriggeredToast": {
+    "message": "Triggered: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "triggerPanelTriggerTimeLabel": {
+    "message": "Trigger Time",
+    "description": "Auto-generated i18n message"
+  },
+  "unknownErrorMessage": {
+    "message": "Unknown error, please check if your network can access HuggingFace",
+    "description": "Unknown error fallback message"
+  },
+  "userscriptsManagerTitle": {
+    "message": "Userscripts Manager",
+    "description": "Options page title"
+  },
+  "vectorDocumentsLabel": {
+    "message": "Vector Documents",
+    "description": "Number of vector documents label"
+  },
+  "verboseLoggingLabel": {
+    "message": "Verbose Logging",
+    "description": "Verbose logging toggle label"
+  },
+  "warningNotification": {
+    "message": "Warning: Please review before proceeding",
+    "description": "Generic warning notification"
+  },
+  "welcomeConnectTip": {
+    "message": "Tip: You can also open the extension popup and click \"Connect\" to copy a full client config snippet.",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeCopyButton": {
+    "message": "Copy",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeCurrentExtensionId": {
+    "message": "Current extension ID:",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeDiagnosticsDesc": {
+    "message": "Run \"doctor\" to check installation status. If it reports an error, run the auto-fix command.",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeDiagnosticsTitle": {
+    "message": "Diagnostics",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeHeaderSubtitle": {
+    "message": "Extension-aware setup commands (includes this extension ID).",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeHeaderTitle": {
+    "message": "Webpage MCP Server",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeMcpConfigDesc": {
+    "message": "Use this in your MCP client. No localhost HTTP URL is required.",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeMcpConfigTitle": {
+    "message": "MCP client config (stdio)",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeOpenTroubleshootingDocs": {
+    "message": "Open troubleshooting docs",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomePageTitle": {
+    "message": "Welcome - webpage-mcp-server",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeRegisterHostDesc": {
+    "message": "Run this command first. It writes the Native Messaging manifest with your current extension ID so Chrome can launch the local host process.",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeRegisterHostTitle": {
+    "message": "Register Native Host (one-time)",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeReportIssueDesc": {
+    "message": "Generate a diagnostic report and paste it into a GitHub issue.",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeReportIssueTip": {
+    "message": "This copies the report to your clipboard (sensitive info is automatically redacted).",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeReportIssueTitle": {
+    "message": "Report an issue",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeStdioCommandDesc": {
+    "message": "Then use this command in your MCP client. No global install and no localhost URL are required.",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeStdioCommandTitle": {
+    "message": "MCP stdio command",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeTroubleshootingCommands": {
+    "message": "doctor | report",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeTroubleshootingDesc": {
+    "message": "Use these only if the bridge fails to register or connect.",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeTroubleshootingDocsButton": {
+    "message": "Troubleshooting Docs",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsAddTriggerTitle": {
+    "message": "Add trigger",
+    "description": "Add trigger button tooltip"
+  },
+  "workflowsAdvancedSection": {
+    "message": "Advanced",
+    "description": "Workflow advanced section title"
+  },
+  "workflowsCountPlural": {
+    "message": "workflows",
+    "description": "Workflow count plural unit"
+  },
+  "workflowsCountSingular": {
+    "message": "workflow",
+    "description": "Workflow count singular unit"
+  },
+  "workflowsCreateButton": {
+    "message": "New",
+    "description": "Create workflow button text"
+  },
+  "workflowsCreateWorkflow": {
+    "message": "Create workflow",
+    "description": "Create workflow action text"
+  },
+  "workflowsCurrentPageOnly": {
+    "message": "Current page only",
+    "description": "Workflow filter current page only label"
+  },
+  "workflowsDeleteAction": {
+    "message": "Delete",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsDeleteTriggerTitle": {
+    "message": "Delete",
+    "description": "Delete trigger button tooltip"
+  },
+  "workflowsDescriptionLabel": {
+    "message": "Description",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsEditTriggerTitle": {
+    "message": "Edit",
+    "description": "Edit trigger button tooltip"
+  },
+  "workflowsEditWorkflowTitle": {
+    "message": "Edit workflow",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsEmptyDesc": {
+    "message": "Record your first automation workflow",
+    "description": "Workflow empty state description"
+  },
+  "workflowsEmptySearchDesc": {
+    "message": "Try a different search term",
+    "description": "Workflow empty search description"
+  },
+  "workflowsEmptySearchTitle": {
+    "message": "No matching workflows",
+    "description": "Workflow empty state title for filtered search"
+  },
+  "workflowsEmptyTitle": {
+    "message": "No workflows yet",
+    "description": "Workflow empty state title"
+  },
+  "workflowsExportAction": {
+    "message": "Export",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsImportAction": {
+    "message": "Import",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsMillisecondsValue": {
+    "message": "$ARG1$ms",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsMoreActionsTitle": {
+    "message": "More actions",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsNoDescription": {
+    "message": "No description",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsNoRunHistory": {
+    "message": "No run history yet",
+    "description": "Workflow run history empty text"
+  },
+  "workflowsNoTriggers": {
+    "message": "No triggers configured",
+    "description": "Workflow triggers empty text"
+  },
+  "workflowsOptionalDescription": {
+    "message": "Optional description",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRefreshTitle": {
+    "message": "Refresh",
+    "description": "Workflow list refresh button tooltip"
+  },
+  "workflowsRunAction": {
+    "message": "Run",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRunCanceled": {
+    "message": "Canceled",
+    "description": "Workflow run status canceled"
+  },
+  "workflowsRunDurationPrefix": {
+    "message": "Time taken",
+    "description": "Workflow run duration label prefix"
+  },
+  "workflowsRunEntrySummary": {
+    "message": "#$ARG1$ $ARG2$ - step=$ARG3$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      },
+      "arg3": {
+        "content": "$3$",
+        "example": "3"
+      }
+    }
+  },
+  "workflowsRunFailed": {
+    "message": "Failed",
+    "description": "Workflow run status failed"
+  },
+  "workflowsRunHistory": {
+    "message": "Run history",
+    "description": "Workflow run history section title"
+  },
+  "workflowsRunPaused": {
+    "message": "Paused",
+    "description": "Workflow run status paused"
+  },
+  "workflowsRunQueued": {
+    "message": "Queued",
+    "description": "Workflow run status queued"
+  },
+  "workflowsRunRunning": {
+    "message": "Running",
+    "description": "Workflow run status running"
+  },
+  "workflowsRunStatusPrefix": {
+    "message": "Status",
+    "description": "Workflow run status label prefix"
+  },
+  "workflowsRunSucceeded": {
+    "message": "Succeeded",
+    "description": "Workflow run status succeeded"
+  },
+  "workflowsRunWorkflowTitle": {
+    "message": "Run workflow",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsSearchPlaceholder": {
+    "message": "Search workflows...",
+    "description": "Workflow search input placeholder"
+  },
+  "workflowsSecondsUnit": {
+    "message": "s",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggersSection": {
+    "message": "Triggers",
+    "description": "Workflow triggers section title"
+  },
+  "workflowsUntitledName": {
+    "message": "Untitled",
+    "description": "Auto-generated i18n message"
+  },
+  "worldAuto": {
+    "message": "auto",
+    "description": "world auto"
+  },
+  "worldIsolated": {
+    "message": "ISOLATED",
+    "description": "ISOLATED world"
+  },
+  "worldLabel": {
+    "message": "World",
+    "description": "world select label"
+  },
+  "worldMain": {
+    "message": "MAIN",
+    "description": "MAIN world"
+  }
 }

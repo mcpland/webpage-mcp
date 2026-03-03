@@ -27,6 +27,7 @@ import AgentSessionSettingsPanel, {
 import AgentSettingsMenu from './agent-chat/AgentSettingsMenu';
 import AgentTopBar, { type ConnectionState } from './agent-chat/AgentTopBar';
 import WebEditorChanges from './agent-chat/WebEditorChanges';
+import { getMessage } from '@/utils/i18n';
 
 type SessionWithPreviewMeta = AgentSession & {
   previewMeta?: {
@@ -152,6 +153,9 @@ type AgentChatViewProps = {
 };
 
 export default function AgentChatView(props: AgentChatViewProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   return (
     <div className="agent-theme relative h-full" data-agent-theme={props.theme}>
       {props.isSessionsView ? (
@@ -204,7 +208,7 @@ export default function AgentChatView(props: AgentChatViewProps) {
                 cancelling={props.cancelling}
                 canCancel={props.canCancel}
                 canSend={props.canSend}
-                placeholder="Ask Claude to write code..."
+                placeholder={t('agentChatComposerPlaceholder', 'Ask Claude to write code...')}
                 engineName={props.currentEngineName}
                 selectedModel={props.currentSessionModel}
                 availableModels={props.currentAvailableModels}

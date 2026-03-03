@@ -4,6 +4,7 @@ import type {
   AttachmentStatsResponse,
 } from 'webpage-mcp-shared';
 import { requestAgentRpcJson } from '@/utils/agent-rpc';
+import { getMessage } from '@/utils/i18n';
 
 type AttachmentCachePanelProps = {
   open: boolean;
@@ -41,6 +42,9 @@ export default function AttachmentCachePanel({
   serverPort: _serverPort,
   onClose,
 }: AttachmentCachePanelProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const [stats, setStats] = useState<AttachmentStatsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
@@ -126,7 +130,7 @@ export default function AttachmentCachePanel({
         });
         if (controller.signal.aborted) return;
         if (!data || data.success !== true) {
-          throw new Error('Invalid response from server.');
+          throw new Error(t('agentAttachmentInvalidServerResponse', 'Invalid response from server.'));
         }
 
         setStats(data);
@@ -136,7 +140,11 @@ export default function AttachmentCachePanel({
       } catch (err: unknown) {
         if ((err as { name?: string }).name === 'AbortError') return;
         console.error('Failed to load attachment stats:', err);
-        setErrorMessage(err instanceof Error ? err.message : 'Failed to load attachment stats.');
+        setErrorMessage(
+          err instanceof Error
+            ? err.message
+            : t('agentAttachmentLoadStatsFailed', 'Failed to load attachment stats.'),
+        );
       } finally {
         if (!controller.signal.aborted) {
           setIsLoading(false);
@@ -165,17 +173,24 @@ export default function AttachmentCachePanel({
         body: { projectIds },
       });
       if (!result || result.success !== true) {
-        throw new Error('Invalid response from server.');
+        throw new Error(t('agentAttachmentInvalidServerResponse', 'Invalid response from server.'));
       }
 
       setStatusMessage(
-        `Removed ${formatBytes(result.removedBytes)} (${result.removedFiles.toLocaleString()} files).`,
+        t('agentAttachmentRemovedSummary', 'Removed {0} ({1} files).', [
+          formatBytes(result.removedBytes),
+          result.removedFiles.toLocaleString(),
+        ]),
       );
       setSelectedProjectIds(new Set());
       await loadStats({ resetStatusMessage: false });
     } catch (err: unknown) {
       console.error('Failed to clear attachments:', err);
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to clear attachments.');
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : t('agentAttachmentClearFailed', 'Failed to clear attachments.'),
+      );
     } finally {
       setIsClearing(false);
     }
@@ -251,7 +266,7 @@ export default function AttachmentCachePanel({
       className="fixed inset-0 z-50 flex items-center justify-center"
       role="dialog"
       aria-modal="true"
-      aria-label="Attachment cache management"
+      aria-label={t('agentAttachmentCacheDialogAria', 'Attachment cache management')}
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           onClose?.();
@@ -275,10 +290,13 @@ export default function AttachmentCachePanel({
         >
           <div className="min-w-0">
             <h2 className="text-sm font-semibold" style={{ color: 'var(--ac-text, #1a1a1a)' }}>
-              Attachment Cache
+              {t('agentAttachmentCacheTitle', 'Attachment Cache')}
             </h2>
             <p className="text-[10px] mt-0.5" style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}>
-              Manage cached images stored on disk by the agent server.
+              {t(
+                'agentAttachmentCacheDesc',
+                'Manage cached images stored on disk by the agent server.',
+              )}
             </p>
           </div>
 
@@ -292,7 +310,7 @@ export default function AttachmentCachePanel({
                 borderRadius: 'var(--ac-radius-button, 8px)',
                 opacity: !serverReady || isLoading || isClearing ? 0.6 : 1,
               }}
-              title="Refresh"
+              title={t('workflowsRefreshTitle', 'Refresh')}
               onClick={() => void refresh()}
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -312,7 +330,7 @@ export default function AttachmentCachePanel({
                 color: 'var(--ac-text-muted, #6e6e6e)',
                 borderRadius: 'var(--ac-radius-button, 8px)',
               }}
-              aria-label="Close"
+              aria-label={t('closeButton', 'Close')}
               onClick={onClose}
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -326,10 +344,13 @@ export default function AttachmentCachePanel({
           {!serverReady ? (
             <div className="py-10 text-center">
               <div className="text-sm" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-                Agent server not ready.
+                {t('agentServerNotReadySimple', 'Agent server not ready.')}
               </div>
               <div className="text-[10px] mt-1" style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}>
-                Start or reconnect the server, then open this panel again.
+                {t(
+                  'agentServerReconnectHint',
+                  'Start or reconnect the server, then open this panel again.',
+                )}
               </div>
             </div>
           ) : null}
@@ -341,7 +362,7 @@ export default function AttachmentCachePanel({
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                 </svg>
-                Loading attachment stats...
+                {t('agentAttachmentLoadingStats', 'Loading attachment stats...')}
               </div>
             </div>
           ) : null}
@@ -372,7 +393,7 @@ export default function AttachmentCachePanel({
                   disabled={isLoading || isClearing}
                   onClick={() => void refresh()}
                 >
-                  Retry
+                  {t('retryButton', 'Retry')}
                 </button>
                 <button
                   type="button"
@@ -384,7 +405,7 @@ export default function AttachmentCachePanel({
                   }}
                   onClick={onClose}
                 >
-                  Close
+                  {t('closeButton', 'Close')}
                 </button>
               </div>
             </div>
@@ -401,13 +422,13 @@ export default function AttachmentCachePanel({
                   }}
                 >
                   <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--ac-text-subtle)' }}>
-                    Total Size
+                    {t('agentAttachmentTotalSizeLabel', 'Total Size')}
                   </div>
                   <div className="text-sm font-semibold" style={{ color: 'var(--ac-text)' }}>
                     {formatBytes(totalBytes)}
                   </div>
                   <div className="text-[10px]" style={{ color: 'var(--ac-text-muted)' }}>
-                    {totalFiles.toLocaleString()} files
+                    {t('agentAttachmentFilesCount', '{0} files', [totalFiles.toLocaleString()])}
                   </div>
                 </div>
 
@@ -419,14 +440,16 @@ export default function AttachmentCachePanel({
                   }}
                 >
                   <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--ac-text-subtle)' }}>
-                    Root Directory
+                    {t('agentAttachmentRootDirectoryLabel', 'Root Directory')}
                   </div>
                   <div className="text-[11px] font-mono truncate" style={{ color: 'var(--ac-text)' }} title={stats.rootDir}>
                     {stats.rootDir || '-'}
                   </div>
                   {orphanProjectIds.length > 0 ? (
                     <div className="text-[10px] mt-0.5" style={{ color: 'var(--ac-text-subtle)' }}>
-                      {orphanProjectIds.length} orphan project{orphanProjectIds.length === 1 ? '' : 's'}
+                      {t('agentAttachmentOrphanProjectsCount', '{0} orphan projects', [
+                        String(orphanProjectIds.length),
+                      ])}
                     </div>
                   ) : null}
                 </div>
@@ -437,7 +460,7 @@ export default function AttachmentCachePanel({
                   className="text-[10px] font-bold uppercase tracking-wider"
                   style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
                 >
-                  Projects
+                  {t('agentProjectsTitle', 'Projects')}
                 </div>
 
                 <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -448,7 +471,7 @@ export default function AttachmentCachePanel({
                     disabled={isClearing || selectableProjectIds.length === 0}
                     onClick={selectAll}
                   >
-                    Select all
+                    {t('agentAttachmentSelectAll', 'Select all')}
                   </button>
                   <button
                     type="button"
@@ -457,7 +480,7 @@ export default function AttachmentCachePanel({
                     disabled={isClearing || selectableProjectIds.length === 0}
                     onClick={invertSelection}
                   >
-                    Invert
+                    {t('agentAttachmentInvertSelection', 'Invert')}
                   </button>
                   <button
                     type="button"
@@ -466,7 +489,7 @@ export default function AttachmentCachePanel({
                     disabled={isClearing || selectedCount === 0}
                     onClick={clearSelection}
                   >
-                    Clear
+                    {t('clearButton', 'Clear')}
                   </button>
                 </div>
               </div>
@@ -474,7 +497,7 @@ export default function AttachmentCachePanel({
               {projectsSorted.length === 0 ? (
                 <div className="py-8 text-center">
                   <div className="text-sm" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-                    No attachment data found.
+                    {t('agentAttachmentNoData', 'No attachment data found.')}
                   </div>
                 </div>
               ) : (
@@ -511,7 +534,7 @@ export default function AttachmentCachePanel({
                                 color: 'var(--ac-text)',
                               }}
                             >
-                              orphan
+                              {t('agentAttachmentOrphanTag', 'orphan')}
                             </span>
                           ) : null}
                           {!project.exists ? (
@@ -523,13 +546,17 @@ export default function AttachmentCachePanel({
                                 border: 'var(--ac-border-width) solid var(--ac-chip-border)',
                               }}
                             >
-                              missing
+                              {t('agentAttachmentMissingTag', 'missing')}
                             </span>
                           ) : null}
                         </div>
 
                         <div className="text-[10px] mt-0.5 flex flex-wrap items-center gap-2" style={{ color: 'var(--ac-text-subtle)' }}>
-                          <span>{project.fileCount.toLocaleString()} files</span>
+                          <span>
+                            {t('agentAttachmentFilesCount', '{0} files', [
+                              project.fileCount.toLocaleString(),
+                            ])}
+                          </span>
                           <span className="opacity-50">&middot;</span>
                           <span>{formatBytes(project.totalBytes)}</span>
                         </div>
@@ -553,7 +580,16 @@ export default function AttachmentCachePanel({
           style={{ borderTop: 'var(--ac-border-width, 1px) solid var(--ac-border, #e5e5e5)' }}
         >
           <div className="text-[10px] min-w-0" style={{ color: 'var(--ac-text-subtle)' }}>
-            {statusMessage ? <span>{statusMessage}</span> : <span>Select projects to remove cached attachment files from disk.</span>}
+            {statusMessage ? (
+              <span>{statusMessage}</span>
+            ) : (
+              <span>
+                {t(
+                  'agentAttachmentSelectProjectsHint',
+                  'Select projects to remove cached attachment files from disk.',
+                )}
+              </span>
+            )}
           </div>
 
           <button
@@ -563,7 +599,9 @@ export default function AttachmentCachePanel({
             style={clearButtonStyle}
             onClick={() => void clearSelected()}
           >
-            {isClearing ? 'Clearing...' : `Clear Selected (${selectedCount})`}
+            {isClearing
+              ? t('clearingStatus', 'Clearing...')
+              : t('agentAttachmentClearSelected', 'Clear Selected ({0})', [String(selectedCount)])}
           </button>
         </div>
       </div>

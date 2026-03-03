@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentSession } from 'webpage-mcp-shared';
+import { getMessage } from '@/utils/i18n';
 
 type SessionPreviewMeta = {
   displayText?: string;
@@ -49,17 +50,20 @@ function formatUpdatedAt(updatedAt: string): string {
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
 
+  const uiLocale = chrome.i18n?.getUILanguage?.() || undefined;
+  const rtf = new Intl.RelativeTimeFormat(uiLocale, { numeric: 'auto', style: 'short' });
+
   if (diffMins < 1) {
-    return 'just now';
+    return rtf.format(0, 'minute');
   }
   if (diffMins < 60) {
-    return `${diffMins}m ago`;
+    return rtf.format(-diffMins, 'minute');
   }
   if (diffHours < 24) {
-    return `${diffHours}h ago`;
+    return rtf.format(-diffHours, 'hour');
   }
   if (diffDays < 7) {
-    return `${diffDays}d ago`;
+    return rtf.format(-diffDays, 'day');
   }
   return date.toLocaleDateString();
 }
@@ -87,6 +91,9 @@ export default function AgentSessionListItem({
   onDelete,
   onOpenProject,
 }: AgentSessionListItemProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const [isEditing, setIsEditing] = useState(false);
   const [editingName, setEditingName] = useState('');
   const renameInputRef = useRef<HTMLInputElement | null>(null);
@@ -102,7 +109,7 @@ export default function AgentSessionListItem({
     }
   }, [isEditing]);
 
-  const displayName = session.name || 'Unnamed Session';
+  const displayName = session.name || t('agentSessionsUnnamed', 'Unnamed Session');
   const engineAbbrev = getEngineAbbrev(session.engineName);
   const formattedDate = formatUpdatedAt(session.updatedAt);
   const displayProjectPath = formatProjectPath(projectPath);
@@ -142,8 +149,8 @@ export default function AgentSessionListItem({
   }
 
   function handleDelete(): void {
-    const sessionName = session.name || session.preview || 'this session';
-    if (confirm(`Delete "${sessionName}"?`)) {
+    const sessionName = session.name || session.preview || t('agentSessionThisSession', 'this session');
+    if (confirm(t('agentSessionDeleteNamedConfirm', 'Delete "{0}"?', [sessionName]))) {
       onDelete?.(session.id);
     }
   }
@@ -225,8 +232,8 @@ export default function AgentSessionListItem({
                       color: '#ffffff',
                       borderRadius: 'var(--ac-radius-button)',
                     }}
-                  >
-                    Running
+                    >
+                    {t('agentSessionRunningBadge', 'Running')}
                   </span>
                 ) : null}
               </>
@@ -310,7 +317,7 @@ export default function AgentSessionListItem({
               <button
                 className="p-1.5 rounded-md transition-colors cursor-pointer"
                 style={{ color: 'var(--ac-text-muted)', backgroundColor: 'transparent' }}
-                title="Open project"
+                title={t('agentSessionOpenProjectTitle', 'Open project')}
                 onClick={(event) => {
                   event.stopPropagation();
                   onOpenProject?.(session.id);
@@ -339,7 +346,7 @@ export default function AgentSessionListItem({
               <button
                 className="p-1.5 rounded-md transition-colors cursor-pointer"
                 style={{ color: 'var(--ac-text-muted)', backgroundColor: 'transparent' }}
-                title="Rename"
+                title={t('agentSessionRenameTitle', 'Rename')}
                 onClick={(event) => {
                   event.stopPropagation();
                   setEditingName(session.name || '');
@@ -362,7 +369,7 @@ export default function AgentSessionListItem({
               <button
                 className="p-1.5 rounded-md transition-colors cursor-pointer"
                 style={{ color: 'var(--ac-danger)', backgroundColor: 'transparent' }}
-                title="Delete"
+                title={t('agentSessionDeleteTitle', 'Delete')}
                 onClick={(event) => {
                   event.stopPropagation();
                   handleDelete();

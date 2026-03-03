@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentUsageStats } from 'webpage-mcp-shared';
+import { getMessage } from '@/utils/i18n';
 
 type AgentChatShellProps = {
   errorMessage?: string | null;
@@ -37,6 +38,9 @@ export default function AgentChatShell({
   composer,
   onErrorDismiss,
 }: AgentChatShellProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const contentRef = useRef<HTMLElement | null>(null);
   const contentSlotRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
@@ -162,8 +166,8 @@ export default function AgentChatShell({
                 color: 'var(--ac-danger)',
                 borderRadius: 'var(--ac-radius-button)',
               }}
-              aria-label="Dismiss error"
-              title="Dismiss"
+              aria-label={t('agentDismissErrorAria', 'Dismiss error')}
+              title={t('agentDismissTitle', 'Dismiss')}
               onClick={onErrorDismiss}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -181,17 +185,29 @@ export default function AgentChatShell({
         >
           {usage ? (
             <>
-              <span title={`Input: ${usage.inputTokens.toLocaleString()}, Output: ${usage.outputTokens.toLocaleString()}`}>
-                {formatTokens(usage.inputTokens + usage.outputTokens)} tokens
+              <span
+                title={t('agentUsageInputOutputTitle', 'Input: {0}, Output: {1}', [
+                  usage.inputTokens.toLocaleString(),
+                  usage.outputTokens.toLocaleString(),
+                ])}
+              >
+                {t('agentUsageTokensSummary', '{0} tokens', [
+                  formatTokens(usage.inputTokens + usage.outputTokens),
+                ])}
               </span>
               <span className="opacity-50">|</span>
-              <span title={`Duration: ${(usage.durationMs / 1000).toFixed(1)}s, Turns: ${usage.numTurns}`}>
+              <span
+                title={t('agentUsageDurationTurnsTitle', 'Duration: {0}s, Turns: {1}', [
+                  (usage.durationMs / 1000).toFixed(1),
+                  String(usage.numTurns),
+                ])}
+              >
                 ${usage.totalCostUsd.toFixed(4)}
               </span>
               <span className="opacity-50">|</span>
             </>
           ) : null}
-          <span>{footerLabel || 'Agent Preview'}</span>
+          <span>{footerLabel || t('agentPreviewFooterLabel', 'Agent Preview')}</span>
         </div>
       </footer>
     </div>

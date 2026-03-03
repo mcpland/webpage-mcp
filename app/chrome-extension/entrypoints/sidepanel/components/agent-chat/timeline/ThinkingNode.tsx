@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { getMessage } from '@/utils/i18n';
 
 import './ThinkingNode.css';
 
@@ -36,6 +37,8 @@ function formatLine(text: string): string {
 }
 
 export default function ThinkingNode({ node, loading }: ThinkingNodeProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
   const [expanded, setExpanded] = useState(false);
 
   const isLoading = useMemo(() => loading ?? node.loading ?? false, [loading, node.loading]);
@@ -103,7 +106,7 @@ export default function ThinkingNode({ node, loading }: ThinkingNodeProps) {
         {isLoading ? (
           <span className="thinking-loading">
             <span className="thinking-pulse" aria-hidden="true" />
-            Thinking...
+            {t('agentThinkingStatus', 'Thinking...')}
           </span>
         ) : (
           <>
@@ -125,7 +128,10 @@ export default function ThinkingNode({ node, loading }: ThinkingNodeProps) {
                 >
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
-                {moreCount} more {moreCount === 1 ? 'line' : 'lines'}
+                {t('agentMoreLinesCount', '{0} more {1}', [
+                  String(moreCount),
+                  moreCount === 1 ? t('agentLineWord', 'line') : t('agentLinesWord', 'lines'),
+                ])}
               </span>
             ) : null}
           </>

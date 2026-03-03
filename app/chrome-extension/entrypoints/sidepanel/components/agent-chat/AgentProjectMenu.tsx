@@ -2,6 +2,7 @@ import type { ChangeEvent } from 'react';
 import type { AgentEngineInfo, AgentProject, CodexReasoningEffort } from 'webpage-mcp-shared';
 
 import { getCodexReasoningEfforts, getDefaultModelForCli, getModelsForCli } from '@/common/agent-models';
+import { getMessage } from '@/utils/i18n';
 
 type AgentProjectMenuProps = {
   open: boolean;
@@ -44,6 +45,9 @@ export default function AgentProjectMenu({
   onWebpageMcpUpdate,
   onSave,
 }: AgentProjectMenuProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const availableModels = getModelsForCli(selectedCli);
 
   const trimmedModel = model.trim();
@@ -121,7 +125,7 @@ export default function AgentProjectMenu({
         className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider"
         style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
       >
-        Projects
+        {t('agentProjectsTitle', 'Projects')}
       </div>
 
       <div className="max-h-[200px] overflow-y-auto ac-scroll">
@@ -164,7 +168,9 @@ export default function AgentProjectMenu({
         onClick={onProjectNew}
         type="button"
       >
-        {isPicking ? 'Selecting...' : '+ New Project'}
+        {isPicking
+          ? t('agentProjectsSelecting', 'Selecting...')
+          : t('agentProjectsNewButton', '+ New Project')}
       </button>
 
       <div
@@ -176,12 +182,12 @@ export default function AgentProjectMenu({
         className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider"
         style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
       >
-        Settings
+        {t('agentProjectMenuSettingsTitle', 'Settings')}
       </div>
 
       <div className="px-3 py-2 flex items-center gap-2">
         <span className="text-xs w-12" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-          CLI
+          {t('agentProjectMenuCliLabel', 'CLI')}
         </span>
         <select
           value={selectedCli}
@@ -194,7 +200,7 @@ export default function AgentProjectMenu({
           }}
           onChange={handleCliChange}
         >
-          <option value="">Auto</option>
+          <option value="">{t('agentProjectMenuAutoOption', 'Auto')}</option>
           {engines.map((e) => (
             <option key={e.name} value={e.name}>
               {e.name}
@@ -205,7 +211,7 @@ export default function AgentProjectMenu({
 
       <div className="px-3 py-2 flex items-center gap-2">
         <span className="text-xs w-12" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-          Model
+          {t('agentProjectMenuModelLabel', 'Model')}
         </span>
         <select
           value={normalizedModel}
@@ -219,7 +225,7 @@ export default function AgentProjectMenu({
           disabled={isModelDisabled}
           onChange={handleModelChange}
         >
-          <option value="">Default</option>
+          <option value="">{t('agentProjectMenuDefaultOption', 'Default')}</option>
           {availableModels.map((m) => (
             <option key={m.id} value={m.id}>
               {m.name}
@@ -232,7 +238,7 @@ export default function AgentProjectMenu({
         <div className="px-3 py-2">
           <div className="flex items-center gap-2">
             <span className="text-xs w-12" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-              Effort
+              {t('agentProjectMenuEffortLabel', 'Effort')}
             </span>
             <select
               value={normalizedReasoningEffort}
@@ -253,7 +259,10 @@ export default function AgentProjectMenu({
             </select>
           </div>
           <p className="text-[10px] mt-1 ml-14" style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}>
-            Applies to new sessions. Edit existing session in Session Settings.
+            {t(
+              'agentProjectMenuEffortHint',
+              'Applies to new sessions. Edit existing session in Session Settings.',
+            )}
           </p>
         </div>
       ) : null}
@@ -261,11 +270,14 @@ export default function AgentProjectMenu({
       {showWebpageMcpOption ? (
         <div className="px-3 py-2 flex items-center gap-2">
           <span className="text-xs w-12" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-            MCP
+            {t('agentProjectMenuMcpLabel', 'MCP')}
           </span>
           <label
             className="flex items-center gap-2 cursor-pointer"
-            title="Enable local Webpage MCP server integration"
+            title={t(
+              'agentProjectMenuEnableMcpTitle',
+              'Enable local Webpage MCP server integration',
+            )}
           >
             <input
               type="checkbox"
@@ -277,7 +289,7 @@ export default function AgentProjectMenu({
               onChange={handleWebpageMcpChange}
             />
             <span className="text-xs" style={{ color: 'var(--ac-text, #1a1a1a)' }}>
-              Enable Webpage MCP Server
+              {t('agentProjectMenuEnableMcpLabel', 'Enable Webpage MCP Server')}
             </span>
           </label>
         </div>
@@ -295,7 +307,9 @@ export default function AgentProjectMenu({
           onClick={onSave}
           type="button"
         >
-          {isSaving ? 'Saving...' : 'Save Settings'}
+          {isSaving
+            ? t('agentProjectMenuSaving', 'Saving...')
+            : t('agentProjectMenuSaveSettings', 'Save Settings')}
         </button>
       </div>
 

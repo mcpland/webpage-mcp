@@ -24,6 +24,7 @@ import TriggerPanel from '@/entrypoints/popup/components/builder/components/Trig
 import EdgePropertyPanel from '@/entrypoints/popup/components/builder/components/EdgePropertyPanel';
 import Sidebar from '@/entrypoints/popup/components/builder/components/Sidebar';
 import PropertyPanel from '@/entrypoints/popup/components/builder/components/PropertyPanel';
+import { getMessage } from '@/utils/i18n';
 import { useRRV3Rpc } from '../shared/react/useRRV3Rpc';
 import './App.css';
 
@@ -79,8 +80,10 @@ function getQuery(): Record<string, string> {
 export default function BuilderApp() {
   const storeRef = useRef(useBuilderStore());
   const store = storeRef.current;
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
 
-  const [title, setTitle] = useState('Workflow Editor');
+  const [title, setTitle] = useState(() => t('builderWorkflowEditorTitle', 'Workflow Editor'));
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     try {
       const persisted = localStorage.getItem('rr-theme') as 'light' | 'dark' | null;
@@ -135,13 +138,17 @@ export default function BuilderApp() {
   const currentSubflowIdVal = ((store.currentSubflowId as any)?.value ?? null) as string | null;
 
   const saveLabel =
-    saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : '';
+    saveState === 'saving'
+      ? t('builderSavingStatus', 'Saving...')
+      : saveState === 'saved'
+        ? t('builderSavedStatus', 'Saved')
+        : '';
 
   function initEmptyFlow() {
     const now = Date.now();
     const empty: FlowV2 = {
       id: `flow_${now}`,
-      name: 'New workflow',
+      name: t('builderNewWorkflowName', 'New workflow'),
       version: 1,
       steps: [],
       variables: [],
@@ -151,7 +158,7 @@ export default function BuilderApp() {
       } as any,
     } as any;
     store.initFromFlow(empty);
-    setTitle('New workflow');
+    setTitle(t('builderNewWorkflowName', 'New workflow'));
   }
 
   async function bootstrap() {
@@ -167,7 +174,9 @@ export default function BuilderApp() {
           const { flow: flowV2, warnings } = flowV3ToV2ForBuilder(flowV3);
           warnings.forEach((w) => pushToast(w, 'warn'));
           store.initFromFlow(flowV2);
-          setTitle(`Edit: ${flowV2.name || flowV2.id}`);
+          setTitle(
+            t('builderEditFlowTitle', 'Edit: {0}', [String(flowV2.name || flowV2.id)]),
+          );
 
           if (q.focus) {
             setTimeout(() => {
@@ -181,11 +190,21 @@ export default function BuilderApp() {
             }, 0);
           }
         } else {
-          pushToast(`Workflow "${q.flowId}" Not found, new workflow created`, 'warn');
+          pushToast(
+            t('builderWorkflowNotFoundCreated', 'Workflow "{0}" not found, created a new workflow.', [
+              String(q.flowId || ''),
+            ]),
+            'warn',
+          );
           initEmptyFlow();
         }
       } catch (error) {
-        pushToast(`Failed to load workflow: ${error instanceof Error ? error.message : String(error)}`, 'error');
+        pushToast(
+          t('builderLoadFlowFailed', 'Failed to load workflow: {0}', [
+            error instanceof Error ? error.message : String(error),
+          ]),
+          'error',
+        );
         initEmptyFlow();
       }
     } else if (q.new === '1') {
@@ -279,9 +298,23 @@ export default function BuilderApp() {
           if (!cron) {
             const scheduleType = String(s?.type || 'unknown');
             if (scheduleType === 'once') {
-              pushToast(`Node ${n.id} Timing #${i + 1}: V3 One-time timing (once) is not supported yet, has been skipped`, 'warn');
+              pushToast(
+                t(
+                  'builderScheduleOnceUnsupported',
+                  'Node {0} schedule #{1}: one-time schedule is not supported in V3 and was skipped.',
+                  [String(n.id), String(i + 1)],
+                ),
+                'warn',
+              );
             } else {
-              pushToast(`Node ${n.id} Timing #${i + 1}: Cannot convert to cron(type=${scheduleType}），skipped`, 'warn');
+              pushToast(
+                t(
+                  'builderScheduleConvertFailed',
+                  'Node {0} schedule #{1}: cannot convert to cron (type={2}), skipped.',
+                  [String(n.id), String(i + 1), scheduleType],
+                ),
+                'warn',
+              );
             }
             return;
           }
@@ -356,7 +389,12 @@ export default function BuilderApp() {
 
       return saved;
     } catch (error) {
-      pushToast(`Save failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      pushToast(
+        t('builderSaveFailed', 'Save failed: {0}', [
+          error instanceof Error ? error.message : String(error),
+        ]),
+        'error',
+      );
       return null;
     }
   }
@@ -375,7 +413,12 @@ export default function BuilderApp() {
       } as chrome.downloads.DownloadOptions);
       URL.revokeObjectURL(url);
     } catch (error) {
-      pushToast(`Export failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      pushToast(
+        t('builderExportFailed', 'Export failed: {0}', [
+          error instanceof Error ? error.message : String(error),
+        ]),
+        'error',
+      );
     }
   }
 
@@ -390,7 +433,7 @@ export default function BuilderApp() {
       const candidates = extractFlowCandidates(parsed);
 
       if (!candidates.length) {
-        pushToast('Import failed: Workflow data not found', 'error');
+        pushToast(t('builderImportDataNotFound', 'Import failed: workflow data not found.'), 'error');
         return;
       }
 
@@ -405,7 +448,9 @@ export default function BuilderApp() {
         const { flow: flowV2, warnings } = flowV3ToV2ForBuilder(saved);
         warnings.forEach((w) => pushToast(w, 'warn'));
         store.initFromFlow(flowV2);
-        setTitle(`Edit: ${flowV2.name || flowV2.id}`);
+        setTitle(
+          t('builderEditFlowTitle', 'Edit: {0}', [String(flowV2.name || flowV2.id)]),
+        );
 
         try {
           await syncTriggersAndSchedules(flowV2.id, flowV2.nodes || []);
@@ -422,11 +467,18 @@ export default function BuilderApp() {
           store.importFromSteps();
         }
 
-        setTitle(`Edit: ${store.flowLocal.name || store.flowLocal.id}`);
+        setTitle(
+          t('builderEditFlowTitle', 'Edit: {0}', [String(store.flowLocal.name || store.flowLocal.id)]),
+        );
         await save();
       }
     } catch (error) {
-      pushToast(`Import failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      pushToast(
+        t('builderImportFailed', 'Import failed: {0}', [
+          error instanceof Error ? error.message : String(error),
+        ]),
+        'error',
+      );
     } finally {
       input.value = '';
     }
@@ -449,7 +501,12 @@ export default function BuilderApp() {
         ...(startNodeId ? { startNodeId: startNodeId as NodeId } : {}),
       });
     } catch (error) {
-      pushToast(`Run failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      pushToast(
+        t('builderRunFailed', 'Run failed: {0}', [
+          error instanceof Error ? error.message : String(error),
+        ]),
+        'error',
+      );
     }
   }
 
@@ -463,7 +520,12 @@ export default function BuilderApp() {
       await rpc.ensureConnected();
       await rpc.request('rr_v3.enqueueRun', { flowId: saved.id as FlowId });
     } catch (error) {
-      pushToast(`Run failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      pushToast(
+        t('builderRunFailed', 'Run failed: {0}', [
+          error instanceof Error ? error.message : String(error),
+        ]),
+        'error',
+      );
     }
   }
 
@@ -630,9 +692,13 @@ export default function BuilderApp() {
       <div className="builder-page rr-theme" data-theme={theme}>
         {fallbackNotice ? (
           <div className="notice-top">
-            <span>Fallback recommendation applied: Promote {fallbackNotice.type} Priority</span>
+            <span>
+              {t('builderFallbackPromotionNotice', 'Fallback recommendation applied: promoted {0} priority.', [
+                fallbackNotice.type,
+              ])}
+            </span>
             <button className="mini" type="button" onClick={undoFallbackPromotion}>
-              Cancel
+              {t('cancelButton', 'Cancel')}
             </button>
           </div>
         ) : null}
@@ -643,58 +709,81 @@ export default function BuilderApp() {
           <div className="topbar rr-topbar backdrop-blur">
             <div className="left">
               <strong className="text-[var(--rr-text)]">{title}</strong>
-              <span className="tip">Workflow visual orchestration</span>
+              <span className="tip">
+                {t('builderVisualOrchestrationTip', 'Workflow visual orchestration')}
+              </span>
             </div>
             <div className="right">
-              <button className="top-btn" type="button" onClick={() => void exportFlow()} title="Export JSON">
+              <button
+                className="top-btn"
+                type="button"
+                onClick={() => void exportFlow()}
+                title={t('builderExportJsonTitle', 'Export JSON')}
+              >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
                 </svg>
-                Export
+                {t('workflowsExportAction', 'Export')}
               </button>
 
-              <label className="top-btn import" title="Import JSON">
+              <label className="top-btn import" title={t('builderImportJsonTitle', 'Import JSON')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
                 </svg>
-                import
+                {t('workflowsImportAction', 'Import')}
                 <input type="file" accept="application/json" onChange={onImport} />
               </label>
 
-              <button className="top-btn" type="button" onClick={openRename} title="Rename workflow">
+              <button
+                className="top-btn"
+                type="button"
+                onClick={openRename}
+                title={t('builderRenameWorkflowTitle', 'Rename workflow')}
+              >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 20h9" />
                   <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" />
                 </svg>
-                Rename
+                {t('agentSessionRenameTitle', 'Rename')}
               </button>
 
               <button
                 className={`top-btn ${triggerPanelVisible ? 'active' : ''}`}
                 type="button"
                 onClick={() => setTriggerPanelVisible((v) => !v)}
-                title="Manage triggers"
+                title={t('builderManageTriggersTitle', 'Manage triggers')}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                 </svg>
-                Triggers
+                {t('workflowsTriggersSection', 'Triggers')}
               </button>
 
               <span className="divider-vert" />
 
-              <button className="top-btn" type="button" disabled={!selectedId} onClick={() => void runFromSelected()} title="Playback from selected node">
+              <button
+                className="top-btn"
+                type="button"
+                disabled={!selectedId}
+                onClick={() => void runFromSelected()}
+                title={t('builderRunFromSelectedTitle', 'Playback from selected node')}
+              >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polygon points="5 3 19 12 5 21 5 3" />
                 </svg>
-                Run from selected
+                {t('builderRunFromSelectedButton', 'Run from selected')}
               </button>
 
-              <button className="top-btn primary" type="button" onClick={() => void runAll()} title="Playback rectification from the beginning">
+              <button
+                className="top-btn primary"
+                type="button"
+                onClick={() => void runAll()}
+                title={t('builderRunAllTitle', 'Playback rectification from the beginning')}
+              >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polygon points="5 3 19 12 5 21 5 3" />
                 </svg>
-                run
+                {t('workflowsRunAction', 'Run')}
               </button>
 
               <span className="divider-vert" />
@@ -709,7 +798,7 @@ export default function BuilderApp() {
                   <polyline points="17 21 17 13 7 13 7 21" />
                   <polyline points="7 3 7 8 15 8" />
                 </svg>
-                save
+                {t('saveButton', 'Save')}
               </button>
             </div>
           </div>
@@ -755,13 +844,23 @@ export default function BuilderApp() {
           ) : null}
 
           <div className="bottom-toolbar">
-            <button className="toolbar-btn" type="button" onClick={store.undo} title="Undo (⌘/Ctrl+Z)">
+            <button
+              className="toolbar-btn"
+              type="button"
+              onClick={store.undo}
+              title={t('builderUndoTitle', 'Undo (⌘/Ctrl+Z)')}
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M3 7v6h6M21 17a9 9 0 00-9-9 9 9 0 00-9 9" />
               </svg>
             </button>
 
-            <button className="toolbar-btn" type="button" onClick={store.redo} title="redo (⌘/Ctrl+Shift+Z)">
+            <button
+              className="toolbar-btn"
+              type="button"
+              onClick={store.redo}
+              title={t('builderRedoTitle', 'Redo (⌘/Ctrl+Shift+Z)')}
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 7v6h-6M3 17a9 9 0 019-9 9 9 0 019 9" />
               </svg>
@@ -769,7 +868,12 @@ export default function BuilderApp() {
 
             <span className="toolbar-divider" />
 
-            <button className="toolbar-btn" type="button" onClick={store.layoutAuto} title="Automatic typesetting">
+            <button
+              className="toolbar-btn"
+              type="button"
+              onClick={store.layoutAuto}
+              title={t('builderAutoLayoutTitle', 'Automatic typesetting')}
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="7" height="7" rx="1" />
                 <rect x="14" y="3" width="7" height="7" rx="1" />
@@ -778,7 +882,12 @@ export default function BuilderApp() {
               </svg>
             </button>
 
-            <button className="toolbar-btn" type="button" onClick={fitAll} title="Adaptive view">
+            <button
+              className="toolbar-btn"
+              type="button"
+              onClick={fitAll}
+              title={t('builderFitViewTitle', 'Adaptive view')}
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />
               </svg>
@@ -799,24 +908,32 @@ export default function BuilderApp() {
         <div className="rr-modal">
           <div className="rr-dialog small">
             <div className="rr-header">
-              <div className="title">Rename workflow</div>
+              <div className="title">{t('builderRenameWorkflowTitle', 'Rename workflow')}</div>
               <button className="close" type="button" onClick={() => setRenameVisible(false)}>
                 ✕
               </button>
             </div>
             <div className="rr-body">
               <div className="row">
-                <label>Name</label>
-                <input value={renameName} onChange={(event) => setRenameName(event.currentTarget.value)} placeholder="Workflow name" />
+                <label>{t('builderNameLabel', 'Name')}</label>
+                <input
+                  value={renameName}
+                  onChange={(event) => setRenameName(event.currentTarget.value)}
+                  placeholder={t('builderWorkflowNamePlaceholder', 'Workflow name')}
+                />
               </div>
               <div className="row">
-                <label>Description</label>
-                <textarea value={renameDesc} onChange={(event) => setRenameDesc(event.currentTarget.value)} placeholder="Optional description" />
+                <label>{t('workflowsDescriptionLabel', 'Description')}</label>
+                <textarea
+                  value={renameDesc}
+                  onChange={(event) => setRenameDesc(event.currentTarget.value)}
+                  placeholder={t('workflowsOptionalDescription', 'Optional description')}
+                />
               </div>
             </div>
             <div className="rr-footer">
               <button className="primary" type="button" onClick={applyRename}>
-                save
+                {t('saveButton', 'Save')}
               </button>
             </div>
           </div>

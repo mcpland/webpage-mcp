@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { AttachmentMetadata } from 'webpage-mcp-shared';
 import { resolveAgentAttachmentUrl } from '@/utils/agent-attachment-url';
+import { getMessage } from '@/utils/i18n';
 
 import type { AgentThread } from '../../composables/useAgentThreads';
 import ApplyMessageChip from './ApplyMessageChip';
@@ -13,6 +14,9 @@ type AgentRequestThreadProps = {
 };
 
 export default function AgentRequestThread({ thread, serverPort: _serverPort }: AgentRequestThreadProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [overlayTarget, setOverlayTarget] = useState<Element | null>(null);
   const [viewerAttachment, setViewerAttachment] = useState<AttachmentMetadata | null>(null);
@@ -111,7 +115,7 @@ export default function AgentRequestThread({ thread, serverPort: _serverPort }: 
           <button
             className="opacity-0 group-hover:opacity-100 transition-opacity p-1 cursor-pointer"
             style={{ color: 'var(--ac-text-subtle)' }}
-            title="Edit (coming soon)"
+            title={t('agentThreadEditComingSoon', 'Edit (coming soon)')}
             type="button"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -154,7 +158,7 @@ export default function AgentRequestThread({ thread, serverPort: _serverPort }: 
                     <div
                       className="w-full h-full flex items-center justify-center"
                       style={{ color: 'var(--ac-text-subtle)' }}
-                      title="Server not ready"
+                      title={t('agentServerNotReadyTitle', 'Server not ready')}
                     >
                       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path
@@ -191,7 +195,7 @@ export default function AgentRequestThread({ thread, serverPort: _serverPort }: 
               className="fixed inset-0 z-50 flex items-center justify-center"
               role="dialog"
               aria-modal="true"
-              aria-label="Image preview"
+              aria-label={t('agentImagePreviewAria', 'Image preview')}
             >
               <div className="absolute inset-0 bg-black/60" onClick={() => setViewerAttachment(null)} />
               <div
@@ -207,7 +211,7 @@ export default function AgentRequestThread({ thread, serverPort: _serverPort }: 
                   type="button"
                   className="absolute top-2 right-2 p-1 rounded-full transition-colors hover:bg-black/20 cursor-pointer"
                   style={{ color: 'white' }}
-                  aria-label="Close image preview"
+                  aria-label={t('agentImagePreviewCloseAria', 'Close image preview')}
                   onClick={() => setViewerAttachment(null)}
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -228,7 +232,10 @@ export default function AgentRequestThread({ thread, serverPort: _serverPort }: 
                   />
                 ) : (
                   <div className="p-6 text-sm" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
-                    Agent server not ready (missing server port).
+                    {t(
+                      'agentServerNotReadyMissingPort',
+                      'Agent server not ready (missing server port).',
+                    )}
                   </div>
                 )}
               </div>

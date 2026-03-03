@@ -1,4 +1,5 @@
 import { THEME_LABELS, type AgentThemeId } from '../../composables';
+import { getMessage } from '@/utils/i18n';
 
 type AgentSettingsMenuProps = {
   open: boolean;
@@ -28,6 +29,9 @@ export default function AgentSettingsMenu({
   onAttachmentsOpen,
   onFakeCaretToggle,
 }: AgentSettingsMenuProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   if (!open) {
     return null;
   }
@@ -46,7 +50,7 @@ export default function AgentSettingsMenu({
         className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider"
         style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
       >
-        Theme
+        {t('themeLabel', 'Theme')}
       </div>
 
       {themes.map((themeItem) => (
@@ -79,7 +83,7 @@ export default function AgentSettingsMenu({
         className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider"
         style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
       >
-        Input
+        {t('agentSettingsInputSection', 'Input')}
       </div>
 
       <button
@@ -88,7 +92,7 @@ export default function AgentSettingsMenu({
         onClick={() => onFakeCaretToggle?.(!fakeCaretEnabled)}
         type="button"
       >
-        <span>Comet caret</span>
+        <span>{t('agentSettingsCometCaretLabel', 'Comet caret')}</span>
         {fakeCaretEnabled ? (
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
@@ -107,7 +111,7 @@ export default function AgentSettingsMenu({
         className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider"
         style={{ color: 'var(--ac-text-subtle, #a8a29e)' }}
       >
-        Storage
+        {t('agentSettingsStorageSection', 'Storage')}
       </div>
 
       <button
@@ -116,7 +120,7 @@ export default function AgentSettingsMenu({
         onClick={onAttachmentsOpen}
         type="button"
       >
-        Clear Attachment Cache
+        {t('agentSettingsClearAttachmentCache', 'Clear Attachment Cache')}
       </button>
 
       <div
@@ -132,7 +136,7 @@ export default function AgentSettingsMenu({
         onClick={onReconnect}
         type="button"
       >
-        Reconnect Server
+        {t('agentSettingsReconnectServer', 'Reconnect Server')}
       </button>
     </div>
   );

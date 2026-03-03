@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { getMessage } from '@/utils/i18n';
 import type { AttachmentWithPreview } from '../../composables/useAttachments';
 import type { RequestState } from '../../composables/useAgentChat';
 import FakeCaretOverlay from './FakeCaretOverlay';
@@ -53,6 +54,9 @@ export default function ComposerDrawer({
   onAttachmentRemove,
   onPaste,
 }: ComposerDrawerProps) {
+  const t = (key: string, fallback: string, substitutions?: string[]) =>
+    getMessage(key, substitutions, fallback);
+
   const [teleportTarget, setTeleportTarget] = useState<Element | null>(null);
   const [textareaEl, setTextareaEl] = useState<HTMLTextAreaElement | null>(null);
 
@@ -101,7 +105,7 @@ export default function ComposerDrawer({
       className="fixed inset-0 z-50"
       role="dialog"
       aria-modal="true"
-      aria-label="Expanded editor"
+      aria-label={t('composerDrawerExpandedEditorAria', 'Expanded editor')}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           onClose?.();
@@ -128,10 +132,10 @@ export default function ComposerDrawer({
         >
           <div className="min-w-0">
             <div className="text-sm font-semibold" style={{ color: 'var(--ac-text)' }}>
-              Expanded editor
+              {t('composerDrawerExpandedEditorTitle', 'Expanded editor')}
             </div>
             <div className="text-[10px]" style={{ color: 'var(--ac-text-subtle)' }}>
-              Press {modifierKey}+Enter to send
+              {t('composerDrawerShortcutHint', 'Press {0}+Enter to send', [modifierKey])}
             </div>
           </div>
 
@@ -143,7 +147,7 @@ export default function ComposerDrawer({
               color: 'var(--ac-text-muted)',
               borderRadius: 'var(--ac-radius-button)',
             }}
-            aria-label="Close expanded editor"
+            aria-label={t('composerDrawerCloseAria', 'Close expanded editor')}
             onClick={() => onClose?.()}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -186,7 +190,7 @@ export default function ComposerDrawer({
                   <button
                     className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                     style={{ backgroundColor: 'var(--ac-error)', color: 'white' }}
-                    title="Remove image"
+                    title={t('agentComposerRemoveImageTitle', 'Remove image')}
                     onClick={() => onAttachmentRemove?.(index)}
                     type="button"
                   >
@@ -256,7 +260,9 @@ export default function ComposerDrawer({
                   onClick={() => onCancel?.()}
                   type="button"
                 >
-                  {cancelling ? 'Stopping...' : 'Stop'}
+                  {cancelling
+                    ? t('agentComposerStatusStopping', 'Stopping...')
+                    : t('agentComposerStopTitle', 'Stop')}
                 </button>
               ) : null}
 
@@ -272,7 +278,7 @@ export default function ComposerDrawer({
                 onClick={() => onSubmit?.()}
                 type="button"
               >
-                Send
+                {t('agentComposerSendTitle', 'Send')}
               </button>
             </div>
           </div>

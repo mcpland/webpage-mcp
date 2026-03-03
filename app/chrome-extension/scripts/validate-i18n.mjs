@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -9,8 +9,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const extensionRoot = path.resolve(__dirname, '..');
 const localesRoot = path.join(extensionRoot, '_locales');
-const requiredLocales = ['en', 'zh_CN'];
-const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx']);
+const requiredBaselineLocales = ['en', 'zh_CN'];
+const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.html']);
 const ignoredDirectories = new Set(['_locales', 'dist', 'node_modules', '.output', '.wxt']);
 
 function readLocaleMessages(locale) {
@@ -21,6 +21,14 @@ function readLocaleMessages(locale) {
     throw new Error(`Locale file is not a valid object: ${filePath}`);
   }
   return data;
+}
+
+function discoverLocales() {
+  return readdirSync(localesRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => entry.name)
+    .filter((locale) => existsSync(path.join(localesRoot, locale, 'messages.json')))
+    .sort();
 }
 
 function diffKeys(sourceKeys, targetKeys) {
@@ -52,6 +60,8 @@ function collectI18nKeysFromCode(files) {
   const patterns = [
     /\bgetMessage\(\s*(['"`])([^'"`]+)\1/g,
     /chrome\.i18n\.getMessage\(\s*(['"`])([^'"`]+)\1/g,
+    /\bt\(\s*(['"`])([^'"`]+)\1\s*,/g,
+    /__MSG_([A-Za-z0-9_@]+)__/g,
   ];
 
   for (const filePath of files) {
@@ -59,7 +69,11 @@ function collectI18nKeysFromCode(files) {
     for (const pattern of patterns) {
       let match;
       while ((match = pattern.exec(content)) !== null) {
-        keys.add(match[2]);
+        const key = match[2] || match[1];
+        if (!key || key.startsWith('@@')) {
+          continue;
+        }
+        keys.add(key);
       }
       pattern.lastIndex = 0;
     }
@@ -78,8 +92,19 @@ function fail(errors) {
 
 const errors = [];
 const localeData = {};
+const discoveredLocales = discoverLocales();
 
-for (const locale of requiredLocales) {
+for (const locale of requiredBaselineLocales) {
+  if (!discoveredLocales.includes(locale)) {
+    errors.push(`Required locale is missing: ${locale}`);
+  }
+}
+
+if (errors.length > 0) {
+  fail(errors);
+}
+
+for (const locale of discoveredLocales) {
   try {
     localeData[locale] = readLocaleMessages(locale);
   } catch (error) {
@@ -92,35 +117,39 @@ if (errors.length > 0) {
 }
 
 const enKeys = new Set(Object.keys(localeData.en));
-const zhKeys = new Set(Object.keys(localeData.zh_CN));
-const missingInZh = diffKeys(enKeys, zhKeys);
-const missingInEn = diffKeys(zhKeys, enKeys);
 
-if (missingInZh.length > 0) {
-  errors.push(
-    `Missing keys in zh_CN (${missingInZh.length}): ${missingInZh.slice(0, 12).join(', ')}${missingInZh.length > 12 ? ', ...' : ''}`,
-  );
-}
-if (missingInEn.length > 0) {
-  errors.push(
-    `Missing keys in en (${missingInEn.length}): ${missingInEn.slice(0, 12).join(', ')}${missingInEn.length > 12 ? ', ...' : ''}`,
-  );
+for (const locale of discoveredLocales) {
+  if (locale === 'en') {
+    continue;
+  }
+  const localeKeys = new Set(Object.keys(localeData[locale]));
+  const missingInLocale = diffKeys(enKeys, localeKeys);
+  const extraInLocale = diffKeys(localeKeys, enKeys);
+
+  if (missingInLocale.length > 0) {
+    errors.push(
+      `Missing keys in ${locale} (${missingInLocale.length}): ${missingInLocale.slice(0, 12).join(', ')}${missingInLocale.length > 12 ? ', ...' : ''}`,
+    );
+  }
+
+  if (extraInLocale.length > 0) {
+    errors.push(
+      `Extra keys in ${locale} not in en (${extraInLocale.length}): ${extraInLocale.slice(0, 12).join(', ')}${extraInLocale.length > 12 ? ', ...' : ''}`,
+    );
+  }
 }
 
 const sourceFiles = collectSourceFiles(extensionRoot);
 const usedKeys = collectI18nKeysFromCode(sourceFiles);
-const missingUsedInEn = diffKeys(usedKeys, enKeys);
-const missingUsedInZh = diffKeys(usedKeys, zhKeys);
 
-if (missingUsedInEn.length > 0) {
-  errors.push(
-    `Keys used in code but missing in en (${missingUsedInEn.length}): ${missingUsedInEn.slice(0, 12).join(', ')}${missingUsedInEn.length > 12 ? ', ...' : ''}`,
-  );
-}
-if (missingUsedInZh.length > 0) {
-  errors.push(
-    `Keys used in code but missing in zh_CN (${missingUsedInZh.length}): ${missingUsedInZh.slice(0, 12).join(', ')}${missingUsedInZh.length > 12 ? ', ...' : ''}`,
-  );
+for (const locale of discoveredLocales) {
+  const localeKeys = new Set(Object.keys(localeData[locale]));
+  const missingUsed = diffKeys(usedKeys, localeKeys);
+  if (missingUsed.length > 0) {
+    errors.push(
+      `Keys used in code but missing in ${locale} (${missingUsed.length}): ${missingUsed.slice(0, 12).join(', ')}${missingUsed.length > 12 ? ', ...' : ''}`,
+    );
+  }
 }
 
 if (errors.length > 0) {
@@ -128,5 +157,5 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `[i18n] OK: en and zh_CN are in sync (${enKeys.size} keys), and ${usedKeys.size} code-referenced keys are present in both locales.`,
+  `[i18n] OK: ${discoveredLocales.join(', ')} are in sync with en (${enKeys.size} keys), and ${usedKeys.size} code-referenced keys are present in all locales.`,
 );
