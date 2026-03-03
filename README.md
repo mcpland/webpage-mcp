@@ -387,7 +387,7 @@ The extension popup and welcome page can generate this command automatically usi
 | Semantic search     | @xenova/transformers (ONNX) + hnswlib-wasm |
 | SIMD math           | Rust/WASM (wasm-bindgen + wide)            |
 | GIF recording       | gifenc                                     |
-| Testing             | Vitest (extension), Jest (MCP server)      |
+| Testing             | Vitest                                     |
 | Package manager     | pnpm workspaces                            |
 
 ---
