@@ -224,8 +224,8 @@ export default function TimelineUserPromptStep({
                 ) : (
                   <div className="p-6 text-sm" style={{ color: 'var(--ac-text-muted, #6e6e6e)' }}>
                     {t(
-                      'agentServerNotReadyMissingPort',
-                      'Agent server not ready (missing server port).',
+                      'agentServerNotReadyPreviewUnavailable',
+                      'Agent server not ready (attachment preview unavailable).',
                     )}
                   </div>
                 )}

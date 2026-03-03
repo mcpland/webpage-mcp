@@ -545,8 +545,8 @@
       }
     }
   },
-  "agentServerNotReadyMissingPort": {
-    "message": "Agent server not ready (missing server port).",
+  "agentServerNotReadyPreviewUnavailable": {
+    "message": "Agent server not ready (attachment preview unavailable).",
     "description": "Auto-generated i18n message"
   },
   "agentServerNotReadySimple": {

@@ -545,8 +545,8 @@
       }
     }
   },
-  "agentServerNotReadyMissingPort": {
-    "message": "代理服务器未准备好（缺少服务器端口）。",
+  "agentServerNotReadyPreviewUnavailable": {
+    "message": "代理服务器未准备好（暂时无法预览附件）。",
     "description": "自动生成的 i18n 文案"
   },
   "agentServerNotReadySimple": {

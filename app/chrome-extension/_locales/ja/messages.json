@@ -545,8 +545,8 @@
       }
     }
   },
-  "agentServerNotReadyMissingPort": {
-    "message": "エージェントサーバーの準備ができていません (サーバーポートがありません)。",
+  "agentServerNotReadyPreviewUnavailable": {
+    "message": "エージェントサーバーの準備ができていません（添付ファイルのプレビューを表示できません）。",
     "description": "Auto-generated localized message"
   },
   "agentServerNotReadySimple": {
