@@ -52,7 +52,7 @@ jobs:
         run: pnpm typecheck
 
       - name: Typecheck (extension)
-        run: pnpm --filter webpage-mcp-server compile
+        run: pnpm --filter webpage-mcp-connector compile
 
       - name: Test
         run: pnpm -r --if-present test
@@ -61,7 +61,7 @@ jobs:
         run: pnpm build
 
       - name: Build extension zip
-        run: pnpm --filter webpage-mcp-server zip
+        run: pnpm --filter webpage-mcp-connector zip
 
       - name: Pack MCP npm package
         run: |

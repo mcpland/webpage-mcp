@@ -1,5 +1,5 @@
 {
-  "name": "webpage-mcp-server",
+  "name": "webpage-mcp-connector",
   "description": "A chrome extension connector to use your own webpage as a mcp server",
   "author": "unadlib",
   "private": true,

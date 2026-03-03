@@ -145,7 +145,7 @@ pnpm build
 3. Click **Load unpacked**
 4. Select the `app/chrome-extension/.output/chrome-mv3` folder
 
-> This repository does not currently commit binary release zip files. To generate one locally, run `pnpm --filter webpage-mcp-server zip` and use the artifact from `app/chrome-extension/.output/`.
+> This repository does not currently commit binary release zip files. To generate one locally, run `pnpm --filter webpage-mcp-connector zip` and use the artifact from `app/chrome-extension/.output/`.
 
 #### 3. Start MCP Client First
 
