@@ -30,9 +30,9 @@
 └──────────┘                  └───────┬───────┘
        Native Messaging stdin/stdout  │
                                       │
-┌─────────────┐  Chrome APIs ┌────────▼────────┐
-│ Your Webpage│◄─────────────┤ MCP Connector   │
-└─────────────┘   DevTools   └─────────────────┘
+┌─────────────┐  Chrome APIs ┌────────▼───────┐
+│ Your Webpage│◄─────────────┤  MCP Connector │
+└─────────────┘   DevTools   └────────────────┘
 ```
 
 The **Webpage MCP Connector** (Chrome extension) exposes real browser capabilities as MCP tools. The **MCP Server** bridges AI clients and the connector using Chrome [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging). MCP clients connect over stdio only (no localhost HTTP transport).
@@ -53,71 +53,23 @@ The **Webpage MCP Connector** (Chrome extension) exposes real browser capabiliti
 
 ## Comparison with Similar Projects
 
-| Dimension                  | Playwright-based MCP Server                                    | Webpage MCP Connector + MCP Server                               |
-| -------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **First-time Setup**       | :white_check_mark: Usually simpler: install & run              | :warning: Requires one-time Native Messaging host registration   |
-| **Resource Usage**         | :x: Launches a separate automation browser                     | :white_check_mark: Reuses the user's already-open Chrome         |
-| **User Session Reuse**     | :x: Often requires separate login/state management             | :white_check_mark: Reuses existing profile session/cookies       |
-| **Real-user Environment**  | :warning: Automation-oriented environment                      | :white_check_mark: Real user profile, settings, extensions, tabs |
-| **API Access Surface**     | :warning: Constrained by Playwright API boundaries             | :white_check_mark: Chrome extension platform + native APIs       |
-| **CI / Headless Fit**      | :white_check_mark: Strong fit for CI and headless workflows    | :warning: Better suited for local interactive workflows          |
-| **Determinism**            | :white_check_mark: Stronger reproducibility in controlled runs | :warning: Affected by live user environment/state                |
-| **Startup Latency**        | :x: Needs browser automation bootstrap                         | :white_check_mark: Mainly extension/native bridge activation     |
-| **Request Overhead**       | :warning: Extra orchestration adds overhead                    | :white_check_mark: Lower overhead in long-lived local sessions   |
-| **Post-setup Reliability** | :warning: More moving parts can increase failure surface       | :white_check_mark: One-time registration; stable across restarts |
-
-## MCP Browser Tools
-
-| Tool                               | Description                                                             |
-| ---------------------------------- | ----------------------------------------------------------------------- |
-| `get_windows_and_tabs`             | Get all open browser windows and tabs                                   |
-| `chrome_navigate`                  | Navigate to a URL, refresh, or navigate history (back/forward)          |
-| `chrome_screenshot`                | Take a screenshot of the page or a specific element                     |
-| `chrome_read_page`                 | Get an accessibility tree of visible elements on the page               |
-| `chrome_computer`                  | Mouse and keyboard interaction with the browser (computer use)          |
-| `chrome_click_element`             | Click elements via CSS selector, XPath, element ref, or coordinates     |
-| `chrome_fill_or_select`            | Fill or select form elements (input, textarea, select, checkbox, radio) |
-| `chrome_keyboard`                  | Simulate keyboard input (keys, combinations, or text)                   |
-| `chrome_javascript`                | Execute JavaScript code in a browser tab                                |
-| `chrome_get_web_content`           | Fetch and parse web page content                                        |
-| `chrome_network_request`           | Send network requests from the browser context (with cookies)           |
-| `chrome_network_capture`           | Capture network requests (start/stop, optional response bodies via CDP) |
-| `chrome_console`                   | Capture console output (snapshot or persistent buffer mode)             |
-| `chrome_history`                   | Search and retrieve browsing history                                    |
-| `chrome_bookmark_search`           | Search bookmarks by title and URL                                       |
-| `chrome_bookmark_add`              | Add a new bookmark                                                      |
-| `chrome_bookmark_delete`           | Delete a bookmark                                                       |
-| `chrome_switch_tab`                | Switch to a specific tab                                                |
-| `chrome_close_tabs`                | Close one or more tabs                                                  |
-| `chrome_upload_file`               | Upload files to web forms via CDP                                       |
-| `chrome_handle_dialog`             | Handle JavaScript dialogs (alert/confirm/prompt)                        |
-| `chrome_handle_download`           | Wait for and retrieve download details                                  |
-| `chrome_request_element_selection` | Let the user manually select elements on the page                       |
-| `chrome_gif_recorder`              | Record browser activity as an animated GIF                              |
-| `performance_start_trace`          | Start a performance trace recording                                     |
-| `performance_stop_trace`           | Stop the active performance trace                                       |
-| `performance_analyze_insight`      | Get a lightweight summary of the last recorded trace                    |
-
-## Additional Capabilities
-
-- **AI Agent Chat Sidepanel** — Built-in sidepanel for chatting with AI agents (Claude Code CLI, OpenAI Codex CLI) directly from Chrome, with project management, session history, and streaming output
-- **Record & Replay** — Record browser actions and replay them as automated flows; published flows are exposed as dynamic MCP tools (`flow.<slug>`)
-- **Web Editor** — Visual in-page DOM editor overlay with property panel and transaction system (`Cmd+Shift+O`)
-- **Quick Panel** — Keyboard-triggered floating AI chat accessible from any page (`Cmd+Shift+U`)
-- **Semantic Search** — On-device embedding model ([all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)) with HNSW vector index for searching tab content
-- **Element Marker** — Annotate DOM elements with names/selectors, accessible to AI tools via context menu
-
----
+| Dimension                    | Playwright-based MCP Server                                    | Webpage MCP Connector + MCP Server                                                              |
+| ---------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **First-time Setup**         | :white_check_mark: Usually simpler: install & run              | :white_check_mark: Usually install + configure; manual register is fallback                     |
+| **Bootstrap / Self-healing** | :warning: Failures often require manual environment fixes      | :white_check_mark: Startup silent bootstrap (manifest/runtime check + auto user-level register) |
+| **Resource Usage**           | :x: Launches a separate automation browser                     | :white_check_mark: Reuses the user's already-open Chrome                                        |
+| **User Session Reuse**       | :x: Often requires separate login/state management             | :white_check_mark: Reuses existing profile session/cookies                                      |
+| **Real-user Environment**    | :warning: Automation-oriented environment                      | :white_check_mark: Real user profile, settings, extensions, tabs                                |
+| **API Access Surface**       | :warning: Constrained by Playwright API boundaries             | :white_check_mark: Chrome extension platform + native APIs                                      |
+| **CI / Headless Fit**        | :white_check_mark: Strong fit for CI and headless workflows    | :warning: Better suited for local interactive workflows                                         |
+| **Determinism**              | :white_check_mark: Stronger reproducibility in controlled runs | :warning: Affected by live user environment/state                                               |
+| **Startup Latency**          | :x: Needs browser automation bootstrap                         | :white_check_mark: Mainly extension/native bridge activation                                    |
+| **Request Overhead**         | :warning: Extra orchestration adds overhead                    | :white_check_mark: Lower overhead in long-lived local sessions                                  |
+| **Post-setup Reliability**   | :warning: More moving parts can increase failure surface       | :white_check_mark: One-time registration; stable across restarts                                |
 
 ## Installation
 
-### Prerequisites
-
-- **Chrome** (or Chromium-based browser)
-- **Node.js** >= 20.0.0
-- **pnpm** (only needed when building from source)
-
-### Quick Start (Published npm Package)
+### Quick Start
 
 **1.** Install the **Webpage MCP Connector** Chrome extension first (store package or unpacked build). [https://github.com/mcpland/webpage-mcp/releases](https://github.com/mcpland/webpage-mcp/releases)
 
@@ -284,6 +236,49 @@ Important:
 - The current architecture is fully native/stdio and does not expose localhost MCP/agent HTTP endpoints.
 - Multiple instances are identified by `instanceId`; data transport is native/stdio only.
 - For `npx` usage, keep `-p webpage-mcp@latest` in args so `webpage-mcp-stdio` resolves as the executed bin.
+
+---
+
+## MCP Browser Tools
+
+| Tool                               | Description                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| `get_windows_and_tabs`             | Get all open browser windows and tabs                                   |
+| `chrome_navigate`                  | Navigate to a URL, refresh, or navigate history (back/forward)          |
+| `chrome_screenshot`                | Take a screenshot of the page or a specific element                     |
+| `chrome_read_page`                 | Get an accessibility tree of visible elements on the page               |
+| `chrome_computer`                  | Mouse and keyboard interaction with the browser (computer use)          |
+| `chrome_click_element`             | Click elements via CSS selector, XPath, element ref, or coordinates     |
+| `chrome_fill_or_select`            | Fill or select form elements (input, textarea, select, checkbox, radio) |
+| `chrome_keyboard`                  | Simulate keyboard input (keys, combinations, or text)                   |
+| `chrome_javascript`                | Execute JavaScript code in a browser tab                                |
+| `chrome_get_web_content`           | Fetch and parse web page content                                        |
+| `chrome_network_request`           | Send network requests from the browser context (with cookies)           |
+| `chrome_network_capture`           | Capture network requests (start/stop, optional response bodies via CDP) |
+| `chrome_console`                   | Capture console output (snapshot or persistent buffer mode)             |
+| `chrome_history`                   | Search and retrieve browsing history                                    |
+| `chrome_bookmark_search`           | Search bookmarks by title and URL                                       |
+| `chrome_bookmark_add`              | Add a new bookmark                                                      |
+| `chrome_bookmark_delete`           | Delete a bookmark                                                       |
+| `chrome_switch_tab`                | Switch to a specific tab                                                |
+| `chrome_close_tabs`                | Close one or more tabs                                                  |
+| `chrome_upload_file`               | Upload files to web forms via CDP                                       |
+| `chrome_handle_dialog`             | Handle JavaScript dialogs (alert/confirm/prompt)                        |
+| `chrome_handle_download`           | Wait for and retrieve download details                                  |
+| `chrome_request_element_selection` | Let the user manually select elements on the page                       |
+| `chrome_gif_recorder`              | Record browser activity as an animated GIF                              |
+| `performance_start_trace`          | Start a performance trace recording                                     |
+| `performance_stop_trace`           | Stop the active performance trace                                       |
+| `performance_analyze_insight`      | Get a lightweight summary of the last recorded trace                    |
+
+## Additional Capabilities
+
+- **AI Agent Chat Sidepanel** — Built-in sidepanel for chatting with AI agents (Claude Code CLI, OpenAI Codex CLI) directly from Chrome, with project management, session history, and streaming output
+- **Record & Replay** — Record browser actions and replay them as automated flows; published flows are exposed as dynamic MCP tools (`flow.<slug>`)
+- **Web Editor** — Visual in-page DOM editor overlay with property panel and transaction system (`Cmd+Shift+O`)
+- **Quick Panel** — Keyboard-triggered floating AI chat accessible from any page (`Cmd+Shift+U`)
+- **Semantic Search** — On-device embedding model ([all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)) with HNSW vector index for searching tab content
+- **Element Marker** — Annotate DOM elements with names/selectors, accessible to AI tools via context menu
 
 ---
 
