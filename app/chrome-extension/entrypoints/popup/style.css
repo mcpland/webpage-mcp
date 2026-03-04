@@ -74,9 +74,9 @@
 body {
   margin: 0;
   padding: 0;
-  width: 400px;
-  min-height: 500px;
-  max-height: 600px;
+  width: 380px;
+  min-height: 480px;
+  max-height: 580px;
   overflow: hidden;
   font-family: inherit;
   background: var(--bg-secondary);

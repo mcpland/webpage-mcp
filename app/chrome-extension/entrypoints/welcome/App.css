@@ -1,3 +1,6 @@
+/* =============================================
+   Root & Layout
+   ============================================= */
 .welcome-root {
   min-height: 100%;
   background: var(--ac-bg);
@@ -7,53 +10,300 @@
   font-family: var(--ac-font-body);
 }
 
+.welcome-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* =============================================
+   Header
+   ============================================= */
 .welcome-header {
+  flex-shrink: 0;
+  padding: 20px 24px;
   background: var(--ac-header-bg);
   border-bottom: var(--ac-border-width) solid var(--ac-header-border);
   backdrop-filter: blur(8px);
 }
 
+.welcome-header-inner {
+  max-width: 768px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.welcome-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.welcome-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--ac-surface);
+  border: var(--ac-border-width) solid var(--ac-border);
+  border-radius: var(--ac-radius-card);
+  box-shadow: var(--ac-shadow-card);
+}
+
+.welcome-icon-svg {
+  width: 24px;
+  height: 24px;
+}
+
+.welcome-header-text {
+  min-width: 0;
+}
+
+.welcome-header-title {
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.welcome-header-subtitle {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =============================================
+   Main Content
+   ============================================= */
+.welcome-main {
+  flex: 1;
+  padding: 32px 24px;
+}
+
+.welcome-main-inner {
+  max-width: 768px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* =============================================
+   Cards
+   ============================================= */
 .welcome-card {
   background: var(--ac-surface);
   border: var(--ac-border-width) solid var(--ac-border);
   border-radius: var(--ac-radius-card);
   box-shadow: var(--ac-shadow-card);
+  overflow: hidden;
 }
 
 .welcome-card--primary {
   box-shadow: var(--ac-shadow-float);
 }
 
-.welcome-icon {
-  background: var(--ac-surface);
-  border: var(--ac-border-width) solid var(--ac-border);
-  border-radius: var(--ac-radius-card);
-  box-shadow: var(--ac-shadow-card);
+.welcome-card-body {
+  padding: 24px;
 }
 
+/* =============================================
+   Typography helpers
+   ============================================= */
 .welcome-title {
   font-family: var(--ac-font-heading);
   color: var(--ac-text);
+  margin: 0;
+}
+
+.welcome-title-xl {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.welcome-title-sm {
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .welcome-muted {
   color: var(--ac-text-muted);
+  margin: 0;
 }
 
 .welcome-subtle {
   color: var(--ac-text-subtle);
+  margin: 0;
 }
 
 .welcome-mono {
   font-family: var(--ac-font-mono);
 }
 
-.welcome-code {
-  font-family: var(--ac-font-code);
+.welcome-text-xl {
+  font-size: 20px;
 }
 
+.welcome-text-sm {
+  font-size: 14px;
+}
+
+.welcome-text-xs {
+  font-size: 12px;
+}
+
+.welcome-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =============================================
+   Spacing helpers
+   ============================================= */
+.welcome-mt-1 {
+  margin-top: 4px;
+}
+
+.welcome-mt-2 {
+  margin-top: 8px;
+}
+
+.welcome-mt-3 {
+  margin-top: 12px;
+}
+
+.welcome-mt-4 {
+  margin-top: 16px;
+}
+
+/* =============================================
+   Section content (within cards)
+   ============================================= */
+.welcome-section-content {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* =============================================
+   Code & Command rows
+   ============================================= */
+.welcome-code {
+  font-family: var(--ac-font-code);
+  word-break: break-all;
+}
+
+.welcome-code-sm {
+  font-size: 14px;
+}
+
+.welcome-code-xs {
+  font-size: 12px;
+}
+
+.welcome-code-pre {
+  white-space: pre-wrap;
+}
+
+.welcome-code-inline {
+  padding: 2px 4px;
+  background: var(--ac-hover-bg-subtle);
+  border: var(--ac-border-width) solid var(--ac-border);
+  border-radius: 6px;
+}
+
+.welcome-command-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--ac-code-bg);
+  border: var(--ac-border-width) solid var(--ac-code-border);
+  border-radius: var(--ac-radius-inner);
+}
+
+.welcome-command-row--compact {
+  padding: 8px 12px;
+}
+
+.welcome-command-info {
+  min-width: 0;
+}
+
+.welcome-command-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+}
+
+.welcome-copy-btn {
+  font-family: var(--ac-font-mono);
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.2s ease;
+}
+
+.welcome-copy-btn:hover {
+  opacity: 0.8;
+}
+
+/* =============================================
+   Alt row & Report card
+   ============================================= */
+.welcome-alt-row {
+  padding: 12px 16px;
+  background: var(--ac-surface-muted);
+  border: var(--ac-border-width) solid var(--ac-border);
+  border-radius: var(--ac-radius-inner);
+}
+
+.welcome-alt-row--padded {
+  padding: 16px;
+}
+
+.welcome-report-card {
+  padding: 16px;
+  background: var(--ac-diff-del-bg);
+  border: var(--ac-border-width) solid var(--ac-diff-del-border);
+  border-radius: var(--ac-radius-inner);
+}
+
+/* =============================================
+   Diagnostics list
+   ============================================= */
+.welcome-diagnostics-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* =============================================
+   Button
+   ============================================= */
 .welcome-button {
   font-family: var(--ac-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 12px;
   color: var(--ac-text-muted);
   background: var(--ac-surface);
   border: var(--ac-border-width) solid var(--ac-border);
@@ -66,43 +316,38 @@
   background: var(--ac-hover-bg-subtle);
 }
 
-.welcome-command-row {
-  background: var(--ac-code-bg);
-  border: var(--ac-border-width) solid var(--ac-code-border);
-  border-radius: var(--ac-radius-inner);
-}
-
-.welcome-alt-row {
-  background: var(--ac-surface-muted);
-  border: var(--ac-border-width) solid var(--ac-border);
-  border-radius: var(--ac-radius-inner);
-}
-
-.welcome-report-card {
-  background: var(--ac-diff-del-bg);
-  border: var(--ac-border-width) solid var(--ac-diff-del-border);
-  border-radius: var(--ac-radius-inner);
-}
-
-.welcome-code-inline {
-  background: var(--ac-hover-bg-subtle);
-  border: var(--ac-border-width) solid var(--ac-border);
-  border-radius: 6px;
-}
-
-.ac-btn {
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.ac-btn:hover {
-  opacity: 0.8;
-}
-
-summary {
+/* =============================================
+   Details / Collapsible sections
+   ============================================= */
+.welcome-details summary {
   list-style: none;
 }
 
-summary::-webkit-details-marker {
+.welcome-details summary::-webkit-details-marker {
   display: none;
+}
+
+.welcome-details-summary {
+  padding: 16px 24px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.welcome-details-summary-text {
+  min-width: 0;
+}
+
+.welcome-details-body {
+  padding: 0 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.welcome-details-body--lg {
+  gap: 16px;
 }

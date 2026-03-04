@@ -89,9 +89,9 @@ export default function PopupApp() {
     null,
   );
 
-  const showMcpConfig =
+  const isConnectedAndRunning =
     nativeConnectionStatus === "connected" && serverStatus.isRunning;
-  const showRegisterCommand = !showMcpConfig;
+  const showRegisterFallback = nativeConnectionStatus !== "connected";
   const extensionId = chrome.runtime.id;
 
   const mcpConfigJson = useMemo(() => {
@@ -442,41 +442,74 @@ export default function PopupApp() {
   }, []);
 
   useEffect(() => {
-    if (showMcpConfig) {
+    if (isConnectedAndRunning) {
       void refreshNativeAuthToken();
       return;
     }
     setAuthTokenEnabled(false);
     setNativeAuthToken(null);
-  }, [showMcpConfig]);
+  }, [isConnectedAndRunning]);
+
+  function getHeaderStatusClass(): string {
+    if (nativeConnectionStatus === "connected") {
+      return serverStatus.isRunning ? "status-running" : "status-warning";
+    }
+    if (nativeConnectionStatus === "disconnected") {
+      return "status-error";
+    }
+    return "status-unknown";
+  }
+
+  function getHeaderStatusText(): string {
+    if (nativeConnectionStatus === "connected") {
+      if (serverStatus.isRunning) {
+        return t("popupStatusRunning", "Running");
+      }
+      return t("popupStatusIdle", "Idle");
+    }
+    if (nativeConnectionStatus === "disconnected") {
+      return t("popupStatusOffline", "Offline");
+    }
+    return t("popupStatusDetecting", "Detecting");
+  }
 
   return (
     <div className="popup-container agent-theme" data-agent-theme={agentTheme}>
       <div className="home-view">
+        {/* Header with brand + status badge */}
         <div className="header">
-          <div className="header-content">
-            <h1 className="header-title">
-              {t("extensionName", "Webpage MCP Connector")}
-            </h1>
+          <div className="header-top">
+            <div className="header-brand">
+              <div className="header-logo">
+                <BoltIcon className="icon-small" />
+              </div>
+              <h1 className="header-title">
+                {t("extensionName", "Webpage MCP Connector")}
+              </h1>
+            </div>
+            <div className={`header-status ${getHeaderStatusClass()}`}>
+              <span className="status-dot" />
+              <span>{getHeaderStatusText()}</span>
+            </div>
           </div>
         </div>
 
         <div className="content">
+          {/* Server Config Section */}
           <div className="section">
-            <h2 className="section-title">{getMessage("nativeServerConfigLabel")}</h2>
+            <div className="section-header">
+              <h2 className="section-title">{getMessage("nativeServerConfigLabel")}</h2>
+              <button
+                className="refresh-status-button"
+                type="button"
+                onClick={() => void refreshServerStatus()}
+                title={getMessage("refreshStatusButton")}
+              >
+                <RefreshIcon className="icon-small" />
+              </button>
+            </div>
             <div className="config-card">
               <div className="status-section">
-                <div className="status-header">
-                  <p className="status-label">{getMessage("runningStatusLabel")}</p>
-                  <button
-                    className="refresh-status-button"
-                    type="button"
-                    onClick={() => void refreshServerStatus()}
-                    title={getMessage("refreshStatusButton")}
-                  >
-                    <RefreshIcon className="icon-small" />
-                  </button>
-                </div>
                 <div className="status-info">
                   <span className={`status-dot ${getStatusClass()}`} />
                   <span className="status-text">{getStatusText()}</span>
@@ -489,53 +522,23 @@ export default function PopupApp() {
                 ) : null}
               </div>
 
-              {showRegisterCommand ? (
-                <div className="mcp-config-section">
-                  <div className="mcp-config-header">
-                    <p className="mcp-config-label">
-                      {t(
-                        "popupOneTimeHostRegistrationLabel",
-                        "One-time host registration (current extension ID)",
-                      )}
-                    </p>
-                    <button
-                      className="copy-config-button"
-                      type="button"
-                      onClick={() => void copyRegisterCommand()}
-                    >
-                      {copyRegisterButtonText}
-                    </button>
-                  </div>
-                  <div className="mcp-config-content">
-                    <pre className="mcp-config-json">{registerCommand}</pre>
-                  </div>
-                  {nativeConnectionError ? (
-                    <p className="register-command-error">
-                      {t("popupConnectFailedPrefix", "Connect failed")}: {nativeConnectionError}
-                    </p>
-                  ) : null}
+              <div className="mcp-config-section">
+                <div className="mcp-config-header">
+                  <p className="mcp-config-label">{getMessage("mcpServerConfigLabel")}</p>
+                  <button
+                    className="copy-config-button"
+                    type="button"
+                    onClick={() => void copyMcpConfig()}
+                  >
+                    {copyButtonText}
+                  </button>
                 </div>
-              ) : null}
-
-              {showMcpConfig ? (
-                <div className="mcp-config-section">
-                  <div className="mcp-config-header">
-                    <p className="mcp-config-label">{getMessage("mcpServerConfigLabel")}</p>
-                    <button
-                      className="copy-config-button"
-                      type="button"
-                      onClick={() => void copyMcpConfig()}
-                    >
-                      {copyButtonText}
-                    </button>
-                  </div>
-                  <div className="mcp-config-content">
-                    <pre className="mcp-config-json">{mcpConfigJson}</pre>
-                  </div>
+                <div className="mcp-config-content">
+                  <pre className="mcp-config-json">{mcpConfigJson}</pre>
                 </div>
-              ) : null}
+              </div>
 
-              {showMcpConfig && authTokenEnabled && nativeAuthToken ? (
+              {isConnectedAndRunning && authTokenEnabled && nativeAuthToken ? (
                 <div className="mcp-config-section">
                   <div className="mcp-config-header">
                     <p className="mcp-config-label">{t("popupAuthTokenLabel", "Auth token")}</p>
@@ -551,6 +554,48 @@ export default function PopupApp() {
                     <pre className="mcp-config-json">{nativeAuthToken}</pre>
                   </div>
                 </div>
+              ) : null}
+
+              {showRegisterFallback ? (
+                <details className="register-fallback-section">
+                  <summary className="register-fallback-summary">
+                    {t(
+                      "popupManualRegistrationLabel",
+                      "Manual registration (if auto-registration fails)",
+                    )}
+                  </summary>
+                  <div className="register-fallback-content">
+                    <p className="register-fallback-hint">
+                      {t(
+                        "popupManualRegistrationHint",
+                        "Only needed if auto-registration did not work. Requires Node.js.",
+                      )}
+                    </p>
+                    <div className="mcp-config-header">
+                      <p className="mcp-config-label">
+                        {t(
+                          "popupOneTimeHostRegistrationLabel",
+                          "One-time host registration (current extension ID)",
+                        )}
+                      </p>
+                      <button
+                        className="copy-config-button"
+                        type="button"
+                        onClick={() => void copyRegisterCommand()}
+                      >
+                        {copyRegisterButtonText}
+                      </button>
+                    </div>
+                    <div className="mcp-config-content">
+                      <pre className="mcp-config-json">{registerCommand}</pre>
+                    </div>
+                    {nativeConnectionError ? (
+                      <p className="register-command-error">
+                        {t("popupConnectFailedPrefix", "Connect failed")}: {nativeConnectionError}
+                      </p>
+                    ) : null}
+                  </div>
+                </details>
               ) : null}
 
               <button
@@ -571,11 +616,14 @@ export default function PopupApp() {
             </div>
           </div>
 
+          {/* Quick Tools - labeled icon grid */}
           <div className="section">
-            <h2 className="section-title">{t("popupQuickToolsTitle", "Quick tools")}</h2>
-            <div className="rr-icon-buttons">
+            <div className="section-header">
+              <h2 className="section-title">{t("popupQuickToolsTitle", "Quick tools")}</h2>
+            </div>
+            <div className="quick-tools-grid">
               <button
-                className="rr-icon-btn rr-icon-btn-record rr-icon-btn-coming-soon has-tooltip"
+                className="quick-tool-item quick-tool-disabled has-tooltip"
                 type="button"
                 onClick={startRecording}
                 data-tooltip={t(
@@ -583,10 +631,15 @@ export default function PopupApp() {
                   "The recording function is under development",
                 )}
               >
-                <RecordIcon recording={false} />
+                <div className="quick-tool-icon icon-record">
+                  <RecordIcon recording={false} />
+                </div>
+                <span className="quick-tool-label">
+                  {t("popupToolRecord", "Record")}
+                </span>
               </button>
               <button
-                className="rr-icon-btn rr-icon-btn-stop rr-icon-btn-coming-soon has-tooltip"
+                className="quick-tool-item quick-tool-disabled has-tooltip"
                 type="button"
                 onClick={stopRecording}
                 data-tooltip={t(
@@ -594,10 +647,15 @@ export default function PopupApp() {
                   "The recording function is under development",
                 )}
               >
-                <StopIcon />
+                <div className="quick-tool-icon icon-stop">
+                  <StopIcon />
+                </div>
+                <span className="quick-tool-label">
+                  {t("popupToolStop", "Stop")}
+                </span>
               </button>
               <button
-                className="rr-icon-btn rr-icon-btn-edit has-tooltip"
+                className="quick-tool-item has-tooltip"
                 type="button"
                 onClick={() => void toggleWebEditor()}
                 data-tooltip={t(
@@ -605,10 +663,15 @@ export default function PopupApp() {
                   "Turn on page editing mode",
                 )}
               >
-                <EditIcon />
+                <div className="quick-tool-icon icon-edit">
+                  <EditIcon />
+                </div>
+                <span className="quick-tool-label">
+                  {t("popupToolEditor", "Editor")}
+                </span>
               </button>
               <button
-                className="rr-icon-btn rr-icon-btn-marker has-tooltip"
+                className="quick-tool-item has-tooltip"
                 type="button"
                 onClick={() => void toggleElementMarker()}
                 data-tooltip={t(
@@ -616,15 +679,23 @@ export default function PopupApp() {
                   "Turn on element annotation",
                 )}
               >
-                <MarkerIcon />
+                <div className="quick-tool-icon icon-marker">
+                  <MarkerIcon />
+                </div>
+                <span className="quick-tool-label">
+                  {t("popupToolMarker", "Marker")}
+                </span>
               </button>
             </div>
           </div>
 
+          {/* Management Portal */}
           <div className="section">
-            <h2 className="section-title">
-              {t("popupManagementPortalTitle", "Management portal")}
-            </h2>
+            <div className="section-header">
+              <h2 className="section-title">
+                {t("popupManagementPortalTitle", "Management portal")}
+              </h2>
+            </div>
             <div className="entry-card">
               <button
                 className="entry-item entry-item-coming-soon"
@@ -651,8 +722,8 @@ export default function PopupApp() {
                 <svg
                   className="entry-arrow"
                   viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
+                  width="14"
+                  height="14"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
@@ -671,20 +742,7 @@ export default function PopupApp() {
                 onClick={openElementMarkerSidepanel}
               >
                 <div className="entry-icon marker">
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="20"
-                    height="20"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-                    />
-                  </svg>
+                  <MarkerIcon />
                 </div>
                 <div className="entry-content">
                   <span className="entry-title">
@@ -703,8 +761,8 @@ export default function PopupApp() {
                 <svg
                   className="entry-arrow"
                   viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
+                  width="14"
+                  height="14"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
@@ -720,6 +778,7 @@ export default function PopupApp() {
           </div>
         </div>
 
+        {/* Footer */}
         <div className="footer">
           <div className="footer-links">
             <button
@@ -729,7 +788,6 @@ export default function PopupApp() {
               title={t("popupViewInstallGuideTitle", "View installation guide")}
             >
               <svg
-                className="w-4 h-4"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -750,7 +808,6 @@ export default function PopupApp() {
               title={t("popupTroubleshootingTitle", "Troubleshooting")}
             >
               <svg
-                className="w-4 h-4"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -773,8 +830,8 @@ export default function PopupApp() {
 
       {comingSoonToast.show ? (
         <div className="coming-soon-toast">
-          <span className="coming-soon-icon">🚧</span>
-          <span className="coming-soon-text">
+          <span>🚧</span>
+          <span>
             {`${comingSoonToast.feature} ${t(
               "popupFeatureUnderDevelopmentSuffix",
               "The feature is under development, please stay tuned",
