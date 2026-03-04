@@ -129,6 +129,123 @@ function resolveSourceNodeModulesDir(sourceDistDir: string): string {
   return path.join(path.resolve(sourceDistDir, ".."), RUNTIME_NODE_MODULES_DIR_NAME);
 }
 
+function findNearestNodeModulesDir(resolvedModulePath: string): string | null {
+  let currentDir = path.dirname(resolvedModulePath);
+  while (true) {
+    if (path.basename(currentDir) === RUNTIME_NODE_MODULES_DIR_NAME) {
+      return currentDir;
+    }
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      return null;
+    }
+    currentDir = parentDir;
+  }
+}
+
+interface SourceNodeModulesResolution {
+  path: string;
+  score: number;
+  total: number;
+  candidates: string[];
+}
+
+function resolveBestSourceNodeModulesDir(
+  sourceDistDir: string,
+): SourceNodeModulesResolution | null {
+  const entryPath = path.join(sourceDistDir, RUNTIME_HOST_ENTRY_FILE);
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+
+  const addCandidate = (candidatePath: string | null | undefined): void => {
+    if (!candidatePath) {
+      return;
+    }
+    const normalized = path.resolve(candidatePath);
+    if (!fs.existsSync(normalized)) {
+      return;
+    }
+    let stats: fs.Stats;
+    try {
+      stats = fs.statSync(normalized);
+    } catch {
+      return;
+    }
+    if (!stats.isDirectory() || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    candidates.push(normalized);
+  };
+
+  addCandidate(resolveSourceNodeModulesDir(sourceDistDir));
+  addCandidate(path.join(path.resolve(sourceDistDir, "..", ".."), RUNTIME_NODE_MODULES_DIR_NAME));
+  addCandidate(path.join(path.resolve(sourceDistDir, "..", "..", ".."), RUNTIME_NODE_MODULES_DIR_NAME));
+
+  if (fs.existsSync(entryPath)) {
+    try {
+      const runtimeRequire = createRequire(entryPath);
+      for (const moduleId of RUNTIME_REQUIRED_MODULE_IDS) {
+        try {
+          const resolvedPath = runtimeRequire.resolve(moduleId);
+          addCandidate(findNearestNodeModulesDir(resolvedPath));
+        } catch {
+          // ignore unresolved module for candidate discovery
+        }
+      }
+    } catch {
+      // ignore require creation failures
+    }
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  if (!fs.existsSync(entryPath)) {
+    return {
+      path: candidates[0],
+      score: 0,
+      total: RUNTIME_REQUIRED_MODULE_IDS.length,
+      candidates,
+    };
+  }
+
+  try {
+    const runtimeRequire = createRequire(entryPath);
+    let bestPath = candidates[0];
+    let bestScore = -1;
+    for (const candidatePath of candidates) {
+      let score = 0;
+      for (const moduleId of RUNTIME_REQUIRED_MODULE_IDS) {
+        try {
+          runtimeRequire.resolve(moduleId, { paths: [candidatePath] });
+          score += 1;
+        } catch {
+          // unresolved in this candidate
+        }
+      }
+      if (score > bestScore) {
+        bestPath = candidatePath;
+        bestScore = score;
+      }
+    }
+    return {
+      path: bestPath,
+      score: Math.max(bestScore, 0),
+      total: RUNTIME_REQUIRED_MODULE_IDS.length,
+      candidates,
+    };
+  } catch {
+    return {
+      path: candidates[0],
+      score: 0,
+      total: RUNTIME_REQUIRED_MODULE_IDS.length,
+      candidates,
+    };
+  }
+}
+
 export function getExpectedMainPath(): string {
   return path.join(getStableRuntimeDistDir(), getWrapperScriptName());
 }
@@ -213,21 +330,35 @@ function writeRuntimeNodeModulesPathFile(
   sourceDistDir: string,
   logger: RegistrationLogger,
 ): void {
-  const sourceNodeModulesDir = resolveSourceNodeModulesDir(sourceDistDir);
   const modulesPathFile = getRuntimeNodeModulesPathFile(runtimeDistDir);
+  const resolved = resolveBestSourceNodeModulesDir(sourceDistDir);
 
-  if (!fs.existsSync(sourceNodeModulesDir)) {
+  if (!resolved) {
+    try {
+      fs.rmSync(modulesPathFile, { force: true });
+    } catch {
+      // ignore stale file cleanup failure
+    }
     logger.warn(
       colorText(
-        `⚠️ Package dependencies not found at ${sourceNodeModulesDir}`,
+        `⚠️ Package dependencies not found; checked near ${sourceDistDir}`,
         "yellow",
       ),
     );
     return;
   }
 
+  if (resolved.score < resolved.total) {
+    logger.warn(
+      colorText(
+        `⚠️ Runtime dependency path candidate is partial (${resolved.score}/${resolved.total}): ${resolved.path}`,
+        "yellow",
+      ),
+    );
+  }
+
   try {
-    fs.writeFileSync(modulesPathFile, `${sourceNodeModulesDir}\n`, "utf8");
+    fs.writeFileSync(modulesPathFile, `${resolved.path}\n`, "utf8");
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     logger.warn(
@@ -251,9 +382,13 @@ export function getMissingRuntimeHostDependencies(runtimeDistDir: string): strin
     const modulesPathFile = getRuntimeNodeModulesPathFile(runtimeDistDir);
     if (fs.existsSync(modulesPathFile)) {
       try {
-        const fromFile = fs.readFileSync(modulesPathFile, "utf8").trim();
-        if (fromFile) {
-          resolvePaths.push(fromFile);
+        const lines = fs
+          .readFileSync(modulesPathFile, "utf8")
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        for (const line of lines) {
+          resolvePaths.push(line);
         }
       } catch {
         // ignore malformed file
@@ -530,46 +665,50 @@ function detectLocalExtensionIds(): string[] {
         continue;
       }
 
-      const preferencesPath = path.join(root, name, "Preferences");
-      if (!fs.existsSync(preferencesPath)) {
-        continue;
-      }
-
-      let parsed: any;
-      try {
-        parsed = JSON.parse(fs.readFileSync(preferencesPath, "utf8"));
-      } catch {
-        continue;
-      }
-
-      const settings =
-        parsed?.extensions?.settings &&
-        typeof parsed.extensions.settings === "object"
-          ? (parsed.extensions.settings as Record<string, any>)
-          : null;
-      if (!settings) {
-        continue;
-      }
-
-      for (const [extensionId, data] of Object.entries(settings)) {
-        const normalizedId = toExtensionId(extensionId);
-        if (!normalizedId) {
+      const preferenceFileNames = ["Secure Preferences", "Preferences"];
+      for (const fileName of preferenceFileNames) {
+        const preferencesPath = path.join(root, name, fileName);
+        if (!fs.existsSync(preferencesPath)) {
           continue;
         }
 
-        const extensionPath =
-          typeof data?.path === "string" ? data.path.toLowerCase() : "";
-        const manifestName =
-          typeof data?.manifest?.name === "string"
-            ? data.manifest.name.toLowerCase()
-            : "";
-        const isWebpageMcp =
-          extensionPath.includes("webpage-mcp") ||
-          extensionPath.includes("webpage_mcp") ||
-          extensionPath.includes("webpage mcp");
+        let parsed: any;
+        try {
+          parsed = JSON.parse(fs.readFileSync(preferencesPath, "utf8"));
+        } catch {
+          continue;
+        }
 
-        if (isWebpageMcp) {
-          matches.add(normalizedId);
+        const settings =
+          parsed?.extensions?.settings &&
+          typeof parsed.extensions.settings === "object"
+            ? (parsed.extensions.settings as Record<string, any>)
+            : null;
+        if (!settings) {
+          continue;
+        }
+
+        for (const [extensionId, data] of Object.entries(settings)) {
+          const normalizedId = toExtensionId(extensionId);
+          if (!normalizedId) {
+            continue;
+          }
+
+          const extensionPath =
+            typeof data?.path === "string" ? data.path.toLowerCase() : "";
+          const manifestName =
+            typeof data?.manifest?.name === "string"
+              ? data.manifest.name.toLowerCase()
+              : "";
+          const isWebpageMcp =
+            extensionPath.includes("webpage-mcp") ||
+            extensionPath.includes("webpage_mcp") ||
+            extensionPath.includes("webpage mcp") ||
+            (manifestName.includes("webpage") && manifestName.includes("mcp"));
+
+          if (isWebpageMcp) {
+            matches.add(normalizedId);
+          }
         }
       }
     }
