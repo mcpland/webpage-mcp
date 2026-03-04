@@ -1903,6 +1903,14 @@
     "message": "Management portal",
     "description": "Auto-generated i18n message"
   },
+  "popupManualRegistrationHint": {
+    "message": "Only needed if auto-registration did not work. Requires Node.js.",
+    "description": "Auto-generated i18n message"
+  },
+  "popupManualRegistrationLabel": {
+    "message": "Manual registration (if auto-registration fails)",
+    "description": "Auto-generated i18n message"
+  },
   "popupMarkerNamePlaceholder": {
     "message": "Name, such as \"Login Button\"",
     "description": "Auto-generated i18n message"
@@ -1925,6 +1933,38 @@
   },
   "popupRecordPlaybackFeature": {
     "message": "Record playback",
+    "description": "Auto-generated i18n message"
+  },
+  "popupStatusDetecting": {
+    "message": "Detecting",
+    "description": "Auto-generated i18n message"
+  },
+  "popupStatusIdle": {
+    "message": "Idle",
+    "description": "Auto-generated i18n message"
+  },
+  "popupStatusOffline": {
+    "message": "Offline",
+    "description": "Auto-generated i18n message"
+  },
+  "popupStatusRunning": {
+    "message": "Running",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolEditor": {
+    "message": "Editor",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolMarker": {
+    "message": "Marker",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolRecord": {
+    "message": "Record",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolStop": {
+    "message": "Stop",
     "description": "Auto-generated i18n message"
   },
   "popupTroubleshootingTitle": {
@@ -2621,12 +2661,28 @@
     "message": "Webpage MCP Connector",
     "description": "Auto-generated i18n message"
   },
+  "welcomeManualRegistrationDesc": {
+    "message": "Only needed if auto-registration fails. Requires Node.js.",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeManualRegistrationTitle": {
+    "message": "Manual Registration (fallback)",
+    "description": "Auto-generated i18n message"
+  },
   "welcomeMcpConfigDesc": {
     "message": "Use this in your MCP client. No localhost HTTP URL is required.",
     "description": "Auto-generated i18n message"
   },
   "welcomeMcpConfigTitle": {
     "message": "MCP client config (stdio)",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeMcpServerSetupDesc": {
+    "message": "Start the MCP server with your MCP client using the config below. The server automatically registers the native host on first run.",
+    "description": "Auto-generated i18n message"
+  },
+  "welcomeMcpServerSetupTitle": {
+    "message": "MCP Server Setup",
     "description": "Auto-generated i18n message"
   },
   "welcomeOpenTroubleshootingDocs": {

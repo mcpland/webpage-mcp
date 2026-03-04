@@ -1903,6 +1903,14 @@
     "message": "管理ポータル",
     "description": "Auto-generated localized message"
   },
+  "popupManualRegistrationHint": {
+    "message": "自動登録が機能しなかった場合にのみ必要です。 Node.jsが必要です。",
+    "description": "Auto-generated localized message"
+  },
+  "popupManualRegistrationLabel": {
+    "message": "手動登録（自動登録が失敗した場合）",
+    "description": "Auto-generated localized message"
+  },
   "popupMarkerNamePlaceholder": {
     "message": "名前（「ログインボタン」など）",
     "description": "Auto-generated localized message"
@@ -1925,6 +1933,38 @@
   },
   "popupRecordPlaybackFeature": {
     "message": "録音再生",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusDetecting": {
+    "message": "検出中",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusIdle": {
+    "message": "アイドル状態",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusOffline": {
+    "message": "オフライン",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusRunning": {
+    "message": "ランニング",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolEditor": {
+    "message": "エディタ",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolMarker": {
+    "message": "マーカー",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolRecord": {
+    "message": "記録",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStop": {
+    "message": "停止",
     "description": "Auto-generated localized message"
   },
   "popupTroubleshootingTitle": {
@@ -2621,12 +2661,28 @@
     "message": "Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
+  "welcomeManualRegistrationDesc": {
+    "message": "自動登録が失敗した場合にのみ必要です。 Node.jsが必要です。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeManualRegistrationTitle": {
+    "message": "手動登録 (フォールバック)",
+    "description": "Auto-generated localized message"
+  },
   "welcomeMcpConfigDesc": {
     "message": "これを MCP クライアントで使用します。ローカルホストの HTTP URL は必要ありません。",
     "description": "Auto-generated localized message"
   },
   "welcomeMcpConfigTitle": {
     "message": "MCP クライアント設定 (stdio)",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpServerSetupDesc": {
+    "message": "以下の構成を使用して、MCP クライアントで MCP サーバーを起動します。サーバーは、最初の実行時にネイティブ ホストを自動的に登録します。",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpServerSetupTitle": {
+    "message": "MCPサーバーのセットアップ",
     "description": "Auto-generated localized message"
   },
   "welcomeOpenTroubleshootingDocs": {

@@ -1903,6 +1903,14 @@
     "message": "管理入口網站",
     "description": "自動生成的 i18n 文案"
   },
+  "popupManualRegistrationHint": {
+    "message": "僅當自動註冊不起作用時才需要。需要 Node.js。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupManualRegistrationLabel": {
+    "message": "手動註冊（如果自動註冊失敗）",
+    "description": "自動生成的 i18n 文案"
+  },
   "popupMarkerNamePlaceholder": {
     "message": "名稱，例如“登入按鈕”",
     "description": "自動生成的 i18n 文案"
@@ -1925,6 +1933,38 @@
   },
   "popupRecordPlaybackFeature": {
     "message": "錄音回放",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupStatusDetecting": {
+    "message": "偵測",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupStatusIdle": {
+    "message": "閒置的",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupStatusOffline": {
+    "message": "離線",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupStatusRunning": {
+    "message": "跑步",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupToolEditor": {
+    "message": "編輯",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupToolMarker": {
+    "message": "標記",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupToolRecord": {
+    "message": "記錄",
+    "description": "自動生成的 i18n 文案"
+  },
+  "popupToolStop": {
+    "message": "停止",
     "description": "自動生成的 i18n 文案"
   },
   "popupTroubleshootingTitle": {
@@ -2621,12 +2661,28 @@
     "message": "Webpage MCP Connector",
     "description": "自動生成的 i18n 文案"
   },
+  "welcomeManualRegistrationDesc": {
+    "message": "僅當自動註冊失敗時才需要。需要 Node.js。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeManualRegistrationTitle": {
+    "message": "手動註冊（後備）",
+    "description": "自動生成的 i18n 文案"
+  },
   "welcomeMcpConfigDesc": {
     "message": "在您的 MCP 用戶端中使用它。不需要本機主機 HTTP URL。",
     "description": "自動生成的 i18n 文案"
   },
   "welcomeMcpConfigTitle": {
     "message": "MCP 用戶端設定 (stdio)",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeMcpServerSetupDesc": {
+    "message": "使用下列組態透過 MCP 用戶端啟動 MCP 伺服器。伺服器在首次運作時自動註冊本機主機。",
+    "description": "自動生成的 i18n 文案"
+  },
+  "welcomeMcpServerSetupTitle": {
+    "message": "MCP 伺服器設定",
     "description": "自動生成的 i18n 文案"
   },
   "welcomeOpenTroubleshootingDocs": {

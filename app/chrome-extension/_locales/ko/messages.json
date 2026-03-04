@@ -1903,6 +1903,14 @@
     "message": "관리포털",
     "description": "Auto-generated localized message"
   },
+  "popupManualRegistrationHint": {
+    "message": "자동 등록이 작동하지 않는 경우에만 필요합니다. Node.js가 필요합니다.",
+    "description": "Auto-generated localized message"
+  },
+  "popupManualRegistrationLabel": {
+    "message": "수동등록(자동등록이 실패한 경우)",
+    "description": "Auto-generated localized message"
+  },
   "popupMarkerNamePlaceholder": {
     "message": "\"로그인 버튼\"과 같은 이름",
     "description": "Auto-generated localized message"
@@ -1925,6 +1933,38 @@
   },
   "popupRecordPlaybackFeature": {
     "message": "녹음 재생",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusDetecting": {
+    "message": "감지",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusIdle": {
+    "message": "게으른",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusOffline": {
+    "message": "오프라인",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusRunning": {
+    "message": "달리기",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolEditor": {
+    "message": "편집자",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolMarker": {
+    "message": "채점자",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolRecord": {
+    "message": "기록",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStop": {
+    "message": "멈추다",
     "description": "Auto-generated localized message"
   },
   "popupTroubleshootingTitle": {
@@ -2621,12 +2661,28 @@
     "message": "Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
+  "welcomeManualRegistrationDesc": {
+    "message": "자동 등록에 실패한 경우에만 필요합니다. Node.js가 필요합니다.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeManualRegistrationTitle": {
+    "message": "수동 등록(대체)",
+    "description": "Auto-generated localized message"
+  },
   "welcomeMcpConfigDesc": {
     "message": "MCP 클라이언트에서 이것을 사용하십시오. localhost HTTP URL은 필요하지 않습니다.",
     "description": "Auto-generated localized message"
   },
   "welcomeMcpConfigTitle": {
     "message": "MCP 클라이언트 구성(stdio)",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpServerSetupDesc": {
+    "message": "아래 구성을 사용하여 MCP 클라이언트로 MCP 서버를 시작하십시오. 서버는 처음 실행 시 기본 호스트를 자동으로 등록합니다.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpServerSetupTitle": {
+    "message": "MCP 서버 설정",
     "description": "Auto-generated localized message"
   },
   "welcomeOpenTroubleshootingDocs": {

@@ -1903,6 +1903,14 @@
     "message": "Verwaltungsportal",
     "description": "Auto-generated localized message"
   },
+  "popupManualRegistrationHint": {
+    "message": "Wird nur benötigt, wenn die automatische Registrierung nicht funktioniert hat. Erfordert Node.js.",
+    "description": "Auto-generated localized message"
+  },
+  "popupManualRegistrationLabel": {
+    "message": "Manuelle Registrierung (wenn die automatische Registrierung fehlschlägt)",
+    "description": "Auto-generated localized message"
+  },
   "popupMarkerNamePlaceholder": {
     "message": "Name, z. B. „Anmeldeschaltfläche“",
     "description": "Auto-generated localized message"
@@ -1925,6 +1933,38 @@
   },
   "popupRecordPlaybackFeature": {
     "message": "Aufnahmewiedergabe",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusDetecting": {
+    "message": "Erkennen",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusIdle": {
+    "message": "Leerlauf",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusOffline": {
+    "message": "Offline",
+    "description": "Auto-generated localized message"
+  },
+  "popupStatusRunning": {
+    "message": "Läuft",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolEditor": {
+    "message": "Editor",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolMarker": {
+    "message": "Marker",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolRecord": {
+    "message": "Aufzeichnen",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStop": {
+    "message": "Stoppen",
     "description": "Auto-generated localized message"
   },
   "popupTroubleshootingTitle": {
@@ -2621,12 +2661,28 @@
     "message": "Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
+  "welcomeManualRegistrationDesc": {
+    "message": "Wird nur benötigt, wenn die automatische Registrierung fehlschlägt. Erfordert Node.js.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeManualRegistrationTitle": {
+    "message": "Manuelle Registrierung (Fallback)",
+    "description": "Auto-generated localized message"
+  },
   "welcomeMcpConfigDesc": {
     "message": "Verwenden Sie dies in Ihrem MCP-Client. Es ist keine localhost-HTTP-URL erforderlich.",
     "description": "Auto-generated localized message"
   },
   "welcomeMcpConfigTitle": {
     "message": "MCP-Client-Konfiguration (stdio)",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpServerSetupDesc": {
+    "message": "Starten Sie den MCP-Server mit Ihrem MCP-Client mithilfe der folgenden Konfiguration. Der Server registriert den nativen Host beim ersten Start automatisch.",
+    "description": "Auto-generated localized message"
+  },
+  "welcomeMcpServerSetupTitle": {
+    "message": "MCP-Server-Setup",
     "description": "Auto-generated localized message"
   },
   "welcomeOpenTroubleshootingDocs": {
