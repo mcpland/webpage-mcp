@@ -176,6 +176,18 @@ for %%I in ("%NODE_EXEC%") do set "NODE_BIN_DIR=%%~dpI"
 if defined PATH (set "PATH=%NODE_BIN_DIR%;%PATH%") else (set "PATH=%NODE_BIN_DIR%")
 echo Added %NODE_BIN_DIR% to PATH >> "%WRAPPER_LOG%"
 
+REM Load module lookup path captured during runtime bootstrap
+set "NODE_MODULES_PATH_FILE=%SCRIPT_DIR%\node_modules_path.txt"
+if exist "%NODE_MODULES_PATH_FILE%" (
+    set /p MODULES_PATH=<"%NODE_MODULES_PATH_FILE%"
+    if exist "!MODULES_PATH!\*" (
+        if defined NODE_PATH (set "NODE_PATH=!MODULES_PATH!;!NODE_PATH!") else (set "NODE_PATH=!MODULES_PATH!")
+        echo Using NODE_PATH from node_modules_path.txt: !MODULES_PATH! >> "%WRAPPER_LOG%"
+    ) else (
+        echo node_modules_path.txt exists but directory is invalid: !MODULES_PATH! >> "%WRAPPER_LOG%"
+    )
+)
+
 REM Log Claude Code Router (CCR) related env vars for debugging
 REM These are set via System Properties or PowerShell profile
 if defined ANTHROPIC_BASE_URL (

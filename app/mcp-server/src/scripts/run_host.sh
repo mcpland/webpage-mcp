@@ -252,6 +252,18 @@ NODE_BIN_DIR="$(dirname "${NODE_EXEC}")"
 export PATH="${NODE_BIN_DIR}${PATH:+:${PATH}}"
 echo "Added ${NODE_BIN_DIR} to PATH" >> "${WRAPPER_LOG}"
 
+# Load module lookup path captured during runtime bootstrap.
+NODE_MODULES_PATH_FILE="${SCRIPT_DIR}/node_modules_path.txt"
+if [ -f "${NODE_MODULES_PATH_FILE}" ]; then
+    MODULES_PATH=$(cat "${NODE_MODULES_PATH_FILE}" 2>/dev/null | tr -d '\n\r')
+    if [ -n "${MODULES_PATH}" ] && [ -d "${MODULES_PATH}" ]; then
+        export NODE_PATH="${MODULES_PATH}${NODE_PATH:+:${NODE_PATH}}"
+        echo "Using NODE_PATH from node_modules_path.txt: ${MODULES_PATH}" >> "${WRAPPER_LOG}"
+    else
+        echo "node_modules_path.txt exists but directory is invalid: ${MODULES_PATH}" >> "${WRAPPER_LOG}"
+    fi
+fi
+
 # Log Claude Code Router (CCR) related env vars for debugging
 # These are set by `eval "$(ccr activate)"` or in shell profile
 if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then

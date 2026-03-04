@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { execSync } from "child_process";
+import { createRequire } from "module";
 import { promisify } from "util";
 import { COMMAND_NAME, DESCRIPTION, EXTENSION_ID, HOST_NAME } from "./constant";
 import {
@@ -19,6 +20,15 @@ const RUNTIME_DIR_NAME = ".webpage-mcp";
 const RUNTIME_SUBDIR = "runtime";
 const RUNTIME_DIST_SUBDIR = "dist";
 const RUNTIME_VERSION_FILE = ".runtime-version";
+const RUNTIME_HOST_ENTRY_FILE = "index.js";
+const RUNTIME_NODE_MODULES_DIR_NAME = "node_modules";
+const RUNTIME_NODE_MODULES_PATH_FILE = "node_modules_path.txt";
+const RUNTIME_REQUIRED_MODULE_IDS = [
+  "drizzle-orm",
+  "drizzle-orm/sqlite-core",
+  "better-sqlite3",
+  "@modelcontextprotocol/sdk/server/index.js",
+];
 
 interface RegistrationLogOptions {
   silent?: boolean;
@@ -107,6 +117,18 @@ export function getStableRuntimeDistDir(): string {
   return path.join(getStableRuntimeRootDir(), RUNTIME_DIST_SUBDIR);
 }
 
+export function getStableRuntimeNodeModulesDir(): string {
+  return path.join(getStableRuntimeRootDir(), RUNTIME_NODE_MODULES_DIR_NAME);
+}
+
+function getRuntimeNodeModulesPathFile(runtimeDistDir: string): string {
+  return path.join(runtimeDistDir, RUNTIME_NODE_MODULES_PATH_FILE);
+}
+
+function resolveSourceNodeModulesDir(sourceDistDir: string): string {
+  return path.join(path.resolve(sourceDistDir, ".."), RUNTIME_NODE_MODULES_DIR_NAME);
+}
+
 export function getExpectedMainPath(): string {
   return path.join(getStableRuntimeDistDir(), getWrapperScriptName());
 }
@@ -186,6 +208,83 @@ async function ensureExecutionPermissionsForDistWithOptions(
   }
 }
 
+function writeRuntimeNodeModulesPathFile(
+  runtimeDistDir: string,
+  sourceDistDir: string,
+  logger: RegistrationLogger,
+): void {
+  const sourceNodeModulesDir = resolveSourceNodeModulesDir(sourceDistDir);
+  const modulesPathFile = getRuntimeNodeModulesPathFile(runtimeDistDir);
+
+  if (!fs.existsSync(sourceNodeModulesDir)) {
+    logger.warn(
+      colorText(
+        `⚠️ Package dependencies not found at ${sourceNodeModulesDir}`,
+        "yellow",
+      ),
+    );
+    return;
+  }
+
+  try {
+    fs.writeFileSync(modulesPathFile, `${sourceNodeModulesDir}\n`, "utf8");
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(
+      colorText(
+        `⚠️ Failed to write ${RUNTIME_NODE_MODULES_PATH_FILE}: ${message}`,
+        "yellow",
+      ),
+    );
+  }
+}
+
+export function getMissingRuntimeHostDependencies(runtimeDistDir: string): string[] {
+  const entryPath = path.join(runtimeDistDir, RUNTIME_HOST_ENTRY_FILE);
+  if (!fs.existsSync(entryPath)) {
+    return [];
+  }
+
+  try {
+    const runtimeRequire = createRequire(entryPath);
+    const resolvePaths: string[] = [];
+    const modulesPathFile = getRuntimeNodeModulesPathFile(runtimeDistDir);
+    if (fs.existsSync(modulesPathFile)) {
+      try {
+        const fromFile = fs.readFileSync(modulesPathFile, "utf8").trim();
+        if (fromFile) {
+          resolvePaths.push(fromFile);
+        }
+      } catch {
+        // ignore malformed file
+      }
+    }
+    const runtimeNodeModulesDir = getStableRuntimeNodeModulesDir();
+    if (fs.existsSync(runtimeNodeModulesDir)) {
+      resolvePaths.push(runtimeNodeModulesDir);
+    }
+
+    return RUNTIME_REQUIRED_MODULE_IDS.filter((moduleId) => {
+      try {
+        runtimeRequire.resolve(moduleId);
+        return false;
+      } catch {
+        if (resolvePaths.length > 0) {
+          try {
+            runtimeRequire.resolve(moduleId, { paths: resolvePaths });
+            return false;
+          } catch {
+            return true;
+          }
+        }
+        return true;
+      }
+    });
+  } catch {
+    return [...RUNTIME_REQUIRED_MODULE_IDS];
+  }
+}
+
 export async function ensureStableRuntimeHostFiles(
   options?: EnsureRuntimeOptions,
 ): Promise<StableRuntimeInstallResult> {
@@ -204,6 +303,7 @@ export async function ensureStableRuntimeHostFiles(
     const targetNormalized = normalizeComparablePath(runtimeDistDir);
 
     if (sourceNormalized === targetNormalized) {
+      writeRuntimeNodeModulesPathFile(runtimeDistDir, sourceDistDir, logger);
       writeNodePathFile(runtimeDistDir, process.execPath, options);
       await ensureExecutionPermissionsForDistWithOptions(
         runtimeDistDir,
@@ -250,6 +350,7 @@ export async function ensureStableRuntimeHostFiles(
       writeRuntimeVersionMarker(runtimeDistDir, packageVersion);
     }
 
+    writeRuntimeNodeModulesPathFile(runtimeDistDir, sourceDistDir, logger);
     writeNodePathFile(runtimeDistDir, process.execPath, options);
     await ensureExecutionPermissionsForDistWithOptions(runtimeDistDir, logger);
 
@@ -1137,6 +1238,7 @@ function runDoctorLiteChecks(
   const issues: string[] = [];
   const indexScriptPath = path.join(runtimeDistDir, "index.js");
   const nodePathFilePath = path.join(runtimeDistDir, "node_path.txt");
+  const nodeModulesPathFilePath = getRuntimeNodeModulesPathFile(runtimeDistDir);
 
   if (!fs.existsSync(runtimeDistDir)) {
     issues.push(`runtime dist directory missing: ${runtimeDistDir}`);
@@ -1150,6 +1252,11 @@ function runDoctorLiteChecks(
   if (!fs.existsSync(nodePathFilePath)) {
     issues.push(`node_path.txt missing: ${nodePathFilePath}`);
   }
+  if (!fs.existsSync(nodeModulesPathFilePath)) {
+    issues.push(
+      `${RUNTIME_NODE_MODULES_PATH_FILE} missing: ${nodeModulesPathFilePath}`,
+    );
+  }
   if (process.platform !== "win32" && fs.existsSync(wrapperPath)) {
     try {
       fs.accessSync(wrapperPath, fs.constants.X_OK);
@@ -1159,6 +1266,12 @@ function runDoctorLiteChecks(
   }
   if (!manifestResult.anyValid) {
     issues.push("no valid user-level Native Messaging manifest found");
+  }
+  const missingDependencies = getMissingRuntimeHostDependencies(runtimeDistDir);
+  if (missingDependencies.length > 0) {
+    issues.push(
+      `runtime dependencies missing: ${missingDependencies.join(", ")}`,
+    );
   }
 
   return issues;

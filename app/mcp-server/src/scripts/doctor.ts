@@ -26,6 +26,8 @@ import {
   resolveAllowedOrigins,
   getExpectedMainPath,
   getStableRuntimeDistDir,
+  getStableRuntimeNodeModulesDir,
+  getMissingRuntimeHostDependencies,
   resolvePackageDistDir,
 } from './utils';
 import { getNativeSocketPath } from '../ipc/socket-path';
@@ -784,7 +786,35 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
     },
   });
 
-  // Check 5: Manifest checks per browser
+  // Check 5: Runtime dependency resolution
+  const missingRuntimeDeps = getMissingRuntimeHostDependencies(runtimeDistDir);
+  const runtimeNodeModulesDir = getStableRuntimeNodeModulesDir();
+  checks.push({
+    id: 'runtime.dependencies',
+    title: 'Runtime dependencies',
+    status: missingRuntimeDeps.length === 0 ? 'ok' : 'error',
+    message:
+      missingRuntimeDeps.length === 0
+        ? 'Native host runtime dependencies are resolvable'
+        : `Missing modules: ${missingRuntimeDeps.join(', ')}`,
+    details: {
+      runtimeDistDir,
+      runtimeNodeModulesDir,
+      missing: missingRuntimeDeps,
+      fix:
+        missingRuntimeDeps.length === 0
+          ? undefined
+          : [
+              `${COMMAND_NAME} doctor --fix`,
+              `Reinstall package: npm install -g ${COMMAND_NAME}`,
+            ],
+    },
+  });
+  if (missingRuntimeDeps.length > 0) {
+    nextSteps.push(`${COMMAND_NAME} doctor --fix`);
+  }
+
+  // Check 6: Manifest checks per browser
   const expectedOrigins = resolveAllowedOrigins();
   const expectedOriginsWithDetected = resolveAllowedOrigins({ includeDetectedExtensionIds: true });
   const detectedOnlyOrigins = expectedOriginsWithDetected.filter(
@@ -876,7 +906,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
     if (issues.length > 0) nextSteps.push(`${COMMAND_NAME} register --browser ${browser}`);
   }
 
-  // Check 6: Windows registry (Windows only)
+  // Check 7: Windows registry (Windows only)
   if (process.platform === 'win32') {
     for (const browser of browsersToCheck) {
       const config = getBrowserConfig(browser);
@@ -967,7 +997,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
     }
   }
 
-  // Check 7: Native IPC bridge configuration (no localhost HTTP transport)
+  // Check 8: Native IPC bridge configuration (no localhost HTTP transport)
   const socketPath = getNativeSocketPath();
   checks.push({
     id: 'native.ipc',
@@ -979,7 +1009,7 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
     },
   });
 
-  // Check 8: Logs directory
+  // Check 9: Logs directory
   checks.push({
     id: 'logs',
     title: 'Logs',
