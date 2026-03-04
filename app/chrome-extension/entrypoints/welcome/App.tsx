@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { LINKS } from "@/common/constants";
 import { getMessage } from "@/utils/i18n";
 
-import "../sidepanel/styles/agent-chat.css";
+import "../sidepanel/styles/connector-theme.css";
 import "./App.css";
 
 const STATIC_COMMANDS = {

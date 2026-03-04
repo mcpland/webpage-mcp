@@ -1,5 +1,5 @@
 /**
- * Composable for managing AgentChat theme.
+ * Composable for managing shared connector theme.
  * Handles theme persistence and application.
  */
 import { ref, type Ref } from '@/entrypoints/shared/reactivity';
@@ -70,7 +70,7 @@ function getThemeFromDocument(): AgentThemeId {
 }
 
 /**
- * Composable for managing AgentChat theme
+ * Composable for managing connector theme
  */
 export function useAgentTheme(): UseAgentTheme {
   // Initialize with preloaded theme (or default)

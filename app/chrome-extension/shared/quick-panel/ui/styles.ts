@@ -2,11 +2,11 @@
  * Quick Panel AI Chat Styles
  *
  * This stylesheet is injected into the Quick Panel's Shadow DOM (content script).
- * It intentionally reuses AgentChat token names (--ac-*) to maintain visual consistency
- * with the sidepanel AgentChat component.
+ * It intentionally reuses shared connector token names (--ac-*) to maintain visual consistency
+ * with popup/sidepanel/welcome UIs.
  *
  * Design System:
- * - Source of truth: app/chrome-extension/entrypoints/sidepanel/styles/agent-chat.css
+ * - Source of truth: app/chrome-extension/entrypoints/sidepanel/styles/connector-theme.css
  * - This file extracts a minimal token + utility subset for content script use
  * - Liquid Glass styling follows quick-panel-prd.md V6 spec
  *

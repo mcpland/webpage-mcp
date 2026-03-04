@@ -1,8 +1,8 @@
 /**
- * AgentChat Theme System
+ * Connector Theme System
  *
- * This file defines the CSS variable tokens for the AgentChat component.
- * All components must only use these tokens - never hardcode colors.
+ * This file defines shared CSS variable tokens used by popup, sidepanel, welcome,
+ * and quick panel UIs. Components should consume these tokens instead of hardcoded colors.
  *
  * Themes:
  * - warm-editorial (default): Warm, editorial style from agent-ux.html

@@ -5,8 +5,8 @@ import App from './App';
 
 // Tailwind first, then custom tokens
 import '../styles/tailwind.css';
-// AgentChat theme tokens
-import './styles/agent-chat.css';
+// Shared connector theme tokens
+import './styles/connector-theme.css';
 
 import { preloadAgentTheme } from './composables';
 

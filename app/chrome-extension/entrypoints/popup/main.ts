@@ -2,8 +2,8 @@ import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NativeMessageType } from 'webpage-mcp-shared';
 import './style.css';
-// Introducing AgentChat theme style
-import '../sidepanel/styles/agent-chat.css';
+// Shared connector theme tokens
+import '../sidepanel/styles/connector-theme.css';
 import { preloadAgentTheme } from '../sidepanel/composables/useAgentTheme';
 import App from './App';
 

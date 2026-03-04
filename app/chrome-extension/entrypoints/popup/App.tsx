@@ -766,7 +766,7 @@ export default function PopupApp() {
             </button>
           </div>
           <p className="footer-text">
-            {t("popupFooterTagline", "webpage mcp server for ai")}
+            {t("popupFooterTagline", "webpage mcp connector for ai")}
           </p>
         </div>
       </div>
@@ -775,11 +775,10 @@ export default function PopupApp() {
         <div className="coming-soon-toast">
           <span className="coming-soon-icon">🚧</span>
           <span className="coming-soon-text">
-            {t(
-              "popupFeatureComingSoon",
-              "{0} is under active development and coming soon",
-              [comingSoonToast.feature],
-            )}
+            {`${comingSoonToast.feature} ${t(
+              "popupFeatureUnderDevelopmentSuffix",
+              "The feature is under development, please stay tuned",
+            )}`}
           </span>
         </div>
       ) : null}
