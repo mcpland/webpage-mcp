@@ -4,13 +4,12 @@ import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import type { ElementMarker, UpsertMarkerRequest } from '@/common/element-marker-types';
 import { getMessage } from '@/utils/i18n';
 import type { AgentThemeId } from './composables/useAgentTheme';
-import AgentChat from './components/AgentChat';
 import SidepanelNavigator from './components/SidepanelNavigator';
 import { WorkflowsView } from './components/workflows';
 import { useWorkflowsV3React, type FlowLite } from './react/useWorkflowsV3React';
 import './App.css';
 
-type TabType = 'workflows' | 'element-markers' | 'agent-chat';
+type TabType = 'workflows' | 'element-markers';
 
 type MarkerFormState = UpsertMarkerRequest & {
   selectorType: 'css' | 'xpath';
@@ -50,7 +49,7 @@ export default function SidepanelApp() {
     getMessage(key, substitutions, fallback);
 
   const [currentTheme, setCurrentTheme] = useState<AgentThemeId>(() => getThemeFromDocument());
-  const [activeTab, setActiveTab] = useState<TabType>('agent-chat');
+  const [activeTab, setActiveTab] = useState<TabType>('workflows');
 
   const workflows = useWorkflowsV3React({ autoConnect: true });
   const { flows, runs, triggers } = workflows;
@@ -496,7 +495,7 @@ export default function SidepanelApp() {
 
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
-      if (tabParam === 'element-markers' || tabParam === 'agent-chat' || tabParam === 'workflows') {
+      if (tabParam === 'element-markers' || tabParam === 'workflows') {
         setActiveTab(tabParam);
         if (tabParam === 'element-markers') {
           await loadMarkers();
@@ -530,19 +529,11 @@ export default function SidepanelApp() {
 
   return (
     <div className="h-full w-full bg-slate-50 relative agent-theme" data-agent-theme={currentTheme}>
-      {activeTab !== 'agent-chat' ? (
-        <SidepanelNavigator activeTab={activeTab} onChange={handleTabChange} />
-      ) : null}
+      <SidepanelNavigator activeTab={activeTab} onChange={handleTabChange} />
 
       {activeTab === 'workflows' ? (
         <div className="h-full">
           <WorkflowsView {...workflowsProps} />
-        </div>
-      ) : null}
-
-      {activeTab === 'agent-chat' ? (
-        <div className="h-full">
-          <AgentChat />
         </div>
       ) : null}
 

@@ -7,7 +7,7 @@ import {
 import { getMessage } from '@/utils/i18n';
 import './SidepanelNavigator.css';
 
-export type SidepanelTabType = 'workflows' | 'element-markers' | 'agent-chat';
+export type SidepanelTabType = 'workflows' | 'element-markers';
 
 export type SidepanelNavigatorProps = {
   activeTab: SidepanelTabType;
@@ -194,51 +194,6 @@ export default function SidepanelNavigator({ activeTab, onChange }: SidepanelNav
             </div>
 
             <div className="navigator-items">
-              <button
-                className={`navigator-item${activeTab === 'agent-chat' ? ' navigator-item-active' : ''}`}
-                onClick={() => selectTab('agent-chat')}
-                type="button"
-              >
-                <div className="navigator-item-icon">
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="20"
-                    height="20"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                    />
-                  </svg>
-                </div>
-                <div className="navigator-item-content">
-                  <span className="navigator-item-title">
-                    {t('sidepanelNavigatorAgentTitle', 'AI Assistant')}
-                  </span>
-                  <span className="navigator-item-desc">
-                    {t('sidepanelNavigatorAgentDesc', 'AI agent conversations and tasks')}
-                  </span>
-                </div>
-                {activeTab === 'agent-chat' ? (
-                  <div className="navigator-item-check">
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="16"
-                      height="16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                ) : null}
-              </button>
-
               <button
                 className={`navigator-item${activeTab === 'workflows' ? ' navigator-item-active' : ''}`}
                 onClick={() => selectTab('workflows')}

@@ -6,11 +6,11 @@
  */
 
 /**
- * Best-effort open the sidepanel with AgentChat tab selected.
+ * Best-effort open the sidepanel with workflows tab selected.
  *
  * @param tabId - Tab ID to associate with sidepanel
  * @param windowId - Optional window ID for fallback when tab-level open fails
- * @param sessionId - Optional session ID to navigate directly to chat view (deep-link)
+ * @param _sessionId - Deprecated, preserved for call-site compatibility
  *
  * @remarks
  * This function is intentionally resilient - it will not throw on failures.
@@ -19,14 +19,10 @@
 export async function openAgentChatSidepanel(
   tabId: number,
   windowId?: number,
-  sessionId?: string,
+  _sessionId?: string,
 ): Promise<void> {
   try {
-    // Build deep-link path with optional session navigation
-    let path = 'sidepanel.html?tab=agent-chat';
-    if (sessionId) {
-      path += `&view=chat&sessionId=${encodeURIComponent(sessionId)}`;
-    }
+    const path = 'sidepanel.html?tab=workflows';
 
     // Configure sidepanel options for this tab
 
