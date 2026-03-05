@@ -17,6 +17,10 @@ import type { TriggerSpec } from '@/entrypoints/background/record-replay-v3/doma
 import type { FlowId, RunId } from '@/entrypoints/background/record-replay-v3/domain/ids';
 import { useRRV3Rpc } from './useRRV3Rpc';
 
+// Route A scope: trigger/schedule management is out of connector surface.
+const ENABLE_TRIGGER_MANAGEMENT = false;
+const TRIGGER_SCOPE_DISABLED_ERROR = 'Triggers are disabled in Connector scope.';
+
 // ==================== UI Types ====================
 
 /** Flow type for UI display (compatible with existing WorkflowsView) */
@@ -198,6 +202,10 @@ export function useWorkflowsV3(options: UseWorkflowsV3Options = {}): UseWorkflow
   }
 
   async function refreshTriggers(): Promise<void> {
+    if (!ENABLE_TRIGGER_MANAGEMENT) {
+      triggers.value = [];
+      return;
+    }
     try {
       const result = (await rpc.request('rr_v3.listTriggers')) as TriggerSpec[] | null;
       triggers.value = (result || []).map(mapTriggerV3ToLite);
@@ -211,7 +219,12 @@ export function useWorkflowsV3(options: UseWorkflowsV3Options = {}): UseWorkflow
     loading.value = true;
     error.value = null;
     try {
-      await Promise.all([refreshFlows(), refreshRuns(), refreshTriggers()]);
+      if (ENABLE_TRIGGER_MANAGEMENT) {
+        await Promise.all([refreshFlows(), refreshRuns(), refreshTriggers()]);
+      } else {
+        await Promise.all([refreshFlows(), refreshRuns()]);
+        triggers.value = [];
+      }
     } finally {
       loading.value = false;
     }
@@ -259,6 +272,10 @@ export function useWorkflowsV3(options: UseWorkflowsV3Options = {}): UseWorkflow
   }
 
   async function deleteTrigger(triggerId: string): Promise<boolean> {
+    if (!ENABLE_TRIGGER_MANAGEMENT) {
+      error.value = TRIGGER_SCOPE_DISABLED_ERROR;
+      return false;
+    }
     try {
       await rpc.request('rr_v3.deleteTrigger', { triggerId });
       // Refresh triggers after deletion
