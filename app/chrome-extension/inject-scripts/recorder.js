@@ -14,6 +14,9 @@
     return;
   }
   const { CONFIG, FRAME_EVENT, SelectorEngine } = shared;
+  const RECORDER_EVENT_PROTOCOL_VERSION = 1;
+  const SEND_RETRY_MAX = 2;
+  const SEND_RETRY_BASE_MS = 80;
 
   // ================================================================
   // 2) UI CLASS (injected via constructor)
@@ -306,6 +309,10 @@
       this.batch = [];
       this.batchTimer = null;
       this.scrollTimer = null;
+      // Protocol/session metadata for background ingest validation
+      this.sessionId = '';
+      this._sendSeq = 0;
+      this._sendNonce = 0;
 
       // Local, content-side buffer for batching/merging steps during recording.
       // Not the authoritative Flow (background holds the real one).
@@ -438,6 +445,7 @@
         clearTimeout(this._forceFlushTimer);
         this._forceFlushTimer = null;
       }
+      this.batch.length = 0;
       this.sessionBuffer.steps = [];
 
       // Return acknowledgment with stats
@@ -730,13 +738,23 @@
 
     _reset(meta) {
       this.sessionBuffer = this._createSessionBuffer();
+      this.batch.length = 0;
+      if (this.batchTimer) clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+      if (this.scrollTimer) clearTimeout(this.scrollTimer);
+      this.scrollTimer = null;
       try {
         if (meta && typeof meta === 'object') {
           if (meta.id) this.sessionBuffer.id = String(meta.id);
           if (meta.name) this.sessionBuffer.name = String(meta.name);
           if (meta.description) this.sessionBuffer.description = String(meta.description);
+          this.sessionId = meta.sessionId ? String(meta.sessionId) : '';
+        } else {
+          this.sessionId = '';
         }
       } catch {}
+      this._sendSeq = 0;
+      this._sendNonce = 0;
       this.lastFill = { step: null, ts: 0, el: null };
       this._lastInputActivityTs = 0;
       this._typingBurstStartTs = 0;
@@ -1005,13 +1023,23 @@
       // Clear force flush timer since we're flushing now
       this._clearForceFlushTimer();
 
-      const steps = this.batch.map((s) => {
+      const rawSteps = this.batch.splice(0, this.batch.length);
+      const steps = rawSteps.map((s) => {
         // sanitize internal fields before sending to background
         const { _recordingRef, ...rest } = s || {};
         return rest;
       });
-      this.batch.length = 0;
-      return this._send({ kind: 'steps', steps });
+      const ok = await this._send({ kind: 'steps', steps });
+
+      // On transport failure, restore batch for retry to avoid step loss.
+      if (!ok) {
+        this.batch.unshift(...rawSteps);
+        if (this.isRecording && !this.isPaused) {
+          this._scheduleFlush();
+        }
+      }
+
+      return ok;
     }
 
     /**
@@ -1019,23 +1047,68 @@
      * @param {Object} payload - The payload to send
      * @returns {Promise<boolean>} - Resolves true if background acknowledged, false otherwise
      */
+    _nextRecorderMeta() {
+      this._sendSeq += 1;
+      this._sendNonce += 1;
+      return {
+        version: RECORDER_EVENT_PROTOCOL_VERSION,
+        sessionId: this.sessionId || '',
+        eventId: `evt_${Date.now()}_${this._sendNonce.toString(36)}`,
+        seq: this._sendSeq,
+        sentAt: Date.now(),
+        source: {
+          href: String(location && location.href ? location.href : ''),
+          isTop: window === window.top,
+        },
+      };
+    }
+
     _send(payload) {
-      return new Promise((resolve) => {
-        try {
-          chrome.runtime.sendMessage({ type: 'rr_recorder_event', payload }, (response) => {
-            // Check for runtime error (e.g., no receiver)
-            if (chrome.runtime.lastError) {
-              console.warn('Recorder: send failed', chrome.runtime.lastError.message);
-              resolve(false);
+      const meta = this._nextRecorderMeta();
+      const envelope = { type: 'rr_recorder_event', payload, meta };
+      const maxAttempts = Math.max(0, SEND_RETRY_MAX);
+
+      const sendAttempt = (attempt) =>
+        new Promise((resolve) => {
+          const finish = (ok) => {
+            if (ok || attempt >= maxAttempts) {
+              resolve(ok);
               return;
             }
-            resolve(response && response.ok);
-          });
-        } catch (e) {
-          console.warn('Recorder: send exception', e);
-          resolve(false);
-        }
-      });
+            const delay = SEND_RETRY_BASE_MS * (attempt + 1);
+            setTimeout(() => {
+              sendAttempt(attempt + 1).then(resolve);
+            }, delay);
+          };
+
+          try {
+            chrome.runtime.sendMessage(envelope, (response) => {
+              if (chrome.runtime.lastError) {
+                console.warn('Recorder: send failed', chrome.runtime.lastError.message);
+                finish(false);
+                return;
+              }
+
+              const ack = response && response.ack ? response.ack : null;
+              const ackSeq = ack && Number.isFinite(ack.seq) ? Number(ack.seq) : undefined;
+              const seqMismatch = ackSeq !== undefined && ackSeq !== meta.seq;
+              if (seqMismatch) {
+                console.warn(
+                  `Recorder: ack seq mismatch (sent=${meta.seq}, received=${ackSeq})`,
+                );
+                finish(false);
+                return;
+              }
+
+              finish(!!(response && response.ok));
+            });
+          } catch (e) {
+            console.warn('Recorder: send exception', e);
+            finish(false);
+          }
+        });
+
+      return sendAttempt(0);
     }
 
     _addVariable(key, sensitive, defVal) {
@@ -1750,6 +1823,21 @@
           return true;
         }
         if (cmd === 'stop') {
+          const requestedSessionId = request?.sessionId || request?.meta?.sessionId;
+          if (
+            requestedSessionId &&
+            rec.sessionId &&
+            String(requestedSessionId) !== String(rec.sessionId)
+          ) {
+            sendResponse({
+              success: true,
+              ack: true,
+              ignored: true,
+              reason: 'session_mismatch',
+              stats: { ack: true, steps: 0, variables: 0 },
+            });
+            return true;
+          }
           // Stop is now async - flush all data and wait for ack before responding
           rec
             .stop()
@@ -1767,6 +1855,20 @@
       // Handle direct stop message with ack (sent by recorder-manager)
       if (request.action === 'stop' && request.requireAck) {
         const rec = getRecorder();
+        const requestedSessionId = request?.sessionId;
+        if (
+          requestedSessionId &&
+          rec.sessionId &&
+          String(requestedSessionId) !== String(rec.sessionId)
+        ) {
+          sendResponse({
+            ack: true,
+            ignored: true,
+            reason: 'session_mismatch',
+            stats: { ack: true, steps: 0, variables: 0 },
+          });
+          return true;
+        }
         rec
           .stop()
           .then((result) => {
