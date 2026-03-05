@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { BACKGROUND_MESSAGE_TYPES, TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import type { ElementMarker, UpsertMarkerRequest } from '@/common/element-marker-types';
+import type { EdgeV3, FlowV3, NodeV3 } from '@/entrypoints/background/record-replay-v3/domain/flow';
+import type { JsonObject } from '@/entrypoints/background/record-replay-v3/domain/json';
 import { getMessage } from '@/utils/i18n';
 import type { AgentThemeId } from './composables/useAgentTheme';
 import SidepanelNavigator from './components/SidepanelNavigator';
@@ -38,6 +40,179 @@ type MarkerFormState = UpsertMarkerRequest & {
   selectorType: 'css' | 'xpath';
   matchType: 'exact' | 'prefix' | 'host';
 };
+
+const SELECTOR_LIKE_KINDS = new Set([
+  'click',
+  'dblclick',
+  'fill',
+  'hover',
+  'assert',
+  'extract',
+  'screenshot',
+  'scroll',
+  'triggerEvent',
+  'setAttribute',
+  'loopElements',
+  'drag',
+]);
+
+const VALUE_LIKE_KINDS = new Set(['fill', 'key', 'setAttribute']);
+
+function cloneNodeConfig<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function toConfigObject(value: unknown): JsonObject {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as JsonObject)
+    : {};
+}
+
+function readSelectorFromConfig(config: unknown): string {
+  const source = toConfigObject(config);
+  const target = toConfigObject(source.target);
+  if (typeof target.selector === 'string') {
+    return target.selector;
+  }
+  if (Array.isArray(target.candidates)) {
+    for (const candidate of target.candidates) {
+      const item = toConfigObject(candidate);
+      if (typeof item.value === 'string') {
+        return item.value;
+      }
+    }
+  }
+  if (typeof source.selector === 'string') {
+    return source.selector;
+  }
+  return '';
+}
+
+function writeSelectorToConfig(config: unknown, selector: string): JsonObject {
+  const source = cloneNodeConfig(toConfigObject(config));
+  const target = toConfigObject(source.target);
+  const nextTarget = cloneNodeConfig(target);
+
+  if (Object.keys(nextTarget).length > 0) {
+    nextTarget.selector = selector;
+    if (Array.isArray(nextTarget.candidates)) {
+      const nextCandidates = nextTarget.candidates.slice();
+      const first = toConfigObject(nextCandidates[0]);
+      nextCandidates[0] = { ...first, value: selector };
+      nextTarget.candidates = nextCandidates;
+    } else {
+      nextTarget.candidates = [{ value: selector }];
+    }
+    source.target = nextTarget;
+    return source;
+  }
+
+  source.selector = selector;
+  return source;
+}
+
+function readUrlFromConfig(config: unknown): string {
+  const source = toConfigObject(config);
+  return typeof source.url === 'string' ? source.url : '';
+}
+
+function writeUrlToConfig(config: unknown, url: string): JsonObject {
+  const source = cloneNodeConfig(toConfigObject(config));
+  source.url = url;
+  return source;
+}
+
+function readValueFromConfig(config: unknown): string {
+  const source = toConfigObject(config);
+  const value = source.value;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return '';
+}
+
+function writeValueToConfig(config: unknown, value: string): JsonObject {
+  const source = cloneNodeConfig(toConfigObject(config));
+  source.value = value;
+  return source;
+}
+
+function buildLinearEdges(nodes: NodeV3[]): EdgeV3[] {
+  const edges: EdgeV3[] = [];
+  for (let index = 0; index < nodes.length - 1; index += 1) {
+    const from = nodes[index]?.id;
+    const to = nodes[index + 1]?.id;
+    if (!from || !to) continue;
+    edges.push({
+      id: `edge_${index}_${from}_${to}` as EdgeV3['id'],
+      from,
+      to,
+      label: 'default',
+    });
+  }
+  return edges;
+}
+
+function reorderNodes(nodes: NodeV3[], fromIndex: number, toIndex: number): NodeV3[] {
+  if (fromIndex < 0 || toIndex < 0 || fromIndex >= nodes.length || toIndex >= nodes.length) {
+    return nodes;
+  }
+  const next = nodes.slice();
+  const [moved] = next.splice(fromIndex, 1);
+  if (!moved) return nodes;
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
+function getOrderedNodesForEditor(flow: FlowV3): NodeV3[] {
+  const nodes = Array.isArray(flow.nodes) ? cloneNodeConfig(flow.nodes) : [];
+  if (nodes.length <= 1) {
+    return nodes;
+  }
+
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const outgoing = new Map<string, EdgeV3[]>();
+  for (const edge of flow.edges || []) {
+    const from = String(edge.from);
+    const list = outgoing.get(from);
+    if (list) {
+      list.push(edge);
+    } else {
+      outgoing.set(from, [edge]);
+    }
+  }
+
+  const ordered: NodeV3[] = [];
+  const visited = new Set<string>();
+  let currentId: string | null = flow.entryNodeId ?? null;
+
+  while (currentId && !visited.has(currentId)) {
+    const currentNode = nodeMap.get(currentId as NodeV3['id']);
+    if (!currentNode) {
+      break;
+    }
+
+    ordered.push(currentNode);
+    visited.add(currentId);
+
+    const nextCandidates: EdgeV3[] = (outgoing.get(currentId) || []).filter(
+      (edge) => !visited.has(edge.to),
+    );
+    if (nextCandidates.length !== 1) {
+      break;
+    }
+
+    currentId = nextCandidates[0].to;
+  }
+
+  for (const node of nodes) {
+    if (!visited.has(node.id)) {
+      ordered.push(node);
+    }
+  }
+
+  return ordered;
+}
 
 const THEME_STORAGE_KEY = 'agentTheme';
 const DEFAULT_THEME: AgentThemeId = 'warm-editorial';
@@ -95,6 +270,15 @@ export default function SidepanelApp() {
   const [recordingState, setRecordingState] = useState<RecordingState>(DEFAULT_RECORDING_STATE);
   const [timelineSteps, setTimelineSteps] = useState<TimelineStep[]>([]);
   const [recordingAction, setRecordingAction] = useState<'start' | 'stop' | null>(null);
+  const [flowEditorOpen, setFlowEditorOpen] = useState(false);
+  const [flowEditorLoading, setFlowEditorLoading] = useState(false);
+  const [flowEditorSaving, setFlowEditorSaving] = useState(false);
+  const [flowEditorError, setFlowEditorError] = useState<string | null>(null);
+  const [flowEditorFlow, setFlowEditorFlow] = useState<FlowV3 | null>(null);
+  const [flowEditorName, setFlowEditorName] = useState('');
+  const [flowEditorDescription, setFlowEditorDescription] = useState('');
+  const [flowEditorNodes, setFlowEditorNodes] = useState<NodeV3[]>([]);
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
 
   const [currentPageUrl, setCurrentPageUrl] = useState('');
   const [markers, setMarkers] = useState<ElementMarker[]>([]);
@@ -319,13 +503,150 @@ export default function SidepanelApp() {
     }
   }
 
-  function edit(_id: string): void {
-    alert(
-      t(
-        'sidepanelEditFlowUnavailable',
-        'V3 builder is not implemented yet, so workflows cannot be edited.',
-      ),
+  function closeFlowEditor(): void {
+    if (flowEditorSaving) return;
+    setFlowEditorOpen(false);
+    setFlowEditorLoading(false);
+    setFlowEditorError(null);
+    setFlowEditorFlow(null);
+    setFlowEditorName('');
+    setFlowEditorDescription('');
+    setFlowEditorNodes([]);
+    setDraggingNodeId(null);
+  }
+
+  function openFlowEditor(flow: FlowV3): void {
+    setFlowEditorFlow(flow);
+    setFlowEditorName(flow.name || '');
+    setFlowEditorDescription(flow.description || '');
+    setFlowEditorNodes(getOrderedNodesForEditor(flow));
+    setFlowEditorError(null);
+    setFlowEditorOpen(true);
+  }
+
+  async function edit(id: string): Promise<void> {
+    setFlowEditorOpen(true);
+    setFlowEditorLoading(true);
+    setFlowEditorError(null);
+    try {
+      const flow = await workflows.getFlowById(id);
+      if (!flow) {
+        setFlowEditorError('Failed to load flow');
+        return;
+      }
+      openFlowEditor(flow);
+    } catch (error) {
+      console.warn('Failed to open flow editor:', error);
+      setFlowEditorError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFlowEditorLoading(false);
+    }
+  }
+
+  function moveFlowNodeByOffset(nodeId: string, offset: number): void {
+    setFlowEditorNodes((current) => {
+      const fromIndex = current.findIndex((node) => node.id === nodeId);
+      if (fromIndex < 0) return current;
+      const toIndex = fromIndex + offset;
+      return reorderNodes(current, fromIndex, toIndex);
+    });
+    setFlowEditorError(null);
+  }
+
+  function reorderFlowNodes(dragNodeId: string, targetNodeId: string): void {
+    if (!dragNodeId || !targetNodeId || dragNodeId === targetNodeId) return;
+    setFlowEditorNodes((current) => {
+      const fromIndex = current.findIndex((node) => node.id === dragNodeId);
+      const toIndex = current.findIndex((node) => node.id === targetNodeId);
+      return reorderNodes(current, fromIndex, toIndex);
+    });
+    setFlowEditorError(null);
+  }
+
+  function updateFlowNodeConfig(
+    nodeId: string,
+    updater: (config: JsonObject) => JsonObject,
+  ): void {
+    setFlowEditorNodes((current) =>
+      current.map((node) => {
+        if (node.id !== nodeId) return node;
+        const nextConfig = updater(toConfigObject(node.config));
+        return { ...node, config: nextConfig };
+      }),
     );
+    setFlowEditorError(null);
+  }
+
+  function removeFlowNode(nodeId: string): void {
+    setFlowEditorError(null);
+    setFlowEditorNodes((current) => {
+      if (current.length <= 1) {
+        setFlowEditorError('At least one step is required');
+        return current;
+      }
+      const next = current.filter((node) => node.id !== nodeId);
+      if (next.length === current.length) return current;
+      return next;
+    });
+  }
+
+  function canEditSelector(node: NodeV3): boolean {
+    return SELECTOR_LIKE_KINDS.has(node.kind) || readSelectorFromConfig(node.config).length > 0;
+  }
+
+  function canEditValue(node: NodeV3): boolean {
+    const config = toConfigObject(node.config);
+    return VALUE_LIKE_KINDS.has(node.kind) || Object.prototype.hasOwnProperty.call(config, 'value');
+  }
+
+  function canEditUrl(node: NodeV3): boolean {
+    return node.kind === 'navigate' || readUrlFromConfig(node.config).length > 0;
+  }
+
+  async function saveFlowEditor(): Promise<void> {
+    if (!flowEditorFlow) {
+      setFlowEditorError('No flow loaded');
+      return;
+    }
+    if (flowEditorNodes.length === 0) {
+      setFlowEditorError('At least one step is required');
+      return;
+    }
+
+    setFlowEditorSaving(true);
+    setFlowEditorError(null);
+    try {
+      const name = flowEditorName.trim() || flowEditorFlow.name;
+      const description = flowEditorDescription.trim();
+      const nodes = cloneNodeConfig(flowEditorNodes);
+      const edges = buildLinearEdges(nodes);
+      const payload: FlowV3 = {
+        ...flowEditorFlow,
+        name,
+        entryNodeId: nodes[0].id,
+        nodes,
+        edges,
+      };
+      if (description) {
+        payload.description = description;
+      } else {
+        delete payload.description;
+      }
+
+      const saved = await workflows.saveFlow(payload);
+      if (!saved) {
+        setFlowEditorError('Failed to save flow');
+        return;
+      }
+
+      closeFlowEditor();
+      await workflows.refreshFlows();
+    } catch (error) {
+      console.warn('Failed to save flow editor changes:', error);
+      setFlowEditorError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFlowEditorSaving(false);
+    }
   }
 
   function createFlow(): void {
@@ -643,7 +964,7 @@ export default function SidepanelApp() {
     onStopRecording: () => void stopRecording(),
     onCreate: createFlow,
     onRun: (id: string) => void run(id),
-    onEdit: (id: string) => edit(id),
+    onEdit: (id: string) => void edit(id),
     onDelete: (id: string) => void remove(id),
     onExport: (id: string) => void exportFlow(id),
     onOnlyBoundChange: (value: boolean) => setOnlyBound(value),
@@ -657,6 +978,228 @@ export default function SidepanelApp() {
       {activeTab === 'workflows' ? (
         <div className="h-full">
           <WorkflowsView {...workflowsProps} />
+        </div>
+      ) : null}
+
+      {flowEditorOpen ? (
+        <div className="flow-editor-overlay" onClick={closeFlowEditor}>
+          <div className="flow-editor-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="flow-editor-header">
+              <div className="flow-editor-title-wrap">
+                <h3 className="flow-editor-title">
+                  {t('workflowsEditWorkflowTitle', 'Edit workflow')}
+                </h3>
+                {flowEditorFlow?.id ? (
+                  <code className="flow-editor-flow-id">{flowEditorFlow.id}</code>
+                ) : null}
+              </div>
+              <button
+                className="flow-editor-close"
+                onClick={closeFlowEditor}
+                type="button"
+                disabled={flowEditorSaving}
+              >
+                <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            {flowEditorLoading ? (
+              <div className="flow-editor-loading">Loading workflow...</div>
+            ) : (
+              <>
+                <div className="flow-editor-body">
+                  {flowEditorError ? (
+                    <div className="flow-editor-error" role="alert">
+                      {flowEditorError}
+                    </div>
+                  ) : null}
+
+                  <div className="flow-editor-field-grid">
+                    <label className="flow-editor-field">
+                      <span className="flow-editor-label">Name</span>
+                      <input
+                        className="flow-editor-input"
+                        value={flowEditorName}
+                        onChange={(event) => setFlowEditorName(event.currentTarget.value)}
+                        disabled={flowEditorSaving}
+                      />
+                    </label>
+
+                    <label className="flow-editor-field">
+                      <span className="flow-editor-label">Description</span>
+                      <input
+                        className="flow-editor-input"
+                        value={flowEditorDescription}
+                        onChange={(event) => setFlowEditorDescription(event.currentTarget.value)}
+                        disabled={flowEditorSaving}
+                        placeholder="Optional"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flow-editor-steps-meta">
+                    <span>Steps: {flowEditorNodes.length}</span>
+                    <span className="flow-editor-hint">
+                      This editor is optimized for linear recorded flows.
+                    </span>
+                  </div>
+
+                  <ol className="flow-editor-step-list">
+                    {flowEditorNodes.map((node, index) => {
+                      const selectorValue = readSelectorFromConfig(node.config);
+                      const urlValue = readUrlFromConfig(node.config);
+                      const valueText = readValueFromConfig(node.config);
+                      const allowSelectorEdit = canEditSelector(node);
+                      const allowUrlEdit = canEditUrl(node);
+                      const allowValueEdit = canEditValue(node);
+
+                      return (
+                        <li
+                          key={node.id}
+                          className={`flow-editor-step-item${draggingNodeId === node.id ? ' flow-editor-step-item-dragging' : ''}`}
+                          draggable={!flowEditorSaving}
+                          onDragStart={() => setDraggingNodeId(node.id)}
+                          onDragEnd={() => setDraggingNodeId(null)}
+                          onDragOver={(event) => {
+                            if (flowEditorSaving) return;
+                            event.preventDefault();
+                          }}
+                          onDrop={(event) => {
+                            if (flowEditorSaving) return;
+                            event.preventDefault();
+                            if (!draggingNodeId) return;
+                            reorderFlowNodes(draggingNodeId, node.id);
+                            setDraggingNodeId(null);
+                          }}
+                        >
+                          <div className="flow-editor-step-head">
+                            <div className="flow-editor-step-main">
+                              <span className="flow-editor-step-index">{index + 1}</span>
+                              <span className="flow-editor-step-kind">{node.kind}</span>
+                              {node.name ? (
+                                <span className="flow-editor-step-name">{node.name}</span>
+                              ) : null}
+                            </div>
+                            <div className="flow-editor-step-actions">
+                              <button
+                                type="button"
+                                className="flow-editor-icon-btn"
+                                onClick={() => moveFlowNodeByOffset(node.id, -1)}
+                                disabled={flowEditorSaving || index === 0}
+                                title="Move up"
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                className="flow-editor-icon-btn"
+                                onClick={() => moveFlowNodeByOffset(node.id, 1)}
+                                disabled={flowEditorSaving || index === flowEditorNodes.length - 1}
+                                title="Move down"
+                              >
+                                ↓
+                              </button>
+                              <button
+                                type="button"
+                                className="flow-editor-icon-btn flow-editor-delete-btn"
+                                onClick={() => removeFlowNode(node.id)}
+                                disabled={flowEditorSaving || flowEditorNodes.length <= 1}
+                                title={t('workflowsDeleteAction', 'Delete')}
+                              >
+                                {t('workflowsDeleteAction', 'Delete')}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flow-editor-config-grid">
+                            {allowUrlEdit ? (
+                              <label className="flow-editor-field">
+                                <span className="flow-editor-label">URL</span>
+                                <input
+                                  className="flow-editor-input flow-editor-mono"
+                                  value={urlValue}
+                                  onChange={(event) =>
+                                    updateFlowNodeConfig(node.id, (config) =>
+                                      writeUrlToConfig(config, event.currentTarget.value),
+                                    )
+                                  }
+                                  disabled={flowEditorSaving}
+                                  placeholder="https://example.com"
+                                />
+                              </label>
+                            ) : null}
+
+                            {allowSelectorEdit ? (
+                              <label className="flow-editor-field">
+                                <span className="flow-editor-label">Selector</span>
+                                <input
+                                  className="flow-editor-input flow-editor-mono"
+                                  value={selectorValue}
+                                  onChange={(event) =>
+                                    updateFlowNodeConfig(node.id, (config) =>
+                                      writeSelectorToConfig(config, event.currentTarget.value),
+                                    )
+                                  }
+                                  disabled={flowEditorSaving}
+                                  placeholder=".btn-primary"
+                                />
+                              </label>
+                            ) : null}
+
+                            {allowValueEdit ? (
+                              <label className="flow-editor-field">
+                                <span className="flow-editor-label">Value</span>
+                                <input
+                                  className="flow-editor-input flow-editor-mono"
+                                  value={valueText}
+                                  onChange={(event) =>
+                                    updateFlowNodeConfig(node.id, (config) =>
+                                      writeValueToConfig(config, event.currentTarget.value),
+                                    )
+                                  }
+                                  disabled={flowEditorSaving}
+                                  placeholder="input value"
+                                />
+                              </label>
+                            ) : null}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+
+                <div className="flow-editor-footer">
+                  <button
+                    className="flow-editor-btn flow-editor-btn-ghost"
+                    onClick={closeFlowEditor}
+                    type="button"
+                    disabled={flowEditorSaving}
+                  >
+                    {t('cancelButton', 'Cancel')}
+                  </button>
+                  <button
+                    className="flow-editor-btn flow-editor-btn-primary"
+                    onClick={() => void saveFlowEditor()}
+                    type="button"
+                    disabled={
+                      flowEditorSaving ||
+                      flowEditorLoading ||
+                      !flowEditorFlow ||
+                      flowEditorNodes.length === 0
+                    }
+                  >
+                    {flowEditorSaving ? 'Saving...' : t('saveButton', 'Save')}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       ) : null}
 

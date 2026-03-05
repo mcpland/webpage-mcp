@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { FlowV3 } from '@/entrypoints/background/record-replay-v3/domain/flow';
 import type { RunRecordV3 } from '@/entrypoints/background/record-replay-v3/domain/events';
 import type { FlowId, RunId } from '@/entrypoints/background/record-replay-v3/domain/ids';
+import type { JsonObject } from '@/entrypoints/background/record-replay-v3/domain/json';
 import { useRRV3Rpc } from '@/entrypoints/shared/react/useRRV3Rpc';
 
 export interface FlowLite {
@@ -90,6 +91,7 @@ export interface UseWorkflowsV3ReactReturn {
   runFlow: (flowId: string) => Promise<{ runId: string } | null>;
   deleteFlow: (flowId: string) => Promise<boolean>;
   exportFlow: (flowId: string) => Promise<FlowV3 | null>;
+  saveFlow: (flow: FlowV3) => Promise<FlowV3 | null>;
   getFlowById: (flowId: string) => Promise<FlowV3 | null>;
   getRunEvents: (runId: string) => Promise<unknown[]>;
 }
@@ -176,6 +178,20 @@ export function useWorkflowsV3React(
     }
   }
 
+  async function saveFlow(flow: FlowV3): Promise<FlowV3 | null> {
+    try {
+      const result = (await rpc.request('rr_v3.saveFlow', {
+        flow: flow as unknown as JsonObject,
+      })) as FlowV3 | null;
+      void refreshFlows();
+      return result;
+    } catch (err) {
+      console.warn('[useWorkflowsV3React] Failed to save flow:', err);
+      setError(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }
+
   async function getFlowById(flowId: string): Promise<FlowV3 | null> {
     try {
       return (await rpc.request('rr_v3.getFlow', {
@@ -256,6 +272,7 @@ export function useWorkflowsV3React(
     runFlow,
     deleteFlow,
     exportFlow,
+    saveFlow,
     getFlowById,
     getRunEvents,
   };
