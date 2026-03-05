@@ -6,6 +6,10 @@ import type { TriggerSpec } from '@/entrypoints/background/record-replay-v3/doma
 import type { FlowId, RunId } from '@/entrypoints/background/record-replay-v3/domain/ids';
 import { useRRV3Rpc } from '@/entrypoints/shared/react/useRRV3Rpc';
 
+// Route A scope: trigger/schedule management is out of connector surface.
+const ENABLE_TRIGGER_MANAGEMENT = false;
+const TRIGGER_SCOPE_DISABLED_ERROR = 'Triggers are disabled in Connector scope.';
+
 export interface FlowLite {
   id: string;
   name: string;
@@ -151,6 +155,10 @@ export function useWorkflowsV3React(
   }
 
   async function refreshTriggers(): Promise<void> {
+    if (!ENABLE_TRIGGER_MANAGEMENT) {
+      setTriggers([]);
+      return;
+    }
     try {
       const result = (await rpc.request('rr_v3.listTriggers')) as TriggerSpec[] | null;
       setTriggers((result || []).map(mapTriggerV3ToLite));
@@ -164,7 +172,12 @@ export function useWorkflowsV3React(
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([refreshFlows(), refreshRuns(), refreshTriggers()]);
+      if (ENABLE_TRIGGER_MANAGEMENT) {
+        await Promise.all([refreshFlows(), refreshRuns(), refreshTriggers()]);
+      } else {
+        await Promise.all([refreshFlows(), refreshRuns()]);
+        setTriggers([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -210,6 +223,10 @@ export function useWorkflowsV3React(
   }
 
   async function deleteTrigger(triggerId: string): Promise<boolean> {
+    if (!ENABLE_TRIGGER_MANAGEMENT) {
+      setError(TRIGGER_SCOPE_DISABLED_ERROR);
+      return false;
+    }
     try {
       await rpc.request('rr_v3.deleteTrigger', { triggerId });
       void refreshTriggers();

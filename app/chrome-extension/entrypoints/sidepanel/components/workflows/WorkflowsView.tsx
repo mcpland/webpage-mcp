@@ -148,6 +148,9 @@ const triggerActionDangerStyle: CSSProperties = {
   color: 'var(--ac-danger)',
 };
 
+// Route A scope: trigger/schedule management is out of connector surface.
+const ENABLE_TRIGGER_MANAGEMENT = false;
+
 export default function WorkflowsView({
   flows,
   runs,
@@ -584,123 +587,125 @@ export default function WorkflowsView({
             ) : null}
           </div>
 
-          <div className="advanced-section" style={sectionStyle}>
-            <button className="advanced-section-header" style={sectionHeaderStyle} onClick={() => toggleSection('triggers')} type="button">
-              <div className="flex items-center gap-2">
-                <svg
-                  className={`w-4 h-4 transition-transform${expandedSections.has('triggers') ? ' rotate-90' : ''}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-                <span>{t('workflowsTriggersSection', 'Triggers')}</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-xs" style={{ color: 'var(--ac-text-subtle)' }}>
-                  {triggers.length}
-                </span>
-                <button
-                  className="trigger-add-btn"
-                  style={triggerAddStyle}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCreateTrigger();
-                  }}
-                  title={t('workflowsAddTriggerTitle', 'Add trigger')}
-                  type="button"
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          {ENABLE_TRIGGER_MANAGEMENT ? (
+            <div className="advanced-section" style={sectionStyle}>
+              <button className="advanced-section-header" style={sectionHeaderStyle} onClick={() => toggleSection('triggers')} type="button">
+                <div className="flex items-center gap-2">
+                  <svg
+                    className={`w-4 h-4 transition-transform${expandedSections.has('triggers') ? ' rotate-90' : ''}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
-                </button>
-              </div>
-            </button>
+                  <span>{t('workflowsTriggersSection', 'Triggers')}</span>
+                </div>
 
-            {expandedSections.has('triggers') ? (
-              <div className="advanced-section-content">
-                {triggers.length === 0 ? (
-                  <div className="text-sm py-3" style={{ color: 'var(--ac-text-muted)' }}>
-                    {t('workflowsNoTriggers', 'No triggers configured')}
-                  </div>
-                ) : (
-                  <div className="space-y-2 py-2">
-                    {triggers.map((trigger) => (
-                      <div key={trigger.id} className="trigger-item" style={triggerItemStyle}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="w-2 h-2 rounded-full"
-                              style={{
-                                backgroundColor:
-                                  trigger.enabled !== false
-                                    ? 'var(--ac-success)'
-                                    : 'var(--ac-text-subtle)',
-                              }}
-                            />
-                            <span className="text-sm font-medium" style={{ color: 'var(--ac-text)' }}>
-                              {trigger.type}
-                            </span>
-                            <span className="text-xs" style={{ color: 'var(--ac-text-muted)' }}>
-                              {getFlowName(trigger.flowId)}
-                            </span>
-                          </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs" style={{ color: 'var(--ac-text-subtle)' }}>
+                    {triggers.length}
+                  </span>
+                  <button
+                    className="trigger-add-btn"
+                    style={triggerAddStyle}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCreateTrigger();
+                    }}
+                    title={t('workflowsAddTriggerTitle', 'Add trigger')}
+                    type="button"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                    </svg>
+                  </button>
+                </div>
+              </button>
 
-                          <div className="flex items-center gap-1">
-                            <button
-                              className="trigger-action"
-                              style={triggerActionStyle}
-                              onClick={() => onEditTrigger(trigger.id)}
-                              title={t('workflowsEditTriggerTitle', 'Edit')}
-                              type="button"
-                            >
-                              <svg
-                                className="w-3.5 h-3.5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth="2"
+              {expandedSections.has('triggers') ? (
+                <div className="advanced-section-content">
+                  {triggers.length === 0 ? (
+                    <div className="text-sm py-3" style={{ color: 'var(--ac-text-muted)' }}>
+                      {t('workflowsNoTriggers', 'No triggers configured')}
+                    </div>
+                  ) : (
+                    <div className="space-y-2 py-2">
+                      {triggers.map((trigger) => (
+                        <div key={trigger.id} className="trigger-item" style={triggerItemStyle}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-2 h-2 rounded-full"
+                                style={{
+                                  backgroundColor:
+                                    trigger.enabled !== false
+                                      ? 'var(--ac-success)'
+                                      : 'var(--ac-text-subtle)',
+                                }}
+                              />
+                              <span className="text-sm font-medium" style={{ color: 'var(--ac-text)' }}>
+                                {trigger.type}
+                              </span>
+                              <span className="text-xs" style={{ color: 'var(--ac-text-muted)' }}>
+                                {getFlowName(trigger.flowId)}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              <button
+                                className="trigger-action"
+                                style={triggerActionStyle}
+                                onClick={() => onEditTrigger(trigger.id)}
+                                title={t('workflowsEditTriggerTitle', 'Edit')}
+                                type="button"
                               >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                                />
-                              </svg>
-                            </button>
-                            <button
-                              className="trigger-action trigger-action-danger"
-                              style={triggerActionDangerStyle}
-                              onClick={() => onRemoveTrigger(trigger.id)}
-                              title={t('workflowsDeleteTriggerTitle', 'Delete')}
-                              type="button"
-                            >
-                              <svg
-                                className="w-3.5 h-3.5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth="2"
+                                <svg
+                                  className="w-3.5 h-3.5"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                                  />
+                                </svg>
+                              </button>
+                              <button
+                                className="trigger-action trigger-action-danger"
+                                style={triggerActionDangerStyle}
+                                onClick={() => onRemoveTrigger(trigger.id)}
+                                title={t('workflowsDeleteTriggerTitle', 'Delete')}
+                                type="button"
                               >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                />
-                              </svg>
-                            </button>
+                                <svg
+                                  className="w-3.5 h-3.5"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
