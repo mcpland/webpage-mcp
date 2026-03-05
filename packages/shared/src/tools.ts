@@ -48,6 +48,7 @@ export const TOOL_NAMES = {
     RECORDING_STATUS: 'recording_status',
     FLOW_ANALYZE: 'flow_analyze',
     FLOW_UPDATE: 'flow_update',
+    FLOW_EXPORT_CODE: 'flow_export_code',
   },
 };
 
@@ -154,6 +155,25 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'array',
           description: 'Optional replacement variables array.',
           items: { type: 'object' },
+        },
+      },
+      required: ['flowId'],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.FLOW_EXPORT_CODE,
+    description: 'Export a flow into runnable code (Playwright/Puppeteer/Cypress) or normalized JSON.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Flow ID to export.',
+        },
+        format: {
+          type: 'string',
+          enum: ['playwright', 'puppeteer', 'cypress', 'json'],
+          description: 'Target export format. Defaults to playwright.',
         },
       },
       required: ['flowId'],
