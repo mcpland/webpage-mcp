@@ -165,25 +165,7 @@ export const TOOL_SCHEMAS: Tool[] = [
       required: ['flowId'],
     },
   },
-  {
-    name: TOOL_NAMES.RECORD_REPLAY.FLOW_EXPORT_CODE,
-    description: 'Export a flow into runnable code (Playwright/Puppeteer/Cypress) or normalized JSON.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        flowId: {
-          type: 'string',
-          description: 'Flow ID to export.',
-        },
-        format: {
-          type: 'string',
-          enum: ['playwright', 'puppeteer', 'cypress', 'json'],
-          description: 'Target export format. Defaults to playwright.',
-        },
-      },
-      required: ['flowId'],
-    },
-  },
+  // Route A scope: flow_export_code is intentionally not exposed in connector tool schemas.
   // {
   //   name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
   //   description:
