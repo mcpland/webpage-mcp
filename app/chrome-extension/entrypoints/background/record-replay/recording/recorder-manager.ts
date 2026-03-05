@@ -40,6 +40,90 @@ interface StopTabBarrierResult {
   subframes: StopFrameAck[];
 }
 
+function sanitizeVariableKey(raw: string, fallback: string): string {
+  const normalized = String(raw || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (!normalized) return fallback;
+  if (/^[0-9]/.test(normalized)) return `${fallback}_${normalized}`;
+  return normalized;
+}
+
+function deriveKeyFromSelector(selector: string, fallback: string): string {
+  const byName = selector.match(/\[name="([^"]+)"\]/i)?.[1];
+  if (byName) return sanitizeVariableKey(byName, fallback);
+  const byId = selector.match(/#([a-zA-Z0-9_-]+)/)?.[1];
+  if (byId) return sanitizeVariableKey(byId, fallback);
+  return fallback;
+}
+
+function collectParameterSuggestions(flow: Flow): Array<{
+  nodeId: string;
+  kind: 'fill' | 'navigate';
+  suggestedKey: string;
+  currentValue: string;
+}> {
+  const suggestions: Array<{
+    nodeId: string;
+    kind: 'fill' | 'navigate';
+    suggestedKey: string;
+    currentValue: string;
+  }> = [];
+  const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
+  let seq = 1;
+
+  for (const node of nodes) {
+    if (!node || !node.id) continue;
+    const cfg = node.config && typeof node.config === 'object' ? (node.config as Record<string, unknown>) : {};
+
+    if (node.type === 'fill') {
+      const rawValue = typeof cfg.value === 'string' ? cfg.value.trim() : '';
+      if (!rawValue) continue;
+      if (/^\{[a-zA-Z_][a-zA-Z0-9_]*\}$/.test(rawValue)) continue;
+      const selector =
+        cfg.target && typeof cfg.target === 'object' && typeof (cfg.target as any).selector === 'string'
+          ? String((cfg.target as any).selector)
+          : '';
+      const key = deriveKeyFromSelector(selector, `input_${seq}`);
+      suggestions.push({
+        nodeId: node.id,
+        kind: 'fill',
+        suggestedKey: key,
+        currentValue: rawValue,
+      });
+      seq += 1;
+      if (suggestions.length >= 25) break;
+      continue;
+    }
+
+    if (node.type === 'navigate') {
+      const url = typeof cfg.url === 'string' ? cfg.url.trim() : '';
+      if (!url) continue;
+      try {
+        const parsed = new URL(url);
+        for (const [param, value] of parsed.searchParams.entries()) {
+          const trimmedValue = String(value || '').trim();
+          if (!trimmedValue) continue;
+          suggestions.push({
+            nodeId: node.id,
+            kind: 'navigate',
+            suggestedKey: sanitizeVariableKey(param, `url_param_${seq}`),
+            currentValue: trimmedValue,
+          });
+          seq += 1;
+          if (suggestions.length >= 25) break;
+        }
+      } catch {
+        // ignore invalid URLs
+      }
+      if (suggestions.length >= 25) break;
+    }
+  }
+
+  return suggestions;
+}
+
 /**
  * List frameIds for a tab. Always includes 0 (main frame).
  */
@@ -279,11 +363,13 @@ class RecorderManagerImpl {
           : Array.isArray(flow.steps)
             ? flow.steps.length
             : 0;
+        const parameterSuggestions = collectParameterSuggestions(flow);
         flow.meta.recording = {
           ...(flow.meta.recording || {}),
           stoppedAt,
           durationMs,
           stepCount,
+          parameterSuggestions: parameterSuggestions.length ? parameterSuggestions : undefined,
         };
         const failed = results
           .filter((r) => !r.ok || r.skipped || r.subframes.some((sf) => !sf.ack))

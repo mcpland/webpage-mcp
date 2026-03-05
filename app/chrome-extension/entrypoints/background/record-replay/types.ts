@@ -122,6 +122,12 @@ export interface Flow {
       stoppedAt?: string;
       durationMs?: number;
       stepCount?: number;
+      parameterSuggestions?: Array<{
+        nodeId: string;
+        kind: 'fill' | 'navigate';
+        suggestedKey: string;
+        currentValue: string;
+      }>;
     };
     /** Recording stop barrier status (used during recording stop) */
     stopBarrier?: {
