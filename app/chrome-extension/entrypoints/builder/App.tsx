@@ -32,6 +32,9 @@ type ToastLevel = 'info' | 'warn' | 'error';
 type ToastItem = { id: string; message: string; level: ToastLevel };
 type FallbackNotice = { nodeId: string; type: string; prevIndex: number };
 
+// Route A scope: trigger/schedule automation is out of connector authoring surface.
+const ENABLE_TRIGGER_MANAGEMENT = false;
+
 function trigId(flowId: string, nodeId: string, kind: string): TriggerId {
   return `trg_${flowId}_${nodeId}_${kind}` as TriggerId;
 }
@@ -237,6 +240,8 @@ export default function BuilderApp() {
   }
 
   async function syncTriggersAndSchedules(flowId: string, nodes: unknown[]) {
+    if (!ENABLE_TRIGGER_MANAGEMENT) return;
+
     const triggersNeeded: TriggerSpec[] = [];
     const tnodes = (nodes || []).filter((n: any) => n && n.type === 'trigger');
 
@@ -747,17 +752,19 @@ export default function BuilderApp() {
                 {t('agentSessionRenameTitle', 'Rename')}
               </button>
 
-              <button
-                className={`top-btn ${triggerPanelVisible ? 'active' : ''}`}
-                type="button"
-                onClick={() => setTriggerPanelVisible((v) => !v)}
-                title={t('builderManageTriggersTitle', 'Manage triggers')}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                </svg>
-                {t('workflowsTriggersSection', 'Triggers')}
-              </button>
+              {ENABLE_TRIGGER_MANAGEMENT ? (
+                <button
+                  className={`top-btn ${triggerPanelVisible ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => setTriggerPanelVisible((v) => !v)}
+                  title={t('builderManageTriggersTitle', 'Manage triggers')}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                  </svg>
+                  {t('workflowsTriggersSection', 'Triggers')}
+                </button>
+              ) : null}
 
               <span className="divider-vert" />
 
@@ -837,7 +844,7 @@ export default function BuilderApp() {
             </div>
           ) : null}
 
-          {triggerPanelVisible && store.flowLocal?.id ? (
+          {ENABLE_TRIGGER_MANAGEMENT && triggerPanelVisible && store.flowLocal?.id ? (
             <div className="floating-trigger">
               <TriggerPanel flowId={store.flowLocal.id} onClose={() => setTriggerPanelVisible(false)} />
             </div>
