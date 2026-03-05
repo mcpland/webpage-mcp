@@ -140,52 +140,14 @@
   padding: 0 12px 12px;
 }
 
-.run-item,
-.trigger-item {
+.run-item {
   padding: 10px 12px;
   cursor: pointer;
   transition: background-color var(--ac-motion-fast, 120ms) ease;
 }
 
-.run-item:hover,
-.trigger-item:hover {
+.run-item:hover {
   background-color: var(--ac-hover-bg, #f5f5f4) !important;
-}
-
-.trigger-add-btn {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.trigger-add-btn:hover {
-  transform: scale(1.1);
-}
-
-.trigger-action {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--ac-radius-button, 8px);
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.trigger-action:hover {
-  background-color: var(--ac-hover-bg, #f5f5f4);
-}
-
-.trigger-action-danger:hover {
-  background-color: rgba(239, 68, 68, 0.1);
 }
 
 /* Section expand transition */
