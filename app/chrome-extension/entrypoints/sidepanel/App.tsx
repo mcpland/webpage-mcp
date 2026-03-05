@@ -87,7 +87,7 @@ export default function SidepanelApp() {
   const [activeTab, setActiveTab] = useState<TabType>('workflows');
 
   const workflows = useWorkflowsV3React({ autoConnect: true });
-  const { flows, runs, triggers } = workflows;
+  const { flows, runs } = workflows;
 
   const [onlyBound, setOnlyBound] = useState(false);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
@@ -302,28 +302,6 @@ export default function SidepanelApp() {
     } catch (error) {
       console.warn('Export failed:', error);
     }
-  }
-
-  function createTrigger() {
-    alert(
-      t(
-        'sidepanelCreateTriggerUnavailable',
-        'V3 trigger management is not implemented yet, so triggers cannot be created.',
-      ),
-    );
-  }
-
-  function editTrigger(_id: string) {
-    alert(
-      t(
-        'sidepanelEditTriggerUnavailable',
-        'V3 trigger management is not implemented yet, so triggers cannot be edited.',
-      ),
-    );
-  }
-
-  async function removeTrigger(id: string): Promise<void> {
-    await workflows.deleteTrigger(id);
   }
 
   function toggleRun(id: string): void {
@@ -655,7 +633,6 @@ export default function SidepanelApp() {
   const workflowsProps = {
     flows: filteredFlows,
     runs,
-    triggers,
     recordingState,
     timelineSteps,
     recordingAction,
@@ -671,9 +648,6 @@ export default function SidepanelApp() {
     onExport: (id: string) => void exportFlow(id),
     onOnlyBoundChange: (value: boolean) => setOnlyBound(value),
     onToggleRun: (id: string) => toggleRun(id),
-    onCreateTrigger: createTrigger,
-    onEditTrigger: (id: string) => editTrigger(id),
-    onRemoveTrigger: (id: string) => void removeTrigger(id),
   };
 
   return (
