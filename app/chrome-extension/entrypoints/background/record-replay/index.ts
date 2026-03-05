@@ -25,16 +25,27 @@ import { buildRecordingStateSnapshot } from './recording/recording-state';
 
 // design note: background listener for record & replay; delegates recording to dedicated modules
 
-// Alarm helpers for schedules
-async function rescheduleAlarms() {
-  const schedules = await listSchedules();
-  // Clear existing rr_schedule_* alarms
+// Route A scope: disable platform-style trigger/schedule automation surfaces.
+const ENABLE_TRIGGERS_AND_SCHEDULES = false;
+const TRIGGER_SCHEDULE_DISABLED_ERROR =
+  'Triggers and schedules are disabled in Connector scope.';
+
+async function clearScheduleAlarms() {
   const alarms = await chrome.alarms.getAll();
   await Promise.all(
     alarms
       .filter((a) => a.name && a.name.startsWith('rr_schedule_'))
       .map((a) => chrome.alarms.clear(a.name)),
   );
+}
+
+// Alarm helpers for schedules
+async function rescheduleAlarms() {
+  await clearScheduleAlarms();
+  if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
+    return;
+  }
+  const schedules = await listSchedules();
   for (const s of schedules) {
     if (!s.enabled) continue;
     const name = `rr_schedule_${s.id}`;
@@ -76,7 +87,11 @@ export function initRecordReplayListeners() {
   // On startup, re-schedule alarms
   rescheduleAlarms().catch(() => {});
   // Initialize trigger engine (contextMenus/commands/url/dom)
-  initTriggerEngine().catch(() => {});
+  if (ENABLE_TRIGGERS_AND_SCHEDULES) {
+    initTriggerEngine().catch(() => {});
+  } else {
+    disableTriggerEngine().catch(() => {});
+  }
   // Initialize recorder manager (wires browser and content listeners)
   RecorderManager.init().catch(() => {});
 
@@ -220,12 +235,20 @@ export function initRecordReplayListeners() {
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_LIST_TRIGGERS: {
+          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
+            sendResponse({ success: true, triggers: [] });
+            return true;
+          }
           listTriggers()
             .then((triggers) => sendResponse({ success: true, triggers }))
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_SAVE_TRIGGER: {
+          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
+            sendResponse({ success: false, error: TRIGGER_SCHEDULE_DISABLED_ERROR });
+            return true;
+          }
           const t = message.trigger as FlowTrigger;
           if (!t || !t.id || !t.type || !t.flowId) {
             sendResponse({ success: false, error: 'invalid trigger' });
@@ -240,6 +263,10 @@ export function initRecordReplayListeners() {
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_DELETE_TRIGGER: {
+          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
+            sendResponse({ success: false, error: TRIGGER_SCHEDULE_DISABLED_ERROR });
+            return true;
+          }
           const id = String(message.id || '');
           if (!id) {
             sendResponse({ success: false, error: 'invalid id' });
@@ -254,18 +281,30 @@ export function initRecordReplayListeners() {
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_REFRESH_TRIGGERS: {
+          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
+            sendResponse({ success: true });
+            return true;
+          }
           refreshTriggers()
             .then(() => sendResponse({ success: true }))
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_LIST_SCHEDULES: {
+          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
+            sendResponse({ success: true, schedules: [] });
+            return true;
+          }
           listSchedules()
             .then((s) => sendResponse({ success: true, schedules: s }))
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_SCHEDULE_FLOW: {
+          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
+            sendResponse({ success: false, error: TRIGGER_SCHEDULE_DISABLED_ERROR });
+            return true;
+          }
           const s = message.schedule as FlowSchedule;
           if (!s || !s.id || !s.flowId) {
             sendResponse({ success: false, error: 'invalid schedule' });
@@ -280,6 +319,10 @@ export function initRecordReplayListeners() {
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_UNSCHEDULE_FLOW: {
+          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
+            sendResponse({ success: false, error: TRIGGER_SCHEDULE_DISABLED_ERROR });
+            return true;
+          }
           const scheduleId = String(message.scheduleId || '');
           if (!scheduleId) {
             sendResponse({ success: false, error: 'invalid scheduleId' });
@@ -301,7 +344,7 @@ export function initRecordReplayListeners() {
   });
 
   // Trigger engine: contextMenus/commands/url/dom
-  if ((chrome as any).contextMenus?.onClicked?.addListener) {
+  if (ENABLE_TRIGGERS_AND_SCHEDULES && (chrome as any).contextMenus?.onClicked?.addListener) {
     chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       try {
         const triggers = await listTriggers();
@@ -319,19 +362,21 @@ export function initRecordReplayListeners() {
       } catch {}
     });
   }
-  chrome.commands.onCommand.addListener(async (command) => {
-    try {
-      const triggers = await listTriggers();
-      const t = triggers.find((x) => x.type === 'command' && (x as any).commandKey === command);
+  if (ENABLE_TRIGGERS_AND_SCHEDULES)
+    chrome.commands.onCommand.addListener(async (command) => {
+      try {
+        const triggers = await listTriggers();
+        const t = triggers.find((x) => x.type === 'command' && (x as any).commandKey === command);
       if (!t || t.enabled === false) return;
       const flow = await getFlow(t.flowId);
       if (!flow) return;
       await runFlow(flow, { args: t.args || {}, returnLogs: false });
     } catch {}
-  });
-  chrome.webNavigation.onCommitted.addListener(async (details) => {
-    try {
-      if (details.frameId !== 0) return;
+    });
+  if (ENABLE_TRIGGERS_AND_SCHEDULES)
+    chrome.webNavigation.onCommitted.addListener(async (details) => {
+      try {
+        if (details.frameId !== 0) return;
       const url = details.url || '';
       // Ensure core content scripts are injected for this tab (pre-heat for replay)
       await ensureCoreInjected(details.tabId);
@@ -377,10 +422,11 @@ export function initRecordReplayListeners() {
         }
       }
     } catch {}
-  });
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    try {
-      if (message && message.action === 'dom_trigger_fired') {
+    });
+  if (ENABLE_TRIGGERS_AND_SCHEDULES)
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      try {
+        if (message && message.action === 'dom_trigger_fired') {
         const id = message.triggerId;
         const senderTabId = sender?.tab?.id;
         listTriggers().then(async (arr) => {
@@ -397,9 +443,9 @@ export function initRecordReplayListeners() {
         sendResponse({ ok: true });
         return true;
       }
-    } catch {}
-    return false;
-  });
+      } catch {}
+      return false;
+    });
 }
 
 function matchUrl(
@@ -461,6 +507,7 @@ async function removeRecordReplayMenus() {
 }
 
 async function refreshTriggers() {
+  if (!ENABLE_TRIGGERS_AND_SCHEDULES) return;
   try {
     const triggers = await listTriggers();
     await refreshContextMenus(triggers);
@@ -494,7 +541,15 @@ async function refreshTriggers() {
 
 // Backward-compatible init function; initialize all trigger-related hooks/state
 async function initTriggerEngine() {
+  if (!ENABLE_TRIGGERS_AND_SCHEDULES) return;
   await refreshTriggers();
+}
+
+async function disableTriggerEngine() {
+  try {
+    await removeRecordReplayMenus();
+    await chrome.storage.local.set({ [STORAGE_KEYS.RR_TRIGGERS]: [] });
+  } catch {}
 }
 
 // Ensure core content scripts are present for a tab after navigation
@@ -527,6 +582,7 @@ async function pingTab(tabId: number, action: string): Promise<boolean> {
 // Alarm listener executes scheduled flows
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   try {
+    if (!ENABLE_TRIGGERS_AND_SCHEDULES) return;
     if (!alarm?.name || !alarm.name.startsWith('rr_schedule_')) return;
     const id = alarm.name.slice('rr_schedule_'.length);
     const schedules = await listSchedules();
