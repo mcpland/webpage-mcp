@@ -9,6 +9,7 @@ import {
   getRecorderSourceKey,
   parseRecorderEventMeta,
 } from './recorder-event-protocol';
+import { recordingNetworkTracker, type RecordedRequest } from './network-tracker';
 
 const MAX_SOURCES = 200;
 const MAX_RECENT_EVENT_IDS_PER_SOURCE = 300;
@@ -98,7 +99,60 @@ function buildAck(
   };
 }
 
-function applyPayload(payload: any, session: RecordingSessionManager): void {
+function toNetworkContext(requests: RecordedRequest[]) {
+  return {
+    pendingRequests: requests.slice(0, 10).map((item) => ({
+      url: item.url,
+      method: item.method,
+      status: item.status,
+      duration: item.duration,
+    })),
+    waitForNetworkIdle: true,
+  };
+}
+
+function patchStepWithNetworkContext(step: Step, requests: RecordedRequest[]): Step {
+  if (!step || !requests.length) return step;
+  if (step.type !== 'click' && step.type !== 'dblclick' && step.type !== 'fill') return step;
+  const withAfter = {
+    ...step,
+    after: {
+      ...((step as any).after || {}),
+      waitForNetworkIdle: true,
+    },
+    networkContext: toNetworkContext(requests),
+  } as unknown as Step;
+  return withAfter;
+}
+
+function buildStepFromFlowById(session: RecordingSessionManager, stepId: string): Step | null {
+  const flow = session.getFlow();
+  if (!flow || !stepId) return null;
+
+  if (Array.isArray(flow.nodes)) {
+    const node = flow.nodes.find((item) => item.id === stepId);
+    if (node) {
+      const cfg = node.config && typeof node.config === 'object' ? (node.config as Record<string, unknown>) : {};
+      return { ...cfg, id: node.id, type: node.type } as Step;
+    }
+  }
+
+  if (Array.isArray(flow.steps)) {
+    const step = flow.steps.find((item) => item.id === stepId);
+    if (step) {
+      return { ...(step as any) } as Step;
+    }
+  }
+
+  return null;
+}
+
+function applyPayload(
+  payload: any,
+  session: RecordingSessionManager,
+  senderTabId?: number,
+  lastStepByTab?: Map<number, string>,
+): void {
   // Handle steps
   if (payload.kind === 'steps' || payload.kind === 'step') {
     const steps: Step[] = Array.isArray(payload.steps)
@@ -107,7 +161,23 @@ function applyPayload(payload: any, session: RecordingSessionManager): void {
         ? [payload.step as Step]
         : [];
     if (steps.length > 0) {
+      if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
+        const requests = recordingNetworkTracker.takeRecent(senderTabId);
+        const previousStepId = lastStepByTab.get(senderTabId);
+        if (previousStepId && requests.length > 0) {
+          const previousStep = buildStepFromFlowById(session, previousStepId);
+          if (previousStep) {
+            session.appendSteps([patchStepWithNetworkContext(previousStep, requests)]);
+          }
+        }
+      }
       session.appendSteps(steps);
+      if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
+        const lastStep = steps[steps.length - 1];
+        if (lastStep && typeof lastStep.id === 'string' && lastStep.id) {
+          lastStepByTab.set(senderTabId, lastStep.id);
+        }
+      }
     }
   }
 
@@ -128,7 +198,23 @@ function applyPayload(payload: any, session: RecordingSessionManager): void {
       ? (payload.variables as VariableDef[])
       : [];
     if (steps.length > 0) {
+      if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
+        const requests = recordingNetworkTracker.takeRecent(senderTabId);
+        const previousStepId = lastStepByTab.get(senderTabId);
+        if (previousStepId && requests.length > 0) {
+          const previousStep = buildStepFromFlowById(session, previousStepId);
+          if (previousStep) {
+            session.appendSteps([patchStepWithNetworkContext(previousStep, requests)]);
+          }
+        }
+      }
       session.appendSteps(steps);
+      if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
+        const lastStep = steps[steps.length - 1];
+        if (lastStep && typeof lastStep.id === 'string' && lastStep.id) {
+          lastStepByTab.set(senderTabId, lastStep.id);
+        }
+      }
     }
     if (variables.length > 0) {
       session.appendVariables(variables);
@@ -140,6 +226,8 @@ export function createRecorderEventMessageHandler(
   session: RecordingSessionManager,
 ): Parameters<typeof chrome.runtime.onMessage.addListener>[0] {
   const tracker = new RecorderEventIngestTracker();
+  const lastStepByTab = new Map<number, string>();
+  let ingestSessionId = '';
 
   return (message, sender, sendResponse) => {
     try {
@@ -160,6 +248,10 @@ export function createRecorderEventMessageHandler(
 
       const payload = message?.payload || {};
       const sessionId = session.getSession().sessionId;
+      if (ingestSessionId !== sessionId) {
+        ingestSessionId = sessionId;
+        lastStepByTab.clear();
+      }
       tracker.alignSession(sessionId);
 
       const parsedMeta = parseRecorderEventMeta(message?.meta);
@@ -167,7 +259,7 @@ export function createRecorderEventMessageHandler(
         const isLegacyMessage = parsedMeta.error === 'missing meta object';
         if (isLegacyMessage) {
           // Backward compatibility path for older recorder scripts.
-          applyPayload(payload, session);
+          applyPayload(payload, session, sender?.tab?.id, lastStepByTab);
           sendResponse({
             ok: true,
             legacy: true,
@@ -209,7 +301,7 @@ export function createRecorderEventMessageHandler(
         return true;
       }
 
-      applyPayload(payload, session);
+      applyPayload(payload, session, sender?.tab?.id, lastStepByTab);
       sendResponse({ ok: true, ack: buildAck(meta, highWatermarkSeq, 'accept') });
       return true;
     } catch (e) {

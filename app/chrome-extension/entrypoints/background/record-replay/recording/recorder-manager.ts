@@ -6,6 +6,7 @@ import { createInitialFlow, addNavigationStep } from './flow-builder';
 import { initBrowserEventListeners } from './browser-event-listener';
 import { initContentMessageHandler } from './content-message-handler';
 import { broadcastRecordingStateChanged } from './recording-state';
+import { recordingNetworkTracker } from './network-tracker';
 
 /** Timeout for waiting for the top-frame content script to acknowledge stop. */
 const STOP_BARRIER_TOP_TIMEOUT_MS = 5000;
@@ -218,6 +219,7 @@ class RecorderManagerImpl {
     if (this.initialized) return;
     initBrowserEventListeners(session);
     initContentMessageHandler(session);
+    recordingNetworkTracker.init();
     this.initialized = true;
   }
 
