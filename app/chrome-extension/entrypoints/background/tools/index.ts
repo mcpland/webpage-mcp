@@ -3,10 +3,18 @@ import { ERROR_MESSAGES } from '@/common/constants';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import * as browserTools from './browser';
 import { flowRunTool, listPublishedFlowsTool } from './record-replay';
+import { recordingStartTool, recordingStatusTool, recordingStopTool } from './recording';
 import { getSessionContext, patchSessionContext } from '../session-context';
 import { runInTabQueue } from '../tab-queue';
 
-const tools = { ...browserTools, flowRunTool, listPublishedFlowsTool } as any;
+const tools = {
+  ...browserTools,
+  flowRunTool,
+  listPublishedFlowsTool,
+  recordingStartTool,
+  recordingStopTool,
+  recordingStatusTool,
+} as any;
 const toolsMap = new Map(Object.values(tools).map((tool: any) => [tool.name, tool]));
 const NON_TAB_SCOPED_CHROME_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
@@ -48,7 +56,8 @@ function isTabScopedTool(toolName: string): boolean {
   return (
     toolName.startsWith('chrome_') ||
     toolName.startsWith('performance_') ||
-    toolName === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN
+    toolName === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN ||
+    toolName === TOOL_NAMES.RECORD_REPLAY.RECORDING_START
   );
 }
 

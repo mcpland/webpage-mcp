@@ -136,11 +136,24 @@ class RecorderManagerImpl {
     this.initialized = true;
   }
 
-  async start(meta?: Partial<Flow>): Promise<{ success: boolean; error?: string }> {
+  async start(
+    meta?: Partial<Flow>,
+    tabId?: number,
+  ): Promise<{ success: boolean; error?: string }> {
     if (session.getStatus() !== 'idle')
       return { success: false, error: 'Recording already active' };
-    // Resolve active tab
-    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    // Resolve target tab (explicit tabId preferred, otherwise active tab)
+    let active: chrome.tabs.Tab | null = null;
+    if (typeof tabId === 'number') {
+      try {
+        active = await chrome.tabs.get(tabId);
+      } catch {
+        return { success: false, error: `Target tab not found: ${tabId}` };
+      }
+    } else {
+      const [currentActive] = await chrome.tabs.query({ active: true, currentWindow: true });
+      active = currentActive ?? null;
+    }
     if (!active?.id) return { success: false, error: 'Active tab not found' };
 
     // Initialize flow & session
