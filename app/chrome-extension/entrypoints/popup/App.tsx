@@ -92,6 +92,10 @@ export default function PopupApp() {
   const [recordingAction, setRecordingAction] = useState<"start" | "stop" | null>(
     null,
   );
+  const [recordedFlowDraft, setRecordedFlowDraft] = useState<any | null>(null);
+  const [recordedFlowName, setRecordedFlowName] = useState("");
+  const [recordedFlowDescription, setRecordedFlowDescription] = useState("");
+  const [isSavingRecordedFlow, setIsSavingRecordedFlow] = useState(false);
 
   const [nativeConnectionStatus, setNativeConnectionStatus] =
     useState<NativeConnectionStatus>("unknown");
@@ -179,6 +183,31 @@ export default function PopupApp() {
       flowId: typeof data.flowId === "string" ? data.flowId : null,
       flowName: typeof data.flowName === "string" ? data.flowName : null,
     };
+  }
+
+  function suggestRecordedFlowName(flow: any): string {
+    const flowName =
+      typeof flow?.name === "string" ? flow.name.trim() : "";
+    if (flowName && flowName !== "new_workflow") {
+      return flowName;
+    }
+
+    try {
+      const nodes = Array.isArray(flow?.nodes) ? flow.nodes : [];
+      const navigateNode = nodes.find((node: any) => node?.type === "navigate");
+      const url = String(navigateNode?.config?.url || "");
+      if (url) {
+        const parsed = new URL(url);
+        const host = parsed.hostname.replace(/^www\./, "");
+        if (host) {
+          return `${host} flow`;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return t("popupRecordedFlowDefaultName", "New recording");
   }
 
   function showComingSoon(feature: string) {
@@ -478,6 +507,16 @@ export default function PopupApp() {
       });
       if (response?.success) {
         setRecordingState(normalizeRecordingState(response.state));
+        if (response?.flow) {
+          const nextName = suggestRecordedFlowName(response.flow);
+          setRecordedFlowDraft(response.flow);
+          setRecordedFlowName(nextName);
+          setRecordedFlowDescription(
+            typeof response.flow.description === "string"
+              ? response.flow.description
+              : "",
+          );
+        }
       }
     } catch (error) {
       console.warn("Failed to start recording:", error);
@@ -498,6 +537,7 @@ export default function PopupApp() {
       });
       if (response?.success) {
         setRecordingState(normalizeRecordingState(response.state));
+        setRecordedFlowDraft(null);
       }
       if (response?.error) {
         console.warn("Stop recording warning:", response.error);
@@ -507,6 +547,43 @@ export default function PopupApp() {
     } finally {
       setRecordingAction(null);
     }
+  }
+
+  async function saveRecordedFlowDraft() {
+    if (!recordedFlowDraft || isSavingRecordedFlow) {
+      return;
+    }
+
+    const nextName = recordedFlowName.trim() || suggestRecordedFlowName(recordedFlowDraft);
+    const nextDescription = recordedFlowDescription.trim();
+    const updatedFlow = {
+      ...recordedFlowDraft,
+      name: nextName,
+      description: nextDescription || undefined,
+      meta: {
+        ...(recordedFlowDraft.meta || {}),
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    setIsSavingRecordedFlow(true);
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.RR_SAVE_FLOW,
+        flow: updatedFlow,
+      });
+      if (response?.success) {
+        setRecordedFlowDraft(null);
+      }
+    } catch (error) {
+      console.warn("Failed to save recorded flow:", error);
+    } finally {
+      setIsSavingRecordedFlow(false);
+    }
+  }
+
+  function dismissRecordedFlowDraft() {
+    setRecordedFlowDraft(null);
   }
 
   useEffect(() => {
@@ -848,6 +925,65 @@ export default function PopupApp() {
                 </span>
               </button>
             </div>
+
+            {recordedFlowDraft ? (
+              <div className="recorded-flow-card">
+                <div className="recorded-flow-header">
+                  <h3 className="recorded-flow-title">
+                    {t("popupSaveRecordingTitle", "Save recording")}
+                  </h3>
+                  <span className="recorded-flow-id">
+                    {String(recordedFlowDraft.id || "")}
+                  </span>
+                </div>
+                <div className="recorded-flow-fields">
+                  <label className="recorded-flow-label">
+                    {t("popupFlowNameLabel", "Flow name")}
+                  </label>
+                  <input
+                    className="recorded-flow-input"
+                    value={recordedFlowName}
+                    onChange={(event) => setRecordedFlowName(event.currentTarget.value)}
+                    placeholder={t("popupFlowNamePlaceholder", "Enter a flow name")}
+                    type="text"
+                  />
+                  <label className="recorded-flow-label">
+                    {t("popupFlowDescriptionLabel", "Description")}
+                  </label>
+                  <textarea
+                    className="recorded-flow-input recorded-flow-textarea"
+                    value={recordedFlowDescription}
+                    onChange={(event) =>
+                      setRecordedFlowDescription(event.currentTarget.value)
+                    }
+                    placeholder={t(
+                      "popupFlowDescriptionPlaceholder",
+                      "Describe this flow (optional)",
+                    )}
+                  />
+                </div>
+                <div className="recorded-flow-actions">
+                  <button
+                    className="recorded-flow-btn"
+                    type="button"
+                    onClick={dismissRecordedFlowDraft}
+                    disabled={isSavingRecordedFlow}
+                  >
+                    {t("popupDismissButton", "Dismiss")}
+                  </button>
+                  <button
+                    className="recorded-flow-btn recorded-flow-btn-primary"
+                    type="button"
+                    onClick={() => void saveRecordedFlowDraft()}
+                    disabled={isSavingRecordedFlow}
+                  >
+                    {isSavingRecordedFlow
+                      ? t("popupSavingButton", "Saving...")
+                      : t("popupSaveButton", "Save")}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {/* Management Portal */}

@@ -503,6 +503,89 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
   line-height: 1.2;
 }
 
+.recorded-flow-card {
+  margin-top: 10px;
+  padding: 10px;
+  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
+  border-radius: var(--ac-radius-card, 12px);
+  background: var(--ac-surface, #ffffff);
+}
+
+.recorded-flow-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recorded-flow-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--ac-text, #1a1a1a);
+}
+
+.recorded-flow-id {
+  font-size: 10px;
+  color: var(--ac-text-subtle, #a8a29e);
+  font-family: var(--ac-font-code, 'JetBrains Mono', monospace);
+}
+
+.recorded-flow-fields {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recorded-flow-label {
+  font-size: 11px;
+  color: var(--ac-text-muted, #6e6e6e);
+}
+
+.recorded-flow-input {
+  width: 100%;
+  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
+  border-radius: var(--ac-radius-inner, 8px);
+  background: var(--ac-surface-inset, #f2f0eb);
+  color: var(--ac-text, #1a1a1a);
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+.recorded-flow-textarea {
+  min-height: 68px;
+  resize: vertical;
+}
+
+.recorded-flow-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.recorded-flow-btn {
+  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
+  background: var(--ac-surface, #ffffff);
+  color: var(--ac-text-muted, #6e6e6e);
+  border-radius: var(--ac-radius-button, 8px);
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.recorded-flow-btn-primary {
+  border-color: transparent;
+  background: var(--ac-accent, #d97757);
+  color: var(--ac-accent-contrast, #ffffff);
+}
+
+.recorded-flow-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* CSS Tooltip */
 .has-tooltip {
   position: relative;
