@@ -429,7 +429,7 @@ export default function PopupApp() {
   }
 
   function openWorkflowSidepanel() {
-    showComingSoon(t("popupWorkflowManagementTitle", "Workflow management"));
+    void openSidepanelAndClose("workflows");
   }
 
   function openElementMarkerSidepanel() {
@@ -995,7 +995,7 @@ export default function PopupApp() {
             </div>
             <div className="entry-card">
               <button
-                className="entry-item entry-item-coming-soon"
+                className="entry-item"
                 type="button"
                 onClick={openWorkflowSidepanel}
               >
@@ -1005,9 +1005,6 @@ export default function PopupApp() {
                 <div className="entry-content">
                   <span className="entry-title">
                     {t("popupWorkflowManagementTitle", "Workflow management")}
-                    <span className="coming-soon-badge">
-                      {t("popupComingSoonBadge", "Coming Soon")}
-                    </span>
                   </span>
                   <span className="entry-desc">
                     {t(
