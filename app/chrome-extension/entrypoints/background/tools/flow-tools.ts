@@ -3,6 +3,7 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { nodesToSteps } from 'webpage-mcp-shared';
 import { getFlow, saveFlow } from '../record-replay/flow-store';
 import type { Flow } from '../record-replay/types';
+import { applyFlowParameterSuggestions } from './flow-parameterization';
 
 type FlowHintLevel = 'info' | 'warning';
 
@@ -372,10 +373,28 @@ class FlowUpdateTool {
       flow.variables = args.variables;
       changed = true;
     }
+    const applyParameterSuggestions = args?.applyParameterSuggestions === true;
+    let parameterization: ReturnType<typeof applyFlowParameterSuggestions> | undefined;
+    if (applyParameterSuggestions) {
+      parameterization = applyFlowParameterSuggestions(flow);
+      if (parameterization.changed) {
+        changed = true;
+      }
+    }
 
     if (!changed) {
       return {
-        content: [{ type: 'text', text: JSON.stringify({ success: true, updated: false, flowId }) }],
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              updated: false,
+              flowId,
+              ...(parameterization ? { parameterization } : {}),
+            }),
+          },
+        ],
         isError: false,
       };
     }
@@ -403,6 +422,7 @@ class FlowUpdateTool {
               edgeCount: Array.isArray(flow.edges) ? flow.edges.length : 0,
               variableCount: Array.isArray(flow.variables) ? flow.variables.length : 0,
             },
+            ...(parameterization ? { parameterization } : {}),
           }),
         },
       ],

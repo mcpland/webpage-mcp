@@ -156,6 +156,11 @@ export const TOOL_SCHEMAS: Tool[] = [
           description: 'Optional replacement variables array.',
           items: { type: 'object' },
         },
+        applyParameterSuggestions: {
+          type: 'boolean',
+          description:
+            'If true, applies flow.meta.recording.parameterSuggestions to nodes and auto-adds missing variables.',
+        },
       },
       required: ['flowId'],
     },
