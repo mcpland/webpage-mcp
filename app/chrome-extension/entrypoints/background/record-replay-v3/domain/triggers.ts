@@ -10,7 +10,6 @@ import type { FlowId, TriggerId } from './ids';
 export type TriggerKind =
   | 'manual'
   | 'url'
-  | 'cron'
   | 'interval'
   | 'once'
   | 'command'
@@ -52,13 +51,6 @@ export type TriggerSpec =
   | (TriggerSpecBase & {
       kind: 'url';
       match: UrlMatchRule[];
-    })
-
-  // Cron Timing trigger
-  | (TriggerSpecBase & {
-      kind: 'cron';
-      cron: string;
-      timezone?: string;
     })
 
   // Interval Timed trigger (repeat at fixed intervals)

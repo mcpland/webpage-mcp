@@ -620,21 +620,9 @@ export function convertTriggerV2ToV3(v2Trigger: V2Trigger): ConversionResult<Tri
       };
       break;
 
-    case 'schedule': { // Convert V2 schedule to cron expression
-      const cron = convertScheduleToCron(v2Trigger.schedule);
-      if (!cron) {
-        errors.push('Could not convert V2 schedule to cron expression');
-        return { success: false, errors, warnings };
-      }
-      trigger = {
-        id: v2Trigger.id,
-        kind: 'cron',
-        flowId: v2Trigger.flowId as FlowId,
-        enabled: v2Trigger.enabled ?? true,
-        cron,
-      };
-      break;
-    }
+    case 'schedule':
+      errors.push('Schedule/cron triggers are no longer supported in Connector scope');
+      return { success: false, errors, warnings };
 
     case 'element':
       warnings.push('Element trigger is not fully supported in V3, converting to manual');
@@ -652,45 +640,6 @@ export function convertTriggerV2ToV3(v2Trigger: V2Trigger): ConversionResult<Tri
   }
 
   return { success: true, data: trigger, errors, warnings };
-}
-
-/**
- * Convert V2 schedule config to cron expression
- */
-function convertScheduleToCron(schedule: V2Trigger['schedule']): string | null {
-  if (!schedule) return null;
-
-  switch (schedule.type) {
-    case 'interval': { // Convert interval to approximate cron (every N minutes)
-      const intervalMinutes = Math.max(1, Math.round((schedule.intervalMs || 60000) / 60000));
-      if (intervalMinutes < 60) {
-        return `*/${intervalMinutes} * * * *`;
-      } else {
-        const hours = Math.round(intervalMinutes / 60);
-        return `0 */${hours} * * *`;
-      }
-    }
-
-    case 'daily':
-      // specified time every day
-      if (schedule.time) {
-        const [hour, minute] = schedule.time.split(':').map(Number);
-        return `${minute || 0} ${hour || 0} * * *`;
-      }
-      return '0 0 * * *'; // Default is 0:00 every day
-
-    case 'weekly': { // Specify days and times per week
-      const days = (schedule.days || [0]).join(',');
-      if (schedule.time) {
-        const [hour, minute] = schedule.time.split(':').map(Number);
-        return `${minute || 0} ${hour || 0} * * ${days}`;
-      }
-      return `0 0 * * ${days}`;
-    }
-
-    default:
-      return null;
-  }
 }
 
 // ==================== Converter Interface ====================

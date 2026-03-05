@@ -27,17 +27,6 @@ function createUrlTrigger(id: string, flowId: string): TriggerSpec {
   };
 }
 
-function createCronTrigger(id: string, flowId: string): TriggerSpec {
-  return {
-    id: id as any,
-    kind: 'cron',
-    enabled: true,
-    flowId: flowId as any,
-    cron: '0 9 * * *', // Every day at 9am
-    timezone: 'UTC',
-  };
-}
-
 function createCommandTrigger(id: string, flowId: string): TriggerSpec {
   return {
     id: id as any,
@@ -119,8 +108,8 @@ describe('TriggerStore CRUD', () => {
       const store = createTriggersStore();
 
       await store.save(createUrlTrigger('trigger-1', 'flow-1'));
-      await store.save(createCronTrigger('trigger-2', 'flow-2'));
-      await store.save(createCommandTrigger('trigger-3', 'flow-3'));
+      await store.save(createCommandTrigger('trigger-2', 'flow-2'));
+      await store.save(createContextMenuTrigger('trigger-3', 'flow-3'));
 
       const triggers = await store.list();
 
@@ -189,18 +178,6 @@ describe('TriggerStore CRUD', () => {
 
       expect(retrieved?.kind).toBe('url');
       expect((retrieved as any).match).toEqual([{ kind: 'domain', value: 'example.com' }]);
-    });
-
-    it('stores and retrieves cron trigger', async () => {
-      const store = createTriggersStore();
-      const trigger = createCronTrigger('cron-1', 'flow-1');
-
-      await store.save(trigger);
-      const retrieved = await store.get('cron-1' as any);
-
-      expect(retrieved?.kind).toBe('cron');
-      expect((retrieved as any).cron).toBe('0 9 * * *');
-      expect((retrieved as any).timezone).toBe('UTC');
     });
 
     it('stores and retrieves command trigger', async () => {

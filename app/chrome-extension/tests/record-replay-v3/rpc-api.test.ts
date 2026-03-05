@@ -1066,7 +1066,7 @@ describe('V3 RPC Flow CRUD APIs', () => {
 
       (storage.triggers.list as ReturnType<typeof vi.fn>).mockResolvedValue([
         { id: 'trigger-1', kind: 'manual', flowId: 'flow-1', enabled: true },
-        { id: 'trigger-2', kind: 'cron', flowId: 'flow-1', enabled: true, cron: '0 * * * *' },
+        { id: 'trigger-2', kind: 'interval', flowId: 'flow-1', enabled: true, everySec: 300 },
       ]);
 
       await expect(
