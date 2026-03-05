@@ -6,10 +6,8 @@ import type { FlowV3 } from '@/entrypoints/background/record-replay-v3/domain/fl
 import type {
   FlowId,
   NodeId,
-  TriggerId,
 } from '@/entrypoints/background/record-replay-v3/domain/ids';
 import type { JsonObject } from '@/entrypoints/background/record-replay-v3/domain/json';
-import type { TriggerSpec } from '@/entrypoints/background/record-replay-v3/domain/triggers';
 import {
   flowV2ToV3ForRpc,
   flowV3ToV2ForBuilder,
@@ -20,7 +18,6 @@ import {
 import { validateFlow } from '@/entrypoints/popup/components/builder/model/validation';
 import { useBuilderStore } from '@/entrypoints/popup/components/builder/store/useBuilderStore';
 import Canvas from '@/entrypoints/popup/components/builder/components/Canvas';
-import TriggerPanel from '@/entrypoints/popup/components/builder/components/TriggerPanel';
 import EdgePropertyPanel from '@/entrypoints/popup/components/builder/components/EdgePropertyPanel';
 import Sidebar from '@/entrypoints/popup/components/builder/components/Sidebar';
 import PropertyPanel from '@/entrypoints/popup/components/builder/components/PropertyPanel';
@@ -31,45 +28,6 @@ import './App.css';
 type ToastLevel = 'info' | 'warn' | 'error';
 type ToastItem = { id: string; message: string; level: ToastLevel };
 type FallbackNotice = { nodeId: string; type: string; prevIndex: number };
-
-// Route A scope: trigger/schedule automation is out of connector authoring surface.
-const ENABLE_TRIGGER_MANAGEMENT = false;
-
-function trigId(flowId: string, nodeId: string, kind: string): TriggerId {
-  return `trg_${flowId}_${nodeId}_${kind}` as TriggerId;
-}
-
-function schId(flowId: string, nodeId: string, idx: number): TriggerId {
-  return `sch_${flowId}_${nodeId}_${idx}` as TriggerId;
-}
-
-function scheduleToCron(schedule: { type?: string; when?: string }): string | null {
-  if (!schedule) return null;
-
-  const type = String(schedule.type || '').trim();
-  const when = String(schedule.when || '').trim();
-
-  if (type === 'interval') {
-    const minutesRaw = Number(when);
-    if (!Number.isFinite(minutesRaw)) return null;
-    const minutes = Math.max(1, Math.round(minutesRaw));
-    if (minutes < 60) return `*/${minutes} * * * *`;
-    const hours = Math.max(1, Math.round(minutes / 60));
-    return `0 */${hours} * * *`;
-  }
-
-  if (type === 'daily') {
-    const [hRaw, mRaw] = when.split(':');
-    const hourRaw = Number(hRaw);
-    const minuteRaw = Number(mRaw);
-    if (!Number.isFinite(hourRaw) || !Number.isFinite(minuteRaw)) return null;
-    const hour = Math.min(23, Math.max(0, Math.floor(hourRaw)));
-    const minute = Math.min(59, Math.max(0, Math.floor(minuteRaw)));
-    return `${minute} ${hour} * * *`;
-  }
-
-  return null;
-}
 
 function getQuery(): Record<string, string> {
   const q: Record<string, string> = {};
@@ -103,7 +61,6 @@ export default function BuilderApp() {
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [highlightField, setHighlightField] = useState<string | null>(null);
   const [fitSeq, setFitSeq] = useState(0);
-  const [triggerPanelVisible, setTriggerPanelVisible] = useState(false);
 
   const [renameVisible, setRenameVisible] = useState(false);
   const [renameName, setRenameName] = useState('');
@@ -239,135 +196,6 @@ export default function BuilderApp() {
     setRenameVisible(false);
   }
 
-  async function syncTriggersAndSchedules(flowId: string, nodes: unknown[]) {
-    if (!ENABLE_TRIGGER_MANAGEMENT) return;
-
-    const triggersNeeded: TriggerSpec[] = [];
-    const tnodes = (nodes || []).filter((n: any) => n && n.type === 'trigger');
-
-    for (const n of tnodes as any[]) {
-      const cfg = n.config || {};
-      const enabled = cfg.enabled !== false;
-
-      if (cfg.modes?.url && Array.isArray(cfg.url?.rules) && cfg.url.rules.length) {
-        triggersNeeded.push({
-          id: trigId(flowId, n.id, 'url'),
-          kind: 'url',
-          enabled,
-          flowId: flowId as FlowId,
-          match: cfg.url.rules,
-        });
-      }
-
-      if (cfg.modes?.contextMenu && cfg.contextMenu?.title) {
-        triggersNeeded.push({
-          id: trigId(flowId, n.id, 'menu'),
-          kind: 'contextMenu',
-          enabled,
-          flowId: flowId as FlowId,
-          title: cfg.contextMenu.title,
-          contexts: (Array.isArray(cfg.contextMenu.contexts)
-            ? cfg.contextMenu.contexts
-            : ['all']
-          ).map(String),
-        });
-      }
-
-      if (cfg.modes?.command && cfg.command?.commandKey) {
-        triggersNeeded.push({
-          id: trigId(flowId, n.id, 'cmd'),
-          kind: 'command',
-          enabled,
-          flowId: flowId as FlowId,
-          commandKey: String(cfg.command.commandKey),
-        });
-      }
-
-      if (cfg.modes?.dom && cfg.dom?.selector) {
-        const debounceMsRaw = Number(cfg.dom.debounceMs);
-        triggersNeeded.push({
-          id: trigId(flowId, n.id, 'dom'),
-          kind: 'dom',
-          enabled,
-          flowId: flowId as FlowId,
-          selector: String(cfg.dom.selector),
-          appear: cfg.dom.appear !== false,
-          once: cfg.dom.once !== false,
-          debounceMs: Number.isFinite(debounceMsRaw) ? debounceMsRaw : 800,
-        });
-      }
-
-      if (cfg.modes?.schedule && Array.isArray(cfg.schedules)) {
-        cfg.schedules.forEach((s: any, i: number) => {
-          const cron = scheduleToCron(s);
-          if (!cron) {
-            const scheduleType = String(s?.type || 'unknown');
-            if (scheduleType === 'once') {
-              pushToast(
-                t(
-                  'builderScheduleOnceUnsupported',
-                  'Node {0} schedule #{1}: one-time schedule is not supported in V3 and was skipped.',
-                  [String(n.id), String(i + 1)],
-                ),
-                'warn',
-              );
-            } else {
-              pushToast(
-                t(
-                  'builderScheduleConvertFailed',
-                  'Node {0} schedule #{1}: cannot convert to cron (type={2}), skipped.',
-                  [String(n.id), String(i + 1), scheduleType],
-                ),
-                'warn',
-              );
-            }
-            return;
-          }
-
-          triggersNeeded.push({
-            id: schId(flowId, n.id, i),
-            kind: 'cron',
-            enabled: enabled && s?.enabled !== false,
-            flowId: flowId as FlowId,
-            cron,
-          });
-        });
-      }
-    }
-
-    try {
-      await rpc.ensureConnected();
-
-      const existing = (await rpc.request('rr_v3.listTriggers', {
-        flowId: flowId as FlowId,
-      })) as TriggerSpec[] | null;
-
-      const existingById = new Map((existing || []).map((t) => [t.id, t]));
-      const neededIds = new Set(triggersNeeded.map((t) => t.id));
-
-      for (const trigger of triggersNeeded) {
-        const triggerPayload = trigger as unknown as JsonObject;
-        if (existingById.has(trigger.id)) {
-          await rpc.request('rr_v3.updateTrigger', { trigger: triggerPayload });
-        } else {
-          await rpc.request('rr_v3.createTrigger', { trigger: triggerPayload });
-        }
-      }
-
-      const nodeManagedPrefixes = [`trg_${flowId}_`, `sch_${flowId}_`];
-      const isNodeManaged = (triggerId: string) =>
-        nodeManagedPrefixes.some((prefix) => triggerId.startsWith(prefix));
-
-      for (const existingItem of existingById.values()) {
-        if (!neededIds.has(existingItem.id) && isNodeManaged(existingItem.id)) {
-          await rpc.request('rr_v3.deleteTrigger', { triggerId: existingItem.id });
-        }
-      }
-    } catch (error) {
-      console.warn('[Builder] Trigger sync failed:', error);
-    }
-  }
-
   async function save(): Promise<FlowV3 | null> {
     try {
       const flowV2 = store.exportFlowForSave();
@@ -385,12 +213,6 @@ export default function BuilderApp() {
       }
       (store.flowLocal as any).meta.createdAt = saved.createdAt;
       (store.flowLocal as any).meta.updatedAt = saved.updatedAt;
-
-      try {
-        await syncTriggersAndSchedules(flowV2.id, flowV2.nodes || []);
-      } catch {
-        // ignore
-      }
 
       return saved;
     } catch (error) {
@@ -456,12 +278,6 @@ export default function BuilderApp() {
         setTitle(
           t('builderEditFlowTitle', 'Edit: {0}', [String(flowV2.name || flowV2.id)]),
         );
-
-        try {
-          await syncTriggersAndSchedules(flowV2.id, flowV2.nodes || []);
-        } catch {
-          // ignore
-        }
       } else {
         store.initFromFlow(first as FlowV2);
 
@@ -752,20 +568,6 @@ export default function BuilderApp() {
                 {t('agentSessionRenameTitle', 'Rename')}
               </button>
 
-              {ENABLE_TRIGGER_MANAGEMENT ? (
-                <button
-                  className={`top-btn ${triggerPanelVisible ? 'active' : ''}`}
-                  type="button"
-                  onClick={() => setTriggerPanelVisible((v) => !v)}
-                  title={t('builderManageTriggersTitle', 'Manage triggers')}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                  </svg>
-                  {t('workflowsTriggersSection', 'Triggers')}
-                </button>
-              ) : null}
-
               <span className="divider-vert" />
 
               <button
@@ -841,12 +643,6 @@ export default function BuilderApp() {
           {!activeNode && activeEdge ? (
             <div className="floating-property">
               <EdgePropertyPanel edge={activeEdge} nodes={store.nodes} onRemoveEdge={store.removeEdge} />
-            </div>
-          ) : null}
-
-          {ENABLE_TRIGGER_MANAGEMENT && triggerPanelVisible && store.flowLocal?.id ? (
-            <div className="floating-trigger">
-              <TriggerPanel flowId={store.flowLocal.id} onClose={() => setTriggerPanelVisible(false)} />
             </div>
           ) : null}
 
