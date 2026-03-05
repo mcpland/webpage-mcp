@@ -198,6 +198,30 @@ describe('Recorder ingest protocol', () => {
     );
   });
 
+  it('rejects event when meta is present but invalid', () => {
+    const mock = createSessionMock();
+    const handler = createRecorderEventMessageHandler(mock.session as any);
+    const sendResponse = vi.fn();
+
+    handler(
+      {
+        type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
+        payload: { kind: 'steps', steps: [{ id: 's1', type: 'click' }] },
+        meta: createMeta({ seq: -1 }),
+      },
+      createSender(),
+      sendResponse,
+    );
+
+    expect(mock.appendSteps).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        code: 'INVALID_META',
+      }),
+    );
+  });
+
   it('resets source watermark when session rotates', () => {
     const mock = createSessionMock('sess_a');
     const handler = createRecorderEventMessageHandler(mock.session as any);

@@ -164,12 +164,21 @@ export function createRecorderEventMessageHandler(
 
       const parsedMeta = parseRecorderEventMeta(message?.meta);
       if (!parsedMeta.ok) {
-        // Backward compatibility path for older recorder scripts.
-        applyPayload(payload, session);
+        const isLegacyMessage = parsedMeta.error === 'missing meta object';
+        if (isLegacyMessage) {
+          // Backward compatibility path for older recorder scripts.
+          applyPayload(payload, session);
+          sendResponse({
+            ok: true,
+            legacy: true,
+            warning: `Recorder meta missing or invalid: ${parsedMeta.error}`,
+          });
+          return true;
+        }
         sendResponse({
-          ok: true,
-          legacy: true,
-          warning: `Recorder meta missing or invalid: ${parsedMeta.error}`,
+          ok: false,
+          code: 'INVALID_META',
+          error: parsedMeta.error,
         });
         return true;
       }
