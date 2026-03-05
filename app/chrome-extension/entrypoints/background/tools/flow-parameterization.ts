@@ -29,37 +29,52 @@ function restorePlaceholderToken(url: string, placeholder: string): string {
   return url.replace(pattern, placeholder);
 }
 
+function decodeQueryValue(raw: string): string {
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, '%20'));
+  } catch {
+    return raw;
+  }
+}
+
+function replaceInQueryString(
+  url: string,
+  currentValue: string,
+  placeholder: string,
+): { url: string; changed: boolean } {
+  const hashIndex = url.indexOf('#');
+  const beforeHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : '';
+  const queryIndex = beforeHash.indexOf('?');
+  if (queryIndex < 0) return { url, changed: false };
+
+  const base = beforeHash.slice(0, queryIndex);
+  const query = beforeHash.slice(queryIndex + 1);
+  const segments = query.split('&');
+  let changed = false;
+
+  const replaced = segments.map((segment) => {
+    const eqIndex = segment.indexOf('=');
+    if (eqIndex < 0) return segment;
+    const key = segment.slice(0, eqIndex);
+    const rawValue = segment.slice(eqIndex + 1);
+    const decodedValue = decodeQueryValue(rawValue);
+    if (decodedValue === currentValue || rawValue === currentValue) {
+      changed = true;
+      return `${key}=${placeholder}`;
+    }
+    return segment;
+  });
+
+  if (!changed) return { url, changed: false };
+  return { url: `${base}?${replaced.join('&')}${hash}`, changed: true };
+}
+
 function replaceNavigateValue(url: string, currentValue: string, placeholder: string): string {
   if (!currentValue) return url;
-  const hasScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(url);
-  try {
-    const parsed = new URL(url, 'https://flow.local');
-    let changed = false;
-    const keys = Array.from(parsed.searchParams.keys());
-    for (const key of keys) {
-      const values = parsed.searchParams.getAll(key);
-      const replaced = values.map((v) => {
-        if (v === currentValue) {
-          changed = true;
-          return placeholder;
-        }
-        return v;
-      });
-      parsed.searchParams.delete(key);
-      for (const value of replaced) {
-        parsed.searchParams.append(key, value);
-      }
-    }
-    if (changed) {
-      if (hasScheme) return restorePlaceholderToken(parsed.toString(), placeholder);
-      return restorePlaceholderToken(`${parsed.pathname}${parsed.search}${parsed.hash}`, placeholder);
-    }
-  } catch {
-    // fallback below
-  }
-
-  if (!url.includes(currentValue)) return url;
-  return url.split(currentValue).join(placeholder);
+  const replaced = replaceInQueryString(url, currentValue, placeholder);
+  if (!replaced.changed) return url;
+  return restorePlaceholderToken(replaced.url, placeholder);
 }
 
 function normalizeSuggestions(flow: Flow): ParameterSuggestion[] {

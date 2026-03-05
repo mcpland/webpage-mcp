@@ -85,4 +85,16 @@ describe('flow parameterization suggestions', () => {
     expect(result.variablesAdded).toBe(0);
     expect(result.skipped).toBe(1);
   });
+
+  it('preserves relative navigate urls while replacing query values', () => {
+    const flow = createFlow();
+    const navNode = flow.nodes?.find((node) => node.id === 'nav-1');
+    if (!navNode) throw new Error('navigate node missing in test setup');
+    (navNode.config as any).url = 'search?q=hello&page=1';
+
+    const result = applyFlowParameterSuggestions(flow);
+
+    expect(result.changed).toBe(true);
+    expect((navNode.config as any).url).toBe('search?q={q}&page=1');
+  });
 });
