@@ -18,7 +18,7 @@ describe('flow run dataset parser', () => {
     expect(parsed.rows).toEqual([{ q: 'a' }, { q: 'b' }]);
   });
 
-  it('parses datasetCsv with scalar coercion', () => {
+  it('parses datasetCsv and preserves cell strings', () => {
     const parsed = parseRunDatasetInput({
       datasetCsv: 'name,age,active\nAlice,20,true\nBob,31,false',
     });
@@ -26,8 +26,8 @@ describe('flow run dataset parser', () => {
     if (!parsed || !('rows' in parsed)) return;
     expect(parsed.source).toBe('datasetCsv');
     expect(parsed.rows).toEqual([
-      { name: 'Alice', age: 20, active: true },
-      { name: 'Bob', age: 31, active: false },
+      { name: 'Alice', age: '20', active: 'true' },
+      { name: 'Bob', age: '31', active: 'false' },
     ]);
   });
 
@@ -36,5 +36,14 @@ describe('flow run dataset parser', () => {
     expect(parsed && 'error' in parsed).toBe(true);
     if (!parsed || !('error' in parsed)) return;
     expect(parsed.error).toContain('datasetCsv row 1 has 1 columns, expected 2');
+  });
+
+  it('keeps leading zeros for csv cell values', () => {
+    const parsed = parseRunDatasetInput({
+      datasetCsv: 'code,pin\n00123,0007',
+    });
+    expect(parsed && 'rows' in parsed).toBe(true);
+    if (!parsed || !('rows' in parsed)) return;
+    expect(parsed.rows).toEqual([{ code: '00123', pin: '0007' }]);
   });
 });

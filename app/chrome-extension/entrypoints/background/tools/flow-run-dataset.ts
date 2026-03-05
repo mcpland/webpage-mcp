@@ -74,17 +74,6 @@ function parseCsvLine(line: string): string[] {
   return values;
 }
 
-function coerceValue(value: string): unknown {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return '';
-  if (/^(true|false)$/i.test(trimmed)) return trimmed.toLowerCase() === 'true';
-  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
-    const n = Number(trimmed);
-    if (Number.isFinite(n)) return n;
-  }
-  return trimmed;
-}
-
 function parseCsvRows(csvText: string): ParsedRunDataset | ParseDatasetError {
   const lines = String(csvText || '')
     .split(/\r?\n/)
@@ -110,7 +99,7 @@ function parseCsvRows(csvText: string): ParsedRunDataset | ParseDatasetError {
     }
     const row: DatasetRow = {};
     for (let c = 0; c < headers.length; c += 1) {
-      row[headers[c]] = coerceValue(cells[c]);
+      row[headers[c]] = cells[c];
     }
     rows.push(row);
   }
