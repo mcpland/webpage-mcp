@@ -357,6 +357,10 @@
       this._lastKeyTs = 0;
       // Map to avoid duplicate switchFrame per iframe source (keyed by frame selector)
       this._frameSwitchMap = new Set();
+      // Track last committed values per element ref for no-op fill filtering
+      this._lastRecordedFieldValue = new Map();
+      // Timestamp for pending single-click denoising
+      this._pendingClickAt = 0;
     }
 
     // Lifecycle
@@ -472,6 +476,7 @@
         if (this._pendingClick) this._pushStep(this._pendingClick);
       } catch {}
       this._pendingClick = null;
+      this._pendingClickAt = 0;
     }
 
     /**
@@ -499,6 +504,7 @@
 
       // Enqueue for upsert to ensure background gets the final value
       try {
+        this._rememberRecordedValue(last.step._recordingRef, last.step.value);
         this._enqueueForUpsert(last.step);
       } catch {}
 
@@ -713,6 +719,7 @@
       }
       this._pendingClickTimer = null;
       this._pendingClick = null;
+      this._pendingClickAt = 0;
     }
 
     _updateHoverListener() {
@@ -763,6 +770,10 @@
         this._forceFlushTimer = null;
       }
       this.frameSwitchPushed = false;
+      this._pendingClickAt = 0;
+      try {
+        this._lastRecordedFieldValue.clear();
+      } catch {}
     }
 
     /**
@@ -1166,6 +1177,7 @@
           this._pendingClickTimer = null;
         }
         this._pendingClick = null;
+        this._pendingClickAt = 0;
         this._pushStep({
           type: 'dblclick',
           target,
@@ -1178,8 +1190,22 @@
       // Cancel any previous pending click first
       if (this._pendingClickTimer) {
         clearTimeout(this._pendingClickTimer);
-        // Flush previous pending click before starting new one
-        if (this._pendingClick) {
+        const now = Date.now();
+        const prevSelector =
+          this._pendingClick &&
+          this._pendingClick.target &&
+          this._pendingClick.target.selector
+            ? String(this._pendingClick.target.selector)
+            : '';
+        const nextSelector =
+          target && target.selector ? String(target.selector) : '';
+        const isFastDuplicate =
+          !!prevSelector &&
+          !!nextSelector &&
+          prevSelector === nextSelector &&
+          now - this._pendingClickAt <= 200;
+        // Keep only the latest click for same-target rapid taps.
+        if (!isFastDuplicate && this._pendingClick) {
           this._pushStep(this._pendingClick);
         }
       }
@@ -1189,12 +1215,14 @@
         target,
         screenshotOnFail: true,
       };
+      this._pendingClickAt = Date.now();
 
       this._pendingClickTimer = setTimeout(() => {
         if (this._pendingClick) {
           this._pushStep(this._pendingClick);
           this._pendingClick = null;
         }
+        this._pendingClickAt = 0;
         this._pendingClickTimer = null;
       }, this._DBLCLICK_THRESHOLD_MS);
     }
@@ -1319,19 +1347,31 @@
       );
       const within = nowTs - this.lastFill.ts <= CONFIG.INPUT_DEBOUNCE_MS;
       if ((sameRef || sameSelector) && within) {
+        // No-op update (value unchanged) should not create churn.
+        if (this._sameRecordedValue(this.lastFill.step.value, value)) {
+          this.lastFill.ts = nowTs;
+          this.lastFill.el = el;
+          this._updateInputActivity();
+          return;
+        }
         // Update existing step's value
         this.lastFill.step.value = value;
         this.sessionBuffer.meta.updatedAt = new Date().toISOString();
         this.lastFill.ts = nowTs;
         this.lastFill.el = el; // Keep DOM reference updated for finalize
+        this._rememberRecordedValue(elRef, value);
         // Keep flush gate aligned to the latest keystroke
         this._updateInputActivity();
         // Re-enqueue the updated step for upsert (ensures background gets final value)
         this._enqueueForUpsert(this.lastFill.step);
         return;
       }
+      if (this._hasRecordedValue(elRef, value)) {
+        return;
+      }
       const newStep = { type: 'fill', target, value, screenshotOnFail: true };
       newStep._recordingRef = elRef;
+      this._rememberRecordedValue(elRef, value);
       this._pushStep(newStep);
       this.lastFill = { step: newStep, ts: nowTs, el: el };
     }
@@ -1383,14 +1423,21 @@
         const sameRef = !!(this.lastFill.step && this.lastFill.step._recordingRef === elRef);
         const within = nowTs - this.lastFill.ts <= CONFIG.INPUT_DEBOUNCE_MS;
         if (sameRef && within) {
+          if (this._sameRecordedValue(this.lastFill.step.value, val)) {
+            this.lastFill.ts = nowTs;
+            this.lastFill.el = el;
+            return;
+          }
           this.lastFill.step.value = val;
           this.sessionBuffer.meta.updatedAt = new Date().toISOString();
           this.lastFill.ts = nowTs;
           this.lastFill.el = el; // Keep DOM reference updated
+          this._rememberRecordedValue(elRef, val);
           // Re-enqueue for upsert
           this._enqueueForUpsert(this.lastFill.step);
           return;
         }
+        if (this._hasRecordedValue(elRef, val)) return;
         const target = SelectorEngine.buildTarget(el);
         try {
           const gref = SelectorEngine._ensureGlobalRef && SelectorEngine._ensureGlobalRef(el);
@@ -1398,6 +1445,7 @@
         } catch {}
         const st = { type: 'fill', target, value: val, screenshotOnFail: true };
         st._recordingRef = elRef;
+        this._rememberRecordedValue(elRef, val);
         this._pushStep(st);
         this.lastFill = { step: st, ts: nowTs, el: el };
         return;
@@ -1412,21 +1460,30 @@
         } catch {}
         const elRef = this._getElRef(el);
         if (tt === 'checkbox') {
+          const val = !!el.checked;
+          if (this._hasRecordedValue(elRef, val)) return;
           const st = { type: 'fill', target, value: !!el.checked, screenshotOnFail: true };
           st._recordingRef = elRef;
+          this._rememberRecordedValue(elRef, val);
           this._pushStep(st);
           return;
         }
         if (tt === 'radio') {
+          const val = true;
+          if (this._hasRecordedValue(elRef, val)) return;
           const st = { type: 'fill', target, value: true, screenshotOnFail: true };
           st._recordingRef = elRef;
+          this._rememberRecordedValue(elRef, val);
           this._pushStep(st);
           return;
         }
         if (tt === 'file') {
           const varKey = el.name ? el.name : `file_${Math.random().toString(36).slice(2, 6)}`;
           this._addVariable(varKey, false, '');
-          this._pushStep({ type: 'fill', target, value: `{${varKey}}`, screenshotOnFail: true });
+          const value = `{${varKey}}`;
+          if (this._hasRecordedValue(elRef, value)) return;
+          this._rememberRecordedValue(elRef, value);
+          this._pushStep({ type: 'fill', target, value, screenshotOnFail: true });
           return;
         }
       }
@@ -1443,6 +1500,24 @@
         // Fallback to timestamp-based ref if WeakMap fails (should not happen)
         return `ref_${Date.now()}`;
       }
+    }
+
+    _sameRecordedValue(a, b) {
+      if (typeof a === 'boolean' || typeof b === 'boolean') {
+        return Boolean(a) === Boolean(b);
+      }
+      return String(a == null ? '' : a) === String(b == null ? '' : b);
+    }
+
+    _hasRecordedValue(elRef, value) {
+      if (!elRef) return false;
+      if (!this._lastRecordedFieldValue.has(elRef)) return false;
+      return this._sameRecordedValue(this._lastRecordedFieldValue.get(elRef), value);
+    }
+
+    _rememberRecordedValue(elRef, value) {
+      if (!elRef) return;
+      this._lastRecordedFieldValue.set(elRef, value);
     }
 
     // UI handled by injected UI class
