@@ -621,7 +621,7 @@ export function convertTriggerV2ToV3(v2Trigger: V2Trigger): ConversionResult<Tri
       break;
 
     case 'schedule':
-      errors.push('Schedule/cron triggers are no longer supported in Connector scope');
+      errors.push('Schedule triggers are no longer supported in Connector scope');
       return { success: false, errors, warnings };
 
     case 'element':

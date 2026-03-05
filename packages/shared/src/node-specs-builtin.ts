@@ -856,7 +856,7 @@ export function registerBuiltinSpecs() {
                 { label: "Daily", value: "daily" },
               ] as any,
             },
-            { key: "when", label: "Time (ISO/cron)", type: "string" },
+            { key: "when", label: "Time (ISO)", type: "string" },
             {
               key: "enabled",
               label: "Enabled",

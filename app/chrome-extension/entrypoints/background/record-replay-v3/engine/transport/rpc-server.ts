@@ -1004,10 +1004,6 @@ export class RpcServer {
         return { ...base, match } as TriggerSpec;
       }
 
-      case 'cron': {
-        throw new Error('Cron triggers are removed from Connector scope');
-      }
-
       case 'interval': {
         if (raw.periodMinutes === undefined || raw.periodMinutes === null) {
           throw new Error('trigger.periodMinutes is required for interval triggers');

@@ -619,7 +619,7 @@ export type TriggerScheduleType = 'once' | 'interval' | 'daily';
 export interface TriggerSchedule {
   id: string;
   type: TriggerScheduleType;
-  when: Resolvable<string>; // ISO/cron-like string
+  when: Resolvable<string>; // ISO-like string
   enabled?: boolean;
 }
 
