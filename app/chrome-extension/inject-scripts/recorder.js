@@ -17,6 +17,8 @@
   const RECORDER_EVENT_PROTOCOL_VERSION = 1;
   const SEND_RETRY_MAX = 2;
   const SEND_RETRY_BASE_MS = 80;
+  // Route A scope: assertion authoring is out of connector surface.
+  const ENABLE_ASSERT_CAPTURE = false;
 
   // ================================================================
   // 2) UI CLASS (injected via constructor)
@@ -120,9 +122,13 @@
         else rec.resume();
       });
       if (btnAssert) {
-        btnAssert.addEventListener('click', () => {
-          rec.toggleAssertMode();
-        });
+        if (ENABLE_ASSERT_CAPTURE) {
+          btnAssert.addEventListener('click', () => {
+            rec.toggleAssertMode();
+          });
+        } else {
+          btnAssert.style.display = 'none';
+        }
       }
       btnStop.addEventListener('click', () => {
         chrome.runtime.sendMessage({ type: 'rr_stop_recording' });
@@ -156,7 +162,7 @@
       const assertBtn = document.getElementById('__rr_assert');
       if (badge) badge.textContent = this.recorder.isPaused ? 'Paused': 'Recording';
       if (pauseBtn) pauseBtn.textContent = this.recorder.isPaused ? 'Continue' : 'Pause';
-      if (assertBtn) {
+      if (assertBtn && ENABLE_ASSERT_CAPTURE) {
         assertBtn.textContent = this.recorder._assertMode ? 'Assert: ON' : 'Assert';
         assertBtn.style.opacity = this.recorder._assertMode ? '1' : '0.9';
       }
@@ -697,6 +703,7 @@
     }
 
     toggleAssertMode() {
+      if (!ENABLE_ASSERT_CAPTURE) return;
       if (!this.isRecording || this.isPaused) return;
       this._assertMode = !this._assertMode;
       this.ui.updateStatus();
@@ -1424,7 +1431,7 @@
         }
         const overlay = document.getElementById('__rr_rec_overlay');
         if (overlay && (el === overlay || (el.closest && el.closest('#__rr_rec_overlay')))) return;
-        if (this._assertMode) {
+        if (ENABLE_ASSERT_CAPTURE && this._assertMode) {
           e.preventDefault();
           e.stopPropagation();
           this._recordAssertStep(el);
