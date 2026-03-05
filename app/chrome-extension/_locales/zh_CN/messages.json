@@ -2908,5 +2908,123 @@
   "worldMain": {
     "message": "页面 (MAIN)",
     "description": "MAIN world"
+  },
+  "popupDismissButton": {
+    "message": "Dismiss",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupFlowDescriptionLabel": {
+    "message": "Description",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupFlowDescriptionPlaceholder": {
+    "message": "Describe this flow (optional)",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupFlowNameLabel": {
+    "message": "Flow name",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupFlowNamePlaceholder": {
+    "message": "Enter a flow name",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupRecordedFlowDefaultName": {
+    "message": "New recording",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupRecordingBadge": {
+    "message": "Recording",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupRecordingPaused": {
+    "message": "Recording paused",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupRecordingStopping": {
+    "message": "Stopping...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupSaveButton": {
+    "message": "Save",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupSaveRecordingTitle": {
+    "message": "Save recording",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupSavingButton": {
+    "message": "Saving...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupToolRecordDisabledHint": {
+    "message": "Recording is already in progress",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupToolRecordHint": {
+    "message": "Start recording browser actions",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupToolStopDisabledHint": {
+    "message": "No active recording",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupToolStopHint": {
+    "message": "Stop recording and save flow",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsNewRecordingButton": {
+    "message": "New Recording",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStarting": {
+    "message": "Starting...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStatusIdle": {
+    "message": "Idle",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStatusPaused": {
+    "message": "Paused",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStatusRecording": {
+    "message": "Recording",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStatusStopping": {
+    "message": "Stopping",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStepCount": {
+    "message": "$ARG1$ steps",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsRecordingStopping": {
+    "message": "Stopping...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingWaiting": {
+    "message": "Waiting for interaction...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsStartRecordingTitle": {
+    "message": "Start recording",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsStopRecordingButton": {
+    "message": "Stop",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsStopRecordingTitle": {
+    "message": "Stop recording",
+    "description": "自动生成的 i18n 文案"
   }
 }

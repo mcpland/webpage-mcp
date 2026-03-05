@@ -2908,5 +2908,123 @@
   "worldMain": {
     "message": "MAIN",
     "description": "MAIN world"
+  },
+  "popupDismissButton": {
+    "message": "Dismiss",
+    "description": "Auto-generated i18n message"
+  },
+  "popupFlowDescriptionLabel": {
+    "message": "Description",
+    "description": "Auto-generated i18n message"
+  },
+  "popupFlowDescriptionPlaceholder": {
+    "message": "Describe this flow (optional)",
+    "description": "Auto-generated i18n message"
+  },
+  "popupFlowNameLabel": {
+    "message": "Flow name",
+    "description": "Auto-generated i18n message"
+  },
+  "popupFlowNamePlaceholder": {
+    "message": "Enter a flow name",
+    "description": "Auto-generated i18n message"
+  },
+  "popupRecordedFlowDefaultName": {
+    "message": "New recording",
+    "description": "Auto-generated i18n message"
+  },
+  "popupRecordingBadge": {
+    "message": "Recording",
+    "description": "Auto-generated i18n message"
+  },
+  "popupRecordingPaused": {
+    "message": "Recording paused",
+    "description": "Auto-generated i18n message"
+  },
+  "popupRecordingStopping": {
+    "message": "Stopping...",
+    "description": "Auto-generated i18n message"
+  },
+  "popupSaveButton": {
+    "message": "Save",
+    "description": "Auto-generated i18n message"
+  },
+  "popupSaveRecordingTitle": {
+    "message": "Save recording",
+    "description": "Auto-generated i18n message"
+  },
+  "popupSavingButton": {
+    "message": "Saving...",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolRecordDisabledHint": {
+    "message": "Recording is already in progress",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolRecordHint": {
+    "message": "Start recording browser actions",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolStopDisabledHint": {
+    "message": "No active recording",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolStopHint": {
+    "message": "Stop recording and save flow",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsNewRecordingButton": {
+    "message": "New Recording",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStarting": {
+    "message": "Starting...",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStatusIdle": {
+    "message": "Idle",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStatusPaused": {
+    "message": "Paused",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStatusRecording": {
+    "message": "Recording",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStatusStopping": {
+    "message": "Stopping",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStepCount": {
+    "message": "$ARG1$ steps",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsRecordingStopping": {
+    "message": "Stopping...",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingWaiting": {
+    "message": "Waiting for interaction...",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsStartRecordingTitle": {
+    "message": "Start recording",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsStopRecordingButton": {
+    "message": "Stop",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsStopRecordingTitle": {
+    "message": "Stop recording",
+    "description": "Auto-generated i18n message"
   }
 }

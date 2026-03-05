@@ -2908,5 +2908,123 @@
   "worldMain": {
     "message": "主要",
     "description": "Auto-generated localized message"
+  },
+  "popupDismissButton": {
+    "message": "Dismiss",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowDescriptionLabel": {
+    "message": "Description",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowDescriptionPlaceholder": {
+    "message": "Describe this flow (optional)",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowNameLabel": {
+    "message": "Flow name",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowNamePlaceholder": {
+    "message": "Enter a flow name",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordedFlowDefaultName": {
+    "message": "New recording",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingBadge": {
+    "message": "Recording",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingPaused": {
+    "message": "Recording paused",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingStopping": {
+    "message": "Stopping...",
+    "description": "Auto-generated localized message"
+  },
+  "popupSaveButton": {
+    "message": "Save",
+    "description": "Auto-generated localized message"
+  },
+  "popupSaveRecordingTitle": {
+    "message": "Save recording",
+    "description": "Auto-generated localized message"
+  },
+  "popupSavingButton": {
+    "message": "Saving...",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolRecordDisabledHint": {
+    "message": "Recording is already in progress",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolRecordHint": {
+    "message": "Start recording browser actions",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStopDisabledHint": {
+    "message": "No active recording",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStopHint": {
+    "message": "Stop recording and save flow",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsNewRecordingButton": {
+    "message": "New Recording",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStarting": {
+    "message": "Starting...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusIdle": {
+    "message": "Idle",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusPaused": {
+    "message": "Paused",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusRecording": {
+    "message": "Recording",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusStopping": {
+    "message": "Stopping",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStepCount": {
+    "message": "$ARG1$ steps",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsRecordingStopping": {
+    "message": "Stopping...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingWaiting": {
+    "message": "Waiting for interaction...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsStartRecordingTitle": {
+    "message": "Start recording",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsStopRecordingButton": {
+    "message": "Stop",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsStopRecordingTitle": {
+    "message": "Stop recording",
+    "description": "Auto-generated localized message"
   }
 }
