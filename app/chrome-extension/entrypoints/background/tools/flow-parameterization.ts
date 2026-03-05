@@ -18,6 +18,17 @@ function isValidVariableKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function restorePlaceholderToken(url: string, placeholder: string): string {
+  const encoded = encodeURIComponent(placeholder);
+  if (!encoded || !url.includes('%7B')) return url;
+  const pattern = new RegExp(escapeRegExp(encoded), 'gi');
+  return url.replace(pattern, placeholder);
+}
+
 function replaceNavigateValue(url: string, currentValue: string, placeholder: string): string {
   if (!currentValue) return url;
   const hasScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(url);
@@ -40,8 +51,8 @@ function replaceNavigateValue(url: string, currentValue: string, placeholder: st
       }
     }
     if (changed) {
-      if (hasScheme) return parsed.toString();
-      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+      if (hasScheme) return restorePlaceholderToken(parsed.toString(), placeholder);
+      return restorePlaceholderToken(`${parsed.pathname}${parsed.search}${parsed.hash}`, placeholder);
     }
   } catch {
     // fallback below

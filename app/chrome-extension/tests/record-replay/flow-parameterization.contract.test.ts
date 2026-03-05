@@ -55,7 +55,7 @@ describe('flow parameterization suggestions', () => {
     expect(result.applied).toBe(2);
     expect(result.variablesAdded).toBe(2);
     expect((flow.nodes?.find((n) => n.id === 'fill-1')?.config as any).value).toBe('{email}');
-    expect((flow.nodes?.find((n) => n.id === 'nav-1')?.config as any).url).toContain('q=%7Bq%7D');
+    expect((flow.nodes?.find((n) => n.id === 'nav-1')?.config as any).url).toContain('q={q}');
     expect(flow.variables?.some((v) => v.key === 'email')).toBe(true);
     expect(flow.variables?.some((v) => v.key === 'q')).toBe(true);
   });
