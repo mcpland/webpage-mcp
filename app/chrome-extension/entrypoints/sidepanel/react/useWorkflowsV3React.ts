@@ -2,13 +2,8 @@ import { useEffect, useState } from 'react';
 
 import type { FlowV3 } from '@/entrypoints/background/record-replay-v3/domain/flow';
 import type { RunRecordV3 } from '@/entrypoints/background/record-replay-v3/domain/events';
-import type { TriggerSpec } from '@/entrypoints/background/record-replay-v3/domain/triggers';
 import type { FlowId, RunId } from '@/entrypoints/background/record-replay-v3/domain/ids';
 import { useRRV3Rpc } from '@/entrypoints/shared/react/useRRV3Rpc';
-
-// Route A scope: trigger/schedule management is out of connector surface.
-const ENABLE_TRIGGER_MANAGEMENT = false;
-const TRIGGER_SCOPE_DISABLED_ERROR = 'Triggers are disabled in Connector scope.';
 
 export interface FlowLite {
   id: string;
@@ -38,16 +33,6 @@ export interface RunLite {
     stepId?: string;
     tookMs?: number;
   }>;
-}
-
-export interface TriggerLite {
-  id: string;
-  type: string;
-  kind: string;
-  flowId: string;
-  enabled?: boolean;
-  match?: Array<{ kind: string; value: string }>;
-  [key: string]: unknown;
 }
 
 function mapFlowV3ToLite(flow: FlowV3): FlowLite {
@@ -88,14 +73,6 @@ function mapRunV3ToLite(run: RunRecordV3): RunLite {
   };
 }
 
-function mapTriggerV3ToLite(trigger: TriggerSpec): TriggerLite {
-  return {
-    ...trigger,
-    type: trigger.kind,
-    kind: trigger.kind,
-  } as TriggerLite;
-}
-
 export interface UseWorkflowsV3ReactOptions {
   autoRefreshMs?: number;
   autoConnect?: boolean;
@@ -107,15 +84,12 @@ export interface UseWorkflowsV3ReactReturn {
   error: string | null;
   flows: FlowLite[];
   runs: RunLite[];
-  triggers: TriggerLite[];
   refresh: () => Promise<void>;
   refreshFlows: () => Promise<void>;
   refreshRuns: () => Promise<void>;
-  refreshTriggers: () => Promise<void>;
   runFlow: (flowId: string) => Promise<{ runId: string } | null>;
   deleteFlow: (flowId: string) => Promise<boolean>;
   exportFlow: (flowId: string) => Promise<FlowV3 | null>;
-  deleteTrigger: (triggerId: string) => Promise<boolean>;
   getFlowById: (flowId: string) => Promise<FlowV3 | null>;
   getRunEvents: (runId: string) => Promise<unknown[]>;
 }
@@ -131,7 +105,6 @@ export function useWorkflowsV3React(
   const [error, setError] = useState<string | null>(null);
   const [flows, setFlows] = useState<FlowLite[]>([]);
   const [runs, setRuns] = useState<RunLite[]>([]);
-  const [triggers, setTriggers] = useState<TriggerLite[]>([]);
 
   async function refreshFlows(): Promise<void> {
     try {
@@ -154,30 +127,11 @@ export function useWorkflowsV3React(
     }
   }
 
-  async function refreshTriggers(): Promise<void> {
-    if (!ENABLE_TRIGGER_MANAGEMENT) {
-      setTriggers([]);
-      return;
-    }
-    try {
-      const result = (await rpc.request('rr_v3.listTriggers')) as TriggerSpec[] | null;
-      setTriggers((result || []).map(mapTriggerV3ToLite));
-    } catch (err) {
-      console.warn('[useWorkflowsV3React] Failed to refresh triggers:', err);
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   async function refresh(): Promise<void> {
     setLoading(true);
     setError(null);
     try {
-      if (ENABLE_TRIGGER_MANAGEMENT) {
-        await Promise.all([refreshFlows(), refreshRuns(), refreshTriggers()]);
-      } else {
-        await Promise.all([refreshFlows(), refreshRuns()]);
-        setTriggers([]);
-      }
+      await Promise.all([refreshFlows(), refreshRuns()]);
     } finally {
       setLoading(false);
     }
@@ -219,22 +173,6 @@ export function useWorkflowsV3React(
       console.warn('[useWorkflowsV3React] Failed to export flow:', err);
       setError(err instanceof Error ? err.message : String(err));
       return null;
-    }
-  }
-
-  async function deleteTrigger(triggerId: string): Promise<boolean> {
-    if (!ENABLE_TRIGGER_MANAGEMENT) {
-      setError(TRIGGER_SCOPE_DISABLED_ERROR);
-      return false;
-    }
-    try {
-      await rpc.request('rr_v3.deleteTrigger', { triggerId });
-      void refreshTriggers();
-      return true;
-    } catch (err) {
-      console.warn('[useWorkflowsV3React] Failed to delete trigger:', err);
-      setError(err instanceof Error ? err.message : String(err));
-      return false;
     }
   }
 
@@ -312,15 +250,12 @@ export function useWorkflowsV3React(
     error,
     flows,
     runs,
-    triggers,
     refresh,
     refreshFlows,
     refreshRuns,
-    refreshTriggers,
     runFlow,
     deleteFlow,
     exportFlow,
-    deleteTrigger,
     getFlowById,
     getRunEvents,
   };

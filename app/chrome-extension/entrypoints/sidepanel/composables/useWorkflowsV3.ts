@@ -13,13 +13,8 @@ import { onMounted, onUnmounted, ref, type Ref } from '@/entrypoints/shared/reac
 
 import type { FlowV3 } from '@/entrypoints/background/record-replay-v3/domain/flow';
 import type { RunRecordV3 } from '@/entrypoints/background/record-replay-v3/domain/events';
-import type { TriggerSpec } from '@/entrypoints/background/record-replay-v3/domain/triggers';
 import type { FlowId, RunId } from '@/entrypoints/background/record-replay-v3/domain/ids';
 import { useRRV3Rpc } from './useRRV3Rpc';
-
-// Route A scope: trigger/schedule management is out of connector surface.
-const ENABLE_TRIGGER_MANAGEMENT = false;
-const TRIGGER_SCOPE_DISABLED_ERROR = 'Triggers are disabled in Connector scope.';
 
 // ==================== UI Types ====================
 
@@ -54,17 +49,6 @@ export interface RunLite {
   isInProgress: boolean;
   status: RunRecordV3['status'];
   entries: unknown[];
-}
-
-/** Trigger type for UI display */
-export interface TriggerLite {
-  id: string;
-  type: string; // UI uses 'type', V3 uses 'kind'
-  kind: string; // V3 uses 'kind'
-  flowId: string;
-  enabled?: boolean;
-  match?: Array<{ kind: string; value: string }>; // For URL triggers
-  [key: string]: unknown;
 }
 
 // ==================== Mappers ====================
@@ -112,15 +96,6 @@ function mapRunV3ToLite(run: RunRecordV3): RunLite {
   };
 }
 
-/** Convert V3 TriggerSpec to UI TriggerLite */
-function mapTriggerV3ToLite(trigger: TriggerSpec): TriggerLite {
-  return {
-    ...trigger,
-    type: trigger.kind, // Map 'kind' to 'type' for UI compatibility
-    kind: trigger.kind,
-  } as TriggerLite;
-}
-
 // ==================== Composable ====================
 
 export interface UseWorkflowsV3Options {
@@ -139,17 +114,14 @@ export interface UseWorkflowsV3Return {
   // Data
   flows: Ref<FlowLite[]>;
   runs: Ref<RunLite[]>;
-  triggers: Ref<TriggerLite[]>;
 
   // Actions
   refresh: () => Promise<void>;
   refreshFlows: () => Promise<void>;
   refreshRuns: () => Promise<void>;
-  refreshTriggers: () => Promise<void>;
   runFlow: (flowId: string) => Promise<{ runId: string } | null>;
   deleteFlow: (flowId: string) => Promise<boolean>;
   exportFlow: (flowId: string) => Promise<FlowV3 | null>;
-  deleteTrigger: (triggerId: string) => Promise<boolean>;
 
   // V3-specific
   getFlowById: (flowId: string) => Promise<FlowV3 | null>;
@@ -170,7 +142,6 @@ export function useWorkflowsV3(options: UseWorkflowsV3Options = {}): UseWorkflow
   const error = ref<string | null>(null);
   const flows = ref<FlowLite[]>([]);
   const runs = ref<RunLite[]>([]);
-  const triggers = ref<TriggerLite[]>([]);
 
   // Auto-refresh timer
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -201,30 +172,11 @@ export function useWorkflowsV3(options: UseWorkflowsV3Options = {}): UseWorkflow
     }
   }
 
-  async function refreshTriggers(): Promise<void> {
-    if (!ENABLE_TRIGGER_MANAGEMENT) {
-      triggers.value = [];
-      return;
-    }
-    try {
-      const result = (await rpc.request('rr_v3.listTriggers')) as TriggerSpec[] | null;
-      triggers.value = (result || []).map(mapTriggerV3ToLite);
-    } catch (e) {
-      console.warn('[useWorkflowsV3] Failed to refresh triggers:', e);
-      error.value = e instanceof Error ? e.message : String(e);
-    }
-  }
-
   async function refresh(): Promise<void> {
     loading.value = true;
     error.value = null;
     try {
-      if (ENABLE_TRIGGER_MANAGEMENT) {
-        await Promise.all([refreshFlows(), refreshRuns(), refreshTriggers()]);
-      } else {
-        await Promise.all([refreshFlows(), refreshRuns()]);
-        triggers.value = [];
-      }
+      await Promise.all([refreshFlows(), refreshRuns()]);
     } finally {
       loading.value = false;
     }
@@ -268,23 +220,6 @@ export function useWorkflowsV3(options: UseWorkflowsV3Options = {}): UseWorkflow
       console.warn('[useWorkflowsV3] Failed to export flow:', e);
       error.value = e instanceof Error ? e.message : String(e);
       return null;
-    }
-  }
-
-  async function deleteTrigger(triggerId: string): Promise<boolean> {
-    if (!ENABLE_TRIGGER_MANAGEMENT) {
-      error.value = TRIGGER_SCOPE_DISABLED_ERROR;
-      return false;
-    }
-    try {
-      await rpc.request('rr_v3.deleteTrigger', { triggerId });
-      // Refresh triggers after deletion
-      void refreshTriggers();
-      return true;
-    } catch (e) {
-      console.warn('[useWorkflowsV3] Failed to delete trigger:', e);
-      error.value = e instanceof Error ? e.message : String(e);
-      return false;
     }
   }
 
@@ -366,15 +301,12 @@ export function useWorkflowsV3(options: UseWorkflowsV3Options = {}): UseWorkflow
     error,
     flows,
     runs,
-    triggers,
     refresh,
     refreshFlows,
     refreshRuns,
-    refreshTriggers,
     runFlow,
     deleteFlow,
     exportFlow,
-    deleteTrigger,
     getFlowById,
     getRunEvents,
   };
