@@ -36,6 +36,7 @@ export const BACKGROUND_MESSAGE_TYPES = {
   RR_PAUSE_RECORDING: 'rr_pause_recording',
   RR_RESUME_RECORDING: 'rr_resume_recording',
   RR_GET_RECORDING_STATUS: 'rr_get_recording_status',
+  RR_RECORDING_STATE_CHANGED: 'rr_recording_state_changed',
   RR_LIST_FLOWS: 'rr_list_flows',
   RR_FLOWS_CHANGED: 'rr_flows_changed',
   RR_GET_FLOW: 'rr_get_flow',

@@ -20,7 +20,7 @@ import { STORAGE_KEYS } from '@/common/constants';
 import { listTriggers, saveTrigger, deleteTrigger, type FlowTrigger } from './trigger-store';
 import { runFlow } from './flow-runner';
 import { RecorderManager } from './recording/recorder-manager';
-import { recordingSession } from './recording/session-manager';
+import { buildRecordingStateSnapshot } from './recording/recording-state';
 // Browser/content listeners are initialized via RecorderManager.init
 
 // design note: background listener for record & replay; delegates recording to dedicated modules
@@ -60,8 +60,11 @@ async function rescheduleAlarms() {
 
 // legacy injection helpers removed — use recording/content-injection when needed
 
-async function startRecording(meta?: Partial<Flow>): Promise<{ success: boolean; error?: string }> {
-  return await RecorderManager.start(meta);
+async function startRecording(
+  meta?: Partial<Flow>,
+  tabId?: number,
+): Promise<{ success: boolean; error?: string }> {
+  return await RecorderManager.start(meta, tabId);
 }
 
 async function stopRecording(): Promise<{ success: boolean; flow?: Flow; error?: string }> {
@@ -82,37 +85,58 @@ export function initRecordReplayListeners() {
       // rr_recorder_event Handled by ContentMessageHandler
       switch (message?.type) {
         case BACKGROUND_MESSAGE_TYPES.RR_START_RECORDING: {
-          startRecording(message.meta)
-            .then(sendResponse)
+          startRecording(message.meta, message.tabId)
+            .then((result) =>
+              sendResponse({
+                ...result,
+                state: buildRecordingStateSnapshot(),
+              }),
+            )
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING: {
           stopRecording()
-            .then(sendResponse)
+            .then((result) =>
+              sendResponse({
+                ...result,
+                state: buildRecordingStateSnapshot(),
+              }),
+            )
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_PAUSE_RECORDING: {
           RecorderManager.pause()
-            .then(sendResponse)
+            .then((result) =>
+              sendResponse({
+                ...result,
+                state: buildRecordingStateSnapshot(),
+              }),
+            )
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_RESUME_RECORDING: {
           RecorderManager.resume()
-            .then(sendResponse)
+            .then((result) =>
+              sendResponse({
+                ...result,
+                state: buildRecordingStateSnapshot(),
+              }),
+            )
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.RR_GET_RECORDING_STATUS: {
-          const status = recordingSession.getStatus();
-          const session = recordingSession.getSession();
+          const state = buildRecordingStateSnapshot();
           sendResponse({
             success: true,
-            status,
-            sessionId: session.sessionId,
-            originTabId: session.originTabId,
+            state,
+            // Keep legacy top-level fields for older UI callers.
+            status: state.status,
+            sessionId: state.sessionId,
+            originTabId: state.originTabId,
           });
           return true;
         }

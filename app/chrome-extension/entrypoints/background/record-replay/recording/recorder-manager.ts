@@ -5,6 +5,7 @@ import { recordingSession as session } from './session-manager';
 import { createInitialFlow, addNavigationStep } from './flow-builder';
 import { initBrowserEventListeners } from './browser-event-listener';
 import { initContentMessageHandler } from './content-message-handler';
+import { broadcastRecordingStateChanged } from './recording-state';
 
 /** Timeout for waiting for the top-frame content script to acknowledge stop. */
 const STOP_BARRIER_TOP_TIMEOUT_MS = 5000;
@@ -159,6 +160,7 @@ class RecorderManagerImpl {
     // Initialize flow & session
     const flow: Flow = createInitialFlow(meta);
     await session.startSession(flow, active.id);
+    broadcastRecordingStateChanged();
 
     // Ensure recorder available and start listening
     await ensureRecorderInjected(active.id);
@@ -180,6 +182,7 @@ class RecorderManagerImpl {
       } catch (e) {
         console.warn('RecorderManager: initial saveFlow failed', e);
       }
+      broadcastRecordingStateChanged();
     }
 
     return { success: true };
@@ -213,6 +216,7 @@ class RecorderManagerImpl {
 
     // Step 1: Transition to stopping state
     const sessionId = session.beginStopping();
+    broadcastRecordingStateChanged();
     const tabs = session.getActiveTabs();
 
     // Step 2: Send stop commands to all tabs with full barrier support
@@ -229,6 +233,7 @@ class RecorderManagerImpl {
 
     // Step 4: Finalize - clear session state and save with barrier metadata
     const flow = await session.stopSession();
+    broadcastRecordingStateChanged();
     const barrierOk = results.length === tabs.length && results.every((r) => r.ok || r.skipped);
     const stoppedAt = new Date().toISOString();
 
@@ -283,6 +288,7 @@ class RecorderManagerImpl {
     }
 
     session.pause();
+    broadcastRecordingStateChanged();
 
     // Broadcast pause to all active tabs
     const tabs = session.getActiveTabs();
@@ -304,6 +310,7 @@ class RecorderManagerImpl {
     }
 
     session.resume();
+    broadcastRecordingStateChanged();
 
     // Broadcast resume to all active tabs
     const tabs = session.getActiveTabs();
