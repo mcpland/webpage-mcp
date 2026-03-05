@@ -46,6 +46,8 @@ export const TOOL_NAMES = {
     RECORDING_START: 'recording_start',
     RECORDING_STOP: 'recording_stop',
     RECORDING_STATUS: 'recording_status',
+    FLOW_ANALYZE: 'flow_analyze',
+    FLOW_UPDATE: 'flow_update',
   },
 };
 
@@ -104,6 +106,57 @@ export const TOOL_SCHEMAS: Tool[] = [
       type: 'object',
       properties: {},
       required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.FLOW_ANALYZE,
+    description: 'Analyze a recorded flow and return structure with optimization hints.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Flow ID to analyze.',
+        },
+      },
+      required: ['flowId'],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.FLOW_UPDATE,
+    description: 'Update a flow using partial fields such as nodes, edges, variables or metadata.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Flow ID to update.',
+        },
+        name: {
+          type: 'string',
+          description: 'Optional new flow name.',
+        },
+        description: {
+          type: 'string',
+          description: 'Optional new flow description.',
+        },
+        nodes: {
+          type: 'array',
+          description: 'Optional replacement nodes array.',
+          items: { type: 'object' },
+        },
+        edges: {
+          type: 'array',
+          description: 'Optional replacement edges array.',
+          items: { type: 'object' },
+        },
+        variables: {
+          type: 'array',
+          description: 'Optional replacement variables array.',
+          items: { type: 'object' },
+        },
+      },
+      required: ['flowId'],
     },
   },
   // {
