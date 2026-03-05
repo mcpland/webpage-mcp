@@ -48,7 +48,6 @@ export const TOOL_NAMES = {
     RECORDING_STATUS: 'recording_status',
     FLOW_ANALYZE: 'flow_analyze',
     FLOW_UPDATE: 'flow_update',
-    FLOW_EXPORT_CODE: 'flow_export_code',
   },
 };
 
@@ -165,7 +164,6 @@ export const TOOL_SCHEMAS: Tool[] = [
       required: ['flowId'],
     },
   },
-  // Route A scope: flow_export_code is intentionally not exposed in connector tool schemas.
   // {
   //   name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
   //   description:
