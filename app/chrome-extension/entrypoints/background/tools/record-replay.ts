@@ -34,9 +34,6 @@ class FlowRunTool {
       recordStepScreenshotBaselines,
       screenshotBaselines,
       screenshotDiffThreshold,
-      dataset,
-      datasetJson,
-      datasetCsv,
     } = args || {};
     if (!flowId) return createErrorResponse('flowId is required');
     const flow = await getFlow(flowId);
@@ -64,12 +61,6 @@ class FlowRunTool {
           ? screenshotDiffThreshold
           : undefined,
     };
-
-    if (dataset !== undefined || datasetJson !== undefined || datasetCsv !== undefined) {
-      return createErrorResponse(
-        'Dataset-driven batch execution is disabled in Connector scope. Run one flow invocation at a time.',
-      );
-    }
 
     const result = await runFlow(flow, {
       ...runOptions,
