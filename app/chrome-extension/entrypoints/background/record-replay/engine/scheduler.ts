@@ -17,7 +17,7 @@ import { breakpointPlugin } from './plugins/breakpoint';
 import { evalExpression } from './utils/expression';
 import { runState } from './state-manager';
 import { AfterScriptQueue } from './runners/after-script-queue';
-import { StepRunner } from './runners/step-runner';
+import { type StepExecutionEvent, StepRunner } from './runners/step-runner';
 import { ControlFlowRunner } from './runners/control-flow-runner';
 import { SubflowRunner } from './runners/subflow-runner';
 import { ENGINE_CONSTANTS, LOG_STEP_IDS } from './constants';
@@ -30,6 +30,7 @@ import {
 } from './execution-mode';
 import { createExecutor, type StepExecutorInterface } from './runners/step-executor';
 import { createReplayActionRegistry } from '../actions/handlers';
+import { compareScreenshotBase64 } from './utils/screenshot-compare';
 
 export interface RunOptions {
   tabTarget?: 'current' | 'new';
@@ -64,6 +65,56 @@ export interface RunOptions {
    * When omitted, createHybridConfig defaults to LEGACY_ONLY_TYPES.
    */
   legacyOnlyTypes?: string[];
+
+  /**
+   * Include step-by-step trace in the run result.
+   */
+  debugStepByStep?: boolean;
+
+  /**
+   * Optional delay between steps in debug mode (milliseconds).
+   */
+  stepDelayMs?: number;
+
+  /**
+   * Capture screenshot after each step and include base64 in debug trace.
+   */
+  captureStepScreenshots?: boolean;
+
+  /**
+   * Capture screenshot after each step and return as baseline map by stepId.
+   */
+  recordStepScreenshotBaselines?: boolean;
+
+  /**
+   * Baseline screenshots keyed by stepId for visual comparison.
+   */
+  screenshotBaselines?: Record<string, string>;
+
+  /**
+   * Similarity threshold in [0,1] for screenshot baseline match.
+   * Default: 0.92
+   */
+  screenshotDiffThreshold?: number;
+}
+
+interface StepDebugRecord {
+  stepId: string;
+  type: string;
+  status: 'success' | 'failed' | 'paused';
+  tookMs: number;
+  tabId?: number;
+  error?: string;
+  nextLabel?: string;
+  nextNodeId?: string;
+  screenshotBase64?: string;
+  screenshotSimilarity?: number | null;
+  screenshotMatched?: boolean;
+}
+
+interface RunDebugPayload {
+  steps: StepDebugRecord[];
+  screenshotBaselines?: Record<string, string>;
 }
 
 /**
@@ -122,6 +173,25 @@ function buildExecutionModeConfig(options: RunOptions): ExecutionModeConfig {
   return { ...DEFAULT_EXECUTION_MODE_CONFIG };
 }
 
+function normalizeScreenshotBaselines(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const normalized: Record<string, string> = {};
+  for (const [key, baseline] of Object.entries(value)) {
+    if (typeof key !== 'string' || !key.trim()) continue;
+    if (typeof baseline !== 'string' || !baseline.trim()) continue;
+    normalized[key] = baseline;
+  }
+  return normalized;
+}
+
+function clampSimilarityThreshold(value: unknown, fallback = 0.92): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(1, n));
+}
+
 /**
  * ExecutionOrchestrator manages the lifecycle of a flow execution.
  *
@@ -152,6 +222,15 @@ class ExecutionOrchestrator {
   private executed = 0;
   private steps: Step[] = [];
   private prepareError: RunResult | null = null;
+  private lastStepEventIndex = -1;
+  private readonly debugRecords: StepDebugRecord[] = [];
+  private readonly capturedBaselines: Record<string, string> = Object.create(null);
+  private readonly debugStepByStep: boolean;
+  private readonly captureStepScreenshots: boolean;
+  private readonly recordStepScreenshotBaselines: boolean;
+  private readonly screenshotBaselines: Record<string, string>;
+  private readonly screenshotDiffThreshold: number;
+  private readonly stepDelayMs: number;
 
   // Runners
   private stepRunner: StepRunner;
@@ -162,6 +241,13 @@ class ExecutionOrchestrator {
     private flow: Flow,
     private options: RunOptions = {},
   ) {
+    this.debugStepByStep = options.debugStepByStep === true;
+    this.captureStepScreenshots = options.captureStepScreenshots === true;
+    this.recordStepScreenshotBaselines = options.recordStepScreenshotBaselines === true;
+    this.screenshotBaselines = normalizeScreenshotBaselines(options.screenshotBaselines);
+    this.screenshotDiffThreshold = clampSimilarityThreshold(options.screenshotDiffThreshold, 0.92);
+    this.stepDelayMs = Math.max(0, Math.floor(Number(options.stepDelayMs || 0)));
+
     // Initialize variables from flow defaults and args
     for (const v of flow.variables || []) {
       if (v.default !== undefined) this.vars[v.key] = v.default;
@@ -198,7 +284,102 @@ class ExecutionOrchestrator {
       getRemainingBudgetMs: () =>
         this.deadline > 0 ? Math.max(0, this.deadline - Date.now()) : Number.POSITIVE_INFINITY,
       stepExecutor: this.stepExecutor,
+      onStepFinished: async (event) => this.onStepFinished(event),
     });
+  }
+
+  private get shouldCollectDebugData(): boolean {
+    return (
+      this.debugStepByStep ||
+      this.captureStepScreenshots ||
+      this.recordStepScreenshotBaselines ||
+      Object.keys(this.screenshotBaselines).length > 0
+    );
+  }
+
+  private async onStepFinished(event: StepExecutionEvent): Promise<void> {
+    if (!this.shouldCollectDebugData) return;
+
+    const record: StepDebugRecord = {
+      stepId: event.step.id,
+      type: event.step.type,
+      status: event.status,
+      tookMs: Math.max(0, Number(event.tookMs || 0)),
+      tabId: event.tabId,
+      ...(event.error ? { error: event.error } : {}),
+      ...(event.nextLabel ? { nextLabel: event.nextLabel } : {}),
+    };
+
+    const needsScreenshot =
+      this.captureStepScreenshots ||
+      this.recordStepScreenshotBaselines ||
+      typeof this.screenshotBaselines[event.step.id] === 'string';
+    if (needsScreenshot) {
+      const screenshot = await this.logger.captureScreenshotBase64(event.tabId);
+      if (screenshot) {
+        if (this.captureStepScreenshots) {
+          record.screenshotBase64 = screenshot;
+        }
+        if (this.recordStepScreenshotBaselines) {
+          this.capturedBaselines[event.step.id] = screenshot;
+        }
+        const baseline = this.screenshotBaselines[event.step.id];
+        if (baseline) {
+          const similarity = compareScreenshotBase64(screenshot, baseline);
+          record.screenshotSimilarity = similarity;
+          if (similarity == null) {
+            record.screenshotMatched = false;
+            this.logger.push({
+              stepId: event.step.id,
+              status: 'warning',
+              message: 'Screenshot comparison skipped: invalid baseline payload',
+            });
+          } else {
+            const matched = similarity >= this.screenshotDiffThreshold;
+            record.screenshotMatched = matched;
+            if (!matched) {
+              this.logger.push({
+                stepId: event.step.id,
+                status: 'warning',
+                message: `Screenshot mismatch: similarity ${similarity} below threshold ${this.screenshotDiffThreshold}`,
+              });
+            }
+          }
+        }
+      } else if (this.screenshotBaselines[event.step.id]) {
+        this.logger.push({
+          stepId: event.step.id,
+          status: 'warning',
+          message: 'Screenshot comparison skipped: failed to capture runtime screenshot',
+        });
+      }
+    }
+
+    this.debugRecords.push(record);
+    this.lastStepEventIndex = this.debugRecords.length - 1;
+
+    if (this.stepDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.stepDelayMs));
+    }
+  }
+
+  private annotateDebugRecord(index: number, patch: Partial<StepDebugRecord>, expectedStepId: string) {
+    if (!this.shouldCollectDebugData) return;
+    if (!Number.isInteger(index) || index < 0 || index >= this.debugRecords.length) return;
+    const target = this.debugRecords[index];
+    if (!target || target.stepId !== expectedStepId) return;
+    Object.assign(target, patch);
+  }
+
+  private buildRunDebugPayload(): RunDebugPayload | undefined {
+    if (!this.shouldCollectDebugData) return undefined;
+    const payload: RunDebugPayload = {
+      steps: this.debugRecords.map((record) => ({ ...record })),
+    };
+    if (this.recordStepScreenshotBaselines) {
+      payload.screenshotBaselines = { ...this.capturedBaselines };
+    }
+    return payload;
   }
 
   private ensureWithinDeadline() {
@@ -518,6 +699,7 @@ class ExecutionOrchestrator {
     if (!this.steps.length) {
       await this.logger.overlayDone();
       const tookMs0 = Date.now() - this.startAt;
+      const debugPayload0 = this.buildRunDebugPayload();
       return (
         this.prepareError || {
           runId: this.runId,
@@ -528,6 +710,7 @@ class ExecutionOrchestrator {
           logs: this.options.returnLogs ? this.logger.getLogs() : undefined,
           screenshots: { onFailure: null },
           paused: false,
+          ...(debugPayload0 ? { debug: debugPayload0 } : {}),
         }
       );
     }
@@ -638,14 +821,31 @@ class ExecutionOrchestrator {
         (s) => this.logger.overlayAppend(`✔ ${s.type} (${s.id})`),
         (s, e) => this.logger.overlayAppend(`✘ ${s.type} (${s.id}) -> ${e?.message || String(e)}`),
       );
+      const currentStepDebugIndex = this.lastStepEventIndex;
       if (r.status === 'paused') {
         this.paused = true;
+        this.annotateDebugRecord(
+          currentStepDebugIndex,
+          {
+            nextLabel: ENGINE_CONSTANTS.EDGE_LABELS.DEFAULT,
+            nextNodeId: undefined,
+          },
+          step.id,
+        );
         break;
       }
       if (r.status === 'failed') {
         this.failed++;
         const oes = (outEdges.get(currentId) || []) as Edge[];
         const errEdge = oes.find((edg) => edg.label === ENGINE_CONSTANTS.EDGE_LABELS.ON_ERROR);
+        this.annotateDebugRecord(
+          currentStepDebugIndex,
+          {
+            nextLabel: errEdge ? ENGINE_CONSTANTS.EDGE_LABELS.ON_ERROR : undefined,
+            nextNodeId: errEdge?.to,
+          },
+          step.id,
+        );
         if (errEdge) {
           currentId = errEdge.to;
           continue;
@@ -662,6 +862,14 @@ class ExecutionOrchestrator {
         }
         const suggested = r.nextLabel ? String(r.nextLabel) : ENGINE_CONSTANTS.EDGE_LABELS.DEFAULT;
         const next = await this.advanceToNext(currentId, step, suggested, id2node, outEdges);
+        this.annotateDebugRecord(
+          currentStepDebugIndex,
+          {
+            nextLabel: suggested,
+            nextNodeId: next,
+          },
+          step.id,
+        );
         if (!next) break;
         currentId = next;
         continue;
@@ -670,6 +878,14 @@ class ExecutionOrchestrator {
       {
         const suggested = r.nextLabel ? String(r.nextLabel) : ENGINE_CONSTANTS.EDGE_LABELS.DEFAULT;
         const next = await this.advanceToNext(currentId, step, suggested, id2node, outEdges);
+        this.annotateDebugRecord(
+          currentStepDebugIndex,
+          {
+            nextLabel: suggested,
+            nextNodeId: next,
+          },
+          step.id,
+        );
         if (!next) break;
         currentId = next;
       }
@@ -680,6 +896,7 @@ class ExecutionOrchestrator {
     );
     const outputs: Record<string, any> = {};
     for (const [k, v] of Object.entries(this.vars)) if (!sensitiveKeys.has(k)) outputs[k] = v;
+    const debugPayload = this.buildRunDebugPayload();
     return {
       runId: this.runId,
       success: !this.paused && this.failed === 0,
@@ -696,6 +913,7 @@ class ExecutionOrchestrator {
         onFailure: this.logger.getLogs().find((l) => l.status === 'failed')?.screenshotBase64,
       },
       paused: this.paused,
+      ...(debugPayload ? { debug: debugPayload } : {}),
     };
   }
 

@@ -65,16 +65,33 @@ export class RunLogger {
     } catch {}
   }
 
-  async screenshotOnFailure() {
+  async captureScreenshotBase64(tabId?: number): Promise<string | null> {
     try {
-      const tabId = await this.resolveOverlayTabId();
+      let resolvedTabId: number | undefined;
+      if (typeof tabId === 'number') {
+        resolvedTabId = tabId;
+      } else {
+        resolvedTabId = await this.resolveOverlayTabId();
+      }
       const shot = await handleCallTool({
         name: TOOL_NAMES.BROWSER.COMPUTER,
-        args: typeof tabId === 'number' ? { action: 'screenshot', tabId } : { action: 'screenshot' },
+        args:
+          typeof resolvedTabId === 'number'
+            ? { action: 'screenshot', tabId: resolvedTabId }
+            : { action: 'screenshot' },
       });
-      const img = (shot?.content?.find((c: any) => c.type === 'image') as any)?.data as string;
-      if (img) this.logs[this.logs.length - 1].screenshotBase64 = img;
-    } catch {}
+      const img = (shot?.content?.find((c: any) => c.type === 'image') as any)?.data as
+        | string
+        | undefined;
+      return img || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async screenshotOnFailure() {
+    const img = await this.captureScreenshotBase64();
+    if (img && this.logs.length > 0) this.logs[this.logs.length - 1].screenshotBase64 = img;
   }
 
   async persist(flow: Flow, startedAt: number, success: boolean) {

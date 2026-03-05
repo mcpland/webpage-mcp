@@ -48,6 +48,12 @@ const SESSION_RUN_OPTION_KEYS = [
   'timeoutMs',
   'startUrl',
   'tabId',
+  'debugStepByStep',
+  'stepDelayMs',
+  'captureStepScreenshots',
+  'recordStepScreenshotBaselines',
+  'screenshotBaselines',
+  'screenshotDiffThreshold',
 ] as const;
 const RUN_OPTION_KEY_SET = new Set<string>(SESSION_RUN_OPTION_KEYS);
 const publishedFlowsCache = new Map<string, { fetchedAt: number; items: PublishedFlow[] }>();
@@ -224,6 +230,42 @@ async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
     if (!properties['timeoutMs']) properties['timeoutMs'] = { type: 'number', minimum: 0 };
     if (!properties['startUrl']) properties['startUrl'] = { type: 'string' };
     if (!properties['tabId']) properties['tabId'] = { type: 'number' };
+    if (!properties['debugStepByStep'])
+      properties['debugStepByStep'] = {
+        type: 'boolean',
+        default: false,
+        description: 'Include per-step debug trace in run result.',
+      };
+    if (!properties['stepDelayMs'])
+      properties['stepDelayMs'] = {
+        type: 'number',
+        minimum: 0,
+        description: 'Optional delay between steps for visual debugging.',
+      };
+    if (!properties['captureStepScreenshots'])
+      properties['captureStepScreenshots'] = {
+        type: 'boolean',
+        default: false,
+        description: 'Capture screenshot after each step and include in debug output.',
+      };
+    if (!properties['recordStepScreenshotBaselines'])
+      properties['recordStepScreenshotBaselines'] = {
+        type: 'boolean',
+        default: false,
+        description: 'Capture screenshots keyed by stepId for future baseline comparison.',
+      };
+    if (!properties['screenshotBaselines'])
+      properties['screenshotBaselines'] = {
+        type: 'object',
+        description: 'Baseline screenshots keyed by stepId.',
+      };
+    if (!properties['screenshotDiffThreshold'])
+      properties['screenshotDiffThreshold'] = {
+        type: 'number',
+        minimum: 0,
+        maximum: 1,
+        description: 'Similarity threshold for screenshot comparison (0-1).',
+      };
     const tool: Tool = {
       name,
       description,

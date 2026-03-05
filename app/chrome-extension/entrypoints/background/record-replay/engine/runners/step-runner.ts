@@ -34,6 +34,16 @@ function errorMessage(e: unknown): string {
   return String(e);
 }
 
+export interface StepExecutionEvent {
+  step: Step;
+  status: 'success' | 'failed' | 'paused';
+  tookMs: number;
+  tabId?: number;
+  nextLabel?: string;
+  control?: ExecResult['control'];
+  error?: string;
+}
+
 /**
  * Environment dependencies for StepRunner.
  * Injected by Scheduler to allow flexible configuration and testing.
@@ -59,6 +69,11 @@ export interface StepRunEnv {
    * In future, Scheduler will inject ActionsStepExecutor or HybridStepExecutor.
    */
   stepExecutor: StepExecutorInterface;
+  /**
+   * Optional hook invoked after each step reaches a terminal status.
+   * Useful for debug traces and screenshot capture in the scheduler.
+   */
+  onStepFinished?: (event: StepExecutionEvent) => Promise<void> | void;
 }
 
 export class StepRunner {
@@ -75,6 +90,19 @@ export class StepRunner {
     return { url: tab?.url || '', status: (tab?.status as string) || '' };
   }
 
+  private async emitStepFinished(event: StepExecutionEvent) {
+    if (!this.env.onStepFinished) return;
+    try {
+      await this.env.onStepFinished(event);
+    } catch (e: unknown) {
+      this.env.logger.push({
+        stepId: event.step.id,
+        status: 'warning',
+        message: `stepFinished hook error: ${errorMessage(e)}`,
+      });
+    }
+  }
+
   async run(
     ctx: ExecCtx,
     step: Step,
@@ -84,6 +112,8 @@ export class StepRunner {
     status: 'success' | 'failed' | 'paused';
     nextLabel?: string;
     control?: ExecResult['control'];
+    tookMs: number;
+    error?: string;
   }> {
     const t0 = Date.now();
     let stepNextLabel: string | undefined;
@@ -103,7 +133,16 @@ export class StepRunner {
         message: `plugin.beforeStep error: ${errorMessage(e)}`,
       });
     }
-    if (ctrlStart?.pause) return { status: 'paused' };
+    if (ctrlStart?.pause) {
+      const tookMs = Date.now() - t0;
+      await this.emitStepFinished({
+        step,
+        status: 'paused',
+        tookMs,
+        tabId: ctx.tabId,
+      });
+      return { status: 'paused', tookMs };
+    }
 
     this.env.logger.setTargetTabId(ctx.tabId);
     const beforeInfo = await this.getActiveTabInfo(ctx.tabId);
@@ -168,6 +207,7 @@ export class StepRunner {
           }
           if (!result?.alreadyLogged)
             this.env.logger.push({ stepId: step.id, status: 'success', tookMs: Date.now() - t0 });
+          let resultError: string | undefined;
           try {
             await this.env.pluginManager.afterStep({
               runId: this.env.runId,
@@ -177,10 +217,11 @@ export class StepRunner {
               result,
             });
           } catch (e: unknown) {
+            resultError = errorMessage(e);
             this.env.logger.push({
               stepId: step.id,
               status: 'warning',
-              message: `plugin.afterStep error: ${errorMessage(e)}`,
+              message: `plugin.afterStep error: ${resultError}`,
             });
           }
           await appendOverlayOk(step);
@@ -188,6 +229,15 @@ export class StepRunner {
           if (result?.control) controlOut = result.control;
           if (result?.deferAfterScript) this.env.afterScripts.enqueue(result.deferAfterScript);
           await this.env.afterScripts.flush(ctx, this.env.vars);
+          await this.emitStepFinished({
+            step,
+            status: 'success',
+            tookMs: Date.now() - t0,
+            tabId: ctx.tabId,
+            nextLabel: stepNextLabel,
+            control: controlOut,
+            error: resultError,
+          });
         },
         async (attempt, e) => {
           this.env.logger.push({
@@ -219,10 +269,11 @@ export class StepRunner {
         },
       );
     } catch (e: unknown) {
+      const message = errorMessage(e);
       this.env.logger.push({
         stepId: step.id,
         status: 'failed',
-        message: errorMessage(e),
+        message,
         tookMs: Date.now() - t0,
       });
       await this.env.logger.screenshotOnFailure();
@@ -235,7 +286,17 @@ export class StepRunner {
           step,
           error: e,
         });
-        if (hook?.pause) return { status: 'paused' };
+        if (hook?.pause) {
+          const tookMs = Date.now() - t0;
+          await this.emitStepFinished({
+            step,
+            status: 'paused',
+            tookMs,
+            tabId: ctx.tabId,
+            error: message,
+          });
+          return { status: 'paused', tookMs, error: message };
+        }
       } catch (pe: unknown) {
         this.env.logger.push({
           stepId: step.id,
@@ -243,8 +304,16 @@ export class StepRunner {
           message: `plugin.onError error: ${errorMessage(pe)}`,
         });
       }
-      return { status: 'failed' };
+      const tookMs = Date.now() - t0;
+      await this.emitStepFinished({
+        step,
+        status: 'failed',
+        tookMs,
+        tabId: ctx.tabId,
+        error: message,
+      });
+      return { status: 'failed', tookMs, error: message };
     }
-    return { status: 'success', nextLabel: stepNextLabel, control: controlOut };
+    return { status: 'success', nextLabel: stepNextLabel, control: controlOut, tookMs: Date.now() - t0 };
   }
 }

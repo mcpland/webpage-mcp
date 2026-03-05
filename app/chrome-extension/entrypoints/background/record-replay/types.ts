@@ -192,4 +192,20 @@ export interface RunResult {
   logs?: RunLogEntry[];
   screenshots?: { onFailure?: string | null };
   paused?: boolean; // when true, the run was intentionally paused (e.g., breakpoint)
+  debug?: {
+    steps: Array<{
+      stepId: string;
+      type: string;
+      status: 'success' | 'failed' | 'paused';
+      tookMs: number;
+      tabId?: number;
+      error?: string;
+      nextLabel?: string;
+      nextNodeId?: string;
+      screenshotBase64?: string;
+      screenshotSimilarity?: number | null;
+      screenshotMatched?: boolean;
+    }>;
+    screenshotBaselines?: Record<string, string>;
+  };
 }
