@@ -734,30 +734,6 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
   color: var(--ac-text-muted, #6e6e6e);
 }
 
-/* Coming Soon Badge */
-.coming-soon-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  padding: 1px 5px;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--ac-accent, #d97757);
-  background: var(--ac-accent-subtle, rgba(217, 119, 87, 0.12));
-  border-radius: 4px;
-  vertical-align: middle;
-}
-
-.entry-item-coming-soon {
-  opacity: 0.65;
-}
-
-.entry-item-coming-soon:hover {
-  opacity: 0.8;
-}
-
 /* =============================================
    Footer
    ============================================= */
@@ -806,40 +782,6 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
   color: var(--ac-text-subtle, #a8a29e);
   margin: 0;
   letter-spacing: 0.03em;
-}
-
-/* =============================================
-   Coming Soon Toast
-   ============================================= */
-.coming-soon-toast {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: var(--ac-text, #1a1a1a);
-  color: var(--ac-text-inverse, #ffffff);
-  font-size: 12px;
-  font-weight: 500;
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  z-index: 1000;
-  white-space: nowrap;
-  animation: toastSlideUp 0.25s ease;
-}
-
-@keyframes toastSlideUp {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
 }
 
 /* =============================================

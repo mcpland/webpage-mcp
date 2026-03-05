@@ -22,11 +22,6 @@ type ServerStatus = {
   lastUpdated: number;
 };
 
-type ComingSoonToast = {
-  show: boolean;
-  feature: string;
-};
-
 type RecordingStatus = "idle" | "recording" | "paused" | "stopping";
 
 type RecordingState = {
@@ -82,10 +77,6 @@ export default function PopupApp() {
   const [agentTheme, setAgentTheme] = useState<AgentThemeId>(() =>
     getThemeFromDocument(),
   );
-  const [comingSoonToast, setComingSoonToast] = useState<ComingSoonToast>({
-    show: false,
-    feature: "",
-  });
   const [recordingState, setRecordingState] = useState<RecordingState>(
     DEFAULT_RECORDING_STATE,
   );
@@ -119,7 +110,6 @@ export default function PopupApp() {
     string | null
   >(null);
 
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const authCopyTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -208,16 +198,6 @@ export default function PopupApp() {
     }
 
     return t("popupRecordedFlowDefaultName", "New recording");
-  }
-
-  function showComingSoon(feature: string) {
-    setComingSoonToast({ show: true, feature });
-    if (toastTimerRef.current) {
-      clearTimeout(toastTimerRef.current);
-    }
-    toastTimerRef.current = setTimeout(() => {
-      setComingSoonToast({ show: false, feature: "" });
-    }, 2000);
   }
 
   function getStatusClass(): string {
@@ -634,9 +614,6 @@ export default function PopupApp() {
       chrome.runtime.onMessage.removeListener(onRuntimeMessage);
       chrome.storage.onChanged.removeListener(onStorageChanged);
 
-      if (toastTimerRef.current) {
-        clearTimeout(toastTimerRef.current);
-      }
       if (copyTextTimerRef.current) {
         clearTimeout(copyTextTimerRef.current);
       }
@@ -1122,17 +1099,6 @@ export default function PopupApp() {
         </div>
       </div>
 
-      {comingSoonToast.show ? (
-        <div className="coming-soon-toast">
-          <span>🚧</span>
-          <span>
-            {`${comingSoonToast.feature} ${t(
-              "popupFeatureUnderDevelopmentSuffix",
-              "The feature is under development, please stay tuned",
-            )}`}
-          </span>
-        </div>
-      ) : null}
     </div>
   );
 }
