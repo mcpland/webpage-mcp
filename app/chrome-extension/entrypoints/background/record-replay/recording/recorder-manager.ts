@@ -159,6 +159,36 @@ class RecorderManagerImpl {
 
     // Initialize flow & session
     const flow: Flow = createInitialFlow(meta);
+    try {
+      const startedAt = new Date().toISOString();
+      const originUrl = typeof active.url === 'string' ? active.url : undefined;
+      const originTitle = typeof active.title === 'string' ? active.title : undefined;
+      const userAgent =
+        typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string'
+          ? navigator.userAgent
+          : undefined;
+      if (!flow.meta) {
+        flow.meta = { createdAt: startedAt, updatedAt: startedAt };
+      }
+      flow.meta.recording = {
+        ...(flow.meta.recording || {}),
+        startedAt,
+        originUrl,
+        originTitle,
+        originTabId: active.id,
+        browser: 'chrome',
+        userAgent,
+      };
+      if (!flow.meta.domain && originUrl) {
+        try {
+          flow.meta.domain = new URL(originUrl).hostname;
+        } catch {
+          // ignore invalid URL
+        }
+      }
+    } catch {
+      // ignore metadata enrichment errors
+    }
     await session.startSession(flow, active.id);
     broadcastRecordingStateChanged();
 
@@ -241,6 +271,20 @@ class RecorderManagerImpl {
       // Add barrier metadata to flow
       try {
         if (!flow.meta) flow.meta = { createdAt: stoppedAt, updatedAt: stoppedAt };
+        const startIso = flow.meta.recording?.startedAt || flow.meta.createdAt;
+        const startMs = startIso ? Date.parse(startIso) : NaN;
+        const durationMs = Number.isFinite(startMs) ? Math.max(0, Date.now() - startMs) : undefined;
+        const stepCount = Array.isArray(flow.nodes)
+          ? flow.nodes.length
+          : Array.isArray(flow.steps)
+            ? flow.steps.length
+            : 0;
+        flow.meta.recording = {
+          ...(flow.meta.recording || {}),
+          stoppedAt,
+          durationMs,
+          stepCount,
+        };
         const failed = results
           .filter((r) => !r.ok || r.skipped || r.subframes.some((sf) => !sf.ack))
           .map((r) => ({

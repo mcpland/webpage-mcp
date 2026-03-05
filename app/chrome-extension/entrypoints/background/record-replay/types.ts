@@ -112,6 +112,17 @@ export interface Flow {
     bindings?: Array<{ type: 'domain' | 'path' | 'url'; value: string }>;
     tool?: { category?: string; description?: string };
     exposedOutputs?: Array<{ nodeId: string; as: string }>;
+    recording?: {
+      originUrl?: string;
+      originTitle?: string;
+      originTabId?: number;
+      browser?: string;
+      userAgent?: string;
+      startedAt?: string;
+      stoppedAt?: string;
+      durationMs?: number;
+      stepCount?: number;
+    };
     /** Recording stop barrier status (used during recording stop) */
     stopBarrier?: {
       ok: boolean;

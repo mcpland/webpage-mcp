@@ -7,6 +7,8 @@ export interface RecordingStateSnapshot {
   status: RecordingStatus;
   sessionId: string | null;
   originTabId: number | null;
+  originUrl: string | null;
+  originTitle: string | null;
   startedAt: string | null;
   durationMs: number;
   stepCount: number;
@@ -28,17 +30,30 @@ export function buildRecordingStateSnapshot(
   const status = sessionManager.getStatus();
   const session = sessionManager.getSession();
   const flow = sessionManager.getFlow();
-  const startedAt = flow?.meta?.createdAt || null;
+  const recordingMeta = flow?.meta?.recording;
+  const startedAt = recordingMeta?.startedAt || flow?.meta?.createdAt || null;
   const startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
-  const durationMs = Number.isFinite(startedAtMs) ? Math.max(0, Date.now() - startedAtMs) : 0;
+  const recordedDurationMs =
+    typeof recordingMeta?.durationMs === 'number' && Number.isFinite(recordingMeta.durationMs)
+      ? recordingMeta.durationMs
+      : undefined;
+  const durationMs =
+    recordedDurationMs ??
+    (Number.isFinite(startedAtMs) ? Math.max(0, Date.now() - startedAtMs) : 0);
+  const recordedStepCount =
+    typeof recordingMeta?.stepCount === 'number' && Number.isFinite(recordingMeta.stepCount)
+      ? recordingMeta.stepCount
+      : undefined;
 
   return {
     status,
     sessionId: session.sessionId || null,
     originTabId: session.originTabId ?? null,
+    originUrl: recordingMeta?.originUrl || null,
+    originTitle: recordingMeta?.originTitle || null,
     startedAt,
     durationMs,
-    stepCount: countFlowSteps(flow),
+    stepCount: recordedStepCount ?? countFlowSteps(flow),
     activeTabCount: session.activeTabs.size,
     flowId: flow?.id ?? null,
     flowName: flow?.name ?? null,
