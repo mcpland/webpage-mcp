@@ -27,6 +27,20 @@ type ComingSoonToast = {
   feature: string;
 };
 
+type RecordingStatus = "idle" | "recording" | "paused" | "stopping";
+
+type RecordingState = {
+  status: RecordingStatus;
+  sessionId: string | null;
+  originTabId: number | null;
+  startedAt: string | null;
+  durationMs: number;
+  stepCount: number;
+  activeTabCount: number;
+  flowId: string | null;
+  flowName: string | null;
+};
+
 const THEME_STORAGE_KEY = "agentTheme";
 const DEFAULT_THEME: AgentThemeId = "warm-editorial";
 const VALID_THEMES: AgentThemeId[] = [
@@ -37,6 +51,18 @@ const VALID_THEMES: AgentThemeId[] = [
   "dark-console",
   "swiss-grid",
 ];
+
+const DEFAULT_RECORDING_STATE: RecordingState = {
+  status: "idle",
+  sessionId: null,
+  originTabId: null,
+  startedAt: null,
+  durationMs: 0,
+  stepCount: 0,
+  activeTabCount: 0,
+  flowId: null,
+  flowName: null,
+};
 
 function isValidTheme(theme: unknown): theme is AgentThemeId {
   return (
@@ -60,6 +86,12 @@ export default function PopupApp() {
     show: false,
     feature: "",
   });
+  const [recordingState, setRecordingState] = useState<RecordingState>(
+    DEFAULT_RECORDING_STATE,
+  );
+  const [recordingAction, setRecordingAction] = useState<"start" | "stop" | null>(
+    null,
+  );
 
   const [nativeConnectionStatus, setNativeConnectionStatus] =
     useState<NativeConnectionStatus>("unknown");
@@ -109,6 +141,45 @@ export default function PopupApp() {
   const registerCommand = useMemo(() => {
     return `npx -y webpage-mcp@latest register --browser chrome --force --extension-id ${extensionId}`;
   }, [extensionId]);
+
+  function normalizeRecordingState(payload: unknown): RecordingState {
+    if (!payload || typeof payload !== "object") {
+      return DEFAULT_RECORDING_STATE;
+    }
+
+    const data = payload as Partial<RecordingState>;
+    const status: RecordingStatus =
+      data.status === "recording" ||
+      data.status === "paused" ||
+      data.status === "stopping"
+        ? data.status
+        : "idle";
+
+    return {
+      ...DEFAULT_RECORDING_STATE,
+      ...data,
+      status,
+      sessionId: typeof data.sessionId === "string" ? data.sessionId : null,
+      originTabId:
+        typeof data.originTabId === "number" ? data.originTabId : null,
+      startedAt: typeof data.startedAt === "string" ? data.startedAt : null,
+      durationMs:
+        typeof data.durationMs === "number" && Number.isFinite(data.durationMs)
+          ? data.durationMs
+          : 0,
+      stepCount:
+        typeof data.stepCount === "number" && Number.isFinite(data.stepCount)
+          ? data.stepCount
+          : 0,
+      activeTabCount:
+        typeof data.activeTabCount === "number" &&
+        Number.isFinite(data.activeTabCount)
+          ? data.activeTabCount
+          : 0,
+      flowId: typeof data.flowId === "string" ? data.flowId : null,
+      flowName: typeof data.flowName === "string" ? data.flowName : null,
+    };
+  }
 
   function showComingSoon(feature: string) {
     setComingSoonToast({ show: true, feature });
@@ -381,12 +452,61 @@ export default function PopupApp() {
     }
   }
 
-  function startRecording() {
-    showComingSoon(t("popupRecordPlaybackFeature", "Record playback"));
+  async function refreshRecordingState() {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.RR_GET_RECORDING_STATUS,
+      });
+      if (!response?.success) {
+        return;
+      }
+      setRecordingState(normalizeRecordingState(response.state));
+    } catch (error) {
+      console.warn("Failed to get recording status:", error);
+    }
   }
 
-  function stopRecording() {
-    showComingSoon(t("popupRecordPlaybackFeature", "Record playback"));
+  async function startRecording() {
+    if (recordingAction || recordingState.status !== "idle") {
+      return;
+    }
+
+    setRecordingAction("start");
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.RR_START_RECORDING,
+      });
+      if (response?.success) {
+        setRecordingState(normalizeRecordingState(response.state));
+      }
+    } catch (error) {
+      console.warn("Failed to start recording:", error);
+    } finally {
+      setRecordingAction(null);
+    }
+  }
+
+  async function stopRecording() {
+    if (recordingAction || recordingState.status === "idle") {
+      return;
+    }
+
+    setRecordingAction("stop");
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING,
+      });
+      if (response?.success) {
+        setRecordingState(normalizeRecordingState(response.state));
+      }
+      if (response?.error) {
+        console.warn("Stop recording warning:", response.error);
+      }
+    } catch (error) {
+      console.warn("Failed to stop recording:", error);
+    } finally {
+      setRecordingAction(null);
+    }
   }
 
   useEffect(() => {
@@ -399,6 +519,13 @@ export default function PopupApp() {
         message.payload
       ) {
         setServerStatus(message.payload as ServerStatus);
+        return;
+      }
+      if (
+        message.type === BACKGROUND_MESSAGE_TYPES.RR_RECORDING_STATE_CHANGED &&
+        message.payload
+      ) {
+        setRecordingState(normalizeRecordingState(message.payload));
       }
     };
 
@@ -423,6 +550,7 @@ export default function PopupApp() {
     void (async () => {
       await checkNativeConnection();
       await checkServerStatus();
+      await refreshRecordingState();
     })();
 
     return () => {
@@ -451,6 +579,15 @@ export default function PopupApp() {
   }, [isConnectedAndRunning]);
 
   function getHeaderStatusClass(): string {
+    if (recordingState.status === "recording") {
+      return "status-recording";
+    }
+    if (recordingState.status === "paused") {
+      return "status-warning";
+    }
+    if (recordingState.status === "stopping") {
+      return "status-warning";
+    }
     if (nativeConnectionStatus === "connected") {
       return serverStatus.isRunning ? "status-running" : "status-warning";
     }
@@ -461,6 +598,15 @@ export default function PopupApp() {
   }
 
   function getHeaderStatusText(): string {
+    if (recordingState.status === "recording") {
+      return t("popupRecordingBadge", "Recording");
+    }
+    if (recordingState.status === "paused") {
+      return t("popupRecordingPaused", "Recording paused");
+    }
+    if (recordingState.status === "stopping") {
+      return t("popupRecordingStopping", "Stopping...");
+    }
     if (nativeConnectionStatus === "connected") {
       if (serverStatus.isRunning) {
         return t("popupStatusRunning", "Running");
@@ -472,6 +618,14 @@ export default function PopupApp() {
     }
     return t("popupStatusDetecting", "Detecting");
   }
+
+  const canStartRecording =
+    recordingState.status === "idle" && recordingAction === null;
+  const canStopRecording =
+    (recordingState.status === "recording" ||
+      recordingState.status === "paused" ||
+      recordingState.status === "stopping") &&
+    recordingAction === null;
 
   return (
     <div className="popup-container agent-theme" data-agent-theme={agentTheme}>
@@ -623,29 +777,36 @@ export default function PopupApp() {
             </div>
             <div className="quick-tools-grid">
               <button
-                className="quick-tool-item quick-tool-disabled has-tooltip"
+                className={`quick-tool-item has-tooltip${!canStartRecording ? " quick-tool-disabled" : ""}`}
                 type="button"
-                onClick={startRecording}
-                data-tooltip={t(
-                  "popupRecordingUnderDevelopment",
-                  "The recording function is under development",
-                )}
+                disabled={!canStartRecording}
+                onClick={() => void startRecording()}
+                data-tooltip={
+                  canStartRecording
+                    ? t("popupToolRecordHint", "Start recording browser actions")
+                    : t(
+                        "popupToolRecordDisabledHint",
+                        "Recording is already in progress",
+                      )
+                }
               >
                 <div className="quick-tool-icon icon-record">
-                  <RecordIcon recording={false} />
+                  <RecordIcon recording={recordingState.status === "recording"} />
                 </div>
                 <span className="quick-tool-label">
                   {t("popupToolRecord", "Record")}
                 </span>
               </button>
               <button
-                className="quick-tool-item quick-tool-disabled has-tooltip"
+                className={`quick-tool-item has-tooltip${!canStopRecording ? " quick-tool-disabled" : ""}`}
                 type="button"
-                onClick={stopRecording}
-                data-tooltip={t(
-                  "popupRecordingUnderDevelopment",
-                  "The recording function is under development",
-                )}
+                disabled={!canStopRecording}
+                onClick={() => void stopRecording()}
+                data-tooltip={
+                  canStopRecording
+                    ? t("popupToolStopHint", "Stop recording and save flow")
+                    : t("popupToolStopDisabledHint", "No active recording")
+                }
               >
                 <div className="quick-tool-icon icon-stop">
                   <StopIcon />

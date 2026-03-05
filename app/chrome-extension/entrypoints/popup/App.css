@@ -94,6 +94,17 @@
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
 }
 
+.header-status.status-recording {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+}
+
+.header-status.status-recording .status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18);
+  animation: rr-record-pulse 1.2s ease-in-out infinite;
+}
+
 .header-status.status-warning {
   background: rgba(234, 179, 8, 0.1);
   color: #a16207;
@@ -446,6 +457,10 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
   opacity: 0.55;
 }
 
+.quick-tool-item:disabled {
+  cursor: default;
+}
+
 .quick-tool-icon {
   width: 36px;
   height: 36px;
@@ -533,6 +548,18 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
 .has-tooltip:hover::before {
   opacity: 1;
   visibility: visible;
+}
+
+@keyframes rr-record-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.8);
+    opacity: 0.6;
+  }
 }
 
 /* =============================================
