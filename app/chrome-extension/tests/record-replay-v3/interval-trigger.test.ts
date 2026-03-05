@@ -219,7 +219,7 @@ describe('IntervalTriggerHandler', () => {
       await handler.install(createIntervalTriggerSpec());
 
       // Simulate alarm from different handler
-      simulateAlarmFire('rr_v3_cron_some-other-trigger');
+      simulateAlarmFire('rr_v3_once_some-other-trigger');
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 

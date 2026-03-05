@@ -77,7 +77,7 @@ let bootstrapPromise: Promise<V3Runtime> | null = null;
 
 // Route A scope: disable platform-style trigger/schedule automation surfaces.
 const ENABLE_V3_TRIGGERS_AND_SCHEDULES = false;
-const V3_TRIGGER_ALARM_PREFIXES = ['rr_v3_cron_', 'rr_v3_interval_', 'rr_v3_once_'] as const;
+const V3_TRIGGER_ALARM_PREFIXES = ['rr_v3_'] as const;
 
 // ==================== Utilities ====================
 

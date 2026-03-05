@@ -2465,30 +2465,6 @@
       }
     }
   },
-  "triggerPanelDescribeCron": {
-    "message": "スケジュール: $ARG1$",
-    "description": "Auto-generated localized message",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      }
-    }
-  },
-  "triggerPanelDescribeCronWithTz": {
-    "message": "スケジュール: $ARG1$ ($ARG2$)",
-    "description": "Auto-generated localized message",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      },
-      "arg2": {
-        "content": "$2$",
-        "example": "2"
-      }
-    }
-  },
   "triggerPanelDescribeDomSelector": {
     "message": "セレクター: $ARG1$",
     "description": "Auto-generated localized message",

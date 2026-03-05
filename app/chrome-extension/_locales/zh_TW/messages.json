@@ -2465,30 +2465,6 @@
       }
     }
   },
-  "triggerPanelDescribeCron": {
-    "message": "排程任務：$ARG1$",
-    "description": "自動生成的 i18n 文案",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      }
-    }
-  },
-  "triggerPanelDescribeCronWithTz": {
-    "message": "排程任務：$ARG1$ ($ARG2$)",
-    "description": "自動生成的 i18n 文案",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      },
-      "arg2": {
-        "content": "$2$",
-        "example": "2"
-      }
-    }
-  },
   "triggerPanelDescribeDomSelector": {
     "message": "選擇器：$ARG1$",
     "description": "自動生成的 i18n 文案",

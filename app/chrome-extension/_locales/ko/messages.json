@@ -2465,30 +2465,6 @@
       }
     }
   },
-  "triggerPanelDescribeCron": {
-    "message": "일정: $ARG1$",
-    "description": "Auto-generated localized message",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      }
-    }
-  },
-  "triggerPanelDescribeCronWithTz": {
-    "message": "일정: $ARG1$ ($ARG2$)",
-    "description": "Auto-generated localized message",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      },
-      "arg2": {
-        "content": "$2$",
-        "example": "2"
-      }
-    }
-  },
   "triggerPanelDescribeDomSelector": {
     "message": "선택기: $ARG1$",
     "description": "Auto-generated localized message",
