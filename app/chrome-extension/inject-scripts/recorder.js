@@ -375,6 +375,8 @@
         loadingSeen: false,
         loadingSelector: '',
         committed: false,
+        baselineResourceCount: 0,
+        networkProbeTimer: null,
       };
     }
 
@@ -763,23 +765,64 @@
     }
 
     _disconnectMutationObserver() {
-      if (!this._mutationObserver) return;
-      try {
-        this._mutationObserver.disconnect();
-      } catch {}
+      if (this._mutationObserver) {
+        try {
+          this._mutationObserver.disconnect();
+        } catch {}
+      }
       this._mutationObserver = null;
+      this._clearWaitProbeTimer();
       this._waitDetector.armedAt = 0;
       this._waitDetector.loadingSeen = false;
       this._waitDetector.loadingSelector = '';
       this._waitDetector.committed = false;
+      this._waitDetector.baselineResourceCount = 0;
+    }
+
+    _clearWaitProbeTimer() {
+      try {
+        if (this._waitDetector.networkProbeTimer) {
+          clearTimeout(this._waitDetector.networkProbeTimer);
+          this._waitDetector.networkProbeTimer = null;
+        }
+      } catch {}
+    }
+
+    _getResourceCount() {
+      try {
+        if (!window.performance || typeof window.performance.getEntriesByType !== 'function') {
+          return 0;
+        }
+        return window.performance.getEntriesByType('resource').length;
+      } catch {
+        return 0;
+      }
     }
 
     _armWaitDetector(step) {
       if (!step || (step.type !== 'click' && step.type !== 'dblclick')) return;
+      this._clearWaitProbeTimer();
       this._waitDetector.armedAt = Date.now();
       this._waitDetector.loadingSeen = false;
       this._waitDetector.loadingSelector = '';
       this._waitDetector.committed = false;
+      this._waitDetector.baselineResourceCount = this._getResourceCount();
+      this._waitDetector.networkProbeTimer = setTimeout(() => {
+        const detector = this._waitDetector;
+        detector.networkProbeTimer = null;
+        if (!this.isRecording || this.isPaused || detector.committed || !detector.armedAt) return;
+        if (detector.loadingSeen) return;
+        const hasNetworkActivity = this._getResourceCount() > detector.baselineResourceCount;
+        if (!hasNetworkActivity) return;
+        this._pushStep({
+          type: 'wait',
+          condition: { networkIdle: true },
+          timeoutMs: 15000,
+          screenshotOnFail: false,
+        });
+        detector.committed = true;
+        detector.armedAt = 0;
+      }, 900);
     }
 
     _isLoadingLikeElement(el) {
@@ -802,6 +845,7 @@
       const detector = this._waitDetector;
       if (!detector.armedAt || detector.committed) return;
       if (Date.now() - detector.armedAt > 4500) {
+        this._clearWaitProbeTimer();
         detector.armedAt = 0;
         return;
       }
@@ -849,6 +893,7 @@
                 timeoutMs: 15000,
                 screenshotOnFail: false,
               });
+              this._clearWaitProbeTimer();
               detector.committed = true;
               detector.armedAt = 0;
               return;
@@ -872,6 +917,7 @@
                   timeoutMs: 15000,
                   screenshotOnFail: false,
                 });
+                this._clearWaitProbeTimer();
                 detector.committed = true;
                 detector.armedAt = 0;
                 return;
@@ -923,10 +969,12 @@
       }
       this.frameSwitchPushed = false;
       this._pendingClickAt = 0;
+      this._clearWaitProbeTimer();
       this._waitDetector.armedAt = 0;
       this._waitDetector.loadingSeen = false;
       this._waitDetector.loadingSelector = '';
       this._waitDetector.committed = false;
+      this._waitDetector.baselineResourceCount = 0;
       try {
         this._lastRecordedFieldValue.clear();
       } catch {}
