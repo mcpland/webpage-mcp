@@ -43,6 +43,9 @@ export const TOOL_NAMES = {
   RECORD_REPLAY: {
     FLOW_RUN: 'record_replay_flow_run',
     LIST_PUBLISHED: 'record_replay_list_published',
+    RECORDING_START: 'recording_start',
+    RECORDING_STOP: 'recording_stop',
+    RECORDING_STATUS: 'recording_status',
   },
 };
 
@@ -50,6 +53,53 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
     description: 'Get all currently open browser windows and tabs',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.RECORDING_START,
+    description:
+      'Start recording user interactions on a browser tab. If tabId is omitted, uses the active tab.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description: 'Optional target tab ID to record on.',
+        },
+        name: {
+          type: 'string',
+          description: 'Optional flow name used for the newly recorded flow.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.RECORDING_STOP,
+    description:
+      'Stop the active recording session and persist the recorded flow. Optionally rename the flow.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Optional flow name to apply before saving.',
+        },
+        description: {
+          type: 'string',
+          description: 'Optional flow description to apply before saving.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.RECORDING_STATUS,
+    description: 'Get the current recording status and session snapshot.',
     inputSchema: {
       type: 'object',
       properties: {},
