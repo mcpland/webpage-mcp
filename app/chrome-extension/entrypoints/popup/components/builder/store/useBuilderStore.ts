@@ -15,6 +15,9 @@ import {
 import { defaultConfigOf, getIoConstraint } from '../model/ui-nodes';
 import { toast } from '../model/toast';
 
+// Route A scope: keep trigger/schedule automation out of connector authoring surface.
+const ENABLE_TRIGGER_NODE_CREATION = false;
+
 export function useBuilderStore(initial?: FlowV2 | null) {
   const flowLocal = reactive<FlowV2>({ id: '', name: '', version: 1, steps: [], variables: [] });
   const nodes = reactive<NodeBase[]>([]);
@@ -24,7 +27,6 @@ export function useBuilderStore(initial?: FlowV2 | null) {
   const pendingFrom = ref<string | null>(null);
   const pendingLabel = ref<string>('default');
   const paletteTypes = [
-    'trigger',
     'click',
     'drag',
     'scroll',
@@ -51,6 +53,9 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     'switchTab',
     'closeTab',
   ] as NodeBase['type'][];
+  if (ENABLE_TRIGGER_NODE_CREATION) {
+    paletteTypes.unshift('trigger');
+  }
 
   // --- history (undo/redo) ---
   type Snapshot = {
