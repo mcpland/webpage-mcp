@@ -10,6 +10,34 @@ export interface LocatedElement {
   frameId?: number;
 }
 
+function getCandidateScore(candidate: SelectorCandidate): number {
+  const fromWeight = Number.isFinite(candidate.weight as number) ? Number(candidate.weight) : NaN;
+  const stabilityRaw = (candidate as any)?.stability;
+  const fromStability = Number.isFinite(stabilityRaw) ? Number(stabilityRaw) : NaN;
+  if (Number.isFinite(fromWeight)) return fromWeight;
+  if (Number.isFinite(fromStability)) return fromStability;
+  return 0;
+}
+
+function getCandidateTypePriority(type: SelectorCandidate['type']): number {
+  if (type === 'attr') return 5;
+  if (type === 'css') return 4;
+  if (type === 'aria') return 3;
+  if (type === 'xpath') return 2;
+  if (type === 'text') return 1;
+  return 0;
+}
+
+function sortCandidates(candidates: SelectorCandidate[]): SelectorCandidate[] {
+  return [...candidates].sort((a, b) => {
+    const scoreDiff = getCandidateScore(b) - getCandidateScore(a);
+    if (scoreDiff !== 0) return scoreDiff;
+    const priorityDiff = getCandidateTypePriority(b.type) - getCandidateTypePriority(a.type);
+    if (priorityDiff !== 0) return priorityDiff;
+    return String(a.value || '').length - String(b.value || '').length;
+  });
+}
+
 // Helper: decide whether selector is a composite cross-frame selector
 function isCompositeSelector(sel: string): boolean {
   return typeof sel === 'string' && sel.includes('|>');
@@ -76,7 +104,8 @@ export async function locateElement(
   }
 
   // 1) Non-text candidates first for stability (css/attr/aria/xpath)
-  const nonText = (target.candidates || []).filter((c) => c.type !== 'text');
+  const rankedCandidates = sortCandidates(target.candidates || []);
+  const nonText = rankedCandidates.filter((c) => c.type !== 'text');
   for (const c of nonText) {
     try {
       if (c.type === 'css' || c.type === 'attr') {
@@ -142,7 +171,7 @@ export async function locateElement(
     }
   }
   // 2) Human-intent fallback: text-based search as last resort
-  const textCands = (target.candidates || []).filter((c) => c.type === 'text');
+  const textCands = rankedCandidates.filter((c) => c.type === 'text');
   const tagName = ((target as any)?.tag || '').toString();
   for (const c of textCands) {
     try {
