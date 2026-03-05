@@ -5,12 +5,23 @@ import type { RecordingSessionManager } from './session-manager';
 import type { Step } from '../types';
 
 export function initBrowserEventListeners(session: RecordingSessionManager): void {
+  const getStartMeta = () => {
+    const flow = session.getFlow();
+    const sess = session.getSession();
+    return {
+      ...(flow?.id ? { id: flow.id } : {}),
+      ...(flow?.name ? { name: flow.name } : {}),
+      ...(flow?.description ? { description: flow.description } : {}),
+      sessionId: sess.sessionId,
+    };
+  };
+
   chrome.tabs.onActivated.addListener(async (activeInfo) => {
     try {
       if (session.getStatus() !== 'recording') return;
       const tabId = activeInfo.tabId;
       await ensureRecorderInjected(tabId);
-      await broadcastControlToTab(tabId, REC_CMD.START);
+      await broadcastControlToTab(tabId, REC_CMD.START, getStartMeta());
       // Track active tab for targeted STOP later
       session.addActiveTab(tabId);
 
@@ -53,7 +64,7 @@ export function initBrowserEventListeners(session: RecordingSessionManager): voi
         }
       }
       await ensureRecorderInjected(tabId);
-      await broadcastControlToTab(tabId, REC_CMD.START);
+      await broadcastControlToTab(tabId, REC_CMD.START, getStartMeta());
       // Track active tab for targeted STOP later
       session.addActiveTab(tabId);
       if (session.getFlow()) {
