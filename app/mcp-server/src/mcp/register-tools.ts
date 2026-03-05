@@ -54,10 +54,6 @@ const SESSION_RUN_OPTION_KEYS = [
   'recordStepScreenshotBaselines',
   'screenshotBaselines',
   'screenshotDiffThreshold',
-  'dataset',
-  'datasetJson',
-  'datasetCsv',
-  'continueOnError',
 ] as const;
 const RUN_OPTION_KEY_SET = new Set<string>(SESSION_RUN_OPTION_KEYS);
 const publishedFlowsCache = new Map<string, { fetchedAt: number; items: PublishedFlow[] }>();
@@ -269,27 +265,6 @@ async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
         minimum: 0,
         maximum: 1,
         description: 'Similarity threshold for screenshot comparison (0-1).',
-      };
-    if (!properties['dataset'])
-      properties['dataset'] = {
-        anyOf: [{ type: 'object' }, { type: 'array', items: { type: 'object' } }],
-        description: 'Data rows for batch execution (object or array of objects).',
-      };
-    if (!properties['datasetJson'])
-      properties['datasetJson'] = {
-        type: 'string',
-        description: 'JSON payload for batch execution (object or array of objects).',
-      };
-    if (!properties['datasetCsv'])
-      properties['datasetCsv'] = {
-        type: 'string',
-        description: 'CSV payload for batch execution (header + rows).',
-      };
-    if (!properties['continueOnError'])
-      properties['continueOnError'] = {
-        type: 'boolean',
-        default: false,
-        description: 'When batch mode is used, continue remaining rows after a failed run.',
       };
     const tool: Tool = {
       name,
