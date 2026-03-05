@@ -221,7 +221,7 @@ const overrides = {
     runAtLabel: '執行時間',
     tableHeaderRunAt: '執行時間',
     triggerPanelCreate: '建立',
-    triggerPanelOtherTypesHint: '其他類型（url/cron/command/contextMenu/dom）請透過觸發節點設定。',
+    triggerPanelOtherTypesHint: '其他類型（url/command/contextMenu/dom）請透過觸發節點設定。',
     triggerPanelRunEnqueued: '已加入執行佇列',
     welcomeDiagnosticsDesc: '執行「doctor」以檢查安裝狀態。若回報錯誤，請執行自動修復命令。',
     welcomeCurrentExtensionId: '目前擴充功能 ID：',

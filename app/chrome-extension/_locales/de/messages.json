@@ -1184,7 +1184,7 @@
     "description": "Auto-generated localized message"
   },
   "builderScheduleConvertFailed": {
-    "message": "Knoten $ARG1$ Zeitplan #$ARG2$: Kann nicht in Cron konvertiert werden (Typ=$ARG3$), übersprungen.",
+    "message": "Knoten $ARG1$ Zeitplan #$ARG2$: Schedule-Trigger werden im Connector-Umfang nicht unterstützt (Typ=$ARG3$), übersprungen.",
     "description": "Auto-generated localized message",
     "placeholders": {
       "arg1": {
@@ -2466,7 +2466,7 @@
     }
   },
   "triggerPanelDescribeCron": {
-    "message": "Cron: $ARG1$",
+    "message": "Zeitplan: $ARG1$",
     "description": "Auto-generated localized message",
     "placeholders": {
       "arg1": {
@@ -2476,7 +2476,7 @@
     }
   },
   "triggerPanelDescribeCronWithTz": {
-    "message": "Cron: $ARG1$ ($ARG2$)",
+    "message": "Zeitplan: $ARG1$ ($ARG2$)",
     "description": "Auto-generated localized message",
     "placeholders": {
       "arg1": {
@@ -2580,7 +2580,7 @@
     "description": "Auto-generated localized message"
   },
   "triggerPanelOtherTypesHint": {
-    "message": "Andere Typen (url/cron/command/contextMenu/dom) werden über Triggerknoten konfiguriert.",
+    "message": "Andere Typen (url/command/contextMenu/dom) werden über Triggerknoten konfiguriert.",
     "description": "Auto-generated localized message"
   },
   "triggerPanelOwnerExternal": {

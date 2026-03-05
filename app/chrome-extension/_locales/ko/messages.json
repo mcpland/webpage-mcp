@@ -1184,7 +1184,7 @@
     "description": "Auto-generated localized message"
   },
   "builderScheduleConvertFailed": {
-    "message": "노드 $ARG1$ 일정 #$ARG2$: cron(유형=$ARG3$)으로 변환할 수 없습니다. 건너뛰었습니다.",
+    "message": "노드 $ARG1$ 일정 #$ARG2$: Connector 범위에서는 schedule 트리거(유형=$ARG3$)를 지원하지 않아 건너뛰었습니다.",
     "description": "Auto-generated localized message",
     "placeholders": {
       "arg1": {
@@ -2466,7 +2466,7 @@
     }
   },
   "triggerPanelDescribeCron": {
-    "message": "크론: $ARG1$",
+    "message": "일정: $ARG1$",
     "description": "Auto-generated localized message",
     "placeholders": {
       "arg1": {
@@ -2476,7 +2476,7 @@
     }
   },
   "triggerPanelDescribeCronWithTz": {
-    "message": "크론: $ARG1$ ($ARG2$)",
+    "message": "일정: $ARG1$ ($ARG2$)",
     "description": "Auto-generated localized message",
     "placeholders": {
       "arg1": {
@@ -2580,7 +2580,7 @@
     "description": "Auto-generated localized message"
   },
   "triggerPanelOtherTypesHint": {
-    "message": "다른 유형(url/cron/command/contextMenu/dom)은 트리거 노드를 통해 구성됩니다.",
+    "message": "다른 유형(url/command/contextMenu/dom)은 트리거 노드를 통해 구성됩니다.",
     "description": "Auto-generated localized message"
   },
   "triggerPanelOwnerExternal": {

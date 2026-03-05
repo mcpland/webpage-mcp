@@ -1184,7 +1184,7 @@
     "description": "Auto-generated localized message"
   },
   "builderScheduleConvertFailed": {
-    "message": "ノード $ARG1$ スケジュール #$ARG2$: cron (type=$ARG3$) に変換できません。スキップされました。",
+    "message": "ノード $ARG1$ スケジュール #$ARG2$: Connector 範囲では schedule トリガー (type=$ARG3$) は未対応のためスキップされました。",
     "description": "Auto-generated localized message",
     "placeholders": {
       "arg1": {
@@ -2466,7 +2466,7 @@
     }
   },
   "triggerPanelDescribeCron": {
-    "message": "クロン: $ARG1$",
+    "message": "スケジュール: $ARG1$",
     "description": "Auto-generated localized message",
     "placeholders": {
       "arg1": {
@@ -2476,7 +2476,7 @@
     }
   },
   "triggerPanelDescribeCronWithTz": {
-    "message": "クロン: $ARG1$ ($ARG2$)",
+    "message": "スケジュール: $ARG1$ ($ARG2$)",
     "description": "Auto-generated localized message",
     "placeholders": {
       "arg1": {
@@ -2580,7 +2580,7 @@
     "description": "Auto-generated localized message"
   },
   "triggerPanelOtherTypesHint": {
-    "message": "他のタイプ (url/cron/command/contextMenu/dom) は、トリガー ノードを介して設定されます。",
+    "message": "他のタイプ (url/command/contextMenu/dom) は、トリガー ノードを介して設定されます。",
     "description": "Auto-generated localized message"
   },
   "triggerPanelOwnerExternal": {

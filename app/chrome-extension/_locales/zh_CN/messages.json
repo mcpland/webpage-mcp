@@ -1184,7 +1184,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "builderScheduleConvertFailed": {
-    "message": "节点 $ARG1$ 计划 #$ARG2$：无法转换为 cron (type=$ARG3$)，已跳过。",
+    "message": "节点 $ARG1$ 计划 #$ARG2$：Connector 范围不支持计划触发器（type=$ARG3$），已跳过。",
     "description": "自动生成的 i18n 文案",
     "placeholders": {
       "arg1": {
@@ -2476,7 +2476,7 @@
     }
   },
   "triggerPanelDescribeCronWithTz": {
-    "message": "计划任务： $ARG1$ ($ARG2$)",
+    "message": "计划任务：$ARG1$ ($ARG2$)",
     "description": "自动生成的 i18n 文案",
     "placeholders": {
       "arg1": {
@@ -2580,7 +2580,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "triggerPanelOtherTypesHint": {
-    "message": "其他类型（url/cron/command/contextMenu/dom）通过触发节点进行配置。",
+    "message": "其他类型（url/command/contextMenu/dom）通过触发节点进行配置。",
     "description": "自动生成的 i18n 文案"
   },
   "triggerPanelOwnerExternal": {

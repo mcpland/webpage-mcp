@@ -1184,7 +1184,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "builderScheduleConvertFailed": {
-    "message": "節點 $ARG1$ 計畫 #$ARG2$：無法轉換為 cron (type=$ARG3$)，已跳過。",
+    "message": "節點 $ARG1$ 計畫 #$ARG2$：Connector 範圍不支援排程觸發器（type=$ARG3$），已跳過。",
     "description": "自動生成的 i18n 文案",
     "placeholders": {
       "arg1": {
@@ -2466,7 +2466,7 @@
     }
   },
   "triggerPanelDescribeCron": {
-    "message": "規劃任務：$ARG1$",
+    "message": "排程任務：$ARG1$",
     "description": "自動生成的 i18n 文案",
     "placeholders": {
       "arg1": {
@@ -2476,7 +2476,7 @@
     }
   },
   "triggerPanelDescribeCronWithTz": {
-    "message": "規劃任務： $ARG1$ ($ARG2$)",
+    "message": "排程任務：$ARG1$ ($ARG2$)",
     "description": "自動生成的 i18n 文案",
     "placeholders": {
       "arg1": {
@@ -2580,7 +2580,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "triggerPanelOtherTypesHint": {
-    "message": "其他類型（url/cron/command/contextMenu/dom）請透過觸發節點設定。",
+    "message": "其他類型（url/command/contextMenu/dom）請透過觸發節點設定。",
     "description": "自動生成的 i18n 文案"
   },
   "triggerPanelOwnerExternal": {
