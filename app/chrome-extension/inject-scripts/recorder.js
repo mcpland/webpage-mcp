@@ -17,8 +17,6 @@
   const RECORDER_EVENT_PROTOCOL_VERSION = 1;
   const SEND_RETRY_MAX = 2;
   const SEND_RETRY_BASE_MS = 80;
-  // Route A scope: assertion authoring is out of connector surface.
-  const ENABLE_ASSERT_CAPTURE = false;
 
   // ================================================================
   // 2) UI CLASS (injected via constructor)
@@ -58,7 +56,6 @@
           </label>
           <button id="__rr_toggle_timeline" style="background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.5); border-radius:6px; padding:2px 6px; cursor:pointer; font-size:12px;">Collapse</button>
           <button id="__rr_pause" style="background:#fff; color:#111; border:none; border-radius:6px; padding:4px 8px; cursor:pointer;">Pause</button>
-          <button id="__rr_assert" style="background:#fef3c7; color:#78350f; border:none; border-radius:6px; padding:4px 8px; cursor:pointer;">Assert</button>
           <button id="__rr_stop" style="background:#111; color:#fff; border:none; border-radius:6px; padding:4px 8px; cursor:pointer;">Stop</button>
         </div>`;
       document.documentElement.appendChild(root);
@@ -97,7 +94,6 @@
       this._timeline = list;
       this._timelineBox = timeline;
       const btnPause = root.querySelector('#__rr_pause');
-      const btnAssert = root.querySelector('#__rr_assert');
       const btnStop = root.querySelector('#__rr_stop');
       const hideChk = root.querySelector('#__rr_hide_values');
       const highlightChk = root.querySelector('#__rr_enable_highlight');
@@ -121,15 +117,6 @@
         if (!rec.isPaused) rec.pause();
         else rec.resume();
       });
-      if (btnAssert) {
-        if (ENABLE_ASSERT_CAPTURE) {
-          btnAssert.addEventListener('click', () => {
-            rec.toggleAssertMode();
-          });
-        } else {
-          btnAssert.style.display = 'none';
-        }
-      }
       btnStop.addEventListener('click', () => {
         chrome.runtime.sendMessage({ type: 'rr_stop_recording' });
       });
@@ -159,13 +146,8 @@
     updateStatus() {
       const badge = document.getElementById('__rr_badge');
       const pauseBtn = document.getElementById('__rr_pause');
-      const assertBtn = document.getElementById('__rr_assert');
       if (badge) badge.textContent = this.recorder.isPaused ? 'Paused': 'Recording';
       if (pauseBtn) pauseBtn.textContent = this.recorder.isPaused ? 'Continue' : 'Pause';
-      if (assertBtn && ENABLE_ASSERT_CAPTURE) {
-        assertBtn.textContent = this.recorder._assertMode ? 'Assert: ON' : 'Assert';
-        assertBtn.style.opacity = this.recorder._assertMode ? '1' : '0.9';
-      }
     }
 
     // Reset the timeline list content
@@ -331,7 +313,6 @@
       this.highlightEnabled = true;
       this.hoverRAF = 0;
       this.frameSwitchPushed = false;
-      this._assertMode = false;
       this.batch = [];
       this.batchTimer = null;
       this.scrollTimer = null;
@@ -434,7 +415,6 @@
       this.isRecording = false;
       // Stop should clear paused state so detach fully cleans up (and barrier works consistently)
       this.isPaused = false;
-      this._assertMode = false;
 
       // Step 1: Finalize pending click (dblclick detector)
       this._finalizePendingClick();
@@ -700,63 +680,6 @@
       this._attach();
       this.ui.ensure();
       this.ui.updateStatus();
-    }
-
-    toggleAssertMode() {
-      if (!ENABLE_ASSERT_CAPTURE) return;
-      if (!this.isRecording || this.isPaused) return;
-      this._assertMode = !this._assertMode;
-      this.ui.updateStatus();
-    }
-
-    _recordAssertStep(el) {
-      if (!(el instanceof Element)) return;
-      const target = SelectorEngine.buildTarget(el);
-      try {
-        const gref = SelectorEngine._ensureGlobalRef && SelectorEngine._ensureGlobalRef(el);
-        if (gref) target.ref = gref;
-      } catch {}
-      const selector = target && target.selector ? String(target.selector) : '';
-      if (!selector) return;
-
-      let assertStep = { type: 'assert', assert: { visible: selector }, screenshotOnFail: true };
-
-      try {
-        const raw = window.prompt(
-          'Assertion type: visible | text | class',
-          'visible',
-        );
-        const mode = String(raw || 'visible').trim().toLowerCase();
-        if (mode === 'text') {
-          const defaultText = String((el.textContent || '').trim()).slice(0, 80);
-          const expected = window.prompt('Expected text', defaultText);
-          if (!expected) return;
-          assertStep = {
-            type: 'assert',
-            assert: { textPresent: expected },
-            screenshotOnFail: true,
-          };
-        } else if (mode === 'class') {
-          const defaultClass = String(el.className || '').split(/\s+/).find(Boolean) || '';
-          const expectedClass = window.prompt('Class should contain', defaultClass);
-          if (!expectedClass) return;
-          assertStep = {
-            type: 'assert',
-            assert: {
-              attribute: {
-                selector,
-                name: 'class',
-                matches: expectedClass,
-              },
-            },
-            screenshotOnFail: true,
-          };
-        }
-      } catch {
-        // If prompt is blocked, fallback to visible assert.
-      }
-
-      this._pushStep(assertStep);
     }
 
     // DOM listeners
@@ -1052,7 +975,6 @@
       this._waitDetector.loadingSelector = '';
       this._waitDetector.committed = false;
       this._waitDetector.baselineResourceCount = 0;
-      this._assertMode = false;
       try {
         this._lastRecordedFieldValue.clear();
       } catch {}
@@ -1425,21 +1347,13 @@
       if (!el) return;
       try {
         if (el instanceof HTMLInputElement) {
-          const t = (el.getAttribute && el.getAttribute('type')) || '';
-          const tt = String(t).toLowerCase();
-          if (tt === 'checkbox' || tt === 'radio') return; // avoid duplicate with change
-        }
-        const overlay = document.getElementById('__rr_rec_overlay');
-        if (overlay && (el === overlay || (el.closest && el.closest('#__rr_rec_overlay')))) return;
-        if (ENABLE_ASSERT_CAPTURE && this._assertMode) {
-          e.preventDefault();
-          e.stopPropagation();
-          this._recordAssertStep(el);
-          this._assertMode = false;
-          this.ui.updateStatus();
-          return;
-        }
-        const a = el.closest && el.closest('a[href]');
+        const t = (el.getAttribute && el.getAttribute('type')) || '';
+        const tt = String(t).toLowerCase();
+        if (tt === 'checkbox' || tt === 'radio') return; // avoid duplicate with change
+      }
+      const overlay = document.getElementById('__rr_rec_overlay');
+      if (overlay && (el === overlay || (el.closest && el.closest('#__rr_rec_overlay')))) return;
+      const a = el.closest && el.closest('a[href]');
         const href = a && a.getAttribute && a.getAttribute('href');
         const tgt = a && a.getAttribute && a.getAttribute('target');
         if (a && href && tgt && tgt.toLowerCase() === '_blank') {
