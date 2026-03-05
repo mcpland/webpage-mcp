@@ -8,6 +8,89 @@
   transition: all var(--ac-motion-fast, 120ms) ease;
 }
 
+.workflow-record-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.workflow-recording-active {
+  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.35);
+}
+
+.workflow-record-stop:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.recording-panel {
+  margin-top: 10px;
+  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
+  border-radius: var(--ac-radius-button, 8px);
+  background: var(--ac-surface-muted, #f2f0eb);
+  padding: 10px;
+}
+
+.recording-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.recording-status-chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.12);
+  border-radius: 9999px;
+  padding: 2px 8px;
+}
+
+.recording-meta {
+  font-size: 11px;
+  color: var(--ac-text-muted, #6e6e6e);
+}
+
+.recording-timeline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.recording-timeline-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.recording-timeline-index {
+  width: 20px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--ac-text-subtle, #a8a29e);
+}
+
+.recording-timeline-text {
+  font-size: 12px;
+  color: var(--ac-text, #1a1a1a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recording-timeline-empty {
+  font-size: 12px;
+  color: var(--ac-text-muted, #6e6e6e);
+}
+
 .workflow-checkbox:checked {
   background-color: var(--ac-accent, #d97757);
   border-color: var(--ac-accent, #d97757);

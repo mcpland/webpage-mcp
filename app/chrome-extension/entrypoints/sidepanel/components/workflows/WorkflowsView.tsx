@@ -28,13 +28,34 @@ export interface TriggerLite {
   enabled?: boolean;
 }
 
+export interface RecordingStateLite {
+  status: 'idle' | 'recording' | 'paused' | 'stopping';
+  stepCount: number;
+  startedAt?: string | null;
+  flowName?: string | null;
+}
+
+export interface TimelineStepLite {
+  id?: string;
+  type?: string;
+  target?: { selector?: string };
+  value?: unknown;
+  url?: string;
+  keys?: string;
+}
+
 export type WorkflowsViewProps = {
   flows: FlowLite[];
   runs: RunLite[];
   triggers: TriggerLite[];
+  recordingState: RecordingStateLite;
+  timelineSteps: TimelineStepLite[];
+  recordingAction: 'start' | 'stop' | null;
   onlyBound: boolean;
   openRunId: string | null;
   onRefresh: () => void;
+  onStartRecording: () => void;
+  onStopRecording: () => void;
   onCreate: () => void;
   onRun: (id: string) => void;
   onEdit: (id: string) => void;
@@ -74,6 +95,18 @@ const refreshButtonStyle: CSSProperties = {
 const newButtonStyle: CSSProperties = {
   backgroundColor: 'var(--ac-accent)',
   color: 'var(--ac-accent-contrast)',
+  borderRadius: 'var(--ac-radius-button)',
+};
+
+const recordingStartButtonStyle: CSSProperties = {
+  backgroundColor: '#dc2626',
+  color: '#ffffff',
+  borderRadius: 'var(--ac-radius-button)',
+};
+
+const recordingStopButtonStyle: CSSProperties = {
+  backgroundColor: 'var(--ac-surface-muted)',
+  color: 'var(--ac-text)',
   borderRadius: 'var(--ac-radius-button)',
 };
 
@@ -119,9 +152,14 @@ export default function WorkflowsView({
   flows,
   runs,
   triggers,
+  recordingState,
+  timelineSteps,
+  recordingAction,
   onlyBound,
   openRunId,
   onRefresh,
+  onStartRecording,
+  onStopRecording,
   onCreate,
   onRun,
   onEdit,
@@ -154,6 +192,9 @@ export default function WorkflowsView({
       );
     });
   }, [flows, searchQuery]);
+  const isRecordingActive = recordingState.status !== 'idle';
+  const canStartRecording = !isRecordingActive && recordingAction === null;
+  const canStopRecording = isRecordingActive && recordingAction === null;
 
   function getFlowName(flowId: string): string {
     const flow = flows.find((item) => item.id === flowId);
@@ -194,6 +235,27 @@ export default function WorkflowsView({
   function formatTime(dateStr: string): string {
     const date = new Date(dateStr);
     return date.toLocaleString();
+  }
+
+  function formatTimelineStep(step: TimelineStepLite): string {
+    const type = String(step.type || '').trim();
+    const selector = step.target?.selector ? String(step.target.selector) : '';
+    if (type === 'click' || type === 'dblclick') {
+      return `${type}: ${selector || '(document)'}`;
+    }
+    if (type === 'fill') {
+      return `fill ${selector || ''}`;
+    }
+    if (type === 'navigate') {
+      return `navigate ${step.url || ''}`;
+    }
+    if (type === 'key') {
+      return `key ${String(step.keys || '')}`;
+    }
+    if (type === 'scroll') {
+      return 'scroll';
+    }
+    return type || 'step';
   }
 
   function toggleSection(section: string): void {
@@ -253,6 +315,35 @@ export default function WorkflowsView({
             </svg>
           </button>
 
+          <button
+            className={`flex-shrink-0 px-3 py-2 text-sm font-medium${isRecordingActive ? ' workflow-recording-active' : ''}`}
+            style={recordingStartButtonStyle}
+            onClick={onStartRecording}
+            type="button"
+            disabled={!canStartRecording}
+            title={t('workflowsStartRecordingTitle', 'Start recording')}
+          >
+            <span className="flex items-center gap-1">
+              <span className={`workflow-record-dot${isRecordingActive ? ' animate-pulse' : ''}`} />
+              {recordingAction === 'start'
+                ? t('workflowsRecordingStarting', 'Starting...')
+                : t('workflowsNewRecordingButton', 'New Recording')}
+            </span>
+          </button>
+
+          <button
+            className="flex-shrink-0 px-3 py-2 text-sm font-medium workflow-record-stop"
+            style={recordingStopButtonStyle}
+            onClick={onStopRecording}
+            type="button"
+            disabled={!canStopRecording}
+            title={t('workflowsStopRecordingTitle', 'Stop recording')}
+          >
+            {recordingAction === 'stop'
+              ? t('workflowsRecordingStopping', 'Stopping...')
+              : t('workflowsStopRecordingButton', 'Stop')}
+          </button>
+
           <button className="flex-shrink-0 px-3 py-2 text-sm font-medium" style={newButtonStyle} onClick={onCreate} type="button">
             <span className="flex items-center gap-1">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -262,6 +353,39 @@ export default function WorkflowsView({
             </span>
           </button>
         </div>
+
+        {isRecordingActive || timelineSteps.length > 0 ? (
+          <div className="recording-panel">
+            <div className="recording-panel-header">
+              <span className="recording-status-chip">
+                {recordingState.status === 'recording'
+                  ? t('workflowsRecordingStatusRecording', 'Recording')
+                  : recordingState.status === 'paused'
+                    ? t('workflowsRecordingStatusPaused', 'Paused')
+                    : recordingState.status === 'stopping'
+                      ? t('workflowsRecordingStatusStopping', 'Stopping')
+                      : t('workflowsRecordingStatusIdle', 'Idle')}
+              </span>
+              <span className="recording-meta">
+                {t('workflowsRecordingStepCount', '{0} steps', [String(recordingState.stepCount || timelineSteps.length)])}
+              </span>
+            </div>
+            {timelineSteps.length > 0 ? (
+              <ol className="recording-timeline-list">
+                {timelineSteps.slice(-8).map((step, index) => (
+                  <li key={step.id || `${step.type || 'step'}-${index}`} className="recording-timeline-item">
+                    <span className="recording-timeline-index">{timelineSteps.length - Math.min(8, timelineSteps.length) + index + 1}.</span>
+                    <span className="recording-timeline-text">{formatTimelineStep(step)}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <div className="recording-timeline-empty">
+                {t('workflowsRecordingWaiting', 'Waiting for interaction...')}
+              </div>
+            )}
+          </div>
+        ) : null}
 
         <div className="flex items-center justify-between mt-3">
           <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--ac-text-muted)' }}>

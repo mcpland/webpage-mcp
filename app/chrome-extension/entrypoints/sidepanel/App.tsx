@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { BACKGROUND_MESSAGE_TYPES, TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import type { ElementMarker, UpsertMarkerRequest } from '@/common/element-marker-types';
 import { getMessage } from '@/utils/i18n';
 import type { AgentThemeId } from './composables/useAgentTheme';
@@ -10,6 +10,29 @@ import { useWorkflowsV3React, type FlowLite } from './react/useWorkflowsV3React'
 import './App.css';
 
 type TabType = 'workflows' | 'element-markers';
+
+type RecordingStatus = 'idle' | 'recording' | 'paused' | 'stopping';
+
+type RecordingState = {
+  status: RecordingStatus;
+  sessionId: string | null;
+  originTabId: number | null;
+  startedAt: string | null;
+  durationMs: number;
+  stepCount: number;
+  activeTabCount: number;
+  flowId: string | null;
+  flowName: string | null;
+};
+
+type TimelineStep = {
+  id?: string;
+  type?: string;
+  target?: { selector?: string };
+  value?: unknown;
+  url?: string;
+  keys?: string;
+};
 
 type MarkerFormState = UpsertMarkerRequest & {
   selectorType: 'css' | 'xpath';
@@ -26,6 +49,18 @@ const VALID_THEMES: AgentThemeId[] = [
   'dark-console',
   'swiss-grid',
 ];
+
+const DEFAULT_RECORDING_STATE: RecordingState = {
+  status: 'idle',
+  sessionId: null,
+  originTabId: null,
+  startedAt: null,
+  durationMs: 0,
+  stepCount: 0,
+  activeTabCount: 0,
+  flowId: null,
+  flowName: null,
+};
 
 function isValidTheme(theme: unknown): theme is AgentThemeId {
   return typeof theme === 'string' && VALID_THEMES.includes(theme as AgentThemeId);
@@ -57,6 +92,9 @@ export default function SidepanelApp() {
   const [onlyBound, setOnlyBound] = useState(false);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState('');
+  const [recordingState, setRecordingState] = useState<RecordingState>(DEFAULT_RECORDING_STATE);
+  const [timelineSteps, setTimelineSteps] = useState<TimelineStep[]>([]);
+  const [recordingAction, setRecordingAction] = useState<'start' | 'stop' | null>(null);
 
   const [currentPageUrl, setCurrentPageUrl] = useState('');
   const [markers, setMarkers] = useState<ElementMarker[]>([]);
@@ -123,6 +161,42 @@ export default function SidepanelApp() {
     return flows.filter(isBoundToCurrentUrl);
   }, [flows, onlyBound, currentUrl]);
 
+  function normalizeRecordingState(payload: unknown): RecordingState {
+    if (!payload || typeof payload !== 'object') {
+      return DEFAULT_RECORDING_STATE;
+    }
+    const data = payload as Partial<RecordingState>;
+    const status: RecordingStatus =
+      data.status === 'recording' || data.status === 'paused' || data.status === 'stopping'
+        ? data.status
+        : 'idle';
+    return {
+      ...DEFAULT_RECORDING_STATE,
+      ...data,
+      status,
+      sessionId: typeof data.sessionId === 'string' ? data.sessionId : null,
+      originTabId: typeof data.originTabId === 'number' ? data.originTabId : null,
+      startedAt: typeof data.startedAt === 'string' ? data.startedAt : null,
+      durationMs:
+        typeof data.durationMs === 'number' && Number.isFinite(data.durationMs) ? data.durationMs : 0,
+      stepCount:
+        typeof data.stepCount === 'number' && Number.isFinite(data.stepCount) ? data.stepCount : 0,
+      activeTabCount:
+        typeof data.activeTabCount === 'number' && Number.isFinite(data.activeTabCount)
+          ? data.activeTabCount
+          : 0,
+      flowId: typeof data.flowId === 'string' ? data.flowId : null,
+      flowName: typeof data.flowName === 'string' ? data.flowName : null,
+    };
+  }
+
+  function normalizeTimelineSteps(raw: unknown): TimelineStep[] {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    return raw.filter((step) => step && typeof step === 'object') as TimelineStep[];
+  }
+
   function isBoundToCurrentUrl(flow: FlowLite): boolean {
     try {
       const bindings = flow?.meta?.bindings || [];
@@ -157,6 +231,58 @@ export default function SidepanelApp() {
 
   async function handleWorkflowRefresh(): Promise<void> {
     await workflows.refresh();
+  }
+
+  async function refreshRecordingState(): Promise<void> {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.RR_GET_RECORDING_STATUS,
+      });
+      if (!response?.success) return;
+      setRecordingState(normalizeRecordingState(response.state));
+    } catch (error) {
+      console.warn('Failed to load recording status:', error);
+    }
+  }
+
+  async function startRecording(): Promise<void> {
+    if (recordingAction || recordingState.status !== 'idle') return;
+    setRecordingAction('start');
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.RR_START_RECORDING,
+      });
+      if (response?.success) {
+        setRecordingState(normalizeRecordingState(response.state));
+      }
+    } catch (error) {
+      console.warn('Failed to start recording:', error);
+    } finally {
+      setRecordingAction(null);
+    }
+  }
+
+  async function stopRecording(): Promise<void> {
+    if (recordingAction || recordingState.status === 'idle') return;
+    setRecordingAction('stop');
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING,
+      });
+      if (response?.success) {
+        setRecordingState(normalizeRecordingState(response.state));
+      }
+      if (response?.flow) {
+        await workflows.refresh();
+      }
+      if (response?.error) {
+        console.warn('Recording stop warning:', response.error);
+      }
+    } catch (error) {
+      console.warn('Failed to stop recording:', error);
+    } finally {
+      setRecordingAction(null);
+    }
   }
 
   async function exportFlow(id: string): Promise<void> {
@@ -483,7 +609,23 @@ export default function SidepanelApp() {
       }
     };
 
+    const onRuntimeMessage = (message: {
+      type?: string;
+      payload?: unknown;
+      steps?: unknown;
+    }) => {
+      if (message.type === BACKGROUND_MESSAGE_TYPES.RR_RECORDING_STATE_CHANGED) {
+        setRecordingState(normalizeRecordingState(message.payload));
+        return;
+      }
+      if (message.type === TOOL_MESSAGE_TYPES.RR_TIMELINE_UPDATE) {
+        const steps = normalizeTimelineSteps(message.steps ?? (message.payload as any)?.steps);
+        setTimelineSteps(steps);
+      }
+    };
+
     chrome.storage.onChanged.addListener(onStorageChanged);
+    chrome.runtime.onMessage.addListener(onRuntimeMessage);
 
     void (async () => {
       try {
@@ -492,6 +634,7 @@ export default function SidepanelApp() {
       } catch {
         // ignore
       }
+      await refreshRecordingState();
 
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
@@ -505,6 +648,7 @@ export default function SidepanelApp() {
 
     return () => {
       chrome.storage.onChanged.removeListener(onStorageChanged);
+      chrome.runtime.onMessage.removeListener(onRuntimeMessage);
     };
   }, []);
 
@@ -512,9 +656,14 @@ export default function SidepanelApp() {
     flows: filteredFlows,
     runs,
     triggers,
+    recordingState,
+    timelineSteps,
+    recordingAction,
     onlyBound,
     openRunId,
     onRefresh: () => void handleWorkflowRefresh(),
+    onStartRecording: () => void startRecording(),
+    onStopRecording: () => void stopRecording(),
     onCreate: createFlow,
     onRun: (id: string) => void run(id),
     onEdit: (id: string) => edit(id),

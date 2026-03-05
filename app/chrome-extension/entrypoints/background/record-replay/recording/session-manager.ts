@@ -487,6 +487,17 @@ export class RecordingSessionManager {
           { frameId: 0 },
         );
       }
+
+      // Also broadcast to extension pages (popup/sidepanel) for recording UI sync.
+      void chrome.runtime
+        .sendMessage({
+          type: TOOL_MESSAGE_TYPES.RR_TIMELINE_UPDATE,
+          payload: { steps: fullSteps },
+          steps: fullSteps,
+        })
+        .catch(() => {
+          // Ignore no-listener errors when popup/sidepanel are closed.
+        });
     } catch {}
   }
 }
