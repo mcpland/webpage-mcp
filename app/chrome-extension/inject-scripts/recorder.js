@@ -286,7 +286,14 @@
         if (t === 'switchTab') return `Switch tabs: Contains ${step.urlContains || ''}`;
         if (t === 'switchFrame')
           return `Switch Frame: Contains ${step.frame && step.frame.urlContains ? step.frame.urlContains : ''}`;
-        if (t === 'waitFor') return `Wait: ${sel || step.until || ''}`;
+        if (t === 'waitFor' || t === 'wait') {
+          const condition = step.condition || {};
+          if (condition.selector) return `Wait: selector hidden ${condition.selector}`;
+          if (condition.text) return `Wait: text ${condition.text}`;
+          if (condition.navigation) return `Wait: navigation`;
+          if (condition.networkIdle) return `Wait: network idle`;
+          return `Wait: ${sel || step.until || ''}`;
+        }
         return `${t}`;
       } catch (_) {
         return 'steps';
@@ -344,6 +351,7 @@
       this._onKeyDown = this._onKeyDown.bind(this);
       this._onKeyUp = this._onKeyUp.bind(this);
       this._onWindowMessage = this._onWindowMessage.bind(this);
+      this._onMutations = this._onMutations.bind(this);
       // Page lifecycle handlers for best-effort flush on navigation/close
       this._onPageHide = this._onPageHide.bind(this);
       this._onVisibilityChange = this._onVisibilityChange.bind(this);
@@ -361,6 +369,13 @@
       this._lastRecordedFieldValue = new Map();
       // Timestamp for pending single-click denoising
       this._pendingClickAt = 0;
+      this._mutationObserver = null;
+      this._waitDetector = {
+        armedAt: 0,
+        loadingSeen: false,
+        loadingSelector: '',
+        committed: false,
+      };
     }
 
     // Lifecycle
@@ -686,6 +701,7 @@
       // Cross-frame: top window aggregates iframe-recorded steps
       if (window === window.top) window.addEventListener('message', this._onWindowMessage, true);
       this._updateHoverListener();
+      this._ensureMutationObserver();
     }
 
     _detach() {
@@ -706,6 +722,7 @@
       // Detach per-element input listener if any
       if (this._focusedEl) this._focusedEl.removeEventListener('input', this._onInput, true);
       this._focusedEl = null;
+      this._disconnectMutationObserver();
       // Best-effort cleanup for timers/raf when detaching
       if (this.batchTimer) clearTimeout(this.batchTimer);
       this.batchTimer = null;
@@ -727,6 +744,141 @@
       document.removeEventListener('mousemove', this._onMouseMove, { capture: true });
       if (this.isRecording && !this.isPaused && this.highlightEnabled) {
         document.addEventListener('mousemove', this._onMouseMove, { capture: true, passive: true });
+      }
+    }
+
+    _ensureMutationObserver() {
+      if (this._mutationObserver || typeof MutationObserver === 'undefined') return;
+      try {
+        this._mutationObserver = new MutationObserver(this._onMutations);
+        this._mutationObserver.observe(document.documentElement || document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['class', 'style', 'hidden', 'aria-busy'],
+        });
+      } catch {
+        this._mutationObserver = null;
+      }
+    }
+
+    _disconnectMutationObserver() {
+      if (!this._mutationObserver) return;
+      try {
+        this._mutationObserver.disconnect();
+      } catch {}
+      this._mutationObserver = null;
+      this._waitDetector.armedAt = 0;
+      this._waitDetector.loadingSeen = false;
+      this._waitDetector.loadingSelector = '';
+      this._waitDetector.committed = false;
+    }
+
+    _armWaitDetector(step) {
+      if (!step || (step.type !== 'click' && step.type !== 'dblclick')) return;
+      this._waitDetector.armedAt = Date.now();
+      this._waitDetector.loadingSeen = false;
+      this._waitDetector.loadingSelector = '';
+      this._waitDetector.committed = false;
+    }
+
+    _isLoadingLikeElement(el) {
+      if (!(el instanceof Element)) return false;
+      const attrBusy = (el.getAttribute && el.getAttribute('aria-busy')) || '';
+      if (String(attrBusy).toLowerCase() === 'true') return true;
+      const cls = `${el.className || ''} ${el.id || ''}`.toLowerCase();
+      if (!cls) return false;
+      return (
+        cls.includes('loading') ||
+        cls.includes('spinner') ||
+        cls.includes('skeleton') ||
+        cls.includes('progress') ||
+        cls.includes('pending')
+      );
+    }
+
+    _onMutations(records) {
+      if (!this.isRecording || this.isPaused) return;
+      const detector = this._waitDetector;
+      if (!detector.armedAt || detector.committed) return;
+      if (Date.now() - detector.armedAt > 4500) {
+        detector.armedAt = 0;
+        return;
+      }
+
+      for (const rec of records || []) {
+        if (!detector.loadingSeen && rec.type === 'childList') {
+          const added = Array.from(rec.addedNodes || []);
+          for (const node of added) {
+            if (!(node instanceof Element)) continue;
+            const candidate =
+              this._isLoadingLikeElement(node)
+                ? node
+                : node.querySelector &&
+                    node.querySelector(
+                      '[aria-busy="true"], .loading, .spinner, .skeleton, [class*="loading"], [class*="spinner"], [class*="skeleton"]',
+                    );
+            if (!candidate || !(candidate instanceof Element)) continue;
+            const target = SelectorEngine.buildTarget(candidate);
+            const selector = target && target.selector ? String(target.selector) : '';
+            if (!selector) continue;
+            detector.loadingSelector = selector;
+            detector.loadingSeen = true;
+            break;
+          }
+        }
+
+        if (detector.loadingSeen && detector.loadingSelector && !detector.committed) {
+          if (rec.type === 'childList') {
+            const removed = Array.from(rec.removedNodes || []);
+            const gone = removed.some((node) => {
+              if (!(node instanceof Element)) return false;
+              try {
+                if (node.matches(detector.loadingSelector)) return true;
+              } catch {}
+              try {
+                return !!(node.querySelector && node.querySelector(detector.loadingSelector));
+              } catch {
+                return false;
+              }
+            });
+            if (gone) {
+              this._pushStep({
+                type: 'wait',
+                condition: { selector: detector.loadingSelector, visible: false },
+                timeoutMs: 15000,
+                screenshotOnFail: false,
+              });
+              detector.committed = true;
+              detector.armedAt = 0;
+              return;
+            }
+          }
+
+          if (rec.type === 'attributes' && rec.target instanceof Element) {
+            let stillThere = false;
+            try {
+              stillThere = rec.target.matches(detector.loadingSelector);
+            } catch {}
+            if (stillThere) {
+              const hidden =
+                rec.target.hidden === true ||
+                rec.target.getAttribute('aria-busy') === 'false' ||
+                rec.target.getAttribute('aria-hidden') === 'true';
+              if (hidden) {
+                this._pushStep({
+                  type: 'wait',
+                  condition: { selector: detector.loadingSelector, visible: false },
+                  timeoutMs: 15000,
+                  screenshotOnFail: false,
+                });
+                detector.committed = true;
+                detector.armedAt = 0;
+                return;
+              }
+            }
+          }
+        }
       }
     }
 
@@ -771,6 +923,10 @@
       }
       this.frameSwitchPushed = false;
       this._pendingClickAt = 0;
+      this._waitDetector.armedAt = 0;
+      this._waitDetector.loadingSeen = false;
+      this._waitDetector.loadingSelector = '';
+      this._waitDetector.committed = false;
       try {
         this._lastRecordedFieldValue.clear();
       } catch {}
@@ -874,6 +1030,9 @@
       // Track input activity for fill steps (to enforce flush gate)
       if (step && step.type === 'fill') {
         this._updateInputActivity();
+      }
+      if (step && (step.type === 'click' || step.type === 'dblclick')) {
+        this._armWaitDetector(step);
       }
 
       this._scheduleFlush();
