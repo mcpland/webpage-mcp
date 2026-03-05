@@ -1005,17 +1005,7 @@ export class RpcServer {
       }
 
       case 'cron': {
-        if (!raw.cron || typeof raw.cron !== 'string') {
-          throw new Error('trigger.cron is required for cron triggers');
-        }
-        let timezone: string | undefined;
-        if (raw.timezone !== undefined && raw.timezone !== null) {
-          if (typeof raw.timezone !== 'string') {
-            throw new Error('trigger.timezone must be a string');
-          }
-          timezone = raw.timezone.trim() || undefined;
-        }
-        return { ...base, cron: raw.cron, timezone } as TriggerSpec;
+        throw new Error('Cron triggers are removed from Connector scope');
       }
 
       case 'interval': {
@@ -1092,7 +1082,7 @@ export class RpcServer {
 
       default:
         throw new Error(
-          `trigger.kind must be one of: manual, url, cron, interval, once, command, contextMenu, dom`,
+          `trigger.kind must be one of: manual, url, interval, once, command, contextMenu, dom`,
         );
     }
   }

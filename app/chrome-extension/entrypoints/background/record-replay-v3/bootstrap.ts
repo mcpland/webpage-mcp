@@ -28,7 +28,6 @@ import { createUrlTriggerHandlerFactory } from './engine/triggers/url-trigger';
 import { createCommandTriggerHandlerFactory } from './engine/triggers/command-trigger';
 import { createContextMenuTriggerHandlerFactory } from './engine/triggers/context-menu-trigger';
 import { createDomTriggerHandlerFactory } from './engine/triggers/dom-trigger';
-import { createCronTriggerHandlerFactory } from './engine/triggers/cron-trigger';
 import { createIntervalTriggerHandlerFactory } from './engine/triggers/interval-trigger';
 import { createOnceTriggerHandlerFactory } from './engine/triggers/once-trigger';
 import { createManualTriggerHandlerFactory } from './engine/triggers/manual-trigger';
@@ -375,7 +374,6 @@ export async function bootstrapV3(): Promise<V3Runtime> {
         command: createCommandTriggerHandlerFactory({ logger }),
         contextMenu: createContextMenuTriggerHandlerFactory({ logger }),
         dom: createDomTriggerHandlerFactory({ logger }),
-        cron: createCronTriggerHandlerFactory({ logger, now }),
         interval: createIntervalTriggerHandlerFactory({ logger }),
         once: createOnceTriggerHandlerFactory({ logger }),
         manual: createManualTriggerHandlerFactory({ logger }),
