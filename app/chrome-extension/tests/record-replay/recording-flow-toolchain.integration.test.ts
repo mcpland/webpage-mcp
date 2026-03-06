@@ -33,6 +33,10 @@ import {
   recordingStopTool,
 } from '@/entrypoints/background/tools/recording';
 
+function asMock(fn: unknown): ReturnType<typeof vi.fn> {
+  return fn as ReturnType<typeof vi.fn>;
+}
+
 function createFlow(
   id: string,
   nodes: Flow['nodes'],
@@ -71,9 +75,9 @@ describe('recording/editing/flow toolchain integration', () => {
       activeTabIds: [],
       stepCount: 0,
     });
-    vi.mocked(chrome.storage.local.get).mockResolvedValue({});
-    vi.mocked(chrome.storage.local.set).mockResolvedValue(undefined);
-    vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
+    asMock(chrome.storage.local.get).mockResolvedValue({});
+    asMock(chrome.storage.local.set).mockResolvedValue(undefined);
+    asMock(chrome.runtime.sendMessage).mockResolvedValue(undefined);
   });
 
   it('recordingStartTool forwards trimmed metadata and returns a state snapshot', async () => {

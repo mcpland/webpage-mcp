@@ -42,6 +42,10 @@ import { recordingStartTool, recordingStopTool } from '@/entrypoints/background/
 
 const TAB_ID = 41;
 
+function asMock(fn: unknown): ReturnType<typeof vi.fn> {
+  return fn as ReturnType<typeof vi.fn>;
+}
+
 interface MockTab extends Partial<chrome.tabs.Tab> {
   id: number;
   url: string;
@@ -112,7 +116,7 @@ describe('record to replay automation', () => {
       }
     });
 
-    vi.mocked(chrome.storage.local.get).mockImplementation(async (keys?: string | string[] | object | null) => {
+    asMock(chrome.storage.local.get).mockImplementation(async (keys?: string | string[] | object | null) => {
       if (Array.isArray(keys)) {
         const out: Record<string, unknown> = {};
         for (const key of keys) {
@@ -132,11 +136,11 @@ describe('record to replay automation', () => {
       }
       return { ...localStorageState };
     });
-    vi.mocked(chrome.storage.local.set).mockImplementation(async (items: object) => {
+    asMock(chrome.storage.local.set).mockImplementation(async (items: object) => {
       Object.assign(localStorageState, items);
     });
-    vi.mocked(chrome.runtime.sendMessage).mockResolvedValue(undefined);
-    vi.mocked(chrome.tabs.query).mockImplementation(async (queryInfo?: chrome.tabs.QueryInfo) => {
+    asMock(chrome.runtime.sendMessage).mockResolvedValue(undefined);
+    asMock(chrome.tabs.query).mockImplementation(async (queryInfo?: chrome.tabs.QueryInfo) => {
       if (queryInfo?.currentWindow === true) {
         if (queryInfo.active === true) {
           return [currentTab as chrome.tabs.Tab];
@@ -145,13 +149,13 @@ describe('record to replay automation', () => {
       }
       return [currentTab as chrome.tabs.Tab];
     });
-    vi.mocked(chrome.tabs.get).mockImplementation(async (tabId: number) => {
+    asMock(chrome.tabs.get).mockImplementation(async (tabId: number) => {
       if (tabId !== currentTab.id) {
         throw new Error(`Unknown tab: ${tabId}`);
       }
       return currentTab as chrome.tabs.Tab;
     });
-    vi.mocked(chrome.tabs.sendMessage).mockImplementation(
+    asMock(chrome.tabs.sendMessage).mockImplementation(
       async (_tabId: number, message: any): Promise<any> => {
         switch (message?.action) {
           case 'stop':
@@ -179,7 +183,7 @@ describe('record to replay automation', () => {
         }
       },
     );
-    vi.mocked(chrome.webNavigation.getAllFrames).mockResolvedValue([
+    asMock(chrome.webNavigation.getAllFrames).mockResolvedValue([
       { frameId: 0, url: currentTab.url, parentFrameId: -1 },
     ] as chrome.webNavigation.GetAllFrameResultDetails[]);
   });
