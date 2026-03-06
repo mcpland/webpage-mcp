@@ -684,7 +684,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionRunningBadge": {
-    "message": "跑步",
+    "message": "运行中",
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionSdkInfoLabel": {
@@ -1948,7 +1948,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "popupStatusRunning": {
-    "message": "跑步",
+    "message": "运行中",
     "description": "自动生成的 i18n 文案"
   },
   "popupToolEditor": {
@@ -2816,7 +2816,7 @@
     "description": "Workflow list refresh button tooltip"
   },
   "workflowsRunAction": {
-    "message": "跑步",
+    "message": "运行",
     "description": "自动生成的 i18n 文案"
   },
   "workflowsRunCanceled": {

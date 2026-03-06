@@ -1948,7 +1948,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "popupStatusRunning": {
-    "message": "跑步",
+    "message": "執行中",
     "description": "自動生成的 i18n 文案"
   },
   "popupToolEditor": {
