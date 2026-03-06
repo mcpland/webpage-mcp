@@ -380,7 +380,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "agentOpenProjectMenuVSCode": {
-    "message": "VS程式碼",
+    "message": "VS Code",
     "description": "自動生成的 i18n 文案"
   },
   "agentPreviewFooterLabel": {
@@ -388,7 +388,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "agentProjectMenuAutoOption": {
-    "message": "汽車",
+    "message": "自動",
     "description": "自動生成的 i18n 文案"
   },
   "agentProjectMenuCliLabel": {
@@ -412,7 +412,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "agentProjectMenuEnableMcpTitle": {
-    "message": "啟用本地 Webpage MCP Connector 集成",
+    "message": "啟用本機 Webpage MCP Connector 整合",
     "description": "自動生成的 i18n 文案"
   },
   "agentProjectMenuMcpLabel": {
@@ -1120,7 +1120,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "builderPageTitle": {
-    "message": "工作流程產生器 - 網頁 mcp 伺服器",
+    "message": "工作流程建構器 - Webpage MCP Connector",
     "description": "自動生成的 i18n 文案"
   },
   "builderPickButton": {
@@ -1162,7 +1162,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "builderRunFromSelectedTitle": {
-    "message": "從選取節點執行",
+    "message": "從所選節點執行",
     "description": "自動生成的 i18n 文案"
   },
   "builderSavedStatus": {
@@ -1710,7 +1710,7 @@
     "description": "功能表無障礙標籤"
   },
   "modeAuto": {
-    "message": "汽車",
+    "message": "自動",
     "description": "自動生成的 i18n 文案"
   },
   "modeCss": {
@@ -1872,7 +1872,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "popupFooterTagline": {
-    "message": "AI 網頁 mcp 伺服器",
+    "message": "AI 網頁 MCP 連接器",
     "description": "自動生成的 i18n 文案"
   },
   "popupGuideLink": {
@@ -1920,7 +1920,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "popupPageTitle": {
-    "message": "網頁 mcp 伺服器",
+    "message": "Webpage MCP Connector",
     "description": "自動生成的 i18n 文案"
   },
   "popupQuickToolsTitle": {
@@ -2012,7 +2012,7 @@
     "description": "重試按鈕文字"
   },
   "runAtAuto": {
-    "message": "汽車",
+    "message": "自動",
     "description": "自動生成的 i18n 文案"
   },
   "runAtDocumentEnd": {
@@ -2364,7 +2364,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "sidepanelPageTitle": {
-    "message": "網頁 mcp 伺服器",
+    "message": "Webpage MCP Connector",
     "description": "自動生成的 i18n 文案"
   },
   "sidepanelUpdateButton": {
@@ -2408,7 +2408,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "tableHeaderWorld": {
-    "message": "世界",
+    "message": "執行上下文",
     "description": "自動生成的 i18n 文案"
   },
   "tagsInputLabel": {
@@ -2666,7 +2666,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "welcomePageTitle": {
-    "message": "歡迎 - 網頁 mcp 伺服器",
+    "message": "歡迎 - Webpage MCP Connector",
     "description": "自動生成的 i18n 文案"
   },
   "welcomeRegisterHostDesc": {
@@ -2894,19 +2894,19 @@
     "description": "自動生成的 i18n 文案"
   },
   "worldAuto": {
-    "message": "汽車",
+    "message": "自動",
     "description": "自動生成的 i18n 文案"
   },
   "worldIsolated": {
-    "message": "孤立",
+    "message": "隔離 (ISOLATED)",
     "description": "自動生成的 i18n 文案"
   },
   "worldLabel": {
-    "message": "世界",
+    "message": "執行上下文",
     "description": "自動生成的 i18n 文案"
   },
   "worldMain": {
-    "message": "主要的",
+    "message": "頁面 (MAIN)",
     "description": "自動生成的 i18n 文案"
   },
   "popupDismissButton": {

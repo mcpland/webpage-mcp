@@ -388,7 +388,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "agentProjectMenuAutoOption": {
-    "message": "汽车",
+    "message": "自动",
     "description": "自动生成的 i18n 文案"
   },
   "agentProjectMenuCliLabel": {
@@ -1120,7 +1120,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "builderPageTitle": {
-    "message": "工作流程生成器 - 网页 mcp 服务器",
+    "message": "工作流程构建器 - Webpage MCP Connector",
     "description": "自动生成的 i18n 文案"
   },
   "builderPickButton": {
@@ -1920,7 +1920,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "popupPageTitle": {
-    "message": "网页 mcp 服务器",
+    "message": "Webpage MCP Connector",
     "description": "自动生成的 i18n 文案"
   },
   "popupQuickToolsTitle": {
@@ -2364,7 +2364,7 @@
     "description": "No matching markers message"
   },
   "sidepanelPageTitle": {
-    "message": "网页 mcp 服务器",
+    "message": "Webpage MCP Connector",
     "description": "自动生成的 i18n 文案"
   },
   "sidepanelUpdateButton": {
@@ -2666,7 +2666,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "welcomePageTitle": {
-    "message": "欢迎 - 网页 mcp 服务器",
+    "message": "欢迎 - Webpage MCP Connector",
     "description": "自动生成的 i18n 文案"
   },
   "welcomeRegisterHostDesc": {
