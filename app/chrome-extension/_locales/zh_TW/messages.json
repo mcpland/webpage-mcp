@@ -1840,7 +1840,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "popupCopyRegisterCommand": {
-    "message": "複製暫存器命令",
+    "message": "複製註冊命令",
     "description": "自動生成的 i18n 文案"
   },
   "popupCopyToken": {
@@ -1928,11 +1928,11 @@
     "description": "自動生成的 i18n 文案"
   },
   "popupRecordingUnderDevelopment": {
-    "message": "錄音功能正在開發中",
+    "message": "錄製功能正在開發中",
     "description": "自動生成的 i18n 文案"
   },
   "popupRecordPlaybackFeature": {
-    "message": "錄音回放",
+    "message": "錄製與回放",
     "description": "自動生成的 i18n 文案"
   },
   "popupStatusDetecting": {
@@ -1960,7 +1960,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "popupToolRecord": {
-    "message": "記錄",
+    "message": "錄製",
     "description": "自動生成的 i18n 文案"
   },
   "popupToolStop": {
@@ -1976,7 +1976,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "popupWorkflowManagementDesc": {
-    "message": "錄製和播放自動化工作流程",
+    "message": "錄製與回放自動化工作流程",
     "description": "自動生成的 i18n 文案"
   },
   "popupWorkflowManagementTitle": {
@@ -2036,7 +2036,7 @@
     "description": "伺服器執行狀態標籤"
   },
   "runOnceButton": {
-    "message": "運轉一次 (CDP)",
+    "message": "執行一次 (CDP)",
     "description": "自動生成的 i18n 文案"
   },
   "saveButton": {
@@ -2348,7 +2348,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "sidepanelNavigatorWorkflowsDesc": {
-    "message": "記錄和重播自動化工作流程",
+    "message": "錄製與回放自動化工作流程",
     "description": "自動生成的 i18n 文案"
   },
   "sidepanelNavigatorWorkflowsTitle": {
@@ -2714,7 +2714,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "workflowsAdvancedSection": {
-    "message": "先進的",
+    "message": "進階",
     "description": "自動生成的 i18n 文案"
   },
   "workflowsCountPlural": {
@@ -2758,7 +2758,7 @@
     "description": "自動生成的 i18n 文案"
   },
   "workflowsEmptyDesc": {
-    "message": "記錄您的第一個自動化工作流程",
+    "message": "錄製您的第一個自動化工作流程",
     "description": "自動生成的 i18n 文案"
   },
   "workflowsEmptySearchDesc": {
@@ -2792,7 +2792,7 @@
     }
   },
   "workflowsMoreActionsTitle": {
-    "message": "更多行動",
+    "message": "更多操作",
     "description": "自動生成的 i18n 文案"
   },
   "workflowsNoDescription": {

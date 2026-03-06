@@ -1144,7 +1144,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "builderRunAllTitle": {
-    "message": "从头开始播放校正",
+    "message": "从头开始执行",
     "description": "自动生成的 i18n 文案"
   },
   "builderRunFailed": {
@@ -1158,11 +1158,11 @@
     }
   },
   "builderRunFromSelectedButton": {
-    "message": "从选定的运行",
+    "message": "从所选节点执行",
     "description": "自动生成的 i18n 文案"
   },
   "builderRunFromSelectedTitle": {
-    "message": "从选定的节点播放",
+    "message": "从所选节点执行",
     "description": "自动生成的 i18n 文案"
   },
   "builderSavedStatus": {
@@ -1840,7 +1840,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "popupCopyRegisterCommand": {
-    "message": "复制寄存器命令",
+    "message": "复制注册命令",
     "description": "自动生成的 i18n 文案"
   },
   "popupCopyToken": {
@@ -1928,11 +1928,11 @@
     "description": "自动生成的 i18n 文案"
   },
   "popupRecordingUnderDevelopment": {
-    "message": "录音功能正在开发中",
+    "message": "录制功能正在开发中",
     "description": "自动生成的 i18n 文案"
   },
   "popupRecordPlaybackFeature": {
-    "message": "录音回放",
+    "message": "录制与回放",
     "description": "自动生成的 i18n 文案"
   },
   "popupStatusDetecting": {
@@ -1960,7 +1960,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "popupToolRecord": {
-    "message": "记录",
+    "message": "录制",
     "description": "自动生成的 i18n 文案"
   },
   "popupToolStop": {
@@ -1976,7 +1976,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "popupWorkflowManagementDesc": {
-    "message": "录制和播放自动化工作流程",
+    "message": "录制与回放自动化工作流程",
     "description": "自动生成的 i18n 文案"
   },
   "popupWorkflowManagementTitle": {
@@ -2348,7 +2348,7 @@
     "description": "Sidepanel navigator toggle button tooltip"
   },
   "sidepanelNavigatorWorkflowsDesc": {
-    "message": "录制并回放自动化工作流",
+    "message": "录制与回放自动化工作流",
     "description": "Navigator workflows tab description"
   },
   "sidepanelNavigatorWorkflowsTitle": {
@@ -2774,11 +2774,11 @@
     "description": "Workflow empty state title"
   },
   "workflowsExportAction": {
-    "message": "出口",
+    "message": "导出",
     "description": "自动生成的 i18n 文案"
   },
   "workflowsImportAction": {
-    "message": "进口",
+    "message": "导入",
     "description": "自动生成的 i18n 文案"
   },
   "workflowsMillisecondsValue": {
@@ -2792,7 +2792,7 @@
     }
   },
   "workflowsMoreActionsTitle": {
-    "message": "更多行动",
+    "message": "更多操作",
     "description": "自动生成的 i18n 文案"
   },
   "workflowsNoDescription": {
