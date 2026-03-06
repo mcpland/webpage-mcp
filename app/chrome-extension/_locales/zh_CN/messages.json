@@ -380,7 +380,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "agentOpenProjectMenuVSCode": {
-    "message": "VS代码",
+    "message": "VS Code",
     "description": "自动生成的 i18n 文案"
   },
   "agentPreviewFooterLabel": {
@@ -562,7 +562,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionActiveModelLabel": {
-    "message": "主动模型",
+    "message": "当前模型",
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionAppendCustomText": {
@@ -574,11 +574,11 @@
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionClaudeCodeLabel": {
-    "message": "克劳德·科德",
+    "message": "Claude Code",
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionCreating": {
-    "message": "创造...",
+    "message": "创建中...",
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionCustomPromptPlaceholder": {
@@ -608,11 +608,11 @@
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionEngineSessionLabel": {
-    "message": "引擎会议",
+    "message": "引擎会话",
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionInfoSection": {
-    "message": "会议信息",
+    "message": "会话信息",
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionMcpServersLabel": {
@@ -692,7 +692,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionsEmpty": {
-    "message": "还没有会议",
+    "message": "还没有会话",
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionSettingsLoading": {
@@ -724,7 +724,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionsTitle": {
-    "message": "会议",
+    "message": "会话",
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionsTryDifferentSearch": {
@@ -740,7 +740,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionThisSession": {
-    "message": "本次会议",
+    "message": "当前会话",
     "description": "自动生成的 i18n 文案"
   },
   "agentSessionToolsLabel": {
@@ -812,7 +812,7 @@
     "description": "自动生成的 i18n 文案"
   },
   "agentTopBarBackToSessionsTitle": {
-    "message": "返回会议",
+    "message": "返回会话列表",
     "description": "自动生成的 i18n 文案"
   },
   "agentTopBarBrandFallback": {
