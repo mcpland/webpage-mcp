@@ -13,6 +13,7 @@ import { NATIVE_HOST, STORAGE_KEYS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/c
 import { handleCallTool } from './tools';
 import { listPublished, getFlow } from './record-replay/flow-store';
 import { acquireKeepalive } from './keepalive-manager';
+import { updateConnectionBadge } from './action-badge';
 import {
   clearAllSessionContexts,
   clearSessionContextsForTab,
@@ -77,6 +78,13 @@ let currentServerStatuses: ServerStatusMap = {
 
 let managedInstances: McpServerInstanceConfig[] = [];
 let managedInstancesLoaded = false;
+
+function syncConnectionBadge(): void {
+  void updateConnectionBadge({
+    connected: nativePort !== null,
+    serverRunning: currentServerStatus.isRunning,
+  });
+}
 
 function makeRequestId(): string {
   try {
@@ -209,6 +217,7 @@ async function loadServerStatuses(): Promise<void> {
       isRunning: false,
       lastUpdated: Date.now(),
     };
+    syncConnectionBadge();
   } catch (error) {
     console.error(ERROR_MESSAGES.SERVER_STATUS_LOAD_FAILED, error);
     currentServerStatuses = {
@@ -218,11 +227,13 @@ async function loadServerStatuses(): Promise<void> {
       },
     };
     currentServerStatus = currentServerStatuses[DEFAULT_MCP_INSTANCE_ID];
+    syncConnectionBadge();
   }
 }
 
 function broadcastServerStatusChange(instanceId: string): void {
   const normalizedId = normalizeInstanceId(instanceId);
+  syncConnectionBadge();
   chrome.runtime
     .sendMessage({
       type: BACKGROUND_MESSAGE_TYPES.SERVER_STATUS_CHANGED,
@@ -905,6 +916,7 @@ export function connectNativeHost(): boolean {
   try {
     lastNativeDisconnectError = null;
     nativePort = chrome.runtime.connectNative(HOST_NAME);
+    syncConnectionBadge();
 
     nativePort.onMessage.addListener(async (message) => {
       if (message?.responseToRequestId) {
@@ -1043,6 +1055,7 @@ export function connectNativeHost(): boolean {
       lastNativeDisconnectError = disconnectMessage;
       console.warn(ERROR_MESSAGES.NATIVE_DISCONNECTED, chrome.runtime.lastError);
       nativePort = null;
+      syncConnectionBadge();
       clearAllSessionContexts();
       rejectAllPendingNativeRequests('Native host disconnected');
 
@@ -1064,6 +1077,7 @@ export function connectNativeHost(): boolean {
     lastNativeDisconnectError =
       error instanceof Error ? error.message : ERROR_MESSAGES.NATIVE_CONNECTION_FAILED;
     nativePort = null;
+    syncConnectionBadge();
     return false;
   }
 }
