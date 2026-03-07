@@ -216,8 +216,8 @@
 
 .status-section {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 12px;
 }
 
 .status-header {
@@ -237,6 +237,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .status-dot {
@@ -269,8 +270,12 @@
 }
 
 .status-timestamp {
+  margin-left: auto;
+  flex-shrink: 0;
   font-size: 11px;
   color: var(--ac-text-subtle, #a8a29e);
+  text-align: right;
+  white-space: nowrap;
 }
 
 /* =============================================

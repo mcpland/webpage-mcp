@@ -629,18 +629,25 @@ async function syncManagedInstancesOnNative(
   }
 }
 
-async function refreshStatusesFromNative(): Promise<void> {
-  if (!nativePort) {
-    return;
-  }
+async function refreshStatusesFromNative(options?: { bestEffort?: boolean }): Promise<void> {
+  const bestEffort = options?.bestEffort === true;
+
   try {
+    if (!nativePort) {
+      throw new Error('Native host not connected');
+    }
+
     const response = (await requestNativeHost(
       NativeMessageType.LIST_INSTANCES,
       {},
       8000,
     )) as NativeInstanceListPayload;
-    if (response?.status !== 'success' || !Array.isArray(response.instances)) {
-      return;
+
+    if (response?.status !== 'success') {
+      throw new Error('Failed to list native instances');
+    }
+    if (!Array.isArray(response.instances)) {
+      throw new Error('Native host returned an invalid instance list');
     }
 
     applyInstanceStatusList(response.instances);
@@ -649,6 +656,10 @@ async function refreshStatusesFromNative(): Promise<void> {
     broadcastServerInstancesChanged();
   } catch (error) {
     console.debug(`${LOG_PREFIX} Failed to refresh native instance statuses`, error);
+    if (bestEffort) {
+      return;
+    }
+    throw error instanceof Error ? error : new Error(String(error));
   }
 }
 
@@ -664,7 +675,7 @@ async function ensureManagedInstancesRunning(): Promise<void> {
     for (const instance of targets) {
       await startManagedInstanceOnNative(instance);
     }
-    await refreshStatusesFromNative();
+    await refreshStatusesFromNative({ bestEffort: true });
   }
 }
 
@@ -1235,13 +1246,13 @@ export const initNativeHostListener = () => {
           if (nativePort) {
             const synced = await syncManagedInstancesOnNative(managedInstances);
             if (!synced) {
-              await refreshStatusesFromNative();
+              await refreshStatusesFromNative({ bestEffort: true });
               throw new Error('Failed to synchronize managed instances with native host');
             }
             if (instance.enabled && message?.startNow === true) {
               const started = await startManagedInstanceOnNative(instance);
               if (!started) {
-                await refreshStatusesFromNative();
+                await refreshStatusesFromNative({ bestEffort: true });
                 throw new Error(`Failed to start instance: ${instance.instanceId}`);
               }
               await refreshStatusesFromNative();
@@ -1266,7 +1277,8 @@ export const initNativeHostListener = () => {
         if (nativePort) {
           const synced = await syncManagedInstancesOnNative(managedInstances);
           if (!synced) {
-            await refreshStatusesFromNative();
+            await refreshStatusesFromNative({ bestEffort: true });
+            throw new Error('Failed to synchronize managed instances with native host');
           }
         }
       })()
