@@ -5,6 +5,7 @@
   "author": "unadlib",
   "type": "module",
   "scripts": {
+    "version:app": "node ./scripts/set-app-version.mjs",
     "build:shared": "pnpm --filter webpage-mcp-shared build",
     "build:mcp": "pnpm --filter webpage-mcp build",
     "build:extension": "pnpm --filter webpage-mcp-connector build",
