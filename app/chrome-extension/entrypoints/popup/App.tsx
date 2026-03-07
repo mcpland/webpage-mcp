@@ -80,9 +80,9 @@ export default function PopupApp() {
   const [recordingState, setRecordingState] = useState<RecordingState>(
     DEFAULT_RECORDING_STATE,
   );
-  const [recordingAction, setRecordingAction] = useState<"start" | "stop" | null>(
-    null,
-  );
+  const [recordingAction, setRecordingAction] = useState<
+    "start" | "stop" | null
+  >(null);
   const [recordedFlowDraft, setRecordedFlowDraft] = useState<any | null>(null);
   const [recordedFlowName, setRecordedFlowName] = useState("");
   const [recordedFlowDescription, setRecordedFlowDescription] = useState("");
@@ -90,7 +90,7 @@ export default function PopupApp() {
 
   const [nativeConnectionStatus, setNativeConnectionStatus] =
     useState<NativeConnectionStatus>("unknown");
-  const [isConnecting, setIsConnecting] = useState(false);
+  const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
   const [serverStatus, setServerStatus] = useState<ServerStatus>({
     isRunning: false,
     lastUpdated: Date.now(),
@@ -176,8 +176,7 @@ export default function PopupApp() {
   }
 
   function suggestRecordedFlowName(flow: any): string {
-    const flowName =
-      typeof flow?.name === "string" ? flow.name.trim() : "";
+    const flowName = typeof flow?.name === "string" ? flow.name.trim() : "";
     if (flowName && flowName !== "new_workflow") {
       return flowName;
     }
@@ -257,12 +256,18 @@ export default function PopupApp() {
     }
   }
 
-  async function refreshServerStatus() {
+  async function reconnectAndRefreshServerStatus() {
+    if (isRefreshingStatus) {
+      return;
+    }
+
+    setIsRefreshingStatus(true);
+    setNativeConnectionError(null);
     try {
       const response = await chrome.runtime.sendMessage({
         type: BACKGROUND_MESSAGE_TYPES.REFRESH_SERVER_STATUS,
       });
-      if (response?.success && response.serverStatus) {
+      if (response?.serverStatus) {
         setServerStatus(response.serverStatus as ServerStatus);
       }
       if (response?.connected !== undefined) {
@@ -270,18 +275,34 @@ export default function PopupApp() {
           response.connected ? "connected" : "disconnected",
         );
       }
+      if (response?.success) {
+        setNativeConnectionError(null);
+        return;
+      }
+
+      const reason =
+        typeof response?.error === "string"
+          ? response.error
+          : "Failed to reconnect and sync status";
+      setNativeConnectionError(reason);
     } catch (error) {
-      console.error("Failed to refresh server status:", error);
+      console.error("Failed to reconnect and sync status:", error);
+      setNativeConnectionStatus("disconnected");
+      setNativeConnectionError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setIsRefreshingStatus(false);
     }
   }
 
   async function copyMcpConfig() {
     try {
       await navigator.clipboard.writeText(mcpConfigJson);
-      setCopyButtonText(`✅${getMessage("configCopiedNotification")}`);
+      setCopyButtonText(`✅ ${getMessage("configCopiedNotification")}`);
     } catch (error) {
       console.error("Failed to copy configuration:", error);
-      setCopyButtonText(`❌${getMessage("networkErrorMessage")}`);
+      setCopyButtonText(`❌ ${getMessage("networkErrorMessage")}`);
     }
 
     if (copyTextTimerRef.current) {
@@ -346,48 +367,6 @@ export default function PopupApp() {
     authCopyTextTimerRef.current = setTimeout(() => {
       setAuthCopyButtonText(t("popupCopyToken", "Copy token"));
     }, 2000);
-  }
-
-  async function testNativeConnection() {
-    if (isConnecting) {
-      return;
-    }
-
-    setIsConnecting(true);
-    try {
-      if (nativeConnectionStatus === "connected") {
-        await chrome.runtime.sendMessage({ type: "disconnect_native" });
-        setNativeConnectionStatus("disconnected");
-        setNativeConnectionError(null);
-      } else {
-        const response = await chrome.runtime.sendMessage({
-          type: "connectNative",
-        });
-
-        const connected =
-          typeof response?.connected === "boolean"
-            ? response.connected
-            : Boolean(response?.success);
-        if (connected) {
-          setNativeConnectionStatus("connected");
-          setNativeConnectionError(null);
-        } else {
-          setNativeConnectionStatus("disconnected");
-          const reason =
-            typeof response?.error === "string" ? response.error : "";
-          setNativeConnectionError(reason || "Native host connection failed");
-          console.error("Connection failed:", response?.error || response);
-        }
-      }
-    } catch (error) {
-      console.error("Test connection failed:", error);
-      setNativeConnectionStatus("disconnected");
-      setNativeConnectionError(
-        error instanceof Error ? error.message : String(error),
-      );
-    } finally {
-      setIsConnecting(false);
-    }
   }
 
   async function openSidepanelAndClose(tab: "workflows" | "element-markers") {
@@ -534,7 +513,8 @@ export default function PopupApp() {
       return;
     }
 
-    const nextName = recordedFlowName.trim() || suggestRecordedFlowName(recordedFlowDraft);
+    const nextName =
+      recordedFlowName.trim() || suggestRecordedFlowName(recordedFlowDraft);
     const nextDescription = recordedFlowDescription.trim();
     const updatedFlow = {
       ...recordedFlowDraft,
@@ -706,12 +686,21 @@ export default function PopupApp() {
           {/* Server Config Section */}
           <div className="section">
             <div className="section-header">
-              <h2 className="section-title">{getMessage("nativeServerConfigLabel")}</h2>
+              <h2 className="section-title">
+                {getMessage("nativeServerConfigLabel")}
+              </h2>
               <button
-                className="refresh-status-button"
+                className={`refresh-status-button${
+                  isRefreshingStatus ? " is-refreshing" : ""
+                }`}
                 type="button"
-                onClick={() => void refreshServerStatus()}
-                title={getMessage("refreshStatusButton")}
+                disabled={isRefreshingStatus}
+                onClick={() => void reconnectAndRefreshServerStatus()}
+                title={t("refreshStatusButton", "Reconnect and sync status")}
+                aria-label={t(
+                  "refreshStatusButton",
+                  "Reconnect and sync status",
+                )}
               >
                 <RefreshIcon className="icon-small" />
               </button>
@@ -732,7 +721,9 @@ export default function PopupApp() {
 
               <div className="mcp-config-section">
                 <div className="mcp-config-header">
-                  <p className="mcp-config-label">{getMessage("mcpServerConfigLabel")}</p>
+                  <p className="mcp-config-label">
+                    {getMessage("mcpServerConfigLabel")}
+                  </p>
                   <button
                     className="copy-config-button"
                     type="button"
@@ -749,7 +740,9 @@ export default function PopupApp() {
               {isConnectedAndRunning && authTokenEnabled && nativeAuthToken ? (
                 <div className="mcp-config-section">
                   <div className="mcp-config-header">
-                    <p className="mcp-config-label">{t("popupAuthTokenLabel", "Auth token")}</p>
+                    <p className="mcp-config-label">
+                      {t("popupAuthTokenLabel", "Auth token")}
+                    </p>
                     <button
                       className="copy-config-button"
                       type="button"
@@ -799,35 +792,22 @@ export default function PopupApp() {
                     </div>
                     {nativeConnectionError ? (
                       <p className="register-command-error">
-                        {t("popupConnectFailedPrefix", "Connect failed")}: {nativeConnectionError}
+                        {t("popupConnectFailedPrefix", "Connect failed")}:{" "}
+                        {nativeConnectionError}
                       </p>
                     ) : null}
                   </div>
                 </details>
               ) : null}
-
-              <button
-                className="connect-button"
-                type="button"
-                disabled={isConnecting}
-                onClick={() => void testNativeConnection()}
-              >
-                <BoltIcon />
-                <span>
-                  {isConnecting
-                    ? getMessage("connectingStatus")
-                    : nativeConnectionStatus === "connected"
-                      ? getMessage("disconnectButton")
-                      : getMessage("connectButton")}
-                </span>
-              </button>
             </div>
           </div>
 
           {/* Quick Tools - labeled icon grid */}
           <div className="section">
             <div className="section-header">
-              <h2 className="section-title">{t("popupQuickToolsTitle", "Quick tools")}</h2>
+              <h2 className="section-title">
+                {t("popupQuickToolsTitle", "Quick tools")}
+              </h2>
             </div>
             <div className="quick-tools-grid">
               <button
@@ -837,7 +817,10 @@ export default function PopupApp() {
                 onClick={() => void startRecording()}
                 data-tooltip={
                   canStartRecording
-                    ? t("popupToolRecordHint", "Start recording browser actions")
+                    ? t(
+                        "popupToolRecordHint",
+                        "Start recording browser actions",
+                      )
                     : t(
                         "popupToolRecordDisabledHint",
                         "Recording is already in progress",
@@ -845,7 +828,9 @@ export default function PopupApp() {
                 }
               >
                 <div className="quick-tool-icon icon-record">
-                  <RecordIcon recording={recordingState.status === "recording"} />
+                  <RecordIcon
+                    recording={recordingState.status === "recording"}
+                  />
                 </div>
                 <span className="quick-tool-label">
                   {t("popupToolRecord", "Record")}
@@ -920,8 +905,13 @@ export default function PopupApp() {
                   <input
                     className="recorded-flow-input"
                     value={recordedFlowName}
-                    onChange={(event) => setRecordedFlowName(event.currentTarget.value)}
-                    placeholder={t("popupFlowNamePlaceholder", "Enter a flow name")}
+                    onChange={(event) =>
+                      setRecordedFlowName(event.currentTarget.value)
+                    }
+                    placeholder={t(
+                      "popupFlowNamePlaceholder",
+                      "Enter a flow name",
+                    )}
                     type="text"
                   />
                   <label className="recorded-flow-label">
@@ -1058,11 +1048,7 @@ export default function PopupApp() {
               onClick={() => void openWelcomePage()}
               title={t("popupViewInstallGuideTitle", "View installation guide")}
             >
-              <svg
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -1078,11 +1064,7 @@ export default function PopupApp() {
               onClick={() => void openTroubleshooting()}
               title={t("popupTroubleshootingTitle", "Troubleshooting")}
             >
-              <svg
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -1098,7 +1080,6 @@ export default function PopupApp() {
           </p>
         </div>
       </div>
-
     </div>
   );
 }

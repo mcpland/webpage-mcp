@@ -106,7 +106,7 @@ Root cause:
 Fix:
 
 1. Open Chrome and ensure extension is enabled.
-2. In extension popup, ensure native connection is established (Connect / auto-connect on).
+2. In extension popup, use the status refresh button to reconnect and sync status.
 3. Run:
 
 ```bash

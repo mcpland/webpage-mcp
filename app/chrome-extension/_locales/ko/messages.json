@@ -1996,8 +1996,8 @@
     "description": "Auto-generated localized message"
   },
   "refreshStatusButton": {
-    "message": "상태 새로고침",
-    "description": "상태 새로고침 버튼 툴팁"
+    "message": "다시 연결하고 상태 동기화",
+    "description": "다시 연결하고 상태를 동기화하는 버튼 툴팁"
   },
   "reinitializeButton": {
     "message": "재초기화",
@@ -2614,7 +2614,7 @@
     "description": "일반 경고 알림"
   },
   "welcomeConnectTip": {
-    "message": "팁: 확장 팝업을 열고 \"연결\"을 클릭하여 전체 클라이언트 구성 조각을 복사할 수도 있습니다.",
+    "message": "팁: 확장 팝업을 열고 상태 새로고침 버튼으로 다시 연결하고 상태를 동기화한 다음 전체 클라이언트 구성 조각을 복사할 수도 있습니다.",
     "description": "Auto-generated localized message"
   },
   "welcomeCopyButton": {

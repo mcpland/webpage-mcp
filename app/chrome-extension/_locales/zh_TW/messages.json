@@ -1996,8 +1996,8 @@
     "description": "自動生成的 i18n 文案"
   },
   "refreshStatusButton": {
-    "message": "重新整理狀態",
-    "description": "重新整理狀態按鈕提示"
+    "message": "重新連線並同步狀態",
+    "description": "重新連線並同步狀態按鈕提示"
   },
   "reinitializeButton": {
     "message": "重新初始化",
@@ -2614,7 +2614,7 @@
     "description": "通用警告通知"
   },
   "welcomeConnectTip": {
-    "message": "提示：您也可以開啟擴充彈出視窗並點擊「連線」來複製完整的客戶端設定片段。",
+    "message": "提示：您也可以開啟擴充彈出視窗，使用狀態刷新按鈕重新連線並同步狀態，然後再複製完整的客戶端設定片段。",
     "description": "自動生成的 i18n 文案"
   },
   "welcomeCopyButton": {

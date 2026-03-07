@@ -1336,7 +1336,16 @@ export const initNativeHostListener = () => {
     }
 
     if (message.type === BACKGROUND_MESSAGE_TYPES.REFRESH_SERVER_STATUS) {
-      void loadServerStatuses()
+      void (async () => {
+        await ensureManagedInstancesLoaded();
+        await setNativeAutoConnectEnabled(true);
+        const connected = await ensureNativeConnected('ui_refresh_status');
+        if (!connected) {
+          await markAllServersStopped('ui_refresh_status_failed');
+          throw new Error(getNativeConnectionErrorMessage() || 'Native host not connected');
+        }
+        await refreshStatusesFromNative();
+      })()
         .then(() => {
           sendResponse({
             success: true,
@@ -1346,10 +1355,12 @@ export const initNativeHostListener = () => {
           });
         })
         .catch((error) => {
-          console.error(ERROR_MESSAGES.SERVER_STATUS_LOAD_FAILED, error);
+          const messageText =
+            error instanceof Error ? error.message : ERROR_MESSAGES.SERVER_STATUS_LOAD_FAILED;
+          console.error('[NativeHost] Failed to reconnect and sync status', error);
           sendResponse({
             success: false,
-            error: ERROR_MESSAGES.SERVER_STATUS_LOAD_FAILED,
+            error: messageText,
             serverStatus: currentServerStatus,
             serverStatuses: currentServerStatuses,
             connected: nativePort !== null,

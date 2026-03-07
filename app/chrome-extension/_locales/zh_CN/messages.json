@@ -1996,8 +1996,8 @@
     "description": "查询输入标签"
   },
   "refreshStatusButton": {
-    "message": "刷新状态",
-    "description": "刷新状态按钮提示"
+    "message": "重新连接并同步状态",
+    "description": "重新连接并同步状态按钮提示"
   },
   "reinitializeButton": {
     "message": "重新初始化",
@@ -2614,7 +2614,7 @@
     "description": "通用警告通知"
   },
   "welcomeConnectTip": {
-    "message": "提示：您还可以打开扩展弹出窗口并单击“连接”来复制完整的客户端配置片段。",
+    "message": "提示：您还可以打开扩展弹出窗口，使用状态刷新按钮重新连接并同步状态，然后再复制完整的客户端配置片段。",
     "description": "自动生成的 i18n 文案"
   },
   "welcomeCopyButton": {

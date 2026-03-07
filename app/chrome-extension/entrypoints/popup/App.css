@@ -192,6 +192,15 @@
   color: var(--ac-text-muted, #6e6e6e);
 }
 
+.refresh-status-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.refresh-status-button.is-refreshing .icon-small {
+  animation: popup-refresh-spin 0.9s linear infinite;
+}
+
 /* =============================================
    Config Card
    ============================================= */
@@ -373,46 +382,6 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
   color: var(--ac-text-subtle, #a8a29e);
   margin: 0 0 8px;
   line-height: 1.4;
-}
-
-/* =============================================
-   Connect Button
-   ============================================= */
-.connect-button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  background: var(--ac-accent, #d97757);
-  color: var(--ac-accent-contrast, #ffffff);
-  font-weight: 600;
-  font-size: 13px;
-  padding: 10px 16px;
-  border-radius: var(--ac-radius-button, 8px);
-  border: none;
-  cursor: pointer;
-  transition: all var(--ac-motion-fast, 120ms) ease;
-}
-
-.connect-button svg {
-  width: 16px;
-  height: 16px;
-}
-
-.connect-button:hover:not(:disabled) {
-  background: var(--ac-accent-hover, #c4664a);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-}
-
-.connect-button:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.connect-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* =============================================
@@ -642,6 +611,12 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
   50% {
     transform: scale(0.8);
     opacity: 0.6;
+  }
+}
+
+@keyframes popup-refresh-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

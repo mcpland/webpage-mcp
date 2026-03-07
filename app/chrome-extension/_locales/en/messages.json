@@ -1996,8 +1996,8 @@
     "description": "query input label"
   },
   "refreshStatusButton": {
-    "message": "Refresh Status",
-    "description": "Refresh status button tooltip"
+    "message": "Reconnect and sync status",
+    "description": "Reconnect and sync status button tooltip"
   },
   "reinitializeButton": {
     "message": "Reinitialize",
@@ -2614,7 +2614,7 @@
     "description": "Generic warning notification"
   },
   "welcomeConnectTip": {
-    "message": "Tip: You can also open the extension popup and click \"Connect\" to copy a full client config snippet.",
+    "message": "Tip: You can also open the extension popup and use the status refresh button to reconnect and sync status before copying a full client config snippet.",
     "description": "Auto-generated i18n message"
   },
   "welcomeCopyButton": {

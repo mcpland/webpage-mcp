@@ -38,7 +38,7 @@ const fallbackMessages: Record<string, string> = {
   // Configuration labels
   mcpServerConfigLabel: "MCP Server Configuration",
   connectionPortLabel: "Connection Port",
-  refreshStatusButton: "Refresh Status",
+  refreshStatusButton: "Reconnect and sync status",
   copyConfigButton: "Copy Configuration",
 
   // Action buttons

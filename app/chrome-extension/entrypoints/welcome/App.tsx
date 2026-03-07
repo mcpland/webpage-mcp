@@ -183,7 +183,7 @@ export default function WelcomeApp() {
                 <p className="welcome-subtle welcome-text-xs welcome-mt-3">
                   {t(
                     "welcomeConnectTip",
-                    'Tip: You can also open the extension popup and click "Connect" to copy a full client config snippet.',
+                    "Tip: You can also open the extension popup and use the status refresh button to reconnect and sync status before copying a full client config snippet.",
                   )}
                 </p>
               </div>

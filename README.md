@@ -104,7 +104,7 @@ npx -y webpage-mcp@latest register --browser chrome --force --extension-id <exte
 npx -y webpage-mcp@latest doctor --fix
 ```
 
-3. Click extension popup **Connect** once, then restart MCP client.
+3. Use the extension popup status refresh button once to reconnect and sync status, then restart MCP client.
 
 <details>
 <summary><strong>When do I need to re-register?</strong></summary>

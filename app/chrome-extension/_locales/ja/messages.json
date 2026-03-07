@@ -1996,7 +1996,7 @@
     "description": "Auto-generated localized message"
   },
   "refreshStatusButton": {
-    "message": "ステータス更新",
+    "message": "再接続して状態を同期",
     "description": "Auto-generated localized message"
   },
   "reinitializeButton": {
@@ -2614,7 +2614,7 @@
     "description": "Auto-generated localized message"
   },
   "welcomeConnectTip": {
-    "message": "ヒント: 拡張機能のポップアップを開いて「接続」をクリックして、完全なクライアント構成スニペットをコピーすることもできます。",
+    "message": "ヒント: 拡張機能のポップアップを開き、状態更新ボタンで再接続して状態を同期してから、完全なクライアント構成スニペットをコピーすることもできます。",
     "description": "Auto-generated localized message"
   },
   "welcomeCopyButton": {

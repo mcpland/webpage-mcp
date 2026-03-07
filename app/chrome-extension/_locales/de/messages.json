@@ -1996,8 +1996,8 @@
     "description": "Auto-generated localized message"
   },
   "refreshStatusButton": {
-    "message": "Status aktualisieren",
-    "description": "Status aktualisieren Schaltflächen-Tooltip"
+    "message": "Neu verbinden und Status synchronisieren",
+    "description": "Schaltflächen-Tooltip für Neuverbinden und Statussynchronisierung"
   },
   "reinitializeButton": {
     "message": "Neu initialisieren",
@@ -2614,7 +2614,7 @@
     "description": "Allgemeine Warnmeldung"
   },
   "welcomeConnectTip": {
-    "message": "Tipp: Sie können auch das Erweiterungs-Popup öffnen und auf „Verbinden“ klicken, um einen vollständigen Client-Konfigurationsausschnitt zu kopieren.",
+    "message": "Tipp: Sie können auch das Erweiterungs-Popup öffnen und die Status-Aktualisierung verwenden, um die Verbindung wiederherzustellen und den Status zu synchronisieren, bevor Sie einen vollständigen Client-Konfigurationsausschnitt kopieren.",
     "description": "Auto-generated localized message"
   },
   "welcomeCopyButton": {
