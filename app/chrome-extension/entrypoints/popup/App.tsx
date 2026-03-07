@@ -718,6 +718,12 @@ export default function PopupApp() {
                   </div>
                 ) : null}
               </div>
+              {nativeConnectionError ? (
+                <p className="register-command-error">
+                  {t("popupConnectFailedPrefix", "Connect failed")}:{" "}
+                  {nativeConnectionError}
+                </p>
+              ) : null}
 
               <div className="mcp-config-section">
                 <div className="mcp-config-header">
@@ -790,12 +796,6 @@ export default function PopupApp() {
                     <div className="mcp-config-content">
                       <pre className="mcp-config-json">{registerCommand}</pre>
                     </div>
-                    {nativeConnectionError ? (
-                      <p className="register-command-error">
-                        {t("popupConnectFailedPrefix", "Connect failed")}:{" "}
-                        {nativeConnectionError}
-                      </p>
-                    ) : null}
                   </div>
                 </details>
               ) : null}
