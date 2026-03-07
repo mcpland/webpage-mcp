@@ -14,6 +14,7 @@ import { handleCallTool } from './tools';
 import { listPublished, getFlow } from './record-replay/flow-store';
 import { acquireKeepalive } from './keepalive-manager';
 import { updateConnectionBadge } from './action-badge';
+import { maybeShowFirstConnectNotification } from './first-connect-notification';
 import {
   clearAllSessionContexts,
   clearSessionContextsForTab,
@@ -856,6 +857,7 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
 
       console.debug(`${LOG_PREFIX} Already connected (trigger=${trigger})`);
       await ensureManagedInstancesRunning();
+      await maybeShowFirstConnectNotification();
       return true;
     }
 
@@ -896,6 +898,7 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
     console.debug(`${LOG_PREFIX} Connection initiated successfully (trigger=${trigger})`);
     lastNativeDisconnectError = null;
     await ensureManagedInstancesRunning();
+    await maybeShowFirstConnectNotification();
     return true;
   })().finally(() => {
     ensurePromise = null;

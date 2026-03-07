@@ -222,6 +222,7 @@ export const STORAGE_KEYS = {
   SERVER_STATUSES: 'serverStatuses',
   MCP_SERVER_INSTANCES: 'mcpServerInstances',
   NATIVE_AUTO_CONNECT_ENABLED: 'nativeAutoConnectEnabled',
+  NATIVE_FIRST_CONNECT_NOTIFICATION_SHOWN: 'nativeFirstConnectNotificationShown',
   SEMANTIC_MODEL: 'selectedModel',
   USER_PREFERENCES: 'userPreferences',
   VECTOR_INDEX: 'vectorIndex',
@@ -241,6 +242,7 @@ export const STORAGE_KEYS = {
 export const NOTIFICATIONS = {
   PRIORITY: 2,
   TYPE: 'basic' as const,
+  AUTO_CLEAR_DELAY_MS: 8000,
 } as const;
 
 export enum ExecutionWorld {

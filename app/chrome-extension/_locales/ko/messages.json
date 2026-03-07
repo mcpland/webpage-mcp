@@ -2391,6 +2391,10 @@
     "message": "작업이 성공적으로 완료되었습니다",
     "description": "일반 성공 알림"
   },
+  "nativeConnectionSuccessNotification": {
+    "message": "네이티브 호스트가 연결되었습니다. Webpage MCP Connector를 사용할 수 있습니다.",
+    "description": "네이티브 호스트에 처음 성공적으로 연결된 후 한 번만 표시됩니다"
+  },
   "switchingModelStatus": {
     "message": "모델 전환 중...",
     "description": "모델 전환 진행 메시지"

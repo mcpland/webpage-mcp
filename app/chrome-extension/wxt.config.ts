@@ -48,6 +48,7 @@ export default defineConfig({
       "history",
       "bookmarks",
       "offscreen",
+      "notifications",
       "storage",
       "declarativeNetRequest",
       "alarms",

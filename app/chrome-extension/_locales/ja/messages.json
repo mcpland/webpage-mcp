@@ -2391,6 +2391,10 @@
     "message": "操作が正常に完了しました",
     "description": "Auto-generated localized message"
   },
+  "nativeConnectionSuccessNotification": {
+    "message": "ネイティブホストに接続しました。Webpage MCP Connector を利用できます。",
+    "description": "最初にネイティブホストへの接続が成功した後に一度だけ表示されます"
+  },
   "switchingModelStatus": {
     "message": "モデルを切り替え中...",
     "description": "Auto-generated localized message"

@@ -2391,6 +2391,10 @@
     "message": "Operation completed successfully",
     "description": "Generic success notification"
   },
+  "nativeConnectionSuccessNotification": {
+    "message": "Native host connected. Webpage MCP Connector is ready to use.",
+    "description": "Shown once after the first successful native host connection"
+  },
   "switchingModelStatus": {
     "message": "Switching Model...",
     "description": "Model switching progress message"

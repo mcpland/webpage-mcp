@@ -2391,6 +2391,10 @@
     "message": "操作已成功完成",
     "description": "通用成功通知"
   },
+  "nativeConnectionSuccessNotification": {
+    "message": "本機主機已連線。Webpage MCP Connector 已可使用。",
+    "description": "首次成功連線本機主機後顯示一次"
+  },
   "switchingModelStatus": {
     "message": "正在切換模型...",
     "description": "模型切換進度訊息"
