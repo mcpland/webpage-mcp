@@ -1,3 +1,43 @@
+.workflows-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workflows-toolbar-search {
+  position: relative;
+  min-width: 0;
+}
+
+.workflows-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workflow-action-button {
+  min-width: 0;
+  flex: 1 1 132px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.workflow-icon-button {
+  flex: 0 0 40px;
+  width: 40px;
+}
+
+.workflows-summary-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .workflow-checkbox {
   width: 16px;
   height: 16px;
@@ -108,7 +148,7 @@
 
 .advanced-divider::before,
 .advanced-divider::after {
-  content: '';
+  content: "";
   flex: 1;
   border-bottom: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
 }
@@ -148,6 +188,16 @@
 
 .run-item:hover {
   background-color: var(--ac-hover-bg, #f5f5f4) !important;
+}
+
+@media (max-width: 360px) {
+  .workflow-action-button {
+    flex-basis: 100%;
+  }
+
+  .workflow-icon-button {
+    flex-basis: 40px;
+  }
 }
 
 /* Section expand transition */
