@@ -40,7 +40,10 @@ import {
   flowAnalyzeTool,
   flowUpdateTool,
 } from "@/entrypoints/background/tools/flow-tools";
-import { flowRunTool } from "@/entrypoints/background/tools/record-replay";
+import {
+  flowRunTool,
+  listPublishedFlowsTool,
+} from "@/entrypoints/background/tools/record-replay";
 import {
   recordingStartTool,
   recordingStatusTool,
@@ -371,6 +374,107 @@ describe("recording/editing/flow toolchain integration", () => {
       runId: "run-toolchain",
       success: true,
       summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+    });
+  });
+
+  it("flowRunTool falls back to V3 storage when the legacy flow is absent", async () => {
+    const flowId = `flow-run-v3-${Date.now()}`;
+    await createStoragePort().flows.save({
+      schemaVersion: 3,
+      id: flowId as any,
+      name: "V3 Only Flow",
+      entryNodeId: "fill-1" as any,
+      nodes: [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: {
+              selector: "#email",
+              candidates: [{ type: "css", value: "#email" }],
+            },
+            value: "{email}",
+          },
+        },
+      ],
+      edges: [],
+      createdAt: new Date(0).toISOString() as any,
+      updatedAt: new Date(0).toISOString() as any,
+    });
+    mocks.runFlow.mockResolvedValue({
+      runId: "run-toolchain-v3",
+      success: true,
+      summary: { total: 1, success: 1, failed: 0, tookMs: 8 },
+    });
+
+    const result = await flowRunTool.execute({
+      flowId,
+      args: { email: "alice@example.com" },
+    });
+
+    expect(mocks.runFlow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: flowId,
+        nodes: [
+          expect.objectContaining({
+            id: "fill-1",
+            type: "fill",
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        args: { email: "alice@example.com" },
+      }),
+    );
+    expect(parseToolPayload(result)).toMatchObject({
+      runId: "run-toolchain-v3",
+      success: true,
+    });
+  });
+
+  it("listPublishedFlowsTool reports published V3 workflows", async () => {
+    const flowId = `flow-published-v3-${Date.now()}`;
+    await createStoragePort().flows.save({
+      schemaVersion: 3,
+      id: flowId as any,
+      name: "Published V3 Flow",
+      entryNodeId: "node-1" as any,
+      nodes: [
+        {
+          id: "node-1" as any,
+          kind: "navigate",
+          config: { url: "https://example.com" },
+        },
+      ],
+      edges: [],
+      variables: [
+        { name: "target_url", default: "https://example.com" } as any,
+      ],
+      createdAt: new Date(0).toISOString() as any,
+      updatedAt: new Date(0).toISOString() as any,
+      meta: {
+        tool: {
+          published: true,
+          slug: "published-v3-flow",
+          description: "Published from V3",
+        },
+      },
+    });
+
+    const result = await listPublishedFlowsTool.execute();
+    const payload = parseToolPayload(result);
+
+    expect(payload).toEqual({
+      success: true,
+      published: [
+        expect.objectContaining({
+          id: flowId,
+          slug: "published-v3-flow",
+          name: "Published V3 Flow",
+          description: "Published from V3",
+          variables: [expect.objectContaining({ name: "target_url" })],
+        }),
+      ],
     });
   });
 });

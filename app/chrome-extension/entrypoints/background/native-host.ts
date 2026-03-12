@@ -7,22 +7,28 @@ import {
   type McpServerInstanceConfig,
   type McpServerInstanceStatus,
   type NativeInstanceListPayload,
-} from 'webpage-mcp-shared';
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
-import { NATIVE_HOST, STORAGE_KEYS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/common/constants';
-import { handleCallTool } from './tools';
-import { listPublished, getFlow } from './record-replay/flow-store';
-import { acquireKeepalive } from './keepalive-manager';
-import { updateConnectionBadge } from './action-badge';
-import { maybeShowFirstConnectNotification } from './first-connect-notification';
+} from "webpage-mcp-shared";
+import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import {
+  NATIVE_HOST,
+  STORAGE_KEYS,
+  ERROR_MESSAGES,
+  SUCCESS_MESSAGES,
+} from "@/common/constants";
+import { handleCallTool } from "./tools";
+import { createStoragePort } from "./record-replay-v3";
+import { listPublishedFlowDetails } from "./record-replay-v3/flows/publish";
+import { acquireKeepalive } from "./keepalive-manager";
+import { updateConnectionBadge } from "./action-badge";
+import { maybeShowFirstConnectNotification } from "./first-connect-notification";
 import {
   clearAllSessionContexts,
   clearSessionContextsForTab,
   clearSessionContextsForWindow,
-} from './session-context';
-import { clearTabQueue } from './tab-queue';
+} from "./session-context";
+import { clearTabQueue } from "./tab-queue";
 
-const LOG_PREFIX = '[NativeHost]';
+const LOG_PREFIX = "[NativeHost]";
 const INSTANCE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
 
 let nativePort: chrome.runtime.Port | null = null;
@@ -50,7 +56,7 @@ function getNativeConnectionErrorMessage(): string {
   if (lastNativeDisconnectError && lastNativeDisconnectError.trim()) {
     return `Native host not connected: ${lastNativeDisconnectError.trim()}`;
   }
-  return 'Native host not connected';
+  return "Native host not connected";
 }
 
 interface PendingNativeRequest {
@@ -96,7 +102,7 @@ function makeRequestId(): string {
 }
 
 function normalizeInstanceId(value: unknown): string {
-  if (typeof value !== 'string') {
+  if (typeof value !== "string") {
     return DEFAULT_MCP_INSTANCE_ID;
   }
   const trimmed = value.trim();
@@ -107,7 +113,7 @@ function normalizeInstanceId(value: unknown): string {
 }
 
 function parseInstanceIdInput(value: unknown): string | null {
-  if (typeof value !== 'string') {
+  if (typeof value !== "string") {
     return null;
   }
   const trimmed = value.trim();
@@ -117,18 +123,30 @@ function parseInstanceIdInput(value: unknown): string | null {
   return trimmed;
 }
 
-function sortInstances(instances: McpServerInstanceConfig[]): McpServerInstanceConfig[] {
+function sortInstances(
+  instances: McpServerInstanceConfig[],
+): McpServerInstanceConfig[] {
   return [...instances].sort((a, b) => {
-    if (a.instanceId === DEFAULT_MCP_INSTANCE_ID && b.instanceId !== DEFAULT_MCP_INSTANCE_ID) return -1;
-    if (b.instanceId === DEFAULT_MCP_INSTANCE_ID && a.instanceId !== DEFAULT_MCP_INSTANCE_ID) return 1;
+    if (
+      a.instanceId === DEFAULT_MCP_INSTANCE_ID &&
+      b.instanceId !== DEFAULT_MCP_INSTANCE_ID
+    )
+      return -1;
+    if (
+      b.instanceId === DEFAULT_MCP_INSTANCE_ID &&
+      a.instanceId !== DEFAULT_MCP_INSTANCE_ID
+    )
+      return 1;
     return a.instanceId.localeCompare(b.instanceId);
   });
 }
 
 function normalizeServerStatus(raw: unknown): ServerStatus {
-  const record = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const record =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const updated =
-    typeof record.lastUpdated === 'number' && Number.isFinite(record.lastUpdated)
+    typeof record.lastUpdated === "number" &&
+    Number.isFinite(record.lastUpdated)
       ? record.lastUpdated
       : Date.now();
 
@@ -143,18 +161,18 @@ function createDefaultInstanceConfig(): McpServerInstanceConfig {
     instanceId: DEFAULT_MCP_INSTANCE_ID,
     enabled: true,
     autoStart: true,
-    label: 'Default',
+    label: "Default",
   };
 }
 
 function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
-  if (!raw || typeof raw !== 'object') {
+  if (!raw || typeof raw !== "object") {
     return null;
   }
   const record = raw as Record<string, unknown>;
   let instanceId = DEFAULT_MCP_INSTANCE_ID;
   if (record.instanceId !== undefined && record.instanceId !== null) {
-    if (typeof record.instanceId !== 'string') {
+    if (typeof record.instanceId !== "string") {
       return null;
     }
     const trimmed = record.instanceId.trim();
@@ -164,9 +182,13 @@ function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
     instanceId = trimmed;
   }
 
-  const enabled = typeof record.enabled === 'boolean' ? record.enabled : true;
-  const autoStart = typeof record.autoStart === 'boolean' ? record.autoStart : true;
-  const label = typeof record.label === 'string' && record.label.trim() ? record.label.trim() : undefined;
+  const enabled = typeof record.enabled === "boolean" ? record.enabled : true;
+  const autoStart =
+    typeof record.autoStart === "boolean" ? record.autoStart : true;
+  const label =
+    typeof record.label === "string" && record.label.trim()
+      ? record.label.trim()
+      : undefined;
 
   return {
     instanceId,
@@ -176,7 +198,9 @@ function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
   };
 }
 
-function normalizeManagedInstances(instances: McpServerInstanceConfig[]): McpServerInstanceConfig[] {
+function normalizeManagedInstances(
+  instances: McpServerInstanceConfig[],
+): McpServerInstanceConfig[] {
   return sortInstances(instances);
 }
 
@@ -202,8 +226,10 @@ async function loadServerStatuses(): Promise<void> {
     const mapRaw = result[STORAGE_KEYS.SERVER_STATUSES];
     const nextMap: ServerStatusMap = {};
 
-    if (mapRaw && typeof mapRaw === 'object') {
-      for (const [rawId, status] of Object.entries(mapRaw as Record<string, unknown>)) {
+    if (mapRaw && typeof mapRaw === "object") {
+      for (const [rawId, status] of Object.entries(
+        mapRaw as Record<string, unknown>,
+      )) {
         const instanceId = normalizeInstanceId(rawId);
         nextMap[instanceId] = normalizeServerStatus(status);
       }
@@ -273,7 +299,8 @@ function applyInstanceStatus(status: McpServerInstanceStatus): void {
   const nextStatus: ServerStatus = {
     isRunning: Boolean(status.isRunning),
     lastUpdated:
-      typeof status.lastUpdated === 'number' && Number.isFinite(status.lastUpdated)
+      typeof status.lastUpdated === "number" &&
+      Number.isFinite(status.lastUpdated)
         ? status.lastUpdated
         : Date.now(),
   };
@@ -290,13 +317,14 @@ function applyInstanceStatus(status: McpServerInstanceStatus): void {
 function applyInstanceStatusList(rawStatuses: unknown[]): void {
   const next: ServerStatusMap = {};
   for (const raw of rawStatuses) {
-    if (!raw || typeof raw !== 'object') continue;
+    if (!raw || typeof raw !== "object") continue;
     const item = raw as Record<string, unknown>;
     const instanceId = normalizeInstanceId(item.instanceId);
     next[instanceId] = {
       isRunning: Boolean(item.isRunning),
       lastUpdated:
-        typeof item.lastUpdated === 'number' && Number.isFinite(item.lastUpdated)
+        typeof item.lastUpdated === "number" &&
+        Number.isFinite(item.lastUpdated)
           ? item.lastUpdated
           : Date.now(),
     };
@@ -315,16 +343,18 @@ function applyInstanceStatusList(rawStatuses: unknown[]): void {
 
 async function markAllServersStopped(reason: string): Promise<void> {
   const now = Date.now();
-  const nextEntries = Object.entries(currentServerStatuses).map(([instanceId, status]) => {
-    const normalizedId = normalizeInstanceId(instanceId);
-    return [
-      normalizedId,
-      {
-        isRunning: false,
-        lastUpdated: now,
-      } satisfies ServerStatus,
-    ] as const;
-  });
+  const nextEntries = Object.entries(currentServerStatuses).map(
+    ([instanceId, status]) => {
+      const normalizedId = normalizeInstanceId(instanceId);
+      return [
+        normalizedId,
+        {
+          isRunning: false,
+          lastUpdated: now,
+        } satisfies ServerStatus,
+      ] as const;
+    },
+  );
 
   if (nextEntries.length === 0) {
     nextEntries.push([
@@ -348,7 +378,9 @@ async function markAllServersStopped(reason: string): Promise<void> {
   console.debug(`${LOG_PREFIX} All servers marked stopped (${reason})`);
 }
 
-async function ensureManagedInstancesLoaded(): Promise<McpServerInstanceConfig[]> {
+async function ensureManagedInstancesLoaded(): Promise<
+  McpServerInstanceConfig[]
+> {
   if (managedInstancesLoaded) {
     const resolvedInstances = normalizeManagedInstances(managedInstances);
     const changed =
@@ -396,15 +428,19 @@ async function ensureManagedInstancesLoaded(): Promise<McpServerInstanceConfig[]
   return managedInstances;
 }
 
-async function getManagedInstancesById(): Promise<Map<string, McpServerInstanceConfig>> {
+async function getManagedInstancesById(): Promise<
+  Map<string, McpServerInstanceConfig>
+> {
   const loaded = await ensureManagedInstancesLoaded();
   return new Map(loaded.map((cfg) => [cfg.instanceId, cfg]));
 }
 
-async function upsertManagedInstance(raw: unknown): Promise<McpServerInstanceConfig> {
+async function upsertManagedInstance(
+  raw: unknown,
+): Promise<McpServerInstanceConfig> {
   const normalized = normalizeInstanceConfig(raw);
   if (!normalized) {
-    throw new Error('Invalid instance configuration');
+    throw new Error("Invalid instance configuration");
   }
 
   const byId = await getManagedInstancesById();
@@ -416,13 +452,17 @@ async function upsertManagedInstance(raw: unknown): Promise<McpServerInstanceCon
   managedInstances = normalizeManagedInstances(Array.from(byId.values()));
   await persistManagedInstances();
   broadcastServerInstancesChanged();
-  return managedInstances.find((item) => item.instanceId === normalized.instanceId) ?? normalized;
+  return (
+    managedInstances.find(
+      (item) => item.instanceId === normalized.instanceId,
+    ) ?? normalized
+  );
 }
 
 async function removeManagedInstance(instanceId: string): Promise<void> {
   const normalized = normalizeInstanceId(instanceId);
   if (normalized === DEFAULT_MCP_INSTANCE_ID) {
-    throw new Error('Default instance cannot be removed');
+    throw new Error("Default instance cannot be removed");
   }
 
   const byId = await getManagedInstancesById();
@@ -447,7 +487,7 @@ async function requestNativeHost(
 ): Promise<any> {
   const nativeBridgePort = nativePort;
   if (!nativeBridgePort) {
-    throw new Error('Native host not connected');
+    throw new Error("Native host not connected");
   }
 
   const requestId = makeRequestId();
@@ -469,7 +509,9 @@ async function requestNativeHost(
   });
 }
 
-async function probeNativeHostReady(timeoutMs: number = 3000): Promise<boolean> {
+async function probeNativeHostReady(
+  timeoutMs: number = 3000,
+): Promise<boolean> {
   if (!nativePort) {
     return false;
   }
@@ -481,7 +523,7 @@ async function probeNativeHostReady(timeoutMs: number = 3000): Promise<boolean> 
       timeoutMs,
     )) as NativeInstanceListPayload;
 
-    return response?.status === 'success' && Array.isArray(response.instances);
+    return response?.status === "success" && Array.isArray(response.instances);
   } catch (error) {
     console.debug(`${LOG_PREFIX} Native host probe failed`, error);
     return false;
@@ -493,12 +535,14 @@ export async function requestAgentRpcFetch(
   timeoutMs: number = 30_000,
 ): Promise<AgentRpcResponsePayload> {
   if (!isAgentRpcRequestPayload(payload)) {
-    throw new Error('Invalid agent_rpc payload: operation is required');
+    throw new Error("Invalid agent_rpc payload: operation is required");
   }
 
-  const connected = nativePort ? true : await ensureNativeConnected('agent_rpc_fetch');
+  const connected = nativePort
+    ? true
+    : await ensureNativeConnected("agent_rpc_fetch");
   if (!connected) {
-    throw new Error('Native host not connected');
+    throw new Error("Native host not connected");
   }
   const response = (await requestNativeHost(
     NativeMessageType.AGENT_RPC,
@@ -516,9 +560,11 @@ export async function subscribeAgentStream(
     timeoutMs?: number;
   },
 ): Promise<{ subscriptionId: string }> {
-  const connected = nativePort ? true : await ensureNativeConnected('agent_stream_subscribe');
+  const connected = nativePort
+    ? true
+    : await ensureNativeConnected("agent_stream_subscribe");
   if (!connected) {
-    throw new Error('Native host not connected');
+    throw new Error("Native host not connected");
   }
   const response = (await requestNativeHost(
     NativeMessageType.AGENT_STREAM_SUBSCRIBE,
@@ -530,8 +576,8 @@ export async function subscribeAgentStream(
     options?.timeoutMs ?? 10_000,
   )) as { success?: boolean; subscriptionId?: string };
 
-  if (!response?.success || typeof response.subscriptionId !== 'string') {
-    throw new Error('Failed to subscribe agent stream');
+  if (!response?.success || typeof response.subscriptionId !== "string") {
+    throw new Error("Failed to subscribe agent stream");
   }
   return { subscriptionId: response.subscriptionId };
 }
@@ -563,7 +609,9 @@ function rejectAllPendingNativeRequests(reason: string): void {
   }
 }
 
-async function startManagedInstanceOnNative(instance: McpServerInstanceConfig): Promise<boolean> {
+async function startManagedInstanceOnNative(
+  instance: McpServerInstanceConfig,
+): Promise<boolean> {
   if (!nativePort) {
     return false;
   }
@@ -577,12 +625,17 @@ async function startManagedInstanceOnNative(instance: McpServerInstanceConfig): 
     );
     return true;
   } catch (error) {
-    console.warn(`${LOG_PREFIX} Failed to start instance ${instance.instanceId}`, error);
+    console.warn(
+      `${LOG_PREFIX} Failed to start instance ${instance.instanceId}`,
+      error,
+    );
     return false;
   }
 }
 
-async function stopManagedInstanceOnNative(instanceId: string): Promise<boolean> {
+async function stopManagedInstanceOnNative(
+  instanceId: string,
+): Promise<boolean> {
   if (!nativePort) {
     return false;
   }
@@ -614,7 +667,7 @@ async function syncManagedInstancesOnNative(
       { instances },
       timeoutMs,
     )) as NativeInstanceListPayload;
-    if (response?.status !== 'success' || !Array.isArray(response.instances)) {
+    if (response?.status !== "success" || !Array.isArray(response.instances)) {
       return false;
     }
 
@@ -629,12 +682,14 @@ async function syncManagedInstancesOnNative(
   }
 }
 
-async function refreshStatusesFromNative(options?: { bestEffort?: boolean }): Promise<void> {
+async function refreshStatusesFromNative(options?: {
+  bestEffort?: boolean;
+}): Promise<void> {
   const bestEffort = options?.bestEffort === true;
 
   try {
     if (!nativePort) {
-      throw new Error('Native host not connected');
+      throw new Error("Native host not connected");
     }
 
     const response = (await requestNativeHost(
@@ -643,11 +698,11 @@ async function refreshStatusesFromNative(options?: { bestEffort?: boolean }): Pr
       8000,
     )) as NativeInstanceListPayload;
 
-    if (response?.status !== 'success') {
-      throw new Error('Failed to list native instances');
+    if (response?.status !== "success") {
+      throw new Error("Failed to list native instances");
     }
     if (!Array.isArray(response.instances)) {
-      throw new Error('Native host returned an invalid instance list');
+      throw new Error("Native host returned an invalid instance list");
     }
 
     applyInstanceStatusList(response.instances);
@@ -655,7 +710,10 @@ async function refreshStatusesFromNative(options?: { bestEffort?: boolean }): Pr
     broadcastServerStatusChange(DEFAULT_MCP_INSTANCE_ID);
     broadcastServerInstancesChanged();
   } catch (error) {
-    console.debug(`${LOG_PREFIX} Failed to refresh native instance statuses`, error);
+    console.debug(
+      `${LOG_PREFIX} Failed to refresh native instance statuses`,
+      error,
+    );
     if (bestEffort) {
       return;
     }
@@ -706,7 +764,10 @@ function getReconnectDelayMs(attempt: number): number {
   if (attempt >= RECONNECT_MAX_FAST_ATTEMPTS) {
     return withJitter(RECONNECT_COOLDOWN_DELAY_MS);
   }
-  const delay = Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt), RECONNECT_MAX_DELAY_MS);
+  const delay = Math.min(
+    RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt),
+    RECONNECT_MAX_DELAY_MS,
+  );
   return withJitter(delay);
 }
 
@@ -736,7 +797,7 @@ function resetReconnectState(): void {
 function syncKeepaliveHold(): void {
   if (autoConnectEnabled) {
     if (!keepaliveRelease) {
-      keepaliveRelease = acquireKeepalive('native-host');
+      keepaliveRelease = acquireKeepalive("native-host");
       console.debug(`${LOG_PREFIX} Acquired keepalive`);
     }
     return;
@@ -759,11 +820,16 @@ function syncKeepaliveHold(): void {
  */
 async function loadNativeAutoConnectEnabled(): Promise<boolean> {
   try {
-    const result = await chrome.storage.local.get([STORAGE_KEYS.NATIVE_AUTO_CONNECT_ENABLED]);
+    const result = await chrome.storage.local.get([
+      STORAGE_KEYS.NATIVE_AUTO_CONNECT_ENABLED,
+    ]);
     const raw = result[STORAGE_KEYS.NATIVE_AUTO_CONNECT_ENABLED];
-    if (typeof raw === 'boolean') return raw;
+    if (typeof raw === "boolean") return raw;
   } catch (error) {
-    console.warn(`${LOG_PREFIX} Failed to load nativeAutoConnectEnabled`, error);
+    console.warn(
+      `${LOG_PREFIX} Failed to load nativeAutoConnectEnabled`,
+      error,
+    );
   }
   return true; // Default to enabled
 }
@@ -775,10 +841,15 @@ async function setNativeAutoConnectEnabled(enabled: boolean): Promise<void> {
   autoConnectEnabled = enabled;
   autoConnectLoaded = true;
   try {
-    await chrome.storage.local.set({ [STORAGE_KEYS.NATIVE_AUTO_CONNECT_ENABLED]: enabled });
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.NATIVE_AUTO_CONNECT_ENABLED]: enabled,
+    });
     console.debug(`${LOG_PREFIX} Set nativeAutoConnectEnabled=${enabled}`);
   } catch (error) {
-    console.warn(`${LOG_PREFIX} Failed to persist nativeAutoConnectEnabled`, error);
+    console.warn(
+      `${LOG_PREFIX} Failed to persist nativeAutoConnectEnabled`,
+      error,
+    );
   }
   syncKeepaliveHold();
 }
@@ -832,7 +903,9 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
 
     // If auto-connect is disabled, do nothing
     if (!autoConnectEnabled) {
-      console.debug(`${LOG_PREFIX} Auto-connect disabled, skipping ensure (trigger=${trigger})`);
+      console.debug(
+        `${LOG_PREFIX} Auto-connect disabled, skipping ensure (trigger=${trigger})`,
+      );
       return false;
     }
 
@@ -845,14 +918,16 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
     if (nativePort) {
       const ready = await probeNativeHostReady(1500);
       if (!ready) {
-        console.warn(`${LOG_PREFIX} Native probe failed on existing port (trigger=${trigger})`);
+        console.warn(
+          `${LOG_PREFIX} Native probe failed on existing port (trigger=${trigger})`,
+        );
         if (!lastNativeDisconnectError) {
-          lastNativeDisconnectError = 'Native host probe failed';
+          lastNativeDisconnectError = "Native host probe failed";
         }
         const port: any = nativePort;
         if (port) {
           try {
-            if (typeof port.disconnect === 'function') {
+            if (typeof port.disconnect === "function") {
               port.disconnect();
             }
           } catch {
@@ -860,8 +935,10 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
           }
         }
         nativePort = null;
-        rejectAllPendingNativeRequests('Native host probe failed on existing connection');
-        await markAllServersStopped('native_probe_failed');
+        rejectAllPendingNativeRequests(
+          "Native host probe failed on existing connection",
+        );
+        await markAllServersStopped("native_probe_failed");
         scheduleReconnect(`probe_failed:${trigger}`);
         return false;
       }
@@ -877,7 +954,7 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
     if (!ok) {
       console.warn(`${LOG_PREFIX} Connection failed (trigger=${trigger})`);
       if (!lastNativeDisconnectError) {
-        lastNativeDisconnectError = 'Failed to open native messaging port';
+        lastNativeDisconnectError = "Failed to open native messaging port";
       }
       scheduleReconnect(`connect_failed:${trigger}`);
       return false;
@@ -885,14 +962,16 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
 
     const ready = await probeNativeHostReady(3000);
     if (!ready) {
-      console.warn(`${LOG_PREFIX} Native handshake failed (trigger=${trigger})`);
+      console.warn(
+        `${LOG_PREFIX} Native handshake failed (trigger=${trigger})`,
+      );
       if (!lastNativeDisconnectError) {
-        lastNativeDisconnectError = 'Native host handshake failed';
+        lastNativeDisconnectError = "Native host handshake failed";
       }
       const port: any = nativePort;
       if (port) {
         try {
-          if (typeof port.disconnect === 'function') {
+          if (typeof port.disconnect === "function") {
             port.disconnect();
           }
         } catch {
@@ -900,13 +979,15 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
         }
       }
       nativePort = null;
-      rejectAllPendingNativeRequests('Native host handshake failed');
-      await markAllServersStopped('native_handshake_failed');
+      rejectAllPendingNativeRequests("Native host handshake failed");
+      await markAllServersStopped("native_handshake_failed");
       scheduleReconnect(`handshake_failed:${trigger}`);
       return false;
     }
 
-    console.debug(`${LOG_PREFIX} Connection initiated successfully (trigger=${trigger})`);
+    console.debug(
+      `${LOG_PREFIX} Connection initiated successfully (trigger=${trigger})`,
+    );
     lastNativeDisconnectError = null;
     await ensureManagedInstancesRunning();
     await maybeShowFirstConnectNotification();
@@ -948,19 +1029,25 @@ export function connectNativeHost(): boolean {
         }
       }
 
-      if (message.type === NativeMessageType.PROCESS_DATA && message.requestId) {
+      if (
+        message.type === NativeMessageType.PROCESS_DATA &&
+        message.requestId
+      ) {
         const requestId = message.requestId;
         const requestPayload = message.payload;
 
         nativePort?.postMessage({
           responseToRequestId: requestId,
           payload: {
-            status: 'success',
+            status: "success",
             message: SUCCESS_MESSAGES.TOOL_EXECUTED,
             data: requestPayload,
           },
         });
-      } else if (message.type === NativeMessageType.CALL_TOOL && message.requestId) {
+      } else if (
+        message.type === NativeMessageType.CALL_TOOL &&
+        message.requestId
+      ) {
         const requestId = message.requestId;
         try {
           const payload = (message.payload || {}) as {
@@ -969,14 +1056,14 @@ export function connectNativeHost(): boolean {
             meta?: { mcpSessionId?: string; instanceId?: string };
           };
           const result = await handleCallTool({
-            name: String(payload.name || ''),
+            name: String(payload.name || ""),
             args: payload.args,
             meta: payload.meta,
           });
           nativePort?.postMessage({
             responseToRequestId: requestId,
             payload: {
-              status: 'success',
+              status: "success",
               message: SUCCESS_MESSAGES.TOOL_EXECUTED,
               data: result,
             },
@@ -985,38 +1072,32 @@ export function connectNativeHost(): boolean {
           nativePort?.postMessage({
             responseToRequestId: requestId,
             payload: {
-              status: 'error',
+              status: "error",
               message: ERROR_MESSAGES.TOOL_EXECUTION_FAILED,
               error: error instanceof Error ? error.message : String(error),
             },
           });
         }
-      } else if (message.type === 'rr_list_published_flows' && message.requestId) {
+      } else if (
+        message.type === "rr_list_published_flows" &&
+        message.requestId
+      ) {
         const requestId = message.requestId;
         try {
-          const published = await listPublished();
-          const items = [] as any[];
-          for (const p of published) {
-            const flow = await getFlow(p.id);
-            if (!flow) continue;
-            items.push({
-              id: p.id,
-              slug: p.slug,
-              version: p.version,
-              name: p.name,
-              description: p.description || flow.description || '',
-              variables: flow.variables || [],
-              meta: flow.meta || {},
-            });
-          }
+          const items = listPublishedFlowDetails(
+            await createStoragePort().flows.list(),
+          );
           nativePort?.postMessage({
             responseToRequestId: requestId,
-            payload: { status: 'success', items },
+            payload: { status: "success", items },
           });
         } catch (error: any) {
           nativePort?.postMessage({
             responseToRequestId: requestId,
-            payload: { status: 'error', error: error?.message || String(error) },
+            payload: {
+              status: "error",
+              error: error?.message || String(error),
+            },
           });
         }
       } else if (message.type === NativeMessageType.AGENT_STREAM_EVENT) {
@@ -1041,7 +1122,9 @@ export function connectNativeHost(): boolean {
         broadcastServerInstancesChanged();
         // Server is confirmed running - now we can reset reconnect state
         resetReconnectState();
-        console.log(`${SUCCESS_MESSAGES.SERVER_STARTED} [${status.instanceId}]`);
+        console.log(
+          `${SUCCESS_MESSAGES.SERVER_STARTED} [${status.instanceId}]`,
+        );
       } else if (message.type === NativeMessageType.SERVER_STOPPED) {
         const status: McpServerInstanceStatus = {
           instanceId: normalizeInstanceId(message.payload?.instanceId),
@@ -1053,10 +1136,15 @@ export function connectNativeHost(): boolean {
         await saveServerStatuses();
         broadcastServerStatusChange(status.instanceId);
         broadcastServerInstancesChanged();
-        console.log(`${SUCCESS_MESSAGES.SERVER_STOPPED} [${status.instanceId}]`);
+        console.log(
+          `${SUCCESS_MESSAGES.SERVER_STOPPED} [${status.instanceId}]`,
+        );
       } else if (message.type === NativeMessageType.ERROR_FROM_NATIVE_HOST) {
-        console.error('Error from native host:', message.payload?.message || 'Unknown error');
-      } else if (message.type === 'file_operation_response') {
+        console.error(
+          "Error from native host:",
+          message.payload?.message || "Unknown error",
+        );
+      } else if (message.type === "file_operation_response") {
         // Forward file operation response back to the requesting tool
         chrome.runtime.sendMessage(message).catch(() => {
           // Ignore if no listeners
@@ -1065,16 +1153,20 @@ export function connectNativeHost(): boolean {
     });
 
     nativePort.onDisconnect.addListener(() => {
-      const disconnectMessage = chrome.runtime.lastError?.message || ERROR_MESSAGES.NATIVE_DISCONNECTED;
+      const disconnectMessage =
+        chrome.runtime.lastError?.message || ERROR_MESSAGES.NATIVE_DISCONNECTED;
       lastNativeDisconnectError = disconnectMessage;
-      console.warn(ERROR_MESSAGES.NATIVE_DISCONNECTED, chrome.runtime.lastError);
+      console.warn(
+        ERROR_MESSAGES.NATIVE_DISCONNECTED,
+        chrome.runtime.lastError,
+      );
       nativePort = null;
       syncConnectionBadge();
       clearAllSessionContexts();
-      rejectAllPendingNativeRequests('Native host disconnected');
+      rejectAllPendingNativeRequests("Native host disconnected");
 
       // Mark all known servers as stopped since native host disconnection means servers are down
-      void markAllServersStopped('native_port_disconnected');
+      void markAllServersStopped("native_port_disconnected");
 
       // Handle reconnection based on disconnect reason
       if (manualDisconnect) {
@@ -1082,14 +1174,16 @@ export function connectNativeHost(): boolean {
         return;
       }
       if (!autoConnectEnabled) return;
-      scheduleReconnect('native_port_disconnected');
+      scheduleReconnect("native_port_disconnected");
     });
 
     return true;
   } catch (error) {
     console.warn(ERROR_MESSAGES.NATIVE_CONNECTION_FAILED, error);
     lastNativeDisconnectError =
-      error instanceof Error ? error.message : ERROR_MESSAGES.NATIVE_CONNECTION_FAILED;
+      error instanceof Error
+        ? error.message
+        : ERROR_MESSAGES.NATIVE_CONNECTION_FAILED;
     nativePort = null;
     syncConnectionBadge();
     return false;
@@ -1105,34 +1199,37 @@ export const initNativeHostListener = () => {
   void ensureManagedInstancesLoaded();
 
   // Auto-connect on SW activation (covers SW restart after idle termination)
-  void ensureNativeConnected('sw_startup').catch(() => {});
+  void ensureNativeConnected("sw_startup").catch(() => {});
 
   // Auto-connect on Chrome browser startup
   chrome.runtime.onStartup.addListener(() => {
-    void ensureNativeConnected('onStartup').catch(() => {});
+    void ensureNativeConnected("onStartup").catch(() => {});
   });
 
   // Auto-connect on extension install/update
   chrome.runtime.onInstalled.addListener(() => {
-    void ensureNativeConnected('onInstalled').catch(() => {});
+    void ensureNativeConnected("onInstalled").catch(() => {});
   });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // Allow UI to call tools directly
-    if (message && message.type === 'call_tool' && message.name) {
+    if (message && message.type === "call_tool" && message.name) {
       handleCallTool({ name: message.name, args: message.args })
         .then((res) => sendResponse({ success: true, result: res }))
         .catch((err) =>
-          sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }),
+          sendResponse({
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          }),
         );
       return true;
     }
 
-    const msgType = typeof message === 'string' ? message : message?.type;
+    const msgType = typeof message === "string" ? message : message?.type;
 
     // ENSURE_NATIVE: Trigger ensure without changing autoConnectEnabled
     if (msgType === NativeMessageType.ENSURE_NATIVE) {
-      ensureNativeConnected('ui_ensure')
+      ensureNativeConnected("ui_ensure")
         .then((connected) => {
           sendResponse({
             success: connected,
@@ -1142,7 +1239,11 @@ export const initNativeHostListener = () => {
           });
         })
         .catch((e) => {
-          sendResponse({ success: false, connected: nativePort !== null, error: String(e) });
+          sendResponse({
+            success: false,
+            connected: nativePort !== null,
+            error: String(e),
+          });
         });
       return true;
     }
@@ -1152,7 +1253,7 @@ export const initNativeHostListener = () => {
       (async () => {
         // Explicit user connect: re-enable auto-connect
         await setNativeAutoConnectEnabled(true);
-        return ensureNativeConnected('ui_connect');
+        return ensureNativeConnected("ui_connect");
       })()
         .then((connected) => {
           sendResponse({
@@ -1162,7 +1263,11 @@ export const initNativeHostListener = () => {
           });
         })
         .catch((e) => {
-          sendResponse({ success: false, connected: nativePort !== null, error: String(e) });
+          sendResponse({
+            success: false,
+            connected: nativePort !== null,
+            error: String(e),
+          });
         });
       return true;
     }
@@ -1172,7 +1277,11 @@ export const initNativeHostListener = () => {
         const connected = await probeNativeHostReady(1000);
         sendResponse({ connected, autoConnectEnabled });
       })().catch((e) => {
-        sendResponse({ connected: false, autoConnectEnabled, error: String(e) });
+        sendResponse({
+          connected: false,
+          autoConnectEnabled,
+          error: String(e),
+        });
       });
       return true;
     }
@@ -1197,7 +1306,7 @@ export const initNativeHostListener = () => {
           }
           nativePort = null;
         }
-        await markAllServersStopped('manual_disconnect');
+        await markAllServersStopped("manual_disconnect");
       })()
         .then(() => {
           sendResponse({ success: true });
@@ -1247,21 +1356,32 @@ export const initNativeHostListener = () => {
             const synced = await syncManagedInstancesOnNative(managedInstances);
             if (!synced) {
               await refreshStatusesFromNative({ bestEffort: true });
-              throw new Error('Failed to synchronize managed instances with native host');
+              throw new Error(
+                "Failed to synchronize managed instances with native host",
+              );
             }
             if (instance.enabled && message?.startNow === true) {
               const started = await startManagedInstanceOnNative(instance);
               if (!started) {
                 await refreshStatusesFromNative({ bestEffort: true });
-                throw new Error(`Failed to start instance: ${instance.instanceId}`);
+                throw new Error(
+                  `Failed to start instance: ${instance.instanceId}`,
+                );
               }
               await refreshStatusesFromNative();
             }
           }
-          sendResponse({ success: true, instance, instances: managedInstances });
+          sendResponse({
+            success: true,
+            instance,
+            instances: managedInstances,
+          });
         })
         .catch((error) => {
-          sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
+          sendResponse({
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
       return true;
     }
@@ -1269,7 +1389,7 @@ export const initNativeHostListener = () => {
     if (message.type === BACKGROUND_MESSAGE_TYPES.REMOVE_SERVER_INSTANCE) {
       const instanceId = parseInstanceIdInput(message?.instanceId);
       if (!instanceId) {
-        sendResponse({ success: false, error: 'Invalid instanceId' });
+        sendResponse({ success: false, error: "Invalid instanceId" });
         return true;
       }
       void (async () => {
@@ -1278,7 +1398,9 @@ export const initNativeHostListener = () => {
           const synced = await syncManagedInstancesOnNative(managedInstances);
           if (!synced) {
             await refreshStatusesFromNative({ bestEffort: true });
-            throw new Error('Failed to synchronize managed instances with native host');
+            throw new Error(
+              "Failed to synchronize managed instances with native host",
+            );
           }
         }
       })()
@@ -1286,7 +1408,10 @@ export const initNativeHostListener = () => {
           sendResponse({ success: true, instances: managedInstances });
         })
         .catch((error) => {
-          sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
+          sendResponse({
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
       return true;
     }
@@ -1294,13 +1419,15 @@ export const initNativeHostListener = () => {
     if (message.type === BACKGROUND_MESSAGE_TYPES.START_SERVER_INSTANCE) {
       const instanceId = parseInstanceIdInput(message?.instanceId);
       if (!instanceId) {
-        sendResponse({ success: false, error: 'Invalid instanceId' });
+        sendResponse({ success: false, error: "Invalid instanceId" });
         return true;
       }
       void (async () => {
-        const connected = nativePort ? true : await ensureNativeConnected('ui_start_instance');
+        const connected = nativePort
+          ? true
+          : await ensureNativeConnected("ui_start_instance");
         if (!connected) {
-          throw new Error('Native host not connected');
+          throw new Error("Native host not connected");
         }
         const byId = await getManagedInstancesById();
         const target = byId.get(instanceId);
@@ -1317,7 +1444,10 @@ export const initNativeHostListener = () => {
           sendResponse({ success: true, statuses: currentServerStatuses });
         })
         .catch((error) => {
-          sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
+          sendResponse({
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
       return true;
     }
@@ -1325,12 +1455,12 @@ export const initNativeHostListener = () => {
     if (message.type === BACKGROUND_MESSAGE_TYPES.STOP_SERVER_INSTANCE) {
       const instanceId = parseInstanceIdInput(message?.instanceId);
       if (!instanceId) {
-        sendResponse({ success: false, error: 'Invalid instanceId' });
+        sendResponse({ success: false, error: "Invalid instanceId" });
         return true;
       }
       void (async () => {
         if (!nativePort) {
-          throw new Error('Native host not connected');
+          throw new Error("Native host not connected");
         }
         const stopped = await stopManagedInstanceOnNative(instanceId);
         if (!stopped) {
@@ -1342,7 +1472,10 @@ export const initNativeHostListener = () => {
           sendResponse({ success: true, statuses: currentServerStatuses });
         })
         .catch((error) => {
-          sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
+          sendResponse({
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
       return true;
     }
@@ -1351,10 +1484,12 @@ export const initNativeHostListener = () => {
       void (async () => {
         await ensureManagedInstancesLoaded();
         await setNativeAutoConnectEnabled(true);
-        const connected = await ensureNativeConnected('ui_refresh_status');
+        const connected = await ensureNativeConnected("ui_refresh_status");
         if (!connected) {
-          await markAllServersStopped('ui_refresh_status_failed');
-          throw new Error(getNativeConnectionErrorMessage() || 'Native host not connected');
+          await markAllServersStopped("ui_refresh_status_failed");
+          throw new Error(
+            getNativeConnectionErrorMessage() || "Native host not connected",
+          );
         }
         await refreshStatusesFromNative();
       })()
@@ -1368,8 +1503,13 @@ export const initNativeHostListener = () => {
         })
         .catch((error) => {
           const messageText =
-            error instanceof Error ? error.message : ERROR_MESSAGES.SERVER_STATUS_LOAD_FAILED;
-          console.error('[NativeHost] Failed to reconnect and sync status', error);
+            error instanceof Error
+              ? error.message
+              : ERROR_MESSAGES.SERVER_STATUS_LOAD_FAILED;
+          console.error(
+            "[NativeHost] Failed to reconnect and sync status",
+            error,
+          );
           sendResponse({
             success: false,
             error: messageText,
@@ -1384,15 +1524,17 @@ export const initNativeHostListener = () => {
     if (message.type === BACKGROUND_MESSAGE_TYPES.GET_NATIVE_AUTH_TOKEN) {
       (async () => {
         if (!nativePort) {
-          const connected = await ensureNativeConnected('ui_get_native_auth_token');
+          const connected = await ensureNativeConnected(
+            "ui_get_native_auth_token",
+          );
           if (!connected) {
-            throw new Error('Native host not connected');
+            throw new Error("Native host not connected");
           }
         }
-        const response = await requestNativeHost('auth_get_token', {}, 5000);
+        const response = await requestNativeHost("auth_get_token", {}, 5000);
         return {
           enabled: response?.enabled === true,
-          token: typeof response?.token === 'string' ? response.token : null,
+          token: typeof response?.token === "string" ? response.token : null,
         };
       })()
         .then((res) => {
@@ -1425,12 +1567,17 @@ export const initNativeHostListener = () => {
 
     if (message.type === BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_SUBSCRIBE) {
       const payload =
-        message?.payload && typeof message.payload === 'object'
-          ? (message.payload as { sessionId?: string; instanceId?: string; subscriptionId?: string })
+        message?.payload && typeof message.payload === "object"
+          ? (message.payload as {
+              sessionId?: string;
+              instanceId?: string;
+              subscriptionId?: string;
+            })
           : {};
-      const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
+      const sessionId =
+        typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
       if (!sessionId) {
-        sendResponse({ success: false, error: 'sessionId is required' });
+        sendResponse({ success: false, error: "sessionId is required" });
         return true;
       }
 
@@ -1452,11 +1599,13 @@ export const initNativeHostListener = () => {
 
     if (message.type === BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_UNSUBSCRIBE) {
       const payload =
-        message?.payload && typeof message.payload === 'object'
+        message?.payload && typeof message.payload === "object"
           ? (message.payload as { subscriptionId?: string })
           : {};
       const subscriptionId =
-        typeof payload.subscriptionId === 'string' ? payload.subscriptionId.trim() : '';
+        typeof payload.subscriptionId === "string"
+          ? payload.subscriptionId.trim()
+          : "";
       if (!subscriptionId) {
         sendResponse({ success: true });
         return true;
@@ -1476,12 +1625,12 @@ export const initNativeHostListener = () => {
     }
 
     // Forward file operation messages to native host
-    if (message.type === 'forward_to_native' && message.message) {
+    if (message.type === "forward_to_native" && message.message) {
       if (nativePort) {
         nativePort.postMessage(message.message);
         sendResponse({ success: true });
       } else {
-        sendResponse({ success: false, error: 'Native host not connected' });
+        sendResponse({ success: false, error: "Native host not connected" });
       }
       return true;
     }

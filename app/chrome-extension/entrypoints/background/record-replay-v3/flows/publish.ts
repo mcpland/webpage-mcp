@@ -11,6 +11,11 @@ export interface PublishedFlowInfoV3 {
   category?: string;
 }
 
+export interface PublishedFlowDetailsV3 extends PublishedFlowInfoV3 {
+  variables?: FlowV3["variables"];
+  meta?: FlowV3["meta"];
+}
+
 export const TOOL_SLUG_MAX_LENGTH = 64;
 const TOOL_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -73,6 +78,25 @@ export function listPublishedFlowInfos(flows: FlowV3[]): PublishedFlowInfoV3[] {
   return flows
     .map((flow) => getPublishedFlowInfo(flow))
     .filter((info): info is PublishedFlowInfoV3 => Boolean(info))
+    .sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
+export function listPublishedFlowDetails(
+  flows: FlowV3[],
+): PublishedFlowDetailsV3[] {
+  return flows
+    .map((flow) => {
+      const info = getPublishedFlowInfo(flow);
+      if (!info) {
+        return null;
+      }
+      return {
+        ...info,
+        ...(flow.variables ? { variables: flow.variables } : {}),
+        ...(flow.meta ? { meta: flow.meta } : {}),
+      };
+    })
+    .filter((info): info is PublishedFlowDetailsV3 => Boolean(info))
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
