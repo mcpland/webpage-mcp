@@ -294,6 +294,42 @@ describe("convertFlowV2ToV3 - entryNodeId calculation", () => {
       expect(result.success).toBe(false);
       expect(result.errors).toContain("V2 Flow has no nodes");
     });
+
+    it("rejects executeFlow nodes that the V3 runtime does not support", () => {
+      const result = convertFlowV2ToV3(
+        createV2Flow({
+          nodes: [
+            { id: "exec-1", type: "executeFlow", config: { flowId: "child" } },
+          ],
+          edges: [],
+        }),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toContain(
+        "V3 does not support these node types yet. Found: exec-1 (executeFlow)",
+      );
+    });
+
+    it("rejects loopElements nodes that still depend on subflows", () => {
+      const result = convertFlowV2ToV3(
+        createV2Flow({
+          nodes: [
+            {
+              id: "loop-1",
+              type: "loopElements",
+              config: { selector: ".item", subflowId: "sub-1" },
+            },
+          ],
+          edges: [],
+        }),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toContain(
+        "V3 does not support these node types yet. Found: loop-1 (loopElements)",
+      );
+    });
   });
 });
 

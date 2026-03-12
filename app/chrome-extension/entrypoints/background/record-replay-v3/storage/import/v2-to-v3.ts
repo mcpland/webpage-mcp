@@ -23,6 +23,7 @@ import type {
   JsonValue,
 } from "../../domain/json";
 import { FLOW_SCHEMA_VERSION } from "../../domain/flow";
+import { V3_UNSUPPORTED_NODE_TYPES } from "@/entrypoints/shared/utils/v3-authoring";
 
 // ==================== V2 Types (imported from record-replay) ====================
 
@@ -229,12 +230,14 @@ export function convertFlowV2ToV3(v2Flow: V2Flow): ConversionResult<FlowV3> {
   }
 
   // Check foreach/while nodes
-  const unsupportedNodes = (v2Flow.nodes || []).filter(
-    (n) => n.type === "foreach" || n.type === "while",
+  const unsupportedNodes = (v2Flow.nodes || []).filter((n) =>
+    V3_UNSUPPORTED_NODE_TYPES.includes(
+      n.type as (typeof V3_UNSUPPORTED_NODE_TYPES)[number],
+    ),
   );
   if (unsupportedNodes.length > 0) {
     errors.push(
-      "V3 does not support foreach/while nodes yet. Found: " +
+      "V3 does not support these node types yet. Found: " +
         unsupportedNodes.map((n) => `${n.id} (${n.type})`).join(", "),
     );
   }

@@ -935,6 +935,27 @@ describe("V3 RPC Flow CRUD APIs", () => {
       ).rejects.toThrow("flow.nodes[0].kind is required");
     });
 
+    it("rejects unsupported V3 runtime node kinds", async () => {
+      await expect(
+        (server as unknown as { handleRequest: Function }).handleRequest(
+          {
+            method: "rr_v3.saveFlow",
+            params: {
+              flow: {
+                name: "Test",
+                entryNodeId: "node-1",
+                nodes: [{ id: "node-1", kind: "foreach", config: {} }],
+              },
+            },
+            requestId: "req-1",
+          },
+          { subscriptions: new Set() },
+        ),
+      ).rejects.toThrow(
+        'flow.nodes[0].kind "foreach" is not supported by the current V3 runtime',
+      );
+    });
+
     it("generates edge ID if not provided", async () => {
       const result = (await (
         server as unknown as { handleRequest: Function }

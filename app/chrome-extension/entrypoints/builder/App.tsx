@@ -1,31 +1,35 @@
-import { useEffect, useRef, useState } from 'react';
-import { watch } from '@/entrypoints/shared/reactivity';
+import { useEffect, useRef, useState } from "react";
+import { watch } from "@/entrypoints/shared/reactivity";
 
-import type { Flow as FlowV2, NodeBase } from '@/entrypoints/background/record-replay/types';
-import type { FlowV3 } from '@/entrypoints/background/record-replay-v3/domain/flow';
+import type {
+  Flow as FlowV2,
+  NodeBase,
+} from "@/entrypoints/background/record-replay/types";
+import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import type {
   FlowId,
   NodeId,
-} from '@/entrypoints/background/record-replay-v3/domain/ids';
-import type { JsonObject } from '@/entrypoints/background/record-replay-v3/domain/json';
+} from "@/entrypoints/background/record-replay-v3/domain/ids";
+import type { JsonObject } from "@/entrypoints/background/record-replay-v3/domain/json";
 import {
   flowV2ToV3ForRpc,
   flowV3ToV2ForBuilder,
   isFlowV3,
   extractFlowCandidates,
-} from '@/entrypoints/shared/utils';
+} from "@/entrypoints/shared/utils";
+import { getV3AuthoringCompatibility } from "@/entrypoints/shared/utils/v3-authoring";
 
-import { validateFlow } from '@/entrypoints/popup/components/builder/model/validation';
-import { useBuilderStore } from '@/entrypoints/popup/components/builder/store/useBuilderStore';
-import Canvas from '@/entrypoints/popup/components/builder/components/Canvas';
-import EdgePropertyPanel from '@/entrypoints/popup/components/builder/components/EdgePropertyPanel';
-import Sidebar from '@/entrypoints/popup/components/builder/components/Sidebar';
-import PropertyPanel from '@/entrypoints/popup/components/builder/components/PropertyPanel';
-import { getMessage } from '@/utils/i18n';
-import { useRRV3Rpc } from '../shared/react/useRRV3Rpc';
-import './App.css';
+import { validateFlow } from "@/entrypoints/popup/components/builder/model/validation";
+import { useBuilderStore } from "@/entrypoints/popup/components/builder/store/useBuilderStore";
+import Canvas from "@/entrypoints/popup/components/builder/components/Canvas";
+import EdgePropertyPanel from "@/entrypoints/popup/components/builder/components/EdgePropertyPanel";
+import Sidebar from "@/entrypoints/popup/components/builder/components/Sidebar";
+import PropertyPanel from "@/entrypoints/popup/components/builder/components/PropertyPanel";
+import { getMessage } from "@/utils/i18n";
+import { useRRV3Rpc } from "../shared/react/useRRV3Rpc";
+import "./App.css";
 
-type ToastLevel = 'info' | 'warn' | 'error';
+type ToastLevel = "info" | "warn" | "error";
 type ToastItem = { id: string; message: string; level: ToastLevel };
 type FallbackNotice = { nodeId: string; type: string; prevIndex: number };
 
@@ -44,17 +48,24 @@ export default function BuilderApp() {
   const t = (key: string, fallback: string, substitutions?: string[]) =>
     getMessage(key, substitutions, fallback);
 
-  const [title, setTitle] = useState(() => t('builderWorkflowEditorTitle', 'Workflow Editor'));
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+  const [title, setTitle] = useState(() =>
+    t("builderWorkflowEditorTitle", "Workflow Editor"),
+  );
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
     try {
-      const persisted = localStorage.getItem('rr-theme') as 'light' | 'dark' | null;
-      if (persisted === 'light' || persisted === 'dark') {
+      const persisted = localStorage.getItem("rr-theme") as
+        | "light"
+        | "dark"
+        | null;
+      if (persisted === "light" || persisted === "dark") {
         return persisted;
       }
     } catch {
       // ignore
     }
-    return matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    return matchMedia && matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
   });
 
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -63,11 +74,15 @@ export default function BuilderApp() {
   const [fitSeq, setFitSeq] = useState(0);
 
   const [renameVisible, setRenameVisible] = useState(false);
-  const [renameName, setRenameName] = useState('');
-  const [renameDesc, setRenameDesc] = useState('');
+  const [renameName, setRenameName] = useState("");
+  const [renameDesc, setRenameDesc] = useState("");
 
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [fallbackNotice, setFallbackNotice] = useState<FallbackNotice | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
+    "idle",
+  );
+  const [fallbackNotice, setFallbackNotice] = useState<FallbackNotice | null>(
+    null,
+  );
 
   const [, forceRender] = useState(0);
 
@@ -77,10 +92,10 @@ export default function BuilderApp() {
 
   const rpc = useRRV3Rpc({
     autoConnect: true,
-    onError: (message) => pushToast(message, 'error'),
+    onError: (message) => pushToast(message, "error"),
   });
 
-  function pushToast(message: string, level: ToastLevel = 'warn') {
+  function pushToast(message: string, level: ToastLevel = "warn") {
     const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const item: ToastItem = { id, message, level };
     setToasts((current) => [...current, item]);
@@ -89,26 +104,68 @@ export default function BuilderApp() {
     }, 2500);
   }
 
-  const selectedId = ((store.activeNodeId as any)?.value ?? null) as string | null;
-  const selectedEdgeId = ((store.activeEdgeId as any)?.value ?? null) as string | null;
+  const selectedId = ((store.activeNodeId as any)?.value ?? null) as
+    | string
+    | null;
+  const selectedEdgeId = ((store.activeEdgeId as any)?.value ?? null) as
+    | string
+    | null;
   const activeNode = store.nodes.find((n) => n.id === selectedId) || null;
   const activeEdge = store.edges.find((e) => e.id === selectedEdgeId) || null;
   const validation = validateFlow(store.nodes);
   const availableVars = store.listAvailableVariables(selectedId || undefined);
-  const currentSubflowIdVal = ((store.currentSubflowId as any)?.value ?? null) as string | null;
+  const currentSubflowIdVal = ((store.currentSubflowId as any)?.value ??
+    null) as string | null;
+  const compatibility = getV3AuthoringCompatibility({
+    nodes: store.nodes,
+    subflows: (store.flowLocal as any)?.subflows,
+  });
+  const compatibilityMessage = compatibility.messages.join(" ");
 
   const saveLabel =
-    saveState === 'saving'
-      ? t('builderSavingStatus', 'Saving...')
-      : saveState === 'saved'
-        ? t('builderSavedStatus', 'Saved')
-        : '';
+    saveState === "saving"
+      ? t("builderSavingStatus", "Saving...")
+      : saveState === "saved"
+        ? t("builderSavedStatus", "Saved")
+        : "";
+  const statusLabel = compatibility.isCompatible
+    ? saveLabel
+    : t("builderUnsupportedV3Status", "Unsupported V3 features");
+
+  function getCurrentCompatibility() {
+    return getV3AuthoringCompatibility({
+      nodes: store.nodes,
+      subflows: (store.flowLocal as any)?.subflows,
+    });
+  }
+
+  function notifyCompatibilityBlocked(actionLabel: string, message?: string) {
+    pushToast(
+      t(
+        "builderV3CompatibilityBlocked",
+        "{0} is disabled until unsupported V3 workflow features are removed. {1}",
+        [actionLabel, message || getCurrentCompatibility().messages.join(" ")],
+      ),
+      "warn",
+    );
+  }
+
+  function notifyImportReadOnly(message: string) {
+    pushToast(
+      t(
+        "builderImportReadOnlyWarning",
+        "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. {0}",
+        [message],
+      ),
+      "warn",
+    );
+  }
 
   function initEmptyFlow() {
     const now = Date.now();
     const empty: FlowV2 = {
       id: `flow_${now}`,
-      name: t('builderNewWorkflowName', 'New workflow'),
+      name: t("builderNewWorkflowName", "New workflow"),
       version: 1,
       steps: [],
       variables: [],
@@ -118,7 +175,7 @@ export default function BuilderApp() {
       } as any,
     } as any;
     store.initFromFlow(empty);
-    setTitle(t('builderNewWorkflowName', 'New workflow'));
+    setTitle(t("builderNewWorkflowName", "New workflow"));
   }
 
   async function bootstrap() {
@@ -126,16 +183,18 @@ export default function BuilderApp() {
     if (q.flowId) {
       try {
         await rpc.ensureConnected();
-        const flowV3 = (await rpc.request('rr_v3.getFlow', {
+        const flowV3 = (await rpc.request("rr_v3.getFlow", {
           flowId: q.flowId as FlowId,
         })) as FlowV3 | null;
 
         if (flowV3) {
           const { flow: flowV2, warnings } = flowV3ToV2ForBuilder(flowV3);
-          warnings.forEach((w) => pushToast(w, 'warn'));
+          warnings.forEach((w) => pushToast(w, "warn"));
           store.initFromFlow(flowV2);
           setTitle(
-            t('builderEditFlowTitle', 'Edit: {0}', [String(flowV2.name || flowV2.id)]),
+            t("builderEditFlowTitle", "Edit: {0}", [
+              String(flowV2.name || flowV2.id),
+            ]),
           );
 
           if (q.focus) {
@@ -151,30 +210,32 @@ export default function BuilderApp() {
           }
         } else {
           pushToast(
-            t('builderWorkflowNotFoundCreated', 'Workflow "{0}" not found, created a new workflow.', [
-              String(q.flowId || ''),
-            ]),
-            'warn',
+            t(
+              "builderWorkflowNotFoundCreated",
+              'Workflow "{0}" not found, created a new workflow.',
+              [String(q.flowId || "")],
+            ),
+            "warn",
           );
           initEmptyFlow();
         }
       } catch (error) {
         pushToast(
-          t('builderLoadFlowFailed', 'Failed to load workflow: {0}', [
+          t("builderLoadFlowFailed", "Failed to load workflow: {0}", [
             error instanceof Error ? error.message : String(error),
           ]),
-          'error',
+          "error",
         );
         initEmptyFlow();
       }
-    } else if (q.new === '1') {
+    } else if (q.new === "1") {
       initEmptyFlow();
     }
   }
 
   function onAddNodeAt(type: string, x: number, y: number) {
     try {
-      store.addNodeAt(type as NodeBase['type'], x, y);
+      store.addNodeAt(type as NodeBase["type"], x, y);
     } catch {
       // ignore
     }
@@ -185,8 +246,8 @@ export default function BuilderApp() {
   }
 
   function openRename() {
-    setRenameName(store.flowLocal.name || '');
-    setRenameDesc((store.flowLocal as any).description || '');
+    setRenameName(store.flowLocal.name || "");
+    setRenameDesc((store.flowLocal as any).description || "");
     setRenameVisible(true);
   }
 
@@ -198,13 +259,22 @@ export default function BuilderApp() {
 
   async function save(): Promise<FlowV3 | null> {
     try {
+      const currentCompatibility = getCurrentCompatibility();
+      if (!currentCompatibility.isCompatible) {
+        notifyCompatibilityBlocked(
+          t("saveButton", "Save"),
+          currentCompatibility.messages.join(" "),
+        );
+        return null;
+      }
+
       const flowV2 = store.exportFlowForSave();
       await rpc.ensureConnected();
 
       const { flow: flowV3, warnings: convWarnings } = flowV2ToV3ForRpc(flowV2);
-      convWarnings.forEach((w) => pushToast(w, 'warn'));
+      convWarnings.forEach((w) => pushToast(w, "warn"));
 
-      const saved = (await rpc.request('rr_v3.saveFlow', {
+      const saved = (await rpc.request("rr_v3.saveFlow", {
         flow: flowV3 as unknown as JsonObject,
       })) as unknown as FlowV3;
 
@@ -217,10 +287,10 @@ export default function BuilderApp() {
       return saved;
     } catch (error) {
       pushToast(
-        t('builderSaveFailed', 'Save failed: {0}', [
+        t("builderSaveFailed", "Save failed: {0}", [
           error instanceof Error ? error.message : String(error),
         ]),
-        'error',
+        "error",
       );
       return null;
     }
@@ -228,23 +298,48 @@ export default function BuilderApp() {
 
   async function exportFlow() {
     try {
+      const currentCompatibility = getCurrentCompatibility();
+      if (!currentCompatibility.isCompatible) {
+        const legacyFlow = store.exportFlowForSave();
+        const blob = new Blob([JSON.stringify(legacyFlow, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        await chrome.downloads.download({
+          url,
+          filename: `${store.flowLocal.name || "flow"}.legacy-v2.json`,
+          saveAs: true,
+        } as chrome.downloads.DownloadOptions);
+        URL.revokeObjectURL(url);
+        pushToast(
+          t(
+            "builderLegacyExportNotice",
+            "Exported as legacy V2 JSON because this workflow uses unsupported V3 features.",
+          ),
+          "info",
+        );
+        return;
+      }
+
       const saved = await save();
       if (!saved) return;
 
-      const blob = new Blob([JSON.stringify(saved, null, 2)], { type: 'application/json' });
+      const blob = new Blob([JSON.stringify(saved, null, 2)], {
+        type: "application/json",
+      });
       const url = URL.createObjectURL(blob);
       await chrome.downloads.download({
         url,
-        filename: `${store.flowLocal.name || 'flow'}.json`,
+        filename: `${store.flowLocal.name || "flow"}.json`,
         saveAs: true,
       } as chrome.downloads.DownloadOptions);
       URL.revokeObjectURL(url);
     } catch (error) {
       pushToast(
-        t('builderExportFailed', 'Export failed: {0}', [
+        t("builderExportFailed", "Export failed: {0}", [
           error instanceof Error ? error.message : String(error),
         ]),
-        'error',
+        "error",
       );
     }
   }
@@ -260,48 +355,75 @@ export default function BuilderApp() {
       const candidates = extractFlowCandidates(parsed);
 
       if (!candidates.length) {
-        pushToast(t('builderImportDataNotFound', 'Import failed: workflow data not found.'), 'error');
+        pushToast(
+          t(
+            "builderImportDataNotFound",
+            "Import failed: workflow data not found.",
+          ),
+          "error",
+        );
         return;
       }
 
       const first = candidates[0];
 
       if (isFlowV3(first)) {
-        await rpc.ensureConnected();
-        const saved = (await rpc.request('rr_v3.saveFlow', {
-          flow: first as unknown as JsonObject,
-        })) as unknown as FlowV3;
-
-        const { flow: flowV2, warnings } = flowV3ToV2ForBuilder(saved);
-        warnings.forEach((w) => pushToast(w, 'warn'));
+        const importedCompatibility = getV3AuthoringCompatibility(first);
+        const { flow: flowV2, warnings } = flowV3ToV2ForBuilder(
+          first as FlowV3,
+        );
+        warnings.forEach((w) => pushToast(w, "warn"));
         store.initFromFlow(flowV2);
         setTitle(
-          t('builderEditFlowTitle', 'Edit: {0}', [String(flowV2.name || flowV2.id)]),
+          t("builderEditFlowTitle", "Edit: {0}", [
+            String(flowV2.name || flowV2.id),
+          ]),
         );
+        if (importedCompatibility.isCompatible) {
+          await rpc.ensureConnected();
+          const saved = (await rpc.request("rr_v3.saveFlow", {
+            flow: first as unknown as JsonObject,
+          })) as unknown as FlowV3;
+          if (!store.flowLocal.meta) {
+            (store.flowLocal as any).meta = {};
+          }
+          (store.flowLocal as any).meta.createdAt = saved.createdAt;
+          (store.flowLocal as any).meta.updatedAt = saved.updatedAt;
+        } else {
+          notifyImportReadOnly(importedCompatibility.messages.join(" "));
+        }
       } else {
         store.initFromFlow(first as FlowV2);
 
         if (
           Array.isArray((first as any)?.steps) &&
-          (!Array.isArray((first as any)?.nodes) || (first as any).nodes.length === 0)
+          (!Array.isArray((first as any)?.nodes) ||
+            (first as any).nodes.length === 0)
         ) {
           store.importFromSteps();
         }
 
         setTitle(
-          t('builderEditFlowTitle', 'Edit: {0}', [String(store.flowLocal.name || store.flowLocal.id)]),
+          t("builderEditFlowTitle", "Edit: {0}", [
+            String(store.flowLocal.name || store.flowLocal.id),
+          ]),
         );
-        await save();
+        const importedCompatibility = getCurrentCompatibility();
+        if (importedCompatibility.isCompatible) {
+          await save();
+        } else {
+          notifyImportReadOnly(importedCompatibility.messages.join(" "));
+        }
       }
     } catch (error) {
       pushToast(
-        t('builderImportFailed', 'Import failed: {0}', [
+        t("builderImportFailed", "Import failed: {0}", [
           error instanceof Error ? error.message : String(error),
         ]),
-        'error',
+        "error",
       );
     } finally {
-      input.value = '';
+      input.value = "";
     }
   }
 
@@ -309,24 +431,33 @@ export default function BuilderApp() {
     if (!selectedId || !store.flowLocal?.id) return;
 
     try {
+      const currentCompatibility = getCurrentCompatibility();
+      if (!currentCompatibility.isCompatible) {
+        notifyCompatibilityBlocked(
+          t("builderRunFromSelectedButton", "Run from selected"),
+          currentCompatibility.messages.join(" "),
+        );
+        return;
+      }
+
       const saved = await save();
       if (!saved) return;
 
       await rpc.ensureConnected();
 
       const node = store.nodes.find((n) => n.id === selectedId) || null;
-      const startNodeId = node?.type === 'trigger' ? undefined : selectedId;
+      const startNodeId = node?.type === "trigger" ? undefined : selectedId;
 
-      await rpc.request('rr_v3.enqueueRun', {
+      await rpc.request("rr_v3.enqueueRun", {
         flowId: saved.id as FlowId,
         ...(startNodeId ? { startNodeId: startNodeId as NodeId } : {}),
       });
     } catch (error) {
       pushToast(
-        t('builderRunFailed', 'Run failed: {0}', [
+        t("builderRunFailed", "Run failed: {0}", [
           error instanceof Error ? error.message : String(error),
         ]),
-        'error',
+        "error",
       );
     }
   }
@@ -335,17 +466,26 @@ export default function BuilderApp() {
     if (!store.flowLocal?.id) return;
 
     try {
+      const currentCompatibility = getCurrentCompatibility();
+      if (!currentCompatibility.isCompatible) {
+        notifyCompatibilityBlocked(
+          t("workflowsRunAction", "Run"),
+          currentCompatibility.messages.join(" "),
+        );
+        return;
+      }
+
       const saved = await save();
       if (!saved) return;
 
       await rpc.ensureConnected();
-      await rpc.request('rr_v3.enqueueRun', { flowId: saved.id as FlowId });
+      await rpc.request("rr_v3.enqueueRun", { flowId: saved.id as FlowId });
     } catch (error) {
       pushToast(
-        t('builderRunFailed', 'Run failed: {0}', [
+        t("builderRunFailed", "Run failed: {0}", [
           error instanceof Error ? error.message : String(error),
         ]),
-        'error',
+        "error",
       );
     }
   }
@@ -354,11 +494,14 @@ export default function BuilderApp() {
     const n = fallbackNotice;
     if (!n) return;
     const node = store.nodes.find((x) => x.id === n.nodeId);
-    if (!node || (node.type !== 'click' && node.type !== 'fill')) {
+    if (!node || (node.type !== "click" && node.type !== "fill")) {
       setFallbackNotice(null);
       return;
     }
-    const cands = (node as any).config?.target?.candidates as Array<{ type: string; value: string }>;
+    const cands = (node as any).config?.target?.candidates as Array<{
+      type: string;
+      value: string;
+    }>;
     if (!Array.isArray(cands) || cands.length === 0) {
       setFallbackNotice(null);
       return;
@@ -376,23 +519,29 @@ export default function BuilderApp() {
       clearTimeout(saveTimerRef.current);
     }
 
+    const currentCompatibility = getCurrentCompatibility();
+    if (!currentCompatibility.isCompatible) {
+      setSaveState("idle");
+      return;
+    }
+
     saveTimerRef.current = setTimeout(async () => {
       try {
-        setSaveState('saving');
+        setSaveState("saving");
         await new Promise((resolve) => setTimeout(resolve, 0));
         const saved = await save();
         if (!saved) {
-          setSaveState('idle');
+          setSaveState("idle");
           return;
         }
 
-        setSaveState('saved');
+        setSaveState("saved");
         if (statusTimerRef.current) {
           clearTimeout(statusTimerRef.current);
         }
-        statusTimerRef.current = setTimeout(() => setSaveState('idle'), 1200);
+        statusTimerRef.current = setTimeout(() => setSaveState("idle"), 1200);
       } catch {
-        setSaveState('idle');
+        setSaveState("idle");
       }
     }, 800);
   }
@@ -401,8 +550,9 @@ export default function BuilderApp() {
     const onToast = (ev: Event) => {
       try {
         const customEvent = ev as CustomEvent;
-        const msg = String((customEvent as any)?.detail?.message || '');
-        const level = ((customEvent as any)?.detail?.level || 'warn') as ToastLevel;
+        const msg = String((customEvent as any)?.detail?.message || "");
+        const level = ((customEvent as any)?.detail?.level ||
+          "warn") as ToastLevel;
         if (msg) pushToast(msg, level);
       } catch {
         // ignore
@@ -414,36 +564,36 @@ export default function BuilderApp() {
       const isMeta = e.metaKey || e.ctrlKey;
       const t = e.target as HTMLElement | null;
       if (t) {
-        const tag = (t.tagName || '').toLowerCase();
+        const tag = (t.tagName || "").toLowerCase();
         const inEditable =
-          tag === 'input' ||
-          tag === 'textarea' ||
-          tag === 'select' ||
+          tag === "input" ||
+          tag === "textarea" ||
+          tag === "select" ||
           t.isContentEditable ||
-          !!t.closest('.floating-property');
+          !!t.closest(".floating-property");
         if (inEditable) return;
       }
 
-      if ((e.key === 'Delete' || e.key === 'Backspace') && id) {
+      if ((e.key === "Delete" || e.key === "Backspace") && id) {
         e.preventDefault();
         store.removeNode(id);
-      } else if (isMeta && e.key.toLowerCase() === 'd') {
+      } else if (isMeta && e.key.toLowerCase() === "d") {
         if (id) {
           e.preventDefault();
           store.duplicateNode(id);
         }
-      } else if (isMeta && e.key.toLowerCase() === 'z') {
+      } else if (isMeta && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) store.redo();
         else store.undo();
-      } else if (isMeta && e.key.toLowerCase() === 's') {
+      } else if (isMeta && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void save();
       }
     };
 
-    window.addEventListener('rr_toast', onToast as EventListener);
-    document.addEventListener('keydown', onKey);
+    window.addEventListener("rr_toast", onToast as EventListener);
+    document.addEventListener("keydown", onKey);
 
     if (!bootstrapDoneRef.current) {
       bootstrapDoneRef.current = true;
@@ -451,8 +601,8 @@ export default function BuilderApp() {
     }
 
     return () => {
-      window.removeEventListener('rr_toast', onToast as EventListener);
-      document.removeEventListener('keydown', onKey);
+      window.removeEventListener("rr_toast", onToast as EventListener);
+      document.removeEventListener("keydown", onKey);
 
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
@@ -461,7 +611,7 @@ export default function BuilderApp() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('rr-theme', theme);
+      localStorage.setItem("rr-theme", theme);
     } catch {
       // ignore
     }
@@ -514,13 +664,30 @@ export default function BuilderApp() {
         {fallbackNotice ? (
           <div className="notice-top">
             <span>
-              {t('builderFallbackPromotionNotice', 'Fallback recommendation applied: promoted {0} priority.', [
-                fallbackNotice.type,
-              ])}
+              {t(
+                "builderFallbackPromotionNotice",
+                "Fallback recommendation applied: promoted {0} priority.",
+                [fallbackNotice.type],
+              )}
             </span>
-            <button className="mini" type="button" onClick={undoFallbackPromotion}>
-              {t('cancelButton', 'Cancel')}
+            <button
+              className="mini"
+              type="button"
+              onClick={undoFallbackPromotion}
+            >
+              {t("cancelButton", "Cancel")}
             </button>
+          </div>
+        ) : null}
+        {!compatibility.isCompatible ? (
+          <div className="notice-top warning">
+            <span>
+              {t(
+                "builderUnsupportedV3Notice",
+                "Save and run are disabled for this workflow. {0}",
+                [compatibilityMessage],
+              )}
+            </span>
           </div>
         ) : null}
 
@@ -531,7 +698,10 @@ export default function BuilderApp() {
             <div className="left">
               <strong className="text-[var(--rr-text)]">{title}</strong>
               <span className="tip">
-                {t('builderVisualOrchestrationTip', 'Workflow visual orchestration')}
+                {t(
+                  "builderVisualOrchestrationTip",
+                  "Workflow visual orchestration",
+                )}
               </span>
             </div>
             <div className="right">
@@ -539,33 +709,61 @@ export default function BuilderApp() {
                 className="top-btn"
                 type="button"
                 onClick={() => void exportFlow()}
-                title={t('builderExportJsonTitle', 'Export JSON')}
+                title={t("builderExportJsonTitle", "Export JSON")}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
                 </svg>
-                {t('workflowsExportAction', 'Export')}
+                {t("workflowsExportAction", "Export")}
               </button>
 
-              <label className="top-btn import" title={t('builderImportJsonTitle', 'Import JSON')}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <label
+                className="top-btn import"
+                title={t("builderImportJsonTitle", "Import JSON")}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
                 </svg>
-                {t('workflowsImportAction', 'Import')}
-                <input type="file" accept="application/json" onChange={onImport} />
+                {t("workflowsImportAction", "Import")}
+                <input
+                  type="file"
+                  accept="application/json"
+                  onChange={onImport}
+                />
               </label>
 
               <button
                 className="top-btn"
                 type="button"
                 onClick={openRename}
-                title={t('builderRenameWorkflowTitle', 'Rename workflow')}
+                title={t("builderRenameWorkflowTitle", "Rename workflow")}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M12 20h9" />
                   <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" />
                 </svg>
-                {t('agentSessionRenameTitle', 'Rename')}
+                {t("agentSessionRenameTitle", "Rename")}
               </button>
 
               <span className="divider-vert" />
@@ -573,41 +771,85 @@ export default function BuilderApp() {
               <button
                 className="top-btn"
                 type="button"
-                disabled={!selectedId}
+                disabled={!selectedId || !compatibility.isCompatible}
                 onClick={() => void runFromSelected()}
-                title={t('builderRunFromSelectedTitle', 'Playback from selected node')}
+                title={
+                  compatibility.isCompatible
+                    ? t(
+                        "builderRunFromSelectedTitle",
+                        "Playback from selected node",
+                      )
+                    : compatibilityMessage
+                }
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <polygon points="5 3 19 12 5 21 5 3" />
                 </svg>
-                {t('builderRunFromSelectedButton', 'Run from selected')}
+                {t("builderRunFromSelectedButton", "Run from selected")}
               </button>
 
               <button
                 className="top-btn primary"
                 type="button"
+                disabled={!compatibility.isCompatible}
                 onClick={() => void runAll()}
-                title={t('builderRunAllTitle', 'Playback rectification from the beginning')}
+                title={
+                  compatibility.isCompatible
+                    ? t(
+                        "builderRunAllTitle",
+                        "Playback rectification from the beginning",
+                      )
+                    : compatibilityMessage
+                }
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <polygon points="5 3 19 12 5 21 5 3" />
                 </svg>
-                {t('workflowsRunAction', 'Run')}
+                {t("workflowsRunAction", "Run")}
               </button>
 
               <span className="divider-vert" />
 
               <span className="status" data-state={saveState}>
-                {saveLabel}
+                {statusLabel}
               </span>
 
-              <button className="top-btn success" type="button" onClick={() => void save()}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <button
+                className="top-btn success"
+                type="button"
+                disabled={!compatibility.isCompatible}
+                onClick={() => void save()}
+                title={
+                  compatibility.isCompatible ? undefined : compatibilityMessage
+                }
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
                   <polyline points="17 21 17 13 7 13 7 21" />
                   <polyline points="7 3 7 8 15 8" />
                 </svg>
-                {t('saveButton', 'Save')}
+                {t("saveButton", "Save")}
               </button>
             </div>
           </div>
@@ -642,7 +884,11 @@ export default function BuilderApp() {
 
           {!activeNode && activeEdge ? (
             <div className="floating-property">
-              <EdgePropertyPanel edge={activeEdge} nodes={store.nodes} onRemoveEdge={store.removeEdge} />
+              <EdgePropertyPanel
+                edge={activeEdge}
+                nodes={store.nodes}
+                onRemoveEdge={store.removeEdge}
+              />
             </div>
           ) : null}
 
@@ -651,9 +897,16 @@ export default function BuilderApp() {
               className="toolbar-btn"
               type="button"
               onClick={store.undo}
-              title={t('builderUndoTitle', 'Undo (⌘/Ctrl+Z)')}
+              title={t("builderUndoTitle", "Undo (⌘/Ctrl+Z)")}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <path d="M3 7v6h6M21 17a9 9 0 00-9-9 9 9 0 00-9 9" />
               </svg>
             </button>
@@ -662,9 +915,16 @@ export default function BuilderApp() {
               className="toolbar-btn"
               type="button"
               onClick={store.redo}
-              title={t('builderRedoTitle', 'Redo (⌘/Ctrl+Shift+Z)')}
+              title={t("builderRedoTitle", "Redo (⌘/Ctrl+Shift+Z)")}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <path d="M21 7v6h-6M3 17a9 9 0 019-9 9 9 0 019 9" />
               </svg>
             </button>
@@ -675,9 +935,16 @@ export default function BuilderApp() {
               className="toolbar-btn"
               type="button"
               onClick={store.layoutAuto}
-              title={t('builderAutoLayoutTitle', 'Automatic typesetting')}
+              title={t("builderAutoLayoutTitle", "Automatic typesetting")}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <rect x="3" y="3" width="7" height="7" rx="1" />
                 <rect x="14" y="3" width="7" height="7" rx="1" />
                 <rect x="14" y="14" width="7" height="7" rx="1" />
@@ -689,9 +956,16 @@ export default function BuilderApp() {
               className="toolbar-btn"
               type="button"
               onClick={fitAll}
-              title={t('builderFitViewTitle', 'Adaptive view')}
+              title={t("builderFitViewTitle", "Adaptive view")}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />
               </svg>
             </button>
@@ -711,32 +985,44 @@ export default function BuilderApp() {
         <div className="rr-modal">
           <div className="rr-dialog small">
             <div className="rr-header">
-              <div className="title">{t('builderRenameWorkflowTitle', 'Rename workflow')}</div>
-              <button className="close" type="button" onClick={() => setRenameVisible(false)}>
+              <div className="title">
+                {t("builderRenameWorkflowTitle", "Rename workflow")}
+              </div>
+              <button
+                className="close"
+                type="button"
+                onClick={() => setRenameVisible(false)}
+              >
                 ✕
               </button>
             </div>
             <div className="rr-body">
               <div className="row">
-                <label>{t('builderNameLabel', 'Name')}</label>
+                <label>{t("builderNameLabel", "Name")}</label>
                 <input
                   value={renameName}
                   onChange={(event) => setRenameName(event.currentTarget.value)}
-                  placeholder={t('builderWorkflowNamePlaceholder', 'Workflow name')}
+                  placeholder={t(
+                    "builderWorkflowNamePlaceholder",
+                    "Workflow name",
+                  )}
                 />
               </div>
               <div className="row">
-                <label>{t('workflowsDescriptionLabel', 'Description')}</label>
+                <label>{t("workflowsDescriptionLabel", "Description")}</label>
                 <textarea
                   value={renameDesc}
                   onChange={(event) => setRenameDesc(event.currentTarget.value)}
-                  placeholder={t('workflowsOptionalDescription', 'Optional description')}
+                  placeholder={t(
+                    "workflowsOptionalDescription",
+                    "Optional description",
+                  )}
                 />
               </div>
             </div>
             <div className="rr-footer">
               <button className="primary" type="button" onClick={applyRename}>
-                {t('saveButton', 'Save')}
+                {t("saveButton", "Save")}
               </button>
             </div>
           </div>

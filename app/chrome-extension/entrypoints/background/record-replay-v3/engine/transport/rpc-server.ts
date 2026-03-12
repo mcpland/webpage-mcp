@@ -47,6 +47,7 @@ import {
   listPublishedFlowInfos,
   normalizeToolSlug,
 } from "../../flows/publish";
+import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
 import {
   RR_V3_PORT_NAME,
   isRpcRequest,
@@ -853,6 +854,11 @@ export class RpcServer {
       throw new Error(`flow.nodes[${index}].kind is required`);
     }
     const kind = raw.kind.trim();
+    if (isV3UnsupportedNodeType(kind)) {
+      throw new Error(
+        `flow.nodes[${index}].kind "${kind}" is not supported by the current V3 runtime`,
+      );
+    }
 
     // config Verification
     if (raw.config !== undefined && raw.config !== null) {

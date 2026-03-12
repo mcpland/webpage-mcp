@@ -1,9 +1,9 @@
-import { reactive, ref } from '@/entrypoints/shared/reactivity';
+import { reactive, ref } from "@/entrypoints/shared/reactivity";
 import type {
   Flow as FlowV2,
   NodeBase,
   Edge as EdgeV2,
-} from '@/entrypoints/background/record-replay/types';
+} from "@/entrypoints/background/record-replay/types";
 import {
   autoChainEdges,
   cloneFlow,
@@ -11,55 +11,53 @@ import {
   stepsToNodes,
   summarizeNode,
   topoOrder,
-} from '../model/transforms';
-import { defaultConfigOf, getIoConstraint } from '../model/ui-nodes';
-import { toast } from '../model/toast';
+} from "../model/transforms";
+import { defaultConfigOf, getIoConstraint } from "../model/ui-nodes";
+import { toast } from "../model/toast";
+import {
+  canCreateV3AuthoringNodeType,
+  getV3AuthoringPaletteTypes,
+} from "@/entrypoints/shared/utils/v3-authoring";
 
 // Route A scope: keep trigger/schedule automation out of connector authoring surface.
 const ENABLE_TRIGGER_NODE_CREATION = false;
 
 export function useBuilderStore(initial?: FlowV2 | null) {
-  const flowLocal = reactive<FlowV2>({ id: '', name: '', version: 1, steps: [], variables: [] });
+  const flowLocal = reactive<FlowV2>({
+    id: "",
+    name: "",
+    version: 1,
+    steps: [],
+    variables: [],
+  });
   const nodes = reactive<NodeBase[]>([]);
   const edges = reactive<EdgeV2[]>([]);
   const activeNodeId = ref<string | null>(null);
   const activeEdgeId = ref<string | null>(null);
   const pendingFrom = ref<string | null>(null);
-  const pendingLabel = ref<string>('default');
-  const paletteTypes = [
-    'click',
-    'drag',
-    'scroll',
-    'fill',
-    'if',
-    'foreach',
-    'while',
-    'key',
-    'wait',
-    'assert',
-    'navigate',
-    'script',
-    'delay',
-    'http',
-    'extract',
-    'screenshot',
-    'triggerEvent',
-    'setAttribute',
-    'loopElements',
-    'switchFrame',
-    'handleDownload',
-    'executeFlow',
-    'openTab',
-    'switchTab',
-    'closeTab',
-  ] as NodeBase['type'][];
-  if (ENABLE_TRIGGER_NODE_CREATION) {
-    paletteTypes.unshift('trigger');
+  const pendingLabel = ref<string>("default");
+  const paletteTypes = getV3AuthoringPaletteTypes({
+    includeTrigger: ENABLE_TRIGGER_NODE_CREATION,
+  });
+
+  function ensureNodeTypeCreatable(type: NodeBase["type"]): boolean {
+    if (
+      canCreateV3AuthoringNodeType(type, {
+        includeTrigger: ENABLE_TRIGGER_NODE_CREATION,
+      })
+    ) {
+      return true;
+    }
+    toast(
+      `This node type is not available in the V3 builder yet: ${type}`,
+      "warn",
+    );
+    return false;
   }
 
   // --- history (undo/redo) ---
   type Snapshot = {
-    flow: Pick<FlowV2, 'name' | 'description'>;
+    flow: Pick<FlowV2, "name" | "description">;
     nodes: NodeBase[];
     edges: EdgeV2[];
   };
@@ -74,8 +72,8 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     };
   }
   function applySnapshot(s: Snapshot) {
-    flowLocal.name = (s.flow as any).name || '';
-    (flowLocal as any).description = (s.flow as any).description || '';
+    flowLocal.name = (s.flow as any).name || "";
+    (flowLocal as any).description = (s.flow as any).description || "";
     nodes.splice(0, nodes.length, ...JSON.parse(JSON.stringify(s.nodes)));
     edges.splice(0, edges.length, ...JSON.parse(JSON.stringify(s.edges)));
   }
@@ -105,7 +103,8 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       startY = 80,
       gapY = 120;
     nodes.forEach((n, i) => {
-      if (!n.ui || isNaN(n.ui.x) || isNaN(n.ui.y)) n.ui = { x: startX, y: startY + i * gapY };
+      if (!n.ui || isNaN(n.ui.x) || isNaN(n.ui.y))
+        n.ui = { x: startX, y: startY + i * gapY };
     });
   }
 
@@ -114,11 +113,17 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     Object.assign(flowLocal, deep);
     // DAG is required - flow-store guarantees nodes/edges via normalization
     // steps fallback removed (deprecated field no longer returned)
-    nodes.splice(0, nodes.length, ...(Array.isArray(deep.nodes) ? deep.nodes : []));
+    nodes.splice(
+      0,
+      nodes.length,
+      ...(Array.isArray(deep.nodes) ? deep.nodes : []),
+    );
     edges.splice(
       0,
       edges.length,
-      ...(Array.isArray(deep.edges) && deep.edges.length ? deep.edges : autoChainEdges(nodes)),
+      ...(Array.isArray(deep.edges) && deep.edges.length
+        ? deep.edges
+        : autoChainEdges(nodes)),
     );
     layoutIfNeeded();
     activeNodeId.value = nodes[0]?.id || null;
@@ -145,30 +150,32 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     if (id) activeNodeId.value = null;
   }
 
-  function addNode(t: NodeBase['type']) {
+  function addNode(t: NodeBase["type"]) {
+    if (!ensureNodeTypeCreatable(t)) return;
     const id = newId(t);
     const n: NodeBase = {
       id,
       type: t,
-      name: '',
+      name: "",
       config: defaultConfigOf(t),
       ui: { x: 200 + nodes.length * 24, y: 120 + nodes.length * 96 },
     };
     nodes.push(n);
     if (nodes.length > 1) {
       const prev = nodes[nodes.length - 2];
-      edges.push({ id: newId('e'), from: prev.id, to: id, label: 'default' });
+      edges.push({ id: newId("e"), from: prev.id, to: id, label: "default" });
     }
     activeNodeId.value = id;
     recordChange();
   }
 
-  function addNodeAt(t: NodeBase['type'], x: number, y: number) {
+  function addNodeAt(t: NodeBase["type"], x: number, y: number) {
+    if (!ensureNodeTypeCreatable(t)) return;
     const id = newId(t);
     const n: NodeBase = {
       id,
       type: t,
-      name: '',
+      name: "",
       config: defaultConfigOf(t),
       ui: { x: Math.round(x), y: Math.round(y) },
     };
@@ -182,9 +189,9 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     if (!src) return;
     const cp: NodeBase = JSON.parse(JSON.stringify(src));
     cp.id = newId(src.type);
-    cp.name = src.name ? `${src.name} Copy` : '';
-    const baseX = cp.ui && typeof cp.ui.x === 'number' ? cp.ui.x : 200;
-    const baseY = cp.ui && typeof cp.ui.y === 'number' ? cp.ui.y : 120;
+    cp.name = src.name ? `${src.name} Copy` : "";
+    const baseX = cp.ui && typeof cp.ui.x === "number" ? cp.ui.x : 200;
+    const baseY = cp.ui && typeof cp.ui.y === "number" ? cp.ui.y : 120;
     cp.ui = { x: baseX + 40, y: baseY + 40 };
     nodes.push(cp);
     activeNodeId.value = cp.id;
@@ -220,15 +227,19 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     // Not included in the history stack to avoid frequent recording; operations (connection/add/delete, etc.) triggered by the user are recorded.
   }
 
-  function connectFrom(id: string, label: string = 'default') {
+  function connectFrom(id: string, label: string = "default") {
     pendingFrom.value = id;
     pendingLabel.value = label;
   }
 
-  function onConnect(sourceId: string, targetId: string, label: string = 'default') {
+  function onConnect(
+    sourceId: string,
+    targetId: string,
+    label: string = "default",
+  ) {
     // prevent self-loop
     if (sourceId === targetId) {
-      toast('Cannot connect to self', 'warn');
+      toast("Cannot connect to self", "warn");
       return;
     }
     // IO constraints
@@ -240,15 +251,15 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       const dstIo = getIoConstraint(dst.type as any);
       // Inputs: respect numeric maximum; 'any' means unlimited
       const incoming = edges.filter((e) => e.to === targetId).length;
-      if (dstIo.inputs !== 'any' && incoming >= (dstIo.inputs as number)) {
-        toast(`This node allows up to ${dstIo.inputs} Entry edge`, 'warn');
+      if (dstIo.inputs !== "any" && incoming >= (dstIo.inputs as number)) {
+        toast(`This node allows up to ${dstIo.inputs} Entry edge`, "warn");
         return;
       }
       // Outputs: respect numeric maximum when defined
-      if (srcIo.outputs !== 'any') {
+      if (srcIo.outputs !== "any") {
         const outgoing = edges.filter((e) => e.from === sourceId).length;
         if (outgoing >= (srcIo.outputs as number)) {
-          toast(`This node allows up to ${srcIo.outputs} outedge`, 'warn');
+          toast(`This node allows up to ${srcIo.outputs} outedge`, "warn");
           return;
         }
       }
@@ -256,17 +267,20 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     // Single outgoing edge with the same label: Delete the existing edge with the same origin + the same label
     for (let i = edges.length - 1; i >= 0; i--) {
       const e = edges[i];
-      const lab = e.label || 'default';
+      const lab = e.label || "default";
       if (e.from === sourceId && lab === label) edges.splice(i, 1);
     }
     // avoid duplicate for same pair+label
     if (
       edges.some(
-        (e) => e.from === sourceId && e.to === targetId && (e.label || 'default') === label,
+        (e) =>
+          e.from === sourceId &&
+          e.to === targetId &&
+          (e.label || "default") === label,
       )
     )
       return;
-    edges.push({ id: newId('e'), from: sourceId, to: targetId, label });
+    edges.push({ id: newId("e"), from: sourceId, to: targetId, label });
     recordChange();
     // auto select the newly created edge
     try {
@@ -284,13 +298,13 @@ export function useBuilderStore(initial?: FlowV2 | null) {
    */
   function listAvailableVariables(currentId?: string): Array<{
     key: string;
-    origin: 'global' | 'node';
+    origin: "global" | "node";
     nodeId?: string;
     nodeName?: string;
   }> {
     const result: Array<{
       key: string;
-      origin: 'global' | 'node';
+      origin: "global" | "node";
       nodeId?: string;
       nodeName?: string;
     }> = [];
@@ -299,37 +313,39 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     // 1) Flow-declared variables
     const declared = (flowLocal.variables || []) as Array<{ key: string }>;
     for (const v of declared) {
-      const k = String(v?.key || '').trim();
+      const k = String(v?.key || "").trim();
       if (!k || seen.has(k)) continue;
       seen.add(k);
-      result.push({ key: k, origin: 'global' });
+      result.push({ key: k, origin: "global" });
     }
 
     // 2) Variables derived from previous nodes
     const ordered = topoOrder(nodes as any, edges as any);
     let cutoffIndex =
-      typeof currentId === 'string' ? ordered.findIndex((n) => n.id === currentId) : -1;
+      typeof currentId === "string"
+        ? ordered.findIndex((n) => n.id === currentId)
+        : -1;
     if (cutoffIndex < 0) cutoffIndex = ordered.length; // include all if not found
     const prevNodes = ordered.slice(0, cutoffIndex);
     for (const n of prevNodes) {
       const cfg: any = (n as any).config || {};
-      const nodeName = String((n as any).name || n.id || 'node');
+      const nodeName = String((n as any).name || n.id || "node");
       const pushVar = (k: string) => {
-        const key = String(k || '').trim();
+        const key = String(k || "").trim();
         if (!key || seen.has(key)) return;
         seen.add(key);
-        result.push({ key, origin: 'node', nodeId: n.id, nodeName });
+        result.push({ key, origin: "node", nodeId: n.id, nodeName });
       };
       // Generic saveAs
-      if (typeof cfg.saveAs === 'string') pushVar(cfg.saveAs);
+      if (typeof cfg.saveAs === "string") pushVar(cfg.saveAs);
       // assign mapping (keys are variable names)
-      if (cfg.assign && typeof cfg.assign === 'object') {
+      if (cfg.assign && typeof cfg.assign === "object") {
         for (const k of Object.keys(cfg.assign)) pushVar(k);
       }
       // loop elements: list var + item var
-      if ((n as any).type === 'loopElements') {
-        if (typeof cfg.saveAs === 'string') pushVar(cfg.saveAs);
-        if (typeof cfg.itemVar === 'string') pushVar(cfg.itemVar);
+      if ((n as any).type === "loopElements") {
+        if (typeof cfg.saveAs === "string") pushVar(cfg.saveAs);
+        if (typeof cfg.itemVar === "string") pushVar(cfg.itemVar);
       }
     }
 
@@ -384,8 +400,16 @@ export function useBuilderStore(initial?: FlowV2 | null) {
   function switchToMain() {
     flushCurrent();
     currentSubflowId.value = null;
-    nodes.splice(0, nodes.length, ...JSON.parse(JSON.stringify((flowLocal.nodes || []) as any)));
-    edges.splice(0, edges.length, ...JSON.parse(JSON.stringify((flowLocal.edges || []) as any)));
+    nodes.splice(
+      0,
+      nodes.length,
+      ...JSON.parse(JSON.stringify((flowLocal.nodes || []) as any)),
+    );
+    edges.splice(
+      0,
+      edges.length,
+      ...JSON.parse(JSON.stringify((flowLocal.edges || []) as any)),
+    );
     layoutIfNeeded();
   }
   function switchToSubflow(id: string) {
@@ -393,8 +417,16 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     currentSubflowId.value = id;
     ensureSubflows();
     const sf = (flowLocal as any).subflows[id] || { nodes: [], edges: [] };
-    nodes.splice(0, nodes.length, ...JSON.parse(JSON.stringify(sf.nodes || [])));
-    edges.splice(0, edges.length, ...JSON.parse(JSON.stringify(sf.edges || [])));
+    nodes.splice(
+      0,
+      nodes.length,
+      ...JSON.parse(JSON.stringify(sf.nodes || [])),
+    );
+    edges.splice(
+      0,
+      edges.length,
+      ...JSON.parse(JSON.stringify(sf.edges || [])),
+    );
     layoutIfNeeded();
   }
   const isEditingMain = () => currentSubflowId.value == null;
@@ -450,7 +482,8 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       .filter((n) => (indeg.get(n.id) || 0) === 0)
       .sort(
         (a, b) =>
-          (a.type === ('trigger' as any) ? -1 : 0) - (b.type === ('trigger' as any) ? -1 : 0),
+          (a.type === ("trigger" as any) ? -1 : 0) -
+          (b.type === ("trigger" as any) ? -1 : 0),
       );
     roots.forEach((r) => q.push(r.id));
     const topo: string[] = [];
@@ -477,7 +510,7 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       for (const e of parents) lv = Math.max(lv, (level.get(e.from) || 0) + 1);
       // Ensure trigger stays at level 0
       const node = idMap.get(id)!;
-      if ((node.type as any) === 'trigger') lv = 0;
+      if ((node.type as any) === "trigger") lv = 0;
       level.set(id, lv);
     }
 
@@ -496,7 +529,7 @@ export function useBuilderStore(initial?: FlowV2 | null) {
         const ps = inEdges.get(id) || [];
         const parentIdx = ps
           .map((e) => yIndex.get(e.from))
-          .filter((v): v is number => typeof v === 'number');
+          .filter((v): v is number => typeof v === "number");
         const score = parentIdx.length
           ? parentIdx.reduce((a, b) => a + b, 0) / parentIdx.length
           : 1e9;
@@ -529,7 +562,7 @@ export function useBuilderStore(initial?: FlowV2 | null) {
   async function layoutAuto() {
     try {
       // Dynamic import of bundled build to avoid 'web-worker' resolution issues
-      const mod: any = await import('elkjs/lib/elk.bundled.js');
+      const mod: any = await import("elkjs/lib/elk.bundled.js");
       const ELK = mod.default || mod.ELK || mod;
       const elk = new ELK();
 
@@ -537,23 +570,27 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       const estimateSize = (n: NodeBase) => {
         const baseW = 280;
         let baseH = 72;
-        if ((n.type as any) === 'if') baseH = 110;
+        if ((n.type as any) === "if") baseH = 110;
         return { width: baseW, height: baseH };
       };
 
       const children = nodes.map((n) => ({ id: n.id, ...estimateSize(n) }));
       const elkEdges = edges
-        .filter((e) => nodes.some((n) => n.id === e.from) && nodes.some((n) => n.id === e.to))
+        .filter(
+          (e) =>
+            nodes.some((n) => n.id === e.from) &&
+            nodes.some((n) => n.id === e.to),
+        )
         .map((e) => ({ id: e.id, sources: [e.from], targets: [e.to] }));
 
       const graph = {
-        id: 'root',
+        id: "root",
         layoutOptions: {
-          'elk.algorithm': 'layered',
-          'elk.direction': 'RIGHT',
-          'elk.layered.spacing.nodeNodeBetweenLayers': '80',
-          'elk.spacing.nodeNode': '40',
-          'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+          "elk.algorithm": "layered",
+          "elk.direction": "RIGHT",
+          "elk.layered.spacing.nodeNodeBetweenLayers": "80",
+          "elk.spacing.nodeNode": "40",
+          "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
         },
         children,
         edges: elkEdges,
@@ -562,7 +599,10 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       const res = await elk.layout(graph);
       const pos = new Map<string, { x: number; y: number }>();
       for (const c of res.children || []) {
-        pos.set(String(c.id), { x: Math.round(c.x || 0), y: Math.round(c.y || 0) });
+        pos.set(String(c.id), {
+          x: Math.round(c.x || 0),
+          y: Math.round(c.y || 0),
+        });
       }
       // anchor
       const startX = 120;
@@ -576,7 +616,7 @@ export function useBuilderStore(initial?: FlowV2 | null) {
       // Fallback without dependency
       try {
         layoutFallback();
-        toast('ELK Autolayout is not available, alternate layout used', 'warn');
+        toast("ELK Autolayout is not available, alternate layout used", "warn");
       } catch {}
     }
   }

@@ -50,12 +50,12 @@
   box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
 }
 
-.rr-toast[data-level='info'] {
+.rr-toast[data-level="info"] {
   background: #e0f2fe;
   border-color: #38bdf8;
 }
 
-.rr-toast[data-level='error'] {
+.rr-toast[data-level="error"] {
   background: #fee2e2;
   border-color: #ef4444;
 }
@@ -281,6 +281,10 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.notice-top.warning {
+  background: #9a3412;
 }
 
 .notice-top .mini {
