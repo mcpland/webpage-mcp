@@ -1,19 +1,27 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from "react";
 
-import { BACKGROUND_MESSAGE_TYPES, TOOL_MESSAGE_TYPES } from '@/common/message-types';
-import type { ElementMarker, UpsertMarkerRequest } from '@/common/element-marker-types';
-import type { EdgeV3, FlowV3, NodeV3 } from '@/entrypoints/background/record-replay-v3/domain/flow';
-import type { JsonObject } from '@/entrypoints/background/record-replay-v3/domain/json';
-import { getMessage } from '@/utils/i18n';
-import type { AgentThemeId } from './composables/useAgentTheme';
-import SidepanelNavigator from './components/SidepanelNavigator';
-import { WorkflowsView } from './components/workflows';
-import { useWorkflowsV3React, type FlowLite } from './react/useWorkflowsV3React';
-import './App.css';
+import {
+  BACKGROUND_MESSAGE_TYPES,
+  TOOL_MESSAGE_TYPES,
+} from "@/common/message-types";
+import type {
+  ElementMarker,
+  UpsertMarkerRequest,
+} from "@/common/element-marker-types";
+import { openWorkflowBuilder } from "@/entrypoints/shared/utils";
+import { getMessage } from "@/utils/i18n";
+import type { AgentThemeId } from "./composables/useAgentTheme";
+import SidepanelNavigator from "./components/SidepanelNavigator";
+import { WorkflowsView } from "./components/workflows";
+import {
+  useWorkflowsV3React,
+  type FlowLite,
+} from "./react/useWorkflowsV3React";
+import "./App.css";
 
-type TabType = 'workflows' | 'element-markers';
+type TabType = "workflows" | "element-markers";
 
-type RecordingStatus = 'idle' | 'recording' | 'paused' | 'stopping';
+type RecordingStatus = "idle" | "recording" | "paused" | "stopping";
 
 type RecordingState = {
   status: RecordingStatus;
@@ -37,196 +45,23 @@ type TimelineStep = {
 };
 
 type MarkerFormState = UpsertMarkerRequest & {
-  selectorType: 'css' | 'xpath';
-  matchType: 'exact' | 'prefix' | 'host';
+  selectorType: "css" | "xpath";
+  matchType: "exact" | "prefix" | "host";
 };
 
-const SELECTOR_LIKE_KINDS = new Set([
-  'click',
-  'dblclick',
-  'fill',
-  'hover',
-  'assert',
-  'extract',
-  'screenshot',
-  'scroll',
-  'triggerEvent',
-  'setAttribute',
-  'loopElements',
-  'drag',
-]);
-
-const VALUE_LIKE_KINDS = new Set(['fill', 'key', 'setAttribute']);
-
-function cloneNodeConfig<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function toConfigObject(value: unknown): JsonObject {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as JsonObject)
-    : {};
-}
-
-function readSelectorFromConfig(config: unknown): string {
-  const source = toConfigObject(config);
-  const target = toConfigObject(source.target);
-  if (typeof target.selector === 'string') {
-    return target.selector;
-  }
-  if (Array.isArray(target.candidates)) {
-    for (const candidate of target.candidates) {
-      const item = toConfigObject(candidate);
-      if (typeof item.value === 'string') {
-        return item.value;
-      }
-    }
-  }
-  if (typeof source.selector === 'string') {
-    return source.selector;
-  }
-  return '';
-}
-
-function writeSelectorToConfig(config: unknown, selector: string): JsonObject {
-  const source = cloneNodeConfig(toConfigObject(config));
-  const target = toConfigObject(source.target);
-  const nextTarget = cloneNodeConfig(target);
-
-  if (Object.keys(nextTarget).length > 0) {
-    nextTarget.selector = selector;
-    if (Array.isArray(nextTarget.candidates)) {
-      const nextCandidates = nextTarget.candidates.slice();
-      const first = toConfigObject(nextCandidates[0]);
-      nextCandidates[0] = { ...first, value: selector };
-      nextTarget.candidates = nextCandidates;
-    } else {
-      nextTarget.candidates = [{ value: selector }];
-    }
-    source.target = nextTarget;
-    return source;
-  }
-
-  source.selector = selector;
-  return source;
-}
-
-function readUrlFromConfig(config: unknown): string {
-  const source = toConfigObject(config);
-  return typeof source.url === 'string' ? source.url : '';
-}
-
-function writeUrlToConfig(config: unknown, url: string): JsonObject {
-  const source = cloneNodeConfig(toConfigObject(config));
-  source.url = url;
-  return source;
-}
-
-function readValueFromConfig(config: unknown): string {
-  const source = toConfigObject(config);
-  const value = source.value;
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  return '';
-}
-
-function writeValueToConfig(config: unknown, value: string): JsonObject {
-  const source = cloneNodeConfig(toConfigObject(config));
-  source.value = value;
-  return source;
-}
-
-function buildLinearEdges(nodes: NodeV3[]): EdgeV3[] {
-  const edges: EdgeV3[] = [];
-  for (let index = 0; index < nodes.length - 1; index += 1) {
-    const from = nodes[index]?.id;
-    const to = nodes[index + 1]?.id;
-    if (!from || !to) continue;
-    edges.push({
-      id: `edge_${index}_${from}_${to}` as EdgeV3['id'],
-      from,
-      to,
-      label: 'default',
-    });
-  }
-  return edges;
-}
-
-function reorderNodes(nodes: NodeV3[], fromIndex: number, toIndex: number): NodeV3[] {
-  if (fromIndex < 0 || toIndex < 0 || fromIndex >= nodes.length || toIndex >= nodes.length) {
-    return nodes;
-  }
-  const next = nodes.slice();
-  const [moved] = next.splice(fromIndex, 1);
-  if (!moved) return nodes;
-  next.splice(toIndex, 0, moved);
-  return next;
-}
-
-function getOrderedNodesForEditor(flow: FlowV3): NodeV3[] {
-  const nodes = Array.isArray(flow.nodes) ? cloneNodeConfig(flow.nodes) : [];
-  if (nodes.length <= 1) {
-    return nodes;
-  }
-
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  const outgoing = new Map<string, EdgeV3[]>();
-  for (const edge of flow.edges || []) {
-    const from = String(edge.from);
-    const list = outgoing.get(from);
-    if (list) {
-      list.push(edge);
-    } else {
-      outgoing.set(from, [edge]);
-    }
-  }
-
-  const ordered: NodeV3[] = [];
-  const visited = new Set<string>();
-  let currentId: string | null = flow.entryNodeId ?? null;
-
-  while (currentId && !visited.has(currentId)) {
-    const currentNode = nodeMap.get(currentId as NodeV3['id']);
-    if (!currentNode) {
-      break;
-    }
-
-    ordered.push(currentNode);
-    visited.add(currentId);
-
-    const nextCandidates: EdgeV3[] = (outgoing.get(currentId) || []).filter(
-      (edge) => !visited.has(edge.to),
-    );
-    if (nextCandidates.length !== 1) {
-      break;
-    }
-
-    currentId = nextCandidates[0].to;
-  }
-
-  for (const node of nodes) {
-    if (!visited.has(node.id)) {
-      ordered.push(node);
-    }
-  }
-
-  return ordered;
-}
-
-const THEME_STORAGE_KEY = 'agentTheme';
-const DEFAULT_THEME: AgentThemeId = 'warm-editorial';
+const THEME_STORAGE_KEY = "agentTheme";
+const DEFAULT_THEME: AgentThemeId = "warm-editorial";
 const VALID_THEMES: AgentThemeId[] = [
-  'warm-editorial',
-  'blueprint-architect',
-  'zen-journal',
-  'neo-pop',
-  'dark-console',
-  'swiss-grid',
+  "warm-editorial",
+  "blueprint-architect",
+  "zen-journal",
+  "neo-pop",
+  "dark-console",
+  "swiss-grid",
 ];
 
 const DEFAULT_RECORDING_STATE: RecordingState = {
-  status: 'idle',
+  status: "idle",
   sessionId: null,
   originTabId: null,
   startedAt: null,
@@ -238,7 +73,9 @@ const DEFAULT_RECORDING_STATE: RecordingState = {
 };
 
 function isValidTheme(theme: unknown): theme is AgentThemeId {
-  return typeof theme === 'string' && VALID_THEMES.includes(theme as AgentThemeId);
+  return (
+    typeof theme === "string" && VALID_THEMES.includes(theme as AgentThemeId)
+  );
 }
 
 function getThemeFromDocument(): AgentThemeId {
@@ -250,7 +87,7 @@ function getCurrentUrlFromLocation(): string {
   try {
     return window.location.href;
   } catch {
-    return '';
+    return "";
   }
 }
 
@@ -258,40 +95,39 @@ export default function SidepanelApp() {
   const t = (key: string, fallback: string, substitutions?: string[]): string =>
     getMessage(key, substitutions, fallback);
 
-  const [currentTheme, setCurrentTheme] = useState<AgentThemeId>(() => getThemeFromDocument());
-  const [activeTab, setActiveTab] = useState<TabType>('workflows');
+  const [currentTheme, setCurrentTheme] = useState<AgentThemeId>(() =>
+    getThemeFromDocument(),
+  );
+  const [activeTab, setActiveTab] = useState<TabType>("workflows");
 
   const workflows = useWorkflowsV3React({ autoConnect: true });
   const { flows, runs } = workflows;
 
   const [onlyBound, setOnlyBound] = useState(false);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
-  const [currentUrl, setCurrentUrl] = useState('');
-  const [recordingState, setRecordingState] = useState<RecordingState>(DEFAULT_RECORDING_STATE);
+  const [currentUrl, setCurrentUrl] = useState("");
+  const [recordingState, setRecordingState] = useState<RecordingState>(
+    DEFAULT_RECORDING_STATE,
+  );
   const [timelineSteps, setTimelineSteps] = useState<TimelineStep[]>([]);
-  const [recordingAction, setRecordingAction] = useState<'start' | 'stop' | null>(null);
-  const [flowEditorOpen, setFlowEditorOpen] = useState(false);
-  const [flowEditorLoading, setFlowEditorLoading] = useState(false);
-  const [flowEditorSaving, setFlowEditorSaving] = useState(false);
-  const [flowEditorError, setFlowEditorError] = useState<string | null>(null);
-  const [flowEditorFlow, setFlowEditorFlow] = useState<FlowV3 | null>(null);
-  const [flowEditorName, setFlowEditorName] = useState('');
-  const [flowEditorDescription, setFlowEditorDescription] = useState('');
-  const [flowEditorNodes, setFlowEditorNodes] = useState<NodeV3[]>([]);
-  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [recordingAction, setRecordingAction] = useState<
+    "start" | "stop" | null
+  >(null);
 
-  const [currentPageUrl, setCurrentPageUrl] = useState('');
+  const [currentPageUrl, setCurrentPageUrl] = useState("");
   const [markers, setMarkers] = useState<ElementMarker[]>([]);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
   const [markerForm, setMarkerForm] = useState<MarkerFormState>({
-    url: '',
-    name: '',
-    selector: '',
-    selectorType: 'css',
-    matchType: 'prefix',
+    url: "",
+    name: "",
+    selector: "",
+    selectorType: "css",
+    matchType: "prefix",
   });
-  const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
-  const [markerSearch, setMarkerSearch] = useState('');
+  const [expandedDomains, setExpandedDomains] = useState<Set<string>>(
+    new Set(),
+  );
+  const [markerSearch, setMarkerSearch] = useState("");
   const [markerEditorOpen, setMarkerEditorOpen] = useState(false);
 
   const filteredMarkers = useMemo(() => {
@@ -301,10 +137,12 @@ export default function SidepanelApp() {
     }
 
     return markers.filter((marker) => {
-      const name = (marker.name || '').toLowerCase();
-      const selector = (marker.selector || '').toLowerCase();
-      const url = (marker.url || '').toLowerCase();
-      return name.includes(query) || selector.includes(query) || url.includes(query);
+      const name = (marker.name || "").toLowerCase();
+      const selector = (marker.selector || "").toLowerCase();
+      const url = (marker.url || "").toLowerCase();
+      return (
+        name.includes(query) || selector.includes(query) || url.includes(query)
+      );
     });
   }, [markerSearch, markers]);
 
@@ -312,8 +150,8 @@ export default function SidepanelApp() {
     const groups = new Map<string, Map<string, ElementMarker[]>>();
 
     for (const marker of filteredMarkers) {
-      const domain = marker.host || '(local file)';
-      const fullUrl = marker.url || '(Unknown URL)';
+      const domain = marker.host || "(local file)";
+      const fullUrl = marker.url || "(Unknown URL)";
 
       if (!groups.has(domain)) {
         groups.set(domain, new Map());
@@ -330,7 +168,10 @@ export default function SidepanelApp() {
     return Array.from(groups.entries())
       .map(([domain, urlMap]) => ({
         domain,
-        count: Array.from(urlMap.values()).reduce((sum, item) => sum + item.length, 0),
+        count: Array.from(urlMap.values()).reduce(
+          (sum, item) => sum + item.length,
+          0,
+        ),
         urls: Array.from(urlMap.entries())
           .map(([url, grouped]) => ({ url, markers: grouped }))
           .sort((a, b) => a.url.localeCompare(b.url)),
@@ -346,31 +187,39 @@ export default function SidepanelApp() {
   }, [flows, onlyBound, currentUrl]);
 
   function normalizeRecordingState(payload: unknown): RecordingState {
-    if (!payload || typeof payload !== 'object') {
+    if (!payload || typeof payload !== "object") {
       return DEFAULT_RECORDING_STATE;
     }
     const data = payload as Partial<RecordingState>;
     const status: RecordingStatus =
-      data.status === 'recording' || data.status === 'paused' || data.status === 'stopping'
+      data.status === "recording" ||
+      data.status === "paused" ||
+      data.status === "stopping"
         ? data.status
-        : 'idle';
+        : "idle";
     return {
       ...DEFAULT_RECORDING_STATE,
       ...data,
       status,
-      sessionId: typeof data.sessionId === 'string' ? data.sessionId : null,
-      originTabId: typeof data.originTabId === 'number' ? data.originTabId : null,
-      startedAt: typeof data.startedAt === 'string' ? data.startedAt : null,
+      sessionId: typeof data.sessionId === "string" ? data.sessionId : null,
+      originTabId:
+        typeof data.originTabId === "number" ? data.originTabId : null,
+      startedAt: typeof data.startedAt === "string" ? data.startedAt : null,
       durationMs:
-        typeof data.durationMs === 'number' && Number.isFinite(data.durationMs) ? data.durationMs : 0,
+        typeof data.durationMs === "number" && Number.isFinite(data.durationMs)
+          ? data.durationMs
+          : 0,
       stepCount:
-        typeof data.stepCount === 'number' && Number.isFinite(data.stepCount) ? data.stepCount : 0,
+        typeof data.stepCount === "number" && Number.isFinite(data.stepCount)
+          ? data.stepCount
+          : 0,
       activeTabCount:
-        typeof data.activeTabCount === 'number' && Number.isFinite(data.activeTabCount)
+        typeof data.activeTabCount === "number" &&
+        Number.isFinite(data.activeTabCount)
           ? data.activeTabCount
           : 0,
-      flowId: typeof data.flowId === 'string' ? data.flowId : null,
-      flowName: typeof data.flowName === 'string' ? data.flowName : null,
+      flowId: typeof data.flowId === "string" ? data.flowId : null,
+      flowName: typeof data.flowName === "string" ? data.flowName : null,
     };
   }
 
@@ -378,7 +227,9 @@ export default function SidepanelApp() {
     if (!Array.isArray(raw)) {
       return [];
     }
-    return raw.filter((step) => step && typeof step === 'object') as TimelineStep[];
+    return raw.filter(
+      (step) => step && typeof step === "object",
+    ) as TimelineStep[];
   }
 
   function isBoundToCurrentUrl(flow: FlowLite): boolean {
@@ -395,9 +246,9 @@ export default function SidepanelApp() {
       const parsed = new URL(currentUrl);
       return bindings.some((binding) => {
         const type = binding.kind || binding.type;
-        if (type === 'domain') return parsed.hostname.includes(binding.value);
-        if (type === 'path') return parsed.pathname.startsWith(binding.value);
-        if (type === 'url') return parsed.href.startsWith(binding.value);
+        if (type === "domain") return parsed.hostname.includes(binding.value);
+        if (type === "path") return parsed.pathname.startsWith(binding.value);
+        if (type === "url") return parsed.href.startsWith(binding.value);
         return false;
       });
     } catch {
@@ -409,8 +260,8 @@ export default function SidepanelApp() {
     setActiveTab(tab);
 
     const url = new URL(getCurrentUrlFromLocation());
-    url.searchParams.set('tab', tab);
-    history.replaceState(null, '', url.toString());
+    url.searchParams.set("tab", tab);
+    history.replaceState(null, "", url.toString());
   }
 
   async function handleWorkflowRefresh(): Promise<void> {
@@ -425,13 +276,13 @@ export default function SidepanelApp() {
       if (!response?.success) return;
       setRecordingState(normalizeRecordingState(response.state));
     } catch (error) {
-      console.warn('Failed to load recording status:', error);
+      console.warn("Failed to load recording status:", error);
     }
   }
 
   async function startRecording(): Promise<void> {
-    if (recordingAction || recordingState.status !== 'idle') return;
-    setRecordingAction('start');
+    if (recordingAction || recordingState.status !== "idle") return;
+    setRecordingAction("start");
     try {
       const response = await chrome.runtime.sendMessage({
         type: BACKGROUND_MESSAGE_TYPES.RR_START_RECORDING,
@@ -440,15 +291,15 @@ export default function SidepanelApp() {
         setRecordingState(normalizeRecordingState(response.state));
       }
     } catch (error) {
-      console.warn('Failed to start recording:', error);
+      console.warn("Failed to start recording:", error);
     } finally {
       setRecordingAction(null);
     }
   }
 
   async function stopRecording(): Promise<void> {
-    if (recordingAction || recordingState.status === 'idle') return;
-    setRecordingAction('stop');
+    if (recordingAction || recordingState.status === "idle") return;
+    setRecordingAction("stop");
     try {
       const response = await chrome.runtime.sendMessage({
         type: BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING,
@@ -460,10 +311,10 @@ export default function SidepanelApp() {
         await workflows.refresh();
       }
       if (response?.error) {
-        console.warn('Recording stop warning:', response.error);
+        console.warn("Recording stop warning:", response.error);
       }
     } catch (error) {
-      console.warn('Failed to stop recording:', error);
+      console.warn("Failed to stop recording:", error);
     } finally {
       setRecordingAction(null);
     }
@@ -476,15 +327,17 @@ export default function SidepanelApp() {
         return;
       }
 
-      const blob = new Blob([JSON.stringify(flowData, null, 2)], { type: 'application/json' });
+      const blob = new Blob([JSON.stringify(flowData, null, 2)], {
+        type: "application/json",
+      });
       const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
+      const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = `workflow-${id}.json`;
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.warn('Export failed:', error);
+      console.warn("Export failed:", error);
     }
   }
 
@@ -496,174 +349,35 @@ export default function SidepanelApp() {
     try {
       const result = await workflows.runFlow(id);
       if (!result) {
-        console.warn('Playback failed');
+        console.warn("Playback failed");
       }
     } catch {
       // ignore
     }
   }
 
-  function closeFlowEditor(): void {
-    if (flowEditorSaving) return;
-    setFlowEditorOpen(false);
-    setFlowEditorLoading(false);
-    setFlowEditorError(null);
-    setFlowEditorFlow(null);
-    setFlowEditorName('');
-    setFlowEditorDescription('');
-    setFlowEditorNodes([]);
-    setDraggingNodeId(null);
-  }
-
-  function openFlowEditor(flow: FlowV3): void {
-    setFlowEditorFlow(flow);
-    setFlowEditorName(flow.name || '');
-    setFlowEditorDescription(flow.description || '');
-    setFlowEditorNodes(getOrderedNodesForEditor(flow));
-    setFlowEditorError(null);
-    setFlowEditorOpen(true);
-  }
-
   async function edit(id: string): Promise<void> {
-    setFlowEditorOpen(true);
-    setFlowEditorLoading(true);
-    setFlowEditorError(null);
     try {
-      const flow = await workflows.getFlowById(id);
-      if (!flow) {
-        setFlowEditorError('Failed to load flow');
-        return;
-      }
-      openFlowEditor(flow);
+      await openWorkflowBuilder({ flowId: id });
     } catch (error) {
-      console.warn('Failed to open flow editor:', error);
-      setFlowEditorError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setFlowEditorLoading(false);
+      console.warn("Failed to open workflow builder:", error);
     }
   }
 
-  function moveFlowNodeByOffset(nodeId: string, offset: number): void {
-    setFlowEditorNodes((current) => {
-      const fromIndex = current.findIndex((node) => node.id === nodeId);
-      if (fromIndex < 0) return current;
-      const toIndex = fromIndex + offset;
-      return reorderNodes(current, fromIndex, toIndex);
-    });
-    setFlowEditorError(null);
-  }
-
-  function reorderFlowNodes(dragNodeId: string, targetNodeId: string): void {
-    if (!dragNodeId || !targetNodeId || dragNodeId === targetNodeId) return;
-    setFlowEditorNodes((current) => {
-      const fromIndex = current.findIndex((node) => node.id === dragNodeId);
-      const toIndex = current.findIndex((node) => node.id === targetNodeId);
-      return reorderNodes(current, fromIndex, toIndex);
-    });
-    setFlowEditorError(null);
-  }
-
-  function updateFlowNodeConfig(
-    nodeId: string,
-    updater: (config: JsonObject) => JsonObject,
-  ): void {
-    setFlowEditorNodes((current) =>
-      current.map((node) => {
-        if (node.id !== nodeId) return node;
-        const nextConfig = updater(toConfigObject(node.config));
-        return { ...node, config: nextConfig };
-      }),
-    );
-    setFlowEditorError(null);
-  }
-
-  function removeFlowNode(nodeId: string): void {
-    setFlowEditorError(null);
-    setFlowEditorNodes((current) => {
-      if (current.length <= 1) {
-        setFlowEditorError('At least one step is required');
-        return current;
-      }
-      const next = current.filter((node) => node.id !== nodeId);
-      if (next.length === current.length) return current;
-      return next;
-    });
-  }
-
-  function canEditSelector(node: NodeV3): boolean {
-    return SELECTOR_LIKE_KINDS.has(node.kind) || readSelectorFromConfig(node.config).length > 0;
-  }
-
-  function canEditValue(node: NodeV3): boolean {
-    const config = toConfigObject(node.config);
-    return VALUE_LIKE_KINDS.has(node.kind) || Object.prototype.hasOwnProperty.call(config, 'value');
-  }
-
-  function canEditUrl(node: NodeV3): boolean {
-    return node.kind === 'navigate' || readUrlFromConfig(node.config).length > 0;
-  }
-
-  async function saveFlowEditor(): Promise<void> {
-    if (!flowEditorFlow) {
-      setFlowEditorError('No flow loaded');
-      return;
-    }
-    if (flowEditorNodes.length === 0) {
-      setFlowEditorError('At least one step is required');
-      return;
-    }
-
-    setFlowEditorSaving(true);
-    setFlowEditorError(null);
+  async function createFlow(): Promise<void> {
     try {
-      const name = flowEditorName.trim() || flowEditorFlow.name;
-      const description = flowEditorDescription.trim();
-      const nodes = cloneNodeConfig(flowEditorNodes);
-      const edges = buildLinearEdges(nodes);
-      const payload: FlowV3 = {
-        ...flowEditorFlow,
-        name,
-        entryNodeId: nodes[0].id,
-        nodes,
-        edges,
-      };
-      if (description) {
-        payload.description = description;
-      } else {
-        delete payload.description;
-      }
-
-      const saved = await workflows.saveFlow(payload);
-      if (!saved) {
-        setFlowEditorError('Failed to save flow');
-        return;
-      }
-
-      closeFlowEditor();
-      await workflows.refreshFlows();
+      await openWorkflowBuilder({ createNew: true });
     } catch (error) {
-      console.warn('Failed to save flow editor changes:', error);
-      setFlowEditorError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setFlowEditorSaving(false);
+      console.warn("Failed to open workflow builder:", error);
     }
-  }
-
-  function createFlow(): void {
-    alert(
-      t(
-        'sidepanelCreateFlowUnavailable',
-        'V3 builder is not implemented yet, so workflows cannot be created.',
-      ),
-    );
   }
 
   async function remove(id: string): Promise<void> {
     try {
       const ok = confirm(
         t(
-          'sidepanelConfirmDeleteWorkflow',
-          'Are you sure you want to delete this workflow? This action cannot be undone.',
+          "sidepanelConfirmDeleteWorkflow",
+          "Are you sure you want to delete this workflow? This action cannot be undone.",
         ),
       );
       if (!ok) {
@@ -678,10 +392,10 @@ export default function SidepanelApp() {
   function resetForm(nextUrl?: string): void {
     setMarkerForm({
       url: nextUrl ?? currentPageUrl,
-      name: '',
-      selector: '',
-      selectorType: 'css',
-      matchType: 'prefix',
+      name: "",
+      selector: "",
+      selectorType: "css",
+      matchType: "prefix",
     });
     setEditingMarkerId(null);
   }
@@ -693,9 +407,9 @@ export default function SidepanelApp() {
         url: marker.url,
         name: marker.name,
         selector: marker.selector,
-        selectorType: marker.selectorType || 'css',
+        selectorType: marker.selectorType || "css",
         listMode: marker.listMode,
-        matchType: marker.matchType || 'prefix',
+        matchType: marker.matchType || "prefix",
         action: marker.action,
       });
     } else {
@@ -711,9 +425,12 @@ export default function SidepanelApp() {
 
   async function loadMarkers(): Promise<void> {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tabs = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       const tab = tabs[0];
-      const url = String(tab?.url || '');
+      const url = String(tab?.url || "");
       setCurrentPageUrl(url);
 
       if (!editingMarkerId) {
@@ -728,7 +445,7 @@ export default function SidepanelApp() {
         setMarkers(response.markers || []);
       }
     } catch (error) {
-      console.error('Failed to load markers:', error);
+      console.error("Failed to load markers:", error);
     }
   }
 
@@ -742,7 +459,9 @@ export default function SidepanelApp() {
       let response: any = null;
 
       if (isEditing) {
-        const existingMarker = markers.find((marker) => marker.id === editingMarkerId);
+        const existingMarker = markers.find(
+          (marker) => marker.id === editingMarkerId,
+        );
 
         if (existingMarker && editingMarkerId) {
           const updatedMarker: ElementMarker = {
@@ -773,14 +492,16 @@ export default function SidepanelApp() {
         await loadMarkers();
       }
     } catch (error) {
-      console.error('Failed to save marker:', error);
+      console.error("Failed to save marker:", error);
     }
   }
 
   async function deleteMarker(marker: ElementMarker): Promise<void> {
     try {
       const confirmed = confirm(
-        t('sidepanelConfirmDeleteMarker', 'Delete marker "{0}"?', [marker.name]),
+        t("sidepanelConfirmDeleteMarker", 'Delete marker "{0}"?', [
+          marker.name,
+        ]),
       );
       if (!confirmed) {
         return;
@@ -795,7 +516,7 @@ export default function SidepanelApp() {
         await loadMarkers();
       }
     } catch (error) {
-      console.error('Failed to delete marker:', error);
+      console.error("Failed to delete marker:", error);
     }
   }
 
@@ -804,8 +525,8 @@ export default function SidepanelApp() {
       const response = await chrome.runtime.sendMessage({
         type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_VALIDATE,
         selector: marker.selector,
-        selectorType: marker.selectorType || 'css',
-        action: 'hover',
+        selectorType: marker.selectorType || "css",
+        action: "hover",
         listMode: Boolean(marker.listMode),
       });
 
@@ -813,17 +534,17 @@ export default function SidepanelApp() {
         await highlightInTab(marker);
       }
     } catch (error) {
-      console.error('Failed to validate marker:', error);
+      console.error("Failed to validate marker:", error);
     }
   }
 
   async function isMarkerInjected(tabId: number): Promise<boolean> {
     try {
       const response = await Promise.race([
-        chrome.tabs.sendMessage(tabId, { action: 'element_marker_ping' }),
+        chrome.tabs.sendMessage(tabId, { action: "element_marker_ping" }),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 300)),
       ]);
-      return (response as any)?.status === 'pong';
+      return (response as any)?.status === "pong";
     } catch {
       return false;
     }
@@ -831,7 +552,10 @@ export default function SidepanelApp() {
 
   async function highlightInTab(marker: ElementMarker): Promise<void> {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tabs = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       const tabId = tabs[0]?.id;
       if (!tabId) {
         return;
@@ -842,8 +566,8 @@ export default function SidepanelApp() {
         try {
           await chrome.scripting.executeScript({
             target: { tabId, allFrames: true },
-            files: ['inject-scripts/element-marker.js'],
-            world: 'ISOLATED',
+            files: ["inject-scripts/element-marker.js"],
+            world: "ISOLATED",
           });
         } catch {
           // ignore
@@ -851,13 +575,13 @@ export default function SidepanelApp() {
       }
 
       await chrome.tabs.sendMessage(tabId, {
-        action: 'element_marker_highlight',
+        action: "element_marker_highlight",
         selector: marker.selector,
-        selectorType: marker.selectorType || 'css',
+        selectorType: marker.selectorType || "css",
         listMode: Boolean(marker.listMode),
       });
     } catch (error) {
-      console.error('Failed to highlight in tab:', error);
+      console.error("Failed to highlight in tab:", error);
     }
   }
 
@@ -886,7 +610,7 @@ export default function SidepanelApp() {
   }, [markerSearch, groupedMarkers]);
 
   useEffect(() => {
-    if (activeTab !== 'element-markers') {
+    if (activeTab !== "element-markers") {
       return;
     }
 
@@ -898,7 +622,7 @@ export default function SidepanelApp() {
       changes: Record<string, chrome.storage.StorageChange>,
       area: string,
     ) => {
-      if (area !== 'local') {
+      if (area !== "local") {
         return;
       }
 
@@ -913,12 +637,16 @@ export default function SidepanelApp() {
       payload?: unknown;
       steps?: unknown;
     }) => {
-      if (message.type === BACKGROUND_MESSAGE_TYPES.RR_RECORDING_STATE_CHANGED) {
+      if (
+        message.type === BACKGROUND_MESSAGE_TYPES.RR_RECORDING_STATE_CHANGED
+      ) {
         setRecordingState(normalizeRecordingState(message.payload));
         return;
       }
       if (message.type === TOOL_MESSAGE_TYPES.RR_TIMELINE_UPDATE) {
-        const steps = normalizeTimelineSteps(message.steps ?? (message.payload as any)?.steps);
+        const steps = normalizeTimelineSteps(
+          message.steps ?? (message.payload as any)?.steps,
+        );
         setTimelineSteps(steps);
       }
     };
@@ -928,18 +656,21 @@ export default function SidepanelApp() {
 
     void (async () => {
       try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        setCurrentUrl(String(tab?.url || ''));
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        setCurrentUrl(String(tab?.url || ""));
       } catch {
         // ignore
       }
       await refreshRecordingState();
 
       const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get('tab');
-      if (tabParam === 'element-markers' || tabParam === 'workflows') {
+      const tabParam = params.get("tab");
+      if (tabParam === "element-markers" || tabParam === "workflows") {
         setActiveTab(tabParam);
-        if (tabParam === 'element-markers') {
+        if (tabParam === "element-markers") {
           await loadMarkers();
         }
       }
@@ -972,243 +703,29 @@ export default function SidepanelApp() {
   };
 
   return (
-    <div className="h-full w-full bg-slate-50 relative agent-theme" data-agent-theme={currentTheme}>
+    <div
+      className="h-full w-full bg-slate-50 relative agent-theme"
+      data-agent-theme={currentTheme}
+    >
       <SidepanelNavigator activeTab={activeTab} onChange={handleTabChange} />
 
-      {activeTab === 'workflows' ? (
+      {activeTab === "workflows" ? (
         <div className="h-full">
           <WorkflowsView {...workflowsProps} />
         </div>
       ) : null}
 
-      {flowEditorOpen ? (
-        <div className="flow-editor-overlay" onClick={closeFlowEditor}>
-          <div className="flow-editor-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="flow-editor-header">
-              <div className="flow-editor-title-wrap">
-                <h3 className="flow-editor-title">
-                  {t('workflowsEditWorkflowTitle', 'Edit workflow')}
-                </h3>
-                {flowEditorFlow?.id ? (
-                  <code className="flow-editor-flow-id">{flowEditorFlow.id}</code>
-                ) : null}
-              </div>
-              <button
-                className="flow-editor-close"
-                onClick={closeFlowEditor}
-                type="button"
-                disabled={flowEditorSaving}
-              >
-                <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
-                  <path
-                    fill="currentColor"
-                    d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            {flowEditorLoading ? (
-              <div className="flow-editor-loading">Loading workflow...</div>
-            ) : (
-              <>
-                <div className="flow-editor-body">
-                  {flowEditorError ? (
-                    <div className="flow-editor-error" role="alert">
-                      {flowEditorError}
-                    </div>
-                  ) : null}
-
-                  <div className="flow-editor-field-grid">
-                    <label className="flow-editor-field">
-                      <span className="flow-editor-label">Name</span>
-                      <input
-                        className="flow-editor-input"
-                        value={flowEditorName}
-                        onChange={(event) => setFlowEditorName(event.currentTarget.value)}
-                        disabled={flowEditorSaving}
-                      />
-                    </label>
-
-                    <label className="flow-editor-field">
-                      <span className="flow-editor-label">Description</span>
-                      <input
-                        className="flow-editor-input"
-                        value={flowEditorDescription}
-                        onChange={(event) => setFlowEditorDescription(event.currentTarget.value)}
-                        disabled={flowEditorSaving}
-                        placeholder="Optional"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="flow-editor-steps-meta">
-                    <span>Steps: {flowEditorNodes.length}</span>
-                    <span className="flow-editor-hint">
-                      This editor is optimized for linear recorded flows.
-                    </span>
-                  </div>
-
-                  <ol className="flow-editor-step-list">
-                    {flowEditorNodes.map((node, index) => {
-                      const selectorValue = readSelectorFromConfig(node.config);
-                      const urlValue = readUrlFromConfig(node.config);
-                      const valueText = readValueFromConfig(node.config);
-                      const allowSelectorEdit = canEditSelector(node);
-                      const allowUrlEdit = canEditUrl(node);
-                      const allowValueEdit = canEditValue(node);
-
-                      return (
-                        <li
-                          key={node.id}
-                          className={`flow-editor-step-item${draggingNodeId === node.id ? ' flow-editor-step-item-dragging' : ''}`}
-                          draggable={!flowEditorSaving}
-                          onDragStart={() => setDraggingNodeId(node.id)}
-                          onDragEnd={() => setDraggingNodeId(null)}
-                          onDragOver={(event) => {
-                            if (flowEditorSaving) return;
-                            event.preventDefault();
-                          }}
-                          onDrop={(event) => {
-                            if (flowEditorSaving) return;
-                            event.preventDefault();
-                            if (!draggingNodeId) return;
-                            reorderFlowNodes(draggingNodeId, node.id);
-                            setDraggingNodeId(null);
-                          }}
-                        >
-                          <div className="flow-editor-step-head">
-                            <div className="flow-editor-step-main">
-                              <span className="flow-editor-step-index">{index + 1}</span>
-                              <span className="flow-editor-step-kind">{node.kind}</span>
-                              {node.name ? (
-                                <span className="flow-editor-step-name">{node.name}</span>
-                              ) : null}
-                            </div>
-                            <div className="flow-editor-step-actions">
-                              <button
-                                type="button"
-                                className="flow-editor-icon-btn"
-                                onClick={() => moveFlowNodeByOffset(node.id, -1)}
-                                disabled={flowEditorSaving || index === 0}
-                                title="Move up"
-                              >
-                                ↑
-                              </button>
-                              <button
-                                type="button"
-                                className="flow-editor-icon-btn"
-                                onClick={() => moveFlowNodeByOffset(node.id, 1)}
-                                disabled={flowEditorSaving || index === flowEditorNodes.length - 1}
-                                title="Move down"
-                              >
-                                ↓
-                              </button>
-                              <button
-                                type="button"
-                                className="flow-editor-icon-btn flow-editor-delete-btn"
-                                onClick={() => removeFlowNode(node.id)}
-                                disabled={flowEditorSaving || flowEditorNodes.length <= 1}
-                                title={t('workflowsDeleteAction', 'Delete')}
-                              >
-                                {t('workflowsDeleteAction', 'Delete')}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="flow-editor-config-grid">
-                            {allowUrlEdit ? (
-                              <label className="flow-editor-field">
-                                <span className="flow-editor-label">URL</span>
-                                <input
-                                  className="flow-editor-input flow-editor-mono"
-                                  value={urlValue}
-                                  onChange={(event) =>
-                                    updateFlowNodeConfig(node.id, (config) =>
-                                      writeUrlToConfig(config, event.currentTarget.value),
-                                    )
-                                  }
-                                  disabled={flowEditorSaving}
-                                  placeholder="https://example.com"
-                                />
-                              </label>
-                            ) : null}
-
-                            {allowSelectorEdit ? (
-                              <label className="flow-editor-field">
-                                <span className="flow-editor-label">Selector</span>
-                                <input
-                                  className="flow-editor-input flow-editor-mono"
-                                  value={selectorValue}
-                                  onChange={(event) =>
-                                    updateFlowNodeConfig(node.id, (config) =>
-                                      writeSelectorToConfig(config, event.currentTarget.value),
-                                    )
-                                  }
-                                  disabled={flowEditorSaving}
-                                  placeholder=".btn-primary"
-                                />
-                              </label>
-                            ) : null}
-
-                            {allowValueEdit ? (
-                              <label className="flow-editor-field">
-                                <span className="flow-editor-label">Value</span>
-                                <input
-                                  className="flow-editor-input flow-editor-mono"
-                                  value={valueText}
-                                  onChange={(event) =>
-                                    updateFlowNodeConfig(node.id, (config) =>
-                                      writeValueToConfig(config, event.currentTarget.value),
-                                    )
-                                  }
-                                  disabled={flowEditorSaving}
-                                  placeholder="input value"
-                                />
-                              </label>
-                            ) : null}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </div>
-
-                <div className="flow-editor-footer">
-                  <button
-                    className="flow-editor-btn flow-editor-btn-ghost"
-                    onClick={closeFlowEditor}
-                    type="button"
-                    disabled={flowEditorSaving}
-                  >
-                    {t('cancelButton', 'Cancel')}
-                  </button>
-                  <button
-                    className="flow-editor-btn flow-editor-btn-primary"
-                    onClick={() => void saveFlowEditor()}
-                    type="button"
-                    disabled={
-                      flowEditorSaving ||
-                      flowEditorLoading ||
-                      !flowEditorFlow ||
-                      flowEditorNodes.length === 0
-                    }
-                  >
-                    {flowEditorSaving ? 'Saving...' : t('saveButton', 'Save')}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      ) : null}
-
-      {activeTab === 'element-markers' ? (
+      {activeTab === "element-markers" ? (
         <div className="element-markers-content">
           <div className="px-4 py-4">
             <div className="em-toolbar">
               <div className="em-search-wrapper">
-                <svg className="em-search-icon" viewBox="0 0 20 20" width="16" height="16">
+                <svg
+                  className="em-search-icon"
+                  viewBox="0 0 20 20"
+                  width="16"
+                  height="16"
+                >
                   <path
                     fill="currentColor"
                     d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
@@ -1216,11 +733,13 @@ export default function SidepanelApp() {
                 </svg>
                 <input
                   value={markerSearch}
-                  onChange={(event) => setMarkerSearch(event.currentTarget.value)}
+                  onChange={(event) =>
+                    setMarkerSearch(event.currentTarget.value)
+                  }
                   className="em-search-input"
                   placeholder={t(
-                    'sidepanelMarkerSearchPlaceholder',
-                    'Search marker name or selector...',
+                    "sidepanelMarkerSearchPlaceholder",
+                    "Search marker name or selector...",
                   )}
                   type="text"
                 />
@@ -1228,7 +747,7 @@ export default function SidepanelApp() {
                   <button
                     className="em-search-clear"
                     type="button"
-                    onClick={() => setMarkerSearch('')}
+                    onClick={() => setMarkerSearch("")}
                   >
                     <svg viewBox="0 0 20 20" width="14" height="14">
                       <path
@@ -1243,7 +762,7 @@ export default function SidepanelApp() {
               <button
                 className="em-add-btn"
                 onClick={() => openMarkerEditor()}
-                title={t('sidepanelAddMarkerTitle', 'Add new marker')}
+                title={t("sidepanelAddMarkerTitle", "Add new marker")}
                 type="button"
               >
                 <svg viewBox="0 0 20 20" width="18" height="18">
@@ -1257,14 +776,21 @@ export default function SidepanelApp() {
 
             {markerEditorOpen ? (
               <div className="em-modal-overlay" onClick={closeMarkerEditor}>
-                <div className="em-modal" onClick={(event) => event.stopPropagation()}>
+                <div
+                  className="em-modal"
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <div className="em-modal-header">
                     <h3 className="em-modal-title">
                       {editingMarkerId
-                        ? t('sidepanelEditMarkerTitle', 'Edit marker')
-                        : t('sidepanelCreateMarkerTitle', 'Create marker')}
+                        ? t("sidepanelEditMarkerTitle", "Edit marker")
+                        : t("sidepanelCreateMarkerTitle", "Create marker")}
                     </h3>
-                    <button className="em-modal-close" onClick={closeMarkerEditor} type="button">
+                    <button
+                      className="em-modal-close"
+                      onClick={closeMarkerEditor}
+                      type="button"
+                    >
                       <svg viewBox="0 0 20 20" width="18" height="18">
                         <path
                           fill="currentColor"
@@ -1284,17 +810,20 @@ export default function SidepanelApp() {
                     <div className="em-form-row">
                       <div className="em-field">
                         <label className="em-field-label">
-                          {t('sidepanelMarkerFieldName', 'Name')}
+                          {t("sidepanelMarkerFieldName", "Name")}
                         </label>
                         <input
                           value={markerForm.name}
                           onChange={(event) =>
-                            setMarkerForm((current) => ({ ...current, name: event.currentTarget.value }))
+                            setMarkerForm((current) => ({
+                              ...current,
+                              name: event.currentTarget.value,
+                            }))
                           }
                           className="em-input"
                           placeholder={t(
-                            'sidepanelMarkerFieldNamePlaceholder',
-                            'For example: Login button',
+                            "sidepanelMarkerFieldNamePlaceholder",
+                            "For example: Login button",
                           )}
                           required
                         />
@@ -1304,7 +833,10 @@ export default function SidepanelApp() {
                     <div className="em-form-row em-form-row-multi">
                       <div className="em-field">
                         <label className="em-field-label">
-                          {t('sidepanelMarkerFieldSelectorType', 'Selector type')}
+                          {t(
+                            "sidepanelMarkerFieldSelectorType",
+                            "Selector type",
+                          )}
                         </label>
                         <div className="em-select-wrapper">
                           <select
@@ -1312,20 +844,26 @@ export default function SidepanelApp() {
                             onChange={(event) =>
                               setMarkerForm((current) => ({
                                 ...current,
-                                selectorType: event.currentTarget.value as 'css' | 'xpath',
+                                selectorType: event.currentTarget.value as
+                                  | "css"
+                                  | "xpath",
                               }))
                             }
                             className="em-select"
                           >
-                            <option value="css">{t('sidepanelMarkerSelectorCss', 'CSS selector')}</option>
-                            <option value="xpath">{t('sidepanelMarkerSelectorXpath', 'XPath')}</option>
+                            <option value="css">
+                              {t("sidepanelMarkerSelectorCss", "CSS selector")}
+                            </option>
+                            <option value="xpath">
+                              {t("sidepanelMarkerSelectorXpath", "XPath")}
+                            </option>
                           </select>
                         </div>
                       </div>
 
                       <div className="em-field">
                         <label className="em-field-label">
-                          {t('sidepanelMarkerFieldMatchType', 'Match type')}
+                          {t("sidepanelMarkerFieldMatchType", "Match type")}
                         </label>
                         <div className="em-select-wrapper">
                           <select
@@ -1333,19 +871,22 @@ export default function SidepanelApp() {
                             onChange={(event) =>
                               setMarkerForm((current) => ({
                                 ...current,
-                                matchType: event.currentTarget.value as 'prefix' | 'exact' | 'host',
+                                matchType: event.currentTarget.value as
+                                  | "prefix"
+                                  | "exact"
+                                  | "host",
                               }))
                             }
                             className="em-select"
                           >
                             <option value="prefix">
-                              {t('sidepanelMarkerMatchPrefix', 'Path prefix')}
+                              {t("sidepanelMarkerMatchPrefix", "Path prefix")}
                             </option>
                             <option value="exact">
-                              {t('sidepanelMarkerMatchExact', 'Exact match')}
+                              {t("sidepanelMarkerMatchExact", "Exact match")}
                             </option>
                             <option value="host">
-                              {t('sidepanelMarkerMatchHost', 'Hostname')}
+                              {t("sidepanelMarkerMatchHost", "Hostname")}
                             </option>
                           </select>
                         </div>
@@ -1355,17 +896,20 @@ export default function SidepanelApp() {
                     <div className="em-form-row">
                       <div className="em-field">
                         <label className="em-field-label">
-                          {t('sidepanelMarkerFieldSelector', 'Selector')}
+                          {t("sidepanelMarkerFieldSelector", "Selector")}
                         </label>
                         <textarea
                           value={markerForm.selector}
                           onChange={(event) =>
-                            setMarkerForm((current) => ({ ...current, selector: event.currentTarget.value }))
+                            setMarkerForm((current) => ({
+                              ...current,
+                              selector: event.currentTarget.value,
+                            }))
                           }
                           className="em-textarea"
                           placeholder={t(
-                            'sidepanelMarkerSelectorPlaceholder',
-                            'CSS selector or XPath',
+                            "sidepanelMarkerSelectorPlaceholder",
+                            "CSS selector or XPath",
                           )}
                           rows={3}
                           required
@@ -1374,11 +918,17 @@ export default function SidepanelApp() {
                     </div>
 
                     <div className="em-modal-actions">
-                      <button type="button" className="em-btn em-btn-ghost" onClick={closeMarkerEditor}>
-                        {t('cancelButton', 'Cancel')}
+                      <button
+                        type="button"
+                        className="em-btn em-btn-ghost"
+                        onClick={closeMarkerEditor}
+                      >
+                        {t("cancelButton", "Cancel")}
                       </button>
                       <button type="submit" className="em-btn em-btn-primary">
-                        {editingMarkerId ? t('sidepanelUpdateButton', 'Update') : t('saveButton', 'Save')}
+                        {editingMarkerId
+                          ? t("sidepanelUpdateButton", "Update")
+                          : t("saveButton", "Save")}
                       </button>
                     </div>
                   </form>
@@ -1393,8 +943,8 @@ export default function SidepanelApp() {
                     {markerSearch ? (
                       <>
                         {t(
-                          'sidepanelMarkerStatsFiltered',
-                          'Showing {0} markers (out of {1}) across {2} domains',
+                          "sidepanelMarkerStatsFiltered",
+                          "Showing {0} markers (out of {1}) across {2} domains",
                           [
                             String(filteredMarkers.length),
                             String(markers.length),
@@ -1405,9 +955,12 @@ export default function SidepanelApp() {
                     ) : (
                       <>
                         {t(
-                          'sidepanelMarkerStatsTotal',
-                          'Total {0} markers across {1} domains',
-                          [String(markers.length), String(groupedMarkers.length)],
+                          "sidepanelMarkerStatsTotal",
+                          "Total {0} markers across {1} domains",
+                          [
+                            String(markers.length),
+                            String(groupedMarkers.length),
+                          ],
                         )}
                       </>
                     )}
@@ -1416,10 +969,13 @@ export default function SidepanelApp() {
 
                 {groupedMarkers.map((domainGroup) => (
                   <div key={domainGroup.domain} className="em-domain-group">
-                    <div className="em-domain-header" onClick={() => toggleDomain(domainGroup.domain)}>
+                    <div
+                      className="em-domain-header"
+                      onClick={() => toggleDomain(domainGroup.domain)}
+                    >
                       <div className="em-domain-info">
                         <svg
-                          className={`em-domain-icon ${expandedDomains.has(domainGroup.domain) ? 'em-domain-icon-expanded' : ''}`}
+                          className={`em-domain-icon ${expandedDomains.has(domainGroup.domain) ? "em-domain-icon-expanded" : ""}`}
                           viewBox="0 0 20 20"
                           width="16"
                           height="16"
@@ -1428,7 +984,7 @@ export default function SidepanelApp() {
                         </svg>
                         <h3 className="em-domain-name">{domainGroup.domain}</h3>
                         <span className="em-domain-count">
-                          {t('sidepanelMarkerDomainCount', '{0} markers', [
+                          {t("sidepanelMarkerDomainCount", "{0} markers", [
                             String(domainGroup.count),
                           ])}
                         </span>
@@ -1441,28 +997,49 @@ export default function SidepanelApp() {
                           {domainGroup.urls.map((urlGroup) => (
                             <div key={urlGroup.url} className="em-url-group">
                               <div className="em-url-header">
-                                <svg className="em-url-icon" viewBox="0 0 16 16" width="12" height="12">
+                                <svg
+                                  className="em-url-icon"
+                                  viewBox="0 0 16 16"
+                                  width="12"
+                                  height="12"
+                                >
                                   <path
                                     fill="currentColor"
                                     d="M4 4a1 1 0 011-1h6a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1V4zm2 1v1h4V5H6zm0 3v1h4V8H6z"
                                   />
                                 </svg>
-                                <span className="em-url-path">{urlGroup.url}</span>
+                                <span className="em-url-path">
+                                  {urlGroup.url}
+                                </span>
                               </div>
 
                               <div className="em-markers-list">
                                 {urlGroup.markers.map((marker) => (
-                                  <div key={marker.id} className="em-marker-item">
+                                  <div
+                                    key={marker.id}
+                                    className="em-marker-item"
+                                  >
                                     <div className="em-marker-row-top">
-                                      <span className="em-marker-name">{marker.name}</span>
+                                      <span className="em-marker-name">
+                                        {marker.name}
+                                      </span>
                                       <div className="em-marker-actions">
                                         <button
                                           className="em-action-btn em-action-verify"
-                                          onClick={() => void validateMarker(marker)}
-                                          title={t('sidepanelMarkerActionVerify', 'Verify')}
+                                          onClick={() =>
+                                            void validateMarker(marker)
+                                          }
+                                          title={t(
+                                            "sidepanelMarkerActionVerify",
+                                            "Verify",
+                                          )}
                                           type="button"
                                         >
-                                          <svg viewBox="0 0 24 24" width="14" height="14">
+                                          <svg
+                                            viewBox="0 0 24 24"
+                                            width="14"
+                                            height="14"
+                                          >
                                             <path
                                               strokeLinecap="round"
                                               strokeLinejoin="round"
@@ -1472,11 +1049,20 @@ export default function SidepanelApp() {
                                         </button>
                                         <button
                                           className="em-action-btn em-action-edit"
-                                          onClick={() => openMarkerEditor(marker)}
-                                          title={t('sidepanelMarkerActionEdit', 'Edit')}
+                                          onClick={() =>
+                                            openMarkerEditor(marker)
+                                          }
+                                          title={t(
+                                            "sidepanelMarkerActionEdit",
+                                            "Edit",
+                                          )}
                                           type="button"
                                         >
-                                          <svg viewBox="0 0 24 24" width="14" height="14">
+                                          <svg
+                                            viewBox="0 0 24 24"
+                                            width="14"
+                                            height="14"
+                                          >
                                             <path
                                               strokeLinecap="round"
                                               strokeLinejoin="round"
@@ -1486,11 +1072,20 @@ export default function SidepanelApp() {
                                         </button>
                                         <button
                                           className="em-action-btn em-action-delete"
-                                          onClick={() => void deleteMarker(marker)}
-                                          title={t('sidepanelMarkerActionDelete', 'Delete')}
+                                          onClick={() =>
+                                            void deleteMarker(marker)
+                                          }
+                                          title={t(
+                                            "sidepanelMarkerActionDelete",
+                                            "Delete",
+                                          )}
                                           type="button"
                                         >
-                                          <svg viewBox="0 0 24 24" width="14" height="14">
+                                          <svg
+                                            viewBox="0 0 24 24"
+                                            width="14"
+                                            height="14"
+                                          >
                                             <path
                                               strokeLinecap="round"
                                               strokeLinejoin="round"
@@ -1501,12 +1096,19 @@ export default function SidepanelApp() {
                                       </div>
                                     </div>
                                     <div className="em-marker-row-bottom">
-                                      <code className="em-marker-selector" title={marker.selector}>
+                                      <code
+                                        className="em-marker-selector"
+                                        title={marker.selector}
+                                      >
                                         {marker.selector}
                                       </code>
                                       <div className="em-marker-tags">
-                                        <span className="em-tag">{marker.selectorType || 'css'}</span>
-                                        <span className="em-tag">{marker.matchType}</span>
+                                        <span className="em-tag">
+                                          {marker.selectorType || "css"}
+                                        </span>
+                                        <span className="em-tag">
+                                          {marker.matchType}
+                                        </span>
                                       </div>
                                     </div>
                                   </div>
@@ -1523,17 +1125,26 @@ export default function SidepanelApp() {
             ) : (
               <div className="em-empty">
                 {markerSearch ? (
-                  <span>{t('sidepanelNoMatchingMarkers', 'No matching markers found')}</span>
+                  <span>
+                    {t(
+                      "sidepanelNoMatchingMarkers",
+                      "No matching markers found",
+                    )}
+                  </span>
                 ) : (
                   <>
                     <span>
                       {t(
-                        'sidepanelNoMarkers',
-                        'No markers yet. Click + in the top-right corner to create the first marker.',
+                        "sidepanelNoMarkers",
+                        "No markers yet. Click + in the top-right corner to create the first marker.",
                       )}
                     </span>
-                    <button className="em-btn em-btn-primary em-empty-btn" onClick={() => openMarkerEditor()} type="button">
-                      {t('sidepanelCreateMarkerButton', 'Create marker')}
+                    <button
+                      className="em-btn em-btn-primary em-empty-btn"
+                      onClick={() => openMarkerEditor()}
+                      type="button"
+                    >
+                      {t("sidepanelCreateMarkerButton", "Create marker")}
                     </button>
                   </>
                 )}

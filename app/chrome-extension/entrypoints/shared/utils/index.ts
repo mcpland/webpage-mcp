@@ -11,4 +11,9 @@ export {
   isFlowV2,
   extractFlowCandidates,
   type FlowConversionResult,
-} from './rr-flow-convert';
+} from "./rr-flow-convert";
+
+export {
+  openWorkflowBuilder,
+  type OpenWorkflowBuilderOptions,
+} from "./open-workflow-builder";
