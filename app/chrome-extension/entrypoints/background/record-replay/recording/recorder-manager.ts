@@ -1,12 +1,17 @@
-import type { Flow } from '../types';
-import { saveFlow } from '../flow-store';
-import { broadcastControlToTab, ensureRecorderInjected, REC_CMD } from './content-injection';
-import { recordingSession as session } from './session-manager';
-import { createInitialFlow, addNavigationStep } from './flow-builder';
-import { initBrowserEventListeners } from './browser-event-listener';
-import { initContentMessageHandler } from './content-message-handler';
-import { broadcastRecordingStateChanged } from './recording-state';
-import { recordingNetworkTracker } from './network-tracker';
+import type { Flow } from "../types";
+import { saveFlow } from "../flow-store";
+import { persistLegacyFlowToV3 } from "../../record-replay-v3/storage/import/persist-legacy-flow";
+import {
+  broadcastControlToTab,
+  ensureRecorderInjected,
+  REC_CMD,
+} from "./content-injection";
+import { recordingSession as session } from "./session-manager";
+import { createInitialFlow, addNavigationStep } from "./flow-builder";
+import { initBrowserEventListeners } from "./browser-event-listener";
+import { initContentMessageHandler } from "./content-message-handler";
+import { broadcastRecordingStateChanged } from "./recording-state";
+import { recordingNetworkTracker } from "./network-tracker";
 
 /** Timeout for waiting for the top-frame content script to acknowledge stop. */
 const STOP_BARRIER_TOP_TIMEOUT_MS = 5000;
@@ -42,10 +47,10 @@ interface StopTabBarrierResult {
 }
 
 function sanitizeVariableKey(raw: string, fallback: string): string {
-  const normalized = String(raw || '')
+  const normalized = String(raw || "")
     .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
   if (!normalized) return fallback;
   if (/^[0-9]/.test(normalized)) return `${fallback}_${normalized}`;
   return normalized;
@@ -61,13 +66,13 @@ function deriveKeyFromSelector(selector: string, fallback: string): string {
 
 function collectParameterSuggestions(flow: Flow): Array<{
   nodeId: string;
-  kind: 'fill' | 'navigate';
+  kind: "fill" | "navigate";
   suggestedKey: string;
   currentValue: string;
 }> {
   const suggestions: Array<{
     nodeId: string;
-    kind: 'fill' | 'navigate';
+    kind: "fill" | "navigate";
     suggestedKey: string;
     currentValue: string;
   }> = [];
@@ -76,20 +81,25 @@ function collectParameterSuggestions(flow: Flow): Array<{
 
   for (const node of nodes) {
     if (!node || !node.id) continue;
-    const cfg = node.config && typeof node.config === 'object' ? (node.config as Record<string, unknown>) : {};
+    const cfg =
+      node.config && typeof node.config === "object"
+        ? (node.config as Record<string, unknown>)
+        : {};
 
-    if (node.type === 'fill') {
-      const rawValue = typeof cfg.value === 'string' ? cfg.value.trim() : '';
+    if (node.type === "fill") {
+      const rawValue = typeof cfg.value === "string" ? cfg.value.trim() : "";
       if (!rawValue) continue;
       if (/^\{[a-zA-Z_][a-zA-Z0-9_]*\}$/.test(rawValue)) continue;
       const selector =
-        cfg.target && typeof cfg.target === 'object' && typeof (cfg.target as any).selector === 'string'
+        cfg.target &&
+        typeof cfg.target === "object" &&
+        typeof (cfg.target as any).selector === "string"
           ? String((cfg.target as any).selector)
-          : '';
+          : "";
       const key = deriveKeyFromSelector(selector, `input_${seq}`);
       suggestions.push({
         nodeId: node.id,
-        kind: 'fill',
+        kind: "fill",
         suggestedKey: key,
         currentValue: rawValue,
       });
@@ -98,17 +108,17 @@ function collectParameterSuggestions(flow: Flow): Array<{
       continue;
     }
 
-    if (node.type === 'navigate') {
-      const url = typeof cfg.url === 'string' ? cfg.url.trim() : '';
+    if (node.type === "navigate") {
+      const url = typeof cfg.url === "string" ? cfg.url.trim() : "";
       if (!url) continue;
       try {
         const parsed = new URL(url);
         for (const [param, value] of parsed.searchParams.entries()) {
-          const trimmedValue = String(value || '').trim();
+          const trimmedValue = String(value || "").trim();
           if (!trimmedValue) continue;
           suggestions.push({
             nodeId: node.id,
-            kind: 'navigate',
+            kind: "navigate",
             suggestedKey: sanitizeVariableKey(param, `url_param_${seq}`),
             currentValue: trimmedValue,
           });
@@ -125,6 +135,17 @@ function collectParameterSuggestions(flow: Flow): Array<{
   return suggestions;
 }
 
+function appendWarning(current: string | undefined, next: string): string {
+  const trimmedNext = next.trim();
+  if (!trimmedNext) {
+    return current || "";
+  }
+  if (!current) {
+    return trimmedNext;
+  }
+  return `${current}; ${trimmedNext}`;
+}
+
 /**
  * List frameIds for a tab. Always includes 0 (main frame).
  */
@@ -132,7 +153,7 @@ async function listFrameIds(tabId: number): Promise<number[]> {
   try {
     const res = await chrome.webNavigation.getAllFrames({ tabId });
     const ids = Array.isArray(res)
-      ? res.map((f) => f.frameId).filter((n) => typeof n === 'number')
+      ? res.map((f) => f.frameId).filter((n) => typeof n === "number")
       : [];
     if (!ids.includes(0)) ids.unshift(0);
     return Array.from(new Set(ids)).sort((a, b) => a - b);
@@ -168,7 +189,10 @@ async function sendStopToFrameWithAck(
       .then((response) => {
         clearTimeout(t);
         const ack = !!(response && response.ack);
-        const stats = response && response.stats ? (response.stats as StopAckStats) : undefined;
+        const stats =
+          response && response.stats
+            ? (response.stats as StopAckStats)
+            : undefined;
         resolve({ frameId, ack, timedOut: false, stats });
       })
       .catch((err) => {
@@ -183,12 +207,21 @@ async function sendStopToFrameWithAck(
  * 1. Stop subframes first (so they can finalize and postMessage to top while top is still listening)
  * 2. Stop the main frame (top) and wait for ACK
  */
-async function stopTabWithBarrier(tabId: number, sessionId: string): Promise<StopTabBarrierResult> {
+async function stopTabWithBarrier(
+  tabId: number,
+  sessionId: string,
+): Promise<StopTabBarrierResult> {
   // If the tab is already gone, don't block stop.
   try {
     await chrome.tabs.get(tabId);
   } catch {
-    return { tabId, ok: true, skipped: true, reason: 'tab not found', subframes: [] };
+    return {
+      tabId,
+      ok: true,
+      skipped: true,
+      reason: "tab not found",
+      subframes: [],
+    };
   }
 
   // Ensure recorder is available in frames (best-effort).
@@ -202,12 +235,22 @@ async function stopTabWithBarrier(tabId: number, sessionId: string): Promise<Sto
   // Stop subframes first so they can finalize and postMessage to top while top is still listening.
   const subframes = await Promise.all(
     subframeIds.map((fid) =>
-      sendStopToFrameWithAck(tabId, sessionId, fid, STOP_BARRIER_SUBFRAME_TIMEOUT_MS),
+      sendStopToFrameWithAck(
+        tabId,
+        sessionId,
+        fid,
+        STOP_BARRIER_SUBFRAME_TIMEOUT_MS,
+      ),
     ),
   );
 
   // Stop the main frame (top) with longer timeout
-  const top = await sendStopToFrameWithAck(tabId, sessionId, 0, STOP_BARRIER_TOP_TIMEOUT_MS);
+  const top = await sendStopToFrameWithAck(
+    tabId,
+    sessionId,
+    0,
+    STOP_BARRIER_TOP_TIMEOUT_MS,
+  );
 
   return { tabId, ok: top.ack, top, subframes };
 }
@@ -227,30 +270,35 @@ class RecorderManagerImpl {
     meta?: Partial<Flow>,
     tabId?: number,
   ): Promise<{ success: boolean; error?: string }> {
-    if (session.getStatus() !== 'idle')
-      return { success: false, error: 'Recording already active' };
+    if (session.getStatus() !== "idle")
+      return { success: false, error: "Recording already active" };
     // Resolve target tab (explicit tabId preferred, otherwise active tab)
     let active: chrome.tabs.Tab | null = null;
-    if (typeof tabId === 'number') {
+    if (typeof tabId === "number") {
       try {
         active = await chrome.tabs.get(tabId);
       } catch {
         return { success: false, error: `Target tab not found: ${tabId}` };
       }
     } else {
-      const [currentActive] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [currentActive] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       active = currentActive ?? null;
     }
-    if (!active?.id) return { success: false, error: 'Active tab not found' };
+    if (!active?.id) return { success: false, error: "Active tab not found" };
 
     // Initialize flow & session
     const flow: Flow = createInitialFlow(meta);
     try {
       const startedAt = new Date().toISOString();
-      const originUrl = typeof active.url === 'string' ? active.url : undefined;
-      const originTitle = typeof active.title === 'string' ? active.title : undefined;
+      const originUrl = typeof active.url === "string" ? active.url : undefined;
+      const originTitle =
+        typeof active.title === "string" ? active.title : undefined;
       const userAgent =
-        typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string'
+        typeof navigator !== "undefined" &&
+        typeof navigator.userAgent === "string"
           ? navigator.userAgent
           : undefined;
       if (!flow.meta) {
@@ -262,7 +310,7 @@ class RecorderManagerImpl {
         originUrl,
         originTitle,
         originTabId: active.id,
-        browser: 'chrome',
+        browser: "chrome",
         userAgent,
       };
       if (!flow.meta.domain && originUrl) {
@@ -296,7 +344,7 @@ class RecorderManagerImpl {
       try {
         await saveFlow(flow);
       } catch (e) {
-        console.warn('RecorderManager: initial saveFlow failed', e);
+        console.warn("RecorderManager: initial saveFlow failed", e);
       }
       broadcastRecordingStateChanged();
     }
@@ -321,13 +369,13 @@ class RecorderManagerImpl {
    */
   async stop(): Promise<{ success: boolean; error?: string; flow?: Flow }> {
     const currentStatus = session.getStatus();
-    if (currentStatus === 'idle' || !session.getFlow()) {
-      return { success: false, error: 'No active recording' };
+    if (currentStatus === "idle" || !session.getFlow()) {
+      return { success: false, error: "No active recording" };
     }
 
     // Already stopping - don't double-stop
-    if (currentStatus === 'stopping') {
-      return { success: false, error: 'Stop already in progress' };
+    if (currentStatus === "stopping") {
+      return { success: false, error: "Stop already in progress" };
     }
 
     // Step 1: Transition to stopping state
@@ -339,9 +387,11 @@ class RecorderManagerImpl {
     // Each tab: stop subframes first, then stop main frame and wait for ACK
     let results: StopTabBarrierResult[] = [];
     try {
-      results = await Promise.all(tabs.map((tabId) => stopTabWithBarrier(tabId, sessionId)));
+      results = await Promise.all(
+        tabs.map((tabId) => stopTabWithBarrier(tabId, sessionId)),
+      );
     } catch (e) {
-      console.warn('RecorderManager: Error during stop broadcast:', e);
+      console.warn("RecorderManager: Error during stop broadcast:", e);
     }
 
     // Step 3: Allow a small grace period for any final messages in flight
@@ -350,16 +400,30 @@ class RecorderManagerImpl {
     // Step 4: Finalize - clear session state and save with barrier metadata
     const flow = await session.stopSession();
     broadcastRecordingStateChanged();
-    const barrierOk = results.length === tabs.length && results.every((r) => r.ok || r.skipped);
+    const barrierOk =
+      results.length === tabs.length && results.every((r) => r.ok || r.skipped);
     const stoppedAt = new Date().toISOString();
+
+    let warning: string | undefined;
+    if (!barrierOk) {
+      const failedTabs = results
+        .filter((r) => !r.ok && !r.skipped)
+        .map((r) => r.tabId);
+      warning = failedTabs.length
+        ? `Stop barrier incomplete; missing ACK from tabs: ${failedTabs.join(", ")}`
+        : "Stop barrier incomplete; missing ACK(s)";
+    }
 
     if (flow) {
       // Add barrier metadata to flow
       try {
-        if (!flow.meta) flow.meta = { createdAt: stoppedAt, updatedAt: stoppedAt };
+        if (!flow.meta)
+          flow.meta = { createdAt: stoppedAt, updatedAt: stoppedAt };
         const startIso = flow.meta.recording?.startedAt || flow.meta.createdAt;
         const startMs = startIso ? Date.parse(startIso) : NaN;
-        const durationMs = Number.isFinite(startMs) ? Math.max(0, Date.now() - startMs) : undefined;
+        const durationMs = Number.isFinite(startMs)
+          ? Math.max(0, Date.now() - startMs)
+          : undefined;
         const stepCount = Array.isArray(flow.nodes)
           ? flow.nodes.length
           : Array.isArray(flow.steps)
@@ -371,17 +435,22 @@ class RecorderManagerImpl {
           stoppedAt,
           durationMs,
           stepCount,
-          parameterSuggestions: parameterSuggestions.length ? parameterSuggestions : undefined,
+          parameterSuggestions: parameterSuggestions.length
+            ? parameterSuggestions
+            : undefined,
         };
         const failed = results
-          .filter((r) => !r.ok || r.skipped || r.subframes.some((sf) => !sf.ack))
+          .filter(
+            (r) => !r.ok || r.skipped || r.subframes.some((sf) => !sf.ack),
+          )
           .map((r) => ({
             tabId: r.tabId,
             skipped: r.skipped || undefined,
             reason: r.reason || undefined,
             topTimedOut: r.top?.timedOut || undefined,
             topError: r.top?.error || undefined,
-            subframesFailed: r.subframes.filter((sf) => !sf.ack).length || undefined,
+            subframesFailed:
+              r.subframes.filter((sf) => !sf.ack).length || undefined,
           }))
           .slice(0, 20); // Limit to first 20 to avoid bloating metadata
 
@@ -394,17 +463,21 @@ class RecorderManagerImpl {
       } catch {}
 
       await saveFlow(flow);
+      try {
+        await persistLegacyFlowToV3(flow);
+      } catch (error) {
+        warning = appendWarning(
+          warning,
+          `Failed to sync recorded workflow to V3: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
 
-    // Return with barrier status
-    if (!barrierOk) {
-      const failedTabs = results.filter((r) => !r.ok && !r.skipped).map((r) => r.tabId);
+    if (warning) {
       return {
-        success: true, // Flow is still saved, but with incomplete barrier
+        success: true,
         flow: flow || undefined,
-        error: failedTabs.length
-          ? `Stop barrier incomplete; missing ACK from tabs: ${failedTabs.join(', ')}`
-          : 'Stop barrier incomplete; missing ACK(s)',
+        error: warning,
       };
     }
 
@@ -415,8 +488,8 @@ class RecorderManagerImpl {
    * Pause recording. Steps are not collected while paused.
    */
   async pause(): Promise<{ success: boolean; error?: string }> {
-    if (session.getStatus() !== 'recording') {
-      return { success: false, error: 'Not currently recording' };
+    if (session.getStatus() !== "recording") {
+      return { success: false, error: "Not currently recording" };
     }
 
     session.pause();
@@ -425,9 +498,11 @@ class RecorderManagerImpl {
     // Broadcast pause to all active tabs
     const tabs = session.getActiveTabs();
     try {
-      await Promise.all(tabs.map((id) => broadcastControlToTab(id, REC_CMD.PAUSE)));
+      await Promise.all(
+        tabs.map((id) => broadcastControlToTab(id, REC_CMD.PAUSE)),
+      );
     } catch (e) {
-      console.warn('RecorderManager: Error during pause broadcast:', e);
+      console.warn("RecorderManager: Error during pause broadcast:", e);
     }
 
     return { success: true };
@@ -437,8 +512,8 @@ class RecorderManagerImpl {
    * Resume recording after pause.
    */
   async resume(): Promise<{ success: boolean; error?: string }> {
-    if (session.getStatus() !== 'paused') {
-      return { success: false, error: 'Not currently paused' };
+    if (session.getStatus() !== "paused") {
+      return { success: false, error: "Not currently paused" };
     }
 
     session.resume();
@@ -447,9 +522,11 @@ class RecorderManagerImpl {
     // Broadcast resume to all active tabs
     const tabs = session.getActiveTabs();
     try {
-      await Promise.all(tabs.map((id) => broadcastControlToTab(id, REC_CMD.RESUME)));
+      await Promise.all(
+        tabs.map((id) => broadcastControlToTab(id, REC_CMD.RESUME)),
+      );
     } catch (e) {
-      console.warn('RecorderManager: Error during resume broadcast:', e);
+      console.warn("RecorderManager: Error during resume broadcast:", e);
     }
 
     return { success: true };
