@@ -9,50 +9,68 @@
  * - RunExecutor Use RunRunner to execute the actual Flow
  */
 
-import type { UnixMillis } from './domain/json';
-import type { RunId } from './domain/ids';
-import { RR_ERROR_CODES, createRRError, type RRError } from './domain/errors';
+import type { UnixMillis } from "./domain/json";
+import type { RunId } from "./domain/ids";
+import { RR_ERROR_CODES, createRRError, type RRError } from "./domain/errors";
 
-import type { StoragePort } from './engine/storage/storage-port';
-import { StorageBackedEventsBus, type EventsBus } from './engine/transport/events-bus';
+import type { StoragePort } from "./engine/storage/storage-port";
+import {
+  StorageBackedEventsBus,
+  type EventsBus,
+} from "./engine/transport/events-bus";
 
-import { DEFAULT_QUEUE_CONFIG, type RunQueueItem } from './engine/queue/queue';
-import { createLeaseManager, generateOwnerId, type LeaseManager } from './engine/queue/leasing';
-import { createRunScheduler, type RunExecutor, type RunScheduler } from './engine/queue/scheduler';
-import { recoverFromCrash } from './engine/recovery/recovery-coordinator';
+import { DEFAULT_QUEUE_CONFIG, type RunQueueItem } from "./engine/queue/queue";
+import {
+  createLeaseManager,
+  generateOwnerId,
+  type LeaseManager,
+} from "./engine/queue/leasing";
+import {
+  createRunScheduler,
+  type RunExecutor,
+  type RunScheduler,
+} from "./engine/queue/scheduler";
+import { recoverFromCrash } from "./engine/recovery/recovery-coordinator";
 
-import { RpcServer } from './engine/transport/rpc-server';
+import { RpcServer } from "./engine/transport/rpc-server";
 
-import { createTriggerManager, type TriggerManager } from './engine/triggers/trigger-manager';
-import { createUrlTriggerHandlerFactory } from './engine/triggers/url-trigger';
-import { createCommandTriggerHandlerFactory } from './engine/triggers/command-trigger';
-import { createContextMenuTriggerHandlerFactory } from './engine/triggers/context-menu-trigger';
-import { createDomTriggerHandlerFactory } from './engine/triggers/dom-trigger';
-import { createIntervalTriggerHandlerFactory } from './engine/triggers/interval-trigger';
-import { createOnceTriggerHandlerFactory } from './engine/triggers/once-trigger';
-import { createManualTriggerHandlerFactory } from './engine/triggers/manual-trigger';
+import {
+  createTriggerManager,
+  type TriggerManager,
+} from "./engine/triggers/trigger-manager";
+import { createUrlTriggerHandlerFactory } from "./engine/triggers/url-trigger";
+import { createCommandTriggerHandlerFactory } from "./engine/triggers/command-trigger";
+import { createContextMenuTriggerHandlerFactory } from "./engine/triggers/context-menu-trigger";
+import { createDomTriggerHandlerFactory } from "./engine/triggers/dom-trigger";
+import { createIntervalTriggerHandlerFactory } from "./engine/triggers/interval-trigger";
+import { createOnceTriggerHandlerFactory } from "./engine/triggers/once-trigger";
+import { createManualTriggerHandlerFactory } from "./engine/triggers/manual-trigger";
 
-import { createChromeArtifactService } from './engine/kernel/artifacts';
-import { createRunRunnerFactory, type RunRunnerFactory } from './engine/kernel/runner';
+import { createChromeArtifactService } from "./engine/kernel/artifacts";
+import {
+  createRunRunnerFactory,
+  type RunRunnerFactory,
+} from "./engine/kernel/runner";
 import {
   createDebugController,
   createRunnerRegistry,
   type DebugController,
   type RunnerRegistry,
-} from './engine/kernel/debug-controller';
+} from "./engine/kernel/debug-controller";
 
-import { PluginRegistry } from './engine/plugins/registry';
+import { PluginRegistry } from "./engine/plugins/registry";
 import {
   registerV2ReplayNodesAsV3Nodes,
   DEFAULT_V2_EXCLUDE_LIST,
-} from './engine/plugins/register-v2-replay-nodes';
+} from "./engine/plugins/register-v2-replay-nodes";
 
-import { acquireKeepalive } from '../keepalive-manager';
-import { createStoragePort } from './index';
+import { acquireKeepalive } from "../keepalive-manager";
+import { createStoragePort } from "./index";
+import { migrateLegacyFlowsToV3 } from "./storage/import/legacy-v2-migration";
 
 // ==================== Types ====================
 
-type Logger = Pick<Console, 'debug' | 'info' | 'warn' | 'error'>;
+type Logger = Pick<Console, "debug" | "info" | "warn" | "error">;
 
 /**
  * V3 runtime handle
@@ -77,19 +95,19 @@ let bootstrapPromise: Promise<V3Runtime> | null = null;
 
 // Route A scope: disable platform-style trigger/schedule automation surfaces.
 const ENABLE_V3_TRIGGERS_AND_SCHEDULES = false;
-const V3_TRIGGER_ALARM_PREFIXES = ['rr_v3_'] as const;
+const V3_TRIGGER_ALARM_PREFIXES = ["rr_v3_"] as const;
 
 // ==================== Utilities ====================
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
-  if (err && typeof err === 'object' && 'message' in err)
+  if (err && typeof err === "object" && "message" in err)
     return String((err as { message: unknown }).message);
   return String(err);
 }
 
 function isFiniteNumber(v: unknown): v is number {
-  return typeof v === 'number' && Number.isFinite(v);
+  return typeof v === "number" && Number.isFinite(v);
 }
 
 async function tabExists(tabId: number): Promise<boolean> {
@@ -102,9 +120,9 @@ async function tabExists(tabId: number): Promise<boolean> {
 }
 
 async function createEphemeralTab(logger: Logger): Promise<number> {
-  const tab = await chrome.tabs.create({ url: 'about:blank', active: false });
+  const tab = await chrome.tabs.create({ url: "about:blank", active: false });
   if (tab.id === undefined) {
-    throw new Error('chrome.tabs.create returned a tab without id');
+    throw new Error("chrome.tabs.create returned a tab without id");
   }
   logger.debug(`[RR-V3] Allocated ephemeral tab ${tab.id}`);
   return tab.id;
@@ -122,13 +140,17 @@ async function clearV3TriggerAlarms(logger: Logger): Promise<void> {
   try {
     const alarms = await chrome.alarms.getAll();
     const toClear = alarms
-      .map((alarm) => alarm?.name || '')
-      .filter((name) => V3_TRIGGER_ALARM_PREFIXES.some((prefix) => name.startsWith(prefix)));
+      .map((alarm) => alarm?.name || "")
+      .filter((name) =>
+        V3_TRIGGER_ALARM_PREFIXES.some((prefix) => name.startsWith(prefix)),
+      );
     if (toClear.length === 0) return;
     await Promise.all(toClear.map((name) => chrome.alarms.clear(name)));
-    logger.info(`[RR-V3] Cleared ${toClear.length} trigger alarm(s) (scope disabled)`);
+    logger.info(
+      `[RR-V3] Cleared ${toClear.length} trigger alarm(s) (scope disabled)`,
+    );
   } catch (e) {
-    logger.warn('[RR-V3] Failed to clear disabled trigger alarms:', e);
+    logger.warn("[RR-V3] Failed to clear disabled trigger alarms:", e);
   }
 }
 
@@ -142,9 +164,11 @@ async function resolveRunTab(input: {
   triggerTabId?: number;
   logger: Logger;
 }): Promise<{ tabId: number; shouldClose: boolean }> {
-  const candidates = [input.runTabId, input.queueTabId, input.triggerTabId].filter(
-    (x): x is number => isFiniteNumber(x),
-  );
+  const candidates = [
+    input.runTabId,
+    input.queueTabId,
+    input.triggerTabId,
+  ].filter((x): x is number => isFiniteNumber(x));
 
   for (const tabId of candidates) {
     if (await tabExists(tabId)) {
@@ -161,7 +185,12 @@ async function resolveRunTab(input: {
  * NOTE: The latest RunRecord will be re-read to get the correct startedAt
  */
 async function failRun(
-  deps: { storage: StoragePort; events: EventsBus; now: () => UnixMillis; logger: Logger },
+  deps: {
+    storage: StoragePort;
+    events: EventsBus;
+    now: () => UnixMillis;
+    logger: Logger;
+  },
   runId: RunId,
   error: RRError,
 ): Promise<void> {
@@ -182,7 +211,7 @@ async function failRun(
 
   try {
     await deps.storage.runs.patch(runId, {
-      status: 'failed',
+      status: "failed",
       finishedAt,
       tookMs,
       error,
@@ -193,7 +222,7 @@ async function failRun(
   }
 
   try {
-    await deps.events.append({ runId, type: 'run.failed', error });
+    await deps.events.append({ runId, type: "run.failed", error });
   } catch (e) {
     deps.logger.warn(`[RR-V3] Failed to append run.failed for "${runId}":`, e);
   }
@@ -219,7 +248,9 @@ function createDefaultRunExecutor(deps: {
     // 1. Get RunRecord
     const run = await deps.storage.runs.get(runId);
     if (!run) {
-      deps.logger.warn(`[RR-V3] RunRecord not found for queue item "${runId}", skipping execution`);
+      deps.logger.warn(
+        `[RR-V3] RunRecord not found for queue item "${runId}", skipping execution`,
+      );
       return;
     }
 
@@ -229,7 +260,10 @@ function createDefaultRunExecutor(deps: {
       await failRun(
         deps,
         runId,
-        createRRError(RR_ERROR_CODES.VALIDATION_ERROR, `Flow "${item.flowId}" not found`),
+        createRRError(
+          RR_ERROR_CODES.VALIDATION_ERROR,
+          `Flow "${item.flowId}" not found`,
+        ),
       );
       return;
     }
@@ -250,7 +284,10 @@ function createDefaultRunExecutor(deps: {
         tabId,
       });
     } catch (e) {
-      deps.logger.debug(`[RR-V3] Failed to patch run "${runId}" attempt/tabId:`, e);
+      deps.logger.debug(
+        `[RR-V3] Failed to patch run "${runId}" attempt/tabId:`,
+        e,
+      );
     }
 
     // 5. Execute Run
@@ -272,7 +309,10 @@ function createDefaultRunExecutor(deps: {
       await failRun(
         deps,
         runId,
-        createRRError(RR_ERROR_CODES.INTERNAL, `Executor crashed: ${errorMessage(e)}`),
+        createRRError(
+          RR_ERROR_CODES.INTERNAL,
+          `Executor crashed: ${errorMessage(e)}`,
+        ),
       );
     } finally {
       // 6. Log out Runner
@@ -302,10 +342,13 @@ export async function bootstrapV3(): Promise<V3Runtime> {
     const logger: Logger = console;
     const now = (): UnixMillis => Date.now();
 
-    logger.info('[RR-V3] Bootstrapping...');
+    logger.info("[RR-V3] Bootstrapping...");
 
     // 1) Storage
     const storage = createStoragePort();
+
+    // 1.5) One-time legacy import from V2 storage
+    await migrateLegacyFlowsToV3({ storage, logger });
 
     // 2) EventsBus
     const events: EventsBus = new StorageBackedEventsBus(storage.events);
@@ -315,7 +358,10 @@ export async function bootstrapV3(): Promise<V3Runtime> {
     logger.debug(`[RR-V3] Owner ID: ${ownerId}`);
 
     // 4) LeaseManager
-    const leaseManager = createLeaseManager(storage.queue, DEFAULT_QUEUE_CONFIG);
+    const leaseManager = createLeaseManager(
+      storage.queue,
+      DEFAULT_QUEUE_CONFIG,
+    );
 
     // 5) RunnerRegistry + DebugController
     const runners = createRunnerRegistry();
@@ -332,7 +378,9 @@ export async function bootstrapV3(): Promise<V3Runtime> {
       // Exclude control directives that V3 runner doesn't support
       exclude: [...DEFAULT_V2_EXCLUDE_LIST],
     });
-    logger.debug(`[RR-V3] Registered ${registeredNodes.length} V2 action handlers as V3 nodes`);
+    logger.debug(
+      `[RR-V3] Registered ${registeredNodes.length} V2 action handlers as V3 nodes`,
+    );
 
     // 8) RunExecutor via RunRunnerFactory
     const runnerFactory = createRunRunnerFactory({
@@ -424,11 +472,13 @@ export async function bootstrapV3(): Promise<V3Runtime> {
 
     try {
       // 10) Recovery - MUST run before scheduler.start()
-      logger.info('[RR-V3] Running crash recovery...');
+      logger.info("[RR-V3] Running crash recovery...");
       await recoverFromCrash({ storage, events, ownerId, now, logger });
 
       if (!ENABLE_V3_TRIGGERS_AND_SCHEDULES) {
-        logger.info('[RR-V3] Trigger/schedule automation surface disabled by connector scope');
+        logger.info(
+          "[RR-V3] Trigger/schedule automation surface disabled by connector scope",
+        );
         await clearV3TriggerAlarms(logger);
       }
 
@@ -441,7 +491,7 @@ export async function bootstrapV3(): Promise<V3Runtime> {
       }
       rpcServer.start();
 
-      logger.info('[RR-V3] Bootstrap complete');
+      logger.info("[RR-V3] Bootstrap complete");
     } catch (e) {
       await cleanup();
       throw e;
@@ -459,7 +509,7 @@ export async function bootstrapV3(): Promise<V3Runtime> {
       triggers,
       rpcServer,
       stop: async () => {
-        logger.info('[RR-V3] Stopping...');
+        logger.info("[RR-V3] Stopping...");
         // Stop order: RPC first (block new requests) -> triggers -> scheduler -> lease -> debug
         rpcServer.stop();
         await triggers.stop().catch(() => {});
@@ -467,7 +517,7 @@ export async function bootstrapV3(): Promise<V3Runtime> {
         leaseManager.dispose();
         debugController.stop();
         runtime = null;
-        logger.info('[RR-V3] Stopped');
+        logger.info("[RR-V3] Stopped");
       },
     };
 

@@ -3,10 +3,10 @@
  * @description Defining Flow IR (Intermediate Representation) in Record-Replay V3
  */
 
-import type { ISODateTimeString, JsonObject } from './json';
-import type { EdgeId, EdgeLabel, FlowId, NodeId } from './ids';
-import type { FlowPolicy, NodePolicy } from './policy';
-import type { VariableDefinition } from './variables';
+import type { ISODateTimeString, JsonObject } from "./json";
+import type { EdgeId, EdgeLabel, FlowId, NodeId } from "./ids";
+import type { FlowPolicy, NodePolicy } from "./policy";
+import type { VariableDefinition } from "./variables";
 
 /** Flow Schema version */
 export const FLOW_SCHEMA_VERSION = 3 as const;
@@ -55,8 +55,66 @@ export interface NodeV3 {
  * @description Define the association of Flow with a specific domain name/path/URL
  */
 export interface FlowBinding {
-  kind: 'domain' | 'path' | 'url';
+  kind: "domain" | "path" | "url";
   value: string;
+}
+
+export interface FlowToolMetadata {
+  published?: boolean;
+  slug?: string;
+  category?: string;
+  description?: string;
+}
+
+export interface FlowExposedOutput {
+  nodeId: NodeId;
+  as: string;
+}
+
+export interface FlowRecordingParameterSuggestion {
+  nodeId: NodeId;
+  kind: "fill" | "navigate";
+  suggestedKey: string;
+  currentValue: string;
+}
+
+export interface FlowRecordingMeta {
+  originUrl?: string;
+  originTitle?: string;
+  originTabId?: number;
+  browser?: string;
+  userAgent?: string;
+  startedAt?: ISODateTimeString;
+  stoppedAt?: ISODateTimeString;
+  durationMs?: number;
+  stepCount?: number;
+  parameterSuggestions?: FlowRecordingParameterSuggestion[];
+}
+
+export interface FlowStopBarrierFailure {
+  tabId: number;
+  skipped?: boolean;
+  reason?: string;
+  topTimedOut?: boolean;
+  topError?: string;
+  subframesFailed?: number;
+}
+
+export interface FlowStopBarrierMeta {
+  ok: boolean;
+  sessionId?: string;
+  stoppedAt?: ISODateTimeString;
+  failed?: FlowStopBarrierFailure[];
+}
+
+export interface FlowMeta {
+  domain?: string;
+  tags?: string[];
+  bindings?: FlowBinding[];
+  tool?: FlowToolMetadata;
+  exposedOutputs?: FlowExposedOutput[];
+  recording?: FlowRecordingMeta;
+  stopBarrier?: FlowStopBarrierMeta;
 }
 
 /**
@@ -89,12 +147,7 @@ export interface FlowV3 {
   /** Flow level strategy */
   policy?: FlowPolicy;
   /** Metadata */
-  meta?: {
-    /** label */
-    tags?: string[];
-    /** Binding rules */
-    bindings?: FlowBinding[];
-  };
+  meta?: FlowMeta;
 }
 
 /**

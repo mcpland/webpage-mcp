@@ -3,12 +3,26 @@
  * @description Convert V2 format data to V3 format, supporting bidirectional conversion
  */
 
-import type { FlowV3, NodeV3, EdgeV3, FlowBinding } from '../../domain/flow';
-import type { TriggerSpec, UrlMatchRule } from '../../domain/triggers';
-import type { VariableDefinition } from '../../domain/variables';
-import type { NodeId, FlowId, EdgeId } from '../../domain/ids';
-import type { ISODateTimeString, JsonObject, JsonValue } from '../../domain/json';
-import { FLOW_SCHEMA_VERSION } from '../../domain/flow';
+import type {
+  FlowV3,
+  NodeV3,
+  EdgeV3,
+  FlowBinding,
+  FlowExposedOutput,
+  FlowMeta,
+  FlowRecordingMeta,
+  FlowStopBarrierMeta,
+  FlowToolMetadata,
+} from "../../domain/flow";
+import type { TriggerSpec, UrlMatchRule } from "../../domain/triggers";
+import type { VariableDefinition } from "../../domain/variables";
+import type { NodeId, FlowId, EdgeId } from "../../domain/ids";
+import type {
+  ISODateTimeString,
+  JsonObject,
+  JsonValue,
+} from "../../domain/json";
+import { FLOW_SCHEMA_VERSION } from "../../domain/flow";
 
 // ==================== V2 Types (imported from record-replay) ====================
 
@@ -42,7 +56,7 @@ interface V2VariableDef {
 
 /** V2 Flow binding */
 interface V2Binding {
-  type: 'domain' | 'path' | 'url';
+  type: "domain" | "path" | "url";
   value: string;
 }
 
@@ -58,8 +72,43 @@ interface V2Flow {
     domain?: string;
     tags?: string[];
     bindings?: V2Binding[];
-    tool?: { category?: string; description?: string };
+    tool?: {
+      published?: boolean;
+      slug?: string;
+      category?: string;
+      description?: string;
+    };
     exposedOutputs?: Array<{ nodeId: string; as: string }>;
+    recording?: {
+      originUrl?: string;
+      originTitle?: string;
+      originTabId?: number;
+      browser?: string;
+      userAgent?: string;
+      startedAt?: string;
+      stoppedAt?: string;
+      durationMs?: number;
+      stepCount?: number;
+      parameterSuggestions?: Array<{
+        nodeId: string;
+        kind: "fill" | "navigate";
+        suggestedKey: string;
+        currentValue: string;
+      }>;
+    };
+    stopBarrier?: {
+      ok: boolean;
+      sessionId?: string;
+      stoppedAt?: string;
+      failed?: Array<{
+        tabId: number;
+        skipped?: boolean;
+        reason?: string;
+        topTimedOut?: boolean;
+        topError?: string;
+        subframesFailed?: number;
+      }>;
+    };
   };
   variables?: V2VariableDef[];
   nodes?: V2Node[];
@@ -82,7 +131,11 @@ function toJsonValue(input: unknown): JsonValue | undefined {
   }
 
   const inputType = typeof input;
-  if (inputType === 'string' || inputType === 'number' || inputType === 'boolean') {
+  if (
+    inputType === "string" ||
+    inputType === "number" ||
+    inputType === "boolean"
+  ) {
     return input as string | number | boolean;
   }
 
@@ -98,9 +151,11 @@ function toJsonValue(input: unknown): JsonValue | undefined {
     return arrayValue;
   }
 
-  if (inputType === 'object') {
+  if (inputType === "object") {
     const objectValue: JsonObject = {};
-    for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(
+      input as Record<string, unknown>,
+    )) {
       const converted = toJsonValue(value);
       if (converted !== undefined) {
         objectValue[key] = converted;
@@ -114,7 +169,7 @@ function toJsonValue(input: unknown): JsonValue | undefined {
 
 function toJsonObject(input: unknown): JsonObject {
   const converted = toJsonValue(input);
-  if (converted && typeof converted === 'object' && !Array.isArray(converted)) {
+  if (converted && typeof converted === "object" && !Array.isArray(converted)) {
     return converted;
   }
   return {};
@@ -126,14 +181,18 @@ function normalizeV2UrlMatchRules(
   const list = rules ?? [];
   const normalized: UrlMatchRule[] = [];
   for (const rule of list) {
-    const value = String(rule?.value ?? '').trim();
+    const value = String(rule?.value ?? "").trim();
     if (!value) {
       continue;
     }
 
-    const kindRaw = String(rule?.kind ?? '').trim().toLowerCase();
-    const kind: UrlMatchRule['kind'] =
-      kindRaw === 'domain' || kindRaw === 'path' || kindRaw === 'url' ? kindRaw : 'url';
+    const kindRaw = String(rule?.kind ?? "")
+      .trim()
+      .toLowerCase();
+    const kind: UrlMatchRule["kind"] =
+      kindRaw === "domain" || kindRaw === "path" || kindRaw === "url"
+        ? kindRaw
+        : "url";
     normalized.push({ kind, value });
   }
   return normalized;
@@ -152,31 +211,31 @@ export function convertFlowV2ToV3(v2Flow: V2Flow): ConversionResult<FlowV3> {
 
   // 1. Basic field validation
   if (!v2Flow.id) {
-    errors.push('V2 Flow missing required field: id');
+    errors.push("V2 Flow missing required field: id");
   }
   if (!v2Flow.name) {
-    errors.push('V2 Flow missing required field: name');
+    errors.push("V2 Flow missing required field: name");
   }
   if (!v2Flow.nodes || v2Flow.nodes.length === 0) {
-    errors.push('V2 Flow has no nodes');
+    errors.push("V2 Flow has no nodes");
   }
 
   // 2. Check for unsupported features
   if (v2Flow.subflows && Object.keys(v2Flow.subflows).length > 0) {
     errors.push(
-      'V3 does not support subflows yet. Flow contains subflows: ' +
-        Object.keys(v2Flow.subflows).join(', '),
+      "V3 does not support subflows yet. Flow contains subflows: " +
+        Object.keys(v2Flow.subflows).join(", "),
     );
   }
 
   // Check foreach/while nodes
   const unsupportedNodes = (v2Flow.nodes || []).filter(
-    (n) => n.type === 'foreach' || n.type === 'while',
+    (n) => n.type === "foreach" || n.type === "while",
   );
   if (unsupportedNodes.length > 0) {
     errors.push(
-      'V3 does not support foreach/while nodes yet. Found: ' +
-        unsupportedNodes.map((n) => `${n.id} (${n.type})`).join(', '),
+      "V3 does not support foreach/while nodes yet. Found: " +
+        unsupportedNodes.map((n) => `${n.id} (${n.type})`).join(", "),
     );
   }
 
@@ -211,7 +270,7 @@ export function convertFlowV2ToV3(v2Flow: V2Flow): ConversionResult<FlowV3> {
   const entryResult = findEntryNodeId(nodes, edges);
   warnings.push(...entryResult.warnings);
   if (!entryResult.nodeId) {
-    errors.push('Could not determine entry node. No valid root node found.');
+    errors.push("Could not determine entry node. No valid root node found.");
     return { success: false, errors, warnings };
   }
   const entryNodeId = entryResult.nodeId;
@@ -293,7 +352,7 @@ function convertEdgeV2ToV3(v2Edge: V2Edge): EdgeV3 | null {
 
   // label pass directly
   if (v2Edge.label) {
-    edge.label = v2Edge.label as EdgeV3['label'];
+    edge.label = v2Edge.label as EdgeV3["label"];
   }
 
   return edge;
@@ -320,9 +379,9 @@ function findEntryNodeId(nodes: NodeV3[], edges: EdgeV3[]): EntryNodeResult {
   const warnings: string[] = [];
 
   // 1. Exclude the trigger node and obtain the executable node
-  const executableNodes = nodes.filter((n) => n.kind !== 'trigger');
+  const executableNodes = nodes.filter((n) => n.kind !== "trigger");
   if (executableNodes.length === 0) {
-    warnings.push('No executable nodes found; cannot determine entry node');
+    warnings.push("No executable nodes found; cannot determine entry node");
     return { nodeId: null, warnings };
   }
 
@@ -368,7 +427,7 @@ function findEntryNodeId(nodes: NodeV3[], edges: EdgeV3[]): EntryNodeResult {
   const candidateIds = rootNodes
     .map((n) => n.id)
     .sort((a, b) => a.localeCompare(b))
-    .join(', ');
+    .join(", ");
   warnings.push(
     `Multiple inDegree=0 executable nodes (${candidateIds}); ` +
       `selected "${selectedResult.node.id}" by ${selectedResult.rule}`,
@@ -389,7 +448,9 @@ interface StableSelectionResult {
  */
 function selectStableRootNode(nodes: NodeV3[]): StableSelectionResult {
   // Check if the node has valid UI coordinates
-  const hasValidUi = (n: NodeV3): n is NodeV3 & { ui: { x: number; y: number } } =>
+  const hasValidUi = (
+    n: NodeV3,
+  ): n is NodeV3 & { ui: { x: number; y: number } } =>
     !!n.ui && Number.isFinite(n.ui.x) && Number.isFinite(n.ui.y);
 
   const nodesWithUi = nodes.filter(hasValidUi);
@@ -410,13 +471,15 @@ function selectStableRootNode(nodes: NodeV3[]): StableSelectionResult {
 
   // No UI coordinates, dictionary order by ID
   const sortedById = [...nodes].sort((a, b) => a.id.localeCompare(b.id));
-  return { node: sortedById[0], rule: 'id' };
+  return { node: sortedById[0], rule: "id" };
 }
 
 /**
  * Conversion variable definition
  */
-function convertVariablesV2ToV3(v2Variables: V2VariableDef[]): VariableDefinition[] {
+function convertVariablesV2ToV3(
+  v2Variables: V2VariableDef[],
+): VariableDefinition[] {
   return v2Variables
     .filter((v) => v.key)
     .map((v) => {
@@ -444,23 +507,115 @@ function convertVariablesV2ToV3(v2Variables: V2VariableDef[]): VariableDefinitio
     });
 }
 
+function dedupeBindings(bindings: FlowBinding[]): FlowBinding[] {
+  const seen = new Set<string>();
+  const next: FlowBinding[] = [];
+
+  for (const binding of bindings) {
+    const key = `${binding.kind}:${binding.value}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    next.push(binding);
+  }
+
+  return next;
+}
+
 /**
  * Convert metadata
  */
-function convertMetaV2ToV3(v2Meta: V2Flow['meta']): FlowV3['meta'] | undefined {
+function convertMetaV2ToV3(v2Meta: V2Flow["meta"]): FlowV3["meta"] | undefined {
   if (!v2Meta) return undefined;
 
-  const meta: FlowV3['meta'] = {};
+  const meta: FlowMeta = {};
+
+  if (v2Meta.domain?.trim()) {
+    meta.domain = v2Meta.domain.trim();
+  }
 
   if (v2Meta.tags && v2Meta.tags.length > 0) {
     meta.tags = v2Meta.tags;
   }
 
+  const bindings: FlowBinding[] = [];
   if (v2Meta.bindings && v2Meta.bindings.length > 0) {
-    meta.bindings = v2Meta.bindings.map((b) => ({
-      kind: b.type, // V2 type -> V3 kind
-      value: b.value,
-    }));
+    bindings.push(
+      ...v2Meta.bindings.map((b) => ({
+        kind: b.type,
+        value: b.value,
+      })),
+    );
+  }
+  if (meta.domain) {
+    bindings.unshift({
+      kind: "domain",
+      value: meta.domain,
+    });
+  }
+  if (bindings.length > 0) {
+    meta.bindings = dedupeBindings(bindings);
+  }
+
+  if (v2Meta.tool) {
+    const tool: FlowToolMetadata = {};
+    if (typeof v2Meta.tool.published === "boolean") {
+      tool.published = v2Meta.tool.published;
+    }
+    if (typeof v2Meta.tool.slug === "string" && v2Meta.tool.slug.trim()) {
+      tool.slug = v2Meta.tool.slug.trim();
+    }
+    if (
+      typeof v2Meta.tool.category === "string" &&
+      v2Meta.tool.category.trim()
+    ) {
+      tool.category = v2Meta.tool.category.trim();
+    }
+    if (
+      typeof v2Meta.tool.description === "string" &&
+      v2Meta.tool.description.trim()
+    ) {
+      tool.description = v2Meta.tool.description.trim();
+    }
+    if (Object.keys(tool).length > 0) {
+      meta.tool = tool;
+    }
+  }
+
+  if (v2Meta.exposedOutputs?.length) {
+    meta.exposedOutputs = v2Meta.exposedOutputs
+      .filter((output) => output?.nodeId && output?.as)
+      .map(
+        (output): FlowExposedOutput => ({
+          nodeId: output.nodeId,
+          as: output.as,
+        }),
+      );
+  }
+
+  if (v2Meta.recording) {
+    const recording: FlowRecordingMeta = {
+      ...v2Meta.recording,
+      parameterSuggestions: v2Meta.recording.parameterSuggestions?.map(
+        (suggestion) => ({
+          ...suggestion,
+        }),
+      ),
+    };
+    if (Object.keys(recording).length > 0) {
+      meta.recording = recording;
+    }
+  }
+
+  if (v2Meta.stopBarrier) {
+    const stopBarrier: FlowStopBarrierMeta = {
+      ...v2Meta.stopBarrier,
+      failed: v2Meta.stopBarrier.failed?.map((failure) => ({
+        ...failure,
+      })),
+    };
+    meta.stopBarrier = stopBarrier;
   }
 
   // If meta is an empty object, return undefined
@@ -510,10 +665,21 @@ export function convertFlowV3ToV2(v3Flow: FlowV3): ConversionResult<V2Flow> {
   }));
 
   // 4. Convert metadata
-  const meta: V2Flow['meta'] = {
+  const meta: V2Flow["meta"] = {
     createdAt: v3Flow.createdAt,
     updatedAt: v3Flow.updatedAt,
   };
+
+  if (v3Flow.meta?.domain) {
+    meta.domain = v3Flow.meta.domain;
+  } else {
+    const domainBinding = v3Flow.meta?.bindings?.find(
+      (binding) => binding.kind === "domain",
+    );
+    if (domainBinding) {
+      meta.domain = domainBinding.value;
+    }
+  }
 
   if (v3Flow.meta?.tags) {
     meta.tags = v3Flow.meta.tags;
@@ -524,6 +690,42 @@ export function convertFlowV3ToV2(v3Flow: FlowV3): ConversionResult<V2Flow> {
       type: b.kind, // V3 kind -> V2 type
       value: b.value,
     }));
+  }
+
+  if (v3Flow.meta?.tool) {
+    meta.tool = {
+      published: v3Flow.meta.tool.published,
+      slug: v3Flow.meta.tool.slug,
+      category: v3Flow.meta.tool.category,
+      description: v3Flow.meta.tool.description,
+    };
+  }
+
+  if (v3Flow.meta?.exposedOutputs) {
+    meta.exposedOutputs = v3Flow.meta.exposedOutputs.map((output) => ({
+      nodeId: output.nodeId,
+      as: output.as,
+    }));
+  }
+
+  if (v3Flow.meta?.recording) {
+    meta.recording = {
+      ...v3Flow.meta.recording,
+      parameterSuggestions: v3Flow.meta.recording.parameterSuggestions?.map(
+        (suggestion) => ({
+          ...suggestion,
+        }),
+      ),
+    };
+  }
+
+  if (v3Flow.meta?.stopBarrier) {
+    meta.stopBarrier = {
+      ...v3Flow.meta.stopBarrier,
+      failed: v3Flow.meta.stopBarrier.failed?.map((failure) => ({
+        ...failure,
+      })),
+    };
   }
 
   // 5. Build V2 Flow
@@ -546,7 +748,7 @@ export function convertFlowV3ToV2(v3Flow: FlowV3): ConversionResult<V2Flow> {
 /** V2 Trigger definition */
 interface V2Trigger {
   id: string;
-  type: 'url' | 'command' | 'manual' | 'schedule' | 'element';
+  type: "url" | "command" | "manual" | "schedule" | "element";
   flowId: string;
   enabled?: boolean;
   match?: Array<{ kind: string; value: string }>;
@@ -557,7 +759,7 @@ interface V2Trigger {
   once?: boolean;
   debounceMs?: number;
   schedule?: {
-    type: 'interval' | 'daily' | 'weekly';
+    type: "interval" | "daily" | "weekly";
     intervalMs?: number;
     time?: string;
     days?: number[];
@@ -569,18 +771,20 @@ interface V2Trigger {
  * @param v2Trigger V2 Trigger format
  * @returns Conversion result
  */
-export function convertTriggerV2ToV3(v2Trigger: V2Trigger): ConversionResult<TriggerSpec> {
+export function convertTriggerV2ToV3(
+  v2Trigger: V2Trigger,
+): ConversionResult<TriggerSpec> {
   const errors: string[] = [];
   const warnings: string[] = [];
 
   if (!v2Trigger.id) {
-    errors.push('V2 Trigger missing required field: id');
+    errors.push("V2 Trigger missing required field: id");
   }
   if (!v2Trigger.flowId) {
-    errors.push('V2 Trigger missing required field: flowId');
+    errors.push("V2 Trigger missing required field: flowId");
   }
   if (!v2Trigger.type) {
-    errors.push('V2 Trigger missing required field: type');
+    errors.push("V2 Trigger missing required field: type");
   }
 
   if (errors.length > 0) {
@@ -591,44 +795,48 @@ export function convertTriggerV2ToV3(v2Trigger: V2Trigger): ConversionResult<Tri
   let trigger: TriggerSpec;
 
   switch (v2Trigger.type) {
-    case 'manual':
+    case "manual":
       trigger = {
         id: v2Trigger.id,
-        kind: 'manual',
+        kind: "manual",
         flowId: v2Trigger.flowId as FlowId,
         enabled: v2Trigger.enabled ?? true,
       };
       break;
 
-    case 'command':
+    case "command":
       trigger = {
         id: v2Trigger.id,
-        kind: 'command',
+        kind: "command",
         flowId: v2Trigger.flowId as FlowId,
         enabled: v2Trigger.enabled ?? true,
-        commandKey: v2Trigger.commandKey || 'run_workflow',
+        commandKey: v2Trigger.commandKey || "run_workflow",
       };
       break;
 
-    case 'url':
+    case "url":
       trigger = {
         id: v2Trigger.id,
-        kind: 'url',
+        kind: "url",
         flowId: v2Trigger.flowId as FlowId,
         enabled: v2Trigger.enabled ?? true,
         match: normalizeV2UrlMatchRules(v2Trigger.match),
       };
       break;
 
-    case 'schedule':
-      errors.push('Schedule triggers are no longer supported in Connector scope');
+    case "schedule":
+      errors.push(
+        "Schedule triggers are no longer supported in Connector scope",
+      );
       return { success: false, errors, warnings };
 
-    case 'element':
-      warnings.push('Element trigger is not fully supported in V3, converting to manual');
+    case "element":
+      warnings.push(
+        "Element trigger is not fully supported in V3, converting to manual",
+      );
       trigger = {
         id: v2Trigger.id,
-        kind: 'manual',
+        kind: "manual",
         flowId: v2Trigger.flowId as FlowId,
         enabled: v2Trigger.enabled ?? true,
       };
@@ -662,7 +870,7 @@ export function createV2ToV3Converter(): V2ToV3Converter {
     convertFlow(v2Flow: unknown): FlowV3 {
       const result = convertFlowV2ToV3(v2Flow as V2Flow);
       if (!result.success || !result.data) {
-        throw new Error(`Flow conversion failed: ${result.errors.join('; ')}`);
+        throw new Error(`Flow conversion failed: ${result.errors.join("; ")}`);
       }
       return result.data;
     },
@@ -670,7 +878,9 @@ export function createV2ToV3Converter(): V2ToV3Converter {
     convertTrigger(v2Trigger: unknown): TriggerSpec {
       const result = convertTriggerV2ToV3(v2Trigger as V2Trigger);
       if (!result.success || !result.data) {
-        throw new Error(`Trigger conversion failed: ${result.errors.join('; ')}`);
+        throw new Error(
+          `Trigger conversion failed: ${result.errors.join("; ")}`,
+        );
       }
       return result.data;
     },

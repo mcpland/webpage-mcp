@@ -3,21 +3,50 @@
  * @description Handles RPC requests from UI via chrome.runtime.Port
  */
 
-import type { ISODateTimeString, JsonObject, JsonValue } from '../../domain/json';
-import type { EdgeId, FlowId, NodeId, RunId, TriggerId } from '../../domain/ids';
-import type { DebuggerCommand } from '../../domain/debug';
-import type { RunEvent } from '../../domain/events';
-import type { FlowV3, NodeV3, EdgeV3 } from '../../domain/flow';
-import { FLOW_SCHEMA_VERSION as CURRENT_FLOW_SCHEMA_VERSION } from '../../domain/flow';
-import type { VariableDefinition } from '../../domain/variables';
-import type { TriggerKind, TriggerSpec } from '../../domain/triggers';
-import type { StoragePort } from '../storage/storage-port';
-import type { EventsBus } from './events-bus';
-import type { DebugController, RunnerRegistry } from '../kernel/debug-controller';
-import type { RunScheduler } from '../queue/scheduler';
-import type { QueueItemStatus } from '../queue/queue';
-import { enqueueRun } from '../queue/enqueue-run';
-import type { TriggerManager } from '../triggers/trigger-manager';
+import type {
+  ISODateTimeString,
+  JsonObject,
+  JsonValue,
+} from "../../domain/json";
+import type {
+  EdgeId,
+  FlowId,
+  NodeId,
+  RunId,
+  TriggerId,
+} from "../../domain/ids";
+import type { DebuggerCommand } from "../../domain/debug";
+import type { RunEvent } from "../../domain/events";
+import type {
+  FlowBinding,
+  FlowExposedOutput,
+  FlowMeta,
+  FlowRecordingMeta,
+  FlowStopBarrierMeta,
+  FlowToolMetadata,
+  FlowV3,
+  NodeV3,
+  EdgeV3,
+} from "../../domain/flow";
+import { FLOW_SCHEMA_VERSION as CURRENT_FLOW_SCHEMA_VERSION } from "../../domain/flow";
+import type { VariableDefinition } from "../../domain/variables";
+import type { TriggerKind, TriggerSpec } from "../../domain/triggers";
+import type { StoragePort } from "../storage/storage-port";
+import type { EventsBus } from "./events-bus";
+import type {
+  DebugController,
+  RunnerRegistry,
+} from "../kernel/debug-controller";
+import type { RunScheduler } from "../queue/scheduler";
+import type { QueueItemStatus } from "../queue/queue";
+import { enqueueRun } from "../queue/enqueue-run";
+import type { TriggerManager } from "../triggers/trigger-manager";
+import {
+  ensurePublishedSlugAvailable,
+  getPublishedFlowInfo,
+  listPublishedFlowInfos,
+  normalizeToolSlug,
+} from "../../flows/publish";
 import {
   RR_V3_PORT_NAME,
   isRpcRequest,
@@ -25,7 +54,7 @@ import {
   createRpcResponseErr,
   createRpcEventMessage,
   type RpcRequest,
-} from './rpc';
+} from "./rpc";
 
 /**
  * RPC Server Configuration
@@ -61,7 +90,11 @@ function defaultGenerateRunId(): RunId {
 // Route A scope: disable platform-style trigger/schedule automation surfaces.
 const ENABLE_V3_TRIGGERS_AND_SCHEDULES = false;
 const TRIGGER_SURFACE_DISABLED_ERROR =
-  'Triggers and schedules are disabled in Connector scope.';
+  "Triggers and schedules are disabled in Connector scope.";
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
 
 /**
  * RPC Server
@@ -141,7 +174,10 @@ export class RpcServer {
   /**
    * Process messages
    */
-  private handleMessage = async (connId: string, msg: unknown): Promise<void> => {
+  private handleMessage = async (
+    connId: string,
+    msg: unknown,
+  ): Promise<void> => {
     if (!isRpcRequest(msg)) return;
 
     const conn = this.connections.get(connId);
@@ -189,7 +225,9 @@ export class RpcServer {
    * Handle enqueueRun requests
    * @description Delegate to the shared enqueueRun service
    */
-  private async handleEnqueueRun(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleEnqueueRun(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const result = await enqueueRun(
       {
         storage: this.storage,
@@ -204,7 +242,9 @@ export class RpcServer {
         priority: params?.priority as number | undefined,
         maxAttempts: params?.maxAttempts as number | undefined,
         args: params?.args as JsonObject | undefined,
-        debug: params?.debug as { breakpoints?: string[]; pauseOnStart?: boolean } | undefined,
+        debug: params?.debug as
+          | { breakpoints?: string[]; pauseOnStart?: boolean }
+          | undefined,
       },
     );
 
@@ -215,14 +255,20 @@ export class RpcServer {
    * Handle listQueue requests
    * @description List queue items, sorted by priority DESC + createdAt ASC
    */
-  private async handleListQueue(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleListQueue(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const rawStatus = params?.status;
 
     // Verify status whitelist
     let status: QueueItemStatus | undefined;
     if (rawStatus !== undefined) {
-      if (rawStatus !== 'queued' && rawStatus !== 'running' && rawStatus !== 'paused') {
-        throw new Error('status must be one of: queued, running, paused');
+      if (
+        rawStatus !== "queued" &&
+        rawStatus !== "running" &&
+        rawStatus !== "paused"
+      ) {
+        throw new Error("status must be one of: queued, running, paused");
       }
       status = rawStatus;
     }
@@ -245,9 +291,11 @@ export class RpcServer {
    * @description Cancel the queued queue item, update the Run status, and publish the run.canceled event
    * @note Only items with status=queued are allowed to be canceled; running/paused needs to use rr_v3.cancelRun
    */
-  private async handleCancelQueueItem(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleCancelQueueItem(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const runId = params?.runId as RunId | undefined;
-    if (!runId) throw new Error('runId is required');
+    if (!runId) throw new Error("runId is required");
 
     const reason = params?.reason as string | undefined;
     const now = this.now();
@@ -259,7 +307,7 @@ export class RpcServer {
     }
 
     // 2. Only the queued state is allowed to be canceled (running/paused needs to use rr_v3.cancelRun)
-    if (queueItem.status !== 'queued') {
+    if (queueItem.status !== "queued") {
       throw new Error(
         `Cannot cancel queue item "${runId}" with status "${queueItem.status}"; use rr_v3.cancelRun for running/paused runs`,
       );
@@ -270,7 +318,7 @@ export class RpcServer {
 
     // 4. Update Run record status
     await this.storage.runs.patch(runId, {
-      status: 'canceled',
+      status: "canceled",
       updatedAt: now,
       finishedAt: now,
     });
@@ -278,7 +326,7 @@ export class RpcServer {
     // 5. Publish the run.canceled event (via EventsBus to ensure broadcasting)
     await this.events.append({
       runId,
-      type: 'run.canceled',
+      type: "run.canceled",
       reason,
     });
 
@@ -288,114 +336,132 @@ export class RpcServer {
   /**
    * Handle RPC requests
    */
-  private async handleRequest(request: RpcRequest, conn: PortConnection): Promise<JsonValue> {
+  private async handleRequest(
+    request: RpcRequest,
+    conn: PortConnection,
+  ): Promise<JsonValue> {
     const { method, params } = request;
 
     switch (method) {
-      case 'rr_v3.listRuns': {
+      case "rr_v3.listRuns": {
         const runs = await this.storage.runs.list();
         return runs as unknown as JsonValue;
       }
 
-      case 'rr_v3.getRun': {
+      case "rr_v3.getRun": {
         const runId = params?.runId as RunId | undefined;
-        if (!runId) throw new Error('runId is required');
+        if (!runId) throw new Error("runId is required");
         const run = await this.storage.runs.get(runId);
         return run as unknown as JsonValue;
       }
 
-      case 'rr_v3.getEvents': {
+      case "rr_v3.getEvents": {
         const runId = params?.runId as RunId | undefined;
-        if (!runId) throw new Error('runId is required');
+        if (!runId) throw new Error("runId is required");
         const fromSeq = params?.fromSeq as number | undefined;
         const limit = params?.limit as number | undefined;
-        const events = await this.storage.events.list(runId, { fromSeq, limit });
+        const events = await this.storage.events.list(runId, {
+          fromSeq,
+          limit,
+        });
         return events as unknown as JsonValue;
       }
 
-      case 'rr_v3.getFlow': {
+      case "rr_v3.getFlow": {
         const flowId = params?.flowId as FlowId | undefined;
-        if (!flowId) throw new Error('flowId is required');
+        if (!flowId) throw new Error("flowId is required");
         const flow = await this.storage.flows.get(flowId);
         return flow as unknown as JsonValue;
       }
 
-      case 'rr_v3.listFlows': {
+      case "rr_v3.listFlows": {
         const flows = await this.storage.flows.list();
         return flows as unknown as JsonValue;
       }
 
-      case 'rr_v3.saveFlow': {
+      case "rr_v3.listPublishedFlows": {
+        return this.handleListPublishedFlows();
+      }
+
+      case "rr_v3.saveFlow": {
         return this.handleSaveFlow(params);
       }
 
-      case 'rr_v3.deleteFlow': {
+      case "rr_v3.publishFlow": {
+        return this.handlePublishFlow(params);
+      }
+
+      case "rr_v3.unpublishFlow": {
+        return this.handleUnpublishFlow(params);
+      }
+
+      case "rr_v3.deleteFlow": {
         return this.handleDeleteFlow(params);
       }
 
       // ===== Trigger APIs =====
 
-      case 'rr_v3.createTrigger':
-      case 'rr_v3.updateTrigger':
-      case 'rr_v3.deleteTrigger':
-      case 'rr_v3.getTrigger':
-      case 'rr_v3.listTriggers':
-      case 'rr_v3.enableTrigger':
-      case 'rr_v3.disableTrigger':
-      case 'rr_v3.fireTrigger':
+      case "rr_v3.createTrigger":
+      case "rr_v3.updateTrigger":
+      case "rr_v3.deleteTrigger":
+      case "rr_v3.getTrigger":
+      case "rr_v3.listTriggers":
+      case "rr_v3.enableTrigger":
+      case "rr_v3.disableTrigger":
+      case "rr_v3.fireTrigger":
         return this.handleTriggerRequest(method, params);
 
       // ===== Queue Management APIs =====
 
-      case 'rr_v3.enqueueRun': {
+      case "rr_v3.enqueueRun": {
         return this.handleEnqueueRun(params);
       }
 
-      case 'rr_v3.listQueue': {
+      case "rr_v3.listQueue": {
         return this.handleListQueue(params);
       }
 
-      case 'rr_v3.cancelQueueItem': {
+      case "rr_v3.cancelQueueItem": {
         return this.handleCancelQueueItem(params);
       }
 
-      case 'rr_v3.subscribe': {
+      case "rr_v3.subscribe": {
         const runId = (params?.runId as RunId | undefined) ?? null;
         conn.subscriptions.add(runId);
         return { subscribed: true, runId };
       }
 
-      case 'rr_v3.unsubscribe': {
+      case "rr_v3.unsubscribe": {
         const runId = (params?.runId as RunId | undefined) ?? null;
         conn.subscriptions.delete(runId);
         return { unsubscribed: true, runId };
       }
 
       // Debug method - route to DebugController
-      case 'rr_v3.debug': {
+      case "rr_v3.debug": {
         if (!this.debugController) {
-          throw new Error('DebugController not configured');
+          throw new Error("DebugController not configured");
         }
         const cmd = params as unknown as DebuggerCommand;
         if (!cmd || !cmd.type) {
-          throw new Error('Invalid debug command');
+          throw new Error("Invalid debug command");
         }
         const response = await this.debugController.handle(cmd);
         return response as unknown as JsonValue;
       }
 
       // Control methods
-      case 'rr_v3.startRun':
+      case "rr_v3.startRun":
         // startRun is essentially enqueueRun - the run starts when claimed by scheduler
         return this.handleEnqueueRun(params);
 
-      case 'rr_v3.pauseRun':
+      case "rr_v3.pauseRun":
         return this.handlePauseRun(params);
 
-      case 'rr_v3.resumeRun':
+      case "rr_v3.resumeRun":
         return this.handleResumeRun(params);
 
-      case 'rr_v3.cancelRun':
+      case "rr_v3.cancelRun":
         return this.handleCancelRun(params);
 
       default:
@@ -409,21 +475,32 @@ export class RpcServer {
    * Handling saveFlow requests
    * @description Save or update the flow to perform complete structural verification
    */
-  private async handleSaveFlow(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleSaveFlow(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const rawFlow = params?.flow;
-    if (!rawFlow || typeof rawFlow !== 'object' || Array.isArray(rawFlow)) {
-      throw new Error('flow is required');
+    if (!rawFlow || typeof rawFlow !== "object" || Array.isArray(rawFlow)) {
+      throw new Error("flow is required");
     }
 
     // Check whether the existing flow is being updated (use the trimmed ID query)
     const rawId = (rawFlow as JsonObject).id;
     let existingFlow: FlowV3 | null = null;
-    if (typeof rawId === 'string' && rawId.trim()) {
+    if (typeof rawId === "string" && rawId.trim()) {
       existingFlow = await this.storage.flows.get(rawId.trim() as FlowId);
     }
 
     // Normalize flow, pass in existingFlow to inherit createdAt
     const flow = this.normalizeFlowSpec(rawFlow, existingFlow);
+
+    if (flow.meta?.tool?.published) {
+      const allFlows = await this.storage.flows.list();
+      ensurePublishedSlugAvailable(
+        allFlows,
+        flow.id,
+        normalizeToolSlug(flow.meta.tool.slug, flow.name),
+      );
+    }
 
     // Save to storage (the storage layer will perform two-step verification)
     await this.storage.flows.save(flow);
@@ -431,13 +508,109 @@ export class RpcServer {
     return flow as unknown as JsonValue;
   }
 
+  private async handleListPublishedFlows(): Promise<JsonValue> {
+    const flows = await this.storage.flows.list();
+    return listPublishedFlowInfos(flows) as unknown as JsonValue;
+  }
+
+  private async handlePublishFlow(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
+    const flowId = params?.flowId as FlowId | undefined;
+    if (!flowId) {
+      throw new Error("flowId is required");
+    }
+
+    const existing = await this.storage.flows.get(flowId);
+    if (!existing) {
+      throw new Error(`Flow "${flowId}" not found`);
+    }
+
+    const toolPatch: FlowToolMetadata = {
+      published: true,
+    };
+    if (params?.slug !== undefined && params?.slug !== null) {
+      toolPatch.slug = String(params.slug);
+    }
+    if (params?.category !== undefined && params?.category !== null) {
+      toolPatch.category = String(params.category);
+    }
+    if (params?.description !== undefined && params?.description !== null) {
+      toolPatch.description = String(params.description);
+    }
+
+    const updated = this.normalizeFlowSpec(
+      {
+        ...existing,
+        meta: {
+          ...(existing.meta ?? {}),
+          tool: {
+            ...(existing.meta?.tool ?? {}),
+            ...toolPatch,
+          },
+        },
+      },
+      existing,
+    );
+
+    const allFlows = await this.storage.flows.list();
+    ensurePublishedSlugAvailable(
+      allFlows,
+      updated.id,
+      normalizeToolSlug(updated.meta?.tool?.slug, updated.name),
+    );
+
+    await this.storage.flows.save(updated);
+
+    const publishedInfo = getPublishedFlowInfo(updated);
+    if (!publishedInfo) {
+      throw new Error(`Flow "${flowId}" could not be published`);
+    }
+
+    return publishedInfo as unknown as JsonValue;
+  }
+
+  private async handleUnpublishFlow(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
+    const flowId = params?.flowId as FlowId | undefined;
+    if (!flowId) {
+      throw new Error("flowId is required");
+    }
+
+    const existing = await this.storage.flows.get(flowId);
+    if (!existing) {
+      throw new Error(`Flow "${flowId}" not found`);
+    }
+
+    const updated = this.normalizeFlowSpec(
+      {
+        ...existing,
+        meta: {
+          ...(existing.meta ?? {}),
+          tool: {
+            ...(existing.meta?.tool ?? {}),
+            published: false,
+          },
+        },
+      },
+      existing,
+    );
+
+    await this.storage.flows.save(updated);
+
+    return { ok: true, flowId } as unknown as JsonValue;
+  }
+
   /**
    * Handling deleteFlow requests
    * @description To delete a Flow, first check whether there are associated Triggers and queued runs.
    */
-  private async handleDeleteFlow(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleDeleteFlow(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const flowId = params?.flowId as FlowId | undefined;
-    if (!flowId) throw new Error('flowId is required');
+    if (!flowId) throw new Error("flowId is required");
 
     // Check if Flow exists
     const existing = await this.storage.flows.get(flowId);
@@ -449,7 +622,7 @@ export class RpcServer {
     const triggers = await this.storage.triggers.list();
     const linkedTriggers = triggers.filter((t) => t.flowId === flowId);
     if (linkedTriggers.length > 0) {
-      const triggerIds = linkedTriggers.map((t) => t.id).join(', ');
+      const triggerIds = linkedTriggers.map((t) => t.id).join(", ");
       throw new Error(
         `Cannot delete flow "${flowId}": it has ${linkedTriggers.length} linked trigger(s): ${triggerIds}. ` +
           `Delete the trigger(s) first.`,
@@ -457,10 +630,12 @@ export class RpcServer {
     }
 
     // Check if there are queued runs (unexecuted runs will fail after deletion)
-    const queuedItems = await this.storage.queue.list('queued');
-    const linkedQueuedRuns = queuedItems.filter((item) => item.flowId === flowId);
+    const queuedItems = await this.storage.queue.list("queued");
+    const linkedQueuedRuns = queuedItems.filter(
+      (item) => item.flowId === flowId,
+    );
     if (linkedQueuedRuns.length > 0) {
-      const runIds = linkedQueuedRuns.map((r) => r.id).join(', ');
+      const runIds = linkedQueuedRuns.map((r) => r.id).join(", ");
       throw new Error(
         `Cannot delete flow "${flowId}": it has ${linkedQueuedRuns.length} queued run(s): ${runIds}. ` +
           `Cancel the run(s) first or wait for them to complete.`,
@@ -479,47 +654,55 @@ export class RpcServer {
    * @param value original input
    * @param existingFlow Existing flow (used to inherit createdAt)
    */
-  private normalizeFlowSpec(value: unknown, existingFlow: FlowV3 | null = null): FlowV3 {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new Error('flow is required');
+  private normalizeFlowSpec(
+    value: unknown,
+    existingFlow: FlowV3 | null = null,
+  ): FlowV3 {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("flow is required");
     }
     const raw = value as JsonObject;
 
     // id Verify and generate
     let id: FlowId;
     if (raw.id === undefined || raw.id === null) {
-      id = `flow_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` as FlowId;
+      id =
+        `flow_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` as FlowId;
     } else {
-      if (typeof raw.id !== 'string' || !raw.id.trim()) {
-        throw new Error('flow.id must be a non-empty string');
+      if (typeof raw.id !== "string" || !raw.id.trim()) {
+        throw new Error("flow.id must be a non-empty string");
       }
       id = raw.id.trim() as FlowId;
     }
 
     // name Verification
-    if (!raw.name || typeof raw.name !== 'string' || !raw.name.trim()) {
-      throw new Error('flow.name is required');
+    if (!raw.name || typeof raw.name !== "string" || !raw.name.trim()) {
+      throw new Error("flow.name is required");
     }
     const name = raw.name.trim();
 
     // description Verification
     let description: string | undefined;
     if (raw.description !== undefined && raw.description !== null) {
-      if (typeof raw.description !== 'string') {
-        throw new Error('flow.description must be a string');
+      if (typeof raw.description !== "string") {
+        throw new Error("flow.description must be a string");
       }
       description = raw.description;
     }
 
     // entryNodeId Verification
-    if (!raw.entryNodeId || typeof raw.entryNodeId !== 'string' || !raw.entryNodeId.trim()) {
-      throw new Error('flow.entryNodeId is required');
+    if (
+      !raw.entryNodeId ||
+      typeof raw.entryNodeId !== "string" ||
+      !raw.entryNodeId.trim()
+    ) {
+      throw new Error("flow.entryNodeId is required");
     }
     const entryNodeId = raw.entryNodeId.trim() as NodeId;
 
     // nodes Verification
     if (!Array.isArray(raw.nodes)) {
-      throw new Error('flow.nodes must be an array');
+      throw new Error("flow.nodes must be an array");
     }
     const nodes = raw.nodes.map((n, i) => this.normalizeNode(n, i));
 
@@ -536,7 +719,7 @@ export class RpcServer {
     let edges: EdgeV3[] = [];
     if (raw.edges !== undefined && raw.edges !== null) {
       if (!Array.isArray(raw.edges)) {
-        throw new Error('flow.edges must be an array');
+        throw new Error("flow.edges must be an array");
       }
       edges = raw.edges.map((e, i) => this.normalizeEdge(e, i));
     }
@@ -558,10 +741,14 @@ export class RpcServer {
     // Validate edge references
     for (const edge of edges) {
       if (!nodeIdSet.has(edge.from)) {
-        throw new Error(`Edge "${edge.id}" references non-existent source node "${edge.from}"`);
+        throw new Error(
+          `Edge "${edge.id}" references non-existent source node "${edge.from}"`,
+        );
       }
       if (!nodeIdSet.has(edge.to)) {
-        throw new Error(`Edge "${edge.id}" references non-existent target node "${edge.to}"`);
+        throw new Error(
+          `Edge "${edge.id}" references non-existent target node "${edge.to}"`,
+        );
       }
     }
 
@@ -590,17 +777,21 @@ export class RpcServer {
     // variables Verification: Each item must be an object and have a name field
     if (raw.variables !== undefined && raw.variables !== null) {
       if (!Array.isArray(raw.variables)) {
-        throw new Error('flow.variables must be an array');
+        throw new Error("flow.variables must be an array");
       }
       const variables: VariableDefinition[] = [];
       const varNameSet = new Set<string>();
       for (let i = 0; i < raw.variables.length; i++) {
         const v = raw.variables[i];
-        if (!v || typeof v !== 'object' || Array.isArray(v)) {
+        if (!v || typeof v !== "object" || Array.isArray(v)) {
           throw new Error(`flow.variables[${i}] must be an object`);
         }
         const varObj = v as JsonObject;
-        if (!varObj.name || typeof varObj.name !== 'string' || !varObj.name.trim()) {
+        if (
+          !varObj.name ||
+          typeof varObj.name !== "string" ||
+          !varObj.name.trim()
+        ) {
           throw new Error(`flow.variables[${i}].name is required`);
         }
         const varName = varObj.name.trim();
@@ -609,7 +800,10 @@ export class RpcServer {
         }
         varNameSet.add(varName);
         // Use trimmed name
-        variables.push({ ...varObj, name: varName } as unknown as VariableDefinition);
+        variables.push({
+          ...varObj,
+          name: varName,
+        } as unknown as VariableDefinition);
       }
       if (variables.length > 0) {
         flow.variables = variables;
@@ -617,16 +811,23 @@ export class RpcServer {
     }
 
     if (raw.policy !== undefined && raw.policy !== null) {
-      if (typeof raw.policy !== 'object' || Array.isArray(raw.policy)) {
-        throw new Error('flow.policy must be an object');
+      if (typeof raw.policy !== "object" || Array.isArray(raw.policy)) {
+        throw new Error("flow.policy must be an object");
       }
-      flow.policy = raw.policy as FlowV3['policy'];
+      flow.policy = raw.policy as FlowV3["policy"];
     }
     if (raw.meta !== undefined && raw.meta !== null) {
-      if (typeof raw.meta !== 'object' || Array.isArray(raw.meta)) {
-        throw new Error('flow.meta must be an object');
+      if (typeof raw.meta !== "object" || Array.isArray(raw.meta)) {
+        throw new Error("flow.meta must be an object");
       }
-      flow.meta = raw.meta as FlowV3['meta'];
+      const meta = this.normalizeFlowMeta(
+        raw.meta as JsonObject,
+        name,
+        nodeIdSet,
+      );
+      if (meta) {
+        flow.meta = meta;
+      }
     }
 
     return flow;
@@ -636,26 +837,26 @@ export class RpcServer {
    * Normalize Node input
    */
   private normalizeNode(value: unknown, index: number): NodeV3 {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error(`flow.nodes[${index}] must be an object`);
     }
     const raw = value as JsonObject;
 
     // id Check (not empty + trim)
-    if (!raw.id || typeof raw.id !== 'string' || !raw.id.trim()) {
+    if (!raw.id || typeof raw.id !== "string" || !raw.id.trim()) {
       throw new Error(`flow.nodes[${index}].id is required`);
     }
     const nodeId = raw.id.trim() as NodeId;
 
     // kind Check (not empty + trim)
-    if (!raw.kind || typeof raw.kind !== 'string' || !raw.kind.trim()) {
+    if (!raw.kind || typeof raw.kind !== "string" || !raw.kind.trim()) {
       throw new Error(`flow.nodes[${index}].kind is required`);
     }
     const kind = raw.kind.trim();
 
     // config Verification
     if (raw.config !== undefined && raw.config !== null) {
-      if (typeof raw.config !== 'object' || Array.isArray(raw.config)) {
+      if (typeof raw.config !== "object" || Array.isArray(raw.config)) {
         throw new Error(`flow.nodes[${index}].config must be an object`);
       }
     }
@@ -668,28 +869,28 @@ export class RpcServer {
 
     // optional fields
     if (raw.name !== undefined && raw.name !== null) {
-      if (typeof raw.name !== 'string') {
+      if (typeof raw.name !== "string") {
         throw new Error(`flow.nodes[${index}].name must be a string`);
       }
       node.name = raw.name;
     }
     if (raw.disabled !== undefined && raw.disabled !== null) {
-      if (typeof raw.disabled !== 'boolean') {
+      if (typeof raw.disabled !== "boolean") {
         throw new Error(`flow.nodes[${index}].disabled must be a boolean`);
       }
       node.disabled = raw.disabled;
     }
     if (raw.policy !== undefined && raw.policy !== null) {
-      if (typeof raw.policy !== 'object' || Array.isArray(raw.policy)) {
+      if (typeof raw.policy !== "object" || Array.isArray(raw.policy)) {
         throw new Error(`flow.nodes[${index}].policy must be an object`);
       }
-      node.policy = raw.policy as NodeV3['policy'];
+      node.policy = raw.policy as NodeV3["policy"];
     }
     if (raw.ui !== undefined && raw.ui !== null) {
-      if (typeof raw.ui !== 'object' || Array.isArray(raw.ui)) {
+      if (typeof raw.ui !== "object" || Array.isArray(raw.ui)) {
         throw new Error(`flow.nodes[${index}].ui must be an object`);
       }
-      node.ui = raw.ui as NodeV3['ui'];
+      node.ui = raw.ui as NodeV3["ui"];
     }
 
     return node;
@@ -699,7 +900,7 @@ export class RpcServer {
    * Normalize Edge input
    */
   private normalizeEdge(value: unknown, index: number): EdgeV3 {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error(`flow.edges[${index}] must be an object`);
     }
     const raw = value as JsonObject;
@@ -709,20 +910,20 @@ export class RpcServer {
     if (raw.id === undefined || raw.id === null) {
       id = `edge_${index}_${Math.random().toString(36).slice(2, 8)}` as EdgeId;
     } else {
-      if (typeof raw.id !== 'string' || !raw.id.trim()) {
+      if (typeof raw.id !== "string" || !raw.id.trim()) {
         throw new Error(`flow.edges[${index}].id must be a non-empty string`);
       }
       id = raw.id.trim() as EdgeId;
     }
 
     // from Check (not empty + trim)
-    if (!raw.from || typeof raw.from !== 'string' || !raw.from.trim()) {
+    if (!raw.from || typeof raw.from !== "string" || !raw.from.trim()) {
       throw new Error(`flow.edges[${index}].from is required`);
     }
     const from = raw.from.trim() as NodeId;
 
     // to Check (not empty + trim)
-    if (!raw.to || typeof raw.to !== 'string' || !raw.to.trim()) {
+    if (!raw.to || typeof raw.to !== "string" || !raw.to.trim()) {
       throw new Error(`flow.edges[${index}].to is required`);
     }
     const to = raw.to.trim() as NodeId;
@@ -735,55 +936,499 @@ export class RpcServer {
 
     // label Optional
     if (raw.label !== undefined && raw.label !== null) {
-      if (typeof raw.label !== 'string') {
+      if (typeof raw.label !== "string") {
         throw new Error(`flow.edges[${index}].label must be a string`);
       }
-      edge.label = raw.label as EdgeV3['label'];
+      edge.label = raw.label as EdgeV3["label"];
     }
 
     return edge;
+  }
+
+  private normalizeFlowMeta(
+    value: JsonObject,
+    flowName: string,
+    nodeIdSet: Set<string>,
+  ): FlowMeta | undefined {
+    const meta: FlowMeta = {};
+
+    const explicitDomain =
+      typeof value.domain === "string" && value.domain.trim()
+        ? value.domain.trim()
+        : undefined;
+    if (explicitDomain) {
+      meta.domain = explicitDomain;
+    }
+
+    if (value.tags !== undefined && value.tags !== null) {
+      if (!Array.isArray(value.tags)) {
+        throw new Error("flow.meta.tags must be an array");
+      }
+      const tags = value.tags
+        .map((tag, index) => {
+          if (typeof tag !== "string") {
+            throw new Error(`flow.meta.tags[${index}] must be a string`);
+          }
+          return tag.trim();
+        })
+        .filter(Boolean);
+      if (tags.length > 0) {
+        meta.tags = Array.from(new Set(tags));
+      }
+    }
+
+    const bindings = this.normalizeFlowBindings(value.bindings, explicitDomain);
+    if (bindings.length > 0) {
+      meta.bindings = bindings;
+      if (!meta.domain) {
+        const domainBinding = bindings.find(
+          (binding) => binding.kind === "domain",
+        );
+        if (domainBinding) {
+          meta.domain = domainBinding.value;
+        }
+      }
+    }
+
+    if (value.tool !== undefined && value.tool !== null) {
+      if (typeof value.tool !== "object" || Array.isArray(value.tool)) {
+        throw new Error("flow.meta.tool must be an object");
+      }
+      const tool = this.normalizeFlowToolMetadata(
+        value.tool as JsonObject,
+        flowName,
+      );
+      if (tool) {
+        meta.tool = tool;
+      }
+    }
+
+    if (value.exposedOutputs !== undefined && value.exposedOutputs !== null) {
+      meta.exposedOutputs = this.normalizeFlowExposedOutputs(
+        value.exposedOutputs,
+        nodeIdSet,
+      );
+    }
+
+    if (value.recording !== undefined && value.recording !== null) {
+      if (
+        typeof value.recording !== "object" ||
+        Array.isArray(value.recording)
+      ) {
+        throw new Error("flow.meta.recording must be an object");
+      }
+      const recording = this.normalizeFlowRecording(
+        value.recording as JsonObject,
+        nodeIdSet,
+      );
+      if (recording) {
+        meta.recording = recording;
+      }
+    }
+
+    if (value.stopBarrier !== undefined && value.stopBarrier !== null) {
+      if (
+        typeof value.stopBarrier !== "object" ||
+        Array.isArray(value.stopBarrier)
+      ) {
+        throw new Error("flow.meta.stopBarrier must be an object");
+      }
+      meta.stopBarrier = this.normalizeFlowStopBarrier(
+        value.stopBarrier as JsonObject,
+      );
+    }
+
+    return Object.keys(meta).length > 0 ? meta : undefined;
+  }
+
+  private normalizeFlowBindings(
+    value: unknown,
+    explicitDomain?: string,
+  ): FlowBinding[] {
+    const bindings: FlowBinding[] = [];
+    const seen = new Set<string>();
+
+    const pushBinding = (
+      kind: FlowBinding["kind"],
+      rawValue: string,
+      source: string,
+    ): void => {
+      const bindingValue = rawValue.trim();
+      if (!bindingValue) {
+        throw new Error(`${source}.value must be a non-empty string`);
+      }
+      const key = `${kind}:${bindingValue}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      bindings.push({ kind, value: bindingValue });
+    };
+
+    if (explicitDomain) {
+      pushBinding("domain", explicitDomain, "flow.meta.domain");
+    }
+
+    if (value === undefined || value === null) {
+      return bindings;
+    }
+    if (!Array.isArray(value)) {
+      throw new Error("flow.meta.bindings must be an array");
+    }
+
+    value.forEach((binding, index) => {
+      if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
+        throw new Error(`flow.meta.bindings[${index}] must be an object`);
+      }
+      const record = binding as JsonObject;
+      const kindValue = record.kind ?? record.type;
+      if (
+        kindValue !== "domain" &&
+        kindValue !== "path" &&
+        kindValue !== "url"
+      ) {
+        throw new Error(
+          `flow.meta.bindings[${index}].kind must be one of: domain, path, url`,
+        );
+      }
+      if (typeof record.value !== "string") {
+        throw new Error(`flow.meta.bindings[${index}].value must be a string`);
+      }
+      pushBinding(kindValue, record.value, `flow.meta.bindings[${index}]`);
+    });
+
+    return bindings;
+  }
+
+  private normalizeFlowToolMetadata(
+    value: JsonObject,
+    flowName: string,
+  ): FlowToolMetadata | undefined {
+    const tool: FlowToolMetadata = {};
+
+    if (value.published !== undefined && value.published !== null) {
+      if (typeof value.published !== "boolean") {
+        throw new Error("flow.meta.tool.published must be a boolean");
+      }
+      tool.published = value.published;
+    }
+
+    if (value.slug !== undefined && value.slug !== null) {
+      if (typeof value.slug !== "string") {
+        throw new Error("flow.meta.tool.slug must be a string");
+      }
+      tool.slug = normalizeToolSlug(value.slug, flowName);
+    } else if (tool.published) {
+      tool.slug = normalizeToolSlug(undefined, flowName);
+    }
+
+    if (value.category !== undefined && value.category !== null) {
+      if (typeof value.category !== "string") {
+        throw new Error("flow.meta.tool.category must be a string");
+      }
+      const category = value.category.trim();
+      if (category) {
+        tool.category = category;
+      }
+    }
+
+    if (value.description !== undefined && value.description !== null) {
+      if (typeof value.description !== "string") {
+        throw new Error("flow.meta.tool.description must be a string");
+      }
+      const description = value.description.trim();
+      if (description) {
+        tool.description = description;
+      }
+    }
+
+    return Object.keys(tool).length > 0 ? tool : undefined;
+  }
+
+  private normalizeFlowExposedOutputs(
+    value: unknown,
+    nodeIdSet: Set<string>,
+  ): FlowExposedOutput[] | undefined {
+    if (!Array.isArray(value)) {
+      throw new Error("flow.meta.exposedOutputs must be an array");
+    }
+
+    const outputs: FlowExposedOutput[] = [];
+    const aliases = new Set<string>();
+    value.forEach((entry, index) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new Error(`flow.meta.exposedOutputs[${index}] must be an object`);
+      }
+      const record = entry as JsonObject;
+      if (typeof record.nodeId !== "string" || !record.nodeId.trim()) {
+        throw new Error(
+          `flow.meta.exposedOutputs[${index}].nodeId is required`,
+        );
+      }
+      const nodeId = record.nodeId.trim();
+      if (!nodeIdSet.has(nodeId)) {
+        throw new Error(
+          `flow.meta.exposedOutputs[${index}].nodeId "${nodeId}" does not exist`,
+        );
+      }
+      if (typeof record.as !== "string" || !record.as.trim()) {
+        throw new Error(`flow.meta.exposedOutputs[${index}].as is required`);
+      }
+      const alias = record.as.trim();
+      if (aliases.has(alias)) {
+        throw new Error(`Duplicate exposed output alias: "${alias}"`);
+      }
+      aliases.add(alias);
+      outputs.push({ nodeId: nodeId as NodeId, as: alias });
+    });
+
+    return outputs.length > 0 ? outputs : undefined;
+  }
+
+  private normalizeFlowRecording(
+    value: JsonObject,
+    nodeIdSet: Set<string>,
+  ): FlowRecordingMeta | undefined {
+    const recording: FlowRecordingMeta = {};
+
+    const stringFields = [
+      "originUrl",
+      "originTitle",
+      "browser",
+      "userAgent",
+      "startedAt",
+      "stoppedAt",
+    ] as const;
+    for (const field of stringFields) {
+      const raw = value[field];
+      if (raw === undefined || raw === null) {
+        continue;
+      }
+      if (typeof raw !== "string") {
+        throw new Error(`flow.meta.recording.${field} must be a string`);
+      }
+      const trimmed = raw.trim();
+      if (trimmed) {
+        recording[field] = trimmed as never;
+      }
+    }
+
+    const numberFields = ["originTabId", "durationMs", "stepCount"] as const;
+    for (const field of numberFields) {
+      const raw = value[field];
+      if (raw === undefined || raw === null) {
+        continue;
+      }
+      if (!isFiniteNumber(raw)) {
+        throw new Error(`flow.meta.recording.${field} must be a finite number`);
+      }
+      recording[field] = raw as never;
+    }
+
+    if (
+      value.parameterSuggestions !== undefined &&
+      value.parameterSuggestions !== null
+    ) {
+      if (!Array.isArray(value.parameterSuggestions)) {
+        throw new Error(
+          "flow.meta.recording.parameterSuggestions must be an array",
+        );
+      }
+      recording.parameterSuggestions = value.parameterSuggestions.map(
+        (entry, index) => {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            throw new Error(
+              `flow.meta.recording.parameterSuggestions[${index}] must be an object`,
+            );
+          }
+          const record = entry as JsonObject;
+          if (typeof record.nodeId !== "string" || !record.nodeId.trim()) {
+            throw new Error(
+              `flow.meta.recording.parameterSuggestions[${index}].nodeId is required`,
+            );
+          }
+          const nodeId = record.nodeId.trim();
+          if (!nodeIdSet.has(nodeId)) {
+            throw new Error(
+              `flow.meta.recording.parameterSuggestions[${index}].nodeId "${nodeId}" does not exist`,
+            );
+          }
+          if (record.kind !== "fill" && record.kind !== "navigate") {
+            throw new Error(
+              `flow.meta.recording.parameterSuggestions[${index}].kind must be "fill" or "navigate"`,
+            );
+          }
+          if (
+            typeof record.suggestedKey !== "string" ||
+            !record.suggestedKey.trim()
+          ) {
+            throw new Error(
+              `flow.meta.recording.parameterSuggestions[${index}].suggestedKey is required`,
+            );
+          }
+          if (typeof record.currentValue !== "string") {
+            throw new Error(
+              `flow.meta.recording.parameterSuggestions[${index}].currentValue must be a string`,
+            );
+          }
+          return {
+            nodeId: nodeId as NodeId,
+            kind: record.kind,
+            suggestedKey: record.suggestedKey.trim(),
+            currentValue: record.currentValue,
+          };
+        },
+      );
+    }
+
+    return Object.keys(recording).length > 0 ? recording : undefined;
+  }
+
+  private normalizeFlowStopBarrier(value: JsonObject): FlowStopBarrierMeta {
+    if (typeof value.ok !== "boolean") {
+      throw new Error("flow.meta.stopBarrier.ok must be a boolean");
+    }
+
+    const stopBarrier: FlowStopBarrierMeta = {
+      ok: value.ok,
+    };
+
+    if (value.sessionId !== undefined && value.sessionId !== null) {
+      if (typeof value.sessionId !== "string") {
+        throw new Error("flow.meta.stopBarrier.sessionId must be a string");
+      }
+      const sessionId = value.sessionId.trim();
+      if (sessionId) {
+        stopBarrier.sessionId = sessionId;
+      }
+    }
+
+    if (value.stoppedAt !== undefined && value.stoppedAt !== null) {
+      if (typeof value.stoppedAt !== "string") {
+        throw new Error("flow.meta.stopBarrier.stoppedAt must be a string");
+      }
+      const stoppedAt = value.stoppedAt.trim();
+      if (stoppedAt) {
+        stopBarrier.stoppedAt = stoppedAt as ISODateTimeString;
+      }
+    }
+
+    if (value.failed !== undefined && value.failed !== null) {
+      if (!Array.isArray(value.failed)) {
+        throw new Error("flow.meta.stopBarrier.failed must be an array");
+      }
+      stopBarrier.failed = value.failed.map((entry, index) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          throw new Error(
+            `flow.meta.stopBarrier.failed[${index}] must be an object`,
+          );
+        }
+        const record = entry as JsonObject;
+        if (!isFiniteNumber(record.tabId)) {
+          throw new Error(
+            `flow.meta.stopBarrier.failed[${index}].tabId must be a finite number`,
+          );
+        }
+        if (
+          record.skipped !== undefined &&
+          record.skipped !== null &&
+          typeof record.skipped !== "boolean"
+        ) {
+          throw new Error(
+            `flow.meta.stopBarrier.failed[${index}].skipped must be a boolean`,
+          );
+        }
+        if (
+          record.topTimedOut !== undefined &&
+          record.topTimedOut !== null &&
+          typeof record.topTimedOut !== "boolean"
+        ) {
+          throw new Error(
+            `flow.meta.stopBarrier.failed[${index}].topTimedOut must be a boolean`,
+          );
+        }
+        if (
+          record.reason !== undefined &&
+          record.reason !== null &&
+          typeof record.reason !== "string"
+        ) {
+          throw new Error(
+            `flow.meta.stopBarrier.failed[${index}].reason must be a string`,
+          );
+        }
+        if (
+          record.topError !== undefined &&
+          record.topError !== null &&
+          typeof record.topError !== "string"
+        ) {
+          throw new Error(
+            `flow.meta.stopBarrier.failed[${index}].topError must be a string`,
+          );
+        }
+        if (
+          record.subframesFailed !== undefined &&
+          record.subframesFailed !== null &&
+          !isFiniteNumber(record.subframesFailed)
+        ) {
+          throw new Error(
+            `flow.meta.stopBarrier.failed[${index}].subframesFailed must be a finite number`,
+          );
+        }
+
+        return {
+          tabId: record.tabId,
+          skipped: record.skipped as boolean | undefined,
+          reason: record.reason as string | undefined,
+          topTimedOut: record.topTimedOut as boolean | undefined,
+          topError: record.topError as string | undefined,
+          subframesFailed: record.subframesFailed as number | undefined,
+        };
+      });
+    }
+
+    return stopBarrier;
   }
 
   // ===== Trigger Management Handlers =====
 
   private async handleTriggerRequest(
     method:
-      | 'rr_v3.createTrigger'
-      | 'rr_v3.updateTrigger'
-      | 'rr_v3.deleteTrigger'
-      | 'rr_v3.getTrigger'
-      | 'rr_v3.listTriggers'
-      | 'rr_v3.enableTrigger'
-      | 'rr_v3.disableTrigger'
-      | 'rr_v3.fireTrigger',
+      | "rr_v3.createTrigger"
+      | "rr_v3.updateTrigger"
+      | "rr_v3.deleteTrigger"
+      | "rr_v3.getTrigger"
+      | "rr_v3.listTriggers"
+      | "rr_v3.enableTrigger"
+      | "rr_v3.disableTrigger"
+      | "rr_v3.fireTrigger",
     params: JsonObject | undefined,
   ): Promise<JsonValue> {
     if (!ENABLE_V3_TRIGGERS_AND_SCHEDULES) {
-      if (method === 'rr_v3.listTriggers') {
+      if (method === "rr_v3.listTriggers") {
         return [] as unknown as JsonValue;
       }
-      if (method === 'rr_v3.getTrigger') {
+      if (method === "rr_v3.getTrigger") {
         return null;
       }
       throw new Error(TRIGGER_SURFACE_DISABLED_ERROR);
     }
 
     switch (method) {
-      case 'rr_v3.createTrigger':
+      case "rr_v3.createTrigger":
         return this.handleCreateTrigger(params);
-      case 'rr_v3.updateTrigger':
+      case "rr_v3.updateTrigger":
         return this.handleUpdateTrigger(params);
-      case 'rr_v3.deleteTrigger':
+      case "rr_v3.deleteTrigger":
         return this.handleDeleteTrigger(params);
-      case 'rr_v3.getTrigger':
+      case "rr_v3.getTrigger":
         return this.handleGetTrigger(params);
-      case 'rr_v3.listTriggers':
+      case "rr_v3.listTriggers":
         return this.handleListTriggers(params);
-      case 'rr_v3.enableTrigger':
+      case "rr_v3.enableTrigger":
         return this.handleEnableTrigger(params);
-      case 'rr_v3.disableTrigger':
+      case "rr_v3.disableTrigger":
         return this.handleDisableTrigger(params);
-      case 'rr_v3.fireTrigger':
+      case "rr_v3.fireTrigger":
         return this.handleFireTrigger(params);
       default:
         throw new Error(`Unknown trigger method: ${method}`);
@@ -792,13 +1437,17 @@ export class RpcServer {
 
   private requireTriggerManager(): TriggerManager {
     if (!this.triggerManager) {
-      throw new Error('TriggerManager not configured');
+      throw new Error("TriggerManager not configured");
     }
     return this.triggerManager;
   }
 
-  private async handleCreateTrigger(params: JsonObject | undefined): Promise<JsonValue> {
-    const trigger = this.normalizeTriggerSpec(params?.trigger, { requireId: false });
+  private async handleCreateTrigger(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
+    const trigger = this.normalizeTriggerSpec(params?.trigger, {
+      requireId: false,
+    });
 
     const existing = await this.storage.triggers.get(trigger.id);
     if (existing) {
@@ -815,8 +1464,12 @@ export class RpcServer {
     return trigger as unknown as JsonValue;
   }
 
-  private async handleUpdateTrigger(params: JsonObject | undefined): Promise<JsonValue> {
-    const trigger = this.normalizeTriggerSpec(params?.trigger, { requireId: true });
+  private async handleUpdateTrigger(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
+    const trigger = this.normalizeTriggerSpec(params?.trigger, {
+      requireId: true,
+    });
 
     const existing = await this.storage.triggers.get(trigger.id);
     if (!existing) {
@@ -833,40 +1486,50 @@ export class RpcServer {
     return trigger as unknown as JsonValue;
   }
 
-  private async handleDeleteTrigger(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleDeleteTrigger(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const triggerId = params?.triggerId as TriggerId | undefined;
-    if (!triggerId) throw new Error('triggerId is required');
+    if (!triggerId) throw new Error("triggerId is required");
 
     await this.storage.triggers.delete(triggerId);
     await this.requireTriggerManager().refresh();
     return { ok: true, triggerId };
   }
 
-  private async handleGetTrigger(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleGetTrigger(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const triggerId = params?.triggerId as TriggerId | undefined;
-    if (!triggerId) throw new Error('triggerId is required');
+    if (!triggerId) throw new Error("triggerId is required");
     const trigger = await this.storage.triggers.get(triggerId);
     return trigger as unknown as JsonValue;
   }
 
-  private async handleListTriggers(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleListTriggers(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const flowIdValue = params?.flowId;
     let flowId: FlowId | undefined;
     if (flowIdValue !== undefined && flowIdValue !== null) {
-      if (typeof flowIdValue !== 'string') {
-        throw new Error('flowId must be a string');
+      if (typeof flowIdValue !== "string") {
+        throw new Error("flowId must be a string");
       }
       flowId = flowIdValue as FlowId;
     }
 
     const triggers = await this.storage.triggers.list();
-    const filtered = flowId ? triggers.filter((t) => t.flowId === flowId) : triggers;
+    const filtered = flowId
+      ? triggers.filter((t) => t.flowId === flowId)
+      : triggers;
     return filtered as unknown as JsonValue;
   }
 
-  private async handleEnableTrigger(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleEnableTrigger(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const triggerId = params?.triggerId as TriggerId | undefined;
-    if (!triggerId) throw new Error('triggerId is required');
+    if (!triggerId) throw new Error("triggerId is required");
 
     const trigger = await this.storage.triggers.get(triggerId);
     if (!trigger) {
@@ -879,9 +1542,11 @@ export class RpcServer {
     return updated as unknown as JsonValue;
   }
 
-  private async handleDisableTrigger(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleDisableTrigger(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const triggerId = params?.triggerId as TriggerId | undefined;
-    if (!triggerId) throw new Error('triggerId is required');
+    if (!triggerId) throw new Error("triggerId is required");
 
     const trigger = await this.storage.triggers.get(triggerId);
     if (!trigger) {
@@ -894,16 +1559,20 @@ export class RpcServer {
     return updated as unknown as JsonValue;
   }
 
-  private async handleFireTrigger(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleFireTrigger(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const triggerId = params?.triggerId as TriggerId | undefined;
-    if (!triggerId) throw new Error('triggerId is required');
+    if (!triggerId) throw new Error("triggerId is required");
 
     const trigger = await this.storage.triggers.get(triggerId);
     if (!trigger) {
       throw new Error(`Trigger "${triggerId}" not found`);
     }
-    if (trigger.kind !== 'manual') {
-      throw new Error(`fireTrigger only supports manual triggers (got kind="${trigger.kind}")`);
+    if (trigger.kind !== "manual") {
+      throw new Error(
+        `fireTrigger only supports manual triggers (got kind="${trigger.kind}")`,
+      );
     }
     if (!trigger.enabled) {
       throw new Error(`Trigger "${triggerId}" is disabled`);
@@ -911,16 +1580,19 @@ export class RpcServer {
 
     let sourceTabId: number | undefined;
     if (params?.sourceTabId !== undefined && params?.sourceTabId !== null) {
-      if (typeof params.sourceTabId !== 'number' || !Number.isFinite(params.sourceTabId)) {
-        throw new Error('sourceTabId must be a finite number');
+      if (
+        typeof params.sourceTabId !== "number" ||
+        !Number.isFinite(params.sourceTabId)
+      ) {
+        throw new Error("sourceTabId must be a finite number");
       }
       sourceTabId = Math.floor(params.sourceTabId);
     }
 
     let sourceUrl: string | undefined;
     if (params?.sourceUrl !== undefined && params?.sourceUrl !== null) {
-      if (typeof params.sourceUrl !== 'string') {
-        throw new Error('sourceUrl must be a string');
+      if (typeof params.sourceUrl !== "string") {
+        throw new Error("sourceUrl must be a string");
       }
       sourceUrl = params.sourceUrl;
     }
@@ -935,34 +1607,38 @@ export class RpcServer {
   /**
    * Normalize TriggerSpec input
    */
-  private normalizeTriggerSpec(value: unknown, opts: { requireId: boolean }): TriggerSpec {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new Error('trigger is required');
+  private normalizeTriggerSpec(
+    value: unknown,
+    opts: { requireId: boolean },
+  ): TriggerSpec {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("trigger is required");
     }
     const raw = value as JsonObject;
 
     // kind Verification
     const kind = raw.kind;
-    if (!kind || typeof kind !== 'string') {
-      throw new Error('trigger.kind is required');
+    if (!kind || typeof kind !== "string") {
+      throw new Error("trigger.kind is required");
     }
 
     // flowId Verification
     const flowId = raw.flowId;
-    if (!flowId || typeof flowId !== 'string') {
-      throw new Error('trigger.flowId is required');
+    if (!flowId || typeof flowId !== "string") {
+      throw new Error("trigger.flowId is required");
     }
 
     // id Verification
     let id: TriggerId;
     if (raw.id === undefined || raw.id === null) {
       if (opts.requireId) {
-        throw new Error('trigger.id is required');
+        throw new Error("trigger.id is required");
       }
-      id = `trg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` as TriggerId;
+      id =
+        `trg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` as TriggerId;
     } else {
-      if (typeof raw.id !== 'string' || !raw.id.trim()) {
-        throw new Error('trigger.id must be a non-empty string');
+      if (typeof raw.id !== "string" || !raw.id.trim()) {
+        throw new Error("trigger.id must be a non-empty string");
       }
       id = raw.id as TriggerId;
     }
@@ -970,8 +1646,8 @@ export class RpcServer {
     // enabled Verification
     let enabled = true;
     if (raw.enabled !== undefined && raw.enabled !== null) {
-      if (typeof raw.enabled !== 'boolean') {
-        throw new Error('trigger.enabled must be a boolean');
+      if (typeof raw.enabled !== "boolean") {
+        throw new Error("trigger.enabled must be a boolean");
       }
       enabled = raw.enabled;
     }
@@ -979,101 +1655,126 @@ export class RpcServer {
     // args Verification
     let args: JsonObject | undefined;
     if (raw.args !== undefined && raw.args !== null) {
-      if (typeof raw.args !== 'object' || Array.isArray(raw.args)) {
-        throw new Error('trigger.args must be an object');
+      if (typeof raw.args !== "object" || Array.isArray(raw.args)) {
+        throw new Error("trigger.args must be an object");
       }
       args = raw.args as JsonObject;
     }
 
     // Basic fields
-    const base = { id, kind: kind as TriggerKind, enabled, flowId: flowId as FlowId, args };
+    const base = {
+      id,
+      kind: kind as TriggerKind,
+      enabled,
+      flowId: flowId as FlowId,
+      args,
+    };
 
     // Add specific fields based on kind
     switch (kind) {
-      case 'manual':
+      case "manual":
         return base as TriggerSpec;
 
-      case 'url': {
+      case "url": {
         let match: unknown[] = [];
         if (raw.match !== undefined && raw.match !== null) {
           if (!Array.isArray(raw.match)) {
-            throw new Error('trigger.match must be an array');
+            throw new Error("trigger.match must be an array");
           }
           match = raw.match;
         }
         return { ...base, match } as TriggerSpec;
       }
 
-      case 'interval': {
+      case "interval": {
         if (raw.periodMinutes === undefined || raw.periodMinutes === null) {
-          throw new Error('trigger.periodMinutes is required for interval triggers');
+          throw new Error(
+            "trigger.periodMinutes is required for interval triggers",
+          );
         }
-        if (typeof raw.periodMinutes !== 'number' || !Number.isFinite(raw.periodMinutes)) {
-          throw new Error('trigger.periodMinutes must be a finite number');
+        if (
+          typeof raw.periodMinutes !== "number" ||
+          !Number.isFinite(raw.periodMinutes)
+        ) {
+          throw new Error("trigger.periodMinutes must be a finite number");
         }
         if (raw.periodMinutes < 1) {
-          throw new Error('trigger.periodMinutes must be >= 1');
+          throw new Error("trigger.periodMinutes must be >= 1");
         }
         return { ...base, periodMinutes: raw.periodMinutes } as TriggerSpec;
       }
 
-      case 'once': {
+      case "once": {
         if (raw.whenMs === undefined || raw.whenMs === null) {
-          throw new Error('trigger.whenMs is required for once triggers');
+          throw new Error("trigger.whenMs is required for once triggers");
         }
-        if (typeof raw.whenMs !== 'number' || !Number.isFinite(raw.whenMs)) {
-          throw new Error('trigger.whenMs must be a finite number');
+        if (typeof raw.whenMs !== "number" || !Number.isFinite(raw.whenMs)) {
+          throw new Error("trigger.whenMs must be a finite number");
         }
         return { ...base, whenMs: Math.floor(raw.whenMs) } as TriggerSpec;
       }
 
-      case 'command': {
-        if (!raw.commandKey || typeof raw.commandKey !== 'string') {
-          throw new Error('trigger.commandKey is required for command triggers');
+      case "command": {
+        if (!raw.commandKey || typeof raw.commandKey !== "string") {
+          throw new Error(
+            "trigger.commandKey is required for command triggers",
+          );
         }
         return { ...base, commandKey: raw.commandKey } as TriggerSpec;
       }
 
-      case 'contextMenu': {
-        if (!raw.title || typeof raw.title !== 'string') {
-          throw new Error('trigger.title is required for contextMenu triggers');
+      case "contextMenu": {
+        if (!raw.title || typeof raw.title !== "string") {
+          throw new Error("trigger.title is required for contextMenu triggers");
         }
         let contexts: string[] | undefined;
         if (raw.contexts !== undefined && raw.contexts !== null) {
-          if (!Array.isArray(raw.contexts) || !raw.contexts.every((c) => typeof c === 'string')) {
-            throw new Error('trigger.contexts must be an array of strings');
+          if (
+            !Array.isArray(raw.contexts) ||
+            !raw.contexts.every((c) => typeof c === "string")
+          ) {
+            throw new Error("trigger.contexts must be an array of strings");
           }
           contexts = raw.contexts as string[];
         }
         return { ...base, title: raw.title, contexts } as TriggerSpec;
       }
 
-      case 'dom': {
-        if (!raw.selector || typeof raw.selector !== 'string') {
-          throw new Error('trigger.selector is required for dom triggers');
+      case "dom": {
+        if (!raw.selector || typeof raw.selector !== "string") {
+          throw new Error("trigger.selector is required for dom triggers");
         }
         let appear: boolean | undefined;
         if (raw.appear !== undefined && raw.appear !== null) {
-          if (typeof raw.appear !== 'boolean') {
-            throw new Error('trigger.appear must be a boolean');
+          if (typeof raw.appear !== "boolean") {
+            throw new Error("trigger.appear must be a boolean");
           }
           appear = raw.appear;
         }
         let once: boolean | undefined;
         if (raw.once !== undefined && raw.once !== null) {
-          if (typeof raw.once !== 'boolean') {
-            throw new Error('trigger.once must be a boolean');
+          if (typeof raw.once !== "boolean") {
+            throw new Error("trigger.once must be a boolean");
           }
           once = raw.once;
         }
         let debounceMs: number | undefined;
         if (raw.debounceMs !== undefined && raw.debounceMs !== null) {
-          if (typeof raw.debounceMs !== 'number' || !Number.isFinite(raw.debounceMs)) {
-            throw new Error('trigger.debounceMs must be a finite number');
+          if (
+            typeof raw.debounceMs !== "number" ||
+            !Number.isFinite(raw.debounceMs)
+          ) {
+            throw new Error("trigger.debounceMs must be a finite number");
           }
           debounceMs = raw.debounceMs;
         }
-        return { ...base, selector: raw.selector, appear, once, debounceMs } as TriggerSpec;
+        return {
+          ...base,
+          selector: raw.selector,
+          appear,
+          once,
+          debounceMs,
+        } as TriggerSpec;
       }
 
       default:
@@ -1085,24 +1786,28 @@ export class RpcServer {
 
   // ===== Run Control Handlers =====
 
-  private async handlePauseRun(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handlePauseRun(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const runId = params?.runId as RunId | undefined;
-    if (!runId) throw new Error('runId is required');
+    if (!runId) throw new Error("runId is required");
 
     if (!this.runners) {
-      throw new Error('RunnerRegistry not configured');
+      throw new Error("RunnerRegistry not configured");
     }
 
     const runner = this.runners.get(runId);
     if (!runner) {
-      throw new Error(`Runner for "${runId}" not found (run may not be executing)`);
+      throw new Error(
+        `Runner for "${runId}" not found (run may not be executing)`,
+      );
     }
 
     const queueItem = await this.storage.queue.get(runId);
     if (!queueItem) {
       throw new Error(`Queue item "${runId}" not found`);
     }
-    if (queueItem.status === 'queued') {
+    if (queueItem.status === "queued") {
       throw new Error(`Cannot pause run "${runId}" while status=queued`);
     }
 
@@ -1118,25 +1823,31 @@ export class RpcServer {
     return { ok: true, runId };
   }
 
-  private async handleResumeRun(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleResumeRun(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const runId = params?.runId as RunId | undefined;
-    if (!runId) throw new Error('runId is required');
+    if (!runId) throw new Error("runId is required");
 
     if (!this.runners) {
-      throw new Error('RunnerRegistry not configured');
+      throw new Error("RunnerRegistry not configured");
     }
 
     const runner = this.runners.get(runId);
     if (!runner) {
-      throw new Error(`Runner for "${runId}" not found (run may not be executing)`);
+      throw new Error(
+        `Runner for "${runId}" not found (run may not be executing)`,
+      );
     }
 
     const queueItem = await this.storage.queue.get(runId);
     if (!queueItem) {
       throw new Error(`Queue item "${runId}" not found`);
     }
-    if (queueItem.status !== 'paused') {
-      throw new Error(`Cannot resume run "${runId}" with status=${queueItem.status}`);
+    if (queueItem.status !== "paused") {
+      throw new Error(
+        `Cannot resume run "${runId}" with status=${queueItem.status}`,
+      );
     }
 
     const ownerId = queueItem.lease?.ownerId;
@@ -1151,27 +1862,34 @@ export class RpcServer {
     return { ok: true, runId };
   }
 
-  private async handleCancelRun(params: JsonObject | undefined): Promise<JsonValue> {
+  private async handleCancelRun(
+    params: JsonObject | undefined,
+  ): Promise<JsonValue> {
     const runId = params?.runId as RunId | undefined;
-    if (!runId) throw new Error('runId is required');
+    if (!runId) throw new Error("runId is required");
 
-    const reason = (params?.reason as string) ?? 'Canceled by user';
+    const reason = (params?.reason as string) ?? "Canceled by user";
     const queueItem = await this.storage.queue.get(runId);
 
     // If still queued (not yet claimed), cancel via queue
-    if (queueItem?.status === 'queued') {
-      return this.handleCancelQueueItem({ runId, reason } as unknown as JsonObject);
+    if (queueItem?.status === "queued") {
+      return this.handleCancelQueueItem({
+        runId,
+        reason,
+      } as unknown as JsonObject);
     }
 
     // If running/paused, cancel via runner
     if (!this.runners) {
-      throw new Error('RunnerRegistry not configured');
+      throw new Error("RunnerRegistry not configured");
     }
 
     const runner = this.runners.get(runId);
     if (!runner) {
       // Run may have already finished
-      throw new Error(`Runner for "${runId}" not found (run may have already finished)`);
+      throw new Error(
+        `Runner for "${runId}" not found (run may have already finished)`,
+      );
     }
 
     runner.cancel(reason);

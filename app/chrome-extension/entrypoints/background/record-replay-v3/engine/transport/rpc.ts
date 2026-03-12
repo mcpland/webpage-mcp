@@ -3,55 +3,58 @@
  * @description Defines the protocol type for communication via chrome.runtime.Port
  */
 
-import type { JsonObject, JsonValue } from '../../domain/json';
-import type { RunId } from '../../domain/ids';
-import type { RunEvent } from '../../domain/events';
+import type { JsonObject, JsonValue } from "../../domain/json";
+import type { RunId } from "../../domain/ids";
+import type { RunEvent } from "../../domain/events";
 
 /** Port Name */
-export const RR_V3_PORT_NAME = 'rr_v3' as const;
+export const RR_V3_PORT_NAME = "rr_v3" as const;
 
 /**
  * RPC method name
  */
 export type RpcMethod =
   // Query method
-  | 'rr_v3.listRuns'
-  | 'rr_v3.getRun'
-  | 'rr_v3.getEvents'
+  | "rr_v3.listRuns"
+  | "rr_v3.getRun"
+  | "rr_v3.getEvents"
   // Flow management methods
-  | 'rr_v3.getFlow'
-  | 'rr_v3.listFlows'
-  | 'rr_v3.saveFlow'
-  | 'rr_v3.deleteFlow'
+  | "rr_v3.getFlow"
+  | "rr_v3.listFlows"
+  | "rr_v3.listPublishedFlows"
+  | "rr_v3.saveFlow"
+  | "rr_v3.publishFlow"
+  | "rr_v3.unpublishFlow"
+  | "rr_v3.deleteFlow"
   // Trigger management methods
-  | 'rr_v3.createTrigger'
-  | 'rr_v3.updateTrigger'
-  | 'rr_v3.deleteTrigger'
-  | 'rr_v3.getTrigger'
-  | 'rr_v3.listTriggers'
-  | 'rr_v3.enableTrigger'
-  | 'rr_v3.disableTrigger'
-  | 'rr_v3.fireTrigger'
+  | "rr_v3.createTrigger"
+  | "rr_v3.updateTrigger"
+  | "rr_v3.deleteTrigger"
+  | "rr_v3.getTrigger"
+  | "rr_v3.listTriggers"
+  | "rr_v3.enableTrigger"
+  | "rr_v3.disableTrigger"
+  | "rr_v3.fireTrigger"
   // Queue management methods
-  | 'rr_v3.enqueueRun'
-  | 'rr_v3.listQueue'
-  | 'rr_v3.cancelQueueItem'
+  | "rr_v3.enqueueRun"
+  | "rr_v3.listQueue"
+  | "rr_v3.cancelQueueItem"
   // Control method
-  | 'rr_v3.startRun'
-  | 'rr_v3.cancelRun'
-  | 'rr_v3.pauseRun'
-  | 'rr_v3.resumeRun'
+  | "rr_v3.startRun"
+  | "rr_v3.cancelRun"
+  | "rr_v3.pauseRun"
+  | "rr_v3.resumeRun"
   // Debugging method
-  | 'rr_v3.debug'
+  | "rr_v3.debug"
   // Subscription method
-  | 'rr_v3.subscribe'
-  | 'rr_v3.unsubscribe';
+  | "rr_v3.subscribe"
+  | "rr_v3.unsubscribe";
 
 /**
  * RPC request message
  */
 export interface RpcRequest {
-  type: 'rr_v3.request';
+  type: "rr_v3.request";
   /** Request ID (used to match responses) */
   requestId: string;
   /** method name */
@@ -64,7 +67,7 @@ export interface RpcRequest {
  * RPC successful response
  */
 export interface RpcResponseOk {
-  type: 'rr_v3.response';
+  type: "rr_v3.response";
   /** Corresponding request ID */
   requestId: string;
   ok: true;
@@ -76,7 +79,7 @@ export interface RpcResponseOk {
  * RPC error response
  */
 export interface RpcResponseErr {
-  type: 'rr_v3.response';
+  type: "rr_v3.response";
   /** Corresponding request ID */
   requestId: string;
   ok: false;
@@ -93,7 +96,7 @@ export type RpcResponse = RpcResponseOk | RpcResponseErr;
  * RPC event push
  */
 export interface RpcEventMessage {
-  type: 'rr_v3.event';
+  type: "rr_v3.event";
   /** event data */
   event: RunEvent;
 }
@@ -102,7 +105,7 @@ export interface RpcEventMessage {
  * RPC Subscription confirmation
  */
 export interface RpcSubscribeAck {
-  type: 'rr_v3.subscribeAck';
+  type: "rr_v3.subscribeAck";
   /** Run ID of the subscription (optional, null means subscribe to all) */
   runId: RunId | null;
 }
@@ -128,29 +131,44 @@ export function generateRequestId(): string {
  * Determine whether the message is an RPC request
  */
 export function isRpcRequest(msg: unknown): msg is RpcRequest {
-  return typeof msg === 'object' && msg !== null && (msg as RpcRequest).type === 'rr_v3.request';
+  return (
+    typeof msg === "object" &&
+    msg !== null &&
+    (msg as RpcRequest).type === "rr_v3.request"
+  );
 }
 
 /**
  * Determine whether the message is an RPC response
  */
 export function isRpcResponse(msg: unknown): msg is RpcResponse {
-  return typeof msg === 'object' && msg !== null && (msg as RpcResponse).type === 'rr_v3.response';
+  return (
+    typeof msg === "object" &&
+    msg !== null &&
+    (msg as RpcResponse).type === "rr_v3.response"
+  );
 }
 
 /**
  * Determine whether the message is an RPC event
  */
 export function isRpcEvent(msg: unknown): msg is RpcEventMessage {
-  return typeof msg === 'object' && msg !== null && (msg as RpcEventMessage).type === 'rr_v3.event';
+  return (
+    typeof msg === "object" &&
+    msg !== null &&
+    (msg as RpcEventMessage).type === "rr_v3.event"
+  );
 }
 
 /**
  * Create RPC request
  */
-export function createRpcRequest(method: RpcMethod, params?: JsonObject): RpcRequest {
+export function createRpcRequest(
+  method: RpcMethod,
+  params?: JsonObject,
+): RpcRequest {
   return {
-    type: 'rr_v3.request',
+    type: "rr_v3.request",
     requestId: generateRequestId(),
     method,
     params,
@@ -160,9 +178,12 @@ export function createRpcRequest(method: RpcMethod, params?: JsonObject): RpcReq
 /**
  * Create successful response
  */
-export function createRpcResponseOk(requestId: string, result: JsonValue): RpcResponseOk {
+export function createRpcResponseOk(
+  requestId: string,
+  result: JsonValue,
+): RpcResponseOk {
   return {
-    type: 'rr_v3.response',
+    type: "rr_v3.response",
     requestId,
     ok: true,
     result,
@@ -172,9 +193,12 @@ export function createRpcResponseOk(requestId: string, result: JsonValue): RpcRe
 /**
  * Create error response
  */
-export function createRpcResponseErr(requestId: string, error: string): RpcResponseErr {
+export function createRpcResponseErr(
+  requestId: string,
+  error: string,
+): RpcResponseErr {
   return {
-    type: 'rr_v3.response',
+    type: "rr_v3.response",
     requestId,
     ok: false,
     error,
@@ -186,7 +210,7 @@ export function createRpcResponseErr(requestId: string, error: string): RpcRespo
  */
 export function createRpcEventMessage(event: RunEvent): RpcEventMessage {
   return {
-    type: 'rr_v3.event',
+    type: "rr_v3.event",
     event,
   };
 }
