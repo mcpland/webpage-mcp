@@ -47,6 +47,10 @@ export default function BuilderApp() {
   const store = storeRef.current;
   const t = (key: string, fallback: string, substitutions?: string[]) =>
     getMessage(key, substitutions, fallback);
+  const pageTitle = t(
+    "builderPageTitle",
+    "Workflow Builder - Webpage MCP Connector",
+  );
 
   const [title, setTitle] = useState(() =>
     t("builderWorkflowEditorTitle", "Workflow Editor"),
@@ -138,6 +142,10 @@ export default function BuilderApp() {
       subflows: (store.flowLocal as any)?.subflows,
     });
   }
+
+  useEffect(() => {
+    document.title = pageTitle;
+  }, [pageTitle]);
 
   function notifyCompatibilityBlocked(actionLabel: string, message?: string) {
     pushToast(

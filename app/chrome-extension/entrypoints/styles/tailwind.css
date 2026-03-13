@@ -19,7 +19,9 @@
     --rr-elevated: #ffffff;
     --rr-border: #e5e7eb;
     --rr-subtle: #f3f4f6;
+    --rr-hover: #eef2f7;
     --rr-text: #0f172a;
+    --rr-text-secondary: #334155;
     --rr-text-weak: #475569;
     --rr-muted: #64748b;
     --rr-brand: #7c3aed;
@@ -37,7 +39,9 @@
     --rr-elevated: #121a33;
     --rr-border: rgba(255, 255, 255, 0.08);
     --rr-subtle: rgba(255, 255, 255, 0.04);
+    --rr-hover: rgba(255, 255, 255, 0.08);
     --rr-text: #e5e7eb;
+    --rr-text-secondary: #cbd5e1;
     --rr-text-weak: #cbd5e1;
     --rr-muted: #94a3b8;
     --rr-brand: #a78bfa;

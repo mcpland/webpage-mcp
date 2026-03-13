@@ -172,10 +172,11 @@
 }
 
 .top-btn:hover:not(:disabled) {
-  background: var(--rr-hover);
+  background: var(--rr-hover, var(--rr-subtle));
   border-color: var(--rr-text-weak);
   transform: translateY(-1px);
   box-shadow: 0 2px 6px rgb(0 0 0 / 10%);
+  color: var(--rr-text);
 }
 
 .top-btn:active:not(:disabled) {
@@ -199,9 +200,10 @@
   border-color: var(--rr-accent);
 }
 
-.top-btn.primary:hover {
+.top-btn.primary:hover:not(:disabled) {
   background: #2563eb;
   border-color: #2563eb;
+  color: #fff;
 }
 
 .top-btn.success {
@@ -210,9 +212,10 @@
   border-color: #10b981;
 }
 
-.top-btn.success:hover {
+.top-btn.success:hover:not(:disabled) {
   background: #059669;
   border-color: #059669;
+  color: #fff;
 }
 
 .top-btn.danger {
@@ -232,7 +235,7 @@
 }
 
 .top-btn.ghost:hover {
-  background: var(--rr-hover);
+  background: var(--rr-hover, var(--rr-subtle));
 }
 
 .top-btn.import {
