@@ -19,7 +19,8 @@
   justify-content: space-between;
   padding: 0 12px;
   border: none;
-  background: #ededed;
+  background: var(--rr-topbar, #ededed);
+  color: var(--rr-text);
   z-index: 20;
   pointer-events: none;
 }
@@ -164,6 +165,8 @@
   border: 1px solid var(--rr-border);
   background: var(--rr-card);
   color: var(--rr-text);
+  appearance: none;
+  -webkit-appearance: none;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
