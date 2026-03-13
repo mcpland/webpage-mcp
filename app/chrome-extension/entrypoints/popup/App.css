@@ -759,6 +759,15 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
   letter-spacing: 0.03em;
 }
 
+.footer-version {
+  text-align: center;
+  font-size: 10px;
+  color: var(--ac-text-subtle, #a8a29e);
+  margin: 4px 0 0;
+  font-family: var(--ac-font-code, 'JetBrains Mono', monospace);
+  letter-spacing: 0.04em;
+}
+
 /* =============================================
    Icon Utilities
    ============================================= */

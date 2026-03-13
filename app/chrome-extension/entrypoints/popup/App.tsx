@@ -119,6 +119,7 @@ export default function PopupApp() {
     nativeConnectionStatus === "connected" && serverStatus.isRunning;
   const showRegisterFallback = nativeConnectionStatus !== "connected";
   const extensionId = chrome.runtime.id;
+  const extensionVersion = chrome.runtime.getManifest().version;
 
   const mcpConfigJson = useMemo(() => {
     const config = {
@@ -1078,6 +1079,7 @@ export default function PopupApp() {
           <p className="footer-text">
             {t("popupFooterTagline", "webpage mcp connector for ai")}
           </p>
+          <p className="footer-version">v{extensionVersion}</p>
         </div>
       </div>
     </div>
