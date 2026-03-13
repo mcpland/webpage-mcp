@@ -1045,6 +1045,10 @@
     "message": "JSONをインポートする",
     "description": "Auto-generated localized message"
   },
+  "builderImportReadOnlyWarning": {
+    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. {0}",
+    "description": "Auto-generated localized message"
+  },
   "builderInsertNodePlaceholder": {
     "message": "ノードを挿入...",
     "description": "Auto-generated localized message"
@@ -1059,6 +1063,10 @@
   },
   "builderKeySequencePlaceholder": {
     "message": "Backspace Enter または cmd+a",
+    "description": "Auto-generated localized message"
+  },
+  "builderLegacyExportNotice": {
+    "message": "Exported as legacy V2 JSON because this workflow uses unsupported V3 features.",
     "description": "Auto-generated localized message"
   },
   "builderLoadFlowFailed": {
@@ -1245,6 +1253,18 @@
   },
   "builderUndoTitle": {
     "message": "元に戻す (⌘/Ctrl+Z)",
+    "description": "Auto-generated localized message"
+  },
+  "builderUnsupportedV3Notice": {
+    "message": "Save and run are disabled for this workflow. {0}",
+    "description": "Auto-generated localized message"
+  },
+  "builderUnsupportedV3Status": {
+    "message": "Unsupported V3 features",
+    "description": "Auto-generated localized message"
+  },
+  "builderV3CompatibilityBlocked": {
+    "message": "{0} is disabled until unsupported V3 workflow features are removed. {1}",
     "description": "Auto-generated localized message"
   },
   "builderViewEditPropertiesHint": {
