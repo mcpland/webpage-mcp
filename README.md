@@ -37,6 +37,8 @@
 
 The **Webpage MCP Connector** (Chrome extension) exposes real browser capabilities as MCP tools. The **MCP Server** bridges AI clients and the connector using Chrome [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging). MCP clients connect over stdio only (no localhost HTTP transport).
 
+Webpage MCP is best understood as a browser-native workflow layer for Chrome, not just a page-control bridge. Recent Chrome releases have made [Chrome DevTools MCP capable of connecting to active browser sessions](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session), which makes protocol-level control of existing tabs much easier. Webpage MCP complements that model by focusing on what DevTools MCP does not try to be: Chrome extension APIs, saved workflows, in-browser operator UI, semantic cross-tab memory, and page-to-code editing flows.
+
 ## Core Features
 
 |                        | Feature                       | Description                                                                                              |
@@ -46,12 +48,17 @@ The **Webpage MCP Connector** (Chrome extension) exposes real browser capabiliti
 | :computer:             | **Fully Local**               | Pure local MCP server ensuring user privacy                                                              |
 | :electric_plug:        | **Native Stdio Transport**    | Native Messaging + stdio only (no localhost HTTP port)                                                   |
 | :racing_car:           | **Cross-Tab**                 | Cross-tab context support                                                                                |
+| :control_knobs:        | **Workflow Runtime**          | Record, publish, trigger, and replay flows; expose saved browser workflows as MCP tools                  |
+| :speech_balloon:       | **In-Browser Agent UX**       | Built-in sidepanel, Quick Panel, element picker, and workflow views keep the agent inside Chrome         |
+| :building_construction: | **Apply-to-Code Web Editor** | Visual in-page editing with transactions, undo/redo, and structured apply payloads for coding agents     |
 | :brain:                | **Semantic Search**           | Built-in vector database for intelligent browser tab content discovery                                   |
 | :mag:                  | **Smart Content Analysis**    | AI-powered text extraction and similarity matching                                                       |
 | :globe_with_meridians: | **20+ Tools**                 | Screenshots, network monitoring, interactive operations, bookmark management, browsing history, and more |
 | :rocket:               | **SIMD-Accelerated AI**       | Custom WebAssembly SIMD optimization for 4-8x faster vector operations                                   |
 
 ## Comparison with Similar Projects
+
+### Playwright-based MCP Servers
 
 | Dimension                    | Playwright-based MCP Server                                    | Webpage MCP Connector + MCP Server                                                              |
 | ---------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -66,6 +73,26 @@ The **Webpage MCP Connector** (Chrome extension) exposes real browser capabiliti
 | **Startup Latency**          | :x: Needs browser automation bootstrap                         | :white_check_mark: Mainly extension/native bridge activation                                    |
 | **Request Overhead**         | :warning: Extra orchestration adds overhead                    | :white_check_mark: Lower overhead in long-lived local sessions                                  |
 | **Post-setup Reliability**   | :warning: More moving parts can increase failure surface       | :white_check_mark: One-time registration; stable across restarts                                |
+
+### Chrome DevTools MCP
+
+Chrome DevTools MCP is an excellent choice when your primary goal is protocol-level debugging of an already-open browser session. Webpage MCP is most valuable one layer above that: browser-native workflows, persistent local automation, and Chrome extension APIs that CDP alone does not cover well.
+
+| Dimension                    | Chrome DevTools MCP                                                                 | Webpage MCP Connector + MCP Server                                                                      |
+| ---------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Primary Strength**         | DevTools- and CDP-centric debugging, inspection, tracing, and performance analysis  | Browser-native workflow automation, operator UX, and persistent local browser tooling                   |
+| **Existing Browser Session** | :white_check_mark: Strong fit for active browser sessions                           | :white_check_mark: Strong fit for the user's real Chrome profile and tabs                               |
+| **Chrome-Native APIs**       | :warning: Mostly limited to DevTools / CDP surfaces                                | :white_check_mark: Extension APIs such as bookmarks, history, sidepanel, context menus, alarms, and more |
+| **Saved Workflows**          | :warning: Not the main product surface                                              | :white_check_mark: Built-in record/replay, publishing, dynamic tools, and reusable flow variables      |
+| **Triggers and Scheduling**  | :warning: Typically external orchestration                                          | :white_check_mark: Built-in manual, URL, DOM, interval, once, command, and context-menu triggers       |
+| **In-Browser UX**            | :warning: Usually operated from an external agent or CLI                            | :white_check_mark: Built-in sidepanel, Quick Panel, workflow views, and page-level pickers             |
+| **Cross-Tab Memory**         | :warning: Not a built-in focus                                                      | :white_check_mark: Built-in semantic indexing and search across live tabs                               |
+| **Visual Editing**           | :warning: Not a built-in focus                                                      | :white_check_mark: Web Editor with transactions, undo/redo, and apply-to-code payloads                 |
+| **Best Fit**                 | Debugging pages, network, console, performance, and memory                          | Turning Chrome into a persistent local automation workspace for agents and human operators              |
+
+### Best Used Together
+
+A strong local setup is to use Chrome DevTools MCP as the debugging engine and Webpage MCP as the browser-native workflow layer. DevTools MCP can own deep protocol inspection, while Webpage MCP owns browser-native APIs, saved automations, in-browser UI, and page-to-code workflows.
 
 ## Installation
 
@@ -274,11 +301,12 @@ Important:
 ## Additional Capabilities
 
 - **AI Agent Chat Sidepanel** — Built-in sidepanel for chatting with AI agents (Claude Code CLI, OpenAI Codex CLI) directly from Chrome, with project management, session history, and streaming output
-- **Record & Replay** — Record browser actions and replay them as automated flows; published flows are exposed as dynamic MCP tools (`flow.<slug>`)
-- **Web Editor** — Visual in-page DOM editor overlay with property panel and transaction system (`Cmd+Shift+O`)
-- **Quick Panel** — Keyboard-triggered floating AI chat accessible from any page (`Cmd+Shift+U`)
-- **Semantic Search** — On-device embedding model ([all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)) with HNSW vector index for searching tab content
-- **Element Marker** — Annotate DOM elements with names/selectors, accessible to AI tools via context menu
+- **Record, Replay, and Publish** — Record browser actions, replay them as automated flows, publish reusable flows, and expose them as dynamic MCP tools (`flow.<slug>`)
+- **Triggerable Browser Workflows** — Launch flows from URL matches, DOM appearance, intervals, one-time schedules, keyboard commands, and context-menu actions
+- **Web Editor** — Visual in-page DOM editor overlay with a property panel, transaction system, undo/redo, and structured apply-to-code handoff (`Cmd+Shift+O`)
+- **Quick Panel** — Keyboard-triggered floating AI chat accessible from any page, with page context and streaming responses (`Cmd+Shift+U`)
+- **Semantic Search** — On-device embedding model ([all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)) with HNSW vector index for searching tab content across live browser state
+- **Element Marker** — Annotate DOM elements with stable names/selectors so agents and workflows can refer to page targets more reliably
 
 ---
 
