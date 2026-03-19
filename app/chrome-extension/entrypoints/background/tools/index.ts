@@ -31,6 +31,11 @@ const URL_PRIORITY_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.INJECT_SCRIPT,
 ]);
 
+interface ResolvedExecutionTarget {
+  tabId?: number;
+  windowId?: number;
+}
+
 const getLazyTool = async (toolName: string) => {
   if (toolName === TOOL_NAMES.BROWSER.SEARCH_TABS_CONTENT) {
     const { vectorSearchTabsContentTool } = await import('./browser/vector-search');
@@ -64,22 +69,63 @@ function isTabScopedTool(toolName: string): boolean {
   );
 }
 
-async function resolveTabIdForExecution(
+function hasUrlNavigationTarget(args: any): boolean {
+  return typeof args?.url === 'string' && args.url.trim().length > 0;
+}
+
+function isHistoryNavigation(args: any): boolean {
+  return args?.url === 'back' || args?.url === 'forward';
+}
+
+function isExplicitNewWindowRequest(args: any): boolean {
+  return (
+    args?.openMode === 'new_window' ||
+    args?.newWindow === true ||
+    typeof args?.width === 'number' ||
+    typeof args?.height === 'number'
+  );
+}
+
+function isExplicitNewTabRequest(args: any): boolean {
+  return args?.openMode === 'new_tab' || args?.newTab === true;
+}
+
+function shouldPreferWindowScopedExecution(toolName: string, args: any): boolean {
+  if (URL_PRIORITY_TOOLS.has(toolName) && hasUrlNavigationTarget(args)) {
+    return true;
+  }
+
+  if (toolName !== TOOL_NAMES.BROWSER.NAVIGATE) {
+    return false;
+  }
+
+  if (args?.refresh === true || isHistoryNavigation(args) || !hasUrlNavigationTarget(args)) {
+    return false;
+  }
+
+  return isExplicitNewTabRequest(args) || isExplicitNewWindowRequest(args);
+}
+
+async function resolveExecutionTarget(
   toolName: string,
   args: any,
   sessionId?: string,
   instanceId?: string,
-): Promise<number | undefined> {
-  if (typeof args?.tabId === 'number') return args.tabId;
-  if (URL_PRIORITY_TOOLS.has(toolName) && typeof args?.url === 'string' && args.url.trim()) {
-    // These tools use `url` as the primary routing key; injecting a session tabId here
-    // can accidentally bypass URL-based selection and produce unexpected behavior.
-    return undefined;
+): Promise<ResolvedExecutionTarget> {
+  const hasExplicitTabId = typeof args?.tabId === 'number';
+  const hasExplicitWindowId = typeof args?.windowId === 'number';
+  if (hasExplicitTabId || hasExplicitWindowId) {
+    return {
+      tabId: hasExplicitTabId ? args.tabId : undefined,
+      windowId: hasExplicitWindowId ? args.windowId : undefined,
+    };
   }
-  if (!isTabScopedTool(toolName)) return undefined;
+
+  const preferWindowScopedExecution = shouldPreferWindowScopedExecution(toolName, args);
+  if (!isTabScopedTool(toolName)) return {};
   if (toolName === TOOL_NAMES.RECORD_REPLAY.FLOW_RUN && args?.tabTarget === 'new') {
     // Respect explicit new-tab execution requests for flow runs.
-    return undefined;
+    return {};
   }
 
   if (sessionId) {
@@ -88,7 +134,14 @@ async function resolveTabIdForExecution(
       try {
         const tab = await chrome.tabs.get(sessionCtx.tabId);
         if (typeof tab?.id === 'number') {
-          return tab.id;
+          if (preferWindowScopedExecution) {
+            return typeof tab.windowId === 'number' ? { windowId: tab.windowId } : {};
+          }
+
+          return {
+            tabId: tab.id,
+            windowId: typeof tab.windowId === 'number' ? tab.windowId : undefined,
+          };
         }
       } catch {
         patchSessionContext(sessionId, { tabId: undefined }, instanceId);
@@ -97,12 +150,19 @@ async function resolveTabIdForExecution(
 
     if (typeof sessionCtx?.windowId === 'number') {
       try {
-        const [windowActive] = await chrome.tabs.query({
-          active: true,
-          windowId: sessionCtx.windowId,
-        });
-        if (typeof windowActive?.id === 'number') {
-          return windowActive.id;
+        const targetWindow = await chrome.windows.get(sessionCtx.windowId, { populate: false });
+        if (typeof targetWindow?.id === 'number') {
+          if (preferWindowScopedExecution) {
+            return { windowId: targetWindow.id };
+          }
+
+          const [windowActive] = await chrome.tabs.query({
+            active: true,
+            windowId: targetWindow.id,
+          });
+          if (typeof windowActive?.id === 'number') {
+            return { tabId: windowActive.id, windowId: targetWindow.id };
+          }
         }
       } catch {
         // Ignore window lookup failures and continue fallback resolution.
@@ -112,20 +172,48 @@ async function resolveTabIdForExecution(
 
   try {
     const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (typeof active?.id === 'number') return active.id;
+    if (!active) return {};
+    if (preferWindowScopedExecution) {
+      return typeof active.windowId === 'number' ? { windowId: active.windowId } : {};
+    }
+    if (typeof active?.id === 'number') {
+      return {
+        tabId: active.id,
+        windowId: typeof active.windowId === 'number' ? active.windowId : undefined,
+      };
+    }
   } catch {
     // Ignore active-tab lookup failures; tools may handle missing target themselves.
   }
-  return undefined;
+  return {};
 }
 
-function mergeArgsWithResolvedTab(args: any, resolvedTabId?: number): any {
-  if (typeof resolvedTabId !== 'number') return args;
+function mergeArgsWithResolvedTarget(args: any, resolvedTarget: ResolvedExecutionTarget): any {
+  const resolvedTabId = resolvedTarget.tabId;
+  const resolvedWindowId = resolvedTarget.windowId;
+  const hasResolvedTabId = typeof resolvedTabId === 'number';
+  const hasResolvedWindowId = typeof resolvedWindowId === 'number';
+  if (!hasResolvedTabId && !hasResolvedWindowId) return args;
+
   if (args && typeof args === 'object' && !Array.isArray(args)) {
-    if (typeof args.tabId === 'number') return args;
-    return { ...args, tabId: resolvedTabId };
+    const nextArgs = { ...args };
+    if (!hasResolvedTabId || typeof nextArgs.tabId === 'number') {
+      if (hasResolvedWindowId && typeof nextArgs.windowId !== 'number') {
+        nextArgs.windowId = resolvedWindowId;
+      }
+      return nextArgs;
+    }
+
+    nextArgs.tabId = resolvedTabId;
+    if (hasResolvedWindowId && typeof nextArgs.windowId !== 'number') {
+      nextArgs.windowId = resolvedWindowId;
+    }
+    return nextArgs;
   }
-  return { tabId: resolvedTabId };
+  const nextArgs: Record<string, number> = {};
+  if (hasResolvedTabId) nextArgs.tabId = resolvedTabId;
+  if (hasResolvedWindowId) nextArgs.windowId = resolvedWindowId;
+  return nextArgs;
 }
 
 function findNumericField(
@@ -192,21 +280,33 @@ export const handleCallTool = async (param: ToolCallParam) => {
 
   const sessionId = param.meta?.mcpSessionId?.trim() || undefined;
   const instanceId = param.meta?.instanceId?.trim() || undefined;
-  const resolvedTabId = await resolveTabIdForExecution(param.name, param.args, sessionId, instanceId);
-  const mergedArgs = mergeArgsWithResolvedTab(param.args, resolvedTabId);
+  const resolvedTarget = await resolveExecutionTarget(param.name, param.args, sessionId, instanceId);
+  const mergedArgs = mergeArgsWithResolvedTarget(param.args, resolvedTarget);
 
   try {
     const execute = async () => await tool.execute(mergedArgs);
     const result =
-      typeof resolvedTabId === 'number' ? await runInTabQueue(resolvedTabId, execute) : await execute();
+      typeof resolvedTarget.tabId === 'number'
+        ? await runInTabQueue(resolvedTarget.tabId, execute)
+        : await execute();
 
     if (sessionId) {
       const patch = extractSessionPatchFromResult(result);
       const tabIdToPersist =
-        typeof patch.tabId === 'number' ? patch.tabId : typeof resolvedTabId === 'number' ? resolvedTabId : undefined;
+        typeof patch.tabId === 'number'
+          ? patch.tabId
+          : typeof resolvedTarget.tabId === 'number'
+            ? resolvedTarget.tabId
+            : undefined;
+      const windowIdToPersist =
+        typeof patch.windowId === 'number'
+          ? patch.windowId
+          : typeof resolvedTarget.windowId === 'number'
+            ? resolvedTarget.windowId
+            : undefined;
       const update: { tabId?: number; windowId?: number } = {};
       if (typeof tabIdToPersist === 'number') update.tabId = tabIdToPersist;
-      if (typeof patch.windowId === 'number') update.windowId = patch.windowId;
+      if (typeof windowIdToPersist === 'number') update.windowId = windowIdToPersist;
       if (Object.keys(update).length > 0) {
         patchSessionContext(sessionId, update, instanceId);
       }

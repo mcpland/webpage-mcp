@@ -41,20 +41,20 @@ Webpage MCP is best understood as a browser-native workflow layer for Chrome, no
 
 ## Core Features
 
-|                        | Feature                       | Description                                                                                              |
-| ---------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| :grinning:             | **Chatbot/Model Agnostic**    | Let any LLM, chatbot client, or agent automate your browser                                              |
-| :star:                 | **Use Your Original Browser** | Seamlessly integrate with your existing browser environment (configs, login states, etc.)                |
-| :computer:             | **Fully Local**               | Pure local MCP server ensuring user privacy                                                              |
-| :electric_plug:        | **Native Stdio Transport**    | Native Messaging + stdio only (no localhost HTTP port)                                                   |
-| :racing_car:           | **Cross-Tab**                 | Cross-tab context support                                                                                |
-| :control_knobs:        | **Workflow Runtime**          | Record, publish, trigger, and replay flows; expose saved browser workflows as MCP tools                  |
-| :speech_balloon:       | **In-Browser Agent UX**       | Built-in sidepanel, Quick Panel, element picker, and workflow views keep the agent inside Chrome         |
-| :building_construction: | **Apply-to-Code Web Editor** | Visual in-page editing with transactions, undo/redo, and structured apply payloads for coding agents     |
-| :brain:                | **Semantic Search**           | Built-in vector database for intelligent browser tab content discovery                                   |
-| :mag:                  | **Smart Content Analysis**    | AI-powered text extraction and similarity matching                                                       |
-| :globe_with_meridians: | **20+ Tools**                 | Screenshots, network monitoring, interactive operations, bookmark management, browsing history, and more |
-| :rocket:               | **SIMD-Accelerated AI**       | Custom WebAssembly SIMD optimization for 4-8x faster vector operations                                   |
+|                         | Feature                       | Description                                                                                              |
+| ----------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| :grinning:              | **Chatbot/Model Agnostic**    | Let any LLM, chatbot client, or agent automate your browser                                              |
+| :star:                  | **Use Your Original Browser** | Seamlessly integrate with your existing browser environment (configs, login states, etc.)                |
+| :computer:              | **Fully Local**               | Pure local MCP server ensuring user privacy                                                              |
+| :electric_plug:         | **Native Stdio Transport**    | Native Messaging + stdio only (no localhost HTTP port)                                                   |
+| :racing_car:            | **Cross-Tab**                 | Cross-tab context support                                                                                |
+| :control_knobs:         | **Workflow Runtime**          | Record, publish, trigger, and replay flows; expose saved browser workflows as MCP tools                  |
+| :speech_balloon:        | **In-Browser Agent UX**       | Built-in sidepanel, Quick Panel, element picker, and workflow views keep the agent inside Chrome         |
+| :building_construction: | **Apply-to-Code Web Editor**  | Visual in-page editing with transactions, undo/redo, and structured apply payloads for coding agents     |
+| :brain:                 | **Semantic Search**           | Built-in vector database for intelligent browser tab content discovery                                   |
+| :mag:                   | **Smart Content Analysis**    | AI-powered text extraction and similarity matching                                                       |
+| :globe_with_meridians:  | **20+ Tools**                 | Screenshots, network monitoring, interactive operations, bookmark management, browsing history, and more |
+| :rocket:                | **SIMD-Accelerated AI**       | Custom WebAssembly SIMD optimization for 4-8x faster vector operations                                   |
 
 ## Comparison with Similar Projects
 
@@ -78,17 +78,17 @@ Webpage MCP is best understood as a browser-native workflow layer for Chrome, no
 
 Chrome DevTools MCP is an excellent choice when your primary goal is protocol-level debugging of an already-open browser session. Webpage MCP is most valuable one layer above that: browser-native workflows, persistent local automation, and Chrome extension APIs that CDP alone does not cover well.
 
-| Dimension                    | Chrome DevTools MCP                                                                 | Webpage MCP Connector + MCP Server                                                                      |
-| ---------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Primary Strength**         | DevTools- and CDP-centric debugging, inspection, tracing, and performance analysis  | Browser-native workflow automation, operator UX, and persistent local browser tooling                   |
-| **Existing Browser Session** | :white_check_mark: Strong fit for active browser sessions                           | :white_check_mark: Strong fit for the user's real Chrome profile and tabs                               |
+| Dimension                    | Chrome DevTools MCP                                                                | Webpage MCP Connector + MCP Server                                                                       |
+| ---------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **Primary Strength**         | DevTools- and CDP-centric debugging, inspection, tracing, and performance analysis | Browser-native workflow automation, operator UX, and persistent local browser tooling                    |
+| **Existing Browser Session** | :white_check_mark: Strong fit for active browser sessions                          | :white_check_mark: Strong fit for the user's real Chrome profile and tabs                                |
 | **Chrome-Native APIs**       | :warning: Mostly limited to DevTools / CDP surfaces                                | :white_check_mark: Extension APIs such as bookmarks, history, sidepanel, context menus, alarms, and more |
-| **Saved Workflows**          | :warning: Not the main product surface                                              | :white_check_mark: Built-in record/replay, publishing, dynamic tools, and reusable flow variables      |
-| **Triggers and Scheduling**  | :warning: Typically external orchestration                                          | :white_check_mark: Built-in manual, URL, DOM, interval, once, command, and context-menu triggers       |
-| **In-Browser UX**            | :warning: Usually operated from an external agent or CLI                            | :white_check_mark: Built-in sidepanel, Quick Panel, workflow views, and page-level pickers             |
-| **Cross-Tab Memory**         | :warning: Not a built-in focus                                                      | :white_check_mark: Built-in semantic indexing and search across live tabs                               |
-| **Visual Editing**           | :warning: Not a built-in focus                                                      | :white_check_mark: Web Editor with transactions, undo/redo, and apply-to-code payloads                 |
-| **Best Fit**                 | Debugging pages, network, console, performance, and memory                          | Turning Chrome into a persistent local automation workspace for agents and human operators              |
+| **Saved Workflows**          | :warning: Not the main product surface                                             | :white_check_mark: Built-in record/replay, publishing, dynamic tools, and reusable flow variables        |
+| **Triggers and Scheduling**  | :warning: Typically external orchestration                                         | :white_check_mark: Built-in manual, URL, DOM, interval, once, command, and context-menu triggers         |
+| **In-Browser UX**            | :warning: Usually operated from an external agent or CLI                           | :white_check_mark: Built-in sidepanel, Quick Panel, workflow views, and page-level pickers               |
+| **Cross-Tab Memory**         | :warning: Not a built-in focus                                                     | :white_check_mark: Built-in semantic indexing and search across live tabs                                |
+| **Visual Editing**           | :warning: Not a built-in focus                                                     | :white_check_mark: Web Editor with transactions, undo/redo, and apply-to-code payloads                   |
+| **Best Fit**                 | Debugging pages, network, console, performance, and memory                         | Turning Chrome into a persistent local automation workspace for agents and human operators               |
 
 ### Best Used Together
 
@@ -268,35 +268,35 @@ Important:
 
 ## MCP Browser Tools
 
-| Tool                               | Description                                                             |
-| ---------------------------------- | ----------------------------------------------------------------------- |
-| `get_windows_and_tabs`             | Get all open browser windows and tabs                                   |
-| `chrome_navigate`                  | Navigate to a URL, refresh, or navigate history (back/forward)          |
-| `chrome_screenshot`                | Take a screenshot of the page or a specific element                     |
-| `chrome_read_page`                 | Get an accessibility tree of visible elements on the page               |
-| `chrome_computer`                  | Mouse and keyboard interaction with the browser (computer use)          |
-| `chrome_click_element`             | Click elements via CSS selector, XPath, element ref, or coordinates     |
-| `chrome_fill_or_select`            | Fill or select form elements (input, textarea, select, checkbox, radio) |
-| `chrome_keyboard`                  | Simulate keyboard input (keys, combinations, or text)                   |
-| `chrome_javascript`                | Execute JavaScript code in a browser tab                                |
-| `chrome_get_web_content`           | Fetch and parse web page content                                        |
-| `chrome_network_request`           | Send network requests from the browser context (with cookies)           |
-| `chrome_network_capture`           | Capture network requests (start/stop, optional response bodies via CDP) |
-| `chrome_console`                   | Capture console output (snapshot or persistent buffer mode)             |
-| `chrome_history`                   | Search and retrieve browsing history                                    |
-| `chrome_bookmark_search`           | Search bookmarks by title and URL                                       |
-| `chrome_bookmark_add`              | Add a new bookmark                                                      |
-| `chrome_bookmark_delete`           | Delete a bookmark                                                       |
-| `chrome_switch_tab`                | Switch to a specific tab                                                |
-| `chrome_close_tabs`                | Close one or more tabs                                                  |
-| `chrome_upload_file`               | Upload files to web forms via CDP                                       |
-| `chrome_handle_dialog`             | Handle JavaScript dialogs (alert/confirm/prompt)                        |
-| `chrome_handle_download`           | Wait for and retrieve download details                                  |
-| `chrome_request_element_selection` | Let the user manually select elements on the page                       |
-| `chrome_gif_recorder`              | Record browser activity as an animated GIF                              |
-| `performance_start_trace`          | Start a performance trace recording                                     |
-| `performance_stop_trace`           | Stop the active performance trace                                       |
-| `performance_analyze_insight`      | Get a lightweight summary of the last recorded trace                    |
+| Tool                               | Description                                                                               |
+| ---------------------------------- | ----------------------------------------------------------------------------------------- |
+| `get_windows_and_tabs`             | Get all open browser windows and tabs                                                     |
+| `chrome_navigate`                  | Navigate the current tab or open a URL in a new tab/window; also supports refresh/history |
+| `chrome_screenshot`                | Take a screenshot of the page or a specific element                                       |
+| `chrome_read_page`                 | Get an accessibility tree of visible elements on the page                                 |
+| `chrome_computer`                  | Mouse and keyboard interaction with the browser (computer use)                            |
+| `chrome_click_element`             | Click elements via CSS selector, XPath, element ref, or coordinates                       |
+| `chrome_fill_or_select`            | Fill or select form elements (input, textarea, select, checkbox, radio)                   |
+| `chrome_keyboard`                  | Simulate keyboard input (keys, combinations, or text)                                     |
+| `chrome_javascript`                | Execute JavaScript code in a browser tab                                                  |
+| `chrome_get_web_content`           | Fetch and parse web page content                                                          |
+| `chrome_network_request`           | Send network requests from the browser context (with cookies)                             |
+| `chrome_network_capture`           | Capture network requests (start/stop, optional response bodies via CDP)                   |
+| `chrome_console`                   | Capture console output (snapshot or persistent buffer mode)                               |
+| `chrome_history`                   | Search and retrieve browsing history                                                      |
+| `chrome_bookmark_search`           | Search bookmarks by title and URL                                                         |
+| `chrome_bookmark_add`              | Add a new bookmark                                                                        |
+| `chrome_bookmark_delete`           | Delete a bookmark                                                                         |
+| `chrome_switch_tab`                | Switch to a specific tab                                                                  |
+| `chrome_close_tabs`                | Close one or more tabs                                                                    |
+| `chrome_upload_file`               | Upload files to web forms via CDP                                                         |
+| `chrome_handle_dialog`             | Handle JavaScript dialogs (alert/confirm/prompt)                                          |
+| `chrome_handle_download`           | Wait for and retrieve download details                                                    |
+| `chrome_request_element_selection` | Let the user manually select elements on the page                                         |
+| `chrome_gif_recorder`              | Record browser activity as an animated GIF                                                |
+| `performance_start_trace`          | Start a performance trace recording                                                       |
+| `performance_stop_trace`           | Stop the active performance trace                                                         |
+| `performance_analyze_insight`      | Get a lightweight summary of the last recorded trace                                      |
 
 ## Additional Capabilities
 

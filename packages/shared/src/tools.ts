@@ -505,7 +505,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.NAVIGATE,
     description:
-      'Navigate to a URL, refresh the current tab, or navigate browser history (back/forward)',
+      'Navigate the current tab, open a URL in a new tab or window, refresh the current tab, or navigate browser history (back/forward)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -514,19 +514,31 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'URL to navigate to. Special values: "back" or "forward" to navigate browser history in the target tab.',
         },
+        openMode: {
+          type: 'string',
+          enum: ['current_tab', 'new_tab', 'new_window'],
+          description:
+            'How to open the URL. Use "current_tab" to load the URL in the target/current tab, "new_tab" to force a brand-new tab, or "new_window" to force a new window. Defaults to "current_tab" unless you explicitly request a new tab or window.',
+        },
+        newTab: {
+          type: 'boolean',
+          description:
+            'Compatibility alias for openMode="new_tab". When true, always creates a fresh tab and never reuses an existing tab.',
+        },
         newWindow: {
           type: 'boolean',
-          description: 'Create a new window to navigate to the URL or not. Defaults to false',
+          description:
+            'Compatibility alias for openMode="new_window". When true, always creates a new window for the URL.',
         },
         tabId: {
           type: 'number',
           description:
-            'Target an existing tab by ID (if provided, navigate/refresh/back/forward that tab instead of the active tab).',
+            'Target an existing tab by ID. When provided and openMode is omitted, the URL is loaded in that tab.',
         },
         windowId: {
           type: 'number',
           description:
-            'Target an existing window by ID (when creating a new tab in existing window, or picking active tab if tabId is not provided).',
+            'Target window ID. Used to choose the active tab when openMode="current_tab", or to choose which window receives a forced new tab.',
         },
         background: {
           type: 'boolean',

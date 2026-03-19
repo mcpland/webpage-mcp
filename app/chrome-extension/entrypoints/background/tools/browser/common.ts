@@ -6,9 +6,15 @@ import { captureFrameOnAction, isAutoCaptureActive } from './gif-recorder';
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 720;
+const NAVIGATION_POLL_MS = 100;
+const NAVIGATION_WAIT_TIMEOUT_MS = 3000;
+
+type NavigateOpenMode = 'current_tab' | 'new_tab' | 'new_window';
 
 interface NavigateToolParams {
   url?: string;
+  openMode?: NavigateOpenMode;
+  newTab?: boolean;
   newWindow?: boolean;
   width?: number;
   height?: number;
@@ -38,8 +44,145 @@ class NavigateTool extends BaseBrowserToolExecutor {
     }
   }
 
+  private async sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private normalizeOpenMode(
+    args: NavigateToolParams,
+    explicitTab: chrome.tabs.Tab | null,
+  ): NavigateOpenMode {
+    if (
+      args.openMode === 'new_window' ||
+      args.newWindow === true ||
+      typeof args.width === 'number' ||
+      typeof args.height === 'number'
+    ) {
+      return 'new_window';
+    }
+
+    if (args.openMode === 'new_tab' || args.newTab === true) {
+      return 'new_tab';
+    }
+
+    if (args.openMode === 'current_tab' || typeof explicitTab?.id === 'number') {
+      return 'current_tab';
+    }
+
+    return 'current_tab';
+  }
+
+  private async waitForUpdatedTab(
+    tabId: number,
+    options: { previousUrl?: string; targetUrl?: string; timeoutMs?: number } = {},
+  ): Promise<chrome.tabs.Tab> {
+    const timeoutMs = options.timeoutMs ?? NAVIGATION_WAIT_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    let lastSeen = await chrome.tabs.get(tabId);
+
+    while (Date.now() < deadline) {
+      const current = await chrome.tabs.get(tabId);
+      lastSeen = current;
+
+      const pendingUrl = (current as chrome.tabs.Tab & { pendingUrl?: string }).pendingUrl || '';
+      const currentUrl = current.url || '';
+      const observedUrl = pendingUrl || currentUrl;
+
+      if (options.targetUrl && observedUrl === options.targetUrl) {
+        return current;
+      }
+
+      if (options.previousUrl && observedUrl && observedUrl !== options.previousUrl) {
+        return current;
+      }
+
+      if (
+        current.status === 'complete' &&
+        currentUrl &&
+        (!options.previousUrl || currentUrl !== options.previousUrl)
+      ) {
+        return current;
+      }
+
+      await this.sleep(NAVIGATION_POLL_MS);
+    }
+
+    return lastSeen;
+  }
+
+  private async resolveTargetWindowForNewTab(
+    preferredWindowId?: number,
+    explicitTab?: chrome.tabs.Tab | null,
+  ): Promise<chrome.windows.Window | null> {
+    const candidateWindowIds = new Set<number>();
+    if (typeof preferredWindowId === 'number') {
+      candidateWindowIds.add(preferredWindowId);
+    }
+    if (typeof explicitTab?.windowId === 'number') {
+      candidateWindowIds.add(explicitTab.windowId);
+    }
+
+    for (const candidateWindowId of candidateWindowIds) {
+      try {
+        return await chrome.windows.get(candidateWindowId, { populate: false });
+      } catch {
+        // Ignore invalid target windows and continue fallback resolution.
+      }
+    }
+
+    try {
+      return await chrome.windows.getLastFocused({ populate: false });
+    } catch {
+      return null;
+    }
+  }
+
+  private buildTabResult(tab: chrome.tabs.Tab, message: string): ToolResult {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message,
+            tabId: tab.id,
+            windowId: tab.windowId,
+            url: tab.url,
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+
+  private buildWindowResult(
+    createdWindow: chrome.windows.Window,
+    message: string,
+    tabs: chrome.tabs.Tab[],
+  ): ToolResult {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message,
+            windowId: createdWindow.id,
+            tabs: tabs.map((tab) => ({
+              tabId: tab.id,
+              url: tab.url,
+            })),
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+
   async execute(args: NavigateToolParams): Promise<ToolResult> {
     const {
+      openMode,
+      newTab = false,
       newWindow = false,
       width,
       height,
@@ -56,12 +199,13 @@ class NavigateTool extends BaseBrowserToolExecutor {
     );
 
     try {
+      const explicitTab = await this.tryGetTab(tabId);
+
       // Handle refresh option first
       if (refresh) {
         console.log('Refreshing current active tab');
-        const explicit = await this.tryGetTab(tabId);
         // Get target tab (explicit or active in provided window)
-        const targetTab = explicit || (await this.getActiveTabOrThrowInWindow(windowId));
+        const targetTab = explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
         if (!targetTab.id) return createErrorResponse('No target tab found to refresh');
         await chrome.tabs.reload(targetTab.id);
 
@@ -97,7 +241,6 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
       // Handle history navigation: url="back" or url="forward"
       if (url === 'back' || url === 'forward') {
-        const explicitTab = await this.tryGetTab(tabId);
         const targetTab = explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
         if (!targetTab.id) {
           return createErrorResponse('No target tab found for history navigation');
@@ -139,299 +282,104 @@ class NavigateTool extends BaseBrowserToolExecutor {
         };
       }
 
-      // 1. Check if URL is already open
-      // Prefer Chrome's URL match patterns for robust matching (host/path variations)
-      console.log(`Checking if URL is already open: ${url}`);
+      const effectiveOpenMode = this.normalizeOpenMode(
+        { openMode, newTab, newWindow, width, height },
+        explicitTab,
+      );
+      console.log(`Resolved navigation mode: ${effectiveOpenMode}`);
 
-      // Build robust match patterns from the provided URL.
-      // This mirrors the approach in CloseTabsTool: ensure wildcard path and
-      // add common variants (www/no-www, http/https) to handle real-world redirects.
-      const buildUrlPatterns = (input: string): string[] => {
-        const patterns = new Set<string>();
-        try {
-          if (!input.includes('*')) {
-            const u = new URL(input);
-            // Use host-level wildcard to include all paths; we'll do precise selection later
-            const pathWildcard = '/*';
-
-            const hostVariants = new Set<string>([u.host]);
-            const hostname = (u.hostname || '').toLowerCase();
-            const hasPort = u.port ? `:${u.port}` : '';
-            const isIpv4 = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname);
-            const isIpv6 = hostname.includes(':');
-            const isLocalhost = hostname === 'localhost' || hostname.endsWith('.localhost');
-            const labels = hostname.split('.').filter(Boolean);
-            const canToggleWww =
-              !isIpv4 && !isIpv6 && !isLocalhost && labels.length === 2 && labels[0] !== 'www';
-
-            if (hostname.startsWith('www.')) {
-              hostVariants.add(`${hostname.replace(/^www\./, '')}${hasPort}`);
-            } else if (canToggleWww) {
-              hostVariants.add(`www.${hostname}${hasPort}`);
-            }
-
-            for (const host of hostVariants) {
-              patterns.add(`${u.protocol}//${host}${pathWildcard}`);
-            }
-
-            // Add protocol variant to catch http↔https redirects
-            const altProtocol = u.protocol === 'https:' ? 'http:' : 'https:';
-            for (const host of hostVariants) {
-              patterns.add(`${altProtocol}//${host}${pathWildcard}`);
-            }
-          } else {
-            patterns.add(input);
-          }
-        } catch {
-          // Fallback: best-effort wildcard suffix
-          patterns.add(input.endsWith('/') ? `${input}*` : `${input}/*`);
-        }
-        return Array.from(patterns);
-      };
-
-      const urlPatterns = buildUrlPatterns(url);
-      const candidateTabs = await chrome.tabs.query({ url: urlPatterns });
-      console.log(`Found ${candidateTabs.length} matching tabs with patterns:`, urlPatterns);
-
-      // Prefer strict match when user specifies a concrete path/query.
-      // Only fall back to host-level activation when the target is site root.
-      const pickBestMatch = (target: string, tabsToPick: chrome.tabs.Tab[]) => {
-        let targetUrl: URL | undefined;
-        try {
-          targetUrl = new URL(target);
-        } catch {
-          // Not a fully-qualified URL; cannot do structured comparison
-          return tabsToPick[0];
+      if (effectiveOpenMode === 'current_tab') {
+        const targetTab = explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
+        if (!targetTab.id) {
+          return createErrorResponse('No target tab found to navigate');
         }
 
-        const normalizePath = (p: string) => {
-          if (!p) return '/';
-          // Ensure leading slash
-          const withLeading = p.startsWith('/') ? p : `/${p}`;
-          // Remove trailing slash except when root
-          return withLeading !== '/' && withLeading.endsWith('/')
-            ? withLeading.slice(0, -1)
-            : withLeading;
-        };
+        const beforeUrl = targetTab.url || '';
+        await chrome.tabs.update(targetTab.id, { url });
+        const updatedTab = await this.waitForUpdatedTab(targetTab.id, {
+          previousUrl: beforeUrl,
+          targetUrl: url,
+        });
 
-        const hostBase = (h: string) => h.replace(/^www\./, '').toLowerCase();
-        const isRootTarget = normalizePath(targetUrl.pathname) === '/' && !targetUrl.search;
-        const targetPath = normalizePath(targetUrl.pathname);
-        const targetSearch = targetUrl.search || '';
-        const targetHostBase = hostBase(targetUrl.host);
-
-        let best: { tab?: chrome.tabs.Tab; score: number } = { score: -1 };
-
-        for (const tab of tabsToPick) {
-          const tabUrlStr = tab.url || '';
-          let tabUrl: URL | undefined;
-          try {
-            tabUrl = new URL(tabUrlStr);
-          } catch {
-            continue;
-          }
-
-          const tabHostBase = hostBase(tabUrl.host);
-          if (tabHostBase !== targetHostBase) continue;
-
-          const tabPath = normalizePath(tabUrl.pathname);
-          const tabSearch = tabUrl.search || '';
-
-          // Scoring:
-          // 3 - exact path match and (if target has query) exact query match
-          // 2 - exact path match ignoring query (target without query)
-          // 1 - same host, any path (only if target is root)
-          let score = -1;
-          const pathEqual = tabPath === targetPath;
-          const searchEqual = tabSearch === targetSearch;
-
-          if (pathEqual && (targetSearch ? searchEqual : true)) {
-            score = 3;
-          } else if (pathEqual && !targetSearch) {
-            score = 2;
-          }
-
-          if (score > best.score) {
-            best = { tab, score };
-            if (score === 3) break; // Cannot do better
-          }
-        }
-
-        return best.tab;
-      };
-
-      const explicitTab = await this.tryGetTab(tabId);
-      const existingTab = explicitTab || pickBestMatch(url, candidateTabs);
-      if (existingTab?.id !== undefined) {
-        console.log(
-          `URL already open in Tab ID: ${existingTab.id}, Window ID: ${existingTab.windowId}`,
-        );
-        // Update URL only when explicit tab specified and url differs
-        if (explicitTab && typeof explicitTab.id === 'number') {
-          await chrome.tabs.update(explicitTab.id, { url });
-        }
-        // Optionally bring to foreground based on background flag
-        await this.ensureFocus(existingTab, {
+        await this.ensureFocus(updatedTab, {
           activate: background !== true,
           focusWindow: background !== true,
         });
-
-        console.log(`Activated existing Tab ID: ${existingTab.id}`);
-        // Get updated tab information and return it
-        const updatedTab = await chrome.tabs.get(existingTab.id);
-
-        // Trigger auto-capture on existing tab activation
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                message: 'Activated existing tab',
-                tabId: updatedTab.id,
-                windowId: updatedTab.windowId,
-                url: updatedTab.url,
-              }),
-            },
-          ],
-          isError: false,
-        };
+        return this.buildTabResult(updatedTab, 'Navigated current tab');
       }
 
-      // 2. If URL is not already open, decide how to open it based on options
-      const openInNewWindow = newWindow || typeof width === 'number' || typeof height === 'number';
-
-      if (openInNewWindow) {
+      if (effectiveOpenMode === 'new_window') {
         console.log('Opening URL in a new window.');
-
-        // Create new window
-        const newWindow = await chrome.windows.create({
-          url: url,
+        const createdWindow = await chrome.windows.create({
+          url,
           width: typeof width === 'number' ? width : DEFAULT_WINDOW_WIDTH,
           height: typeof height === 'number' ? height : DEFAULT_WINDOW_HEIGHT,
           focused: background === true ? false : true,
         });
 
-        if (newWindow && newWindow.id !== undefined) {
-          console.log(`URL opened in new Window ID: ${newWindow.id}`);
-
-          // Trigger auto-capture if the new window has a tab
-          const firstTab = newWindow.tabs?.[0];
+        if (createdWindow && createdWindow.id !== undefined) {
+          console.log(`URL opened in new Window ID: ${createdWindow.id}`);
+          const windowTabs =
+            createdWindow.tabs && createdWindow.tabs.length > 0
+              ? createdWindow.tabs
+              : await chrome.tabs.query({ windowId: createdWindow.id });
+          const firstTab = windowTabs[0];
           if (firstTab?.id) {
-            await this.triggerAutoCapture(firstTab.id, firstTab.url);
+            const updatedFirstTab = await this.waitForUpdatedTab(firstTab.id, { targetUrl: url });
+            await this.triggerAutoCapture(updatedFirstTab.id!, updatedFirstTab.url);
+            return this.buildWindowResult(createdWindow, 'Opened URL in new window', [
+              updatedFirstTab,
+            ]);
           }
 
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  message: 'Opened URL in new window',
-                  windowId: newWindow.id,
-                  tabs: newWindow.tabs
-                    ? newWindow.tabs.map((tab) => ({
-                        tabId: tab.id,
-                        url: tab.url,
-                      }))
-                    : [],
-                }),
-              },
-            ],
-            isError: false,
-          };
+          return this.buildWindowResult(createdWindow, 'Opened URL in new window', windowTabs);
         }
-      } else {
-        console.log('Opening URL in the last active window.');
-        // Try to open a new tab in the specified window, otherwise the most recently active window
-        let targetWindow: chrome.windows.Window | null = null;
-        if (typeof windowId === 'number') {
-          targetWindow = await chrome.windows.get(windowId, { populate: false });
+      }
+
+      console.log('Opening URL in a new tab.');
+      const targetWindow = await this.resolveTargetWindowForNewTab(windowId, explicitTab);
+      if (targetWindow && targetWindow.id !== undefined) {
+        const createdTab = await chrome.tabs.create({
+          url,
+          windowId: targetWindow.id,
+          active: background === true ? false : true,
+        });
+        if (!createdTab.id) {
+          return createErrorResponse('Failed to create new tab');
         }
-        if (!targetWindow) {
-          targetWindow = await chrome.windows.getLastFocused({ populate: false });
+        if (background !== true) {
+          await chrome.windows.update(targetWindow.id, { focused: true });
         }
 
-        if (targetWindow && targetWindow.id !== undefined) {
-          console.log(`Found target Window ID: ${targetWindow.id}`);
+        const updatedTab = await this.waitForUpdatedTab(createdTab.id, { targetUrl: url });
+        await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+        return this.buildTabResult(updatedTab, 'Opened URL in new tab');
+      }
 
-          const newTab = await chrome.tabs.create({
-            url: url,
-            windowId: targetWindow.id,
-            active: background === true ? false : true,
-          });
-          if (background !== true) {
-            await chrome.windows.update(targetWindow.id, { focused: true });
-          }
+      console.warn('No target window found, falling back to creating a new window.');
+      const fallbackWindow = await chrome.windows.create({
+        url,
+        width: DEFAULT_WINDOW_WIDTH,
+        height: DEFAULT_WINDOW_HEIGHT,
+        focused: background === true ? false : true,
+      });
 
-          console.log(
-            `URL opened in new Tab ID: ${newTab.id} in existing Window ID: ${targetWindow.id}`,
-          );
-
-          // Trigger auto-capture on new tab
-          if (newTab.id) {
-            await this.triggerAutoCapture(newTab.id, newTab.url);
-          }
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  message: 'Opened URL in new tab in existing window',
-                  tabId: newTab.id,
-                  windowId: targetWindow.id,
-                  url: newTab.url,
-                }),
-              },
-            ],
-            isError: false,
-          };
-        } else {
-          // In rare cases, if there's no recently active window (e.g., browser just started with no windows)
-          // Fall back to opening in a new window
-          console.warn('No last focused window found, falling back to creating a new window.');
-
-          const fallbackWindow = await chrome.windows.create({
-            url: url,
-            width: DEFAULT_WINDOW_WIDTH,
-            height: DEFAULT_WINDOW_HEIGHT,
-            focused: true,
-          });
-
-          if (fallbackWindow && fallbackWindow.id !== undefined) {
-            console.log(`URL opened in fallback new Window ID: ${fallbackWindow.id}`);
-
-            // Trigger auto-capture if fallback window has a tab
-            const firstTab = fallbackWindow.tabs?.[0];
-            if (firstTab?.id) {
-              await this.triggerAutoCapture(firstTab.id, firstTab.url);
-            }
-
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({
-                    success: true,
-                    message: 'Opened URL in new window',
-                    windowId: fallbackWindow.id,
-                    tabs: fallbackWindow.tabs
-                      ? fallbackWindow.tabs.map((tab) => ({
-                          tabId: tab.id,
-                          url: tab.url,
-                        }))
-                      : [],
-                  }),
-                },
-              ],
-              isError: false,
-            };
-          }
+      if (fallbackWindow && fallbackWindow.id !== undefined) {
+        const fallbackTabs =
+          fallbackWindow.tabs && fallbackWindow.tabs.length > 0
+            ? fallbackWindow.tabs
+            : await chrome.tabs.query({ windowId: fallbackWindow.id });
+        const firstTab = fallbackTabs[0];
+        if (firstTab?.id) {
+          const updatedFirstTab = await this.waitForUpdatedTab(firstTab.id, { targetUrl: url });
+          await this.triggerAutoCapture(updatedFirstTab.id!, updatedFirstTab.url);
+          return this.buildWindowResult(fallbackWindow, 'Opened URL in new window', [
+            updatedFirstTab,
+          ]);
         }
+
+        return this.buildWindowResult(fallbackWindow, 'Opened URL in new window', fallbackTabs);
       }
 
       // If all attempts fail, return a generic error
