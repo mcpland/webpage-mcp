@@ -43,11 +43,14 @@ import type {
   OpenProjectTarget,
 } from 'webpage-mcp-shared';
 
-const VALID_ENGINE_NAMES: readonly EngineName[] = ['claude', 'codex', 'cursor', 'qwen', 'glm'];
 const VALID_OPEN_TARGETS: readonly OpenProjectTarget[] = ['vscode', 'terminal'];
 
-function isValidEngineName(name: string): name is EngineName {
-  return VALID_ENGINE_NAMES.includes(name as EngineName);
+function getRegisteredEngineNames(chatService: AgentChatService): EngineName[] {
+  return chatService.getEngineInfos().map((engine) => engine.name);
+}
+
+function isValidEngineName(name: string, validEngineNames: readonly EngineName[]): name is EngineName {
+  return validEngineNames.includes(name as EngineName);
 }
 
 function isValidOpenTarget(target: string): target is OpenProjectTarget {
@@ -240,11 +243,17 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.projects.upsert': {
+        const validEngineNames = getRegisteredEngineNames(deps.chatService);
         const rawPayload = bodyAsRecord(body);
         const payload = toCreateOrUpdateProjectInput(rawPayload);
         if (!payload) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
             error: 'name and rootPath are required to create a project',
+          });
+        }
+        if (payload.preferredCli && !isValidEngineName(payload.preferredCli, validEngineNames)) {
+          return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
+            error: `Invalid preferredCli. Must be one of: ${validEngineNames.join(', ')}`,
           });
         }
         const project = await upsertProject(payload);
@@ -328,6 +337,7 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.projects.sessions.create': {
+        const validEngineNames = getRegisteredEngineNames(deps.chatService);
         const projectId = readParam(params, 'projectId');
         const payload = bodyAsRecord(body) as CreateSessionOptions & { engineName?: string };
 
@@ -337,9 +347,9 @@ export async function dispatchAgentRpc(
         if (!payload.engineName) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'engineName is required' });
         }
-        if (!isValidEngineName(payload.engineName)) {
+        if (!isValidEngineName(payload.engineName, validEngineNames)) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
-            error: `Invalid engineName. Must be one of: ${VALID_ENGINE_NAMES.join(', ')}`,
+            error: `Invalid engineName. Must be one of: ${validEngineNames.join(', ')}`,
           });
         }
 

@@ -3,6 +3,7 @@ import { Server } from './index';
 
 describe('Server agent RPC runtime', () => {
   const server = new Server({ instanceId: 'unit-test' });
+  const projectRoot = process.cwd();
 
   beforeAll(async () => {
     await server.start({
@@ -28,7 +29,54 @@ describe('Server agent RPC runtime', () => {
     const response = await server.invokeAgentRpc({ operation: 'agent.engines.list' });
 
     expect(response.statusCode).toBe(200);
-    expect(Array.isArray((response.json as { engines?: unknown[] }).engines)).toBe(true);
+    expect((response.json as { engines?: Array<{ name: string }> }).engines).toEqual([
+      { name: 'codex', supportsMcp: false },
+      { name: 'claude', supportsMcp: true },
+    ]);
+  });
+
+  test('agent.projects.upsert rejects unsupported preferredCli values', async () => {
+    const response = await server.invokeAgentRpc({
+      operation: 'agent.projects.upsert',
+      body: {
+        name: 'Unsupported CLI Project',
+        rootPath: projectRoot,
+        preferredCli: 'cursor',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect((response.json as { error?: string }).error).toBe(
+      'Invalid preferredCli. Must be one of: codex, claude',
+    );
+  });
+
+  test('agent.projects.sessions.create rejects unsupported engine names', async () => {
+    const projectResponse = await server.invokeAgentRpc({
+      operation: 'agent.projects.upsert',
+      body: {
+        name: 'Session Creation Project',
+        rootPath: projectRoot,
+        preferredCli: 'codex',
+      },
+    });
+    const projectId = (projectResponse.json as { project?: { id?: string } }).project?.id;
+
+    expect(projectResponse.statusCode).toBe(200);
+    expect(projectId).toBeTruthy();
+
+    const response = await server.invokeAgentRpc({
+      operation: 'agent.projects.sessions.create',
+      params: { projectId },
+      body: {
+        engineName: 'cursor',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect((response.json as { error?: string }).error).toBe(
+      'Invalid engineName. Must be one of: codex, claude',
+    );
   });
 
   test('unsupported operation returns bad request', async () => {
