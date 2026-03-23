@@ -2,22 +2,12 @@ import { createErrorResponse, type ToolResult } from "@/common/tool-handler";
 import { TOOL_NAMES } from "webpage-mcp-shared";
 import { RecorderManager } from "../record-replay/recording/recorder-manager";
 import { buildRecordingStateSnapshot } from "../record-replay/recording/recording-state";
-import { saveFlow } from "../record-replay/flow-store";
-import type { Flow } from "../record-replay/types";
-import { persistLegacyFlowToV3 } from "../record-replay-v3/storage/import/persist-legacy-flow";
+import type { FlowV3 } from "../record-replay-v3/domain/flow";
+import { saveFlowToV3 } from "../record-replay-v3/compat";
 
-function countFlowSteps(flow: Flow | null): number {
+function countFlowSteps(flow: FlowV3 | null): number {
   if (!flow) return 0;
-  if (Array.isArray(flow.nodes)) return flow.nodes.length;
-  if (Array.isArray(flow.steps)) return flow.steps.length;
-  return 0;
-}
-
-function appendWarning(current: string | undefined, next: string): string {
-  if (!current) {
-    return next;
-  }
-  return `${current}; ${next}`;
+  return Array.isArray(flow.nodes) ? flow.nodes.length : 0;
 }
 
 class RecordingStartTool {
@@ -30,7 +20,7 @@ class RecordingStartTool {
         : "";
     const tabId = typeof args?.tabId === "number" ? args.tabId : undefined;
     const meta = flowName
-      ? ({ name: flowName } satisfies Partial<Flow>)
+      ? { name: flowName }
       : undefined;
     const result = await RecorderManager.start(meta, tabId);
     if (!result.success) {
@@ -75,18 +65,8 @@ class RecordingStopTool {
     if (flow && (nextName || nextDescription)) {
       if (nextName) flow.name = nextName;
       if (nextDescription) flow.description = nextDescription;
-      if (flow.meta) flow.meta.updatedAt = new Date().toISOString();
-      await saveFlow(flow);
-    }
-    if (flow) {
-      try {
-        await persistLegacyFlowToV3(flow);
-      } catch (error) {
-        warning = appendWarning(
-          warning,
-          `Failed to sync recorded workflow to V3: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+      flow.updatedAt = new Date().toISOString();
+      await saveFlowToV3(flow);
     }
 
     return {

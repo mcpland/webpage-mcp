@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   installFloatingDrag,
   type FloatingPosition,
-} from '@/entrypoints/web-editor-v2/ui/floating-drag';
+} from '@/entrypoints/web-editor/ui/floating-drag';
 import { getMessage } from '@/utils/i18n';
 import './SidepanelNavigator.css';
 

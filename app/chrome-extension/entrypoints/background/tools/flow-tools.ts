@@ -1,7 +1,10 @@
 import { createErrorResponse, type ToolResult } from '@/common/tool-handler';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
-import { getFlow, saveFlow } from '../record-replay/flow-store';
-import type { Flow } from '../record-replay/types';
+import type { FlowV3 } from '../record-replay-v3/domain/flow';
+import type { JsonValue } from '../record-replay-v3/domain/json';
+import type { VariableDefinition } from '../record-replay-v3/domain/variables';
+import { createStoragePort } from '../record-replay-v3';
+import { saveFlowToV3 } from '../record-replay-v3/compat';
 import { applyFlowParameterSuggestions } from './flow-parameterization';
 
 type FlowHintLevel = 'info' | 'warning';
@@ -13,17 +16,87 @@ interface FlowHint {
   nodeId?: string;
 }
 
-function countFlowNodes(flow: Flow): number {
-  if (Array.isArray(flow.nodes)) return flow.nodes.length;
-  if (Array.isArray(flow.steps)) return flow.steps.length;
-  return 0;
+function countFlowNodes(flow: FlowV3): number {
+  return Array.isArray(flow.nodes) ? flow.nodes.length : 0;
 }
 
-function collectFlowHints(flow: Flow): FlowHint[] {
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every((item) => isJsonValue(item));
+  }
+  if (typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).every((item) => isJsonValue(item));
+  }
+  return false;
+}
+
+function normalizeVariableName(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeFlowVariables(value: unknown): VariableDefinition[] {
+  if (!Array.isArray(value)) {
+    throw new Error('variables must be an array');
+  }
+
+  const seen = new Set<string>();
+  const variables: VariableDefinition[] = [];
+
+  for (let index = 0; index < value.length; index += 1) {
+    const item = value[index];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`variables[${index}] must be an object`);
+    }
+
+    const record = item as Record<string, unknown>;
+    const name = normalizeVariableName(record.name) || normalizeVariableName(record.key);
+    if (!name) {
+      throw new Error(`variables[${index}].name is required`);
+    }
+    if (seen.has(name)) {
+      throw new Error(`Duplicate variable name: "${name}"`);
+    }
+    seen.add(name);
+
+    const variable: VariableDefinition = { name };
+    const label = normalizeVariableName(record.label);
+    if (label) variable.label = label;
+    const description = normalizeVariableName(record.description);
+    if (description) variable.description = description;
+    if (typeof record.sensitive === 'boolean') variable.sensitive = record.sensitive;
+    if (typeof record.required === 'boolean') variable.required = record.required;
+    if (record.default !== undefined) {
+      if (!isJsonValue(record.default)) {
+        throw new Error(`variables[${index}].default must be JSON-serializable`);
+      }
+      variable.default = record.default;
+    }
+    if (record.scope !== undefined) {
+      if (record.scope !== 'flow' && record.scope !== 'run') {
+        throw new Error(`variables[${index}].scope must be "flow" or "run"`);
+      }
+      variable.scope = record.scope;
+    }
+
+    variables.push(variable);
+  }
+
+  return variables;
+}
+
+function collectFlowHints(flow: FlowV3): FlowHint[] {
   const hints: FlowHint[] = [];
   const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
 
-  const hasAssert = nodes.some((node) => node.type === 'assert');
+  const hasAssert = nodes.some((node) => node.kind === 'assert');
   if (!hasAssert) {
     hints.push({
       level: 'warning',
@@ -46,7 +119,7 @@ function collectFlowHints(flow: Flow): FlowHint[] {
       }
     }
 
-    if (node.type === 'fill') {
+    if (node.kind === 'fill') {
       const value = node?.config && (node.config as any).value;
       if (typeof value === 'string' && value.trim() && !/^\{[a-zA-Z_][a-zA-Z0-9_]*\}$/.test(value.trim())) {
         hints.push({
@@ -65,7 +138,7 @@ function collectFlowHints(flow: Flow): FlowHint[] {
     if (!prev || !curr) continue;
     const prevSel = (prev.config as any)?.target?.selector || '';
     const currSel = (curr.config as any)?.target?.selector || '';
-    if (prev.type === curr.type && prevSel && currSel && prevSel === currSel) {
+    if (prev.kind === curr.kind && prevSel && currSel && prevSel === currSel) {
       hints.push({
         level: 'info',
         code: 'possible_redundant_step',
@@ -85,7 +158,7 @@ class FlowAnalyzeTool {
     const flowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
     if (!flowId) return createErrorResponse('flowId is required');
 
-    const flow = await getFlow(flowId);
+    const flow = await createStoragePort().flows.get(flowId as FlowV3['id']);
     if (!flow) return createErrorResponse(`Flow not found: ${flowId}`);
 
     const hints = collectFlowHints(flow);
@@ -120,7 +193,7 @@ class FlowUpdateTool {
     const flowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
     if (!flowId) return createErrorResponse('flowId is required');
 
-    const flow = await getFlow(flowId);
+    const flow = await createStoragePort().flows.get(flowId as FlowV3['id']);
     if (!flow) return createErrorResponse(`Flow not found: ${flowId}`);
 
     let changed = false;
@@ -148,8 +221,12 @@ class FlowUpdateTool {
       flow.edges = args.edges;
       changed = true;
     }
-    if (Array.isArray(args?.variables)) {
-      flow.variables = args.variables;
+    if (args && Object.prototype.hasOwnProperty.call(args, 'variables')) {
+      try {
+        flow.variables = normalizeFlowVariables(args.variables);
+      } catch (error) {
+        return createErrorResponse(error instanceof Error ? error.message : String(error));
+      }
       changed = true;
     }
     const applyParameterSuggestions = args?.applyParameterSuggestions === true;
@@ -178,13 +255,8 @@ class FlowUpdateTool {
       };
     }
 
-    const nowIso = new Date().toISOString();
-    if (!flow.meta) {
-      flow.meta = { createdAt: nowIso, updatedAt: nowIso };
-    } else {
-      flow.meta.updatedAt = nowIso;
-    }
-    await saveFlow(flow);
+    flow.updatedAt = new Date().toISOString();
+    await saveFlowToV3(flow);
 
     return {
       content: [

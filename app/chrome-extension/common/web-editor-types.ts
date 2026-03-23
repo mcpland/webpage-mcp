@@ -1,9 +1,9 @@
 /**
- * Web Editor V2 - Shared Type Definitions
+ * Web Editor shared type definitions.
  *
  * This module defines types shared between:
  * - Background script (injection control)
- * - Inject script (web-editor-v2.ts)
+ * - Inject script (web-editor.ts)
  * - Future: UI panels
  */
 
@@ -15,8 +15,8 @@
 export interface WebEditorState {
   /** Whether the editor is currently active */
   active: boolean;
-  /** Editor version for compatibility checks */
-  version: 2;
+  /** Runtime version for diagnostics */
+  version: number;
 }
 
 // =============================================================================
@@ -24,104 +24,83 @@ export interface WebEditorState {
 // =============================================================================
 
 /**
- * Action types for web editor V2 messages
+ * Action types for the active web editor runtime.
  *
- * IMPORTANT: V2 uses versioned action names (suffix _v2) to avoid
- * conflicts with V1 when both scripts might be injected in the same tab.
- * This prevents double-response race conditions.
- *
- * V1 uses: web_editor_ping, web_editor_toggle, etc.
- * V2 uses: web_editor_ping_v2, web_editor_toggle_v2, etc.
+ * Legacy message names are removed.
  */
-export const WEB_EDITOR_V2_ACTIONS = {
-  /** Check if V2 editor is injected and get status */
-  PING: 'web_editor_ping_v2',
-  /** Toggle V2 editor on/off */
-  TOGGLE: 'web_editor_toggle_v2',
-  /** Start V2 editor */
-  START: 'web_editor_start_v2',
-  /** Stop V2 editor */
-  STOP: 'web_editor_stop_v2',
-  /** Highlight an element (from sidepanel hover) */
-  HIGHLIGHT_ELEMENT: 'web_editor_highlight_element_v2',
-  /** Revert an element to its original state (Phase 2 - Selective Undo) */
-  REVERT_ELEMENT: 'web_editor_revert_element_v2',
-  /** Clear selection (from sidepanel after send) */
-  CLEAR_SELECTION: 'web_editor_clear_selection_v2',
-} as const;
-
-/**
- * Legacy V1 action types (for reference and background compatibility)
- * These are used when USE_WEB_EDITOR_V2 is false
- */
-export const WEB_EDITOR_V1_ACTIONS = {
+export const WEB_EDITOR_ACTIONS = {
+  /** Check if editor is injected and get status */
   PING: 'web_editor_ping',
+  /** Toggle editor on/off */
   TOGGLE: 'web_editor_toggle',
+  /** Start editor */
   START: 'web_editor_start',
+  /** Stop editor */
   STOP: 'web_editor_stop',
-  APPLY: 'web_editor_apply',
+  /** Highlight an element (from sidepanel hover) */
+  HIGHLIGHT_ELEMENT: 'web_editor_highlight_element',
+  /** Revert an element to its original state (Phase 2 - Selective Undo) */
+  REVERT_ELEMENT: 'web_editor_revert_element',
+  /** Clear selection (from sidepanel after send) */
+  CLEAR_SELECTION: 'web_editor_clear_selection',
 } as const;
 
-export type WebEditorV2Action = (typeof WEB_EDITOR_V2_ACTIONS)[keyof typeof WEB_EDITOR_V2_ACTIONS];
-export type WebEditorV1Action = (typeof WEB_EDITOR_V1_ACTIONS)[keyof typeof WEB_EDITOR_V1_ACTIONS];
+export type WebEditorAction = (typeof WEB_EDITOR_ACTIONS)[keyof typeof WEB_EDITOR_ACTIONS];
 
-/** Editor version literal type */
-export type WebEditorVersion = 1 | 2;
-
-/** Ping request (V2) */
-export interface WebEditorV2PingRequest {
-  action: typeof WEB_EDITOR_V2_ACTIONS.PING;
+/** Ping request */
+export interface WebEditorPingRequest {
+  action: typeof WEB_EDITOR_ACTIONS.PING;
 }
 
-/** Ping response (V2) */
-export interface WebEditorV2PingResponse {
+/** Ping response */
+export interface WebEditorPingResponse {
   status: 'pong';
   active: boolean;
-  version: 2;
+  version: number;
 }
 
-/** Toggle request (V2) */
-export interface WebEditorV2ToggleRequest {
-  action: typeof WEB_EDITOR_V2_ACTIONS.TOGGLE;
+/** Toggle request */
+export interface WebEditorToggleRequest {
+  action: typeof WEB_EDITOR_ACTIONS.TOGGLE;
 }
 
-/** Toggle response (V2) */
-export interface WebEditorV2ToggleResponse {
+/** Toggle response */
+export interface WebEditorToggleResponse {
   active: boolean;
 }
 
-/** Start request (V2) */
-export interface WebEditorV2StartRequest {
-  action: typeof WEB_EDITOR_V2_ACTIONS.START;
+/** Start request */
+export interface WebEditorStartRequest {
+  action: typeof WEB_EDITOR_ACTIONS.START;
 }
 
-/** Start response (V2) */
-export interface WebEditorV2StartResponse {
+/** Start response */
+export interface WebEditorStartResponse {
   active: boolean;
 }
 
-/** Stop request (V2) */
-export interface WebEditorV2StopRequest {
-  action: typeof WEB_EDITOR_V2_ACTIONS.STOP;
+/** Stop request */
+export interface WebEditorStopRequest {
+  action: typeof WEB_EDITOR_ACTIONS.STOP;
 }
 
-/** Stop response (V2) */
-export interface WebEditorV2StopResponse {
+/** Stop response */
+export interface WebEditorStopResponse {
   active: boolean;
 }
 
-/** Union types for V2 type-safe message handling */
-export type WebEditorV2Request =
-  | WebEditorV2PingRequest
-  | WebEditorV2ToggleRequest
-  | WebEditorV2StartRequest
-  | WebEditorV2StopRequest;
+/** Union types for type-safe message handling */
+export type WebEditorRequest =
+  | WebEditorPingRequest
+  | WebEditorToggleRequest
+  | WebEditorStartRequest
+  | WebEditorStopRequest;
 
-export type WebEditorV2Response =
-  | WebEditorV2PingResponse
-  | WebEditorV2ToggleResponse
-  | WebEditorV2StartResponse
-  | WebEditorV2StopResponse;
+export type WebEditorResponse =
+  | WebEditorPingResponse
+  | WebEditorToggleResponse
+  | WebEditorStartResponse
+  | WebEditorStopResponse;
 
 // =============================================================================
 // Element Locator (Phase 1 - Basic Structure)
@@ -504,10 +483,10 @@ export interface WebEditorCancelExecutionResponse {
 // =============================================================================
 
 /**
- * Web Editor V2 Public API
- * Exposed on window.__MCP_WEB_EDITOR_V2__
+ * Web Editor public API
+ * Exposed on window.__MCP_WEB_EDITOR__
  */
-export interface WebEditorV2Api {
+export interface WebEditorApi {
   /** Start the editor */
   start: () => void;
   /** Stop the editor */
@@ -534,6 +513,6 @@ export interface WebEditorV2Api {
 
 declare global {
   interface Window {
-    __MCP_WEB_EDITOR_V2__?: WebEditorV2Api;
+    __MCP_WEB_EDITOR__?: WebEditorApi;
   }
 }

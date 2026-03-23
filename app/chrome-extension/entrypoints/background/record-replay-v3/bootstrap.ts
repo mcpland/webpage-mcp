@@ -60,13 +60,12 @@ import {
 
 import { PluginRegistry } from "./engine/plugins/registry";
 import {
-  registerV2ReplayNodesAsV3Nodes,
-  DEFAULT_V2_EXCLUDE_LIST,
-} from "./engine/plugins/register-v2-replay-nodes";
+  registerReplayNodes,
+  DEFAULT_REPLAY_NODE_EXCLUDE_LIST,
+} from "./engine/plugins/register-replay-nodes";
 
 import { acquireKeepalive } from "../keepalive-manager";
 import { createStoragePort } from "./index";
-import { migrateLegacyFlowsToV3 } from "./storage/import/legacy-v2-migration";
 
 // ==================== Types ====================
 
@@ -347,9 +346,6 @@ export async function bootstrapV3(): Promise<V3Runtime> {
     // 1) Storage
     const storage = createStoragePort();
 
-    // 1.5) One-time legacy import from V2 storage
-    await migrateLegacyFlowsToV3({ storage, logger });
-
     // 2) EventsBus
     const events: EventsBus = new StorageBackedEventsBus(storage.events);
 
@@ -372,14 +368,14 @@ export async function bootstrapV3(): Promise<V3Runtime> {
       acquire: (tag: string) => acquireKeepalive(`rr_v3:${tag}`),
     };
 
-    // 7) PluginRegistry - register V2 action handlers as V3 nodes
+    // 7) PluginRegistry - register replay action handlers as runtime nodes
     const plugins = new PluginRegistry();
-    const registeredNodes = registerV2ReplayNodesAsV3Nodes(plugins, {
+    const registeredNodes = registerReplayNodes(plugins, {
       // Exclude control directives that V3 runner doesn't support
-      exclude: [...DEFAULT_V2_EXCLUDE_LIST],
+      exclude: [...DEFAULT_REPLAY_NODE_EXCLUDE_LIST],
     });
     logger.debug(
-      `[RR-V3] Registered ${registeredNodes.length} V2 action handlers as V3 nodes`,
+      `[RR-V3] Registered ${registeredNodes.length} replay action handlers as runtime nodes`,
     );
 
     // 8) RunExecutor via RunRunnerFactory

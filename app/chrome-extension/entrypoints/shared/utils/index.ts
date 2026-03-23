@@ -5,10 +5,10 @@
 
 // Flow conversion utilities
 export {
-  flowV2ToV3ForRpc,
-  flowV3ToV2ForBuilder,
+  flowBuilderToV3ForRpc,
+  flowV3ToBuilderForEditor,
   isFlowV3,
-  isFlowV2,
+  isBuilderFlow,
   extractFlowCandidates,
   type FlowConversionResult,
 } from "./rr-flow-convert";

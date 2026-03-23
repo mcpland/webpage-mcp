@@ -12,8 +12,8 @@ import type {
 } from "@/entrypoints/background/record-replay-v3/domain/ids";
 import type { JsonObject } from "@/entrypoints/background/record-replay-v3/domain/json";
 import {
-  flowV2ToV3ForRpc,
-  flowV3ToV2ForBuilder,
+  flowBuilderToV3ForRpc,
+  flowV3ToBuilderForEditor,
   isFlowV3,
   extractFlowCandidates,
 } from "@/entrypoints/shared/utils";
@@ -196,7 +196,7 @@ export default function BuilderApp() {
         })) as FlowV3 | null;
 
         if (flowV3) {
-          const { flow: flowV2, warnings } = flowV3ToV2ForBuilder(flowV3);
+          const { flow: flowV2, warnings } = flowV3ToBuilderForEditor(flowV3);
           warnings.forEach((w) => pushToast(w, "warn"));
           store.initFromFlow(flowV2);
           setTitle(
@@ -279,7 +279,7 @@ export default function BuilderApp() {
       const flowV2 = store.exportFlowForSave();
       await rpc.ensureConnected();
 
-      const { flow: flowV3, warnings: convWarnings } = flowV2ToV3ForRpc(flowV2);
+      const { flow: flowV3, warnings: convWarnings } = flowBuilderToV3ForRpc(flowV2);
       convWarnings.forEach((w) => pushToast(w, "warn"));
 
       const saved = (await rpc.request("rr_v3.saveFlow", {
@@ -308,21 +308,21 @@ export default function BuilderApp() {
     try {
       const currentCompatibility = getCurrentCompatibility();
       if (!currentCompatibility.isCompatible) {
-        const legacyFlow = store.exportFlowForSave();
-        const blob = new Blob([JSON.stringify(legacyFlow, null, 2)], {
+        const compatFlow = store.exportFlowForSave();
+        const blob = new Blob([JSON.stringify(compatFlow, null, 2)], {
           type: "application/json",
         });
         const url = URL.createObjectURL(blob);
         await chrome.downloads.download({
           url,
-          filename: `${store.flowLocal.name || "flow"}.legacy-v2.json`,
+          filename: `${store.flowLocal.name || "flow"}.builder-compat.json`,
           saveAs: true,
         } as chrome.downloads.DownloadOptions);
         URL.revokeObjectURL(url);
         pushToast(
           t(
             "builderLegacyExportNotice",
-            "Exported as legacy V2 JSON because this workflow uses unsupported V3 features.",
+            "Exported as builder-compatible JSON because this workflow uses unsupported V3 features.",
           ),
           "info",
         );
@@ -377,7 +377,7 @@ export default function BuilderApp() {
 
       if (isFlowV3(first)) {
         const importedCompatibility = getV3AuthoringCompatibility(first);
-        const { flow: flowV2, warnings } = flowV3ToV2ForBuilder(
+        const { flow: flowV2, warnings } = flowV3ToBuilderForEditor(
           first as FlowV3,
         );
         warnings.forEach((w) => pushToast(w, "warn"));

@@ -21,7 +21,7 @@ import type {
 
 import type { QuickPanelAIContext, QuickPanelSendToAIPayload } from '@/common/message-types';
 import type { QuickPanelAgentBridge } from '../core/agent-bridge';
-import { Disposer } from '@/entrypoints/web-editor-v2/utils/disposables';
+import { Disposer } from '@/entrypoints/web-editor/utils/disposables';
 import {
   createQuickPanelMessageRenderer,
   type QuickPanelMessageRenderer,

@@ -1,126 +1,98 @@
-import { BACKGROUND_MESSAGE_TYPES, CONTENT_MESSAGE_TYPES } from '@/common/message-types';
-import { Flow } from './types';
+import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import type { FlowId } from '../record-replay-v3/domain/ids';
+import type { FlowToolMetadata, FlowV3 } from '../record-replay-v3/domain/flow';
+import type { JsonObject } from '../record-replay-v3/domain/json';
 import {
-  listFlows,
-  saveFlow,
-  getFlow,
-  deleteFlow,
-  publishFlow,
-  unpublishFlow,
-  exportFlow,
-  exportAllFlows,
-  importFlowFromJson,
-  listSchedules,
-  saveSchedule,
-  removeSchedule,
-  type FlowSchedule,
-} from './flow-store';
-import { listRuns } from './flow-store';
-import { STORAGE_KEYS } from '@/common/constants';
-import { listTriggers, saveTrigger, deleteTrigger, type FlowTrigger } from './trigger-store';
-import { runFlow } from './flow-runner';
+  ensurePublishedSlugAvailable,
+  mergeFlowToolMetadata,
+  normalizeToolSlug,
+} from '../record-replay-v3/flows/publish';
+import {
+  enqueueRunAndWait,
+  ensureV3Runtime,
+  exportAllFlowsJson,
+  exportFlowJson,
+  importFlowsToV3,
+  saveFlowToV3,
+} from '../record-replay-v3/compat';
 import { RecorderManager } from './recording/recorder-manager';
 import { buildRecordingStateSnapshot } from './recording/recording-state';
-// Browser/content listeners are initialized via RecorderManager.init
 
-// design note: background listener for record & replay; delegates recording to dedicated modules
+const DISABLED_AUTOMATION_SURFACE_ERROR =
+  'Triggers and schedules are not supported in the single-path RR-V3 runtime.';
 
-// Route A scope: disable platform-style trigger/schedule automation surfaces.
-const ENABLE_TRIGGERS_AND_SCHEDULES = false;
-const TRIGGER_SCHEDULE_DISABLED_ERROR =
-  'Triggers and schedules are disabled in Connector scope.';
-
-async function clearScheduleAlarms() {
-  const alarms = await chrome.alarms.getAll();
-  await Promise.all(
-    alarms
-      .filter((a) => a.name && a.name.startsWith('rr_schedule_'))
-      .map((a) => chrome.alarms.clear(a.name)),
-  );
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
-// Alarm helpers for schedules
-async function rescheduleAlarms() {
-  await clearScheduleAlarms();
-  if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
-    return;
+function normalizeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+async function broadcastFlowsChanged(): Promise<void> {
+  await chrome.runtime
+    .sendMessage({ type: BACKGROUND_MESSAGE_TYPES.RR_FLOWS_CHANGED })
+    .catch(() => {});
+}
+
+async function updatePublishedState(
+  flowId: string,
+  patch: Partial<FlowToolMetadata>,
+): Promise<void> {
+  const runtime = await ensureV3Runtime();
+  const flow = await runtime.storage.flows.get(flowId as FlowId);
+  if (!flow) {
+    throw new Error(`Flow "${flowId}" not found`);
   }
-  const schedules = await listSchedules();
-  for (const s of schedules) {
-    if (!s.enabled) continue;
-    const name = `rr_schedule_${s.id}`;
-    if (s.type === 'interval') {
-      const minutes = Math.max(1, Math.floor(Number(s.when) || 0));
-      await chrome.alarms.create(name, { periodInMinutes: minutes });
-    } else if (s.type === 'once') {
-      const whenMs = Date.parse(s.when);
-      if (Number.isFinite(whenMs)) await chrome.alarms.create(name, { when: whenMs });
-    } else if (s.type === 'daily') {
-      // daily HH:mm local time
-      const [hh, mm] = String(s.when || '00:00')
-        .split(':')
-        .map((x) => Number(x));
-      const now = new Date();
-      const next = new Date();
-      next.setHours(hh || 0, mm || 0, 0, 0);
-      if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
-      await chrome.alarms.create(name, { when: next.getTime(), periodInMinutes: 24 * 60 });
-    }
+
+  const nextFlow: FlowV3 = {
+    ...flow,
+    updatedAt: new Date().toISOString(),
+    meta: mergeFlowToolMetadata(flow.meta, patch),
+  };
+
+  if (nextFlow.meta?.tool?.published) {
+    const allFlows = await runtime.storage.flows.list();
+    ensurePublishedSlugAvailable(
+      allFlows,
+      nextFlow.id,
+      normalizeToolSlug(nextFlow.meta.tool.slug, nextFlow.name),
+    );
   }
+
+  await runtime.storage.flows.save(nextFlow);
 }
 
-// legacy injection helpers removed — use recording/content-injection when needed
-
-async function startRecording(
-  meta?: Partial<Flow>,
-  tabId?: number,
-): Promise<{ success: boolean; error?: string }> {
-  return await RecorderManager.start(meta, tabId);
-}
-
-async function stopRecording(): Promise<{ success: boolean; flow?: Flow; error?: string }> {
-  return await RecorderManager.stop();
-}
-
-export function initRecordReplayListeners() {
-  // Storage state sync is handled within session manager and recorder manager
-  // On startup, re-schedule alarms
-  rescheduleAlarms().catch(() => {});
-  // Initialize trigger engine (contextMenus/commands/url/dom)
-  if (ENABLE_TRIGGERS_AND_SCHEDULES) {
-    initTriggerEngine().catch(() => {});
-  } else {
-    disableTriggerEngine().catch(() => {});
-  }
-  // Initialize recorder manager (wires browser and content listeners)
+export function initRecordReplayListeners(): void {
   RecorderManager.init().catch(() => {});
 
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
-      // rr_recorder_event Handled by ContentMessageHandler
       switch (message?.type) {
         case BACKGROUND_MESSAGE_TYPES.RR_START_RECORDING: {
-          startRecording(message.meta, message.tabId)
+          RecorderManager.start(message.meta, message.tabId)
             .then((result) =>
               sendResponse({
                 ...result,
                 state: buildRecordingStateSnapshot(),
               }),
             )
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING: {
-          stopRecording()
+          RecorderManager.stop()
             .then((result) =>
               sendResponse({
                 ...result,
                 state: buildRecordingStateSnapshot(),
               }),
             )
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_PAUSE_RECORDING: {
           RecorderManager.pause()
             .then((result) =>
@@ -129,9 +101,10 @@ export function initRecordReplayListeners() {
                 state: buildRecordingStateSnapshot(),
               }),
             )
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_RESUME_RECORDING: {
           RecorderManager.resume()
             .then((result) =>
@@ -140,463 +113,164 @@ export function initRecordReplayListeners() {
                 state: buildRecordingStateSnapshot(),
               }),
             )
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_GET_RECORDING_STATUS: {
           const state = buildRecordingStateSnapshot();
           sendResponse({
             success: true,
             state,
-            // Keep legacy top-level fields for older UI callers.
             status: state.status,
             sessionId: state.sessionId,
             originTabId: state.originTabId,
           });
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_LIST_FLOWS: {
-          listFlows()
+          ensureV3Runtime()
+            .then((runtime) => runtime.storage.flows.list())
             .then((flows) => sendResponse({ success: true, flows }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_GET_FLOW: {
-          getFlow(message.flowId)
+          ensureV3Runtime()
+            .then((runtime) => runtime.storage.flows.get(String(message.flowId || '') as FlowId))
             .then((flow) => sendResponse({ success: !!flow, flow }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_DELETE_FLOW: {
-          deleteFlow(message.flowId)
-            .then(() => sendResponse({ success: true }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          ensureV3Runtime()
+            .then(async (runtime) => {
+              await runtime.storage.flows.delete(String(message.flowId || '') as FlowId);
+              await broadcastFlowsChanged();
+              sendResponse({ success: true });
+            })
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_PUBLISH_FLOW: {
-          getFlow(message.flowId)
-            .then(async (flow) => {
-              if (!flow) return sendResponse({ success: false, error: 'flow not found' });
-              await publishFlow(flow, message.slug);
+          updatePublishedState(String(message.flowId || ''), {
+            published: true,
+            slug: normalizeString(message.slug) || undefined,
+          })
+            .then(async () => {
+              await broadcastFlowsChanged();
               sendResponse({ success: true });
             })
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_UNPUBLISH_FLOW: {
-          unpublishFlow(message.flowId)
-            .then(() => sendResponse({ success: true }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          updatePublishedState(String(message.flowId || ''), {
+            published: false,
+          })
+            .then(async () => {
+              await broadcastFlowsChanged();
+              sendResponse({ success: true });
+            })
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_RUN_FLOW: {
-          getFlow(message.flowId)
-            .then(async (flow) => {
-              if (!flow) return sendResponse({ success: false, error: 'flow not found' });
-              const result = await runFlow(flow, message.options || {});
-              sendResponse({ success: true, result });
-            })
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          const options =
+            message.options && typeof message.options === 'object'
+              ? (message.options as Record<string, unknown>)
+              : {};
+
+          enqueueRunAndWait({
+            flowId: String(message.flowId || '') as FlowId,
+            tabId: typeof options.tabId === 'number' ? Math.floor(options.tabId) : undefined,
+            tabTarget: options.tabTarget === 'new' ? 'new' : 'current',
+            args:
+              options.args && typeof options.args === 'object' && !Array.isArray(options.args)
+                ? (options.args as JsonObject)
+                : undefined,
+            startUrl: normalizeString(options.startUrl) || undefined,
+            refresh: options.refresh === true,
+            startNodeId: normalizeString(options.startNodeId),
+            timeoutMs:
+              typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
+                ? Math.floor(options.timeoutMs)
+                : undefined,
+          })
+            .then(({ result }) => sendResponse({ success: true, result }))
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_SAVE_FLOW: {
-          const flow = message.flow as Flow;
-          if (!flow || !flow.id) {
-            sendResponse({ success: false, error: 'invalid flow' });
-            return true;
-          }
-          saveFlow(flow)
-            .then(() => sendResponse({ success: true }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          saveFlowToV3(message.flow)
+            .then(async (flow) => {
+              await broadcastFlowsChanged();
+              sendResponse({ success: true, flow });
+            })
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_EXPORT_FLOW: {
-          exportFlow(message.flowId)
+          exportFlowJson(String(message.flowId || ''))
             .then((json) => sendResponse({ success: true, json }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_EXPORT_ALL: {
-          exportAllFlows()
+          exportAllFlowsJson()
             .then((json) => sendResponse({ success: true, json }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_IMPORT_FLOW: {
-          importFlowFromJson(message.json)
-            .then((flows) => sendResponse({ success: true, imported: flows.length, flows }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          importFlowsToV3(String(message.json || ''))
+            .then(async (flows) => {
+              await broadcastFlowsChanged();
+              sendResponse({ success: true, imported: flows.length, flows });
+            })
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_LIST_RUNS: {
-          listRuns()
+          ensureV3Runtime()
+            .then((runtime) => runtime.storage.runs.list())
             .then((runs) => sendResponse({ success: true, runs }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+            .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }
+
         case BACKGROUND_MESSAGE_TYPES.RR_LIST_TRIGGERS: {
-          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
-            sendResponse({ success: true, triggers: [] });
-            return true;
-          }
-          listTriggers()
-            .then((triggers) => sendResponse({ success: true, triggers }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          sendResponse({ success: true, triggers: [] });
           return true;
         }
-        case BACKGROUND_MESSAGE_TYPES.RR_SAVE_TRIGGER: {
-          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
-            sendResponse({ success: false, error: TRIGGER_SCHEDULE_DISABLED_ERROR });
-            return true;
-          }
-          const t = message.trigger as FlowTrigger;
-          if (!t || !t.id || !t.type || !t.flowId) {
-            sendResponse({ success: false, error: 'invalid trigger' });
-            return true;
-          }
-          saveTrigger(t)
-            .then(async () => {
-              await refreshTriggers();
-              sendResponse({ success: true });
-            })
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
-          return true;
-        }
-        case BACKGROUND_MESSAGE_TYPES.RR_DELETE_TRIGGER: {
-          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
-            sendResponse({ success: false, error: TRIGGER_SCHEDULE_DISABLED_ERROR });
-            return true;
-          }
-          const id = String(message.id || '');
-          if (!id) {
-            sendResponse({ success: false, error: 'invalid id' });
-            return true;
-          }
-          deleteTrigger(id)
-            .then(async () => {
-              await refreshTriggers();
-              sendResponse({ success: true });
-            })
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
-          return true;
-        }
-        case BACKGROUND_MESSAGE_TYPES.RR_REFRESH_TRIGGERS: {
-          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
-            sendResponse({ success: true });
-            return true;
-          }
-          refreshTriggers()
-            .then(() => sendResponse({ success: true }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
-          return true;
-        }
-        case BACKGROUND_MESSAGE_TYPES.RR_LIST_SCHEDULES: {
-          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
-            sendResponse({ success: true, schedules: [] });
-            return true;
-          }
-          listSchedules()
-            .then((s) => sendResponse({ success: true, schedules: s }))
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
-          return true;
-        }
-        case BACKGROUND_MESSAGE_TYPES.RR_SCHEDULE_FLOW: {
-          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
-            sendResponse({ success: false, error: TRIGGER_SCHEDULE_DISABLED_ERROR });
-            return true;
-          }
-          const s = message.schedule as FlowSchedule;
-          if (!s || !s.id || !s.flowId) {
-            sendResponse({ success: false, error: 'invalid schedule' });
-            return true;
-          }
-          saveSchedule(s)
-            .then(async () => {
-              await rescheduleAlarms();
-              sendResponse({ success: true });
-            })
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
-          return true;
-        }
+
+        case BACKGROUND_MESSAGE_TYPES.RR_SAVE_TRIGGER:
+        case BACKGROUND_MESSAGE_TYPES.RR_DELETE_TRIGGER:
+        case BACKGROUND_MESSAGE_TYPES.RR_REFRESH_TRIGGERS:
+        case BACKGROUND_MESSAGE_TYPES.RR_LIST_SCHEDULES:
+        case BACKGROUND_MESSAGE_TYPES.RR_SCHEDULE_FLOW:
         case BACKGROUND_MESSAGE_TYPES.RR_UNSCHEDULE_FLOW: {
-          if (!ENABLE_TRIGGERS_AND_SCHEDULES) {
-            sendResponse({ success: false, error: TRIGGER_SCHEDULE_DISABLED_ERROR });
-            return true;
-          }
-          const scheduleId = String(message.scheduleId || '');
-          if (!scheduleId) {
-            sendResponse({ success: false, error: 'invalid scheduleId' });
-            return true;
-          }
-          removeSchedule(scheduleId)
-            .then(async () => {
-              await rescheduleAlarms();
-              sendResponse({ success: true });
-            })
-            .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
+          sendResponse({ success: false, error: DISABLED_AUTOMATION_SURFACE_ERROR });
           return true;
         }
-      }
-    } catch (err) {
-      sendResponse({ success: false, error: (err as any)?.message || String(err) });
-    }
-    return false;
-  });
 
-  // Trigger engine: contextMenus/commands/url/dom
-  if (ENABLE_TRIGGERS_AND_SCHEDULES && (chrome as any).contextMenus?.onClicked?.addListener) {
-    chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-      try {
-        const triggers = await listTriggers();
-        const t = triggers.find(
-          (x) => x.type === 'contextMenu' && (x as any).menuId === info.menuItemId,
-        );
-        if (!t || t.enabled === false) return;
-        const flow = await getFlow(t.flowId);
-        if (!flow) return;
-        await runFlow(flow, {
-          args: t.args || {},
-          returnLogs: false,
-          tabId: typeof tab?.id === 'number' ? tab.id : undefined,
-        });
-      } catch {}
-    });
-  }
-  if (ENABLE_TRIGGERS_AND_SCHEDULES)
-    chrome.commands.onCommand.addListener(async (command) => {
-      try {
-        const triggers = await listTriggers();
-        const t = triggers.find((x) => x.type === 'command' && (x as any).commandKey === command);
-      if (!t || t.enabled === false) return;
-      const flow = await getFlow(t.flowId);
-      if (!flow) return;
-      await runFlow(flow, { args: t.args || {}, returnLogs: false });
-    } catch {}
-    });
-  if (ENABLE_TRIGGERS_AND_SCHEDULES)
-    chrome.webNavigation.onCommitted.addListener(async (details) => {
-      try {
-        if (details.frameId !== 0) return;
-      const url = details.url || '';
-      // Ensure core content scripts are injected for this tab (pre-heat for replay)
-      await ensureCoreInjected(details.tabId);
-      // Ensure DOM observer is active on this tab (if triggers exist)
-      try {
-        const { [STORAGE_KEYS.RR_TRIGGERS]: stored } =
-          (await chrome.storage.local.get(STORAGE_KEYS.RR_TRIGGERS)) || {};
-        const triggers: any[] = Array.isArray(stored) ? stored : [];
-        const domTriggers = triggers
-          .filter((x) => x.type === 'dom' && x.enabled !== false)
-          .map((x: any) => ({
-            id: x.id,
-            selector: x.selector,
-            appear: x.appear !== false,
-            once: x.once !== false,
-            debounceMs: x.debounceMs ?? 800,
-          }));
-        if (typeof details.tabId === 'number') {
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId: details.tabId, allFrames: true },
-              files: ['inject-scripts/dom-observer.js'],
-              world: 'ISOLATED',
-            } as any);
-            await chrome.tabs.sendMessage(details.tabId, {
-              action: 'set_dom_triggers',
-              triggers: domTriggers,
-            } as any);
-          } catch {}
-        }
-      } catch {}
-      const triggers = await listTriggers();
-      const list = triggers.filter((x) => x.type === 'url' && x.enabled !== false) as any[];
-      for (const t of list) {
-        if (matchUrl(url, (t as any).match || [])) {
-          const flow = await getFlow(t.flowId);
-          if (!flow) continue;
-          await runFlow(flow, {
-            args: t.args || {},
-            returnLogs: false,
-            tabId: details.tabId,
-          });
-        }
+        default:
+          return false;
       }
-    } catch {}
-    });
-  if (ENABLE_TRIGGERS_AND_SCHEDULES)
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      try {
-        if (message && message.action === 'dom_trigger_fired') {
-        const id = message.triggerId;
-        const senderTabId = sender?.tab?.id;
-        listTriggers().then(async (arr) => {
-          const t = arr.find((x) => x.id === id && x.type === 'dom');
-          if (!t || t.enabled === false) return;
-          const flow = await getFlow(t.flowId);
-          if (!flow) return;
-          await runFlow(flow, {
-            args: t.args || {},
-            returnLogs: false,
-            tabId: typeof senderTabId === 'number' ? senderTabId : undefined,
-          });
-        });
-        sendResponse({ ok: true });
-        return true;
-      }
-      } catch {}
+    } catch (error) {
+      sendResponse({ success: false, error: errorMessage(error) });
       return false;
-    });
-}
-
-function matchUrl(
-  u: string,
-  rules: Array<{ kind: 'url' | 'domain' | 'path'; value: string }>,
-): boolean {
-  try {
-    const url = new URL(u);
-    for (const r of rules || []) {
-      const v = String(r.value || '');
-      if (r.kind === 'url' && u.startsWith(v)) return true;
-      if (r.kind === 'domain' && url.hostname.includes(v)) return true;
-      if (r.kind === 'path' && url.pathname.startsWith(v)) return true;
     }
-  } catch {}
-  return false;
+  });
 }
-
-// Track context menu IDs created by record-replay to avoid removing other menus
-const rrContextMenuIds = new Set<string>();
-
-async function refreshContextMenus(triggers: FlowTrigger[]) {
-  if (!(chrome as any).contextMenus?.create) return;
-
-  // Remove only our own menu items
-  await removeRecordReplayMenus();
-
-  // Create menus for enabled context menu triggers
-  for (const t of triggers) {
-    if (t.type !== 'contextMenu' || t.enabled === false) continue;
-    const id = `rr_menu_${t.id}`;
-    (t as any).menuId = id;
-
-    try {
-      await chrome.contextMenus.create({
-        id,
-        title: (t as any).title || 'Run workflow',
-        contexts: (t as any).contexts || ['all'],
-      });
-      rrContextMenuIds.add(id);
-    } catch (err) {
-      console.warn('[RecordReplay] Failed to create context menu:', err);
-    }
-  }
-}
-
-async function removeRecordReplayMenus() {
-  if (!(chrome as any).contextMenus?.remove) {
-    rrContextMenuIds.clear();
-    return;
-  }
-
-  const pending = Array.from(rrContextMenuIds.values()).map((id) =>
-    chrome.contextMenus.remove(id).catch(() => {}),
-  );
-
-  if (pending.length) await Promise.all(pending);
-  rrContextMenuIds.clear();
-}
-
-async function refreshTriggers() {
-  if (!ENABLE_TRIGGERS_AND_SCHEDULES) return;
-  try {
-    const triggers = await listTriggers();
-    await refreshContextMenus(triggers);
-    await chrome.storage.local.set({ [STORAGE_KEYS.RR_TRIGGERS]: triggers });
-    const domTriggers = triggers
-      .filter((x) => x.type === 'dom' && x.enabled !== false)
-      .map((x: any) => ({
-        id: x.id,
-        selector: x.selector,
-        appear: x.appear !== false,
-        once: x.once !== false,
-        debounceMs: x.debounceMs ?? 800,
-      }));
-    const tabs = await chrome.tabs.query({});
-    for (const t of tabs) {
-      if (!t.id) continue;
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: t.id, allFrames: true },
-          files: ['inject-scripts/dom-observer.js'],
-          world: 'ISOLATED',
-        } as any);
-        await chrome.tabs.sendMessage(t.id, {
-          action: 'set_dom_triggers',
-          triggers: domTriggers,
-        } as any);
-      } catch {}
-    }
-  } catch {}
-}
-
-// Backward-compatible init function; initialize all trigger-related hooks/state
-async function initTriggerEngine() {
-  if (!ENABLE_TRIGGERS_AND_SCHEDULES) return;
-  await refreshTriggers();
-}
-
-async function disableTriggerEngine() {
-  try {
-    await removeRecordReplayMenus();
-    await chrome.storage.local.set({ [STORAGE_KEYS.RR_TRIGGERS]: [] });
-  } catch {}
-}
-
-// Ensure core content scripts are present for a tab after navigation
-async function ensureCoreInjected(tabId?: number) {
-  try {
-    if (typeof tabId !== 'number') return;
-    // Ping accessibility helper
-    const ok = await pingTab(tabId, CONTENT_MESSAGE_TYPES.ACCESSIBILITY_TREE_HELPER_PING);
-    if (!ok) {
-      await chrome.scripting.executeScript({
-        target: { tabId, allFrames: true },
-        files: ['inject-scripts/inject-bridge.js', 'inject-scripts/accessibility-tree-helper.js'],
-        world: 'ISOLATED',
-      } as any);
-    }
-  } catch {}
-}
-
-async function pingTab(tabId: number, action: string): Promise<boolean> {
-  try {
-    const resp: any = await chrome.tabs.sendMessage(tabId, { action } as any);
-    if (!resp) return false;
-    // Helpers generally respond { status: 'pong' } or { ok: true }
-    return resp.status === 'pong' || resp.ok === true;
-  } catch {
-    return false;
-  }
-}
-
-// Alarm listener executes scheduled flows
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  try {
-    if (!ENABLE_TRIGGERS_AND_SCHEDULES) return;
-    if (!alarm?.name || !alarm.name.startsWith('rr_schedule_')) return;
-    const id = alarm.name.slice('rr_schedule_'.length);
-    const schedules = await listSchedules();
-    const s = schedules.find((x) => x.id === id && x.enabled);
-    if (!s) return;
-    const flow = await getFlow(s.flowId);
-    if (!flow) return;
-    await runFlow(flow, {
-      args: s.args || {},
-      returnLogs: false,
-      tabTarget: s.tabTarget,
-      startUrl: s.startUrl,
-    });
-  } catch (e) {
-    // swallow to not spam logs
-  }
-});

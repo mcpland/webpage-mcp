@@ -8,7 +8,7 @@
  * - Cancel/Confirm actions
  */
 
-import { Disposer } from '@/entrypoints/web-editor-v2/utils/disposables';
+import { Disposer } from '@/entrypoints/web-editor/utils/disposables';
 import {
   mountQuickPanelShadowHost,
   type QuickPanelShadowHostElements,

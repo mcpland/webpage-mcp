@@ -1,6 +1,6 @@
 import type { Flow } from "../types";
-import { saveFlow } from "../flow-store";
-import { persistLegacyFlowToV3 } from "../../record-replay-v3/storage/import/persist-legacy-flow";
+import type { FlowV3 } from "../../record-replay-v3/domain/flow";
+import { saveFlowToV3 } from "../../record-replay-v3/compat";
 import {
   broadcastControlToTab,
   ensureRecorderInjected,
@@ -341,11 +341,6 @@ class RecorderManagerImpl {
     const url = active.url;
     if (url) {
       addNavigationStep(flow, url);
-      try {
-        await saveFlow(flow);
-      } catch (e) {
-        console.warn("RecorderManager: initial saveFlow failed", e);
-      }
       broadcastRecordingStateChanged();
     }
 
@@ -367,7 +362,7 @@ class RecorderManagerImpl {
    * - Subframes finalize to top before top stops
    * - Barrier status is recorded in flow.meta for debugging
    */
-  async stop(): Promise<{ success: boolean; error?: string; flow?: Flow }> {
+  async stop(): Promise<{ success: boolean; error?: string; flow?: FlowV3 }> {
     const currentStatus = session.getStatus();
     if (currentStatus === "idle" || !session.getFlow()) {
       return { success: false, error: "No active recording" };
@@ -462,26 +457,34 @@ class RecorderManagerImpl {
         };
       } catch {}
 
-      await saveFlow(flow);
+      let persistedFlow: FlowV3;
       try {
-        await persistLegacyFlowToV3(flow);
+        persistedFlow = await saveFlowToV3(flow);
       } catch (error) {
         warning = appendWarning(
           warning,
-          `Failed to sync recorded workflow to V3: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to persist recorded workflow to V3: ${error instanceof Error ? error.message : String(error)}`,
         );
+        if (warning) {
+          return {
+            success: true,
+            error: warning,
+          };
+        }
+        return { success: true };
       }
-    }
 
-    if (warning) {
-      return {
-        success: true,
-        flow: flow || undefined,
-        error: warning,
-      };
-    }
+      if (warning) {
+        return {
+          success: true,
+          flow: persistedFlow,
+          error: warning,
+        };
+      }
 
-    return flow ? { success: true, flow } : { success: true };
+      return { success: true, flow: persistedFlow };
+    }
+    return { success: true };
   }
 
   /**

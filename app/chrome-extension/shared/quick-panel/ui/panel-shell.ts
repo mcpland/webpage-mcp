@@ -9,7 +9,7 @@
  * mount points per-view for header/content/footer sections.
  */
 
-import { Disposer } from '@/entrypoints/web-editor-v2/utils/disposables';
+import { Disposer } from '@/entrypoints/web-editor/utils/disposables';
 import type { QuickPanelView } from '../core/types';
 
 // SVG Icons

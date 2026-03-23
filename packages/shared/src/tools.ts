@@ -152,8 +152,21 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         variables: {
           type: 'array',
-          description: 'Optional replacement variables array.',
-          items: { type: 'object' },
+          description:
+            'Optional replacement V3 variables array. Each item should use `name` plus optional `label`, `description`, `default`, `required`, `sensitive`, and `scope` (`flow` or `run`). Legacy `key` inputs may be normalized but are deprecated.',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              key: { type: 'string' },
+              label: { type: 'string' },
+              description: { type: 'string' },
+              default: {},
+              required: { type: 'boolean' },
+              sensitive: { type: 'boolean' },
+              scope: { type: 'string', enum: ['flow', 'run'] },
+            },
+          },
         },
         applyParameterSuggestions: {
           type: 'boolean',
@@ -175,6 +188,10 @@ export const TOOL_SCHEMAS: Tool[] = [
         args: {
           type: 'object',
           description: 'Variable values for the flow (flat object of key/value)',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Explicit tab to bind the run to. Overrides `tabTarget`.',
         },
         tabTarget: {
           type: 'string',

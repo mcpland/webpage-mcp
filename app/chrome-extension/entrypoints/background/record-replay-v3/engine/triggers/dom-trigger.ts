@@ -9,7 +9,7 @@
  * - Ping: { action: 'dom_observer_ping' } -> { status:'pong' }
  *
  * Design notes:
- * - Reuses existing V2 dom observer script for consistency and auditability.
+ * - Reuses the existing DOM observer script for consistency and auditability.
  * - Single handler instance manages multiple triggers.
  * - Sync is coalesced to avoid storms during TriggerManager.refresh().
  * - Top-frame only (no frameId in TriggerFireContext).

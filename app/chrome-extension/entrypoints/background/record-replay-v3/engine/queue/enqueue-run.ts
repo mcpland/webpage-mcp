@@ -41,6 +41,8 @@ export interface EnqueueRunDeps {
 export interface EnqueueRunInput {
   /** Flow ID (Required) */
   flowId: FlowId;
+  /** Preferred tab binding for the run. */
+  tabId?: number;
   /** Starting node ID (optional, Flow’s entryNodeId is used by default) */
   startNodeId?: NodeId;
   /** priority (default 0) */
@@ -185,6 +187,7 @@ export async function enqueueRun(
     trigger: input.trigger,
     debug: input.debug,
     startNodeId: input.startNodeId,
+    tabId: input.tabId,
     nextSeq: 0,
   };
   await deps.storage.runs.save(runRecord);
@@ -193,6 +196,7 @@ export async function enqueueRun(
   await deps.storage.queue.enqueue({
     id: runId,
     flowId,
+    tabId: input.tabId,
     priority,
     maxAttempts,
     args: input.args,

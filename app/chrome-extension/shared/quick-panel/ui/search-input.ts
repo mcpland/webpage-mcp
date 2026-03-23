@@ -9,7 +9,7 @@
  * - Disposer-based cleanup
  */
 
-import { Disposer } from '@/entrypoints/web-editor-v2/utils/disposables';
+import { Disposer } from '@/entrypoints/web-editor/utils/disposables';
 import {
   DEFAULT_SCOPE,
   QUICK_PANEL_SCOPES,

@@ -14,7 +14,7 @@
  * - Theme is synced from chrome.storage.local['agentTheme']
  */
 
-import { Disposer } from '@/entrypoints/web-editor-v2/utils/disposables';
+import { Disposer } from '@/entrypoints/web-editor/utils/disposables';
 import { QUICK_PANEL_STYLES } from './styles';
 
 // ============================================================

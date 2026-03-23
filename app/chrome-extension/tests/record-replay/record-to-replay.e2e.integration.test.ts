@@ -40,7 +40,6 @@ vi.mock("@/entrypoints/background/record-replay/engine/policies/wait", () => ({
   waitForNetworkIdle: mocks.waitForNetworkIdle,
 }));
 
-import { getFlow } from "@/entrypoints/background/record-replay/flow-store";
 import { recordingSession } from "@/entrypoints/background/record-replay/recording/session-manager";
 import { flowRunTool } from "@/entrypoints/background/tools/record-replay";
 import {
@@ -260,7 +259,6 @@ describe("record to replay automation", () => {
     });
     const stopPayload = parseToolPayload(stopResult);
     const flowId = stopPayload.flow.id as string;
-    const savedFlow = await getFlow(flowId);
     const savedFlowV3 = await createStoragePort().flows.get(flowId as any);
 
     expect(stopPayload.success).toBe(true);
@@ -270,14 +268,14 @@ describe("record to replay automation", () => {
       description: "Captured from automated record-to-replay test",
       stepCount: 2,
     });
-    expect(savedFlow?.nodes?.map((node) => node.type)).toEqual([
-      "navigate",
-      "fill",
-    ]);
     expect(savedFlowV3).toMatchObject({
       id: flowId,
       name: "Signup Replay Flow",
       description: "Captured from automated record-to-replay test",
+      nodes: [
+        expect.objectContaining({ kind: "navigate" }),
+        expect.objectContaining({ kind: "fill" }),
+      ],
       meta: {
         recording: {
           originUrl: "https://example.com/signup",

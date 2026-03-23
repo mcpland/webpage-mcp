@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Flow } from "@/entrypoints/background/record-replay/types";
 import { createStoragePort } from "@/entrypoints/background/record-replay-v3";
+import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import { deleteRrV3Db } from "@/entrypoints/background/record-replay-v3/storage/db";
 
 const mocks = vi.hoisted(() => ({
   recorderStart: vi.fn(),
   recorderStop: vi.fn(),
   buildRecordingStateSnapshot: vi.fn(),
-  runFlow: vi.fn(),
+  saveFlowToV3: vi.fn(),
+  enqueueRunAndWait: vi.fn(),
 }));
 
 vi.mock(
@@ -28,14 +29,11 @@ vi.mock(
   }),
 );
 
-vi.mock("@/entrypoints/background/record-replay/flow-runner", () => ({
-  runFlow: mocks.runFlow,
+vi.mock("@/entrypoints/background/record-replay-v3/compat", () => ({
+  saveFlowToV3: mocks.saveFlowToV3,
+  enqueueRunAndWait: mocks.enqueueRunAndWait,
 }));
 
-import {
-  getFlow,
-  saveFlow,
-} from "@/entrypoints/background/record-replay/flow-store";
 import {
   flowAnalyzeTool,
   flowUpdateTool,
@@ -56,22 +54,20 @@ function asMock(fn: unknown): ReturnType<typeof vi.fn> {
 
 function createFlow(
   id: string,
-  nodes: Flow["nodes"],
-  overrides: Partial<Flow> = {},
-): Flow {
+  nodes: FlowV3["nodes"],
+  overrides: Partial<FlowV3> = {},
+): FlowV3 {
   const iso = new Date(0).toISOString();
   return {
-    id,
+    schemaVersion: 3,
+    id: id as any,
     name: `Flow ${id}`,
-    version: 1,
+    entryNodeId: (nodes[0]?.id ?? "node-1") as any,
     nodes: nodes ?? [],
     edges: [],
     variables: [],
-    meta: {
-      createdAt: iso,
-      updatedAt: iso,
-      ...(overrides.meta || {}),
-    },
+    createdAt: iso as any,
+    updatedAt: iso as any,
     ...overrides,
   };
 }
@@ -98,6 +94,17 @@ describe("recording/editing/flow toolchain integration", () => {
     asMock(chrome.storage.local.get).mockResolvedValue({});
     asMock(chrome.storage.local.set).mockResolvedValue(undefined);
     asMock(chrome.runtime.sendMessage).mockResolvedValue(undefined);
+    mocks.saveFlowToV3.mockImplementation(async (flow: FlowV3) => {
+      const now = new Date().toISOString();
+      const persisted = {
+        ...flow,
+        schemaVersion: 3,
+        createdAt: flow.createdAt ?? (now as any),
+        updatedAt: now as any,
+      };
+      await createStoragePort().flows.save(persisted as FlowV3);
+      return persisted;
+    });
   });
 
   it("recordingStartTool forwards trimmed metadata and returns a state snapshot", async () => {
@@ -146,12 +153,12 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
-  it("recordingStopTool persists renamed flow metadata after a successful stop", async () => {
+  it("recordingStopTool persists renamed flow metadata into V3 storage", async () => {
     const flowId = `flow-stop-${Date.now()}`;
     const recordedFlow = createFlow(flowId, [
       {
-        id: "fill-1",
-        type: "fill",
+        id: "fill-1" as any,
+        kind: "fill",
         config: {
           target: {
             selector: "#email",
@@ -172,8 +179,7 @@ describe("recording/editing/flow toolchain integration", () => {
       description: "  Captures the signup form  ",
     });
     const payload = parseToolPayload(result);
-    const persisted = await getFlow(flowId);
-    const persistedV3 = await createStoragePort().flows.get(flowId as any);
+    const persisted = await createStoragePort().flows.get(flowId as any);
 
     expect(payload.success).toBe(true);
     expect(payload.flow).toMatchObject({
@@ -182,38 +188,35 @@ describe("recording/editing/flow toolchain integration", () => {
       description: "Captures the signup form",
       stepCount: 1,
     });
-    expect(persisted?.name).toBe("Final Signup Flow");
-    expect(persisted?.description).toBe("Captures the signup form");
-    expect(typeof persisted?.meta?.updatedAt).toBe("string");
-    expect(persistedV3).toMatchObject({
+    expect(persisted).toMatchObject({
       id: flowId,
       name: "Final Signup Flow",
       description: "Captures the signup form",
     });
+    expect(typeof persisted?.updatedAt).toBe("string");
   });
 
   it("flowAnalyzeTool summarizes saved flows and surfaces recording quality hints", async () => {
     const flowId = `flow-analyze-${Date.now()}`;
-    await saveFlow(
+    await createStoragePort().flows.save(
       createFlow(flowId, [
         {
-          id: "fill-1",
-          type: "fill",
+          id: "fill-1" as any,
+          kind: "fill",
           config: {
             target: { selector: "/html/body/main/form/input[1]" },
             value: "alice@example.com",
           },
         },
         {
-          id: "fill-2",
-          type: "fill",
+          id: "fill-2" as any,
+          kind: "fill",
           config: {
             target: { selector: "/html/body/main/form/input[1]" },
             value: "alice@example.com",
           },
         },
       ]),
-      { notify: false },
     );
 
     const result = await flowAnalyzeTool.execute({ flowId });
@@ -236,18 +239,18 @@ describe("recording/editing/flow toolchain integration", () => {
 
   it("flowUpdateTool applies parameter suggestions and persists the edited flow", async () => {
     const flowId = `flow-update-${Date.now()}`;
-    await saveFlow(
+    await createStoragePort().flows.save(
       createFlow(
         flowId,
         [
           {
-            id: "nav-1",
-            type: "navigate",
+            id: "nav-1" as any,
+            kind: "navigate",
             config: { url: "https://example.com/search?q=laptop" },
           },
           {
-            id: "fill-1",
-            type: "fill",
+            id: "fill-1" as any,
+            kind: "fill",
             config: {
               target: {
                 selector: '[name="email"]',
@@ -259,18 +262,16 @@ describe("recording/editing/flow toolchain integration", () => {
         ],
         {
           meta: {
-            createdAt: new Date(0).toISOString(),
-            updatedAt: new Date(0).toISOString(),
             recording: {
               parameterSuggestions: [
                 {
-                  nodeId: "nav-1",
+                  nodeId: "nav-1" as any,
                   kind: "navigate",
                   suggestedKey: "q",
                   currentValue: "laptop",
                 },
                 {
-                  nodeId: "fill-1",
+                  nodeId: "fill-1" as any,
                   kind: "fill",
                   suggestedKey: "email",
                   currentValue: "alice@example.com",
@@ -280,7 +281,6 @@ describe("recording/editing/flow toolchain integration", () => {
           },
         },
       ),
-      { notify: false },
     );
 
     const result = await flowUpdateTool.execute({
@@ -290,7 +290,7 @@ describe("recording/editing/flow toolchain integration", () => {
       applyParameterSuggestions: true,
     });
     const payload = parseToolPayload(result);
-    const updated = await getFlow(flowId);
+    const updated = await createStoragePort().flows.get(flowId as any);
 
     expect(payload.updated).toBe(true);
     expect(payload.parameterization).toMatchObject({
@@ -315,76 +315,62 @@ describe("recording/editing/flow toolchain integration", () => {
         }
       )?.value,
     ).toBe("{email}");
-    expect(updated?.variables?.map((variable) => variable.key)).toEqual([
+    expect(updated?.variables?.map((variable) => variable.name)).toEqual([
       "q",
       "email",
     ]);
   });
 
-  it("flowRunTool loads the saved flow and forwards normalized run options to the runner", async () => {
-    const flowId = `flow-run-${Date.now()}`;
-    await saveFlow(
+  it("flowUpdateTool normalizes legacy variable payloads before saving", async () => {
+    const flowId = `flow-update-vars-${Date.now()}`;
+    await createStoragePort().flows.save(
       createFlow(flowId, [
         {
-          id: "fill-1",
-          type: "fill",
-          config: {
-            target: {
-              selector: "#email",
-              candidates: [{ type: "css", value: "#email" }],
-            },
-            value: "{email}",
-          },
+          id: "node-1" as any,
+          kind: "navigate",
+          config: { url: "https://example.com" },
         },
       ]),
-      { notify: false },
     );
-    mocks.runFlow.mockResolvedValue({
-      runId: "run-toolchain",
-      success: true,
-      summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
-    });
 
-    const result = await flowRunTool.execute({
+    const result = await flowUpdateTool.execute({
       flowId,
-      args: { email: "alice@example.com" },
-      tabId: 21,
-      returnLogs: true,
-      stepDelayMs: 12.8,
-      screenshotBaselines: {
-        "": "ignored",
-        "fill-1": "baseline-1",
-        "fill-2": "",
-      },
-      screenshotDiffThreshold: 0.88,
+      variables: [
+        {
+          key: "email",
+          label: "Email",
+          default: "alice@example.com",
+          required: true,
+          scope: "flow",
+        },
+      ],
     });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
 
-    expect(mocks.runFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ id: flowId }),
-      expect.objectContaining({
-        args: { email: "alice@example.com" },
-        tabId: 21,
-        returnLogs: true,
-        stepDelayMs: 12,
-        screenshotBaselines: { "fill-1": "baseline-1" },
-        screenshotDiffThreshold: 0.88,
-      }),
-    );
-    expect(parseToolPayload(result)).toMatchObject({
-      runId: "run-toolchain",
+    expect(payload).toMatchObject({
       success: true,
-      summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+      updated: true,
+      flow: {
+        id: flowId,
+        variableCount: 1,
+      },
     });
+    expect(updated?.variables).toEqual([
+      {
+        name: "email",
+        label: "Email",
+        default: "alice@example.com",
+        required: true,
+        scope: "flow",
+      },
+    ]);
   });
 
-  it("flowRunTool falls back to V3 storage when the legacy flow is absent", async () => {
-    const flowId = `flow-run-v3-${Date.now()}`;
-    await createStoragePort().flows.save({
-      schemaVersion: 3,
-      id: flowId as any,
-      name: "V3 Only Flow",
-      entryNodeId: "fill-1" as any,
-      nodes: [
+  it("flowRunTool forwards supported tab-binding options into the V3 runner path", async () => {
+    const flowId = `flow-run-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
         {
           id: "fill-1" as any,
           kind: "fill",
@@ -396,40 +382,100 @@ describe("recording/editing/flow toolchain integration", () => {
             value: "{email}",
           },
         },
-      ],
-      edges: [],
-      createdAt: new Date(0).toISOString() as any,
-      updatedAt: new Date(0).toISOString() as any,
-    });
-    mocks.runFlow.mockResolvedValue({
-      runId: "run-toolchain-v3",
-      success: true,
-      summary: { total: 1, success: 1, failed: 0, tookMs: 8 },
+      ]),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-toolchain" } as any,
+      events: [],
+      result: {
+        runId: "run-toolchain",
+        success: true,
+        summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+        outputs: null,
+        logs: [],
+        paused: false,
+      },
     });
 
     const result = await flowRunTool.execute({
       flowId,
       args: { email: "alice@example.com" },
+      tabTarget: "new",
+      startUrl: "https://example.com/checkout",
+      refresh: true,
+      stepDelayMs: 12.8,
+      screenshotBaselines: {
+        "": "ignored",
+        "fill-1": "baseline-1",
+        "fill-2": "",
+      },
+      screenshotDiffThreshold: 0.88,
+    });
+    const payload = parseToolPayload(result);
+
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledWith({
+      flowId,
+      tabId: undefined,
+      tabTarget: "new",
+      args: { email: "alice@example.com" },
+      startUrl: "https://example.com/checkout",
+      refresh: true,
+      timeoutMs: undefined,
+    });
+    expect(payload).toMatchObject({
+      runId: "run-toolchain",
+      success: true,
+      summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+      warning: expect.stringContaining("stepDelayMs"),
+    });
+    expect(payload.warning).not.toContain("tabTarget");
+    expect(payload.warning).not.toContain("startUrl");
+    expect(payload.warning).not.toContain("refresh");
+  });
+
+  it("flowRunTool binds to an explicit tabId when one is provided", async () => {
+    const flowId = `flow-run-tab-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: {
+              selector: "#email",
+              candidates: [{ type: "css", value: "#email" }],
+            },
+            value: "{email}",
+          },
+        },
+      ]),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-toolchain-tab" } as any,
+      events: [],
+      result: {
+        runId: "run-toolchain-tab",
+        success: true,
+        summary: { total: 1, success: 1, failed: 0, tookMs: 3 },
+        outputs: null,
+        logs: [],
+        paused: false,
+      },
     });
 
-    expect(mocks.runFlow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: flowId,
-        nodes: [
-          expect.objectContaining({
-            id: "fill-1",
-            type: "fill",
-          }),
-        ],
-      }),
+    await flowRunTool.execute({
+      flowId,
+      args: { email: "alice@example.com" },
+      tabId: 21,
+    });
+
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         args: { email: "alice@example.com" },
+        tabId: 21,
+        tabTarget: "current",
       }),
     );
-    expect(parseToolPayload(result)).toMatchObject({
-      runId: "run-toolchain-v3",
-      success: true,
-    });
   });
 
   it("listPublishedFlowsTool reports published V3 workflows", async () => {

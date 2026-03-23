@@ -1,35 +1,10 @@
 import { createErrorResponse, ToolResult } from "@/common/tool-handler";
 import { TOOL_NAMES } from "webpage-mcp-shared";
-import type { Flow } from "../record-replay/types";
-import { getFlow } from "../record-replay/flow-store";
-import { runFlow } from "../record-replay/flow-runner";
 import { createStoragePort } from "../record-replay-v3";
 import type { FlowId } from "../record-replay-v3/domain/ids";
+import type { JsonObject } from "../record-replay-v3/domain/json";
 import { listPublishedFlowDetails } from "../record-replay-v3/flows/publish";
-import { convertFlowV3ToV2 } from "../record-replay-v3/storage/import/v2-to-v3";
-
-async function getRunnableFlow(flowId: string): Promise<Flow | null> {
-  const legacyFlow = await getFlow(flowId);
-  if (legacyFlow) {
-    return legacyFlow;
-  }
-
-  const flowV3 = await createStoragePort().flows.get(flowId as FlowId);
-  if (!flowV3) {
-    return null;
-  }
-
-  const converted = convertFlowV3ToV2(flowV3);
-  if (!converted.success || !converted.data) {
-    throw new Error(
-      converted.errors.length > 0
-        ? converted.errors.join("; ")
-        : `Failed to convert V3 workflow "${flowId}" for legacy runner`,
-    );
-  }
-
-  return converted.data as Flow;
-}
+import { enqueueRunAndWait } from "../record-replay-v3/compat";
 
 class FlowRunTool {
   name = TOOL_NAMES.RECORD_REPLAY.FLOW_RUN;
@@ -66,44 +41,55 @@ class FlowRunTool {
       screenshotDiffThreshold,
     } = args || {};
     if (!flowId) return createErrorResponse("flowId is required");
-    const flow = await getRunnableFlow(flowId);
+    const flow = await createStoragePort().flows.get(flowId as FlowId);
     if (!flow) return createErrorResponse(`Flow not found: ${flowId}`);
     const normalizedBaselines =
       normalizeScreenshotBaselines(screenshotBaselines);
-    const runOptions = {
-      tabTarget,
-      refresh,
+    const unsupportedOptions = {
       captureNetwork,
-      returnLogs,
-      timeoutMs,
-      startUrl,
-      tabId,
-      args: vars,
-      debugStepByStep: debugStepByStep === true,
-      stepDelayMs:
-        typeof stepDelayMs === "number" && Number.isFinite(stepDelayMs)
-          ? Math.max(0, Math.floor(stepDelayMs))
-          : undefined,
-      captureStepScreenshots: captureStepScreenshots === true,
-      recordStepScreenshotBaselines: recordStepScreenshotBaselines === true,
+      debugStepByStep,
+      stepDelayMs,
+      captureStepScreenshots,
+      recordStepScreenshotBaselines,
       screenshotBaselines: normalizedBaselines,
-      screenshotDiffThreshold:
-        typeof screenshotDiffThreshold === "number" &&
-        Number.isFinite(screenshotDiffThreshold)
-          ? screenshotDiffThreshold
-          : undefined,
+      screenshotDiffThreshold,
     };
+    const ignoredOptions = Object.entries(unsupportedOptions)
+      .filter(([, value]) => value !== undefined && value !== false)
+      .map(([key]) => key);
 
-    const result = await runFlow(flow, {
-      ...runOptions,
-      args: vars,
+    const { result } = await enqueueRunAndWait({
+      flowId: flow.id as FlowId,
+      tabId:
+        typeof tabId === "number" && Number.isFinite(tabId)
+          ? Math.floor(tabId)
+          : undefined,
+      tabTarget: tabTarget === "new" ? "new" : "current",
+      args:
+        vars && typeof vars === "object" && !Array.isArray(vars)
+          ? (vars as JsonObject)
+          : undefined,
+      startUrl: typeof startUrl === "string" && startUrl.trim() ? startUrl.trim() : undefined,
+      refresh: refresh === true,
+      timeoutMs:
+        typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
+          ? Math.max(1_000, Math.floor(timeoutMs))
+          : undefined,
     });
+
+    const response =
+      ignoredOptions.length > 0
+        ? {
+            ...result,
+            warning: `Ignored legacy run options: ${ignoredOptions.join(", ")}`,
+          }
+        : result;
 
     return {
       content: [
         {
           type: "text",
-          text: JSON.stringify(result),
+          text: JSON.stringify(response),
         },
       ],
       isError: false,

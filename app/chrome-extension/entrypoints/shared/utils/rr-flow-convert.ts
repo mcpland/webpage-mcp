@@ -1,9 +1,9 @@
 /**
- * @fileoverview V2/V3 Flow bidirectional conversion utilities
- * @description Bridges Builder V2 Flow types with V3 RPC FlowV3 types
+ * @fileoverview builder-flow/V3 bidirectional conversion utilities
+ * @description Bridges builder flow documents with V3 RPC FlowV3 types
  *
  * Design notes:
- * - Builder store currently still uses V2 types (type, version, steps)
+ * - Builder store currently still uses compatibility flow fields (type, version, steps)
  * - RPC layer uses V3 types (kind, schemaVersion, entryNodeId)
  * - This module provides UI-layer type conversion, wrapping the underlying converter
  */
@@ -11,9 +11,9 @@
 import type { Flow as FlowV2 } from "@/entrypoints/background/record-replay/types";
 import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import {
-  convertFlowV2ToV3,
-  convertFlowV3ToV2,
-} from "@/entrypoints/background/record-replay-v3/storage/import/v2-to-v3";
+  convertCompatFlowToV3,
+  convertFlowV3ToCompat,
+} from "@/entrypoints/background/record-replay-v3/storage/import/flow-convert";
 
 // ==================== Types ====================
 
@@ -22,17 +22,17 @@ export interface FlowConversionResult<T> {
   warnings: string[];
 }
 
-// ==================== V2 -> V3 (for RPC calls) ====================
+// ==================== Builder flow -> V3 (for RPC calls) ====================
 
 /**
- * Convert V2 Flow to V3 format for RPC saving
- * @param flowV2 V2 Flow from Builder store
+ * Convert builder flow to V3 format for RPC saving
+ * @param flowV2 Builder flow from the editor store
  * @returns V3 Flow and warning messages
  * @throws Throws error on conversion failure
  */
-export function flowV2ToV3ForRpc(flowV2: FlowV2): FlowConversionResult<FlowV3> {
-  const result = convertFlowV2ToV3(
-    flowV2 as unknown as Parameters<typeof convertFlowV2ToV3>[0],
+export function flowBuilderToV3ForRpc(flowV2: FlowV2): FlowConversionResult<FlowV3> {
+  const result = convertCompatFlowToV3(
+    flowV2 as unknown as Parameters<typeof convertCompatFlowToV3>[0],
   );
 
   if (!result.success || !result.data) {
@@ -40,7 +40,7 @@ export function flowV2ToV3ForRpc(flowV2: FlowV2): FlowConversionResult<FlowV3> {
       result.errors.length > 0
         ? result.errors.join("; ")
         : "Unknown conversion error";
-    throw new Error(`V2→V3 conversion failed: ${errorMsg}`);
+    throw new Error(`Builder→V3 conversion failed: ${errorMsg}`);
   }
 
   return {
@@ -49,25 +49,25 @@ export function flowV2ToV3ForRpc(flowV2: FlowV2): FlowConversionResult<FlowV3> {
   };
 }
 
-// ==================== V3 -> V2 (for Builder display) ====================
+// ==================== V3 -> builder flow (for editor display) ====================
 
 /**
- * Convert V3 Flow to V2 format for Builder display and editing
+ * Convert V3 flow to builder-compatible format for editor display and editing
  * @param flowV3 V3 Flow obtained from RPC
- * @returns V2 Flow and warning messages
+ * @returns Builder-compatible flow and warning messages
  * @throws Throws error on conversion failure
  */
-export function flowV3ToV2ForBuilder(
+export function flowV3ToBuilderForEditor(
   flowV3: FlowV3,
 ): FlowConversionResult<FlowV2> {
-  const result = convertFlowV3ToV2(flowV3);
+  const result = convertFlowV3ToCompat(flowV3);
 
   if (!result.success || !result.data) {
     const errorMsg =
       result.errors.length > 0
         ? result.errors.join("; ")
         : "Unknown conversion error";
-    throw new Error(`V3→V2 conversion failed: ${errorMsg}`);
+    throw new Error(`V3→builder conversion failed: ${errorMsg}`);
   }
 
   return {
@@ -98,10 +98,10 @@ export function isFlowV3(value: unknown): value is FlowV3 {
 }
 
 /**
- * Check if value is a V2 Flow
+ * Check if value is a builder-compatible flow
  * @description Used to determine JSON format during import
  */
-export function isFlowV2(value: unknown): value is FlowV2 {
+export function isBuilderFlow(value: unknown): value is FlowV2 {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
@@ -110,10 +110,10 @@ export function isFlowV2(value: unknown): value is FlowV2 {
   return (
     typeof obj.id === "string" &&
     typeof obj.name === "string" &&
-    // V2 has a version field (number) and no schemaVersion
+    // Builder-compatible flow has a version field and no schemaVersion
     typeof obj.version === "number" &&
     obj.schemaVersion === undefined &&
-    // V2 may have steps or nodes
+    // Builder-compatible flow may have steps or nodes
     (Array.isArray(obj.steps) || Array.isArray(obj.nodes))
   );
 }

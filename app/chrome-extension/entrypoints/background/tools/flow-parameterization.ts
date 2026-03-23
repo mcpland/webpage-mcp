@@ -1,4 +1,5 @@
 import type { Flow } from '../record-replay/types';
+import type { FlowV3 } from '../record-replay-v3/domain/flow';
 
 interface ParameterSuggestion {
   nodeId: string;
@@ -77,7 +78,7 @@ function replaceNavigateValue(url: string, currentValue: string, placeholder: st
   return restorePlaceholderToken(replaced.url, placeholder);
 }
 
-function normalizeSuggestions(flow: Flow): ParameterSuggestion[] {
+function normalizeSuggestions(flow: Flow | FlowV3): ParameterSuggestion[] {
   const list = flow.meta?.recording?.parameterSuggestions;
   if (!Array.isArray(list)) return [];
   const result: ParameterSuggestion[] = [];
@@ -94,7 +95,15 @@ function normalizeSuggestions(flow: Flow): ParameterSuggestion[] {
   return result;
 }
 
-export function applyFlowParameterSuggestions(flow: Flow): ApplyParameterSuggestionsResult {
+function getVariableName(variable: unknown): string {
+  if (!variable || typeof variable !== 'object') return '';
+  const record = variable as Record<string, unknown>;
+  if (typeof record.name === 'string' && record.name.trim()) return record.name.trim();
+  if (typeof record.key === 'string' && record.key.trim()) return record.key.trim();
+  return '';
+}
+
+export function applyFlowParameterSuggestions(flow: Flow | FlowV3): ApplyParameterSuggestionsResult {
   const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
   if (!nodes.length) {
     return { changed: false, applied: 0, variablesAdded: 0, skipped: 0 };
@@ -105,10 +114,11 @@ export function applyFlowParameterSuggestions(flow: Flow): ApplyParameterSuggest
     return { changed: false, applied: 0, variablesAdded: 0, skipped: 0 };
   }
 
-  const existingVariables = new Set((flow.variables || []).map((v) => v.key));
+  const existingVariables = new Set((flow.variables || []).map((v) => getVariableName(v)).filter(Boolean));
   if (!Array.isArray(flow.variables)) {
     flow.variables = [];
   }
+  const isV3Flow = (flow as Partial<FlowV3>).schemaVersion === 3;
 
   let changed = false;
   let applied = 0;
@@ -124,7 +134,8 @@ export function applyFlowParameterSuggestions(flow: Flow): ApplyParameterSuggest
 
     const placeholder = `{${suggestion.suggestedKey}}`;
     if (suggestion.kind === 'fill') {
-      if (node.type !== 'fill') {
+      const nodeKind = (node as { type?: string; kind?: string }).kind ?? (node as { type?: string }).type;
+      if (nodeKind !== 'fill') {
         skipped += 1;
         continue;
       }
@@ -138,7 +149,8 @@ export function applyFlowParameterSuggestions(flow: Flow): ApplyParameterSuggest
         changed = true;
       }
     } else {
-      if (node.type !== 'navigate') {
+      const nodeKind = (node as { type?: string; kind?: string }).kind ?? (node as { type?: string }).type;
+      if (nodeKind !== 'navigate') {
         skipped += 1;
         continue;
       }
@@ -155,12 +167,21 @@ export function applyFlowParameterSuggestions(flow: Flow): ApplyParameterSuggest
     }
 
     if (!existingVariables.has(suggestion.suggestedKey)) {
-      flow.variables!.push({
-        key: suggestion.suggestedKey,
-        label: suggestion.suggestedKey,
-        type: 'string',
-        default: suggestion.currentValue,
-      });
+      if (isV3Flow) {
+        (flow.variables as FlowV3['variables'])!.push({
+          name: suggestion.suggestedKey,
+          label: suggestion.suggestedKey,
+          default: suggestion.currentValue,
+          scope: 'flow',
+        });
+      } else {
+        (flow.variables as Flow['variables'])!.push({
+          key: suggestion.suggestedKey,
+          label: suggestion.suggestedKey,
+          type: 'string',
+          default: suggestion.currentValue,
+        });
+      }
       existingVariables.add(suggestion.suggestedKey);
       variablesAdded += 1;
       changed = true;

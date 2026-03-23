@@ -7,7 +7,7 @@
  * Following PRD spec for Quick Panel entry UI.
  */
 
-import { Disposer } from '@/entrypoints/web-editor-v2/utils/disposables';
+import { Disposer } from '@/entrypoints/web-editor/utils/disposables';
 import { QUICK_PANEL_SCOPES, normalizeQuickPanelScope, type QuickPanelScope } from '../core/types';
 
 // ============================================================
