@@ -21,11 +21,11 @@ import {
 } from '@/entrypoints/background/record-replay-v3/engine/queue/scheduler';
 import { InMemoryKeepaliveController } from '@/entrypoints/background/record-replay-v3/engine/keepalive/offscreen-keepalive';
 import {
-  createQueueStore,
-  createRunsStore,
   closeRrV3Db,
   deleteRrV3Db,
 } from '@/entrypoints/background/record-replay-v3';
+import { createQueueStore } from '@/entrypoints/background/record-replay-v3/storage/queue';
+import { createRunsStore } from '@/entrypoints/background/record-replay-v3/storage/runs';
 import { recoverFromCrash } from '@/entrypoints/background/record-replay-v3/engine/recovery/recovery-coordinator';
 
 // ==================== Test Utilities ====================

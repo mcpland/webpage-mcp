@@ -227,30 +227,28 @@ describe('V3 Domain Types', () => {
 });
 
 // ==================== Engine Types ====================
+import type {
+  ExecutionKernel,
+  RunStartRequest,
+} from '@/entrypoints/background/record-replay-v3/engine/kernel/kernel';
+import { createNotImplementedKernel } from '@/entrypoints/background/record-replay-v3/engine/kernel/kernel';
+import type { RunQueue, RunQueueItem } from '@/entrypoints/background/record-replay-v3/engine/queue/queue';
 import {
-  // Kernel
-  type ExecutionKernel,
-  type RunStartRequest,
-  createNotImplementedKernel,
-
-  // Queue
-  type RunQueue,
-  type RunQueueItem,
   DEFAULT_QUEUE_CONFIG,
   createNotImplementedQueue,
-
-  // Plugins
-  type NodeDefinition,
-  type PluginRegistry,
+} from '@/entrypoints/background/record-replay-v3/engine/queue/queue';
+import type { NodeDefinition } from '@/entrypoints/background/record-replay-v3/engine/plugins/types';
+import {
+  PluginRegistry,
   getPluginRegistry,
   resetPluginRegistry,
-
-  // Transport
+} from '@/entrypoints/background/record-replay-v3/engine/plugins/registry';
+import { InMemoryEventsBus } from '@/entrypoints/background/record-replay-v3/engine/transport/events-bus';
+import {
   RR_V3_PORT_NAME,
-  type RpcMessage,
   createRpcRequest,
-  InMemoryEventsBus,
-} from '@/entrypoints/background/record-replay-v3';
+} from '@/entrypoints/background/record-replay-v3/engine/transport/rpc';
+import type { RpcMessage } from '@/entrypoints/background/record-replay-v3/engine/transport/rpc';
 
 describe('V3 Engine Types', () => {
   describe('Kernel', () => {
@@ -359,7 +357,7 @@ import {
   RR_V3_DB_NAME,
   RR_V3_DB_VERSION,
   RR_V3_STORES,
-} from '@/entrypoints/background/record-replay-v3';
+} from '@/entrypoints/background/record-replay-v3/storage/db';
 
 describe('V3 Storage Constants', () => {
   it('should export database constants', () => {
@@ -378,11 +376,10 @@ describe('V3 Storage Constants', () => {
 });
 
 // ==================== Version ====================
-import { RR_V3_VERSION, IS_RR_V3 } from '@/entrypoints/background/record-replay-v3';
+import { RR_V3_VERSION } from '@/entrypoints/background/record-replay-v3';
 
 describe('V3 Version', () => {
   it('should export version info', () => {
     expect(RR_V3_VERSION).toBe('3.0.0');
-    expect(IS_RR_V3).toBe(true);
   });
 });

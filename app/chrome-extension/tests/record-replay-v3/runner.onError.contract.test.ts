@@ -12,29 +12,33 @@ import type {
   NodeV3,
   RunEvent,
   RunRecordV3,
-  RunRunner,
-  NodeDefinition,
-  NodeExecutionResult,
 } from '@/entrypoints/background/record-replay-v3';
 
 import {
   EDGE_LABELS,
   FLOW_SCHEMA_VERSION,
-  InMemoryEventsBus,
-  PluginRegistry,
   RR_ERROR_CODES,
-  createNotImplementedStoragePort,
   createRRError,
-  createRunRunnerFactory,
-  resetBreakpointRegistry,
 } from '@/entrypoints/background/record-replay-v3';
+import { InMemoryEventsBus } from '@/entrypoints/background/record-replay-v3/engine/transport/events-bus';
+import { PluginRegistry } from '@/entrypoints/background/record-replay-v3/engine/plugins/registry';
+import { createNotImplementedStoragePort } from '@/entrypoints/background/record-replay-v3/engine/storage/storage-port';
+import { createRunRunnerFactory } from '@/entrypoints/background/record-replay-v3/engine/kernel/runner';
+import { resetBreakpointRegistry } from '@/entrypoints/background/record-replay-v3/engine/kernel/breakpoints';
+import type {
+  NodeDefinition,
+  NodeExecutionResult,
+} from '@/entrypoints/background/record-replay-v3/engine/plugins/types';
+import type { RunRunner } from '@/entrypoints/background/record-replay-v3/engine/kernel/runner';
 
 import type {
   RunId,
   PersistentVarRecord,
+} from '@/entrypoints/background/record-replay-v3';
+import type {
   PersistentVarsStore,
   RunsStore,
-} from '@/entrypoints/background/record-replay-v3';
+} from '@/entrypoints/background/record-replay-v3/engine/storage/storage-port';
 
 // ==================== Test Helpers ====================
 

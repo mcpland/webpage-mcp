@@ -16,9 +16,9 @@ import {
   RUN_SCHEMA_VERSION,
   closeRrV3Db,
   deleteRrV3Db,
-  resetBreakpointRegistry,
-  recoverFromCrash,
 } from '@/entrypoints/background/record-replay-v3';
+import { resetBreakpointRegistry } from '@/entrypoints/background/record-replay-v3/engine/kernel/breakpoints';
+import { recoverFromCrash } from '@/entrypoints/background/record-replay-v3/engine/recovery/recovery-coordinator';
 
 import { createV3E2EHarness, type V3E2EHarness, type RpcClient } from './v3-e2e-harness';
 

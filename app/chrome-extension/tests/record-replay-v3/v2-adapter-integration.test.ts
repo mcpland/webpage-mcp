@@ -17,8 +17,8 @@ import {
   RUN_SCHEMA_VERSION,
   closeRrV3Db,
   deleteRrV3Db,
-  resetBreakpointRegistry,
 } from '@/entrypoints/background/record-replay-v3';
+import { resetBreakpointRegistry } from '@/entrypoints/background/record-replay-v3/engine/kernel/breakpoints';
 
 import { PluginRegistry } from '@/entrypoints/background/record-replay-v3/engine/plugins/registry';
 import { ifHandler } from '@/entrypoints/background/record-replay/actions/handlers/control-flow';

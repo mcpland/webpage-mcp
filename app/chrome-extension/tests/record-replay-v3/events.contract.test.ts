@@ -19,14 +19,16 @@ import type {
 import {
   RUN_SCHEMA_VERSION,
   RR_ERROR_CODES,
-  StorageBackedEventsBus,
-  createEventsStore,
-  createRunsStore,
   closeRrV3Db,
   deleteRrV3Db,
+} from '@/entrypoints/background/record-replay-v3';
+import { StorageBackedEventsBus } from '@/entrypoints/background/record-replay-v3/engine/transport/events-bus';
+import { createEventsStore } from '@/entrypoints/background/record-replay-v3/storage/events';
+import { createRunsStore } from '@/entrypoints/background/record-replay-v3/storage/runs';
+import {
   RR_V3_STORES,
   withTransaction,
-} from '@/entrypoints/background/record-replay-v3';
+} from '@/entrypoints/background/record-replay-v3/storage/db';
 
 /**
  * Create a valid RunRecordV3 for testing

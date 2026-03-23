@@ -16,10 +16,10 @@ import {
 } from '@/entrypoints/background/record-replay-v3/engine/queue/queue';
 
 import {
-  createQueueStore,
   closeRrV3Db,
   deleteRrV3Db,
 } from '@/entrypoints/background/record-replay-v3';
+import { createQueueStore } from '@/entrypoints/background/record-replay-v3/storage/queue';
 
 describe('V3 Queue contracts', () => {
   beforeEach(async () => {

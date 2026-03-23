@@ -17,10 +17,10 @@ import type { EventsBus } from '@/entrypoints/background/record-replay-v3/engine
 import type { RunQueueItem } from '@/entrypoints/background/record-replay-v3/engine/queue/queue';
 import { DEFAULT_QUEUE_CONFIG } from '@/entrypoints/background/record-replay-v3/engine/queue/queue';
 import {
-  createQueueStore,
   closeRrV3Db,
   deleteRrV3Db,
 } from '@/entrypoints/background/record-replay-v3';
+import { createQueueStore } from '@/entrypoints/background/record-replay-v3/storage/queue';
 import { recoverFromCrash } from '@/entrypoints/background/record-replay-v3/engine/recovery/recovery-coordinator';
 
 // ==================== Queue-level Tests ====================

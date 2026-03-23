@@ -10,10 +10,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { TriggerSpec } from '@/entrypoints/background/record-replay-v3/domain/triggers';
 import {
-  createTriggersStore,
   closeRrV3Db,
   deleteRrV3Db,
 } from '@/entrypoints/background/record-replay-v3';
+import { createTriggersStore } from '@/entrypoints/background/record-replay-v3/storage/triggers';
 
 // ==================== Test Utilities ====================
 
