@@ -54,8 +54,6 @@ import {
   type ExecutionTracker,
   type ExecutionState,
 } from './execution-tracker';
-import { createHmrConsistencyVerifier, type HmrConsistencyVerifier } from './hmr-consistency';
-import { createPerfMonitor, type PerfMonitor } from './perf-monitor';
 import { createDesignTokensService, type DesignTokensService } from './design-tokens';
 
 // =============================================================================
@@ -80,7 +78,6 @@ interface EditorInternalState {
   dragReorderController: DragReorderController | null;
   transactionManager: TransactionManager | null;
   executionTracker: ExecutionTracker | null;
-  hmrConsistencyVerifier: HmrConsistencyVerifier | null;
   toolbar: Toolbar | null;
   breadcrumbs: Breadcrumbs | null;
   propertyPanel: PropertyPanel | null;
@@ -88,10 +85,6 @@ interface EditorInternalState {
   propsBridge: PropsBridge | null;
   /** Design tokens service (Phase 5.3) */
   tokensService: DesignTokensService | null;
-  /** Performance monitor (Phase 5.3) - disabled by default */
-  perfMonitor: PerfMonitor | null;
-  /** Cleanup function for perf monitor hotkey */
-  perfHotkeyCleanup: (() => void) | null;
   /** Currently hovered element (for hover highlight) */
   hoveredElement: Element | null;
   /** One-shot flag: whether next hover rect update should animate */
@@ -130,14 +123,11 @@ export function createWebEditorV2(): WebEditorV2Api {
     dragReorderController: null,
     transactionManager: null,
     executionTracker: null,
-    hmrConsistencyVerifier: null,
     toolbar: null,
     breadcrumbs: null,
     propertyPanel: null,
     propsBridge: null,
     tokensService: null,
-    perfMonitor: null,
-    perfHotkeyCleanup: null,
     hoveredElement: null,
     pendingHoverTransition: false,
     selectedElement: null,
@@ -355,9 +345,6 @@ export function createWebEditorV2(): WebEditorV2Api {
     // Update resize handles target (Phase 4.9)
     state.handlesController?.setTarget(element);
 
-    // Notify HMR consistency verifier of selection change (Phase 4.8)
-    state.hmrConsistencyVerifier?.onSelectionChange(element);
-
     // Broadcast selection to sidepanel for AgentChat context
     broadcastSelectionChanged(element);
 
@@ -386,10 +373,6 @@ export function createWebEditorV2(): WebEditorV2Api {
 
     // Hide resize handles (Phase 4.9)
     state.handlesController?.setTarget(null);
-
-    // Notify HMR consistency verifier of deselection (Phase 4.8)
-    // Deselection should cancel any ongoing verification
-    state.hmrConsistencyVerifier?.onSelectionChange(null);
 
     // Broadcast deselection to sidepanel
     broadcastSelectionChanged(null);
@@ -611,8 +594,6 @@ export function createWebEditorV2(): WebEditorV2Api {
     // Broadcast aggregated TX state for AgentChat integration (Phase 1.4)
     broadcastTxChanged(action as WebEditorTxChangeAction);
 
-    // Notify HMR consistency verifier of transaction change (Phase 4.8)
-    state.hmrConsistencyVerifier?.onTransactionChange(event);
   }
 
   /**
@@ -755,14 +736,6 @@ export function createWebEditorV2(): WebEditorV2Api {
         if (requestId && sessionId && state.executionTracker) {
           state.executionTracker.track(requestId, sessionId);
         }
-
-        // Start HMR consistency verification (Phase 4.8)
-        state.hmrConsistencyVerifier?.start({
-          tx,
-          requestId,
-          sessionId,
-          element: state.selectedElement,
-        });
 
         return { requestId, sessionId };
       }
@@ -1062,43 +1035,6 @@ export function createWebEditorV2(): WebEditorV2Api {
         container: elements.overlayRoot,
       });
 
-      // Initialize Performance Monitor (Phase 5.3) - disabled by default
-      state.perfMonitor = createPerfMonitor({
-        container: elements.overlayRoot,
-        fpsUiIntervalMs: 500,
-        memorySampleIntervalMs: 1000,
-      });
-
-      // Register hotkey: Ctrl/Cmd + Shift + P toggles perf monitor
-      const perfHotkeyHandler = (event: KeyboardEvent): void => {
-        // Ignore key repeats to avoid rapid toggles when holding the shortcut
-        if (event.repeat) return;
-
-        const isMod = event.metaKey || event.ctrlKey;
-        if (!isMod) return;
-        if (!event.shiftKey) return;
-        if (event.altKey) return;
-
-        const key = (event.key || '').toLowerCase();
-        if (key !== 'p') return;
-
-        const monitor = state.perfMonitor;
-        if (!monitor) return;
-
-        monitor.toggle();
-
-        // Prevent browser shortcuts (e.g., print dialog)
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-      };
-
-      const hotkeyOptions: AddEventListenerOptions = { capture: true, passive: false };
-      window.addEventListener('keydown', perfHotkeyHandler, hotkeyOptions);
-      state.perfHotkeyCleanup = () => {
-        window.removeEventListener('keydown', perfHotkeyHandler, hotkeyOptions);
-      };
-
       // Initialize Selection Engine for intelligent element picking
       state.selectionEngine = createSelectionEngine({
         isOverlayElement: state.shadowHost.isOverlayElement,
@@ -1173,44 +1109,22 @@ export function createWebEditorV2(): WebEditorV2Api {
       // Initialize ExecutionTracker for tracking Agent execution status (Phase 3.10)
       state.executionTracker = createExecutionTracker({
         onStatusChange: (execState: ExecutionState) => {
-          // Map execution status to toolbar status (only used when HMR verifier is not active)
-          // When verifier is active, it controls toolbar status after execution completes
-          const verifierPhase = state.hmrConsistencyVerifier?.getSnapshot().phase ?? 'idle';
-          const verifierActive = verifierPhase !== 'idle';
-
-          // Only update toolbar directly if verifier is not handling it
-          if (!verifierActive || execState.status !== 'completed') {
-            const statusMap: Record<string, string> = {
-              pending: 'applying',
-              starting: 'starting',
-              running: 'running',
-              locating: 'locating',
-              applying: 'applying',
-              completed: 'completed',
-              failed: 'failed',
-              error: 'failed', // Server may return 'error', treat same as 'failed'
-              timeout: 'timeout',
-              cancelled: 'cancelled',
-            };
-            type ToolbarStatusType = Parameters<NonNullable<typeof state.toolbar>['setStatus']>[0];
-            const toolbarStatus = (statusMap[execState.status] ?? 'running') as ToolbarStatusType;
-            state.toolbar?.setStatus(toolbarStatus, execState.message);
-          }
-
-          // Forward to HMR consistency verifier (Phase 4.8)
-          state.hmrConsistencyVerifier?.onExecutionStatus(execState);
+          const statusMap: Record<string, string> = {
+            pending: 'applying',
+            starting: 'starting',
+            running: 'running',
+            locating: 'locating',
+            applying: 'applying',
+            completed: 'completed',
+            failed: 'failed',
+            error: 'failed', // Server may return 'error', treat same as 'failed'
+            timeout: 'timeout',
+            cancelled: 'cancelled',
+          };
+          type ToolbarStatusType = Parameters<NonNullable<typeof state.toolbar>['setStatus']>[0];
+          const toolbarStatus = (statusMap[execState.status] ?? 'running') as ToolbarStatusType;
+          state.toolbar?.setStatus(toolbarStatus, execState.message);
         },
-      });
-
-      // Initialize HMR Consistency Verifier (Phase 4.8)
-      state.hmrConsistencyVerifier = createHmrConsistencyVerifier({
-        transactionManager: state.transactionManager,
-        getSelectedElement: () => state.selectedElement,
-        onReselect: (element) => handleSelect(element, DEFAULT_MODIFIERS),
-        onDeselect: handleDeselect,
-        setToolbarStatus: (status, message) => state.toolbar?.setStatus(status, message),
-        isOverlayElement: state.shadowHost?.isOverlayElement,
-        selectionEngine: state.selectionEngine ?? undefined,
       });
 
       // Initialize Toolbar UI
@@ -1389,10 +1303,6 @@ export function createWebEditorV2(): WebEditorV2Api {
       state.positionTracker = null;
       state.selectionEngine?.dispose();
       state.selectionEngine = null;
-      state.perfHotkeyCleanup?.();
-      state.perfHotkeyCleanup = null;
-      state.perfMonitor?.dispose();
-      state.perfMonitor = null;
       state.canvasOverlay?.dispose();
       state.canvasOverlay = null;
       state.shadowHost?.dispose();
@@ -1470,10 +1380,6 @@ export function createWebEditorV2(): WebEditorV2Api {
       state.executionTracker?.dispose();
       state.executionTracker = null;
 
-      // Cleanup HMR Consistency Verifier (Phase 4.8)
-      state.hmrConsistencyVerifier?.dispose();
-      state.hmrConsistencyVerifier = null;
-
       // Cleanup Transaction Manager (clears history)
       state.transactionManager?.dispose();
       state.transactionManager = null;
@@ -1485,12 +1391,6 @@ export function createWebEditorV2(): WebEditorV2Api {
       // Cleanup Selection Engine
       state.selectionEngine?.dispose();
       state.selectionEngine = null;
-
-      // Cleanup Performance Monitor (Phase 5.3)
-      state.perfHotkeyCleanup?.();
-      state.perfHotkeyCleanup = null;
-      state.perfMonitor?.dispose();
-      state.perfMonitor = null;
 
       // Cleanup Canvas Overlay
       state.canvasOverlay?.dispose();
@@ -1520,8 +1420,6 @@ export function createWebEditorV2(): WebEditorV2Api {
       state.transactionManager = null;
       state.positionTracker = null;
       state.selectionEngine = null;
-      state.perfHotkeyCleanup = null;
-      state.perfMonitor = null;
       state.canvasOverlay = null;
       state.shadowHost = null;
       state.hoveredElement = null;
