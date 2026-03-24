@@ -1,8 +1,8 @@
 import type {
-  Flow as FlowV2,
+  Flow as BuilderFlow,
   NodeBase,
-  Edge as EdgeV2,
-} from '@/entrypoints/background/record-replay/types';
+  Edge as BuilderEdge,
+} from '@/common/workflow-compat-types';
 import {
   nodesToSteps as sharedNodesToSteps,
   stepsToNodes as sharedStepsToNodes,
@@ -60,12 +60,12 @@ export function stepsToNodes(steps: any[]): NodeBase[] {
   return base;
 }
 
-export function topoOrder(nodes: NodeBase[], edges: EdgeV2[]): NodeBase[] {
+export function topoOrder(nodes: NodeBase[], edges: BuilderEdge[]): NodeBase[] {
   const filtered = (edges || []).filter((e) => !e.label || e.label === EDGE_LABELS.DEFAULT);
   return sharedTopoOrder(nodes as any, filtered as any) as any;
 }
 
-export function nodesToSteps(nodes: NodeBase[], edges: EdgeV2[]): any[] {
+export function nodesToSteps(nodes: NodeBase[], edges: BuilderEdge[]): any[] {
   // Exclude non-executable nodes like 'trigger' and cut edges from them
   const execNodes = (nodes || []).filter((n) => n.type !== ('trigger' as any));
   const filtered = (edges || []).filter(
@@ -75,8 +75,8 @@ export function nodesToSteps(nodes: NodeBase[], edges: EdgeV2[]): any[] {
   return sharedNodesToSteps(execNodes as any, filtered as any);
 }
 
-export function autoChainEdges(nodes: NodeBase[]): EdgeV2[] {
-  const arr: EdgeV2[] = [];
+export function autoChainEdges(nodes: NodeBase[]): BuilderEdge[] {
+  const arr: BuilderEdge[] = [];
   for (let i = 0; i < nodes.length - 1; i++)
     arr.push({
       id: newId('e'),
@@ -142,6 +142,6 @@ export function summarizeNode(n?: NodeBase | null): string {
   return '';
 }
 
-export function cloneFlow(flow: FlowV2): FlowV2 {
+export function cloneFlow(flow: BuilderFlow): BuilderFlow {
   return JSON.parse(JSON.stringify(flow));
 }

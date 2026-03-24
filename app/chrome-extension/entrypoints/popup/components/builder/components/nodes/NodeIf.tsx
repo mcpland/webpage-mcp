@@ -1,12 +1,12 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
-import type { NodeBase, Edge as EdgeV2 } from '@/entrypoints/background/record-replay/types';
+import type { NodeBase, Edge as BuilderEdge } from '@/common/workflow-compat-types';
 import { getMessage } from '@/utils/i18n';
 import { getTypeGlyph, getTypeLabel, nodeSubtitle } from './node-util';
 
 type BuilderNodeData = {
   node: NodeBase;
-  edges: EdgeV2[];
+  edges: BuilderEdge[];
   errors?: string[];
 };
 

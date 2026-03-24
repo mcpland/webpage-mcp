@@ -1,4 +1,4 @@
-import type { NodeBase } from '@/entrypoints/background/record-replay/types';
+import type { NodeBase } from '@/common/workflow-compat-types';
 import { summarizeNode as summarize } from '../../model/transforms';
 
 export function getTypeGlyph(type?: string): string {

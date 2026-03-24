@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { watch } from "@/entrypoints/shared/reactivity";
 
 import type {
-  Flow as FlowV2,
+  Flow as BuilderFlow,
   NodeBase,
-} from "@/entrypoints/background/record-replay/types";
+} from "@/common/workflow-compat-types";
 import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import type {
   FlowId,
@@ -171,7 +171,7 @@ export default function BuilderApp() {
 
   function initEmptyFlow() {
     const now = Date.now();
-    const empty: FlowV2 = {
+    const empty: BuilderFlow = {
       id: `flow_${now}`,
       name: t("builderNewWorkflowName", "New workflow"),
       version: 1,
@@ -401,7 +401,7 @@ export default function BuilderApp() {
           notifyImportReadOnly(importedCompatibility.messages.join(" "));
         }
       } else {
-        store.initFromFlow(first as FlowV2);
+        store.initFromFlow(first as BuilderFlow);
 
         if (
           Array.isArray((first as any)?.steps) &&

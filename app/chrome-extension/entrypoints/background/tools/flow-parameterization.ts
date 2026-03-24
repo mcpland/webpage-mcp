@@ -1,4 +1,4 @@
-import type { Flow } from '../record-replay/types';
+import type { Flow } from '@/common/workflow-compat-types';
 import type { FlowV3 } from '../record-replay-v3/domain/flow';
 
 interface ParameterSuggestion {

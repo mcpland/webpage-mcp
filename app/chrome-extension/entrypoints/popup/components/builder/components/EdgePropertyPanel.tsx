@@ -1,9 +1,9 @@
-import type { Edge as EdgeV2, NodeBase } from '@/entrypoints/background/record-replay/types';
+import type { Edge as BuilderEdge, NodeBase } from '@/common/workflow-compat-types';
 import { getMessage } from '@/utils/i18n';
 import './EdgePropertyPanel.css';
 
 type EdgePropertyPanelProps = {
-  edge: EdgeV2 | null;
+  edge: BuilderEdge | null;
   nodes: NodeBase[];
   onRemoveEdge: (id: string) => void;
 };

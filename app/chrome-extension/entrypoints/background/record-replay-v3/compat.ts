@@ -1,4 +1,4 @@
-import type { Flow as CompatFlow, RunLogEntry, RunResult } from '../record-replay/types';
+import type { Flow as CompatFlow, RunLogEntry, RunResult } from '@/common/workflow-compat-types';
 import type { FlowV3 } from './domain/flow';
 import { FLOW_SCHEMA_VERSION, type FlowMeta } from './domain/flow';
 import type { RunEvent, RunRecordV3 } from './domain/events';

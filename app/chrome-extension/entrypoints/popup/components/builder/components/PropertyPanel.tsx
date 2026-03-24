@@ -1,4 +1,4 @@
-import type { NodeBase } from '@/entrypoints/background/record-replay/types';
+import type { NodeBase } from '@/common/workflow-compat-types';
 import { validateNodeWithRegistry } from '@/entrypoints/popup/components/builder/model/ui-nodes';
 import PropertyFromSpec from '@/entrypoints/popup/components/builder/components/properties/PropertyFromSpec';
 import { getMessage } from '@/utils/i18n';

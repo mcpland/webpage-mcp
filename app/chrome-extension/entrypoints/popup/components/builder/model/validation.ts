@@ -1,4 +1,4 @@
-import type { NodeBase } from '@/entrypoints/background/record-replay/types';
+import type { NodeBase } from '@/common/workflow-compat-types';
 import { STEP_TYPES } from 'webpage-mcp-shared';
 
 export function validateNode(n: NodeBase): string[] {

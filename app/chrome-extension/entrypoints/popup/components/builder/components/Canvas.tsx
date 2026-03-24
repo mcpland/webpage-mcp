@@ -13,7 +13,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import type { NodeBase, Edge as EdgeV2 } from '@/entrypoints/background/record-replay/types';
+import type { NodeBase, Edge as BuilderEdge } from '@/common/workflow-compat-types';
 import { NODE_UI_LIST, canvasTypeKey } from '@/entrypoints/popup/components/builder/model/ui-nodes';
 import { EDGE_LABELS } from 'webpage-mcp-shared';
 
@@ -23,13 +23,13 @@ import './Canvas.css';
 
 type BuilderNodeData = {
   node: NodeBase;
-  edges: EdgeV2[];
+  edges: BuilderEdge[];
   errors: string[];
 };
 
 type CanvasProps = {
   nodes: NodeBase[];
-  edges: EdgeV2[];
+  edges: BuilderEdge[];
   nodeErrors?: Record<string, string[]>;
   selectedNodeId?: string | null;
   selectedEdgeId?: string | null;
@@ -114,7 +114,7 @@ function buildEdges(props: CanvasProps): Edge[] {
     return '';
   };
 
-  const labelFor = (edge: EdgeV2) => {
+  const labelFor = (edge: BuilderEdge) => {
     const raw = String((edge as any)?.label || '');
     if (raw.startsWith('case:')) return '';
     if (raw === 'else') return '';

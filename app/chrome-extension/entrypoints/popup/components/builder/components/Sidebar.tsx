@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 
-import type { Flow as FlowV2, NodeBase } from '@/entrypoints/background/record-replay/types';
+import type { Flow as BuilderFlow, NodeBase } from '@/common/workflow-compat-types';
 import { NODE_UI_LIST } from '@/entrypoints/popup/components/builder/model/ui-nodes';
 import { getMessage } from '@/utils/i18n';
 import './Sidebar.css';
@@ -13,7 +13,7 @@ type SidebarItem = {
 };
 
 type SidebarProps = {
-  flow: FlowV2;
+  flow: BuilderFlow;
   paletteTypes: NodeBase['type'][];
   subflowIds?: string[];
   currentSubflowId?: string | null;

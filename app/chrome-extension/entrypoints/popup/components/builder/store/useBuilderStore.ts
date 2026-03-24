@@ -1,9 +1,9 @@
 import { reactive, ref } from "@/entrypoints/shared/reactivity";
 import type {
-  Flow as FlowV2,
+  Flow as BuilderFlow,
   NodeBase,
-  Edge as EdgeV2,
-} from "@/entrypoints/background/record-replay/types";
+  Edge as BuilderEdge,
+} from "@/common/workflow-compat-types";
 import {
   autoChainEdges,
   cloneFlow,
@@ -22,8 +22,8 @@ import {
 // Route A scope: keep trigger/schedule automation out of connector authoring surface.
 const ENABLE_TRIGGER_NODE_CREATION = false;
 
-export function useBuilderStore(initial?: FlowV2 | null) {
-  const flowLocal = reactive<FlowV2>({
+export function useBuilderStore(initial?: BuilderFlow | null) {
+  const flowLocal = reactive<BuilderFlow>({
     id: "",
     name: "",
     version: 1,
@@ -31,7 +31,7 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     variables: [],
   });
   const nodes = reactive<NodeBase[]>([]);
-  const edges = reactive<EdgeV2[]>([]);
+  const edges = reactive<BuilderEdge[]>([]);
   const activeNodeId = ref<string | null>(null);
   const activeEdgeId = ref<string | null>(null);
   const pendingFrom = ref<string | null>(null);
@@ -57,9 +57,9 @@ export function useBuilderStore(initial?: FlowV2 | null) {
 
   // --- history (undo/redo) ---
   type Snapshot = {
-    flow: Pick<FlowV2, "name" | "description">;
+    flow: Pick<BuilderFlow, "name" | "description">;
     nodes: NodeBase[];
-    edges: EdgeV2[];
+    edges: BuilderEdge[];
   };
   const HISTORY_MAX = 50;
   const past: Snapshot[] = [];
@@ -108,7 +108,7 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     });
   }
 
-  function initFromFlow(flow: FlowV2) {
+  function initFromFlow(flow: BuilderFlow) {
     const deep = cloneFlow(flow);
     Object.assign(flowLocal, deep);
     // DAG is required - flow-store guarantees nodes/edges via normalization
@@ -442,7 +442,7 @@ export function useBuilderStore(initial?: FlowV2 | null) {
    * NOTE: flow.steps is no longer written here. The storage layer (flow-store.ts)
    * will strip steps on save. Only nodes/edges are the source of truth.
    */
-  function exportFlowForSave(): FlowV2 {
+  function exportFlowForSave(): BuilderFlow {
     // Step 1: Flush current canvas state to flowLocal
     flushCurrent();
 
@@ -461,8 +461,8 @@ export function useBuilderStore(initial?: FlowV2 | null) {
     nodes.forEach((n) => idMap.set(n.id, n));
 
     // Build graph using all edges (include branches like case:/else/onError)
-    const inEdges = new Map<string, EdgeV2[]>();
-    const outEdges = new Map<string, EdgeV2[]>();
+    const inEdges = new Map<string, BuilderEdge[]>();
+    const outEdges = new Map<string, BuilderEdge[]>();
     for (const n of nodes) {
       inEdges.set(n.id, []);
       outEdges.set(n.id, []);

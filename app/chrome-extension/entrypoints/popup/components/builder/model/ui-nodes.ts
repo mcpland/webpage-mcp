@@ -1,7 +1,7 @@
 // ui-nodes.ts — UI registry for builder nodes (sidebar, canvas, properties)
 // Comments in English to explain intent.
 
-import type { NodeBase, NodeType } from '@/entrypoints/background/record-replay/types';
+import type { NodeBase, NodeType } from '@/common/workflow-compat-types';
 import { NODE_TYPES } from '@/common/node-types';
 import { defaultConfigFor as fallbackDefaultConfig } from '@/entrypoints/popup/components/builder/model/transforms';
 import { validateNode as fallbackValidateNode } from '@/entrypoints/popup/components/builder/model/validation';

@@ -8,7 +8,7 @@
  * - This module provides UI-layer type conversion, wrapping the underlying converter
  */
 
-import type { Flow as FlowV2 } from "@/entrypoints/background/record-replay/types";
+import type { Flow as BuilderFlow } from "@/common/workflow-compat-types";
 import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import {
   convertCompatFlowToV3,
@@ -30,7 +30,7 @@ export interface FlowConversionResult<T> {
  * @returns V3 Flow and warning messages
  * @throws Throws error on conversion failure
  */
-export function flowBuilderToV3ForRpc(flowV2: FlowV2): FlowConversionResult<FlowV3> {
+export function flowBuilderToV3ForRpc(flowV2: BuilderFlow): FlowConversionResult<FlowV3> {
   const result = convertCompatFlowToV3(
     flowV2 as unknown as Parameters<typeof convertCompatFlowToV3>[0],
   );
@@ -59,7 +59,7 @@ export function flowBuilderToV3ForRpc(flowV2: FlowV2): FlowConversionResult<Flow
  */
 export function flowV3ToBuilderForEditor(
   flowV3: FlowV3,
-): FlowConversionResult<FlowV2> {
+): FlowConversionResult<BuilderFlow> {
   const result = convertFlowV3ToCompat(flowV3);
 
   if (!result.success || !result.data) {
@@ -71,7 +71,7 @@ export function flowV3ToBuilderForEditor(
   }
 
   return {
-    flow: result.data as unknown as FlowV2,
+    flow: result.data as unknown as BuilderFlow,
     warnings: result.warnings,
   };
 }
@@ -101,7 +101,7 @@ export function isFlowV3(value: unknown): value is FlowV3 {
  * Check if value is a builder-compatible flow
  * @description Used to determine JSON format during import
  */
-export function isBuilderFlow(value: unknown): value is FlowV2 {
+export function isBuilderFlow(value: unknown): value is BuilderFlow {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
