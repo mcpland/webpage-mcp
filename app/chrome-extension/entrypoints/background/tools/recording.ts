@@ -1,12 +1,22 @@
 import { createErrorResponse, type ToolResult } from "@/common/tool-handler";
 import { TOOL_NAMES } from "webpage-mcp-shared";
+import type { Flow } from "@/common/workflow-compat-types";
 import { RecorderManager, buildRecordingStateSnapshot } from "../recording";
 import type { FlowV3 } from "../record-replay-v3/domain/flow";
 import { saveFlowToV3 } from "../record-replay-v3/compat";
 
-function countFlowSteps(flow: FlowV3 | null): number {
+function countFlowSteps(flow: Flow | FlowV3 | null): number {
   if (!flow) return 0;
-  return Array.isArray(flow.nodes) ? flow.nodes.length : 0;
+  if (Array.isArray(flow.nodes)) return flow.nodes.length;
+  if (Array.isArray(flow.steps)) return flow.steps.length;
+  return 0;
+}
+
+function appendWarning(current: string | undefined, next: string): string {
+  if (!current) {
+    return next;
+  }
+  return `${current}; ${next}`;
 }
 
 class RecordingStartTool {
@@ -64,8 +74,19 @@ class RecordingStopTool {
     if (flow && (nextName || nextDescription)) {
       if (nextName) flow.name = nextName;
       if (nextDescription) flow.description = nextDescription;
-      flow.updatedAt = new Date().toISOString();
-      await saveFlowToV3(flow);
+      if ("updatedAt" in flow) {
+        flow.updatedAt = new Date().toISOString();
+      } else if (flow.meta) {
+        flow.meta.updatedAt = new Date().toISOString();
+      }
+      try {
+        await saveFlowToV3(flow);
+      } catch (error) {
+        warning = appendWarning(
+          warning,
+          `Failed to persist renamed recorded workflow to V3: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
 
     return {

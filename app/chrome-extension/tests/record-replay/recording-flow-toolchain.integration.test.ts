@@ -196,6 +196,59 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(typeof persisted?.updatedAt).toBe("string");
   });
 
+  it("recordingStopTool keeps the recorded flow summary when V3 persistence fails", async () => {
+    const flowId = `flow-stop-fallback-${Date.now()}`;
+    const recordedFlow = {
+      id: flowId,
+      name: "Draft flow",
+      version: 1,
+      nodes: [
+        {
+          id: "fill-1",
+          type: "fill",
+          config: {
+            target: {
+              selector: "#email",
+              candidates: [{ type: "css", value: "#email" }],
+            },
+            value: "alice@example.com",
+          },
+        },
+      ],
+      edges: [],
+      variables: [],
+      meta: {
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      },
+    };
+
+    mocks.recorderStop.mockResolvedValue({
+      success: true,
+      flow: recordedFlow,
+      error: "Initial V3 sync failed",
+    });
+    mocks.saveFlowToV3.mockRejectedValueOnce(new Error("V3 unavailable"));
+
+    const result = await recordingStopTool.execute({
+      name: "Recovered recording",
+      description: "Still usable after V3 error",
+    });
+    const payload = parseToolPayload(result);
+
+    expect(payload.success).toBe(true);
+    expect(payload.flow).toMatchObject({
+      id: flowId,
+      name: "Recovered recording",
+      description: "Still usable after V3 error",
+      stepCount: 1,
+    });
+    expect(payload.warning).toContain("Initial V3 sync failed");
+    expect(payload.warning).toContain(
+      "Failed to persist renamed recorded workflow to V3: V3 unavailable",
+    );
+  });
+
   it("flowAnalyzeTool summarizes saved flows and surfaces recording quality hints", async () => {
     const flowId = `flow-analyze-${Date.now()}`;
     await createStoragePort().flows.save(

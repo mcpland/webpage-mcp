@@ -255,6 +255,8 @@ async function stopTabWithBarrier(
   return { tabId, ok: top.ack, top, subframes };
 }
 
+type RecordedFlow = Flow | FlowV3;
+
 class RecorderManagerImpl {
   private initialized = false;
 
@@ -362,7 +364,7 @@ class RecorderManagerImpl {
    * - Subframes finalize to top before top stops
    * - Barrier status is recorded in flow.meta for debugging
    */
-  async stop(): Promise<{ success: boolean; error?: string; flow?: FlowV3 }> {
+  async stop(): Promise<{ success: boolean; error?: string; flow?: RecordedFlow }> {
     const currentStatus = session.getStatus();
     if (currentStatus === "idle" || !session.getFlow()) {
       return { success: false, error: "No active recording" };
@@ -465,13 +467,11 @@ class RecorderManagerImpl {
           warning,
           `Failed to persist recorded workflow to V3: ${error instanceof Error ? error.message : String(error)}`,
         );
-        if (warning) {
-          return {
-            success: true,
-            error: warning,
-          };
-        }
-        return { success: true };
+        return {
+          success: true,
+          flow,
+          ...(warning ? { error: warning } : {}),
+        };
       }
 
       if (warning) {
