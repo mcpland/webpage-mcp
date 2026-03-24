@@ -362,7 +362,7 @@ function convertCompatEdgeToV3(compatEdge: CompatEdge): EdgeV3 | null {
 }
 
 /** entryNodeId Calculation result */
-interface EntryNodeResult {
+export interface EntryNodeResult {
   nodeId: NodeId | null;
   warnings: string[];
 }
@@ -378,7 +378,10 @@ interface EntryNodeResult {
  *    - Prioritize the node with the upper left UI coordinate (in ascending order by x, in ascending order by y if x is the same)
  *    - If there is no UI coordinate, the first one is taken in dictionary order by ID.
  */
-function findEntryNodeId(nodes: NodeV3[], edges: EdgeV3[]): EntryNodeResult {
+export function findEntryNodeId(
+  nodes: ReadonlyArray<NodeV3>,
+  edges: ReadonlyArray<EdgeV3>,
+): EntryNodeResult {
   const warnings: string[] = [];
 
   // 1. Exclude the trigger node and obtain the executable node
@@ -449,7 +452,7 @@ interface StableSelectionResult {
  * Select a stable entry node from multiple root nodes
  * First press UI coordinates (upper left corner first), secondly press ID dictionary order
  */
-function selectStableRootNode(nodes: NodeV3[]): StableSelectionResult {
+function selectStableRootNode(nodes: ReadonlyArray<NodeV3>): StableSelectionResult {
   // Check if the node has valid UI coordinates
   const hasValidUi = (
     n: NodeV3,

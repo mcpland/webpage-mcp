@@ -5,6 +5,7 @@ import type { JsonValue } from '../record-replay-v3/domain/json';
 import type { VariableDefinition } from '../record-replay-v3/domain/variables';
 import { createStoragePort } from '../record-replay-v3';
 import { saveFlowToV3 } from '../record-replay-v3/compat';
+import { findEntryNodeId } from '../record-replay-v3/storage/import/flow-convert';
 import { applyFlowParameterSuggestions } from './flow-parameterization';
 
 type FlowHintLevel = 'info' | 'warning';
@@ -253,6 +254,14 @@ class FlowUpdateTool {
         ],
         isError: false,
       };
+    }
+
+    if (Array.isArray(args?.nodes) || Array.isArray(args?.edges)) {
+      const entry = findEntryNodeId(flow.nodes, flow.edges);
+      if (!entry.nodeId) {
+        return createErrorResponse('Could not determine a valid entry node for the updated flow');
+      }
+      flow.entryNodeId = entry.nodeId;
     }
 
     flow.updatedAt = new Date().toISOString();

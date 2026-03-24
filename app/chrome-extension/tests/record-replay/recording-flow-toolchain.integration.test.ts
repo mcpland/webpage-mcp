@@ -420,6 +420,78 @@ describe("recording/editing/flow toolchain integration", () => {
     ]);
   });
 
+  it("flowUpdateTool recalculates entryNodeId when the node graph is replaced", async () => {
+    const flowId = `flow-update-entry-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "old-entry" as any,
+          kind: "navigate",
+          config: { url: "https://example.com/original" },
+        },
+        {
+          id: "old-next" as any,
+          kind: "click",
+          config: {},
+        },
+      ], {
+        edges: [
+          {
+            id: "edge-old" as any,
+            from: "old-entry" as any,
+            to: "old-next" as any,
+          },
+        ],
+      }),
+    );
+
+    const result = await flowUpdateTool.execute({
+      flowId,
+      nodes: [
+        {
+          id: "new-start",
+          kind: "fill",
+          config: {
+            target: {
+              selector: "#email",
+              candidates: [{ type: "css", value: "#email" }],
+            },
+            value: "{email}",
+          },
+        },
+        {
+          id: "new-next",
+          kind: "click",
+          config: {},
+        },
+      ],
+      edges: [
+        {
+          id: "edge-new",
+          from: "new-start",
+          to: "new-next",
+        },
+      ],
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(payload).toMatchObject({
+      success: true,
+      updated: true,
+      flow: {
+        id: flowId,
+        nodeCount: 2,
+        edgeCount: 1,
+      },
+    });
+    expect(updated?.entryNodeId).toBe("new-start");
+    expect(updated?.nodes.map((node) => node.id)).toEqual([
+      "new-start",
+      "new-next",
+    ]);
+  });
+
   it("flowRunTool forwards supported tab-binding options into the V3 runner path", async () => {
     const flowId = `flow-run-${Date.now()}`;
     await createStoragePort().flows.save(
