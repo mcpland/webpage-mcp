@@ -1208,7 +1208,12 @@ export function createWebEditor(): WebEditorApi {
 
           const verificationInvalidated = state.invalidatedApplyRequests.has(execState.requestId);
           if (verificationInvalidated && execState.status === 'completed') {
+            state.pendingApplyVerifications.delete(execState.requestId);
             state.invalidatedApplyRequests.delete(execState.requestId);
+            state.toolbar?.setStatus(
+              'completed',
+              execState.message || 'Completed (post-apply verification skipped after local changes)',
+            );
             return;
           }
 

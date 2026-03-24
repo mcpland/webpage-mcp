@@ -56,6 +56,19 @@ interface ApplyVerificationSignals {
   hadElementDisconnect: boolean;
 }
 
+function uniqueNodes<T extends Node>(nodes: readonly (T | null | undefined)[]): T[] {
+  const seen = new Set<T>();
+  const out: T[] = [];
+
+  for (const node of nodes) {
+    if (!node || seen.has(node)) continue;
+    seen.add(node);
+    out.push(node);
+  }
+
+  return out;
+}
+
 function normalizeClassList(classes: readonly string[]): string[] {
   return Array.from(
     new Set(
@@ -271,9 +284,8 @@ function isDomMutationRelevant(
       continue;
     }
 
-    if (!(recordTarget instanceof Element)) continue;
-
     if (record.type === 'attributes') {
+      if (!(recordTarget instanceof Element)) continue;
       try {
         if (recordTarget === target || recordTarget.contains(target) || target.contains(recordTarget)) {
           return true;
@@ -284,12 +296,18 @@ function isDomMutationRelevant(
     }
 
     if (record.type === 'childList') {
-      try {
-        if (recordTarget === target || recordTarget.contains(target) || target.contains(recordTarget)) {
+      if (recordTarget instanceof ShadowRoot) {
+        if (recordTarget === target.getRootNode()) {
           return true;
         }
-      } catch {
-        // Fall through to removed-node checks
+      } else if (recordTarget instanceof Element) {
+        try {
+          if (recordTarget === target || recordTarget.contains(target) || target.contains(recordTarget)) {
+            return true;
+          }
+        } catch {
+          // Fall through to removed-node checks
+        }
       }
 
       for (const node of record.removedNodes) {
@@ -313,6 +331,14 @@ async function observeVerificationSignals(
   delayMs: number,
 ): Promise<ApplyVerificationSignals> {
   const originalElements = snapshot.targets.map((target) => locateElement(target.locator));
+  const rootNodes = uniqueNodes(originalElements.map((element) => element?.getRootNode?.() ?? null));
+  const observedDocuments = uniqueNodes(
+    rootNodes.map((root) => (root instanceof Document ? root : root instanceof ShadowRoot ? root.ownerDocument : null)),
+  );
+  const observedDomTargets = uniqueNodes<Node>([
+    ...rootNodes.filter((root): root is ShadowRoot => root instanceof ShadowRoot),
+    ...observedDocuments.map((doc) => doc.body ?? doc.documentElement),
+  ]);
   const signals: ApplyVerificationSignals = {
     hadRelevantMutation: false,
     hadElementDisconnect: false,
@@ -329,31 +355,44 @@ async function observeVerificationSignals(
     const finish = (): void => {
       if (settled) return;
       settled = true;
-      headObserver?.disconnect();
-      domObserver?.disconnect();
+      for (const observer of headObservers) {
+        observer.disconnect();
+      }
+      for (const observer of domObservers) {
+        observer.disconnect();
+      }
       markDisconnectIfNeeded(originalElements, signals);
       resolve(signals);
     };
 
-    const headObserver =
-      typeof MutationObserver !== 'undefined' && document.head
-        ? new MutationObserver(() => {
-            signals.hadRelevantMutation = true;
-          })
-        : null;
-    headObserver?.observe(document.head!, HEAD_MUTATION_OPTIONS);
+    const headObservers =
+      typeof MutationObserver !== 'undefined'
+        ? observedDocuments
+            .map((doc) => {
+              if (!doc.head) return null;
+              const observer = new MutationObserver(() => {
+                signals.hadRelevantMutation = true;
+              });
+              observer.observe(doc.head, HEAD_MUTATION_OPTIONS);
+              return observer;
+            })
+            .filter((observer): observer is MutationObserver => observer !== null)
+        : [];
 
-    const domTarget = document.body ?? document.documentElement;
-    const domObserver =
-      typeof MutationObserver !== 'undefined' && domTarget
-        ? new MutationObserver((records) => {
-            markDisconnectIfNeeded(originalElements, signals);
-            if (records.some((record) => isDomMutationRelevant(record, originalElements))) {
-              signals.hadRelevantMutation = true;
-            }
-          })
-        : null;
-    domObserver?.observe(domTarget!, DOM_MUTATION_OPTIONS);
+    const domObservers =
+      typeof MutationObserver !== 'undefined'
+        ? observedDomTargets
+            .map((target) => {
+              const observer = new MutationObserver((records) => {
+                markDisconnectIfNeeded(originalElements, signals);
+                if (records.some((record) => isDomMutationRelevant(record, originalElements))) {
+                  signals.hadRelevantMutation = true;
+                }
+              });
+              observer.observe(target, DOM_MUTATION_OPTIONS);
+              return observer;
+            })
+        : [];
 
     window.setTimeout(finish, delayMs);
   });

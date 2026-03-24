@@ -89,6 +89,34 @@ describe('apply-verifier', () => {
     expect(result.status).toBe('verified');
   });
 
+  it('detects HMR-like mutation signals inside shadow roots', async () => {
+    const host = document.createElement('div');
+    host.id = 'shadow-host';
+    const shadowRoot = host.attachShadow({ mode: 'open' });
+    const element = document.createElement('div');
+    element.id = 'target';
+    element.textContent = 'Saved';
+    shadowRoot.appendChild(element);
+    document.body.appendChild(host);
+
+    const summary = createSummary(element, {
+      textChange: { before: 'Draft', after: 'Saved' },
+    });
+
+    const snapshot = createApplyVerificationSnapshotFromSummaries([summary]);
+    expect(snapshot).not.toBeNull();
+
+    window.setTimeout(() => {
+      const marker = document.createElement('span');
+      marker.textContent = 'pulse';
+      shadowRoot.appendChild(marker);
+      marker.remove();
+    }, 5);
+
+    const result = await verifyApplySnapshotSettled(snapshot!, { attempts: 2, settleDelayMs: 20 });
+    expect(result.status).toBe('verified');
+  });
+
   it('reports mismatch when the located element no longer matches the captured state', async () => {
     const element = document.createElement('div');
     element.id = 'target';
