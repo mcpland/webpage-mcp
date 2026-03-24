@@ -58,6 +58,7 @@ async function waitForTabReady(
 ): Promise<chrome.tabs.Tab> {
   const deadline = Date.now() + TAB_RESOLUTION_WAIT_TIMEOUT_MS;
   let lastSeen = await chrome.tabs.get(tabId);
+  let sawNavigationSignal = false;
 
   while (Date.now() < deadline) {
     const current = await chrome.tabs.get(tabId);
@@ -67,15 +68,30 @@ async function waitForTabReady(
     const observedUrl = pendingUrl || currentUrl;
 
     if (options.targetUrl && observedUrl === options.targetUrl) {
-      return current;
+      sawNavigationSignal = true;
+      if (current.status === 'complete') {
+        return current;
+      }
     }
 
     if (options.previousUrl && observedUrl && observedUrl !== options.previousUrl) {
-      return current;
+      sawNavigationSignal = true;
+      if (current.status === 'complete') {
+        return current;
+      }
+    }
+
+    if (current.status !== 'complete') {
+      sawNavigationSignal = true;
     }
 
     if (current.status === 'complete') {
-      return current;
+      if (!options.targetUrl && !options.previousUrl) {
+        return current;
+      }
+      if (sawNavigationSignal) {
+        return current;
+      }
     }
 
     await sleep(RUN_POLL_INTERVAL_MS);

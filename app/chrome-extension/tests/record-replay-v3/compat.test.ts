@@ -154,4 +154,95 @@ describe("record-replay-v3 compat", () => {
       }),
     );
   });
+
+  it("waits for startUrl navigation to actually begin before enqueueing a run on an explicit tab", async () => {
+    const tabBeforeNavigation = {
+      id: 31,
+      url: "https://example.com/current",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+    const tabWhileNavigating = {
+      id: 31,
+      url: "https://example.com/current",
+      pendingUrl: "https://example.com/target",
+      active: true,
+      status: "loading",
+      windowId: 1,
+    };
+    const tabAfterNavigation = {
+      id: 31,
+      url: "https://example.com/target",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+
+    asMock(chrome.tabs.get)
+      .mockResolvedValueOnce(tabBeforeNavigation)
+      .mockResolvedValueOnce(tabBeforeNavigation)
+      .mockResolvedValueOnce(tabBeforeNavigation)
+      .mockResolvedValueOnce(tabWhileNavigating)
+      .mockResolvedValueOnce(tabAfterNavigation);
+    asMock(chrome.tabs.update).mockResolvedValue(tabAfterNavigation);
+
+    await enqueueRunAndWait({
+      flowId: "flow-3" as any,
+      tabId: 31,
+      startUrl: "https://example.com/target",
+    });
+
+    expect(chrome.tabs.update).toHaveBeenCalledWith(31, {
+      url: "https://example.com/target",
+    });
+    expect(chrome.tabs.get).toHaveBeenCalledTimes(5);
+    expect(mocks.enqueueRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        flowId: "flow-3",
+        tabId: 31,
+      }),
+    );
+  });
+
+  it("waits for a refresh to leave the pre-reload complete state before enqueueing", async () => {
+    const tabBeforeReload = {
+      id: 41,
+      url: "https://example.com/dashboard",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+    const tabReloading = {
+      id: 41,
+      url: "https://example.com/dashboard",
+      active: true,
+      status: "loading",
+      windowId: 1,
+    };
+
+    asMock(chrome.tabs.get)
+      .mockResolvedValueOnce(tabBeforeReload)
+      .mockResolvedValueOnce(tabBeforeReload)
+      .mockResolvedValueOnce(tabBeforeReload)
+      .mockResolvedValueOnce(tabReloading)
+      .mockResolvedValueOnce(tabBeforeReload);
+
+    await enqueueRunAndWait({
+      flowId: "flow-4" as any,
+      tabId: 41,
+      refresh: true,
+    });
+
+    expect(chrome.tabs.reload).toHaveBeenCalledWith(41);
+    expect(chrome.tabs.get).toHaveBeenCalledTimes(5);
+    expect(mocks.enqueueRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        flowId: "flow-4",
+        tabId: 41,
+      }),
+    );
+  });
 });
