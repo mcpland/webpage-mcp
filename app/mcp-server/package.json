@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "nodemon --watch src --ext ts,js,json --ignore dist/ --exec \"npm run build && npm run register:dev\"",
     "build": "tsup --config tsup.config.ts && node scripts/postbuild.mjs",
+    "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint 'src/**/*.{js,ts}'",

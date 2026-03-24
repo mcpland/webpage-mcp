@@ -55,6 +55,12 @@ import {
   type ExecutionState,
 } from './execution-tracker';
 import { createDesignTokensService, type DesignTokensService } from './design-tokens';
+import {
+  createApplyVerificationSnapshotFromSummaries,
+  createApplyVerificationSnapshotFromTransaction,
+  verifyApplySnapshotSettled,
+  type ApplyVerificationSnapshot,
+} from './apply-verifier';
 
 // =============================================================================
 // Types
@@ -99,6 +105,12 @@ interface EditorInternalState {
   propertyPanelPosition: { left: number; top: number } | null;
   /** Cleanup for window resize clamping (floating UI) */
   uiResizeCleanup: (() => void) | null;
+  /** Pending post-apply verification snapshots keyed by requestId */
+  pendingApplyVerifications: Map<string, ApplyVerificationSnapshot>;
+  /** Most recent execution request reflected by the toolbar */
+  latestExecutionRequestId: string | null;
+  /** Monotonic token used to suppress stale verification completions */
+  verificationEpoch: number;
 }
 
 // =============================================================================
@@ -135,6 +147,9 @@ export function createWebEditor(): WebEditorApi {
     toolbarPosition: null,
     propertyPanelPosition: null,
     uiResizeCleanup: null,
+    pendingApplyVerifications: new Map(),
+    latestExecutionRequestId: null,
+    verificationEpoch: 0,
   };
 
   /** Default modifiers for programmatic selection (e.g., from breadcrumbs) */
@@ -706,6 +721,7 @@ export function createWebEditor(): WebEditorApi {
       txId: tx.id,
       txTimestamp: tx.timestamp,
     };
+    const verificationSnapshot = createApplyVerificationSnapshotFromTransaction(tx);
 
     // Markers indicating error was already processed by attemptRollbackOnFailure
     const ROLLBACK_MARKERS = [
@@ -734,7 +750,7 @@ export function createWebEditor(): WebEditorApi {
 
         // Start tracking execution status if we have a requestId
         if (requestId && sessionId && state.executionTracker) {
-          state.executionTracker.track(requestId, sessionId);
+          trackExecution(requestId, sessionId, verificationSnapshot);
         }
 
         return { requestId, sessionId };
@@ -797,6 +813,7 @@ export function createWebEditor(): WebEditorApi {
     if (elements.length === 0) {
       throw new Error('No net changes to apply');
     }
+    const verificationSnapshot = createApplyVerificationSnapshotFromSummaries(elements);
 
     // Snapshot latest transaction for concurrency tracking
     const latestTx = undoStack[undoStack.length - 1]!;
@@ -835,7 +852,7 @@ export function createWebEditor(): WebEditorApi {
 
         // Start tracking execution status if we have a requestId
         if (requestId && sessionId && state.executionTracker) {
-          state.executionTracker.track(requestId, sessionId);
+          trackExecution(requestId, sessionId, verificationSnapshot);
         }
 
         // Clear transaction history after successful apply
@@ -1013,6 +1030,40 @@ export function createWebEditor(): WebEditorApi {
     console.error(`${WEB_EDITOR_LOG_PREFIX} Transaction apply error:`, error);
   }
 
+  function trackExecution(
+    requestId: string,
+    sessionId: string,
+    verificationSnapshot: ApplyVerificationSnapshot | null,
+  ): void {
+    state.latestExecutionRequestId = requestId;
+    if (verificationSnapshot) {
+      state.pendingApplyVerifications.set(requestId, verificationSnapshot);
+    } else {
+      state.pendingApplyVerifications.delete(requestId);
+    }
+    state.executionTracker?.track(requestId, sessionId);
+  }
+
+  async function runPostApplyVerification(
+    requestId: string,
+    snapshot: ApplyVerificationSnapshot,
+    verificationEpoch: number,
+  ): Promise<void> {
+    try {
+      const result = await verifyApplySnapshotSettled(snapshot);
+      if (state.latestExecutionRequestId !== requestId) return;
+      if (state.verificationEpoch !== verificationEpoch) return;
+      state.toolbar?.setStatus(result.status, result.message);
+    } catch (error) {
+      if (state.latestExecutionRequestId !== requestId) return;
+      if (state.verificationEpoch !== verificationEpoch) return;
+      const message = error instanceof Error ? error.message : String(error);
+      state.toolbar?.setStatus('uncertain', message || 'Post-apply verification failed');
+    } finally {
+      state.pendingApplyVerifications.delete(requestId);
+    }
+  }
+
   /**
    * Start the editor
    */
@@ -1109,6 +1160,32 @@ export function createWebEditor(): WebEditorApi {
       // Initialize ExecutionTracker for tracking Agent execution status (Phase 3.10)
       state.executionTracker = createExecutionTracker({
         onStatusChange: (execState: ExecutionState) => {
+          if (state.latestExecutionRequestId !== execState.requestId) {
+            return;
+          }
+
+          const verificationSnapshot = state.pendingApplyVerifications.get(execState.requestId);
+          if (execState.status === 'completed' && verificationSnapshot) {
+            state.toolbar?.setStatus('verifying', 'Verifying applied changes...');
+            state.verificationEpoch += 1;
+            const verificationEpoch = state.verificationEpoch;
+            void runPostApplyVerification(
+              execState.requestId,
+              verificationSnapshot,
+              verificationEpoch,
+            );
+            return;
+          }
+
+          if (
+            execState.status === 'failed' ||
+            execState.status === 'error' ||
+            execState.status === 'timeout' ||
+            execState.status === 'cancelled'
+          ) {
+            state.pendingApplyVerifications.delete(execState.requestId);
+          }
+
           const statusMap: Record<string, string> = {
             pending: 'applying',
             starting: 'starting',
@@ -1310,6 +1387,9 @@ export function createWebEditor(): WebEditorApi {
       state.hoveredElement = null;
       state.selectedElement = null;
       state.applyingSnapshot = null;
+      state.pendingApplyVerifications.clear();
+      state.latestExecutionRequestId = null;
+      state.verificationEpoch = 0;
       state.active = false;
 
       console.error(`${WEB_EDITOR_LOG_PREFIX} Failed to start:`, error);
@@ -1404,6 +1484,9 @@ export function createWebEditor(): WebEditorApi {
       state.hoveredElement = null;
       state.selectedElement = null;
       state.applyingSnapshot = null;
+      state.pendingApplyVerifications.clear();
+      state.latestExecutionRequestId = null;
+      state.verificationEpoch = 0;
 
       console.log(`${WEB_EDITOR_LOG_PREFIX} Stopped`);
     } catch (error) {
@@ -1425,6 +1508,9 @@ export function createWebEditor(): WebEditorApi {
       state.hoveredElement = null;
       state.selectedElement = null;
       state.applyingSnapshot = null;
+      state.pendingApplyVerifications.clear();
+      state.latestExecutionRequestId = null;
+      state.verificationEpoch = 0;
     } finally {
       // Always broadcast clear state to sidepanel (removes chips)
       broadcastEditorCleared();
