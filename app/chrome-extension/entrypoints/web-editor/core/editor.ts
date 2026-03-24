@@ -107,8 +107,12 @@ interface EditorInternalState {
   uiResizeCleanup: (() => void) | null;
   /** Pending post-apply verification snapshots keyed by requestId */
   pendingApplyVerifications: Map<string, ApplyVerificationSnapshot>;
+  /** Execution requests whose post-apply verification was invalidated by user actions */
+  invalidatedApplyRequests: Set<string>;
   /** Most recent execution request reflected by the toolbar */
   latestExecutionRequestId: string | null;
+  /** Request currently running post-apply verification */
+  verificationInFlightRequestId: string | null;
   /** Monotonic token used to suppress stale verification completions */
   verificationEpoch: number;
 }
@@ -148,7 +152,9 @@ export function createWebEditor(): WebEditorApi {
     propertyPanelPosition: null,
     uiResizeCleanup: null,
     pendingApplyVerifications: new Map(),
+    invalidatedApplyRequests: new Set(),
     latestExecutionRequestId: null,
+    verificationInFlightRequestId: null,
     verificationEpoch: 0,
   };
 
@@ -335,6 +341,10 @@ export function createWebEditor(): WebEditorApi {
    * Handle element selection from EventController
    */
   function handleSelect(element: Element, modifiers: EventModifiers): void {
+    if (!state.applyingSnapshot) {
+      invalidatePendingApplyVerification();
+    }
+
     // Commit any in-progress edit when selecting a different element
     if (editSession && editSession.element !== element) {
       commitEdit();
@@ -372,6 +382,10 @@ export function createWebEditor(): WebEditorApi {
    * Handle deselection (ESC key) from EventController
    */
   function handleDeselect(): void {
+    if (!state.applyingSnapshot) {
+      invalidatePendingApplyVerification();
+    }
+
     state.selectedElement = null;
 
     // Clear selection tracking and force immediate update
@@ -608,6 +622,10 @@ export function createWebEditor(): WebEditorApi {
 
     // Broadcast aggregated TX state for AgentChat integration (Phase 1.4)
     broadcastTxChanged(action as WebEditorTxChangeAction);
+
+    if (!state.applyingSnapshot) {
+      invalidatePendingApplyVerification();
+    }
 
   }
 
@@ -1030,12 +1048,32 @@ export function createWebEditor(): WebEditorApi {
     console.error(`${WEB_EDITOR_LOG_PREFIX} Transaction apply error:`, error);
   }
 
+  function invalidatePendingApplyVerification(): void {
+    const requestId = state.latestExecutionRequestId;
+    if (!requestId) return;
+
+    const hadPendingSnapshot = state.pendingApplyVerifications.delete(requestId);
+    const verificationInFlight = state.verificationInFlightRequestId === requestId;
+    if (!hadPendingSnapshot && !verificationInFlight) {
+      return;
+    }
+
+    state.invalidatedApplyRequests.add(requestId);
+    state.verificationEpoch += 1;
+
+    if (verificationInFlight) {
+      state.verificationInFlightRequestId = null;
+      state.toolbar?.setStatus('idle');
+    }
+  }
+
   function trackExecution(
     requestId: string,
     sessionId: string,
     verificationSnapshot: ApplyVerificationSnapshot | null,
   ): void {
     state.latestExecutionRequestId = requestId;
+    state.invalidatedApplyRequests.delete(requestId);
     if (verificationSnapshot) {
       state.pendingApplyVerifications.set(requestId, verificationSnapshot);
     } else {
@@ -1049,6 +1087,7 @@ export function createWebEditor(): WebEditorApi {
     snapshot: ApplyVerificationSnapshot,
     verificationEpoch: number,
   ): Promise<void> {
+    state.verificationInFlightRequestId = requestId;
     try {
       const result = await verifyApplySnapshotSettled(snapshot);
       if (state.latestExecutionRequestId !== requestId) return;
@@ -1060,6 +1099,9 @@ export function createWebEditor(): WebEditorApi {
       const message = error instanceof Error ? error.message : String(error);
       state.toolbar?.setStatus('uncertain', message || 'Post-apply verification failed');
     } finally {
+      if (state.verificationInFlightRequestId === requestId) {
+        state.verificationInFlightRequestId = null;
+      }
       state.pendingApplyVerifications.delete(requestId);
     }
   }
@@ -1164,6 +1206,12 @@ export function createWebEditor(): WebEditorApi {
             return;
           }
 
+          const verificationInvalidated = state.invalidatedApplyRequests.has(execState.requestId);
+          if (verificationInvalidated && execState.status === 'completed') {
+            state.invalidatedApplyRequests.delete(execState.requestId);
+            return;
+          }
+
           const verificationSnapshot = state.pendingApplyVerifications.get(execState.requestId);
           if (execState.status === 'completed' && verificationSnapshot) {
             state.toolbar?.setStatus('verifying', 'Verifying applied changes...');
@@ -1184,6 +1232,7 @@ export function createWebEditor(): WebEditorApi {
             execState.status === 'cancelled'
           ) {
             state.pendingApplyVerifications.delete(execState.requestId);
+            state.invalidatedApplyRequests.delete(execState.requestId);
           }
 
           const statusMap: Record<string, string> = {
@@ -1388,7 +1437,9 @@ export function createWebEditor(): WebEditorApi {
       state.selectedElement = null;
       state.applyingSnapshot = null;
       state.pendingApplyVerifications.clear();
+      state.invalidatedApplyRequests.clear();
       state.latestExecutionRequestId = null;
+      state.verificationInFlightRequestId = null;
       state.verificationEpoch = 0;
       state.active = false;
 
@@ -1485,7 +1536,9 @@ export function createWebEditor(): WebEditorApi {
       state.selectedElement = null;
       state.applyingSnapshot = null;
       state.pendingApplyVerifications.clear();
+      state.invalidatedApplyRequests.clear();
       state.latestExecutionRequestId = null;
+      state.verificationInFlightRequestId = null;
       state.verificationEpoch = 0;
 
       console.log(`${WEB_EDITOR_LOG_PREFIX} Stopped`);
@@ -1509,7 +1562,9 @@ export function createWebEditor(): WebEditorApi {
       state.selectedElement = null;
       state.applyingSnapshot = null;
       state.pendingApplyVerifications.clear();
+      state.invalidatedApplyRequests.clear();
       state.latestExecutionRequestId = null;
+      state.verificationInFlightRequestId = null;
       state.verificationEpoch = 0;
     } finally {
       // Always broadcast clear state to sidepanel (removes chips)

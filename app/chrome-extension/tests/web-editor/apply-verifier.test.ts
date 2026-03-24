@@ -36,7 +36,7 @@ describe('apply-verifier', () => {
     document.body.innerHTML = '';
   });
 
-  it('verifies mixed text/class/style changes against the live DOM snapshot', async () => {
+  it('returns uncertain when no HMR signal is observed after apply', async () => {
     const element = document.createElement('div');
     element.id = 'target';
     element.className = 'card active';
@@ -57,6 +57,35 @@ describe('apply-verifier', () => {
     expect(snapshot).not.toBeNull();
 
     const result = await verifyApplySnapshotSettled(snapshot!, { attempts: 1, settleDelayMs: 0 });
+    expect(result.status).toBe('uncertain');
+  });
+
+  it('verifies matching DOM state after observing an HMR-like mutation signal', async () => {
+    const element = document.createElement('div');
+    element.id = 'target';
+    element.className = 'card active';
+    element.textContent = 'Saved';
+    element.style.color = 'rgb(255, 0, 0)';
+    document.body.appendChild(element);
+
+    const summary = createSummary(element, {
+      textChange: { before: 'Draft', after: 'Saved' },
+      classChanges: { before: ['card'], after: ['card', 'active'] },
+      styleChanges: {
+        before: { color: 'rgb(0, 0, 0)' },
+        after: { color: 'rgb(255, 0, 0)' },
+      },
+    });
+
+    const snapshot = createApplyVerificationSnapshotFromSummaries([summary]);
+    expect(snapshot).not.toBeNull();
+
+    window.setTimeout(() => {
+      element.classList.add('hmr-pulse');
+      element.classList.remove('hmr-pulse');
+    }, 5);
+
+    const result = await verifyApplySnapshotSettled(snapshot!, { attempts: 2, settleDelayMs: 20 });
     expect(result.status).toBe('verified');
   });
 
@@ -119,7 +148,12 @@ describe('apply-verifier', () => {
     const snapshot = createApplyVerificationSnapshotFromTransaction(tx);
     expect(snapshot).not.toBeNull();
 
-    const result = await verifyApplySnapshotSettled(snapshot!, { attempts: 1, settleDelayMs: 0 });
+    window.setTimeout(() => {
+      element.classList.add('hmr-pulse');
+      element.classList.remove('hmr-pulse');
+    }, 5);
+
+    const result = await verifyApplySnapshotSettled(snapshot!, { attempts: 2, settleDelayMs: 20 });
     expect(result.status).toBe('verified');
   });
 });

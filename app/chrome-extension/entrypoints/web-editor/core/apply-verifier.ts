@@ -33,9 +33,27 @@ export interface ApplyVerificationOptions {
 
 const DEFAULT_ATTEMPTS = 6;
 const DEFAULT_SETTLE_DELAY_MS = 250;
+const HEAD_MUTATION_OPTIONS: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  characterData: true,
+  attributes: true,
+};
+const DOM_MUTATION_OPTIONS: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  attributes: true,
+  attributeFilter: ['class', 'style', 'id'],
+  characterData: true,
+};
 
 interface ElementVerificationResult {
   status: ApplyVerificationStatus;
+}
+
+interface ApplyVerificationSignals {
+  hadRelevantMutation: boolean;
+  hadElementDisconnect: boolean;
 }
 
 function normalizeClassList(classes: readonly string[]): string[] {
@@ -211,10 +229,152 @@ function summarizeResults(results: readonly ElementVerificationResult[]): ApplyV
   };
 }
 
-function wait(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, delayMs);
+function mergeSignals(
+  current: ApplyVerificationSignals,
+  next: ApplyVerificationSignals,
+): ApplyVerificationSignals {
+  return {
+    hadRelevantMutation: current.hadRelevantMutation || next.hadRelevantMutation,
+    hadElementDisconnect: current.hadElementDisconnect || next.hadElementDisconnect,
+  };
+}
+
+function markDisconnectIfNeeded(
+  originalElements: readonly (Element | null)[],
+  signals: ApplyVerificationSignals,
+): void {
+  if (signals.hadElementDisconnect) return;
+  for (const element of originalElements) {
+    if (element && !element.isConnected) {
+      signals.hadElementDisconnect = true;
+      signals.hadRelevantMutation = true;
+      return;
+    }
+  }
+}
+
+function isDomMutationRelevant(
+  record: MutationRecord,
+  originalElements: readonly (Element | null)[],
+): boolean {
+  for (const target of originalElements) {
+    if (!target) continue;
+
+    const recordTarget = record.target;
+    if (record.type === 'characterData') {
+      if (recordTarget instanceof Text) {
+        const parent = recordTarget.parentElement;
+        if (parent && (parent === target || parent.contains(target) || target.contains(parent))) {
+          return true;
+        }
+      }
+      continue;
+    }
+
+    if (!(recordTarget instanceof Element)) continue;
+
+    if (record.type === 'attributes') {
+      try {
+        if (recordTarget === target || recordTarget.contains(target) || target.contains(recordTarget)) {
+          return true;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    if (record.type === 'childList') {
+      try {
+        if (recordTarget === target || recordTarget.contains(target) || target.contains(recordTarget)) {
+          return true;
+        }
+      } catch {
+        // Fall through to removed-node checks
+      }
+
+      for (const node of record.removedNodes) {
+        if (node === target) return true;
+        if (node instanceof Element) {
+          try {
+            if (node.contains(target)) return true;
+          } catch {
+            // Ignore invalid tree state during mutation delivery
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+async function observeVerificationSignals(
+  snapshot: ApplyVerificationSnapshot,
+  delayMs: number,
+): Promise<ApplyVerificationSignals> {
+  const originalElements = snapshot.targets.map((target) => locateElement(target.locator));
+  const signals: ApplyVerificationSignals = {
+    hadRelevantMutation: false,
+    hadElementDisconnect: false,
+  };
+
+  markDisconnectIfNeeded(originalElements, signals);
+  if (delayMs <= 0) {
+    return signals;
+  }
+
+  return await new Promise((resolve) => {
+    let settled = false;
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      headObserver?.disconnect();
+      domObserver?.disconnect();
+      markDisconnectIfNeeded(originalElements, signals);
+      resolve(signals);
+    };
+
+    const headObserver =
+      typeof MutationObserver !== 'undefined' && document.head
+        ? new MutationObserver(() => {
+            signals.hadRelevantMutation = true;
+          })
+        : null;
+    headObserver?.observe(document.head!, HEAD_MUTATION_OPTIONS);
+
+    const domTarget = document.body ?? document.documentElement;
+    const domObserver =
+      typeof MutationObserver !== 'undefined' && domTarget
+        ? new MutationObserver((records) => {
+            markDisconnectIfNeeded(originalElements, signals);
+            if (records.some((record) => isDomMutationRelevant(record, originalElements))) {
+              signals.hadRelevantMutation = true;
+            }
+          })
+        : null;
+    domObserver?.observe(domTarget!, DOM_MUTATION_OPTIONS);
+
+    window.setTimeout(finish, delayMs);
   });
+}
+
+function finalizeVerificationResult(
+  latest: ApplyVerificationResult,
+  signals: ApplyVerificationSignals,
+): ApplyVerificationResult {
+  if (latest.status !== 'verified') {
+    return latest;
+  }
+
+  if (signals.hadRelevantMutation || signals.hadElementDisconnect) {
+    return latest;
+  }
+
+  return {
+    status: 'uncertain',
+    message: 'No HMR signal observed after apply',
+  };
 }
 
 export async function verifyApplySnapshotSettled(
@@ -225,13 +385,18 @@ export async function verifyApplySnapshotSettled(
   const settleDelayMs = Math.max(0, Math.floor(options.settleDelayMs ?? DEFAULT_SETTLE_DELAY_MS));
 
   let latest = summarizeResults(snapshot.targets.map(verifyTarget));
+  let signals: ApplyVerificationSignals = {
+    hadRelevantMutation: false,
+    hadElementDisconnect: false,
+  };
 
-  for (let attempt = 1; attempt < attempts && latest.status !== 'verified'; attempt += 1) {
-    if (settleDelayMs > 0) {
-      await wait(settleDelayMs);
-    }
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    signals = mergeSignals(signals, await observeVerificationSignals(snapshot, settleDelayMs));
     latest = summarizeResults(snapshot.targets.map(verifyTarget));
+    if (latest.status === 'verified' && (signals.hadRelevantMutation || signals.hadElementDisconnect)) {
+      break;
+    }
   }
 
-  return latest;
+  return finalizeVerificationResult(latest, signals);
 }
