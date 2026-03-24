@@ -155,6 +155,92 @@ describe("record-replay-v3 compat", () => {
     );
   });
 
+  it("falls back to an about:blank tab instead of binding runs to a non-web current tab", async () => {
+    const extensionTab = {
+      id: 10,
+      url: "chrome-extension://abc123/popup.html",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+    const createdTab = {
+      id: 55,
+      url: "about:blank",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+
+    asMock(chrome.tabs.query).mockImplementation(async () => [extensionTab]);
+    asMock(chrome.tabs.create).mockResolvedValue(createdTab);
+    asMock(chrome.tabs.get)
+      .mockResolvedValueOnce(createdTab)
+      .mockResolvedValueOnce(createdTab);
+
+    await enqueueRunAndWait({
+      flowId: "flow-current-fallback" as any,
+      tabTarget: "current",
+    });
+
+    expect(chrome.tabs.create).toHaveBeenCalledWith({
+      active: true,
+      url: "about:blank",
+    });
+    expect(mocks.enqueueRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        flowId: "flow-current-fallback",
+        tabId: 55,
+      }),
+    );
+  });
+
+  it("uses about:blank for new-tab runs when the active tab is not a web page", async () => {
+    const extensionTab = {
+      id: 12,
+      url: "chrome-extension://abc123/popup.html",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+    const createdTab = {
+      id: 77,
+      url: "about:blank",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+
+    asMock(chrome.tabs.query).mockImplementation(async () => [extensionTab]);
+    asMock(chrome.tabs.create).mockResolvedValue(createdTab);
+    asMock(chrome.tabs.get).mockImplementation(async (tabId: number) => {
+      if (tabId === 77) {
+        return createdTab;
+      }
+      if (tabId === 12) {
+        return extensionTab;
+      }
+      throw new Error(`Unknown tab ${tabId}`);
+    });
+
+    await enqueueRunAndWait({
+      flowId: "flow-new-fallback" as any,
+      tabTarget: "new",
+    });
+
+    expect(chrome.tabs.create).toHaveBeenCalledWith({
+      active: true,
+      url: "about:blank",
+    });
+    expect(mocks.enqueueRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        flowId: "flow-new-fallback",
+        tabId: 77,
+      }),
+    );
+  });
+
   it("waits for startUrl navigation to actually begin before enqueueing a run on an explicit tab", async () => {
     const tabBeforeNavigation = {
       id: 31,

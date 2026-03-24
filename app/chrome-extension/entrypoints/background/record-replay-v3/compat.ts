@@ -100,6 +100,15 @@ async function waitForTabReady(
   return lastSeen;
 }
 
+async function createFallbackRunTab(): Promise<number> {
+  const created = await chrome.tabs.create({ url: 'about:blank', active: true });
+  if (created.id === undefined) {
+    throw new Error('chrome.tabs.create returned a tab without id');
+  }
+  await waitForTabReady(created.id, { targetUrl: 'about:blank' });
+  return created.id;
+}
+
 export async function resolveRunTargetTab(input: RunTargetOptions): Promise<number | undefined> {
   const explicitTabId = isFiniteNumber(input.tabId) ? Math.floor(input.tabId) : undefined;
   const tabTarget = normalizeRunTarget(input.tabTarget);
@@ -132,10 +141,10 @@ export async function resolveRunTargetTab(input: RunTargetOptions): Promise<numb
 
   if (tabTarget === 'new') {
     const activeTabUrl = activeTab?.url;
-    const urlToOpen = startUrl ?? (isWebUrl(activeTabUrl) ? activeTabUrl : undefined);
+    const urlToOpen = startUrl ?? (isWebUrl(activeTabUrl) ? activeTabUrl : 'about:blank');
     const created = await chrome.tabs.create({
       active: true,
-      ...(urlToOpen ? { url: urlToOpen } : {}),
+      url: urlToOpen,
     });
     if (created.id === undefined) {
       throw new Error('chrome.tabs.create returned a tab without id');
@@ -181,6 +190,9 @@ export async function resolveRunTargetTab(input: RunTargetOptions): Promise<numb
   }
 
   if (targetTab?.id !== undefined) {
+    if (!isWebUrl(targetTab.url)) {
+      return createFallbackRunTab();
+    }
     if (shouldRefresh && isWebUrl(targetTab.url)) {
       await chrome.tabs.reload(targetTab.id);
       await waitForTabReady(targetTab.id, {
@@ -190,12 +202,7 @@ export async function resolveRunTargetTab(input: RunTargetOptions): Promise<numb
     return targetTab.id;
   }
 
-  const created = await chrome.tabs.create({ active: true });
-  if (created.id === undefined) {
-    throw new Error('chrome.tabs.create returned a tab without id');
-  }
-  await waitForTabReady(created.id);
-  return created.id;
+  return createFallbackRunTab();
 }
 
 export function isFlowV3Object(value: unknown): value is FlowV3 {
