@@ -1,7 +1,6 @@
 import { createErrorResponse, type ToolResult } from "@/common/tool-handler";
 import { TOOL_NAMES } from "webpage-mcp-shared";
-import { RecorderManager } from "../record-replay/recording/recorder-manager";
-import { buildRecordingStateSnapshot } from "../record-replay/recording/recording-state";
+import { RecorderManager, buildRecordingStateSnapshot } from "../recording";
 import type { FlowV3 } from "../record-replay-v3/domain/flow";
 import { saveFlowToV3 } from "../record-replay-v3/compat";
 

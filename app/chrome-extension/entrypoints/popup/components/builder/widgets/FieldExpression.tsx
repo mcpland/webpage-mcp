@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { evalExpression } from '@/entrypoints/background/record-replay/engine/utils/expression';
+import { evalExpression } from '@/entrypoints/background/replay-utils/expression';
 import './FieldCode.css';
 
 type FieldExpressionProps = {

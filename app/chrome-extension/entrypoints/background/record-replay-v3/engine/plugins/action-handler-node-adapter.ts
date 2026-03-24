@@ -20,7 +20,7 @@ import type {
   ExecutableActionType,
   ValidationResult,
   Action,
-} from '@/entrypoints/background/record-replay/actions/types';
+} from '@/entrypoints/background/replay-actions';
 
 import type { JsonValue, JsonObject } from '../../domain/json';
 import { RR_ERROR_CODES, createRRError, type RRError, type RRErrorCode } from '../../domain/errors';

@@ -3,11 +3,8 @@
  * @description Batch registration of action handlers into the RR-V3 PluginRegistry.
  */
 
-import { createReplayActionRegistry } from '@/entrypoints/background/record-replay/actions/handlers';
-import type {
-  ActionHandler,
-  ExecutableActionType,
-} from '@/entrypoints/background/record-replay/actions/types';
+import { createReplayActionRegistry } from '@/entrypoints/background/replay-actions';
+import type { ActionHandler, ExecutableActionType } from '@/entrypoints/background/replay-actions';
 
 import type { PluginRegistry } from './registry';
 import {
