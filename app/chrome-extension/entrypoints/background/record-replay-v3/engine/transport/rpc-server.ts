@@ -112,6 +112,7 @@ export class RpcServer {
   private readonly now: () => number;
   private readonly connections = new Map<string, PortConnection>();
   private eventUnsubscribe: (() => void) | null = null;
+  private connectionListenerInstalled = false;
 
   constructor(config: RpcServerConfig) {
     this.storage = config.storage;
@@ -128,7 +129,10 @@ export class RpcServer {
    * Start RPC Server
    */
   start(): void {
-    chrome.runtime.onConnect.addListener(this.handleConnect);
+    if (chrome.runtime?.onConnect?.addListener) {
+      chrome.runtime.onConnect.addListener(this.handleConnect);
+      this.connectionListenerInstalled = true;
+    }
 
     // Subscribe to all events and broadcast to connected ports
     this.eventUnsubscribe = this.events.subscribe((event) => {
@@ -140,7 +144,10 @@ export class RpcServer {
    * Stop RPC Server
    */
   stop(): void {
-    chrome.runtime.onConnect.removeListener(this.handleConnect);
+    if (this.connectionListenerInstalled && chrome.runtime?.onConnect?.removeListener) {
+      chrome.runtime.onConnect.removeListener(this.handleConnect);
+    }
+    this.connectionListenerInstalled = false;
 
     if (this.eventUnsubscribe) {
       this.eventUnsubscribe();
