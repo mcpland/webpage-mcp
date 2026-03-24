@@ -408,6 +408,25 @@ export async function updateSession(sessionId: string, updates: UpdateSessionInp
 }
 
 /**
+ * Update only the engine name for an existing session.
+ * Used to self-heal legacy sessions that reference engines no longer registered.
+ */
+export async function updateSessionEngineName(
+  sessionId: string,
+  engineName: EngineName,
+): Promise<void> {
+  const db = getDb();
+  const now = new Date().toISOString();
+  await db
+    .update(sessions)
+    .set({
+      engineName,
+      updatedAt: now,
+    })
+    .where(eq(sessions.id, sessionId));
+}
+
+/**
  * Delete a session by ID.
  * Note: Messages associated with this session are NOT automatically deleted.
  * The caller should handle message cleanup if needed.

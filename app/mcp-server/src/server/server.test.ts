@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { createSession, getSession } from '../agent/session-service';
 import { Server } from './index';
 
 describe('Server agent RPC runtime', () => {
@@ -77,6 +78,40 @@ describe('Server agent RPC runtime', () => {
     expect((response.json as { error?: string }).error).toBe(
       'Invalid engineName. Must be one of: codex, claude',
     );
+  });
+
+  test('agent.chat.act self-heals legacy sessions with unsupported engine names', async () => {
+    const projectResponse = await server.invokeAgentRpc({
+      operation: 'agent.projects.upsert',
+      body: {
+        name: 'Legacy Session Recovery Project',
+        rootPath: projectRoot,
+        preferredCli: 'codex',
+      },
+    });
+    const projectId = (projectResponse.json as { project?: { id?: string } }).project?.id;
+
+    expect(projectResponse.statusCode).toBe(200);
+    expect(projectId).toBeTruthy();
+
+    const legacySession = await createSession(projectId!, 'cursor' as any, {
+      name: 'Legacy Cursor Session',
+    });
+
+    const response = await server.invokeAgentRpc({
+      operation: 'agent.chat.act',
+      params: { sessionId: 'legacy-session-runtime' },
+      body: {
+        instruction: 'Say hello',
+        dbSessionId: legacySession.id,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect((response.json as { status?: string }).status).toBe('accepted');
+
+    const healedSession = await getSession(legacySession.id);
+    expect(healedSession?.engineName).toBe('codex');
   });
 
   test('unsupported operation returns bad request', async () => {

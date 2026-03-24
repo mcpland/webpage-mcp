@@ -16,6 +16,7 @@ import {
   getSession,
   updateEngineSessionId,
   updateManagementInfo,
+  updateSessionEngineName,
   touchSessionActivity,
   type AgentSession,
 } from './session-service';
@@ -60,6 +61,10 @@ export class AgentChatService {
       }
       this.defaultEngineName = firstEngine.name;
     }
+  }
+
+  private hasRegisteredEngine(name: unknown): name is EngineName {
+    return typeof name === 'string' && this.engines.has(name as EngineName);
   }
 
   async handleAct(sessionId: string, payload: AgentActRequest): Promise<{ requestId: string }> {
@@ -115,11 +120,24 @@ export class AgentChatService {
     // Resolve engine name - session binding takes precedence
     let engineName: EngineName;
     if (dbSession) {
-      engineName = dbSession.engineName as EngineName;
-      // Validate cliPreference matches session engine
-      if (payload.cliPreference && payload.cliPreference !== engineName) {
-        throw new Error(
-          `cliPreference (${payload.cliPreference}) does not match session.engineName (${engineName})`,
+      const sessionEngineName = typeof dbSession.engineName === 'string' ? dbSession.engineName.trim() : '';
+      if (this.hasRegisteredEngine(sessionEngineName)) {
+        engineName = sessionEngineName;
+        // Validate cliPreference matches session engine
+        if (payload.cliPreference && payload.cliPreference !== engineName) {
+          throw new Error(
+            `cliPreference (${payload.cliPreference}) does not match session.engineName (${engineName})`,
+          );
+        }
+      } else {
+        engineName = this.resolveEngineName(
+          payload.cliPreference as EngineName | undefined,
+          projectPreferredCli,
+        );
+        await updateSessionEngineName(dbSession.id, engineName);
+        dbSession.engineName = engineName;
+        console.warn(
+          `[AgentChatService] Migrated legacy session "${dbSession.id}" from unsupported engine "${sessionEngineName || 'unknown'}" to "${engineName}"`,
         );
       }
     } else {
