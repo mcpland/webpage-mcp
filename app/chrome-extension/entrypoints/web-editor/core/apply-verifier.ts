@@ -56,6 +56,13 @@ interface ApplyVerificationSignals {
   hadElementDisconnect: boolean;
 }
 
+interface ApplyVerificationObservationContext {
+  originalElement: Element | null;
+  documents: Document[];
+  domTargets: Node[];
+  allowRootLevelMutationSignal: boolean;
+}
+
 function uniqueNodes<T extends Node>(nodes: readonly (T | null | undefined)[]): T[] {
   const seen = new Set<T>();
   const out: T[] = [];
@@ -67,6 +74,84 @@ function uniqueNodes<T extends Node>(nodes: readonly (T | null | undefined)[]): 
   }
 
   return out;
+}
+
+function safeQuerySelector(root: ParentNode, selector: string): Element | null {
+  try {
+    return root.querySelector(selector);
+  } catch {
+    return null;
+  }
+}
+
+function isSelectorUnique(root: ParentNode, selector: string): boolean {
+  try {
+    return root.querySelectorAll(selector).length === 1;
+  } catch {
+    return false;
+  }
+}
+
+function resolveObservationContext(
+  locator: ElementLocator,
+  rootDocument: Document = document,
+): Pick<ApplyVerificationObservationContext, 'documents' | 'domTargets'> {
+  let doc = rootDocument;
+
+  if (locator.frameChain?.length) {
+    for (const frameSelector of locator.frameChain) {
+      if (!isSelectorUnique(doc, frameSelector)) {
+        break;
+      }
+      const frame = safeQuerySelector(doc, frameSelector);
+      if (!(frame instanceof HTMLIFrameElement) || !frame.contentDocument) {
+        break;
+      }
+      doc = frame.contentDocument;
+    }
+  }
+
+  let queryRoot: Document | ShadowRoot = doc;
+  const domTargets: Node[] = [];
+
+  if (locator.shadowHostChain?.length) {
+    for (const hostSelector of locator.shadowHostChain) {
+      if (!isSelectorUnique(queryRoot, hostSelector)) {
+        break;
+      }
+      const host = safeQuerySelector(queryRoot, hostSelector);
+      if (!(host instanceof Element)) {
+        break;
+      }
+      const shadowRoot = (host as Element & { shadowRoot?: ShadowRoot | null }).shadowRoot;
+      if (!shadowRoot) {
+        break;
+      }
+      domTargets.push(shadowRoot);
+      queryRoot = shadowRoot;
+    }
+  }
+
+  return {
+    documents: [doc],
+    domTargets,
+  };
+}
+
+function buildObservationContexts(
+  snapshot: ApplyVerificationSnapshot,
+): ApplyVerificationObservationContext[] {
+  return snapshot.targets.map((target) => {
+    const originalElement = locateElement(target.locator);
+    const resolvedContext = resolveObservationContext(target.locator);
+
+    return {
+      originalElement,
+      documents: resolvedContext.documents,
+      domTargets: resolvedContext.domTargets,
+      allowRootLevelMutationSignal: !originalElement,
+    };
+  });
 }
 
 function normalizeClassList(classes: readonly string[]): string[] {
@@ -330,15 +415,37 @@ async function observeVerificationSignals(
   snapshot: ApplyVerificationSnapshot,
   delayMs: number,
 ): Promise<ApplyVerificationSignals> {
-  const originalElements = snapshot.targets.map((target) => locateElement(target.locator));
-  const rootNodes = uniqueNodes(originalElements.map((element) => element?.getRootNode?.() ?? null));
-  const observedDocuments = uniqueNodes(
-    rootNodes.map((root) => (root instanceof Document ? root : root instanceof ShadowRoot ? root.ownerDocument : null)),
-  );
-  const observedDomTargets = uniqueNodes<Node>([
-    ...rootNodes.filter((root): root is ShadowRoot => root instanceof ShadowRoot),
-    ...observedDocuments.map((doc) => doc.body ?? doc.documentElement),
+  const observationContexts = buildObservationContexts(snapshot);
+  const originalElements = observationContexts.map((context) => context.originalElement);
+  const rootNodes = uniqueNodes([
+    ...originalElements.map((element) => element?.getRootNode?.() ?? null),
+    ...observationContexts.flatMap((context) => context.domTargets),
   ]);
+  const observedDocuments = uniqueNodes(
+    [
+      ...rootNodes.map((root) =>
+        root instanceof Document ? root : root instanceof ShadowRoot ? root.ownerDocument : null,
+      ),
+      ...observationContexts.flatMap((context) => context.documents),
+    ].filter((doc): doc is Document => doc instanceof Document),
+  );
+  const observedDomTargets = new Map<Node, boolean>();
+
+  for (const context of observationContexts) {
+    const contextDomTargets = [
+      ...context.domTargets,
+      ...context.documents
+        .map((doc) => doc.body ?? doc.documentElement)
+        .filter((node): node is HTMLElement => node instanceof HTMLElement),
+    ];
+    for (const target of contextDomTargets) {
+      observedDomTargets.set(
+        target,
+        (observedDomTargets.get(target) ?? false) || context.allowRootLevelMutationSignal,
+      );
+    }
+  }
+
   const signals: ApplyVerificationSignals = {
     hadRelevantMutation: false,
     hadElementDisconnect: false,
@@ -381,17 +488,19 @@ async function observeVerificationSignals(
 
     const domObservers =
       typeof MutationObserver !== 'undefined'
-        ? observedDomTargets
-            .map((target) => {
-              const observer = new MutationObserver((records) => {
-                markDisconnectIfNeeded(originalElements, signals);
-                if (records.some((record) => isDomMutationRelevant(record, originalElements))) {
-                  signals.hadRelevantMutation = true;
-                }
-              });
-              observer.observe(target, DOM_MUTATION_OPTIONS);
-              return observer;
-            })
+        ? Array.from(observedDomTargets.entries()).map(([target, allowRootLevelMutationSignal]) => {
+            const observer = new MutationObserver((records) => {
+              markDisconnectIfNeeded(originalElements, signals);
+              if (
+                allowRootLevelMutationSignal ||
+                records.some((record) => isDomMutationRelevant(record, originalElements))
+              ) {
+                signals.hadRelevantMutation = true;
+              }
+            });
+            observer.observe(target, DOM_MUTATION_OPTIONS);
+            return observer;
+          })
         : [];
 
     window.setTimeout(finish, delayMs);
