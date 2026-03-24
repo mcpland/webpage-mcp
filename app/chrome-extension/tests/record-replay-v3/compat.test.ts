@@ -16,15 +16,27 @@ vi.mock(
   }),
 );
 
-import { enqueueRunAndWait } from "@/entrypoints/background/record-replay-v3/compat";
+import {
+  enqueueRunAndWait,
+  importFlowsToV3,
+  saveFlowToV3,
+} from "@/entrypoints/background/record-replay-v3/compat";
 
 function asMock(fn: unknown): ReturnType<typeof vi.fn> {
   return fn as ReturnType<typeof vi.fn>;
 }
 
 function createRuntime() {
+  const flows = new Map<string, any>();
   return {
     storage: {
+      flows: {
+        get: vi.fn(async (id: string) => flows.get(id) ?? null),
+        save: vi.fn(async (flow: any) => {
+          flows.set(flow.id, flow);
+        }),
+        list: vi.fn(async () => Array.from(flows.values())),
+      },
       runs: {
         get: vi.fn().mockResolvedValue({
           id: "run-1",
@@ -330,5 +342,57 @@ describe("record-replay-v3 compat", () => {
         tabId: 41,
       }),
     );
+  });
+
+  it("saveFlowToV3 converts steps-only compatibility flows before persisting", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    const saved = await saveFlowToV3({
+      id: "legacy-flow",
+      name: "Legacy Flow",
+      version: 1,
+      steps: [
+        { id: "step-1", type: "navigate", url: "https://example.com" },
+        { id: "step-2", type: "click", target: { selector: "#submit" } },
+      ],
+    });
+
+    expect(saved.entryNodeId).toBe("step-1");
+    expect(saved.nodes.map((node) => node.id)).toEqual(["step-1", "step-2"]);
+    expect(saved.edges).toEqual([
+      expect.objectContaining({
+        from: "step-1",
+        to: "step-2",
+      }),
+    ]);
+    expect(runtime.storage.flows.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "legacy-flow",
+        entryNodeId: "step-1",
+      }),
+    );
+  });
+
+  it("importFlowsToV3 accepts legacy steps-only JSON payloads", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    const imported = await importFlowsToV3(
+      JSON.stringify({
+        flows: [
+          {
+            id: "legacy-import",
+            name: "Imported Legacy Flow",
+            version: 1,
+            steps: [{ id: "step-a", type: "navigate", url: "https://example.com/import" }],
+          },
+        ],
+      }),
+    );
+
+    expect(imported).toHaveLength(1);
+    expect(imported[0]?.entryNodeId).toBe("step-a");
+    expect(runtime.storage.flows.save).toHaveBeenCalledTimes(1);
   });
 });

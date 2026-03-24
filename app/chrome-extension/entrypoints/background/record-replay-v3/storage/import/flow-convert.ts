@@ -3,6 +3,7 @@
  * @description Convert builder-compatible flow data to and from V3 format.
  */
 
+import { stepsToDAG, type RRNode, type RREdge } from "webpage-mcp-shared";
 import type {
   FlowV3,
   NodeV3,
@@ -112,6 +113,7 @@ interface CompatFlowDocument {
     };
   };
   variables?: CompatVariableDef[];
+  steps?: ReadonlyArray<unknown>;
   nodes?: CompatNode[];
   edges?: CompatEdge[];
   subflows?: Record<string, { nodes: CompatNode[]; edges: CompatEdge[] }>;
@@ -199,6 +201,69 @@ function normalizeCompatUrlMatchRules(
   return normalized;
 }
 
+function toCompatNode(node: RRNode): CompatNode {
+  return {
+    id: node.id,
+    type: node.type,
+    config: node.config,
+  };
+}
+
+function toCompatEdge(edge: RREdge): CompatEdge {
+  return {
+    id: edge.id,
+    from: edge.from,
+    to: edge.to,
+    label: edge.label,
+  };
+}
+
+function filterValidCompatEdges(
+  edges: ReadonlyArray<CompatEdge>,
+  nodeIds: ReadonlySet<string>,
+): CompatEdge[] {
+  return edges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to));
+}
+
+function normalizeCompatGraph(
+  compatFlow: CompatFlowDocument,
+): { nodes: CompatNode[]; edges: CompatEdge[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const compatNodes = Array.isArray(compatFlow.nodes) ? compatFlow.nodes : [];
+  const compatEdges = Array.isArray(compatFlow.edges) ? compatFlow.edges : [];
+
+  if (compatNodes.length > 0) {
+    return {
+      nodes: compatNodes,
+      edges: compatEdges,
+      warnings,
+    };
+  }
+
+  const compatSteps = Array.isArray(compatFlow.steps) ? compatFlow.steps : [];
+  if (compatSteps.length === 0) {
+    return {
+      nodes: [],
+      edges: compatEdges,
+      warnings,
+    };
+  }
+
+  const dag = stepsToDAG(compatSteps);
+  const normalizedNodes = dag.nodes.map(toCompatNode);
+  const nodeIds = new Set(normalizedNodes.map((node) => node.id));
+  const normalizedEdges =
+    compatEdges.length > 0 ? filterValidCompatEdges(compatEdges, nodeIds) : dag.edges.map(toCompatEdge);
+
+  warnings.push("Converted legacy steps-only workflow into DAG nodes for V3 import");
+
+  return {
+    nodes: normalizedNodes,
+    edges: normalizedEdges.length > 0 ? normalizedEdges : dag.edges.map(toCompatEdge),
+    warnings,
+  };
+}
+
 // ==================== Compatibility flow -> V3 conversion ====================
 
 /**
@@ -208,7 +273,10 @@ function normalizeCompatUrlMatchRules(
  */
 export function convertCompatFlowToV3(compatFlow: CompatFlowDocument): ConversionResult<FlowV3> {
   const errors: string[] = [];
-  const warnings: string[] = [];
+  const graph = normalizeCompatGraph(compatFlow);
+  const warnings: string[] = [...graph.warnings];
+  const compatNodes = graph.nodes;
+  const compatEdges = graph.edges;
 
   // 1. Basic field validation
   if (!compatFlow.id) {
@@ -217,7 +285,7 @@ export function convertCompatFlowToV3(compatFlow: CompatFlowDocument): Conversio
   if (!compatFlow.name) {
     errors.push("Compatibility flow missing required field: name");
   }
-  if (!compatFlow.nodes || compatFlow.nodes.length === 0) {
+  if (compatNodes.length === 0) {
     errors.push("Compatibility flow has no nodes");
   }
 
@@ -230,7 +298,7 @@ export function convertCompatFlowToV3(compatFlow: CompatFlowDocument): Conversio
   }
 
   // Check foreach/while nodes
-  const unsupportedNodes = (compatFlow.nodes || []).filter((n) =>
+  const unsupportedNodes = compatNodes.filter((n) =>
     V3_UNSUPPORTED_NODE_TYPES.includes(
       n.type as (typeof V3_UNSUPPORTED_NODE_TYPES)[number],
     ),
@@ -249,7 +317,7 @@ export function convertCompatFlowToV3(compatFlow: CompatFlowDocument): Conversio
 
   // 3. Transform node
   const nodes: NodeV3[] = [];
-  for (const compatNode of compatFlow.nodes || []) {
+  for (const compatNode of compatNodes) {
     const node = convertCompatNodeToV3(compatNode);
     if (node) {
       nodes.push(node);
@@ -260,7 +328,7 @@ export function convertCompatFlowToV3(compatFlow: CompatFlowDocument): Conversio
 
   // 4. Convert edges
   const edges: EdgeV3[] = [];
-  for (const compatEdge of compatFlow.edges || []) {
+  for (const compatEdge of compatEdges) {
     const edge = convertCompatEdgeToV3(compatEdge);
     if (edge) {
       edges.push(edge);
