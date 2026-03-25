@@ -414,4 +414,26 @@ describe("record-replay-v3 compat", () => {
 
     expect(runtime.storage.flows.save).not.toHaveBeenCalled();
   });
+
+  it("saveFlowToV3 rejects node kinds that are explicitly unsupported by the V3 runtime", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    await expect(
+      saveFlowToV3({
+        schemaVersion: 3,
+        id: "unsupported-kind",
+        name: "Unsupported Kind",
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        entryNodeId: "node-1",
+        nodes: [{ id: "node-1", kind: "foreach", config: {} }],
+        edges: [],
+      }),
+    ).rejects.toThrow(
+      'flow.nodes[0].kind "foreach" is not supported by the current V3 runtime',
+    );
+
+    expect(runtime.storage.flows.save).not.toHaveBeenCalled();
+  });
 });

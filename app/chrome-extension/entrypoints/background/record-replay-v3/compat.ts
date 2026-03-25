@@ -7,6 +7,7 @@ import type { FlowId, RunId } from './domain/ids';
 import type { JsonObject } from './domain/json';
 import { bootstrapV3, type V3Runtime } from './bootstrap';
 import { enqueueRun } from './engine/queue/enqueue-run';
+import { isV3UnsupportedNodeType } from '@/entrypoints/shared/utils/v3-authoring';
 import {
   convertCompatFlowToV3 as convertCompatFlowDocumentToV3,
 } from './storage/import/flow-convert';
@@ -232,6 +233,16 @@ function cloneMeta(meta: FlowMeta | undefined): FlowMeta | undefined {
   return meta ? JSON.parse(JSON.stringify(meta)) as FlowMeta : undefined;
 }
 
+function validateRuntimeNodeKinds(flow: FlowV3): void {
+  flow.nodes.forEach((node, index) => {
+    if (isV3UnsupportedNodeType(node.kind)) {
+      throw new Error(
+        `flow.nodes[${index}].kind "${node.kind}" is not supported by the current V3 runtime`,
+      );
+    }
+  });
+}
+
 export async function ensureV3Runtime(): Promise<V3Runtime> {
   return bootstrapV3();
 }
@@ -270,6 +281,7 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
   };
 
   validateFlow(flow);
+  validateRuntimeNodeKinds(flow);
   await runtime.storage.flows.save(flow);
   return flow;
 }
