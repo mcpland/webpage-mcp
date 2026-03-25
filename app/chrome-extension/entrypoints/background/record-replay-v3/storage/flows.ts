@@ -9,14 +9,6 @@ import { FLOW_SCHEMA_VERSION } from '../domain/flow';
 import { RR_ERROR_CODES, createRRError } from '../domain/errors';
 import type { FlowsStore } from '../engine/storage/storage-port';
 import { RR_V3_STORES, withTransaction } from './db';
-import { getSupportedActionTypes } from '../../record-replay/actions/handlers';
-import { DEFAULT_REPLAY_NODE_EXCLUDE_LIST } from '../engine/plugins/register-replay-nodes';
-
-const EXCLUDED_RUNTIME_NODE_KINDS = new Set<string>(DEFAULT_REPLAY_NODE_EXCLUDE_LIST);
-const SUPPORTED_FLOW_NODE_KINDS = new Set<string>([
-  'trigger',
-  ...getSupportedActionTypes().filter((kind) => !EXCLUDED_RUNTIME_NODE_KINDS.has(kind)),
-]);
 
 /**
  * Verify Flow structure
@@ -50,13 +42,6 @@ export function validateFlow(flow: FlowV3): void {
       );
     }
     nodeIds.add(node.id);
-
-    if (!SUPPORTED_FLOW_NODE_KINDS.has(node.kind)) {
-      throw createRRError(
-        RR_ERROR_CODES.VALIDATION_ERROR,
-        `Node kind "${node.kind}" is not registered`,
-      );
-    }
   }
 
   // Verify entryNodeId exists

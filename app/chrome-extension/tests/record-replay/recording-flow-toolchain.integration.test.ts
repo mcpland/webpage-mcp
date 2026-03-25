@@ -492,8 +492,8 @@ describe("recording/editing/flow toolchain integration", () => {
     ]);
   });
 
-  it("flowUpdateTool rejects replacement graphs with unregistered node kinds", async () => {
-    const flowId = `flow-update-invalid-kind-${Date.now()}`;
+  it("flowUpdateTool rejects replacement graphs with duplicate node ids", async () => {
+    const flowId = `flow-update-duplicate-node-${Date.now()}`;
     await createStoragePort().flows.save(
       createFlow(flowId, [
         {
@@ -509,14 +509,19 @@ describe("recording/editing/flow toolchain integration", () => {
         flowId,
         nodes: [
           {
-            id: "bad-node",
-            kind: "not-registered",
+            id: "dup-node",
+            kind: "navigate",
+            config: { url: "https://example.com/one" },
+          },
+          {
+            id: "dup-node",
+            kind: "click",
             config: {},
           },
         ],
         edges: [],
       }),
-    ).rejects.toThrow('Node kind "not-registered" is not registered');
+    ).rejects.toThrow('Duplicate node ID: "dup-node"');
 
     const unchanged = await createStoragePort().flows.get(flowId as any);
     expect(unchanged?.nodes.map((node) => node.id)).toEqual(["start"]);
