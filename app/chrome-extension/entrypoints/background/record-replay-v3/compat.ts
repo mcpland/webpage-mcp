@@ -8,6 +8,7 @@ import type { JsonObject } from './domain/json';
 import { bootstrapV3, type V3Runtime } from './bootstrap';
 import { enqueueRun } from './engine/queue/enqueue-run';
 import { isV3UnsupportedNodeType } from '@/entrypoints/shared/utils/v3-authoring';
+import { ensurePublishedSlugAvailable, normalizeToolSlug } from './flows/publish';
 import { validateReachableRuntimeNodes } from './flows/runtime-validation';
 import {
   convertCompatFlowToV3 as convertCompatFlowDocumentToV3,
@@ -244,6 +245,28 @@ function validateRuntimeNodeKinds(flow: FlowV3): void {
   });
 }
 
+function normalizePublishedToolMetadata(flow: FlowV3): FlowV3 {
+  const tool = flow.meta?.tool;
+  if (!tool) {
+    return flow;
+  }
+
+  if (!tool.published && tool.slug === undefined) {
+    return flow;
+  }
+
+  return {
+    ...flow,
+    meta: {
+      ...(flow.meta ?? {}),
+      tool: {
+        ...tool,
+        slug: normalizeToolSlug(tool.slug, flow.name),
+      },
+    },
+  };
+}
+
 export async function ensureV3Runtime(): Promise<V3Runtime> {
   return bootstrapV3();
 }
@@ -280,10 +303,18 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
     updatedAt: nowIso,
     meta: cloneMeta(flow.meta),
   };
+  flow = normalizePublishedToolMetadata(flow);
 
   validateFlow(flow);
   validateRuntimeNodeKinds(flow);
   validateReachableRuntimeNodes(flow);
+  if (flow.meta?.tool?.published) {
+    ensurePublishedSlugAvailable(
+      await runtime.storage.flows.list(),
+      flow.id as FlowId,
+      normalizeToolSlug(flow.meta.tool.slug, flow.name),
+    );
+  }
   await runtime.storage.flows.save(flow);
   return flow;
 }

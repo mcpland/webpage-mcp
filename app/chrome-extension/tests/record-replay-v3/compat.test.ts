@@ -517,4 +517,49 @@ describe("record-replay-v3 compat", () => {
       }),
     );
   });
+
+  it("saveFlowToV3 normalizes published slugs and rejects collisions like the RPC path", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    const first = await saveFlowToV3({
+      schemaVersion: 3,
+      id: "published-a",
+      name: "Published A",
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      entryNodeId: "node-1",
+      nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com/a" } }],
+      edges: [],
+      meta: {
+        tool: {
+          published: true,
+          slug: "Shared Slug",
+        },
+      },
+    });
+
+    expect(first.meta?.tool?.slug).toBe("shared-slug");
+
+    await expect(
+      saveFlowToV3({
+        schemaVersion: 3,
+        id: "published-b",
+        name: "Published B",
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        entryNodeId: "node-1",
+        nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com/b" } }],
+        edges: [],
+        meta: {
+          tool: {
+            published: true,
+            slug: "shared-slug",
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      'Published workflow slug "shared-slug" is already used by flow "published-a"',
+    );
+  });
 });
