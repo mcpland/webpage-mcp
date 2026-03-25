@@ -396,6 +396,38 @@ describe("record-replay-v3 compat", () => {
     expect(runtime.storage.flows.save).toHaveBeenCalledTimes(1);
   });
 
+  it("importFlowsToV3 falls back unknown legacy step types to script nodes", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    const imported = await importFlowsToV3(
+      JSON.stringify({
+        flows: [
+          {
+            id: "legacy-unknown-type",
+            name: "Imported Unknown Type",
+            version: 1,
+            steps: [{ id: "step-a", type: "unknown_type_xyz", code: "return 42;" }],
+          },
+        ],
+      }),
+    );
+
+    expect(imported).toHaveLength(1);
+    expect(imported[0]?.nodes).toEqual([
+      expect.objectContaining({
+        id: "step-a",
+        kind: "script",
+      }),
+    ]);
+    expect(runtime.storage.flows.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "legacy-unknown-type",
+        nodes: [expect.objectContaining({ id: "step-a", kind: "script" })],
+      }),
+    );
+  });
+
   it("saveFlowToV3 rejects duplicate node ids produced by legacy steps payloads", async () => {
     const runtime = createRuntime();
     mocks.bootstrapV3.mockResolvedValue(runtime);

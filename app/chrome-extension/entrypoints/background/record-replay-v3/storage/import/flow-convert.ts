@@ -25,6 +25,7 @@ import type {
 } from "../../domain/json";
 import { FLOW_SCHEMA_VERSION } from "../../domain/flow";
 import { V3_UNSUPPORTED_NODE_TYPES } from "@/entrypoints/shared/utils/v3-authoring";
+import { NODE_TYPES } from "@/common/node-types";
 
 // ==================== Compatibility flow types ====================
 
@@ -128,6 +129,12 @@ export interface ConversionResult<T> {
   warnings: string[];
 }
 
+const VALID_LEGACY_STEP_TYPES = new Set<string>(Object.values(NODE_TYPES));
+
+function normalizeLegacyStepType(type: string): string {
+  return VALID_LEGACY_STEP_TYPES.has(type) ? type : NODE_TYPES.SCRIPT;
+}
+
 function toJsonValue(input: unknown): JsonValue | undefined {
   if (input === null) {
     return null;
@@ -204,7 +211,7 @@ function normalizeCompatUrlMatchRules(
 function toCompatNode(node: RRNode): CompatNode {
   return {
     id: node.id,
-    type: node.type,
+    type: normalizeLegacyStepType(node.type),
     config: node.config,
   };
 }
@@ -250,7 +257,15 @@ function normalizeCompatGraph(
   }
 
   const dag = stepsToDAG(compatSteps);
-  const normalizedNodes = dag.nodes.map(toCompatNode);
+  const normalizedNodes = dag.nodes.map((node) => {
+    const normalizedNode = toCompatNode(node);
+    if (normalizedNode.type !== node.type) {
+      warnings.push(
+        `Unknown legacy step type "${node.type}" converted to "${normalizedNode.type}" for V3 import`,
+      );
+    }
+    return normalizedNode;
+  });
   const nodeIds = new Set(normalizedNodes.map((node) => node.id));
   const normalizedEdges =
     compatEdges.length > 0 ? filterValidCompatEdges(compatEdges, nodeIds) : dag.edges.map(toCompatEdge);
