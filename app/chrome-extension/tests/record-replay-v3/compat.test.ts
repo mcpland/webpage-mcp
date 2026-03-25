@@ -468,4 +468,53 @@ describe("record-replay-v3 compat", () => {
 
     expect(runtime.storage.flows.save).not.toHaveBeenCalled();
   });
+
+  it("saveFlowToV3 rejects raw V3 flows whose entry path starts with a non-executable trigger node", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    await expect(
+      saveFlowToV3({
+        schemaVersion: 3,
+        id: "trigger-entry",
+        name: "Trigger Entry",
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        entryNodeId: "trigger-1",
+        nodes: [
+          { id: "trigger-1", kind: "trigger", config: {} },
+          { id: "node-1", kind: "navigate", config: { url: "https://example.com" } },
+        ],
+        edges: [{ id: "edge-1", from: "trigger-1", to: "node-1" }],
+      }),
+    ).rejects.toThrow(
+      'Flow entry path reaches non-executable node "trigger-1" with kind "trigger"',
+    );
+
+    expect(runtime.storage.flows.save).not.toHaveBeenCalled();
+  });
+
+  it("saveFlowToV3 still allows trigger nodes that sit outside the executable entry path", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    const saved = await saveFlowToV3({
+      id: "trigger-prefix",
+      name: "Trigger Prefix",
+      version: 1,
+      nodes: [
+        { id: "trigger-1", type: "trigger", config: {} },
+        { id: "nav-1", type: "navigate", config: { url: "https://example.com" } },
+      ],
+      edges: [{ id: "edge-1", from: "trigger-1", to: "nav-1" }],
+    });
+
+    expect(saved.entryNodeId).toBe("nav-1");
+    expect(runtime.storage.flows.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "trigger-prefix",
+        entryNodeId: "nav-1",
+      }),
+    );
+  });
 });

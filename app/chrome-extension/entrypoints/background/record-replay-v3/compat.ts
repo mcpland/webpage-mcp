@@ -8,6 +8,7 @@ import type { JsonObject } from './domain/json';
 import { bootstrapV3, type V3Runtime } from './bootstrap';
 import { enqueueRun } from './engine/queue/enqueue-run';
 import { isV3UnsupportedNodeType } from '@/entrypoints/shared/utils/v3-authoring';
+import { validateReachableRuntimeNodes } from './flows/runtime-validation';
 import {
   convertCompatFlowToV3 as convertCompatFlowDocumentToV3,
 } from './storage/import/flow-convert';
@@ -282,6 +283,7 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
 
   validateFlow(flow);
   validateRuntimeNodeKinds(flow);
+  validateReachableRuntimeNodes(flow);
   await runtime.storage.flows.save(flow);
   return flow;
 }

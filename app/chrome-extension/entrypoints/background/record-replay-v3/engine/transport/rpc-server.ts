@@ -47,6 +47,7 @@ import {
   listPublishedFlowInfos,
   normalizeToolSlug,
 } from "../../flows/publish";
+import { validateReachableRuntimeNodes } from "../../flows/runtime-validation";
 import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
 import {
   RR_V3_PORT_NAME,
@@ -839,6 +840,7 @@ export class RpcServer {
       }
     }
 
+    validateReachableRuntimeNodes(flow);
     return flow;
   }
 

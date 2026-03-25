@@ -164,8 +164,8 @@ function createTestFlow(
   const nodes =
     options.withNodes !== false
       ? [
-          { id: "node-start", kind: "test", config: {} },
-          { id: "node-end", kind: "test", config: {} },
+          { id: "node-start", kind: "navigate", config: {} },
+          { id: "node-end", kind: "navigate", config: {} },
         ]
       : [];
   return {
@@ -787,7 +787,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
         id: "flow-1",
         name: "Updated Without CreatedAt",
         entryNodeId: "node-start",
-        nodes: [{ id: "node-start", kind: "test", config: {} }],
+        nodes: [{ id: "node-start", kind: "navigate", config: {} }],
         edges: [],
         // Note: createdAt is NOT provided
       };
@@ -825,7 +825,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
             params: {
               flow: {
                 entryNodeId: "node-1",
-                nodes: [{ id: "node-1", kind: "test", config: {} }],
+                nodes: [{ id: "node-1", kind: "navigate", config: {} }],
               },
             },
             requestId: "req-1",
@@ -843,7 +843,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
             params: {
               flow: {
                 name: "Test",
-                nodes: [{ id: "node-1", kind: "test", config: {} }],
+                nodes: [{ id: "node-1", kind: "navigate", config: {} }],
               },
             },
             requestId: "req-1",
@@ -862,7 +862,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
               flow: {
                 name: "Test",
                 entryNodeId: "non-existent",
-                nodes: [{ id: "node-1", kind: "test", config: {} }],
+                nodes: [{ id: "node-1", kind: "navigate", config: {} }],
               },
             },
             requestId: "req-1",
@@ -881,7 +881,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
               flow: {
                 name: "Test",
                 entryNodeId: "node-1",
-                nodes: [{ id: "node-1", kind: "test", config: {} }],
+                nodes: [{ id: "node-1", kind: "navigate", config: {} }],
                 edges: [{ id: "e1", from: "non-existent", to: "node-1" }],
               },
             },
@@ -903,7 +903,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
               flow: {
                 name: "Test",
                 entryNodeId: "node-1",
-                nodes: [{ id: "node-1", kind: "test", config: {} }],
+                nodes: [{ id: "node-1", kind: "navigate", config: {} }],
                 edges: [{ id: "e1", from: "node-1", to: "non-existent" }],
               },
             },
@@ -956,6 +956,31 @@ describe("V3 RPC Flow CRUD APIs", () => {
       );
     });
 
+    it("rejects entry paths that start with a non-executable trigger node", async () => {
+      await expect(
+        (server as unknown as { handleRequest: Function }).handleRequest(
+          {
+            method: "rr_v3.saveFlow",
+            params: {
+              flow: {
+                name: "Trigger Entry",
+                entryNodeId: "trigger-1",
+                nodes: [
+                  { id: "trigger-1", kind: "trigger", config: {} },
+                  { id: "node-1", kind: "navigate", config: { url: "https://example.com" } },
+                ],
+                edges: [{ id: "edge-1", from: "trigger-1", to: "node-1" }],
+              },
+            },
+            requestId: "req-1",
+          },
+          { subscriptions: new Set() },
+        ),
+      ).rejects.toThrow(
+        'Flow entry path reaches non-executable node "trigger-1" with kind "trigger"',
+      );
+    });
+
     it("generates edge ID if not provided", async () => {
       const result = (await (
         server as unknown as { handleRequest: Function }
@@ -967,8 +992,8 @@ describe("V3 RPC Flow CRUD APIs", () => {
               name: "Test",
               entryNodeId: "node-1",
               nodes: [
-                { id: "node-1", kind: "test", config: {} },
-                { id: "node-2", kind: "test", config: {} },
+                { id: "node-1", kind: "navigate", config: {} },
+                { id: "node-2", kind: "navigate", config: {} },
               ],
               edges: [{ from: "node-1", to: "node-2" }], // no id
             },
@@ -995,7 +1020,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
               nodes: [
                 {
                   id: "node-1",
-                  kind: "test",
+                  kind: "navigate",
                   config: {},
                   name: "Start Node",
                   disabled: false,
@@ -1106,7 +1131,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
               flow: {
                 name: "Test",
                 entryNodeId: "node-1",
-                nodes: [{ id: "node-1", kind: "test", config: {} }],
+                nodes: [{ id: "node-1", kind: "navigate", config: {} }],
                 variables: [{ description: "Missing name field" }],
               },
             },
@@ -1126,7 +1151,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
               flow: {
                 name: "Test",
                 entryNodeId: "node-1",
-                nodes: [{ id: "node-1", kind: "test", config: {} }],
+                nodes: [{ id: "node-1", kind: "navigate", config: {} }],
                 variables: [
                   { name: "myVar" },
                   { name: "myVar" }, // duplicate
@@ -1150,8 +1175,8 @@ describe("V3 RPC Flow CRUD APIs", () => {
                 name: "Test",
                 entryNodeId: "node-1",
                 nodes: [
-                  { id: "node-1", kind: "test", config: {} },
-                  { id: "node-1", kind: "test", config: {} }, // duplicate
+                  { id: "node-1", kind: "navigate", config: {} },
+                  { id: "node-1", kind: "navigate", config: {} }, // duplicate
                 ],
               },
             },
@@ -1172,8 +1197,8 @@ describe("V3 RPC Flow CRUD APIs", () => {
                 name: "Test",
                 entryNodeId: "node-1",
                 nodes: [
-                  { id: "node-1", kind: "test", config: {} },
-                  { id: "node-2", kind: "test", config: {} },
+                  { id: "node-1", kind: "navigate", config: {} },
+                  { id: "node-2", kind: "navigate", config: {} },
                 ],
                 edges: [
                   { id: "e1", from: "node-1", to: "node-2" },
@@ -1197,7 +1222,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
               flow: {
                 name: "Test",
                 entryNodeId: "node-1",
-                nodes: [{ id: "node-1", kind: "test", config: {} }],
+                nodes: [{ id: "node-1", kind: "navigate", config: {} }],
                 meta: {
                   exposedOutputs: [{ nodeId: "missing-node", as: "result" }],
                 },
