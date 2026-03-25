@@ -45,9 +45,13 @@ import {
   ensurePublishedSlugAvailable,
   getPublishedFlowInfo,
   listPublishedFlowInfos,
+  mergeFlowToolMetadata,
   normalizeToolSlug,
 } from "../../flows/publish";
-import { normalizeFlowOptionalFields } from "../../flows/normalize-flow-optional-fields";
+import {
+  normalizeFlowOptionalFields,
+  normalizeFlowToolMetadata,
+} from "../../flows/normalize-flow-optional-fields";
 import { validateReachableRuntimeNodes } from "../../flows/runtime-validation";
 import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
 import {
@@ -533,32 +537,26 @@ export class RpcServer {
       throw new Error(`Flow "${flowId}" not found`);
     }
 
-    const toolPatch: FlowToolMetadata = {
+    const toolPatchInput: JsonObject = {
       published: true,
     };
     if (params?.slug !== undefined && params?.slug !== null) {
-      toolPatch.slug = String(params.slug);
+      toolPatchInput.slug = String(params.slug);
     }
     if (params?.category !== undefined && params?.category !== null) {
-      toolPatch.category = String(params.category);
+      toolPatchInput.category = String(params.category);
     }
     if (params?.description !== undefined && params?.description !== null) {
-      toolPatch.description = String(params.description);
+      toolPatchInput.description = String(params.description);
     }
+    const toolPatch =
+      normalizeFlowToolMetadata(toolPatchInput, existing.name) ?? ({ published: true } satisfies FlowToolMetadata);
 
-    const updated = this.normalizeFlowSpec(
-      {
-        ...existing,
-        meta: {
-          ...(existing.meta ?? {}),
-          tool: {
-            ...(existing.meta?.tool ?? {}),
-            ...toolPatch,
-          },
-        },
-      },
-      existing,
-    );
+    const updated: FlowV3 = {
+      ...existing,
+      updatedAt: new Date(this.now()).toISOString() as ISODateTimeString,
+      meta: mergeFlowToolMetadata(existing.meta, toolPatch),
+    };
 
     const allFlows = await this.storage.flows.list();
     ensurePublishedSlugAvailable(
@@ -590,19 +588,14 @@ export class RpcServer {
       throw new Error(`Flow "${flowId}" not found`);
     }
 
-    const updated = this.normalizeFlowSpec(
-      {
-        ...existing,
-        meta: {
-          ...(existing.meta ?? {}),
-          tool: {
-            ...(existing.meta?.tool ?? {}),
-            published: false,
-          },
-        },
-      },
-      existing,
-    );
+    const toolPatch =
+      normalizeFlowToolMetadata({ published: false }, existing.name) ??
+      ({ published: false } satisfies FlowToolMetadata);
+    const updated: FlowV3 = {
+      ...existing,
+      updatedAt: new Date(this.now()).toISOString() as ISODateTimeString,
+      meta: mergeFlowToolMetadata(existing.meta, toolPatch),
+    };
 
     await this.storage.flows.save(updated);
 

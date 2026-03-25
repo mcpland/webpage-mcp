@@ -7,6 +7,7 @@ import {
   mergeFlowToolMetadata,
   normalizeToolSlug,
 } from '../record-replay-v3/flows/publish';
+import { normalizeFlowToolMetadata } from '../record-replay-v3/flows/normalize-flow-optional-fields';
 import {
   enqueueRunAndWait,
   ensureV3Runtime,
@@ -45,10 +46,25 @@ async function updatePublishedState(
     throw new Error(`Flow "${flowId}" not found`);
   }
 
+  const toolPatchInput: JsonObject = {};
+  if (patch.published !== undefined) {
+    toolPatchInput.published = patch.published;
+  }
+  if (patch.slug !== undefined) {
+    toolPatchInput.slug = patch.slug;
+  }
+  if (patch.category !== undefined) {
+    toolPatchInput.category = patch.category;
+  }
+  if (patch.description !== undefined) {
+    toolPatchInput.description = patch.description;
+  }
+  const normalizedToolPatch = normalizeFlowToolMetadata(toolPatchInput, flow.name) ?? {};
+
   const nextFlow: FlowV3 = {
     ...flow,
     updatedAt: new Date().toISOString(),
-    meta: mergeFlowToolMetadata(flow.meta, patch),
+    meta: mergeFlowToolMetadata(flow.meta, normalizedToolPatch),
   };
 
   if (nextFlow.meta?.tool?.published) {

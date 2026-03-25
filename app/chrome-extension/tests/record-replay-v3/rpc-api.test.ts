@@ -1311,6 +1311,84 @@ describe("V3 RPC Flow CRUD APIs", () => {
       expect(emptyPublishedList).toEqual([]);
     });
 
+    it("publishes already-stored flows without revalidating their graph", async () => {
+      const flow = createTestFlow("flow-invalid-publish");
+      flow.entryNodeId = "trigger-1" as FlowV3["entryNodeId"];
+      flow.nodes = [
+        { id: "trigger-1", kind: "trigger", config: {} },
+        { id: "node-1", kind: "navigate", config: {} },
+      ] as FlowV3["nodes"];
+      flow.edges = [
+        { id: "edge-1", from: "trigger-1", to: "node-1" },
+      ] as FlowV3["edges"];
+      getInternal(storage).flowsMap.set(flow.id, flow);
+
+      const published = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.publishFlow",
+          params: {
+            flowId: "flow-invalid-publish",
+            slug: "Legacy Broken Flow",
+          },
+          requestId: "req-legacy-publish",
+        },
+        { subscriptions: new Set() },
+      );
+
+      expect(published).toEqual({
+        id: "flow-invalid-publish",
+        slug: "legacy-broken-flow",
+        version: 3,
+        name: "Test Flow flow-invalid-publish",
+      });
+      expect(
+        getInternal(storage).flowsMap.get("flow-invalid-publish")?.meta?.tool,
+      ).toMatchObject({
+        published: true,
+        slug: "legacy-broken-flow",
+      });
+    });
+
+    it("unpublishes already-stored flows without revalidating their graph", async () => {
+      const flow = createTestFlow("flow-invalid-unpublish");
+      flow.entryNodeId = "trigger-1" as FlowV3["entryNodeId"];
+      flow.nodes = [
+        { id: "trigger-1", kind: "trigger", config: {} },
+        { id: "node-1", kind: "navigate", config: {} },
+      ] as FlowV3["nodes"];
+      flow.edges = [
+        { id: "edge-1", from: "trigger-1", to: "node-1" },
+      ] as FlowV3["edges"];
+      flow.meta = {
+        tool: {
+          published: true,
+          slug: "legacy-broken-flow",
+        },
+      };
+      getInternal(storage).flowsMap.set(flow.id, flow);
+
+      const unpublished = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.unpublishFlow",
+          params: { flowId: "flow-invalid-unpublish" },
+          requestId: "req-legacy-unpublish",
+        },
+        { subscriptions: new Set() },
+      );
+
+      expect(unpublished).toEqual({ ok: true, flowId: "flow-invalid-unpublish" });
+      expect(
+        getInternal(storage).flowsMap.get("flow-invalid-unpublish")?.meta?.tool,
+      ).toMatchObject({
+        published: false,
+        slug: "legacy-broken-flow",
+      });
+    });
+
     it("rejects duplicate published slugs", async () => {
       const flowA = createTestFlow("flow-a");
       flowA.meta = {
