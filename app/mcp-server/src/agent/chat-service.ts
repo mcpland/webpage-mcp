@@ -136,6 +136,7 @@ export class AgentChatService {
         );
         await updateSessionEngineName(dbSession.id, engineName);
         dbSession.engineName = engineName;
+        dbSession.engineSessionId = undefined;
         console.warn(
           `[AgentChatService] Migrated legacy session "${dbSession.id}" from unsupported engine "${sessionEngineName || 'unknown'}" to "${engineName}"`,
         );
