@@ -9,6 +9,7 @@ import { bootstrapV3, type V3Runtime } from './bootstrap';
 import { enqueueRun } from './engine/queue/enqueue-run';
 import { isV3UnsupportedNodeType } from '@/entrypoints/shared/utils/v3-authoring';
 import { ensurePublishedSlugAvailable, normalizeToolSlug } from './flows/publish';
+import { normalizeFlowOptionalFields } from './flows/normalize-flow-optional-fields';
 import { validateReachableRuntimeNodes } from './flows/runtime-validation';
 import {
   convertCompatFlowToV3 as convertCompatFlowDocumentToV3,
@@ -301,7 +302,18 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
     schemaVersion: FLOW_SCHEMA_VERSION,
     createdAt: existing?.createdAt ?? flow.createdAt ?? nowIso,
     updatedAt: nowIso,
-    meta: cloneMeta(flow.meta),
+  };
+  const nodeIdSet = new Set(flow.nodes.map((node) => node.id));
+  flow = {
+    ...flow,
+    ...normalizeFlowOptionalFields(
+      {
+        ...(flow as unknown as JsonObject),
+        meta: cloneMeta(flow.meta) as JsonObject | undefined,
+      },
+      flow.name,
+      nodeIdSet,
+    ),
   };
   flow = normalizePublishedToolMetadata(flow);
 

@@ -562,4 +562,71 @@ describe("record-replay-v3 compat", () => {
       'Published workflow slug "shared-slug" is already used by flow "published-a"',
     );
   });
+
+  it("saveFlowToV3 validates raw V3 variable definitions like the RPC path", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    await expect(
+      saveFlowToV3({
+        schemaVersion: 3,
+        id: "invalid-variable",
+        name: "Invalid Variable",
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        entryNodeId: "node-1",
+        nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com" } }],
+        edges: [],
+        variables: [{ description: "missing name" }],
+      }),
+    ).rejects.toThrow("flow.variables[0].name is required");
+
+    expect(runtime.storage.flows.save).not.toHaveBeenCalled();
+  });
+
+  it("saveFlowToV3 rejects non-boolean published flags in raw V3 metadata", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    await expect(
+      saveFlowToV3({
+        schemaVersion: 3,
+        id: "invalid-published",
+        name: "Invalid Published",
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        entryNodeId: "node-1",
+        nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com" } }],
+        edges: [],
+        meta: {
+          tool: {
+            published: "yes",
+          },
+        },
+      }),
+    ).rejects.toThrow("flow.meta.tool.published must be a boolean");
+
+    expect(runtime.storage.flows.save).not.toHaveBeenCalled();
+  });
+
+  it("saveFlowToV3 rejects non-object policies in raw V3 payloads", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    await expect(
+      saveFlowToV3({
+        schemaVersion: 3,
+        id: "invalid-policy",
+        name: "Invalid Policy",
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        entryNodeId: "node-1",
+        nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com" } }],
+        edges: [],
+        policy: "strict",
+      }),
+    ).rejects.toThrow("flow.policy must be an object");
+
+    expect(runtime.storage.flows.save).not.toHaveBeenCalled();
+  });
 });
