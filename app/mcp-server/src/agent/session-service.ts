@@ -409,7 +409,7 @@ export async function updateSession(sessionId: string, updates: UpdateSessionInp
 
 /**
  * Update the engine binding for an existing legacy session.
- * Clears the engine-specific session id because it is not portable across runtimes.
+ * Clears engine-specific state because it is not portable across runtimes.
  */
 export async function updateSessionEngineName(
   sessionId: string,
@@ -422,6 +422,7 @@ export async function updateSessionEngineName(
     .set({
       engineName,
       engineSessionId: null,
+      model: null,
       updatedAt: now,
     })
     .where(eq(sessions.id, sessionId));

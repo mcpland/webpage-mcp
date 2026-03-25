@@ -48,6 +48,7 @@ describe('AgentChatService legacy session migration', () => {
     projectId: 'project-1',
     engineName: 'cursor',
     engineSessionId: 'cursor-session-123',
+    model: 'cursor-proprietary-model',
     name: 'Legacy Cursor Session',
     permissionMode: 'bypassPermissions',
     allowDangerouslySkipPermissions: true,
@@ -59,6 +60,7 @@ describe('AgentChatService legacy session migration', () => {
     vi.clearAllMocks();
     legacySession.engineName = 'cursor';
     legacySession.engineSessionId = 'cursor-session-123';
+    legacySession.model = 'cursor-proprietary-model';
 
     projectServiceMocks.getProject.mockResolvedValue({
       id: 'project-1',
@@ -82,7 +84,7 @@ describe('AgentChatService legacy session migration', () => {
     vi.clearAllMocks();
   });
 
-  it('does not forward a legacy engineSessionId when migrating a session onto Claude', async () => {
+  it('does not forward legacy engine-specific state when migrating a session onto Claude', async () => {
     let capturedOptions: EngineInitOptions | undefined;
     const claudeEngine: AgentEngine = {
       name: 'claude',
@@ -112,6 +114,8 @@ describe('AgentChatService legacy session migration', () => {
     );
     expect(legacySession.engineName).toBe('claude');
     expect(legacySession.engineSessionId).toBeUndefined();
+    expect(legacySession.model).toBeUndefined();
     expect(capturedOptions?.resumeClaudeSessionId).toBeUndefined();
+    expect(capturedOptions?.model).toBeUndefined();
   });
 });
