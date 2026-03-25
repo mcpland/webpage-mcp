@@ -395,4 +395,23 @@ describe("record-replay-v3 compat", () => {
     expect(imported[0]?.entryNodeId).toBe("step-a");
     expect(runtime.storage.flows.save).toHaveBeenCalledTimes(1);
   });
+
+  it("saveFlowToV3 rejects duplicate node ids produced by legacy steps payloads", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    await expect(
+      saveFlowToV3({
+        id: "legacy-dup",
+        name: "Legacy Duplicate Flow",
+        version: 1,
+        steps: [
+          { id: "dup-step", type: "navigate", url: "https://example.com" },
+          { id: "dup-step", type: "click", target: { selector: "#submit" } },
+        ],
+      }),
+    ).rejects.toThrow('Duplicate node ID: "dup-step"');
+
+    expect(runtime.storage.flows.save).not.toHaveBeenCalled();
+  });
 });

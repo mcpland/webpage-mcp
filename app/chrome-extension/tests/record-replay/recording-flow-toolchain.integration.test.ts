@@ -492,6 +492,36 @@ describe("recording/editing/flow toolchain integration", () => {
     ]);
   });
 
+  it("flowUpdateTool rejects replacement graphs with unregistered node kinds", async () => {
+    const flowId = `flow-update-invalid-kind-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "start" as any,
+          kind: "navigate",
+          config: { url: "https://example.com/original" },
+        },
+      ]),
+    );
+
+    await expect(
+      flowUpdateTool.execute({
+        flowId,
+        nodes: [
+          {
+            id: "bad-node",
+            kind: "not-registered",
+            config: {},
+          },
+        ],
+        edges: [],
+      }),
+    ).rejects.toThrow('Node kind "not-registered" is not registered');
+
+    const unchanged = await createStoragePort().flows.get(flowId as any);
+    expect(unchanged?.nodes.map((node) => node.id)).toEqual(["start"]);
+  });
+
   it("flowRunTool forwards supported tab-binding options into the V3 runner path", async () => {
     const flowId = `flow-run-${Date.now()}`;
     await createStoragePort().flows.save(

@@ -9,11 +9,19 @@ import { FLOW_SCHEMA_VERSION } from '../domain/flow';
 import { RR_ERROR_CODES, createRRError } from '../domain/errors';
 import type { FlowsStore } from '../engine/storage/storage-port';
 import { RR_V3_STORES, withTransaction } from './db';
+import { getSupportedActionTypes } from '../../record-replay/actions/handlers';
+import { DEFAULT_REPLAY_NODE_EXCLUDE_LIST } from '../engine/plugins/register-replay-nodes';
+
+const EXCLUDED_RUNTIME_NODE_KINDS = new Set<string>(DEFAULT_REPLAY_NODE_EXCLUDE_LIST);
+const SUPPORTED_FLOW_NODE_KINDS = new Set<string>([
+  'trigger',
+  ...getSupportedActionTypes().filter((kind) => !EXCLUDED_RUNTIME_NODE_KINDS.has(kind)),
+]);
 
 /**
  * Verify Flow structure
  */
-function validateFlow(flow: FlowV3): void {
+export function validateFlow(flow: FlowV3): void {
   // Verify schema version
   if (flow.schemaVersion !== FLOW_SCHEMA_VERSION) {
     throw createRRError(
@@ -33,8 +41,25 @@ function validateFlow(flow: FlowV3): void {
     throw createRRError(RR_ERROR_CODES.VALIDATION_ERROR, 'Flow entryNodeId is required');
   }
 
+  const nodeIds = new Set<string>();
+  for (const node of flow.nodes) {
+    if (nodeIds.has(node.id)) {
+      throw createRRError(
+        RR_ERROR_CODES.VALIDATION_ERROR,
+        `Duplicate node ID: "${node.id}"`,
+      );
+    }
+    nodeIds.add(node.id);
+
+    if (!SUPPORTED_FLOW_NODE_KINDS.has(node.kind)) {
+      throw createRRError(
+        RR_ERROR_CODES.VALIDATION_ERROR,
+        `Node kind "${node.kind}" is not registered`,
+      );
+    }
+  }
+
   // Verify entryNodeId exists
-  const nodeIds = new Set(flow.nodes.map((n) => n.id));
   if (!nodeIds.has(flow.entryNodeId)) {
     throw createRRError(
       RR_ERROR_CODES.VALIDATION_ERROR,
@@ -42,8 +67,17 @@ function validateFlow(flow: FlowV3): void {
     );
   }
 
+  const edgeIds = new Set<string>();
   // Check edge references
   for (const edge of flow.edges) {
+    if (edgeIds.has(edge.id)) {
+      throw createRRError(
+        RR_ERROR_CODES.VALIDATION_ERROR,
+        `Duplicate edge ID: "${edge.id}"`,
+      );
+    }
+    edgeIds.add(edge.id);
+
     if (!nodeIds.has(edge.from)) {
       throw createRRError(
         RR_ERROR_CODES.VALIDATION_ERROR,

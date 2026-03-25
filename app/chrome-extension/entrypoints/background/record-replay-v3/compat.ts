@@ -10,6 +10,7 @@ import { enqueueRun } from './engine/queue/enqueue-run';
 import {
   convertCompatFlowToV3 as convertCompatFlowDocumentToV3,
 } from './storage/import/flow-convert';
+import { validateFlow } from './storage/flows';
 
 const DEFAULT_RUN_TIMEOUT_MS = 60_000;
 const RUN_POLL_INTERVAL_MS = 150;
@@ -268,6 +269,7 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
     meta: cloneMeta(flow.meta),
   };
 
+  validateFlow(flow);
   await runtime.storage.flows.save(flow);
   return flow;
 }
