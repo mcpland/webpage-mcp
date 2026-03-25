@@ -8,7 +8,7 @@ import { saveFlowToV3 } from "../record-replay-v3/compat";
 function countFlowSteps(flow: Flow | FlowV3 | null): number {
   if (!flow) return 0;
   if (Array.isArray(flow.nodes)) return flow.nodes.length;
-  if (Array.isArray(flow.steps)) return flow.steps.length;
+  if ("steps" in flow && Array.isArray(flow.steps)) return flow.steps.length;
   return 0;
 }
 

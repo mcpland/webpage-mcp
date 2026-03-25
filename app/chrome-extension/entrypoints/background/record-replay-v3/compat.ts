@@ -304,13 +304,15 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
     updatedAt: nowIso,
   };
   const nodeIdSet = new Set(flow.nodes.map((node) => node.id));
+  const flowForOptionalNormalization = { ...(flow as unknown as JsonObject) };
+  const clonedMeta = cloneMeta(flow.meta);
+  if (clonedMeta) {
+    flowForOptionalNormalization.meta = clonedMeta as unknown as JsonObject;
+  }
   flow = {
     ...flow,
     ...normalizeFlowOptionalFields(
-      {
-        ...(flow as unknown as JsonObject),
-        meta: cloneMeta(flow.meta) as JsonObject | undefined,
-      },
+      flowForOptionalNormalization,
       flow.name,
       nodeIdSet,
     ),

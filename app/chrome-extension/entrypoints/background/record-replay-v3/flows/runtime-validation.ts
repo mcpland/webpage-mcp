@@ -3,11 +3,13 @@ import type { FlowV3 } from '../domain/flow';
 import { getReachableNodes } from '../engine/kernel/traversal';
 import { DEFAULT_REPLAY_NODE_EXCLUDE_LIST } from '../engine/plugins/register-replay-nodes';
 
-const EXECUTABLE_RUNTIME_NODE_KINDS = new Set(
+const EXCLUDED_RUNTIME_NODE_KINDS = new Set<string>(DEFAULT_REPLAY_NODE_EXCLUDE_LIST);
+
+const EXECUTABLE_RUNTIME_NODE_KINDS = new Set<string>(
   createReplayActionRegistry()
     .list()
     .map((handler) => handler.type)
-    .filter((type) => !DEFAULT_REPLAY_NODE_EXCLUDE_LIST.includes(type as (typeof DEFAULT_REPLAY_NODE_EXCLUDE_LIST)[number])),
+    .filter((type) => !EXCLUDED_RUNTIME_NODE_KINDS.has(type)),
 );
 
 export function validateReachableRuntimeNodes(flow: Pick<FlowV3, 'entryNodeId' | 'nodes' | 'edges'>): void {
