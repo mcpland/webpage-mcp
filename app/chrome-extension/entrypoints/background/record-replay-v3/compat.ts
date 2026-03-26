@@ -149,6 +149,8 @@ export async function resolveRunTargetTab(
         previousUrl: explicitTab.url || undefined,
         targetUrl: startUrl,
       });
+    } else if (!isWebUrl(explicitTab.url)) {
+      return createFallbackRunTab();
     } else if (shouldRefresh && isWebUrl(explicitTab.url)) {
       await chrome.tabs.reload(explicitTab.id);
       await waitForTabReady(explicitTab.id, {

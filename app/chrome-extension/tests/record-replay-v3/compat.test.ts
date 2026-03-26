@@ -344,6 +344,47 @@ describe("record-replay-v3 compat", () => {
     );
   });
 
+  it("falls back to an about:blank tab for explicit non-web tab targets without navigation", async () => {
+    const extensionTab = {
+      id: 51,
+      url: "chrome-extension://abc123/popup.html",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+    const createdTab = {
+      id: 88,
+      url: "about:blank",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+
+    asMock(chrome.tabs.get)
+      .mockResolvedValueOnce(extensionTab)
+      .mockResolvedValueOnce(createdTab)
+      .mockResolvedValueOnce(createdTab);
+    asMock(chrome.tabs.create).mockResolvedValue(createdTab);
+
+    await enqueueRunAndWait({
+      flowId: "flow-explicit-fallback" as any,
+      tabId: 51,
+    });
+
+    expect(chrome.tabs.create).toHaveBeenCalledWith({
+      active: true,
+      url: "about:blank",
+    });
+    expect(chrome.tabs.reload).not.toHaveBeenCalled();
+    expect(mocks.enqueueRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        flowId: "flow-explicit-fallback",
+        tabId: 88,
+      }),
+    );
+  });
+
   it("saveFlowToV3 converts steps-only compatibility flows before persisting", async () => {
     const runtime = createRuntime();
     mocks.bootstrapV3.mockResolvedValue(runtime);
