@@ -1,26 +1,31 @@
-import type { Flow as CompatFlow, RunLogEntry, RunResult } from '@/common/workflow-compat-types';
-import type { FlowV3 } from './domain/flow';
-import { FLOW_SCHEMA_VERSION, type FlowMeta } from './domain/flow';
-import type { RunEvent, RunRecordV3 } from './domain/events';
-import { isTerminalStatus } from './domain/events';
-import type { FlowId, RunId } from './domain/ids';
-import type { JsonObject } from './domain/json';
-import { bootstrapV3, type V3Runtime } from './bootstrap';
-import { enqueueRun } from './engine/queue/enqueue-run';
-import { isV3UnsupportedNodeType } from '@/entrypoints/shared/utils/v3-authoring';
-import { ensurePublishedSlugAvailable, normalizeToolSlug } from './flows/publish';
-import { normalizeFlowOptionalFields } from './flows/normalize-flow-optional-fields';
-import { validateReachableRuntimeNodes } from './flows/runtime-validation';
+import type {
+  Flow as CompatFlow,
+  RunLogEntry,
+  RunResult,
+} from "@/common/workflow-compat-types";
+import type { FlowV3 } from "./domain/flow";
+import { FLOW_SCHEMA_VERSION, type FlowMeta } from "./domain/flow";
+import type { RunEvent, RunRecordV3 } from "./domain/events";
+import { isTerminalStatus } from "./domain/events";
+import type { FlowId, RunId } from "./domain/ids";
+import type { JsonObject } from "./domain/json";
+import { bootstrapV3, type V3Runtime } from "./bootstrap";
+import { enqueueRun } from "./engine/queue/enqueue-run";
+import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
 import {
-  convertCompatFlowToV3 as convertCompatFlowDocumentToV3,
-} from './storage/import/flow-convert';
-import { validateFlow } from './storage/flows';
+  ensurePublishedSlugAvailable,
+  normalizeToolSlug,
+} from "./flows/publish";
+import { normalizeFlowOptionalFields } from "./flows/normalize-flow-optional-fields";
+import { validateReachableRuntimeNodes } from "./flows/runtime-validation";
+import { convertCompatFlowToV3 as convertCompatFlowDocumentToV3 } from "./storage/import/flow-convert";
+import { validateFlow } from "./storage/flows";
 
 const DEFAULT_RUN_TIMEOUT_MS = 60_000;
 const RUN_POLL_INTERVAL_MS = 150;
 const TAB_RESOLUTION_WAIT_TIMEOUT_MS = 3_000;
 
-type RunTargetPreference = 'current' | 'new';
+type RunTargetPreference = "current" | "new";
 
 interface RunTargetOptions {
   tabId?: number;
@@ -38,23 +43,23 @@ function errorMessage(error: unknown): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function isWebUrl(url?: string | null): boolean {
-  return typeof url === 'string' && /^(https?:|file:)/i.test(url);
+  return typeof url === "string" && /^(https?:|file:)/i.test(url);
 }
 
 function normalizeRunTarget(target: unknown): RunTargetPreference {
-  return target === 'new' ? 'new' : 'current';
+  return target === "new" ? "new" : "current";
 }
 
 function normalizeStartUrl(url: unknown): string | undefined {
-  return typeof url === 'string' && url.trim() ? url.trim() : undefined;
+  return typeof url === "string" && url.trim() ? url.trim() : undefined;
 }
 
 async function waitForTabReady(
@@ -68,29 +73,34 @@ async function waitForTabReady(
   while (Date.now() < deadline) {
     const current = await chrome.tabs.get(tabId);
     lastSeen = current;
-    const pendingUrl = (current as chrome.tabs.Tab & { pendingUrl?: string }).pendingUrl || '';
-    const currentUrl = current.url || '';
+    const pendingUrl =
+      (current as chrome.tabs.Tab & { pendingUrl?: string }).pendingUrl || "";
+    const currentUrl = current.url || "";
     const observedUrl = pendingUrl || currentUrl;
 
     if (options.targetUrl && observedUrl === options.targetUrl) {
       sawNavigationSignal = true;
-      if (current.status === 'complete') {
+      if (current.status === "complete") {
         return current;
       }
     }
 
-    if (options.previousUrl && observedUrl && observedUrl !== options.previousUrl) {
+    if (
+      options.previousUrl &&
+      observedUrl &&
+      observedUrl !== options.previousUrl
+    ) {
       sawNavigationSignal = true;
-      if (current.status === 'complete') {
+      if (current.status === "complete") {
         return current;
       }
     }
 
-    if (current.status !== 'complete') {
+    if (current.status !== "complete") {
       sawNavigationSignal = true;
     }
 
-    if (current.status === 'complete') {
+    if (current.status === "complete") {
       if (!options.targetUrl && !options.previousUrl) {
         return current;
       }
@@ -106,22 +116,31 @@ async function waitForTabReady(
 }
 
 async function createFallbackRunTab(): Promise<number> {
-  const created = await chrome.tabs.create({ url: 'about:blank', active: true });
+  const created = await chrome.tabs.create({
+    url: "about:blank",
+    active: true,
+  });
   if (created.id === undefined) {
-    throw new Error('chrome.tabs.create returned a tab without id');
+    throw new Error("chrome.tabs.create returned a tab without id");
   }
-  await waitForTabReady(created.id, { targetUrl: 'about:blank' });
+  await waitForTabReady(created.id, { targetUrl: "about:blank" });
   return created.id;
 }
 
-export async function resolveRunTargetTab(input: RunTargetOptions): Promise<number | undefined> {
-  const explicitTabId = isFiniteNumber(input.tabId) ? Math.floor(input.tabId) : undefined;
+export async function resolveRunTargetTab(
+  input: RunTargetOptions,
+): Promise<number | undefined> {
+  const explicitTabId = isFiniteNumber(input.tabId)
+    ? Math.floor(input.tabId)
+    : undefined;
   const tabTarget = normalizeRunTarget(input.tabTarget);
   const startUrl = normalizeStartUrl(input.startUrl);
   const shouldRefresh = input.refresh === true;
 
   const explicitTab =
-    explicitTabId !== undefined ? await chrome.tabs.get(explicitTabId).catch(() => null) : null;
+    explicitTabId !== undefined
+      ? await chrome.tabs.get(explicitTabId).catch(() => null)
+      : null;
 
   if (explicitTab?.id !== undefined) {
     if (startUrl) {
@@ -144,15 +163,16 @@ export async function resolveRunTargetTab(input: RunTargetOptions): Promise<numb
     currentWindowTabs.find((tab) => tab.active) ??
     (await chrome.tabs.query({ active: true, currentWindow: true })).at(0);
 
-  if (tabTarget === 'new') {
+  if (tabTarget === "new") {
     const activeTabUrl = activeTab?.url;
-    const urlToOpen = startUrl ?? (isWebUrl(activeTabUrl) ? activeTabUrl : 'about:blank');
+    const urlToOpen =
+      startUrl ?? (isWebUrl(activeTabUrl) ? activeTabUrl : "about:blank");
     const created = await chrome.tabs.create({
       active: true,
       url: urlToOpen,
     });
     if (created.id === undefined) {
-      throw new Error('chrome.tabs.create returned a tab without id');
+      throw new Error("chrome.tabs.create returned a tab without id");
     }
     await waitForTabReady(created.id, {
       previousUrl: activeTab?.url || undefined,
@@ -164,10 +184,12 @@ export async function resolveRunTargetTab(input: RunTargetOptions): Promise<numb
   let targetTab: chrome.tabs.Tab | null =
     activeTab && activeTab.id !== undefined
       ? activeTab
-      : currentWindowTabs.find((tab) => tab.id !== undefined) ?? null;
+      : (currentWindowTabs.find((tab) => tab.id !== undefined) ?? null);
 
   if (!startUrl && !isWebUrl(targetTab?.url)) {
-    const webCandidate = currentWindowTabs.find((tab) => tab.id !== undefined && isWebUrl(tab.url));
+    const webCandidate = currentWindowTabs.find(
+      (tab) => tab.id !== undefined && isWebUrl(tab.url),
+    );
     if (webCandidate?.id !== undefined) {
       const activatedTab = await chrome.tabs
         .update(webCandidate.id, { active: true })
@@ -188,7 +210,7 @@ export async function resolveRunTargetTab(input: RunTargetOptions): Promise<numb
 
     const created = await chrome.tabs.create({ url: startUrl, active: true });
     if (created.id === undefined) {
-      throw new Error('chrome.tabs.create returned a tab without id');
+      throw new Error("chrome.tabs.create returned a tab without id");
     }
     await waitForTabReady(created.id, { targetUrl: startUrl });
     return created.id;
@@ -214,9 +236,9 @@ export function isFlowV3Object(value: unknown): value is FlowV3 {
   if (!isRecord(value)) return false;
   return (
     value.schemaVersion === FLOW_SCHEMA_VERSION &&
-    typeof value.id === 'string' &&
-    typeof value.name === 'string' &&
-    typeof value.entryNodeId === 'string' &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.entryNodeId === "string" &&
     Array.isArray(value.nodes) &&
     Array.isArray(value.edges)
   );
@@ -225,15 +247,34 @@ export function isFlowV3Object(value: unknown): value is FlowV3 {
 export function isCompatFlowObject(value: unknown): value is CompatFlow {
   if (!isRecord(value)) return false;
   return (
-    typeof value.id === 'string' &&
-    typeof value.name === 'string' &&
-    typeof value.version === 'number' &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.version === "number" &&
     (Array.isArray(value.steps) || Array.isArray(value.nodes))
   );
 }
 
 function cloneMeta(meta: FlowMeta | undefined): FlowMeta | undefined {
-  return meta ? JSON.parse(JSON.stringify(meta)) as FlowMeta : undefined;
+  return meta ? (JSON.parse(JSON.stringify(meta)) as FlowMeta) : undefined;
+}
+
+function rawFlowExplicitlyProvidesToolSlug(rawFlow: unknown): boolean {
+  return (
+    isRecord(rawFlow) &&
+    isRecord(rawFlow.meta) &&
+    isRecord(rawFlow.meta.tool) &&
+    rawFlow.meta.tool.slug !== undefined &&
+    rawFlow.meta.tool.slug !== null
+  );
+}
+
+function getExistingPublishedSlug(existing: FlowV3 | null): string | undefined {
+  if (existing?.meta?.tool?.published !== true) {
+    return undefined;
+  }
+
+  const slug = existing.meta.tool.slug;
+  return typeof slug === "string" && slug.trim() ? slug : undefined;
 }
 
 function validateRuntimeNodeKinds(flow: FlowV3): void {
@@ -284,7 +325,7 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
           if (!result.success || !result.data) {
             throw new Error(
               result.errors.length > 0
-                ? result.errors.join('; ')
+                ? result.errors.join("; ")
                 : `Failed to convert flow "${rawFlow.id}" to V3`,
             );
           }
@@ -293,7 +334,7 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
       : null;
 
   if (!flow) {
-    throw new Error('Invalid flow payload');
+    throw new Error("Invalid flow payload");
   }
 
   const existing = await runtime.storage.flows.get(flow.id as FlowId);
@@ -306,7 +347,18 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
   const nodeIdSet = new Set(flow.nodes.map((node) => node.id));
   const flowForOptionalNormalization = { ...(flow as unknown as JsonObject) };
   const clonedMeta = cloneMeta(flow.meta);
+  const existingPublishedSlug = getExistingPublishedSlug(existing);
   if (clonedMeta) {
+    if (
+      flow.meta?.tool?.published === true &&
+      existingPublishedSlug &&
+      !rawFlowExplicitlyProvidesToolSlug(rawFlow)
+    ) {
+      clonedMeta.tool = {
+        ...(clonedMeta.tool ?? {}),
+        slug: existingPublishedSlug,
+      };
+    }
     flowForOptionalNormalization.meta = clonedMeta as unknown as JsonObject;
   }
   flow = {
@@ -341,7 +393,10 @@ export function extractFlowCandidates(parsed: unknown): unknown[] {
     if (Array.isArray(parsed.flows)) {
       return parsed.flows;
     }
-    if (parsed.id && (Array.isArray(parsed.steps) || Array.isArray(parsed.nodes))) {
+    if (
+      parsed.id &&
+      (Array.isArray(parsed.steps) || Array.isArray(parsed.nodes))
+    ) {
       return [parsed];
     }
   }
@@ -352,7 +407,7 @@ export async function importFlowsToV3(json: string): Promise<FlowV3[]> {
   const parsed = JSON.parse(json);
   const candidates = extractFlowCandidates(parsed);
   if (candidates.length === 0) {
-    throw new Error('invalid flow json: no flows found');
+    throw new Error("invalid flow json: no flows found");
   }
 
   const imported: FlowV3[] = [];
@@ -367,24 +422,29 @@ function toRunLogEntries(events: RunEvent[]): RunLogEntry[] {
 
   for (const event of events) {
     switch (event.type) {
-      case 'node.succeeded':
+      case "node.succeeded":
         entries.push({
           stepId: event.nodeId,
-          status: 'success',
+          status: "success",
           tookMs: event.tookMs,
         });
         break;
-      case 'node.failed':
+      case "node.failed":
         entries.push({
           stepId: event.nodeId,
-          status: 'failed',
+          status: "failed",
           message: event.error.message,
         });
         break;
-      case 'log':
+      case "log":
         entries.push({
           stepId: `log_${event.seq}`,
-          status: event.level === 'error' ? 'failed' : event.level === 'warn' ? 'warning' : 'success',
+          status:
+            event.level === "error"
+              ? "failed"
+              : event.level === "warn"
+                ? "warning"
+                : "success",
           message: event.message,
         });
         break;
@@ -396,16 +456,25 @@ function toRunLogEntries(events: RunEvent[]): RunLogEntry[] {
   return entries;
 }
 
-export function buildCompatRunResult(run: RunRecordV3, events: RunEvent[]): RunResult {
+export function buildCompatRunResult(
+  run: RunRecordV3,
+  events: RunEvent[],
+): RunResult {
   const logs = toRunLogEntries(events);
-  const nodeEntries = logs.filter((entry) => entry.stepId.startsWith('log_') === false);
-  const successCount = nodeEntries.filter((entry) => entry.status === 'success').length;
-  const failedCount = nodeEntries.filter((entry) => entry.status === 'failed').length;
+  const nodeEntries = logs.filter(
+    (entry) => entry.stepId.startsWith("log_") === false,
+  );
+  const successCount = nodeEntries.filter(
+    (entry) => entry.status === "success",
+  ).length;
+  const failedCount = nodeEntries.filter(
+    (entry) => entry.status === "failed",
+  ).length;
   const total = nodeEntries.length;
 
   return {
     runId: run.id,
-    success: run.status === 'succeeded',
+    success: run.status === "succeeded",
     summary: {
       total,
       success: successCount,
@@ -414,22 +483,20 @@ export function buildCompatRunResult(run: RunRecordV3, events: RunEvent[]): RunR
     },
     outputs: run.outputs ?? null,
     logs,
-    paused: run.status === 'paused',
+    paused: run.status === "paused",
   };
 }
 
-export async function enqueueRunAndWait(
-  input: {
-    flowId: FlowId;
-    tabId?: number;
-    tabTarget?: RunTargetPreference;
-    args?: JsonObject;
-    startUrl?: string;
-    refresh?: boolean;
-    startNodeId?: string;
-    timeoutMs?: number;
-  },
-): Promise<{ run: RunRecordV3; events: RunEvent[]; result: RunResult }> {
+export async function enqueueRunAndWait(input: {
+  flowId: FlowId;
+  tabId?: number;
+  tabTarget?: RunTargetPreference;
+  args?: JsonObject;
+  startUrl?: string;
+  refresh?: boolean;
+  startNodeId?: string;
+  timeoutMs?: number;
+}): Promise<{ run: RunRecordV3; events: RunEvent[]; result: RunResult }> {
   const runtime = await ensureV3Runtime();
   const resolvedTabId = await resolveRunTargetTab({
     tabId: input.tabId,
@@ -447,7 +514,7 @@ export async function enqueueRunAndWait(
       flowId: input.flowId,
       tabId: resolvedTabId,
       args: input.args,
-      startNodeId: input.startNodeId as FlowV3['entryNodeId'] | undefined,
+      startNodeId: input.startNodeId as FlowV3["entryNodeId"] | undefined,
     },
   );
 

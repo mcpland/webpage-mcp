@@ -385,7 +385,13 @@ describe("record-replay-v3 compat", () => {
             id: "legacy-import",
             name: "Imported Legacy Flow",
             version: 1,
-            steps: [{ id: "step-a", type: "navigate", url: "https://example.com/import" }],
+            steps: [
+              {
+                id: "step-a",
+                type: "navigate",
+                url: "https://example.com/import",
+              },
+            ],
           },
         ],
       }),
@@ -407,7 +413,9 @@ describe("record-replay-v3 compat", () => {
             id: "legacy-unknown-type",
             name: "Imported Unknown Type",
             version: 1,
-            steps: [{ id: "step-a", type: "unknown_type_xyz", code: "return 42;" }],
+            steps: [
+              { id: "step-a", type: "unknown_type_xyz", code: "return 42;" },
+            ],
           },
         ],
       }),
@@ -483,7 +491,11 @@ describe("record-replay-v3 compat", () => {
         entryNodeId: "trigger-1",
         nodes: [
           { id: "trigger-1", kind: "trigger", config: {} },
-          { id: "node-1", kind: "navigate", config: { url: "https://example.com" } },
+          {
+            id: "node-1",
+            kind: "navigate",
+            config: { url: "https://example.com" },
+          },
         ],
         edges: [{ id: "edge-1", from: "trigger-1", to: "node-1" }],
       }),
@@ -504,7 +516,11 @@ describe("record-replay-v3 compat", () => {
       version: 1,
       nodes: [
         { id: "trigger-1", type: "trigger", config: {} },
-        { id: "nav-1", type: "navigate", config: { url: "https://example.com" } },
+        {
+          id: "nav-1",
+          type: "navigate",
+          config: { url: "https://example.com" },
+        },
       ],
       edges: [{ id: "edge-1", from: "trigger-1", to: "nav-1" }],
     });
@@ -529,7 +545,13 @@ describe("record-replay-v3 compat", () => {
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
       entryNodeId: "node-1",
-      nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com/a" } }],
+      nodes: [
+        {
+          id: "node-1",
+          kind: "navigate",
+          config: { url: "https://example.com/a" },
+        },
+      ],
       edges: [],
       meta: {
         tool: {
@@ -549,7 +571,13 @@ describe("record-replay-v3 compat", () => {
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
         entryNodeId: "node-1",
-        nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com/b" } }],
+        nodes: [
+          {
+            id: "node-1",
+            kind: "navigate",
+            config: { url: "https://example.com/b" },
+          },
+        ],
         edges: [],
         meta: {
           tool: {
@@ -561,6 +589,59 @@ describe("record-replay-v3 compat", () => {
     ).rejects.toThrow(
       'Published workflow slug "shared-slug" is already used by flow "published-a"',
     );
+  });
+
+  it("saveFlowToV3 preserves an existing custom slug when republishing without an explicit override", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+
+    await saveFlowToV3({
+      schemaVersion: 3,
+      id: "published-custom",
+      name: "Original Published Flow",
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      entryNodeId: "node-1",
+      nodes: [
+        {
+          id: "node-1",
+          kind: "navigate",
+          config: { url: "https://example.com/original" },
+        },
+      ],
+      edges: [],
+      meta: {
+        tool: {
+          published: true,
+          slug: "custom-shared-slug",
+        },
+      },
+    });
+
+    const republished = await saveFlowToV3({
+      schemaVersion: 3,
+      id: "published-custom",
+      name: "Renamed Published Flow",
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      entryNodeId: "node-1",
+      nodes: [
+        {
+          id: "node-1",
+          kind: "navigate",
+          config: { url: "https://example.com/renamed" },
+        },
+      ],
+      edges: [],
+      meta: {
+        tool: {
+          published: true,
+        },
+      },
+    });
+
+    expect(republished.name).toBe("Renamed Published Flow");
+    expect(republished.meta?.tool?.slug).toBe("custom-shared-slug");
   });
 
   it("saveFlowToV3 validates raw V3 variable definitions like the RPC path", async () => {
@@ -575,7 +656,13 @@ describe("record-replay-v3 compat", () => {
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
         entryNodeId: "node-1",
-        nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com" } }],
+        nodes: [
+          {
+            id: "node-1",
+            kind: "navigate",
+            config: { url: "https://example.com" },
+          },
+        ],
         edges: [],
         variables: [{ description: "missing name" }],
       }),
@@ -596,7 +683,13 @@ describe("record-replay-v3 compat", () => {
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
         entryNodeId: "node-1",
-        nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com" } }],
+        nodes: [
+          {
+            id: "node-1",
+            kind: "navigate",
+            config: { url: "https://example.com" },
+          },
+        ],
         edges: [],
         meta: {
           tool: {
@@ -621,7 +714,13 @@ describe("record-replay-v3 compat", () => {
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
         entryNodeId: "node-1",
-        nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com" } }],
+        nodes: [
+          {
+            id: "node-1",
+            kind: "navigate",
+            config: { url: "https://example.com" },
+          },
+        ],
         edges: [],
         policy: "strict",
       }),
