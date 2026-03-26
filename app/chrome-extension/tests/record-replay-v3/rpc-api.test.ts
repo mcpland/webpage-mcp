@@ -1351,6 +1351,41 @@ describe("V3 RPC Flow CRUD APIs", () => {
       });
     });
 
+    it("preserves an existing custom slug when republishing without a slug override", async () => {
+      const flow = createTestFlow("flow-custom-slug");
+      flow.meta = {
+        tool: {
+          published: false,
+          slug: "existing-custom-slug",
+        },
+      };
+      getInternal(storage).flowsMap.set(flow.id, flow);
+
+      const published = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.publishFlow",
+          params: { flowId: "flow-custom-slug" },
+          requestId: "req-custom-slug",
+        },
+        { subscriptions: new Set() },
+      );
+
+      expect(published).toEqual({
+        id: "flow-custom-slug",
+        slug: "existing-custom-slug",
+        version: 3,
+        name: "Test Flow flow-custom-slug",
+      });
+      expect(
+        getInternal(storage).flowsMap.get("flow-custom-slug")?.meta?.tool,
+      ).toMatchObject({
+        published: true,
+        slug: "existing-custom-slug",
+      });
+    });
+
     it("unpublishes already-stored flows without revalidating their graph", async () => {
       const flow = createTestFlow("flow-invalid-unpublish");
       flow.entryNodeId = "trigger-1" as FlowV3["entryNodeId"];

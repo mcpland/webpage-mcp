@@ -59,6 +59,13 @@ async function updatePublishedState(
   if (patch.description !== undefined) {
     toolPatchInput.description = patch.description;
   }
+  if (
+    toolPatchInput.slug === undefined &&
+    typeof flow.meta?.tool?.slug === 'string' &&
+    flow.meta.tool.slug.trim()
+  ) {
+    toolPatchInput.slug = flow.meta.tool.slug;
+  }
   const normalizedToolPatch = normalizeFlowToolMetadata(toolPatchInput, flow.name) ?? {};
 
   const nextFlow: FlowV3 = {

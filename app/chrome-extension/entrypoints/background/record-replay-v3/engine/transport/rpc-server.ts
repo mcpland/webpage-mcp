@@ -549,6 +549,13 @@ export class RpcServer {
     if (params?.description !== undefined && params?.description !== null) {
       toolPatchInput.description = String(params.description);
     }
+    if (
+      toolPatchInput.slug === undefined &&
+      typeof existing.meta?.tool?.slug === "string" &&
+      existing.meta.tool.slug.trim()
+    ) {
+      toolPatchInput.slug = existing.meta.tool.slug;
+    }
     const toolPatch =
       normalizeFlowToolMetadata(toolPatchInput, existing.name) ?? ({ published: true } satisfies FlowToolMetadata);
 
