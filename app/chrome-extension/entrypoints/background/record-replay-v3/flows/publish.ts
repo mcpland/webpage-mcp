@@ -19,6 +19,14 @@ export interface PublishedFlowDetailsV3 extends PublishedFlowInfoV3 {
 export const TOOL_SLUG_MAX_LENGTH = 64;
 const TOOL_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+function trimIfString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
 export function toToolSlug(name: string): string {
   return (name || "")
     .trim()
@@ -58,11 +66,8 @@ export function getPublishedFlowInfo(flow: FlowV3): PublishedFlowInfoV3 | null {
   }
 
   const slug = normalizeToolSlug(flow.meta?.tool?.slug, flow.name);
-  const description =
-    flow.meta?.tool?.description?.trim() ||
-    flow.description?.trim() ||
-    undefined;
-  const category = flow.meta?.tool?.category?.trim() || undefined;
+  const description = trimIfString(flow.meta?.tool?.description) || trimIfString(flow.description);
+  const category = trimIfString(flow.meta?.tool?.category);
 
   return {
     id: flow.id,

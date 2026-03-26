@@ -50,6 +50,7 @@ import {
 } from "../../flows/publish";
 import {
   normalizeFlowOptionalFields,
+  sanitizeFlowToolMetadata,
   normalizeFlowToolMetadata,
 } from "../../flows/normalize-flow-optional-fields";
 import { validateReachableRuntimeNodes } from "../../flows/runtime-validation";
@@ -558,11 +559,25 @@ export class RpcServer {
     }
     const toolPatch =
       normalizeFlowToolMetadata(toolPatchInput, existing.name) ?? ({ published: true } satisfies FlowToolMetadata);
+    const sanitizedExistingMeta = {
+      ...(existing.meta ?? {}),
+    };
+    const sanitizedExistingTool = sanitizeFlowToolMetadata(existing.meta?.tool, existing.name, {
+      generateSlugWhenPublished: false,
+    });
+    if (sanitizedExistingTool) {
+      sanitizedExistingMeta.tool = sanitizedExistingTool;
+    } else {
+      delete sanitizedExistingMeta.tool;
+    }
 
     const updated: FlowV3 = {
       ...existing,
       updatedAt: new Date(this.now()).toISOString() as ISODateTimeString,
-      meta: mergeFlowToolMetadata(existing.meta, toolPatch),
+      meta: mergeFlowToolMetadata(
+        Object.keys(sanitizedExistingMeta).length > 0 ? sanitizedExistingMeta : undefined,
+        toolPatch,
+      ),
     };
 
     const allFlows = await this.storage.flows.list();
@@ -598,10 +613,24 @@ export class RpcServer {
     const toolPatch =
       normalizeFlowToolMetadata({ published: false }, existing.name) ??
       ({ published: false } satisfies FlowToolMetadata);
+    const sanitizedExistingMeta = {
+      ...(existing.meta ?? {}),
+    };
+    const sanitizedExistingTool = sanitizeFlowToolMetadata(existing.meta?.tool, existing.name, {
+      generateSlugWhenPublished: false,
+    });
+    if (sanitizedExistingTool) {
+      sanitizedExistingMeta.tool = sanitizedExistingTool;
+    } else {
+      delete sanitizedExistingMeta.tool;
+    }
     const updated: FlowV3 = {
       ...existing,
       updatedAt: new Date(this.now()).toISOString() as ISODateTimeString,
-      meta: mergeFlowToolMetadata(existing.meta, toolPatch),
+      meta: mergeFlowToolMetadata(
+        Object.keys(sanitizedExistingMeta).length > 0 ? sanitizedExistingMeta : undefined,
+        toolPatch,
+      ),
     };
 
     await this.storage.flows.save(updated);

@@ -16,6 +16,10 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+interface FlowToolMetadataNormalizationOptions {
+  generateSlugWhenPublished?: boolean;
+}
+
 export function normalizeFlowOptionalFields(
   value: JsonObject,
   flowName: string,
@@ -83,6 +87,7 @@ export function normalizeFlowOptionalFields(
 export function normalizeFlowToolMetadata(
   value: JsonObject,
   flowName: string,
+  options: FlowToolMetadataNormalizationOptions = {},
 ): FlowToolMetadata | undefined {
   const tool: FlowToolMetadata = {};
 
@@ -98,7 +103,7 @@ export function normalizeFlowToolMetadata(
       throw new Error("flow.meta.tool.slug must be a string");
     }
     tool.slug = normalizeToolSlug(value.slug, flowName);
-  } else if (tool.published) {
+  } else if (tool.published && options.generateSlugWhenPublished !== false) {
     tool.slug = normalizeToolSlug(undefined, flowName);
   }
 
@@ -123,6 +128,34 @@ export function normalizeFlowToolMetadata(
   }
 
   return Object.keys(tool).length > 0 ? tool : undefined;
+}
+
+export function sanitizeFlowToolMetadata(
+  value: unknown,
+  flowName: string,
+  options: FlowToolMetadataNormalizationOptions = {},
+): FlowToolMetadata | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as JsonObject;
+  const sanitizedInput: JsonObject = {};
+
+  if (typeof record.published === "boolean") {
+    sanitizedInput.published = record.published;
+  }
+  if (typeof record.slug === "string" && record.slug.trim()) {
+    sanitizedInput.slug = record.slug;
+  }
+  if (typeof record.category === "string") {
+    sanitizedInput.category = record.category;
+  }
+  if (typeof record.description === "string") {
+    sanitizedInput.description = record.description;
+  }
+
+  return normalizeFlowToolMetadata(sanitizedInput, flowName, options);
 }
 
 function normalizeFlowMeta(

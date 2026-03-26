@@ -1386,6 +1386,43 @@ describe("V3 RPC Flow CRUD APIs", () => {
       });
     });
 
+    it("sanitizes legacy invalid tool metadata when publishing a stored flow", async () => {
+      const flow = createTestFlow("flow-dirty-tool");
+      flow.meta = {
+        tool: {
+          published: false,
+          slug: "legacy-tool-slug",
+          category: 123 as unknown as string,
+          description: { bad: true } as unknown as string,
+        },
+      };
+      getInternal(storage).flowsMap.set(flow.id, flow);
+
+      const published = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.publishFlow",
+          params: { flowId: "flow-dirty-tool" },
+          requestId: "req-dirty-tool",
+        },
+        { subscriptions: new Set() },
+      );
+
+      expect(published).toEqual({
+        id: "flow-dirty-tool",
+        slug: "legacy-tool-slug",
+        version: 3,
+        name: "Test Flow flow-dirty-tool",
+      });
+      expect(
+        getInternal(storage).flowsMap.get("flow-dirty-tool")?.meta?.tool,
+      ).toEqual({
+        published: true,
+        slug: "legacy-tool-slug",
+      });
+    });
+
     it("unpublishes already-stored flows without revalidating their graph", async () => {
       const flow = createTestFlow("flow-invalid-unpublish");
       flow.entryNodeId = "trigger-1" as FlowV3["entryNodeId"];
@@ -1422,6 +1459,35 @@ describe("V3 RPC Flow CRUD APIs", () => {
         published: false,
         slug: "legacy-broken-flow",
       });
+    });
+
+    it("lists published flows even when legacy tool metadata contains non-string text fields", async () => {
+      const dirtyPublishedFlow = createTestFlow("flow-dirty-listed");
+      dirtyPublishedFlow.meta = {
+        tool: {
+          published: true,
+          slug: "listed-legacy-slug",
+          category: 123 as unknown as string,
+          description: { bad: true } as unknown as string,
+        },
+      };
+      getInternal(storage).flowsMap.set(dirtyPublishedFlow.id, dirtyPublishedFlow);
+
+      const listed = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        { method: "rr_v3.listPublishedFlows", params: {}, requestId: "req-dirty-list" },
+        { subscriptions: new Set() },
+      );
+
+      expect(listed).toEqual([
+        {
+          id: "flow-dirty-listed",
+          slug: "listed-legacy-slug",
+          version: 3,
+          name: "Test Flow flow-dirty-listed",
+        },
+      ]);
     });
 
     it("rejects duplicate published slugs", async () => {

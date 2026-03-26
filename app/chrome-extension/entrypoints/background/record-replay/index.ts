@@ -7,7 +7,10 @@ import {
   mergeFlowToolMetadata,
   normalizeToolSlug,
 } from '../record-replay-v3/flows/publish';
-import { normalizeFlowToolMetadata } from '../record-replay-v3/flows/normalize-flow-optional-fields';
+import {
+  normalizeFlowToolMetadata,
+  sanitizeFlowToolMetadata,
+} from '../record-replay-v3/flows/normalize-flow-optional-fields';
 import {
   enqueueRunAndWait,
   ensureV3Runtime,
@@ -67,11 +70,25 @@ async function updatePublishedState(
     toolPatchInput.slug = flow.meta.tool.slug;
   }
   const normalizedToolPatch = normalizeFlowToolMetadata(toolPatchInput, flow.name) ?? {};
+  const sanitizedExistingMeta = {
+    ...(flow.meta ?? {}),
+  };
+  const sanitizedExistingTool = sanitizeFlowToolMetadata(flow.meta?.tool, flow.name, {
+    generateSlugWhenPublished: false,
+  });
+  if (sanitizedExistingTool) {
+    sanitizedExistingMeta.tool = sanitizedExistingTool;
+  } else {
+    delete sanitizedExistingMeta.tool;
+  }
 
   const nextFlow: FlowV3 = {
     ...flow,
     updatedAt: new Date().toISOString(),
-    meta: mergeFlowToolMetadata(flow.meta, normalizedToolPatch),
+    meta: mergeFlowToolMetadata(
+      Object.keys(sanitizedExistingMeta).length > 0 ? sanitizedExistingMeta : undefined,
+      normalizedToolPatch,
+    ),
   };
 
   if (nextFlow.meta?.tool?.published) {
