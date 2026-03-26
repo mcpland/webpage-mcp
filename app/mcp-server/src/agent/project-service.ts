@@ -6,14 +6,19 @@
  * - Path validation with security checks
  * - Consistent with AgentProject interface from shared types
  */
-import { randomUUID } from 'node:crypto';
-import { mkdir, stat } from 'node:fs/promises';
-import path from 'node:path';
-import os from 'node:os';
-import { eq, desc } from 'drizzle-orm';
-import type { AgentProject } from 'webpage-mcp-shared';
-import type { CreateOrUpdateProjectInput } from './project-types';
-import { getDb, projects, type ProjectRow } from './db';
+import { randomUUID } from "node:crypto";
+import { mkdir, stat } from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import { eq, desc } from "drizzle-orm";
+import type { AgentProject } from "webpage-mcp-shared";
+import type { CreateOrUpdateProjectInput } from "./project-types";
+import { getDb, projects, type ProjectRow } from "./db";
+
+const VALID_PROJECT_CLI_PREFERENCES = new Set<AgentProject["preferredCli"]>([
+  "claude",
+  "codex",
+]);
 
 // ============================================================
 // Security Configuration
@@ -27,7 +32,7 @@ const ALLOWED_BASE_DIRS: string[] = [
   os.homedir(),
   process.env.USERPROFILE,
   process.env.MCP_ALLOWED_WORKSPACE_BASE,
-].filter((dir): dir is string => typeof dir === 'string' && dir.length > 0);
+].filter((dir): dir is string => typeof dir === "string" && dir.length > 0);
 
 // ============================================================
 // Path Validation
@@ -48,15 +53,17 @@ export interface PathValidationResult {
  * Validate a root path without creating it.
  * Returns validation result including whether directory needs creation.
  */
-export async function validateRootPath(rootPath: string): Promise<PathValidationResult> {
+export async function validateRootPath(
+  rootPath: string,
+): Promise<PathValidationResult> {
   const trimmed = rootPath.trim();
   if (!trimmed) {
     return {
       valid: false,
-      absolute: '',
+      absolute: "",
       exists: false,
       needsCreation: false,
-      error: 'Project rootPath must not be empty',
+      error: "Project rootPath must not be empty",
     };
   }
 
@@ -65,7 +72,9 @@ export async function validateRootPath(rootPath: string): Promise<PathValidation
     : path.resolve(process.cwd(), trimmed);
 
   // Security check: ensure path is under allowed base directories
-  const isAllowed = ALLOWED_BASE_DIRS.some((base) => absolute.startsWith(path.resolve(base)));
+  const isAllowed = ALLOWED_BASE_DIRS.some((base) =>
+    absolute.startsWith(path.resolve(base)),
+  );
 
   if (!isAllowed) {
     return {
@@ -73,7 +82,7 @@ export async function validateRootPath(rootPath: string): Promise<PathValidation
       absolute,
       exists: false,
       needsCreation: false,
-      error: `Project rootPath must be under allowed directories: ${ALLOWED_BASE_DIRS.join(', ')}`,
+      error: `Project rootPath must be under allowed directories: ${ALLOWED_BASE_DIRS.join(", ")}`,
     };
   }
 
@@ -92,7 +101,7 @@ export async function validateRootPath(rootPath: string): Promise<PathValidation
     return { valid: true, absolute, exists: true, needsCreation: false };
   } catch (err: unknown) {
     const error = err as NodeJS.ErrnoException;
-    if (error.code === 'ENOENT') {
+    if (error.code === "ENOENT") {
       // Path doesn't exist but is valid - can be created
       return { valid: true, absolute, exists: false, needsCreation: true };
     }
@@ -101,7 +110,7 @@ export async function validateRootPath(rootPath: string): Promise<PathValidation
       absolute,
       exists: false,
       needsCreation: false,
-      error: error.message || 'Unknown error validating path',
+      error: error.message || "Unknown error validating path",
     };
   }
 }
@@ -110,14 +119,16 @@ export async function validateRootPath(rootPath: string): Promise<PathValidation
  * Create a project directory after user confirmation.
  * This should only be called after validateRootPath returns needsCreation: true.
  */
-export async function createProjectDirectory(absolutePath: string): Promise<void> {
+export async function createProjectDirectory(
+  absolutePath: string,
+): Promise<void> {
   // Re-validate for safety
   const validation = await validateRootPath(absolutePath);
   if (!validation.valid) {
-    throw new Error(validation.error || 'Invalid path');
+    throw new Error(validation.error || "Invalid path");
   }
   if (validation.exists) {
-    throw new Error('Directory already exists');
+    throw new Error("Directory already exists");
   }
   await mkdir(absolutePath, { recursive: true });
 }
@@ -127,11 +138,14 @@ export async function createProjectDirectory(absolutePath: string): Promise<void
  * @param rootPath - The path to normalize
  * @param allowCreate - If true, create directory if it doesn't exist
  */
-async function normalizeRootPath(rootPath: string, allowCreate = false): Promise<string> {
+async function normalizeRootPath(
+  rootPath: string,
+  allowCreate = false,
+): Promise<string> {
   const result = await validateRootPath(rootPath);
 
   if (!result.valid) {
-    throw new Error(result.error || 'Invalid path');
+    throw new Error(result.error || "Invalid path");
   }
 
   if (result.needsCreation) {
@@ -155,15 +169,23 @@ async function normalizeRootPath(rootPath: string, allowCreate = false): Promise
  * Convert database row to AgentProject interface.
  */
 function rowToProject(row: ProjectRow): AgentProject {
+  const preferredCli =
+    row.preferredCli &&
+    VALID_PROJECT_CLI_PREFERENCES.has(
+      row.preferredCli as AgentProject["preferredCli"],
+    )
+      ? (row.preferredCli as AgentProject["preferredCli"])
+      : undefined;
+
   return {
     id: row.id,
     name: row.name,
     description: row.description ?? undefined,
     rootPath: row.rootPath,
-    preferredCli: row.preferredCli as AgentProject['preferredCli'],
+    preferredCli,
     selectedModel: row.selectedModel ?? undefined,
     activeClaudeSessionId: row.activeClaudeSessionId ?? undefined,
-    enableWebpageMcp: row.enableWebpageMcp !== '0',
+    enableWebpageMcp: row.enableWebpageMcp !== "0",
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     lastActiveAt: row.lastActiveAt ?? undefined,
@@ -179,37 +201,51 @@ function rowToProject(row: ProjectRow): AgentProject {
  */
 export async function listProjects(): Promise<AgentProject[]> {
   const db = getDb();
-  const rows = await db.select().from(projects).orderBy(desc(projects.lastActiveAt));
+  const rows = await db
+    .select()
+    .from(projects)
+    .orderBy(desc(projects.lastActiveAt));
   return rows.map(rowToProject);
 }
 
 /**
  * Get a single project by ID.
  */
-export async function getProject(id: string): Promise<AgentProject | undefined> {
+export async function getProject(
+  id: string,
+): Promise<AgentProject | undefined> {
   const db = getDb();
-  const rows = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
+  const rows = await db
+    .select()
+    .from(projects)
+    .where(eq(projects.id, id))
+    .limit(1);
   return rows.length > 0 ? rowToProject(rows[0]) : undefined;
 }
 
 /**
  * Create or update a project.
  */
-export async function upsertProject(input: CreateOrUpdateProjectInput): Promise<AgentProject> {
+export async function upsertProject(
+  input: CreateOrUpdateProjectInput,
+): Promise<AgentProject> {
   const db = getDb();
   const now = new Date().toISOString();
-  const rootPath = await normalizeRootPath(input.rootPath, input.allowCreate ?? false);
+  const rootPath = await normalizeRootPath(
+    input.rootPath,
+    input.allowCreate ?? false,
+  );
 
   const id = input.id?.trim() || randomUUID();
   const existing = await getProject(id);
 
   // Convert booleans to strings for SQLite storage:
   // - enableWebpageMcp: '1' or '0' (non-null; defaults to enabled)
-  let enableWebpageMcpValue: '1' | '0';
-  if (typeof input.enableWebpageMcp === 'boolean') {
-    enableWebpageMcpValue = input.enableWebpageMcp ? '1' : '0';
+  let enableWebpageMcpValue: "1" | "0";
+  if (typeof input.enableWebpageMcp === "boolean") {
+    enableWebpageMcpValue = input.enableWebpageMcp ? "1" : "0";
   } else {
-    enableWebpageMcpValue = existing?.enableWebpageMcp === false ? '0' : '1';
+    enableWebpageMcpValue = existing?.enableWebpageMcp === false ? "0" : "1";
   }
 
   const projectData = {
@@ -253,7 +289,10 @@ export async function deleteProject(id: string): Promise<void> {
 export async function touchProjectActivity(id: string): Promise<void> {
   const db = getDb();
   const now = new Date().toISOString();
-  await db.update(projects).set({ lastActiveAt: now, updatedAt: now }).where(eq(projects.id, id));
+  await db
+    .update(projects)
+    .set({ lastActiveAt: now, updatedAt: now })
+    .where(eq(projects.id, id));
 }
 
 /**
