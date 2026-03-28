@@ -81,9 +81,9 @@ export class FileHandler {
       // Convert base64 to buffer
       const buffer = Buffer.from(base64Content, 'base64');
 
-      // Generate filename if not provided
-      const finalFileName = fileName || this.generateFileName();
-      const filePath = path.join(this.tempDir, finalFileName);
+      // Normalize the client-provided name so temp writes can never escape tempDir.
+      const finalFileName = this.normalizeTempFileName(fileName) || this.generateFileName();
+      const filePath = this.resolveTempFilePath(finalFileName);
 
       // Save to file
       fs.writeFileSync(filePath, buffer);
@@ -165,16 +165,16 @@ export class FileHandler {
    */
   private async cleanupFile(filePath: string): Promise<any> {
     try {
-      // Only allow cleanup of files in our temp directory
-      if (!filePath.startsWith(this.tempDir)) {
+      const resolvedPath = this.resolveExistingTempFilePath(filePath);
+      if (!resolvedPath) {
         return {
           success: false,
           error: 'Can only cleanup files in temp directory',
         };
       }
 
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      if (fs.existsSync(resolvedPath)) {
+        fs.unlinkSync(resolvedPath);
       }
 
       return {
@@ -194,6 +194,48 @@ export class FileHandler {
    */
   private generateFileName(): string {
     return `upload-${crypto.randomBytes(8).toString('hex')}.bin`;
+  }
+
+  private normalizeTempFileName(fileName?: string): string | null {
+    if (typeof fileName !== 'string') {
+      return null;
+    }
+
+    const trimmed = fileName.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const baseName = path.basename(trimmed).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim();
+    if (!baseName || baseName === '.' || baseName === '..') {
+      return null;
+    }
+
+    return baseName;
+  }
+
+  private resolveTempFilePath(fileName: string): string {
+    return path.resolve(this.tempDir, fileName);
+  }
+
+  private resolveExistingTempFilePath(filePath: string): string | null {
+    if (typeof filePath !== 'string' || !filePath.trim()) {
+      return null;
+    }
+
+    const resolvedTempDir = path.resolve(this.tempDir);
+    const resolvedFilePath = path.resolve(filePath);
+    const relative = path.relative(resolvedTempDir, resolvedFilePath);
+
+    if (!relative || relative === '.') {
+      return null;
+    }
+
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      return null;
+    }
+
+    return resolvedFilePath;
   }
 
   /**
