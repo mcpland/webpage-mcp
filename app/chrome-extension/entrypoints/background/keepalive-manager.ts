@@ -10,10 +10,12 @@
 
 import {
   createOffscreenKeepaliveController,
+  InMemoryKeepaliveController,
   type KeepaliveController,
 } from './record-replay-v3/engine/keepalive/offscreen-keepalive';
 
 const LOG_PREFIX = '[KeepaliveManager]';
+let didLogFallbackReason = false;
 
 /**
  * Singleton keepalive controller instance.
@@ -21,12 +23,62 @@ const LOG_PREFIX = '[KeepaliveManager]';
  */
 let controller: KeepaliveController | null = null;
 
+function resolveKeepaliveControllerFactory(): {
+  kind: 'offscreen' | 'passive';
+  reason?: string;
+} {
+  if (typeof chrome === 'undefined' || !chrome.runtime?.getManifest) {
+    return {
+      kind: 'passive',
+      reason: 'chrome.runtime.getManifest is unavailable',
+    };
+  }
+
+  const manifestVersion = chrome.runtime.getManifest().manifest_version;
+  if (manifestVersion !== 3) {
+    return {
+      kind: 'passive',
+      reason: `manifest_version ${manifestVersion} uses a persistent background runtime`,
+    };
+  }
+
+  if (!chrome.offscreen) {
+    return {
+      kind: 'passive',
+      reason: 'chrome.offscreen is unavailable in this MV3 runtime',
+    };
+  }
+
+  if (!chrome.runtime.onConnect) {
+    return {
+      kind: 'passive',
+      reason: 'chrome.runtime.onConnect is unavailable in this MV3 runtime',
+    };
+  }
+
+  return { kind: 'offscreen' };
+}
+
 /**
  * Get or create the singleton keepalive controller.
  */
 function getController(): KeepaliveController {
   if (!controller) {
-    controller = createOffscreenKeepaliveController({ logger: console });
+    const resolution = resolveKeepaliveControllerFactory();
+    controller =
+      resolution.kind === 'offscreen'
+        ? createOffscreenKeepaliveController({ logger: console })
+        : new InMemoryKeepaliveController();
+
+    if (resolution.kind === 'passive' && resolution.reason && !didLogFallbackReason) {
+      const log =
+        typeof chrome !== 'undefined' && chrome.runtime?.getManifest?.().manifest_version === 3
+          ? console.warn
+          : console.info;
+      log(`${LOG_PREFIX} Using passive keepalive controller: ${resolution.reason}`);
+      didLogFallbackReason = true;
+    }
+
     console.debug(`${LOG_PREFIX} Controller initialized`);
   }
   return controller;

@@ -137,6 +137,10 @@ async function safeRemoveTab(tabId: number, logger: Logger): Promise<void> {
 
 async function clearV3TriggerAlarms(logger: Logger): Promise<void> {
   try {
+    if (!chrome.alarms?.getAll || !chrome.alarms?.clear) {
+      logger.debug("[RR-V3] chrome.alarms unavailable; skipping trigger alarm cleanup");
+      return;
+    }
     const alarms = await chrome.alarms.getAll();
     const toClear = alarms
       .map((alarm) => alarm?.name || "")
