@@ -60,4 +60,35 @@ describe('FileHandler temp file safety', () => {
     expect(result.success).toBe(false);
     expect(fs.existsSync(outsideFile)).toBe(true);
   });
+
+  it('only reads base64 from files inside tempDir', async () => {
+    const { handler, tempDir } = createTestHandler();
+    dirsToCleanup.push(tempDir);
+
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webpage-mcp-outside-read-'));
+    dirsToCleanup.push(outsideDir);
+    const outsideFile = path.join(outsideDir, 'secret.txt');
+    fs.writeFileSync(outsideFile, 'secret');
+
+    const result = await handler.handleFileRequest({
+      action: 'readBase64File',
+      filePath: outsideFile,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Can only read files in temp directory');
+  });
+
+  it('rejects prepareFile requests that try to verify arbitrary local paths', async () => {
+    const { handler, tempDir } = createTestHandler();
+    dirsToCleanup.push(tempDir);
+
+    const result = await handler.handleFileRequest({
+      action: 'prepareFile',
+      filePath: '/etc/hosts',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('base64Data is required');
+  });
 });

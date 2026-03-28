@@ -28,10 +28,8 @@ export class FileHandler {
         case 'prepareFile':
           if (base64Data) {
             return await this.saveBase64File(base64Data, fileName);
-          } else if (filePath) {
-            return await this.verifyFile(filePath);
           }
-          return { success: false, error: 'Either base64Data or filePath is required' };
+          return { success: false, error: 'base64Data is required' };
 
         case 'readBase64File': {
           if (!filePath) return { success: false, error: 'filePath is required' };
@@ -100,55 +98,27 @@ export class FileHandler {
   }
 
   /**
-   * Verify that a file exists and is accessible
-   */
-  private async verifyFile(filePath: string): Promise<any> {
-    try {
-      // Check if file exists
-      if (!fs.existsSync(filePath)) {
-        throw new Error(`File does not exist: ${filePath}`);
-      }
-
-      // Get file stats
-      const stats = fs.statSync(filePath);
-
-      // Check if it's actually a file
-      if (!stats.isFile()) {
-        throw new Error(`Path is not a file: ${filePath}`);
-      }
-
-      // Check if file is readable
-      fs.accessSync(filePath, fs.constants.R_OK);
-
-      return {
-        success: true,
-        filePath: filePath,
-        fileName: path.basename(filePath),
-        size: stats.size,
-      };
-    } catch (error) {
-      throw new Error(`Failed to verify file: ${error}`);
-    }
-  }
-
-  /**
    * Read file content and return as base64 string
    */
   private async readBase64File(filePath: string): Promise<any> {
     try {
-      if (!fs.existsSync(filePath)) {
-        throw new Error(`File does not exist: ${filePath}`);
+      const resolvedPath = this.resolveExistingTempFilePath(filePath);
+      if (!resolvedPath) {
+        throw new Error('Can only read files in temp directory');
       }
-      const stats = fs.statSync(filePath);
+      if (!fs.existsSync(resolvedPath)) {
+        throw new Error(`File does not exist: ${resolvedPath}`);
+      }
+      const stats = fs.statSync(resolvedPath);
       if (!stats.isFile()) {
-        throw new Error(`Path is not a file: ${filePath}`);
+        throw new Error(`Path is not a file: ${resolvedPath}`);
       }
-      const buf = fs.readFileSync(filePath);
+      const buf = fs.readFileSync(resolvedPath);
       const base64 = buf.toString('base64');
       return {
         success: true,
-        filePath,
-        fileName: path.basename(filePath),
+        filePath: resolvedPath,
+        fileName: path.basename(resolvedPath),
         size: stats.size,
         base64Data: base64,
       };

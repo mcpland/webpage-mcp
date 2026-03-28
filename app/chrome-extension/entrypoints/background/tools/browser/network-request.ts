@@ -12,8 +12,8 @@ interface NetworkRequestToolParams {
   body?: any; // User-provided body
   timeout?: number; // Timeout for the network request itself
   // Optional multipart/form-data descriptor. When provided, overrides body and lets the helper build FormData.
-  // Shape: { fields?: Record<string, string|number|boolean>, files?: Array<{ name: string, fileUrl?: string, filePath?: string, base64Data?: string, filename?: string, contentType?: string }> }
-  // Or a compact array: [ [name, fileSpec, filename?], ... ] where fileSpec can be 'url:...', 'file:/abs/path', 'base64:...'
+  // Shape: { fields?: Record<string, string|number|boolean>, files?: Array<{ name: string, fileUrl?: string, base64Data?: string, filename?: string, contentType?: string }> }
+  // Or a compact array: [ [name, fileSpec, filename?], ... ] where fileSpec can be 'url:...' or 'base64:...'
   formData?: any;
   tabId?: number;
   windowId?: number;
