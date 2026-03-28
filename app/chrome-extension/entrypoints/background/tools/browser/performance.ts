@@ -246,7 +246,7 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
       if (existed?.recording) {
         return {
           content: [{ type: 'text', text: 'Error: a performance trace is already running.' }],
-          isError: false,
+          isError: true,
         };
       }
 
