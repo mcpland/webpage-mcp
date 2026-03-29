@@ -617,7 +617,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.SCREENSHOT,
     description:
-      '[Prefer read_page over taking a screenshot and Prefer chrome_computer] Take a screenshot of the current page or a specific element. For new usage, use chrome_computer with action="screenshot". Use this tool if you need advanced options.',
+      '[Prefer read_page over taking a screenshot and Prefer chrome_computer] Take a screenshot of the current HTTP(S) page or a specific element. For new usage, use chrome_computer with action="screenshot". Use this tool if you need advanced options.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -705,13 +705,14 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.WEB_FETCHER,
-    description: 'Fetch content from a web page',
+    description: 'Fetch content from an HTTP(S) web page',
     inputSchema: {
       type: 'object',
       properties: {
         url: {
           type: 'string',
-          description: 'URL to fetch content from. If not provided, uses the current active tab',
+          description:
+            'HTTP(S) URL to fetch content from. If not provided, uses the current active tab',
         },
         tabId: {
           type: 'number',

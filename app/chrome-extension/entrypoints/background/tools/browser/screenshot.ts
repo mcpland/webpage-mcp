@@ -57,6 +57,16 @@ interface ScreenshotToolParams {
   maxHeight?: number; // Maximum height to capture in pixels (for infinite scroll pages)
 }
 
+function hasDisallowedPublicPageScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
 /** Page details returned by screenshot-helper content script */
 interface ScreenshotPageDetails {
   totalWidth: number;
@@ -135,6 +145,11 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     ) {
       return createErrorResponse(
         'Cannot capture special browser pages or web store pages due to security restrictions.',
+      );
+    }
+    if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
+      return createErrorResponse(
+        'Only http:// and https:// pages are supported by chrome_screenshot',
       );
     }
 

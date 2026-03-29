@@ -13,6 +13,16 @@ interface WebFetcherToolParams {
   windowId?: number; // target window id to pick active tab or create tab
 }
 
+function hasDisallowedPublicPageScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
 class WebFetcherTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.WEB_FETCHER;
 
@@ -23,7 +33,7 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
     // Handle mutually exclusive parameters: if htmlContent is true, textContent is forced to false
     const htmlContent = args.htmlContent === true;
     const textContent = htmlContent ? false : args.textContent !== false; // Default is true, unless htmlContent is true or textContent is explicitly set to false
-    const url = args.url;
+    const url = typeof args.url === 'string' ? args.url.trim() : undefined;
     const selector = args.selector;
     const explicitTabId = args.tabId;
     const background = args.background === true;
@@ -37,6 +47,12 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
     });
 
     try {
+      if (url && hasDisallowedPublicPageScheme(url)) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_get_web_content',
+        );
+      }
+
       // Get tab to fetch content from
       let tab;
 
@@ -82,6 +98,11 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
 
       if (!tab.id) {
         return createErrorResponse('Tab has no ID');
+      }
+      if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_get_web_content',
+        );
       }
 
       // Optionally bring tab/window to foreground
