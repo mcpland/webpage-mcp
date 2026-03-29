@@ -22,6 +22,48 @@ export interface FlowConversionResult<T> {
   warnings: string[];
 }
 
+export function extractHiddenSensitiveVariables(
+  flowV3: FlowV3,
+): NonNullable<FlowV3["variables"]> | undefined {
+  if (!Array.isArray(flowV3.variables)) {
+    return undefined;
+  }
+
+  const hiddenVariables = flowV3.variables
+    .filter((variable) => variable?.sensitive === true)
+    .map((variable) => JSON.parse(JSON.stringify(variable)) as NonNullable<FlowV3["variables"]>[number]);
+
+  return hiddenVariables.length > 0 ? hiddenVariables : undefined;
+}
+
+export function mergeHiddenSensitiveVariables(
+  flowV3: FlowV3,
+  hiddenSensitiveVariables: FlowV3["variables"] | undefined,
+): FlowV3 {
+  if (!Array.isArray(hiddenSensitiveVariables) || hiddenSensitiveVariables.length === 0) {
+    return flowV3;
+  }
+
+  const visibleVariables = Array.isArray(flowV3.variables) ? flowV3.variables : [];
+  const visibleNames = new Set(
+    visibleVariables
+      .map((variable) => variable?.name)
+      .filter((name): name is string => typeof name === "string" && name.length > 0),
+  );
+  const preservedHiddenVariables = hiddenSensitiveVariables
+    .filter((variable) => variable?.sensitive === true && !visibleNames.has(variable.name))
+    .map((variable) => JSON.parse(JSON.stringify(variable)) as NonNullable<FlowV3["variables"]>[number]);
+
+  if (preservedHiddenVariables.length === 0) {
+    return flowV3;
+  }
+
+  return {
+    ...flowV3,
+    variables: [...visibleVariables, ...preservedHiddenVariables],
+  };
+}
+
 // ==================== Builder flow -> V3 (for RPC calls) ====================
 
 /**

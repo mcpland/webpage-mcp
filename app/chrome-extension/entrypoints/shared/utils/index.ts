@@ -5,11 +5,13 @@
 
 // Flow conversion utilities
 export {
+  extractHiddenSensitiveVariables,
   flowBuilderToV3ForRpc,
   flowV3ToBuilderForEditor,
   isFlowV3,
   isBuilderFlow,
   extractFlowCandidates,
+  mergeHiddenSensitiveVariables,
   type FlowConversionResult,
 } from "./rr-flow-convert";
 

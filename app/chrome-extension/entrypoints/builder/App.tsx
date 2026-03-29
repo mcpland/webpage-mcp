@@ -12,10 +12,12 @@ import type {
 } from "@/entrypoints/background/record-replay-v3/domain/ids";
 import type { JsonObject } from "@/entrypoints/background/record-replay-v3/domain/json";
 import {
+  extractHiddenSensitiveVariables,
   flowBuilderToV3ForRpc,
   flowV3ToBuilderForEditor,
   isFlowV3,
   extractFlowCandidates,
+  mergeHiddenSensitiveVariables,
 } from "@/entrypoints/shared/utils";
 import { getV3AuthoringCompatibility } from "@/entrypoints/shared/utils/v3-authoring";
 
@@ -93,6 +95,7 @@ export default function BuilderApp() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootstrapDoneRef = useRef(false);
+  const hiddenSensitiveVariablesRef = useRef<FlowV3["variables"]>(undefined);
 
   const rpc = useRRV3Rpc({
     autoConnect: true,
@@ -182,6 +185,7 @@ export default function BuilderApp() {
         updatedAt: new Date(now).toISOString(),
       } as any,
     } as any;
+    hiddenSensitiveVariablesRef.current = undefined;
     store.initFromFlow(empty);
     setTitle(t("builderNewWorkflowName", "New workflow"));
   }
@@ -196,6 +200,8 @@ export default function BuilderApp() {
         })) as FlowV3 | null;
 
         if (flowV3) {
+          hiddenSensitiveVariablesRef.current =
+            extractHiddenSensitiveVariables(flowV3);
           const { flow: flowV2, warnings } = flowV3ToBuilderForEditor(flowV3);
           warnings.forEach((w) => pushToast(w, "warn"));
           store.initFromFlow(flowV2);
@@ -281,10 +287,16 @@ export default function BuilderApp() {
 
       const { flow: flowV3, warnings: convWarnings } = flowBuilderToV3ForRpc(flowV2);
       convWarnings.forEach((w) => pushToast(w, "warn"));
+      const flowToSave = mergeHiddenSensitiveVariables(
+        flowV3,
+        hiddenSensitiveVariablesRef.current,
+      );
 
       const saved = (await rpc.request("rr_v3.saveFlow", {
-        flow: flowV3 as unknown as JsonObject,
+        flow: flowToSave as unknown as JsonObject,
       })) as unknown as FlowV3;
+      hiddenSensitiveVariablesRef.current =
+        extractHiddenSensitiveVariables(saved);
 
       if (!store.flowLocal.meta) {
         (store.flowLocal as any).meta = {};
@@ -376,6 +388,8 @@ export default function BuilderApp() {
       const first = candidates[0];
 
       if (isFlowV3(first)) {
+        hiddenSensitiveVariablesRef.current =
+          extractHiddenSensitiveVariables(first as FlowV3);
         const importedCompatibility = getV3AuthoringCompatibility(first);
         const { flow: flowV2, warnings } = flowV3ToBuilderForEditor(
           first as FlowV3,
@@ -401,6 +415,7 @@ export default function BuilderApp() {
           notifyImportReadOnly(importedCompatibility.messages.join(" "));
         }
       } else {
+        hiddenSensitiveVariablesRef.current = undefined;
         store.initFromFlow(first as BuilderFlow);
 
         if (

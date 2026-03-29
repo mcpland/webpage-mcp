@@ -780,24 +780,25 @@ export function convertFlowV3ToCompat(v3Flow: FlowV3): ConversionResult<CompatFl
   }));
 
   // 3. Transform variables
-  const variables: CompatVariableDef[] = (v3Flow.variables || []).map((v) => ({
-    key: v.name,
-    label: v.label,
-    sensitive: v.sensitive,
-    default: v.default,
-    type: v.kind,
-    options: Array.isArray(v.options) ? [...v.options] : undefined,
-    item: v.item,
-    rules:
-      v.required || (Array.isArray(v.options) && v.options.every((option) => typeof option === "string"))
-        ? {
-            ...(v.required ? { required: v.required } : {}),
-            ...(Array.isArray(v.options) && v.options.every((option) => typeof option === "string")
-              ? { enum: [...(v.options as string[])] }
-              : {}),
-          }
-        : undefined,
-  }));
+  const variables: CompatVariableDef[] = (v3Flow.variables || [])
+    .filter((v) => v?.sensitive !== true)
+    .map((v) => ({
+      key: v.name,
+      label: v.label,
+      default: v.default,
+      type: v.kind,
+      options: Array.isArray(v.options) ? [...v.options] : undefined,
+      item: v.item,
+      rules:
+        v.required || (Array.isArray(v.options) && v.options.every((option) => typeof option === "string"))
+          ? {
+              ...(v.required ? { required: v.required } : {}),
+              ...(Array.isArray(v.options) && v.options.every((option) => typeof option === "string")
+                ? { enum: [...(v.options as string[])] }
+                : {}),
+            }
+          : undefined,
+    }));
 
   // 4. Convert metadata
   const meta: CompatFlowDocument["meta"] = {
