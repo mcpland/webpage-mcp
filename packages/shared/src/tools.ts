@@ -1048,7 +1048,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.JAVASCRIPT,
     description:
-      'Execute JavaScript code in a browser tab and return the result. Uses CDP Runtime.evaluate with awaitPromise and returnByValue; automatically falls back to chrome.scripting.executeScript if the debugger is busy. Output is sanitized (sensitive data redacted) and truncated by default.',
+      'Execute JavaScript code in an HTTP(S) browser tab and return the result. Uses CDP Runtime.evaluate with awaitPromise and returnByValue; automatically falls back to chrome.scripting.executeScript if the debugger is busy. Output is sanitized (sensitive data redacted) and truncated by default.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1059,7 +1059,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target tab ID. If omitted, uses the current active tab.',
+          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         timeoutMs: {
           type: 'number',

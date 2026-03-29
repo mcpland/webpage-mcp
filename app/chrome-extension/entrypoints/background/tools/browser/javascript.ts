@@ -121,6 +121,16 @@ function normalizePositiveInt(value: unknown, fallback: number): number {
   return Math.max(1, Math.floor(value));
 }
 
+function hasDisallowedPublicPageScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -423,6 +433,11 @@ class JavaScriptTool extends BaseBrowserToolExecutor {
 
       if (!tab.id) {
         return createErrorResponse('Tab has no ID');
+      }
+      if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_javascript',
+        );
       }
       const tabId = tab.id;
 
