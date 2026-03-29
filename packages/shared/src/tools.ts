@@ -1282,18 +1282,18 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.CONSOLE,
     description:
-      'Capture console output from a browser tab. Supports snapshot mode (default; one-time capture with ~2s wait) and buffer mode (persistent per-tab buffer you can read/clear instantly without waiting).',
+      'Capture console output from an HTTP(S) browser tab. Supports snapshot mode (default; one-time capture with ~2s wait) and buffer mode (persistent per-tab buffer you can read/clear instantly without waiting).',
     inputSchema: {
       type: 'object',
       properties: {
         url: {
           type: 'string',
           description:
-            'URL to navigate to and capture console from. If not provided, uses the current active tab',
+            'HTTP(S) URL to navigate to and capture console from. If not provided, uses the current active tab',
         },
         tabId: {
           type: 'number',
-          description: 'Target an existing tab by ID (default: active tab).',
+          description: 'Target an existing HTTP(S) tab by ID (default: active tab).',
         },
         windowId: {
           type: 'number',

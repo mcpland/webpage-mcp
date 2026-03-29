@@ -71,6 +71,16 @@ function normalizeLimit(value: unknown, fallback: number): number {
   return Math.max(0, n);
 }
 
+function hasDisallowedPublicPageScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
 function parseRegexPattern(pattern?: string): RegExp | undefined {
   if (typeof pattern !== 'string') return undefined;
   const trimmed = pattern.trim();
@@ -172,6 +182,12 @@ class ConsoleTool extends BaseBrowserToolExecutor {
     }
 
     try {
+      if (url && hasDisallowedPublicPageScheme(url)) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_console',
+        );
+      }
+
       if (typeof tabId === 'number') {
         // Use explicit tab
         const t = await chrome.tabs.get(tabId);
@@ -194,6 +210,11 @@ class ConsoleTool extends BaseBrowserToolExecutor {
 
       if (!targetTab?.id) {
         return createErrorResponse('Failed to identify target tab.');
+      }
+      if (hasDisallowedPublicPageScheme(String(targetTab.url || ''))) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_console',
+        );
       }
 
       targetTabId = targetTab.id;
