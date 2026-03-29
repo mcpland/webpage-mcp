@@ -8,6 +8,14 @@ interface HandleDownloadParams {
   waitForComplete?: boolean; // default true
 }
 
+function toDownloadDisplayName(filename?: string | null): string | undefined {
+  if (typeof filename !== 'string' || !filename) {
+    return undefined;
+  }
+  const normalized = filename.split(/[/\\]/).pop();
+  return normalized || filename;
+}
+
 /**
  * Tool: wait for a download and return info
  */
@@ -67,7 +75,7 @@ async function waitForDownload(opts: {
         cleanup();
         resolve({
           id: out.id,
-          filename: out.filename,
+          filename: toDownloadDisplayName(out.filename),
           url: out.url,
           mime: (out as any).mime || undefined,
           fileSize: out.fileSize ?? out.totalBytes ?? undefined,
@@ -76,11 +84,18 @@ async function waitForDownload(opts: {
           startTime: out.startTime,
           endTime: (out as any).endTime || undefined,
           exists: (out as any).exists,
+          pathRedacted: true,
         });
         return;
       } catch {
         cleanup();
-        resolve({ id: item.id, filename: item.filename, url: item.url, state: item.state });
+        resolve({
+          id: item.id,
+          filename: toDownloadDisplayName(item.filename),
+          url: item.url,
+          state: item.state,
+          pathRedacted: true,
+        });
       }
     };
     const onCreated = (item: chrome.downloads.DownloadItem) => {

@@ -839,7 +839,8 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD,
-    description: 'Wait for a browser download and return details (id, filename, url, state, size)',
+    description:
+      'Wait for a browser download and return sanitized details (id, filename basename, source url, state, size). Local download paths are redacted.',
     inputSchema: {
       type: 'object',
       properties: {
