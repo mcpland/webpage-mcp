@@ -7,7 +7,7 @@
  * - Consistent with AgentProject interface from shared types
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { eq, desc } from "drizzle-orm";
@@ -33,6 +33,51 @@ const ALLOWED_BASE_DIRS: string[] = [
   process.env.USERPROFILE,
   process.env.MCP_ALLOWED_WORKSPACE_BASE,
 ].filter((dir): dir is string => typeof dir === "string" && dir.length > 0);
+
+function isPathWithinDirectory(targetPath: string, basePath: string): boolean {
+  const relative = path.relative(basePath, targetPath);
+  return (
+    relative === "" ||
+    (!path.isAbsolute(relative) &&
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`))
+  );
+}
+
+async function resolvePathForContainment(inputPath: string): Promise<string> {
+  const absolutePath = path.resolve(inputPath);
+  const missingSegments: string[] = [];
+  let currentPath = absolutePath;
+
+  while (true) {
+    try {
+      const currentStat = await stat(currentPath);
+      if (!currentStat.isDirectory()) {
+        return missingSegments.length === 0
+          ? await realpath(currentPath)
+          : path.join(await realpath(currentPath), ...missingSegments.reverse());
+      }
+
+      const canonicalPath = await realpath(currentPath);
+      return missingSegments.length === 0
+        ? canonicalPath
+        : path.join(canonicalPath, ...missingSegments.reverse());
+    } catch (err: unknown) {
+      const error = err as NodeJS.ErrnoException;
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+
+      const parentPath = path.dirname(currentPath);
+      if (parentPath === currentPath) {
+        return absolutePath;
+      }
+
+      missingSegments.push(path.basename(currentPath));
+      currentPath = parentPath;
+    }
+  }
+}
 
 // ============================================================
 // Path Validation
@@ -72,9 +117,17 @@ export async function validateRootPath(
     : path.resolve(process.cwd(), trimmed);
 
   // Security check: ensure path is under allowed base directories
-  const isAllowed = ALLOWED_BASE_DIRS.some((base) =>
-    absolute.startsWith(path.resolve(base)),
-  );
+  const canonicalAbsolute = await resolvePathForContainment(absolute);
+  const isAllowed = (
+    await Promise.all(
+      ALLOWED_BASE_DIRS.map(async (base) =>
+        isPathWithinDirectory(
+          canonicalAbsolute,
+          await resolvePathForContainment(base),
+        ),
+      ),
+    )
+  ).some(Boolean);
 
   if (!isAllowed) {
     return {
