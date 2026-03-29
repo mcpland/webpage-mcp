@@ -24,7 +24,7 @@ interface NavigateToolParams {
   background?: boolean; // when true, do not activate tab or focus window
 }
 
-function hasDisallowedPublicUrlScheme(url: string): boolean {
+export function hasDisallowedPublicUrlScheme(url: string): boolean {
   const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
   if (!match) {
     return false;

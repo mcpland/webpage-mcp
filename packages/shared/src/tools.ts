@@ -1078,7 +1078,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.CLICK,
     description:
-      'Click on an element in a web page. Supports multiple targeting methods: CSS selector, XPath, element ref (from chrome_read_page), or viewport coordinates. More focused than chrome_computer for simple click operations.',
+      'Click on an element in an HTTP(S) web page. Supports multiple targeting methods: CSS selector, XPath, element ref (from chrome_read_page), or viewport coordinates. More focused than chrome_computer for simple click operations.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1133,11 +1133,11 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target tab ID. If omitted, uses the current active tab.',
+          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         windowId: {
           type: 'number',
-          description: 'Window ID to select active tab from (when tabId is omitted).',
+          description: 'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
         },
         frameId: {
           type: 'number',
@@ -1150,7 +1150,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.FILL,
     description:
-      'Fill or select a form element on a web page. Supports input, textarea, select, checkbox, and radio elements. Use CSS selector, XPath, or element ref to target the element.',
+      'Fill or select a form element on an HTTP(S) web page. Supports input, textarea, select, checkbox, and radio elements. Use CSS selector, XPath, or element ref to target the element.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1174,11 +1174,11 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target tab ID. If omitted, uses the current active tab.',
+          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         windowId: {
           type: 'number',
-          description: 'Window ID to select active tab from (when tabId is omitted).',
+          description: 'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
         },
         frameId: {
           type: 'number',
@@ -1191,7 +1191,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION,
     description:
-      'Request the user to manually select one or more elements on the current page. Use this as a human-in-the-loop fallback when you cannot reliably locate the target element after approximately 3 attempts using chrome_read_page combined with chrome_click_element/chrome_fill_or_select/chrome_computer. The user will see a panel with instructions and can click on the requested elements. Returns element refs compatible with chrome_click_element/chrome_fill_or_select (including iframe frameId for cross-frame support).',
+      'Request the user to manually select one or more elements on the current HTTP(S) page. Use this as a human-in-the-loop fallback when you cannot reliably locate the target element after approximately 3 attempts using chrome_read_page combined with chrome_click_element/chrome_fill_or_select/chrome_computer. The user will see a panel with instructions and can click on the requested elements. Returns element refs compatible with chrome_click_element/chrome_fill_or_select (including iframe frameId for cross-frame support).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1229,11 +1229,11 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target tab ID. If omitted, uses the current active tab.',
+          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         windowId: {
           type: 'number',
-          description: 'Window ID to select active tab from (when tabId is omitted).',
+          description: 'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
         },
       },
       required: ['requests'],
@@ -1242,7 +1242,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.KEYBOARD,
     description:
-      'Simulate keyboard input on a web page. Supports single keys (Enter, Tab, Escape), key combinations (Ctrl+C, Ctrl+V), and text input. Can target a specific element or send to the focused element.',
+      'Simulate keyboard input on an HTTP(S) web page. Supports single keys (Enter, Tab, Escape), key combinations (Ctrl+C, Ctrl+V), and text input. Can target a specific element or send to the focused element.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1266,11 +1266,11 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target tab ID. If omitted, uses the current active tab.',
+          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         windowId: {
           type: 'number',
-          description: 'Window ID to select active tab from (when tabId is omitted).',
+          description: 'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
         },
         frameId: {
           type: 'number',

@@ -9,6 +9,7 @@ import { createErrorResponse, type ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { BACKGROUND_MESSAGE_TYPES, TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
+import { hasDisallowedPublicUrlScheme } from './common';
 import {
   TOOL_NAMES,
   type ElementPickerRequest,
@@ -199,6 +200,11 @@ class ElementPickerTool extends BaseBrowserToolExecutor {
     }
     if (!tab.id) {
       return createErrorResponse(`${ERROR_MESSAGES.TAB_NOT_FOUND}: Active tab has no ID`);
+    }
+    if (hasDisallowedPublicUrlScheme(String(tab.url || ''))) {
+      return createErrorResponse(
+        'Only http:// and https:// pages are supported by chrome_request_element_selection',
+      );
     }
     const tabId = tab.id;
 

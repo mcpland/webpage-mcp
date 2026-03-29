@@ -3,6 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
+import { hasDisallowedPublicUrlScheme } from './common';
 
 interface Coordinates {
   x: number;
@@ -63,6 +64,11 @@ class ClickTool extends BaseBrowserToolExecutor {
       const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+      }
+      if (hasDisallowedPublicUrlScheme(String(tab.url || ''))) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_click_element',
+        );
       }
 
       let finalRef = args.ref;
@@ -193,6 +199,11 @@ class FillTool extends BaseBrowserToolExecutor {
       const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+      }
+      if (hasDisallowedPublicUrlScheme(String(tab.url || ''))) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_fill_or_select',
+        );
       }
 
       let finalRef = ref;

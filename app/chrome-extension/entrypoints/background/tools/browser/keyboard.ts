@@ -3,6 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
+import { hasDisallowedPublicUrlScheme } from './common';
 
 interface KeyboardToolParams {
   keys: string; // Required: string representing keys or key combinations to simulate (e.g., "Enter", "Ctrl+C")
@@ -39,6 +40,11 @@ class KeyboardTool extends BaseBrowserToolExecutor {
       const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+      }
+      if (hasDisallowedPublicUrlScheme(String(tab.url || ''))) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_keyboard',
+        );
       }
 
       let finalSelector = selector;
