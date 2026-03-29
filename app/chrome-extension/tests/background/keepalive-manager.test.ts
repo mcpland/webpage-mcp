@@ -83,23 +83,25 @@ describe('keepalive-manager', () => {
     expect(isKeepaliveActive()).toBe(false);
   });
 
-  it('uses a passive controller when MV3 offscreen APIs are unavailable', async () => {
+  it('does not report keepalive as active when MV3 offscreen APIs are unavailable', async () => {
     stubChrome({
       runtime: {
         getManifest: () => ({ manifest_version: 3 }),
       },
     });
 
-    const { acquireKeepalive, getKeepaliveRefCount } = await import(
+    const { acquireKeepalive, getKeepaliveRefCount, isKeepaliveActive } = await import(
       '@/entrypoints/background/keepalive-manager'
     );
 
     const release = acquireKeepalive('mv3-no-offscreen');
     expect(mocks.createOffscreenKeepaliveController).not.toHaveBeenCalled();
-    expect(getKeepaliveRefCount()).toBe(1);
+    expect(getKeepaliveRefCount()).toBe(0);
+    expect(isKeepaliveActive()).toBe(false);
 
     release();
     expect(getKeepaliveRefCount()).toBe(0);
+    expect(isKeepaliveActive()).toBe(false);
   });
 
   it('uses the offscreen controller when MV3 capabilities are available', async () => {

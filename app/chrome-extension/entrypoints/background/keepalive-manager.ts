@@ -24,7 +24,7 @@ let didLogFallbackReason = false;
 let controller: KeepaliveController | null = null;
 
 function resolveKeepaliveControllerFactory(): {
-  kind: 'offscreen' | 'passive';
+  kind: 'offscreen' | 'passive' | 'unsupported';
   reason?: string;
 } {
   if (typeof chrome === 'undefined' || !chrome.runtime?.getManifest) {
@@ -44,19 +44,30 @@ function resolveKeepaliveControllerFactory(): {
 
   if (!chrome.offscreen) {
     return {
-      kind: 'passive',
+      kind: 'unsupported',
       reason: 'chrome.offscreen is unavailable in this MV3 runtime',
     };
   }
 
   if (!chrome.runtime.onConnect) {
     return {
-      kind: 'passive',
+      kind: 'unsupported',
       reason: 'chrome.runtime.onConnect is unavailable in this MV3 runtime',
     };
   }
 
   return { kind: 'offscreen' };
+}
+
+function createUnsupportedKeepaliveController(reason: string): KeepaliveController {
+  return {
+    acquire: () => {
+      throw new Error(`No runtime keepalive is available: ${reason}`);
+    },
+    isActive: () => false,
+    getRefCount: () => 0,
+    releaseAll: () => {},
+  };
 }
 
 /**
@@ -68,14 +79,19 @@ function getController(): KeepaliveController {
     controller =
       resolution.kind === 'offscreen'
         ? createOffscreenKeepaliveController({ logger: console })
-        : new InMemoryKeepaliveController();
+        : resolution.kind === 'passive'
+          ? new InMemoryKeepaliveController()
+          : createUnsupportedKeepaliveController(
+              resolution.reason ?? 'MV3 runtime keepalive APIs are unavailable',
+            );
 
-    if (resolution.kind === 'passive' && resolution.reason && !didLogFallbackReason) {
-      const log =
-        typeof chrome !== 'undefined' && chrome.runtime?.getManifest?.().manifest_version === 3
-          ? console.warn
-          : console.info;
-      log(`${LOG_PREFIX} Using passive keepalive controller: ${resolution.reason}`);
+    if (resolution.kind !== 'offscreen' && resolution.reason && !didLogFallbackReason) {
+      const message =
+        resolution.kind === 'passive'
+          ? `${LOG_PREFIX} Using passive keepalive controller: ${resolution.reason}`
+          : `${LOG_PREFIX} No runtime keepalive available: ${resolution.reason}`;
+      const log = resolution.kind === 'unsupported' ? console.warn : console.info;
+      log(message);
       didLogFallbackReason = true;
     }
 
