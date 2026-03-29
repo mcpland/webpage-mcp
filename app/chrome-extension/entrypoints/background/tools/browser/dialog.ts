@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { hasDisallowedPublicUrlScheme } from './common';
 
 interface HandleDialogParams {
   action: 'accept' | 'dismiss';
@@ -26,6 +27,11 @@ class HandleDialogTool extends BaseBrowserToolExecutor {
       const explicit = await this.tryGetTab(tabId);
       const tab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!tab?.id) return createErrorResponse('No active tab found');
+      if (hasDisallowedPublicUrlScheme(String(tab.url || ''))) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_handle_dialog',
+        );
+      }
       const targetTabId = tab.id!;
 
       // Use shared CDP session manager for safe attach/detach with refcount

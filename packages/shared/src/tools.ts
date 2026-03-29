@@ -1396,7 +1396,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.HANDLE_DIALOG,
-    description: 'Handle JavaScript dialogs (alert/confirm/prompt) via CDP',
+    description: 'Handle JavaScript dialogs (alert/confirm/prompt) on an HTTP(S) browser tab via CDP',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1404,6 +1404,14 @@ export const TOOL_SCHEMAS: Tool[] = [
         promptText: {
           type: 'string',
           description: 'Optional prompt text when accepting a prompt',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Window ID to select the active HTTP(S) tab from when tabId is omitted.',
         },
       },
       required: ['action'],
