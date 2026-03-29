@@ -1,6 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/utils/offscreen-manager', () => ({
+  offscreenManager: {
+    ensureOffscreenDocument: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+vi.mock('@/utils/image-utils', () => ({
+  createImageBitmapFromUrl: vi.fn(async () => ({
+    close: vi.fn(),
+  })),
+}));
+
 import { gifRecorderTool } from '@/entrypoints/background/tools/browser/gif-recorder';
+import { OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
@@ -18,6 +31,29 @@ function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
 
 describe('gifRecorderTool', () => {
   beforeEach(() => {
+    vi.stubGlobal(
+      'OffscreenCanvas',
+      class MockOffscreenCanvas {
+        width: number;
+        height: number;
+
+        constructor(width: number, height: number) {
+          this.width = width;
+          this.height = height;
+        }
+
+        getContext() {
+          return {
+            clearRect: vi.fn(),
+            drawImage: vi.fn(),
+            getImageData: vi.fn(() => ({
+              data: new Uint8ClampedArray([0, 0, 0, 255]),
+            })),
+          };
+        }
+      },
+    );
+
     vi.stubGlobal('chrome', {
       runtime: {
         sendMessage: vi.fn(),
@@ -26,6 +62,37 @@ describe('gifRecorderTool', () => {
         download: vi.fn(),
         search: vi.fn(),
       },
+    });
+
+    (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(async (message) => {
+      switch (message?.type) {
+        case OFFSCREEN_MESSAGE_TYPES.GIF_RESET:
+        case OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME:
+          return { success: true };
+        case OFFSCREEN_MESSAGE_TYPES.GIF_FINISH:
+          return { success: true, gifData: [1, 2, 3], byteLength: 3 };
+        default:
+          return { success: true };
+      }
+    });
+
+    vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'sendCommand').mockImplementation(async (_tabId, method) => {
+      if (method === 'Page.getLayoutMetrics') {
+        return {
+          layoutViewport: {
+            clientWidth: 400,
+            clientHeight: 300,
+          },
+        };
+      }
+      if (method === 'Page.captureScreenshot') {
+        return {
+          data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tmS0AAAAASUVORK5CYII=',
+        };
+      }
+      return {};
     });
   });
 
@@ -53,5 +120,34 @@ describe('gifRecorderTool', () => {
     expect(resolveTargetTab).toHaveBeenCalledWith(7);
     expect(attach).not.toHaveBeenCalled();
     expect(sendCommand).not.toHaveBeenCalled();
+  });
+
+  it('redacts local download paths when stopping a fixed-fps recording', async () => {
+    const resolveTargetTab = vi
+      .spyOn(gifRecorderTool as any, 'resolveTargetTab')
+      .mockResolvedValue(makeTab());
+    const downloadsDownload = chrome.downloads.download as ReturnType<typeof vi.fn>;
+    downloadsDownload.mockResolvedValue(88);
+
+    const start = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      fps: 1,
+      durationMs: 5_000,
+      width: 10,
+      height: 10,
+      filename: 'secret-recording',
+    });
+    expect(start.isError).toBe(false);
+
+    const stop = await gifRecorderTool.execute({ action: 'stop' });
+    const payload = JSON.parse(String((stop.content[0] as { text?: string })?.text || '{}'));
+
+    expect(stop.isError).toBe(false);
+    expect(resolveTargetTab).toHaveBeenCalledWith(7);
+    expect(payload.downloadId).toBe(88);
+    expect(payload.filename).toBe('secret-recording.gif');
+    expect(payload.pathRedacted).toBe(true);
+    expect('fullPath' in payload).toBe(false);
   });
 });

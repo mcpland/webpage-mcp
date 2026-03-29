@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const cdpMocks = vi.hoisted(() => ({
+  withSession: vi.fn(),
+  sendCommand: vi.fn(),
+}));
+
+vi.mock('@/utils/cdp-session-manager', () => ({
+  cdpSessionManager: {
+    withSession: cdpMocks.withSession,
+    sendCommand: cdpMocks.sendCommand,
+  },
+}));
+
 function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
     id: 7,
@@ -19,6 +31,26 @@ async function loadScreenshotTool() {
 
 describe('screenshotTool', () => {
   beforeEach(() => {
+    cdpMocks.withSession.mockReset();
+    cdpMocks.sendCommand.mockReset();
+    cdpMocks.withSession.mockImplementation(async (_tabId, _owner, fn) => await fn());
+    cdpMocks.sendCommand.mockImplementation(async (_tabId, method) => {
+      if (method === 'Page.getLayoutMetrics') {
+        return {
+          layoutViewport: {
+            clientWidth: 1280,
+            clientHeight: 720,
+          },
+        };
+      }
+      if (method === 'Page.captureScreenshot') {
+        return {
+          data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tmS0AAAAASUVORK5CYII=',
+        };
+      }
+      return undefined;
+    });
+
     vi.stubGlobal('chrome', {
       tabs: {
         MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND: 2,
@@ -61,5 +93,28 @@ describe('screenshotTool', () => {
     expect(tabsGet).toHaveBeenCalledWith(7);
     expect(injectContentScript).not.toHaveBeenCalled();
     expect(captureVisibleTab).not.toHaveBeenCalled();
+  });
+
+  it('redacts local download paths when saving a screenshot file', async () => {
+    const { screenshotTool } = await loadScreenshotTool();
+    const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
+    const downloadsDownload = chrome.downloads.download as ReturnType<typeof vi.fn>;
+    tabsGet.mockResolvedValue(makeTab());
+    downloadsDownload.mockResolvedValue(42);
+
+    const result = await screenshotTool.execute({
+      tabId: 7,
+      background: true,
+      name: 'secret-shot',
+      savePng: true,
+      storeBase64: false,
+    });
+
+    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
+    expect(result.isError).toBe(false);
+    expect(payload.downloadId).toBe(42);
+    expect(payload.filename).toMatch(/^secret-shot_.*\.png$/);
+    expect(payload.pathRedacted).toBe(true);
+    expect('fullPath' in payload).toBe(false);
   });
 });

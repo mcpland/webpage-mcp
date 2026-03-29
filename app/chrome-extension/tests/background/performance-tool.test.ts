@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
   debuggerOnEventRemoveListener: vi.fn(),
   tabsGet: vi.fn(),
   tabsQuery: vi.fn(),
+  downloadsDownload: vi.fn(),
+  downloadsSearch: vi.fn(),
+  runtimeOnMessageAddListener: vi.fn(),
+  runtimeOnMessageRemoveListener: vi.fn(),
+  runtimeSendMessage: vi.fn(),
 }));
 
 vi.mock('@/utils/cdp-session-manager', () => ({
@@ -44,17 +49,36 @@ describe('performance trace tools', () => {
     mocks.sendCommand.mockResolvedValue(undefined);
     mocks.tabsGet.mockResolvedValue(makeTab());
     mocks.tabsQuery.mockResolvedValue([makeTab()]);
+    mocks.downloadsDownload.mockResolvedValue(91);
+    mocks.downloadsSearch.mockResolvedValue([
+      {
+        id: 91,
+        filename: '/Users/alice/Downloads/perf-secret.json',
+      },
+    ]);
+    mocks.runtimeSendMessage.mockResolvedValue(undefined);
 
     vi.stubGlobal('chrome', {
       tabs: {
         get: mocks.tabsGet,
         query: mocks.tabsQuery,
       },
+      downloads: {
+        download: mocks.downloadsDownload,
+        search: mocks.downloadsSearch,
+      },
       debugger: {
         onEvent: {
           addListener: mocks.debuggerOnEventAddListener,
           removeListener: mocks.debuggerOnEventRemoveListener,
         },
+      },
+      runtime: {
+        onMessage: {
+          addListener: mocks.runtimeOnMessageAddListener,
+          removeListener: mocks.runtimeOnMessageRemoveListener,
+        },
+        sendMessage: mocks.runtimeSendMessage,
       },
     });
   });
@@ -172,5 +196,98 @@ describe('performance trace tools', () => {
       'Only http:// and https:// pages are supported by performance trace tools',
     );
     expect(mocks.sendCommand).not.toHaveBeenCalled();
+  });
+
+  it('redacts saved download paths in stop responses', async () => {
+    const { performanceStartTraceTool, performanceStopTraceTool } = await loadPerformanceTools();
+
+    mocks.sendCommand.mockImplementation(async (_tabId, method) => {
+      if (method === 'Performance.getMetrics') {
+        return { metrics: [{ name: 'FirstContentfulPaint', value: 123 }] };
+      }
+      return undefined;
+    });
+
+    const start = await performanceStartTraceTool.execute({});
+    expect(start.isError).toBe(false);
+
+    const stopPromise = performanceStopTraceTool.execute({ saveToDownloads: true });
+    const traceListener = mocks.debuggerOnEventAddListener.mock.calls[0]?.[0];
+    expect(typeof traceListener).toBe('function');
+    traceListener?.({ tabId: 7 }, 'Tracing.tracingComplete', {});
+
+    const stop = await stopPromise;
+    const payload = JSON.parse(String((stop.content[0] as { text?: string })?.text || '{}'));
+
+    expect(stop.isError).toBe(false);
+    expect(payload.saved).toMatchObject({
+      downloadId: 91,
+      filename: expect.stringMatching(/^performance_trace_.*\.json$/),
+      pathRedacted: true,
+    });
+    expect('fullPath' in payload.saved).toBe(false);
+  });
+
+  it('redacts saved trace paths in analyze responses while keeping native analysis enabled', async () => {
+    const { performanceStartTraceTool, performanceStopTraceTool, performanceAnalyzeInsightTool } =
+      await loadPerformanceTools();
+
+    mocks.sendCommand.mockImplementation(async (_tabId, method) => {
+      if (method === 'Performance.getMetrics') {
+        return { metrics: [{ name: 'LargestContentfulPaint', value: 456 }] };
+      }
+      return undefined;
+    });
+
+    const listeners: Array<(message: any) => void> = [];
+    mocks.runtimeOnMessageAddListener.mockImplementation((listener) => {
+      listeners.push(listener);
+    });
+    mocks.runtimeOnMessageRemoveListener.mockImplementation((listener) => {
+      const index = listeners.indexOf(listener);
+      if (index >= 0) listeners.splice(index, 1);
+    });
+    mocks.runtimeSendMessage.mockImplementation(async (message) => {
+      const requestId = message?.message?.requestId;
+      const action = message?.message?.payload?.action;
+      if (action === 'analyzeTrace') {
+        const listener = listeners.at(-1);
+        listener?.({
+          type: 'file_operation_response',
+          responseToRequestId: requestId,
+          payload: {
+            success: true,
+            summary: { insightName: 'test-summary' },
+            insight: { score: 1 },
+          },
+        });
+      } else if (action === 'cleanupFile') {
+        const listener = listeners.at(-1);
+        listener?.({
+          type: 'file_operation_response',
+          responseToRequestId: requestId,
+          payload: { success: true },
+        });
+      }
+      return undefined;
+    });
+
+    await performanceStartTraceTool.execute({});
+    const stopPromise = performanceStopTraceTool.execute({ saveToDownloads: true });
+    const traceListener = mocks.debuggerOnEventAddListener.mock.calls[0]?.[0];
+    traceListener?.({ tabId: 7 }, 'Tracing.tracingComplete', {});
+    await stopPromise;
+
+    const analyze = await performanceAnalyzeInsightTool.execute({ tabId: 7 });
+    const payload = JSON.parse(String((analyze.content[0] as { text?: string })?.text || '{}'));
+
+    expect(analyze.isError).toBe(false);
+    expect(payload.saved).toMatchObject({
+      downloadId: 91,
+      filename: expect.stringMatching(/^performance_trace_.*\.json$/),
+      pathRedacted: true,
+    });
+    expect('fullPath' in payload.saved).toBe(false);
+    expect(payload.summary).toEqual({ insightName: 'test-summary' });
   });
 });

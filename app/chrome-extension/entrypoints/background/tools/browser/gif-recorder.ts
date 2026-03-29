@@ -14,6 +14,7 @@
  */
 
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
+import { toPublicDownloadLocation } from '@/entrypoints/background/download-paths';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
@@ -114,7 +115,7 @@ interface GifResult {
   byteLength?: number;
   downloadId?: number;
   filename?: string;
-  fullPath?: string;
+  pathRedacted?: boolean;
   isRecording?: boolean;
   mode?: 'fixed_fps' | 'auto_capture';
   actionsCount?: number;
@@ -536,17 +537,6 @@ async function stopRecording(): Promise<GifResult> {
         saveAs: false,
       });
 
-      // Wait briefly to get download info
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      let fullPath: string | undefined;
-      try {
-        const [downloadItem] = await chrome.downloads.search({ id: downloadId });
-        fullPath = downloadItem?.filename;
-      } catch {
-        // Ignore path lookup errors
-      }
-
       return {
         success: true,
         action: 'stop' as const,
@@ -555,8 +545,7 @@ async function stopRecording(): Promise<GifResult> {
         durationMs,
         byteLength: response.byteLength ?? gifBytes.byteLength,
         downloadId,
-        filename: fullFilename,
-        fullPath,
+        ...toPublicDownloadLocation({ filename: fullFilename }),
       };
     } catch (error) {
       return {
@@ -877,16 +866,6 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
               saveAs: false,
             });
 
-            await new Promise((resolve) => setTimeout(resolve, 100));
-
-            let fullPath: string | undefined;
-            try {
-              const [downloadItem] = await chrome.downloads.search({ id: downloadId });
-              fullPath = downloadItem?.filename;
-            } catch {
-              // Ignore
-            }
-
             return this.buildResponse({
               success: true,
               action: 'stop',
@@ -897,8 +876,7 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
               byteLength: stopResult.gifData.byteLength,
               actionsCount: stopResult.actions?.length,
               downloadId,
-              filename: fullFilename,
-              fullPath,
+              ...toPublicDownloadLocation({ filename: fullFilename }),
             });
           }
 
@@ -1032,16 +1010,6 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
               saveAs: false,
             });
 
-            await new Promise((resolve) => setTimeout(resolve, 100));
-
-            let fullPath: string | undefined;
-            try {
-              const [downloadItem] = await chrome.downloads.search({ id: downloadId });
-              fullPath = downloadItem?.filename;
-            } catch {
-              // Ignore
-            }
-
             return this.buildResponse({
               success: true,
               action: 'export',
@@ -1050,8 +1018,7 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
               durationMs: lastRecordedGif.durationMs,
               byteLength: lastRecordedGif.gifData.byteLength,
               downloadId,
-              filename: fullFilename,
-              fullPath,
+              ...toPublicDownloadLocation({ filename: fullFilename }),
             });
           } else {
             // Drag&drop upload mode

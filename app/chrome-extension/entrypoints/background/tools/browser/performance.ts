@@ -1,4 +1,5 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
+import { toPublicDownloadLocation } from '@/entrypoints/background/download-paths';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
@@ -38,6 +39,12 @@ interface TraceSessionState {
   stopPromise?: Promise<{ completed: boolean }>;
 }
 
+type SavedTraceArtifact = {
+  downloadId?: number;
+  filename?: string;
+  fullPath?: string;
+};
+
 const sessions = new Map<number, TraceSessionState>();
 const LAST_RESULTS = new Map<
   number,
@@ -46,7 +53,7 @@ const LAST_RESULTS = new Map<
     startedAt: number;
     endedAt: number;
     tabUrl: string;
-    saved?: { downloadId?: number; filename?: string; fullPath?: string };
+    saved?: SavedTraceArtifact;
     metrics?: Record<string, number>;
   }
 >();
@@ -108,7 +115,7 @@ async function enablePerformanceMetrics(tabId: number): Promise<Record<string, n
 async function saveTraceToDownloads(
   json: string,
   filenamePrefix = 'performance_trace',
-): Promise<{ downloadId?: number; filename?: string; fullPath?: string }> {
+): Promise<SavedTraceArtifact> {
   try {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `${filenamePrefix}_${timestamp}.json`;
@@ -130,7 +137,7 @@ async function saveTraceToDownloads(
 async function saveTraceToNativeTemp(
   json: string,
   filenamePrefix = 'performance_trace',
-): Promise<{ filename?: string; fullPath?: string } | undefined> {
+): Promise<SavedTraceArtifact | undefined> {
   try {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `${filenamePrefix}_${timestamp}.json`;
@@ -227,6 +234,21 @@ async function cleanupNativeTempFile(filePath: string): Promise<void> {
   } catch {
     // ignore
   }
+}
+
+function toPublicSavedTraceArtifact(saved?: SavedTraceArtifact): {
+  downloadId?: number;
+  filename?: string;
+  pathRedacted: true;
+} | undefined {
+  if (!saved) {
+    return undefined;
+  }
+
+  return {
+    ...(typeof saved.downloadId === 'number' ? { downloadId: saved.downloadId } : {}),
+    ...toPublicDownloadLocation(saved),
+  };
 }
 
 function getOrCreateStopPromise(session: TraceSessionState): Promise<{ completed: boolean }> {
@@ -472,7 +494,7 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
       const trace = { traceEvents: session.events };
       const json = JSON.stringify(trace);
 
-      let saved: { downloadId?: number; filename?: string; fullPath?: string } | undefined;
+      let saved: SavedTraceArtifact | undefined;
       if (saveToDownloads) {
         saved = await saveTraceToDownloads(json, filenamePrefix || 'performance_trace');
       } else {
@@ -482,6 +504,8 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
           saved = { ...tempSaved } as any;
         }
       }
+
+      const publicSaved = toPublicSavedTraceArtifact(saved);
 
       LAST_RESULTS.set(tabId, {
         events: session.events,
@@ -500,7 +524,7 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
               success: true,
               message: 'The performance trace has been stopped.',
               eventCount: session.events.length,
-              saved,
+              saved: publicSaved,
               metrics,
               startedAt: session.startedAt,
               endedAt,
@@ -611,7 +635,7 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
                     endedAt: result.endedAt,
                     durationMs: result.endedAt - result.startedAt,
                     metrics: result.metrics || {},
-                    saved: result.saved,
+                    saved: toPublicSavedTraceArtifact(result.saved),
                     summary: resp.summary,
                     insight: resp.insight,
                   }),
@@ -651,7 +675,7 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
               durationMs: result.endedAt - result.startedAt,
               metrics: result.metrics || {},
               topEventNames: top,
-              saved: result.saved,
+              saved: toPublicSavedTraceArtifact(result.saved),
             }),
           },
         ],

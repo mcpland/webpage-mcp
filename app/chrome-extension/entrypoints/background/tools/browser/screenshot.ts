@@ -1,4 +1,5 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
+import { toPublicDownloadLocation } from '@/entrypoints/background/download-paths';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
@@ -334,23 +335,8 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           });
 
           results.downloadId = downloadId;
-          results.filename = filename;
           results.fileSaved = true;
-
-          // Try to get the full file path
-          try {
-            // Wait a moment to ensure download info is updated
-            await new Promise((resolve) => setTimeout(resolve, 100));
-
-            // Search for download item to get full path
-            const [downloadItem] = await chrome.downloads.search({ id: downloadId });
-            if (downloadItem && downloadItem.filename) {
-              // Add full path to response
-              results.fullPath = downloadItem.filename;
-            }
-          } catch (pathError) {
-            console.warn('Could not get full file path:', pathError);
-          }
+          Object.assign(results, toPublicDownloadLocation({ filename }));
         } catch (error) {
           console.error('Error saving PNG file:', error);
           results.saveError = String(error instanceof Error ? error.message : error);

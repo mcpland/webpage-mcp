@@ -1,4 +1,5 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
+import { toDownloadDisplayName } from '@/entrypoints/background/download-paths';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 
@@ -6,14 +7,6 @@ interface HandleDownloadParams {
   filenameContains?: string;
   timeoutMs?: number; // default 60000
   waitForComplete?: boolean; // default true
-}
-
-function toDownloadDisplayName(filename?: string | null): string | undefined {
-  if (typeof filename !== 'string' || !filename) {
-    return undefined;
-  }
-  const normalized = filename.split(/[/\\]/).pop();
-  return normalized || filename;
 }
 
 /**
