@@ -1,6 +1,7 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
+import { hasDisallowedPublicUrlScheme } from './common';
 import {
   parseISO,
   subDays,
@@ -40,6 +41,10 @@ interface HistoryResult {
     endTimeFormatted: string;
   };
   query?: string;
+}
+
+function isPublicHistoryUrl(url?: string | null): boolean {
+  return typeof url === 'string' && url.trim().length > 0 && !hasDisallowedPublicUrlScheme(url);
 }
 
 class HistoryTool extends BaseBrowserToolExecutor {
@@ -170,13 +175,13 @@ class HistoryTool extends BaseBrowserToolExecutor {
 
       console.log(`Found ${historyItems.length} history items before filtering current tabs.`);
 
-      let filteredItems = historyItems;
+      let filteredItems = historyItems.filter((item) => isPublicHistoryUrl(item.url));
       if (excludeCurrentTabs && historyItems.length > 0) {
         const currentTabs = await chrome.tabs.query({});
         const openUrls = new Set<string>();
 
         currentTabs.forEach((tab) => {
-          if (tab.url) {
+          if (isPublicHistoryUrl(tab.url)) {
             openUrls.add(tab.url);
           }
         });

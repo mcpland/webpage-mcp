@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { getMessage } from '@/utils/i18n';
+import { hasDisallowedPublicUrlScheme } from './common';
 
 /**
  * Bookmark search tool parameters interface
@@ -31,6 +32,10 @@ interface BookmarkDeleteToolParams {
   bookmarkId?: string; // ID of bookmark to delete
   url?: string; // URL of bookmark to delete (if ID not provided, search by URL)
   title?: string; // Title of bookmark to delete (used for auxiliary matching, used together with URL)
+}
+
+function isPublicBookmarkUrl(url?: string | null): boolean {
+  return typeof url === 'string' && url.trim().length > 0 && !hasDisallowedPublicUrlScheme(url);
 }
 
 // --- Helper Functions ---
@@ -240,13 +245,16 @@ async function findBookmarksByUrl(
   const searchResults = await chrome.bookmarks.search({ url });
 
   if (!title) {
-    return searchResults;
+    return searchResults.filter((bookmark) => isPublicBookmarkUrl(bookmark.url));
   }
 
   // If title is provided, further filter results
   const titleLower = title.toLowerCase();
   return searchResults.filter(
-    (bookmark) => bookmark.title && bookmark.title.toLowerCase().includes(titleLower),
+    (bookmark) =>
+      isPublicBookmarkUrl(bookmark.url) &&
+      bookmark.title &&
+      bookmark.title.toLowerCase().includes(titleLower),
   );
 }
 
@@ -298,7 +306,7 @@ class BookmarkSearchTool extends BaseBrowserToolExecutor {
           // Has query keywords but no specified folder: use API search
           filteredBookmarks = await chrome.bookmarks.search({ query });
           // API search may return folders (if title matches), filter them out
-          filteredBookmarks = filteredBookmarks.filter((item) => !!item.url);
+          filteredBookmarks = filteredBookmarks.filter((item) => isPublicBookmarkUrl(item.url));
         }
       } else {
         // No query keywords
@@ -309,6 +317,8 @@ class BookmarkSearchTool extends BaseBrowserToolExecutor {
         }
         filteredBookmarks = bookmarksToSearch;
       }
+
+      filteredBookmarks = filteredBookmarks.filter((bookmark) => isPublicBookmarkUrl(bookmark.url));
 
       // Limit number of results
       const limitedResults = filteredBookmarks.slice(0, maxResults);
@@ -395,6 +405,9 @@ class BookmarkAddTool extends BaseBrowserToolExecutor {
       if (!bookmarkUrl) {
         // Should have been caught above, but as a safety measure
         return createErrorResponse('URL is required to create bookmark');
+      }
+      if (!isPublicBookmarkUrl(bookmarkUrl)) {
+        return createErrorResponse('Only http:// and https:// URLs are supported by chrome_bookmark_add');
       }
 
       // Parse parentId (could be ID or path string)
@@ -514,6 +527,9 @@ class BookmarkDeleteTool extends BaseBrowserToolExecutor {
     if (!bookmarkId && !url) {
       return createErrorResponse('Must provide bookmark ID or URL to delete bookmark');
     }
+    if (url && !isPublicBookmarkUrl(url)) {
+      return createErrorResponse('Only http:// and https:// URLs are supported by chrome_bookmark_delete');
+    }
 
     try {
       let bookmarksToDelete: chrome.bookmarks.BookmarkTreeNode[] = [];
@@ -523,6 +539,11 @@ class BookmarkDeleteTool extends BaseBrowserToolExecutor {
         try {
           const nodes = await chrome.bookmarks.get(bookmarkId);
           if (nodes && nodes.length > 0 && nodes[0].url) {
+            if (!isPublicBookmarkUrl(nodes[0].url)) {
+              return createErrorResponse(
+                'Only http:// and https:// bookmarks are supported by chrome_bookmark_delete',
+              );
+            }
             bookmarksToDelete = nodes;
           } else {
             return createErrorResponse(

@@ -853,7 +853,8 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.HISTORY,
-    description: 'Retrieve and search browsing history from Chrome',
+    description:
+      'Retrieve and search HTTP(S) browsing history from Chrome. Non-public entries are filtered out.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -888,7 +889,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.BOOKMARK_SEARCH,
-    description: 'Search Chrome bookmarks by title and URL',
+    description: 'Search Chrome bookmarks by title and URL. Only HTTP(S) bookmarks are returned.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -912,13 +913,13 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.BOOKMARK_ADD,
-    description: 'Add a new bookmark to Chrome',
+    description: 'Add a new HTTP(S) bookmark to Chrome',
     inputSchema: {
       type: 'object',
       properties: {
         url: {
           type: 'string',
-          description: 'URL to bookmark. If not provided, uses the current active tab URL.',
+          description: 'HTTP(S) URL to bookmark. If not provided, uses the current active tab URL.',
         },
         title: {
           type: 'string',
@@ -936,7 +937,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         tabId: {
           type: 'number',
           description:
-            'Target tab ID to read URL/title from when url is omitted (default: active tab).',
+            'Target HTTP(S) tab ID to read URL/title from when url is omitted (default: active tab).',
         },
         windowId: {
           type: 'number',
@@ -949,7 +950,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.BOOKMARK_DELETE,
-    description: 'Delete a bookmark from Chrome',
+    description: 'Delete an HTTP(S) bookmark from Chrome',
     inputSchema: {
       type: 'object',
       properties: {
@@ -959,7 +960,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         url: {
           type: 'string',
-          description: 'URL of the bookmark to delete. Used if bookmarkId is not provided.',
+          description: 'HTTP(S) URL of the bookmark to delete. Used if bookmarkId is not provided.',
         },
         title: {
           type: 'string',
