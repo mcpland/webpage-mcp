@@ -64,13 +64,13 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.RECORD_REPLAY.RECORDING_START,
     description:
-      'Start recording user interactions on a browser tab. If tabId is omitted, uses the active tab.',
+      'Start recording user interactions on an HTTP(S) browser tab. If tabId is omitted, uses the active tab.',
     inputSchema: {
       type: 'object',
       properties: {
         tabId: {
           type: 'number',
-          description: 'Optional target tab ID to record on.',
+          description: 'Optional target HTTP(S) tab ID to record on.',
         },
         name: {
           type: 'string',

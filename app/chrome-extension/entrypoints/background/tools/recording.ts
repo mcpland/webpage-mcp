@@ -5,6 +5,47 @@ import { RecorderManager, buildRecordingStateSnapshot } from "../recording";
 import type { FlowV3 } from "../record-replay-v3/domain/flow";
 import { saveFlowToV3 } from "../record-replay-v3/compat";
 
+const RECORDING_PUBLIC_PAGE_ERROR =
+  "Only http:// and https:// pages are supported by recording_start";
+
+function hasDisallowedPublicPageScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== "http" && protocol !== "https";
+}
+
+function sanitizeRecordingStateSnapshot(state: ReturnType<typeof buildRecordingStateSnapshot>) {
+  if (!state.originUrl || !hasDisallowedPublicPageScheme(state.originUrl)) {
+    return state;
+  }
+
+  return {
+    ...state,
+    originUrl: null,
+    originTitle: null,
+  };
+}
+
+async function getTargetRecordingTab(tabId?: number): Promise<chrome.tabs.Tab | null> {
+  if (typeof tabId === "number") {
+    try {
+      return await chrome.tabs.get(tabId);
+    } catch {
+      return null;
+    }
+  }
+
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  return activeTab ?? null;
+}
+
 function countFlowSteps(flow: Flow | FlowV3 | null): number {
   if (!flow) return 0;
   if (Array.isArray(flow.nodes)) return flow.nodes.length;
@@ -28,6 +69,10 @@ class RecordingStartTool {
         ? args.name.trim()
         : "";
     const tabId = typeof args?.tabId === "number" ? args.tabId : undefined;
+    const targetTab = await getTargetRecordingTab(tabId);
+    if (targetTab?.url && hasDisallowedPublicPageScheme(String(targetTab.url))) {
+      return createErrorResponse(RECORDING_PUBLIC_PAGE_ERROR);
+    }
     const meta = flowName
       ? { name: flowName }
       : undefined;
@@ -42,7 +87,7 @@ class RecordingStartTool {
           type: "text",
           text: JSON.stringify({
             success: true,
-            state: buildRecordingStateSnapshot(),
+            state: sanitizeRecordingStateSnapshot(buildRecordingStateSnapshot()),
           }),
         },
       ],
@@ -104,7 +149,7 @@ class RecordingStopTool {
                   stepCount: countFlowSteps(flow),
                 }
               : null,
-            state: buildRecordingStateSnapshot(),
+            state: sanitizeRecordingStateSnapshot(buildRecordingStateSnapshot()),
           }),
         },
       ],
@@ -123,7 +168,7 @@ class RecordingStatusTool {
           type: "text",
           text: JSON.stringify({
             success: true,
-            state: buildRecordingStateSnapshot(),
+            state: sanitizeRecordingStateSnapshot(buildRecordingStateSnapshot()),
           }),
         },
       ],
