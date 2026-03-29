@@ -86,18 +86,42 @@ export function listPublishedFlowInfos(flows: FlowV3[]): PublishedFlowInfoV3[] {
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
+function sanitizePublishedVariables(
+  variables: FlowV3["variables"] | undefined,
+): FlowV3["variables"] | undefined {
+  if (!Array.isArray(variables)) {
+    return undefined;
+  }
+
+  const sanitized = variables
+    .filter((variable) => variable?.sensitive !== true)
+    .map((variable) => ({
+      name: variable.name,
+      ...(variable.label ? { label: variable.label } : {}),
+      ...(variable.description ? { description: variable.description } : {}),
+      ...(typeof variable.required === "boolean"
+        ? { required: variable.required }
+        : {}),
+      ...(variable.default !== undefined ? { default: variable.default } : {}),
+      ...(variable.scope ? { scope: variable.scope } : {}),
+    }));
+
+  return sanitized.length > 0 ? sanitized : undefined;
+}
+
 export function listPublishedFlowDetails(
   flows: FlowV3[],
 ): PublishedFlowDetailsV3[] {
   return flows
     .map((flow) => {
       const info = getPublishedFlowInfo(flow);
+      const publishedVariables = sanitizePublishedVariables(flow.variables);
       if (!info) {
         return null;
       }
       return {
         ...info,
-        ...(flow.variables ? { variables: flow.variables } : {}),
+        ...(publishedVariables ? { variables: publishedVariables } : {}),
         ...(flow.meta ? { meta: flow.meta } : {}),
       };
     })

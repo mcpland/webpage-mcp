@@ -42,6 +42,11 @@ describe('dynamic published flow tools', () => {
               default: 'alice@example.com',
             },
             {
+              name: 'apiToken',
+              sensitive: true,
+              default: 'secret-token',
+            },
+            {
               name: 'dryRun',
               description: 'Skip final submit',
               default: true,
@@ -81,6 +86,9 @@ describe('dynamic published flow tools', () => {
         },
       },
     });
+    expect(
+      (signupTool?.inputSchema as { properties?: Record<string, any> }).properties?.apiToken,
+    ).toBeUndefined();
     expect((signupTool?.inputSchema as { properties?: Record<string, any> }).properties?.metadata)
       .toHaveProperty('anyOf');
   });

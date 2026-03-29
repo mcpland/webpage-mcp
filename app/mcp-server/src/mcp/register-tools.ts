@@ -19,6 +19,7 @@ interface PublishedFlowVariable {
   name?: string;
   label?: string;
   description?: string;
+  sensitive?: boolean;
   type?: string;
   kind?: string;
   default?: unknown;
@@ -308,6 +309,9 @@ async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
     const properties: Record<string, any> = {};
     const required: string[] = [];
     for (const v of item.variables || []) {
+      if (v?.sensitive === true) {
+        continue;
+      }
       const variableName = getPublishedVariableName(v);
       if (!variableName) {
         continue;
