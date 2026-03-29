@@ -13,7 +13,6 @@ export interface PublishedFlowInfoV3 {
 
 export interface PublishedFlowDetailsV3 extends PublishedFlowInfoV3 {
   variables?: FlowV3["variables"];
-  meta?: FlowV3["meta"];
 }
 
 export const TOOL_SLUG_MAX_LENGTH = 64;
@@ -125,7 +124,6 @@ export function listPublishedFlowDetails(
       return {
         ...info,
         ...(publishedVariables ? { variables: publishedVariables } : {}),
-        ...(flow.meta ? { meta: flow.meta } : {}),
       };
     })
     .filter((info): info is PublishedFlowDetailsV3 => Boolean(info))

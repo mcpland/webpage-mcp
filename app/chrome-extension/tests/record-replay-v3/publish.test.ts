@@ -39,6 +39,11 @@ function createPublishedFlow(): FlowV3 {
       tool: {
         published: true,
         slug: 'sensitive-flow',
+        description: 'Run the sensitive flow',
+      },
+      recording: {
+        originUrl: 'https://internal.example.com/checkout',
+        originTitle: 'Internal Checkout',
       },
     },
   };
@@ -49,9 +54,12 @@ describe('listPublishedFlowDetails', () => {
     const details = listPublishedFlowDetails([createPublishedFlow()]);
 
     expect(details).toEqual([
-      expect.objectContaining({
+      {
         id: 'flow-sensitive',
         slug: 'sensitive-flow',
+        version: 3,
+        name: 'Sensitive Flow',
+        description: 'Run the sensitive flow',
         variables: [
           {
             name: 'email',
@@ -69,7 +77,7 @@ describe('listPublishedFlowDetails', () => {
             item: 'number',
           },
         ],
-      }),
+      },
     ]);
   });
 });
