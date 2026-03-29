@@ -2,8 +2,13 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
+import { hasDisallowedPublicUrlScheme } from './common';
 
 const DEFAULT_NETWORK_REQUEST_TIMEOUT = 30000; // For sending a single request via content script
+const NON_PUBLIC_REQUEST_URL_ERROR =
+  'Only http:// and https:// URLs are allowed for chrome_network_request.';
+const NON_PUBLIC_FORM_DATA_URL_ERROR =
+  'Only http:// and https:// URLs are allowed for chrome_network_request formData attachments.';
 
 interface NetworkRequestToolParams {
   url: string; // URL is always required
@@ -17,6 +22,50 @@ interface NetworkRequestToolParams {
   formData?: any;
   tabId?: number;
   windowId?: number;
+}
+
+function hasDisallowedPublicRequestUrl(url: unknown): boolean {
+  return typeof url === 'string' && url.trim().length > 0 && hasDisallowedPublicUrlScheme(url);
+}
+
+function getFormDataDescriptorError(formData: unknown): string | null {
+  if (!formData) {
+    return null;
+  }
+
+  if (Array.isArray(formData)) {
+    for (const item of formData) {
+      if (!Array.isArray(item) || item.length < 2) {
+        continue;
+      }
+
+      const spec = String(item[1] || '').trim();
+      if (/^url:/i.test(spec)) {
+        const sourceUrl = spec.replace(/^url:/i, '').trim();
+        if (hasDisallowedPublicRequestUrl(sourceUrl)) {
+          return NON_PUBLIC_FORM_DATA_URL_ERROR;
+        }
+      }
+    }
+    return null;
+  }
+
+  if (typeof formData !== 'object') {
+    return null;
+  }
+
+  const files = Array.isArray((formData as { files?: unknown[] }).files)
+    ? (formData as { files: unknown[] }).files
+    : [];
+
+  for (const file of files) {
+    const fileUrl = (file as { fileUrl?: unknown })?.fileUrl;
+    if (hasDisallowedPublicRequestUrl(fileUrl)) {
+      return NON_PUBLIC_FORM_DATA_URL_ERROR;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -40,6 +89,14 @@ class NetworkRequestTool extends BaseBrowserToolExecutor {
 
     if (!url) {
       return createErrorResponse('URL parameter is required.');
+    }
+    if (hasDisallowedPublicRequestUrl(url)) {
+      return createErrorResponse(NON_PUBLIC_REQUEST_URL_ERROR);
+    }
+
+    const formDataError = getFormDataDescriptorError(args.formData);
+    if (formDataError) {
+      return createErrorResponse(formDataError);
     }
 
     try {

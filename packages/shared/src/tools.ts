@@ -746,13 +746,15 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.NETWORK_REQUEST,
-    description: 'Send a network request from the browser with cookies and other browser context',
+    description:
+      'Send a network request from the browser with cookies and other browser context. Absolute target URLs and attachment fileUrl values must use HTTP(S).',
     inputSchema: {
       type: 'object',
       properties: {
         url: {
           type: 'string',
-          description: 'URL to send the request to',
+          description:
+            'Target URL to send the request to. Absolute URLs must use HTTP(S); relative URLs resolve against the page context.',
         },
         method: {
           type: 'string',
@@ -773,7 +775,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         formData: {
           type: 'object',
           description:
-            'Multipart/form-data descriptor. If provided, overrides body and builds FormData with optional file attachments. Shape: { fields?: Record<string,string|number|boolean>, files?: Array<{ name: string, fileUrl?: string, base64Data?: string, filename?: string, contentType?: string }> }. Also supports a compact array form: [ [name, fileSpec, filename?], ... ] where fileSpec may be url: or base64:.',
+            'Multipart/form-data descriptor. If provided, overrides body and builds FormData with optional file attachments. Shape: { fields?: Record<string,string|number|boolean>, files?: Array<{ name: string, fileUrl?: string, base64Data?: string, filename?: string, contentType?: string }> }. Also supports a compact array form: [ [name, fileSpec, filename?], ... ] where fileSpec may be url: or base64:. Absolute fileUrl/url: attachment sources must use HTTP(S).',
         },
       },
       required: ['url'],

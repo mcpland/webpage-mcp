@@ -11,6 +11,17 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
 } else {
   window.__NETWORK_CAPTURE_HELPER_INITIALIZED__ = true;
 
+  const hasDisallowedPublicUrlScheme = (value) => {
+    const normalized = String(value || '').trim();
+    const match = normalized.match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+    if (!match) {
+      return false;
+    }
+
+    const protocol = match[1]?.toLowerCase();
+    return protocol !== 'http' && protocol !== 'https';
+  };
+
   /**
    * Replay a network request
    * @param {string} url - The URL to send the request to
@@ -29,6 +40,13 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
     formDataDescriptor = null,
   ) {
     try {
+      if (hasDisallowedPublicUrlScheme(url)) {
+        return {
+          success: false,
+          error: 'Only http:// and https:// URLs are allowed for chrome_network_request.',
+        };
+      }
+
       // Create fetch options
       const options = {
         method: method,
@@ -63,6 +81,11 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
               const filenameHint = item[2] ? String(item[2]) : undefined;
               if (/^(https?:\/\/|url:)/i.test(spec)) {
                 const url = spec.replace(/^url:/i, '');
+                if (hasDisallowedPublicUrlScheme(url)) {
+                  throw new Error(
+                    'Only http:// and https:// URLs are allowed for chrome_network_request formData attachments.',
+                  );
+                }
                 const resp = await fetch(url);
                 const blob = await resp.blob();
                 const fn =
@@ -89,6 +112,11 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
             for (const file of files) {
               const name = String(file.name || 'file');
               if (file.fileUrl) {
+                if (hasDisallowedPublicUrlScheme(file.fileUrl)) {
+                  throw new Error(
+                    'Only http:// and https:// URLs are allowed for chrome_network_request formData attachments.',
+                  );
+                }
                 const resp = await fetch(String(file.fileUrl));
                 const blob = await resp.blob();
                 const fn =
