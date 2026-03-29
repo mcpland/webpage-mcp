@@ -117,6 +117,20 @@ describe('fileUploadTool', () => {
     expect(mocks.withSession).not.toHaveBeenCalled();
   });
 
+  it('rejects file URLs before fetching or touching the browser', async () => {
+    const result = await fileUploadTool.execute({
+      selector: 'input[type="file"]',
+      fileUrl: 'file:///tmp/secret.txt',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'Only http:// and https:// URLs are allowed for fileUrl uploads',
+    );
+    expect(mocks.runtimeSendMessage).not.toHaveBeenCalled();
+    expect(mocks.withSession).not.toHaveBeenCalled();
+  });
+
   it('still uploads files prepared from base64 payloads', async () => {
     const result = await fileUploadTool.execute({
       selector: '#upload',

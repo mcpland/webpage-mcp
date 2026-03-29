@@ -22,6 +22,16 @@ interface InternalLocalFileUploadParams {
   windowId?: number;
 }
 
+function hasDisallowedPublicUrlScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
 /**
  * Tool for uploading files to web forms using Chrome DevTools Protocol
  * Similar to Playwright's setInputFiles implementation
@@ -37,6 +47,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
    */
   async execute(args: FileUploadToolParams): Promise<ToolResult> {
     const { selector, filePath, fileUrl, base64Data, fileName, multiple = false } = args;
+    const normalizedFileUrl = typeof fileUrl === 'string' && fileUrl.trim() ? fileUrl.trim() : undefined;
 
     console.log(`Starting file upload operation with options:`, args);
 
@@ -51,13 +62,19 @@ class FileUploadTool extends BaseBrowserToolExecutor {
       );
     }
 
-    if (!fileUrl && !base64Data) {
+    if (normalizedFileUrl && hasDisallowedPublicUrlScheme(normalizedFileUrl)) {
+      return createErrorResponse(
+        'Only http:// and https:// URLs are allowed for fileUrl uploads.',
+      );
+    }
+
+    if (!normalizedFileUrl && !base64Data) {
       return createErrorResponse('One of fileUrl or base64Data must be provided');
     }
 
     try {
       const tempFilePath = await this.prepareFileFromRemote({
-        fileUrl,
+        fileUrl: normalizedFileUrl,
         base64Data,
         fileName: fileName || 'uploaded-file',
       });

@@ -1353,7 +1353,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.FILE_UPLOAD,
     description:
-      'Upload files to web forms with file input elements using Chrome DevTools Protocol. Local file paths are not accepted; provide fileUrl or base64Data.',
+      'Upload files to web forms with file input elements using Chrome DevTools Protocol. Local file paths are not accepted; provide an http(s) fileUrl or base64Data.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1368,7 +1368,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         fileUrl: {
           type: 'string',
-          description: 'URL to download file from before uploading',
+          description: 'HTTP(S) URL to download file from before uploading',
         },
         base64Data: {
           type: 'string',
