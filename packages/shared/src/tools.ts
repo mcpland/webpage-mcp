@@ -780,7 +780,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.NETWORK_CAPTURE,
     description:
-      'Unified network capture tool. Use action="start" to begin capturing, action="stop" to end and retrieve results. Set needResponseBody=true to capture response bodies (uses Debugger API, may conflict with DevTools). Default mode uses webRequest API (lightweight, no debugger conflict, but no response body).',
+      'Unified network capture tool for HTTP(S) pages. Use action="start" to begin capturing, action="stop" to end and retrieve results. Set needResponseBody=true to capture response bodies (uses Debugger API, may conflict with DevTools). Default mode uses webRequest API (lightweight, no debugger conflict, but no response body).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -797,7 +797,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         url: {
           type: 'string',
           description:
-            'URL to capture network requests from. For action="start". If not provided, uses the current active tab.',
+            'HTTP(S) URL to capture network requests from. For action="start". If not provided, uses the current active tab.',
         },
         maxCaptureTime: {
           type: 'number',
@@ -814,7 +814,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         tabId: {
           type: 'number',
           description:
-            'Target tab ID for start/stop operations. For action="start", captures this tab when provided. For action="stop", stops capture for this tab when provided.',
+            'Target tab ID for start/stop operations. For action="start", captures this HTTP(S) tab when provided. For action="stop", stops capture for this tab when provided.',
         },
         windowId: {
           type: 'number',

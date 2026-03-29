@@ -19,6 +19,19 @@ interface NetworkCaptureToolParams {
   all?: boolean;
 }
 
+const NETWORK_CAPTURE_PUBLIC_PAGE_ERROR =
+  'Only http:// and https:// pages are supported by chrome_network_capture';
+
+function hasDisallowedPublicPageScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
 /**
  * Extract text content from ToolResult
  */
@@ -46,6 +59,68 @@ function decorateJsonResult(result: ToolResult, extra: Record<string, unknown>):
     // If the underlying tool didn't return JSON, keep it as-is
   }
   return result;
+}
+
+function sanitizePublicCaptureResult(result: ToolResult): ToolResult {
+  const text = getFirstText(result);
+  if (typeof text !== 'string') return result;
+
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return result;
+    }
+
+    const pageUrl =
+      typeof parsed.tabUrl === 'string'
+        ? parsed.tabUrl
+        : typeof parsed.url === 'string'
+          ? parsed.url
+          : undefined;
+    if (!pageUrl || !hasDisallowedPublicPageScheme(pageUrl)) {
+      return result;
+    }
+
+    const requestCount =
+      typeof parsed.requestCount === 'number' && Number.isFinite(parsed.requestCount)
+        ? parsed.requestCount
+        : 0;
+
+    return {
+      ...result,
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            ...parsed,
+            redacted: true,
+            message:
+              requestCount > 0
+                ? `Capture stopped on a non-public page. ${requestCount} requests were captured, but detailed results were redacted.`
+                : 'Capture stopped on a non-public page. Detailed results were redacted.',
+            url: typeof parsed.url === 'string' ? null : parsed.url,
+            tabUrl: typeof parsed.tabUrl === 'string' ? null : parsed.tabUrl,
+            tabTitle: typeof parsed.tabTitle === 'string' ? null : parsed.tabTitle,
+            requests: Array.isArray(parsed.requests) ? [] : parsed.requests,
+            commonRequestHeaders:
+              parsed.commonRequestHeaders &&
+              typeof parsed.commonRequestHeaders === 'object' &&
+              !Array.isArray(parsed.commonRequestHeaders)
+                ? {}
+                : parsed.commonRequestHeaders,
+            commonResponseHeaders:
+              parsed.commonResponseHeaders &&
+              typeof parsed.commonResponseHeaders === 'object' &&
+              !Array.isArray(parsed.commonResponseHeaders)
+                ? {}
+                : parsed.commonResponseHeaders,
+          }),
+        },
+      ],
+    };
+  } catch {
+    return result;
+  }
 }
 
 /**
@@ -107,6 +182,16 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
       );
     }
 
+    if (typeof args.url === 'string' && hasDisallowedPublicPageScheme(args.url)) {
+      return createErrorResponse(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);
+    }
+
+    const explicitTab = await this.tryGetTab(args.tabId);
+    const targetTab = explicitTab || (await this.getActiveTabInWindow(args.windowId));
+    if (targetTab?.url && hasDisallowedPublicPageScheme(String(targetTab.url))) {
+      return createErrorResponse(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);
+    }
+
     const delegate = wantBody ? networkDebuggerStartTool : networkCaptureStartTool;
     const backend: NetworkCaptureBackend = wantBody ? 'debugger' : 'webRequest';
 
@@ -120,7 +205,9 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
       background: args.background,
     });
 
-    return decorateJsonResult(result, { backend, needResponseBody: wantBody });
+    return sanitizePublicCaptureResult(
+      decorateJsonResult(result, { backend, needResponseBody: wantBody }),
+    );
   }
 
   private async handleStop(
@@ -159,10 +246,12 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
       all: args.all,
     });
 
-    return decorateJsonResult(result, {
-      backend: backendToStop,
-      needResponseBody: backendToStop === 'debugger',
-    });
+    return sanitizePublicCaptureResult(
+      decorateJsonResult(result, {
+        backend: backendToStop,
+        needResponseBody: backendToStop === 'debugger',
+      }),
+    );
   }
 }
 
