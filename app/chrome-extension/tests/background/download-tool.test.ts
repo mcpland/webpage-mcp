@@ -66,6 +66,39 @@ describe('handleDownloadTool', () => {
     });
   });
 
+  it('redacts non-public download source urls before returning', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-30T00:00:00.000Z'));
+
+    const hit = {
+      id: 9,
+      filename: '/Users/alice/Downloads/secret-export.bin',
+      url: 'file:///Users/alice/secrets/export.bin',
+      state: 'complete',
+      fileSize: 32,
+      startTime: '2026-03-30T00:00:00.000Z',
+    };
+    const search = chrome.downloads.search as ReturnType<typeof vi.fn>;
+    search.mockResolvedValue([hit]);
+
+    const result = await handleDownloadTool.execute({
+      waitForComplete: false,
+    });
+    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
+
+    expect(payload).toMatchObject({
+      success: true,
+      download: {
+        id: 9,
+        filename: 'secret-export.bin',
+        url: null,
+        state: 'complete',
+        pathRedacted: true,
+        urlRedacted: true,
+      },
+    });
+  });
+
   it('ignores stale existing downloads and resolves when a new matching download is created', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-30T00:00:00.000Z'));

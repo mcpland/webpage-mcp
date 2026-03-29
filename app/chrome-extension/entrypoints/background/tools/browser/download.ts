@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { toDownloadDisplayName } from '@/entrypoints/background/download-paths';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
+import { hasDisallowedPublicUrlScheme } from './common';
 
 interface HandleDownloadParams {
   filenameContains?: string;
@@ -10,6 +11,21 @@ interface HandleDownloadParams {
 }
 
 const RECENT_DOWNLOAD_GRACE_MS = 5000;
+
+function toPublicDownloadUrl(url?: string | null): { url?: string | null; urlRedacted?: true } {
+  if (typeof url !== 'string' || !url.trim()) {
+    return {};
+  }
+
+  if (hasDisallowedPublicUrlScheme(url)) {
+    return {
+      url: null,
+      urlRedacted: true,
+    };
+  }
+
+  return { url };
+}
 
 /**
  * Tool: wait for a download and return info
@@ -121,7 +137,6 @@ async function waitForDownload(opts: {
         resolve({
           id: out.id,
           filename: toDownloadDisplayName(out.filename),
-          url: out.url,
           mime: (out as any).mime || undefined,
           fileSize: out.fileSize ?? out.totalBytes ?? undefined,
           state: out.state,
@@ -130,6 +145,7 @@ async function waitForDownload(opts: {
           endTime: (out as any).endTime || undefined,
           exists: (out as any).exists,
           pathRedacted: true,
+          ...toPublicDownloadUrl(out.url),
         });
         return;
       } catch {
@@ -137,9 +153,9 @@ async function waitForDownload(opts: {
         resolve({
           id: item.id,
           filename: toDownloadDisplayName(item.filename),
-          url: item.url,
           state: item.state,
           pathRedacted: true,
+          ...toPublicDownloadUrl(item.url),
         });
       }
     };
