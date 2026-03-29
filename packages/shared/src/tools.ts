@@ -1405,7 +1405,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.GIF_RECORDER,
     description:
-      'Record browser tab activity as an animated GIF.\n\nModes:\n- Fixed FPS mode (action="start"): Captures frames at regular intervals. Good for animations/videos.\n- Auto-capture mode (action="auto_start"): Captures frames automatically when chrome_computer or chrome_navigate actions succeed. Better for interaction recordings with natural pacing.\n\nUse "stop" to end recording and save the GIF.',
+      'Record browser tab activity as an animated GIF on an HTTP(S) page.\n\nModes:\n- Fixed FPS mode (action="start"): Captures frames at regular intervals. Good for animations/videos.\n- Auto-capture mode (action="auto_start"): Captures frames automatically when chrome_computer or chrome_navigate actions succeed. Better for interaction recordings with natural pacing.\n\nUse "stop" to end recording and save the GIF.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1418,7 +1418,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         tabId: {
           type: 'number',
           description:
-            'Target tab ID (default: active tab). Used with "start"/"auto_start" for recording, and with "export" (download=false) for drag&drop upload target.',
+            'Target HTTP(S) tab ID (default: active tab). Used with "start"/"auto_start" for recording, and with "export" (download=false) for drag&drop upload target.',
         },
         fps: {
           type: 'number',
@@ -1470,7 +1470,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         download: {
           type: 'boolean',
           description:
-            'Export action only: Set to true (default) to download the GIF, or false to upload via drag&drop.',
+            'Export action only: Set to true (default) to download the GIF, or false to upload via drag&drop on an HTTP(S) page.',
         },
         coordinates: {
           type: 'object',

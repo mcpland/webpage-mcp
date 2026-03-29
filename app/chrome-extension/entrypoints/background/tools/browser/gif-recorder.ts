@@ -132,6 +132,16 @@ interface GifResult {
   };
 }
 
+function hasDisallowedPublicPageScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
 // ============================================================================
 // Recording State Management
 // ============================================================================
@@ -655,6 +665,11 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
               'Cannot record special browser pages or web store pages due to security restrictions.',
             );
           }
+          if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
+            return createErrorResponse(
+              'Only http:// and https:// pages are supported by chrome_gif_recorder recording actions.',
+            );
+          }
 
           // Check if auto-capture is active
           if (isAutoCaptureActive(tab.id)) {
@@ -702,6 +717,11 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
           if (this.isRestrictedUrl(tab.url)) {
             return createErrorResponse(
               'Cannot record special browser pages or web store pages due to security restrictions.',
+            );
+          }
+          if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
+            return createErrorResponse(
+              'Only http:// and https:// pages are supported by chrome_gif_recorder recording actions.',
             );
           }
 
@@ -775,6 +795,11 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
           if (!isAutoCaptureActive(tab.id)) {
             return createErrorResponse(
               'Auto-capture is not active for this tab. Use action="auto_start" first.',
+            );
+          }
+          if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
+            return createErrorResponse(
+              'Only http:// and https:// pages are supported by chrome_gif_recorder recording actions.',
             );
           }
 
@@ -1052,6 +1077,11 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             if (this.isRestrictedUrl(tab.url)) {
               return createErrorResponse(
                 'Cannot upload to special browser pages or web store pages.',
+              );
+            }
+            if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
+              return createErrorResponse(
+                'Only http:// and https:// pages are supported for chrome_gif_recorder drag-and-drop export.',
               );
             }
 
