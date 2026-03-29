@@ -9,6 +9,8 @@ interface HandleDownloadParams {
   waitForComplete?: boolean; // default true
 }
 
+const RECENT_DOWNLOAD_GRACE_MS = 5000;
+
 /**
  * Tool: wait for a download and return info
  */
@@ -38,6 +40,7 @@ async function waitForDownload(opts: {
   timeoutMs: number;
 }) {
   const { filenameContains, waitForComplete, timeoutMs } = opts;
+  const observationStartedAt = Date.now();
   return new Promise<any>((resolve, reject) => {
     let timer: any = null;
     const onError = (err: any) => {
@@ -59,6 +62,55 @@ async function waitForDownload(opts: {
       if (!filenameContains) return true;
       const name = (item.filename || '').split(/[/\\]/).pop() || '';
       return name.includes(filenameContains) || (item.url || '').includes(filenameContains);
+    };
+    const parseDownloadTimestamp = (value?: string | null): number | null => {
+      if (typeof value !== 'string' || !value.trim()) {
+        return null;
+      }
+
+      const parsed = Date.parse(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const getDownloadActivityTimestamp = (item: chrome.downloads.DownloadItem): number => {
+      const endTime = parseDownloadTimestamp((item as any).endTime);
+      const startTime = parseDownloadTimestamp(item.startTime);
+      return Math.max(endTime ?? -1, startTime ?? -1);
+    };
+    const isRecentDownload = (item: chrome.downloads.DownloadItem): boolean => {
+      const activityAt = getDownloadActivityTimestamp(item);
+      return activityAt >= observationStartedAt - RECENT_DOWNLOAD_GRACE_MS;
+    };
+    const selectInitialMatch = (
+      items: chrome.downloads.DownloadItem[],
+    ): chrome.downloads.DownloadItem | null => {
+      const matchingItems = items.filter((item) => matches(item));
+      if (!matchingItems.length) {
+        return null;
+      }
+
+      const freshItems = matchingItems.filter(
+        (item) => item.state === 'in_progress' || isRecentDownload(item),
+      );
+      const candidates = freshItems.length > 0 ? freshItems : [];
+
+      if (!candidates.length) {
+        return null;
+      }
+
+      if (waitForComplete) {
+        const completed = candidates.filter((item) => item.state === 'complete');
+        if (!completed.length) {
+          return null;
+        }
+
+        return completed.sort(
+          (left, right) => getDownloadActivityTimestamp(right) - getDownloadActivityTimestamp(left),
+        )[0];
+      }
+
+      return candidates.sort(
+        (left, right) => getDownloadActivityTimestamp(right) - getDownloadActivityTimestamp(left),
+      )[0];
     };
     const fulfill = async (item: chrome.downloads.DownloadItem) => {
       // try to fill more details via downloads.search
@@ -117,12 +169,12 @@ async function waitForDownload(opts: {
     chrome.downloads.onCreated.addListener(onCreated);
     chrome.downloads.onChanged.addListener(onChanged);
     timer = setTimeout(() => onError(new Error('Download wait timed out')), timeoutMs);
-    // Try to find an already-running matching download
+    // Try to find a matching download that started or completed around this invocation.
     chrome.downloads
-      .search({ state: waitForComplete ? 'in_progress' : undefined })
+      .search({})
       .then((arr) => {
-        const hit = (arr || []).find((d) => matches(d));
-        if (hit && !waitForComplete) fulfill(hit);
+        const hit = selectInitialMatch(arr || []);
+        if (hit) fulfill(hit);
       })
       .catch(() => {});
   });
