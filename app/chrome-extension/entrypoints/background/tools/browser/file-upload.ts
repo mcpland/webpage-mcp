@@ -1,4 +1,5 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
+import { toDownloadDisplayName } from '@/entrypoints/background/download-paths';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
@@ -217,9 +218,12 @@ class FileUploadTool extends BaseBrowserToolExecutor {
           text: JSON.stringify({
             success: true,
             message: 'File(s) uploaded successfully',
-            files,
+            files: files
+              .map((file) => toDownloadDisplayName(file))
+              .filter((file): file is string => typeof file === 'string' && file.length > 0),
             selector,
             fileCount: files.length,
+            pathRedacted: true,
           }),
         },
       ],

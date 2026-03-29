@@ -155,6 +155,7 @@ describe('fileUploadTool', () => {
       fileName: 'example.txt',
       tabId: 7,
     });
+    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
 
     expect(result.isError).toBe(false);
     expect(mocks.runtimeSendMessage).toHaveBeenCalledTimes(1);
@@ -162,6 +163,12 @@ describe('fileUploadTool', () => {
     expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'DOM.setFileInputFiles', {
       nodeId: 2,
       files: ['/tmp/prepared-upload.txt'],
+    });
+    expect(payload).toMatchObject({
+      success: true,
+      files: ['prepared-upload.txt'],
+      fileCount: 1,
+      pathRedacted: true,
     });
   });
 });
