@@ -19,7 +19,11 @@ import path from 'node:path';
 import { stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import type { OpenProjectResponse, OpenProjectTarget } from 'webpage-mcp-shared';
-import { validateRootPath } from './project-service';
+import {
+  isPathWithinDirectory,
+  resolvePathForContainment,
+  validateRootPath,
+} from './project-service';
 
 // ============================================================
 // Types
@@ -247,6 +251,7 @@ export async function openFileInVSCode(
     }
 
     const rootAbs = projectValidation.absolute;
+    const canonicalRoot = await resolvePathForContainment(rootAbs);
 
     // Validate file path
     const trimmedFile = String(filePath ?? '').trim();
@@ -300,9 +305,9 @@ export async function openFileInVSCode(
       absoluteFile = path.resolve(rootAbs, trimmedFile);
     }
 
-    // Security: ensure file stays within project root
-    const relativeToRoot = path.relative(rootAbs, absoluteFile);
-    if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
+    // Security: ensure file stays within project root after resolving symlinks.
+    const canonicalFile = await resolvePathForContainment(absoluteFile);
+    if (!isPathWithinDirectory(canonicalFile, canonicalRoot)) {
       return { success: false, error: 'File path must be within project directory' };
     }
 
