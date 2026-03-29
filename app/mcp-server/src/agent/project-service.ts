@@ -14,6 +14,7 @@ import { eq, desc } from "drizzle-orm";
 import type { AgentProject } from "webpage-mcp-shared";
 import type { CreateOrUpdateProjectInput } from "./project-types";
 import { getDb, projects, type ProjectRow } from "./db";
+import { attachmentService } from "./attachment-service";
 
 const VALID_PROJECT_CLI_PREFERENCES = new Set<AgentProject["preferredCli"]>([
   "claude",
@@ -333,6 +334,7 @@ export async function upsertProject(
  */
 export async function deleteProject(id: string): Promise<void> {
   const db = getDb();
+  await attachmentService.cleanupAttachments({ projectIds: [id] });
   await db.delete(projects).where(eq(projects.id, id));
 }
 

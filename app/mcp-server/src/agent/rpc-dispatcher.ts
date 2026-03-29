@@ -809,6 +809,11 @@ export async function dispatchAgentRpc(
         const filename = readParam(params, 'filename');
 
         try {
+          const project = await getProject(projectId);
+          if (!project) {
+            return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
+          }
+
           const buffer = await attachmentService.readAttachment(projectId, filename);
 
           const ext = filename.split('.').pop()?.toLowerCase();
