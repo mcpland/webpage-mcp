@@ -137,6 +137,34 @@ function isPublishedVariableRequired(variable: PublishedFlowVariable): boolean {
   return variable.required === true || variable.rules?.required === true;
 }
 
+function getReservedDynamicToolVariableNames(
+  variables: ReadonlyArray<PublishedFlowVariable> | null | undefined,
+): string[] {
+  if (!Array.isArray(variables)) {
+    return [];
+  }
+
+  return variables
+    .map((variable) => getPublishedVariableName(variable))
+    .filter((name): name is string => typeof name === 'string' && RUN_OPTION_KEY_SET.has(name));
+}
+
+function getDynamicToolVariables(
+  variables: ReadonlyArray<PublishedFlowVariable> | null | undefined,
+): PublishedFlowVariable[] {
+  if (!Array.isArray(variables)) {
+    return [];
+  }
+
+  return variables.filter((variable) => {
+    if (variable?.sensitive === true) {
+      return false;
+    }
+    const variableName = getPublishedVariableName(variable);
+    return typeof variableName === 'string' && variableName.length > 0 && !RUN_OPTION_KEY_SET.has(variableName);
+  });
+}
+
 function inferVariableType(variable: PublishedFlowVariable): string {
   const declaredType =
     typeof variable.kind === 'string'
@@ -295,13 +323,12 @@ function splitDynamicFlowArgs(
   const runOptions: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(args)) {
-    if (flowVariableKeys?.has(key)) {
-      variables[key] = value;
-      continue;
-    }
     if (RUN_OPTION_KEY_SET.has(key)) {
       runOptions[key] = value;
-    } else {
+      continue;
+    }
+    const isDeclaredVariable = flowVariableKeys?.has(key) === true;
+    if (isDeclaredVariable || !RUN_OPTION_KEY_SET.has(key)) {
       variables[key] = value;
     }
   }
@@ -314,16 +341,18 @@ async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
   const tools: Tool[] = [];
   for (const item of items) {
     const name = `flow.${item.slug}`;
-    const description =
+    const reservedVariableNames = getReservedDynamicToolVariableNames(item.variables);
+    const descriptionBase =
       (item.meta && item.meta.tool && item.meta.tool.description) ||
       item.description ||
       'Recorded flow';
+    const description =
+      reservedVariableNames.length > 0
+        ? `${descriptionBase} Reserved dynamic tool parameter names are ignored as flow variables: ${reservedVariableNames.join(', ')}. Use record_replay_flow_run with args for those values.`
+        : descriptionBase;
     const properties: Record<string, any> = {};
     const required: string[] = [];
-    for (const v of item.variables || []) {
-      if (v?.sensitive === true) {
-        continue;
-      }
+    for (const v of getDynamicToolVariables(item.variables)) {
       const variableName = getPublishedVariableName(v);
       if (!variableName) {
         continue;
@@ -429,11 +458,9 @@ export const callToolForContext = async (
         }
         if (!match) throw new Error(`Flow not found for tool ${name}`);
         const variableKeys = new Set(
-          Array.isArray(match.variables)
-            ? match.variables
-                .map((variable) => getPublishedVariableName(variable))
-                .filter((key): key is string => typeof key === 'string' && key.length > 0)
-            : [],
+          getDynamicToolVariables(match.variables)
+            .map((variable) => getPublishedVariableName(variable))
+            .filter((key): key is string => typeof key === 'string' && key.length > 0),
         );
         const { variables, runOptions } = splitDynamicFlowArgs(args, variableKeys);
         const flowArgs = {

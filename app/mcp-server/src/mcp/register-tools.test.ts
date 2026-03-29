@@ -177,4 +177,81 @@ describe('dynamic published flow tools', () => {
       isError: false,
     });
   });
+
+  it('reserves dynamic run option names ahead of conflicting published variables', async () => {
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [
+          {
+            id: 'flow-conflict',
+            slug: 'conflict',
+            description: 'Conflicting flow',
+            variables: [
+              { name: 'email', required: true },
+              { name: 'startUrl', label: 'Shadowed start url' },
+              { name: 'refresh', required: true },
+            ],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
+          isError: false,
+        },
+      });
+    const ctx = createContext('dynamic-flow-conflict', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const conflictTool = tools.find((tool) => tool.name === 'flow.conflict');
+    const conflictInput = conflictTool?.inputSchema as {
+      required?: string[];
+      properties?: Record<string, any>;
+    };
+
+    expect(conflictTool?.description).toContain(
+      'Reserved dynamic tool parameter names are ignored as flow variables: startUrl, refresh.',
+    );
+    expect(conflictInput.required).toEqual(['email']);
+    expect(conflictInput.properties?.email).toMatchObject({ type: 'string' });
+    expect(conflictInput.properties?.startUrl).toMatchObject({
+      type: 'string',
+      description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
+    });
+    expect(conflictInput.properties?.refresh).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
+
+    const result = await callToolForContext(ctx, 'flow.conflict', {
+      email: 'alice@example.com',
+      startUrl: 'https://example.com/start',
+      refresh: true,
+    });
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenNthCalledWith(
+      2,
+      {
+        name: 'record_replay_flow_run',
+        args: {
+          flowId: 'flow-conflict',
+          args: {
+            email: 'alice@example.com',
+          },
+          startUrl: 'https://example.com/start',
+          refresh: true,
+        },
+        meta: { mcpSessionId: 'dynamic-flow-conflict', instanceId: 'unit-test' },
+      },
+      NativeMessageType.CALL_TOOL,
+      120000,
+    );
+    expect(result).toEqual({
+      content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
+      isError: false,
+    });
+  });
 });
