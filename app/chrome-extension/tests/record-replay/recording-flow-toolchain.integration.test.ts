@@ -639,6 +639,49 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("flowRunTool marks failed runs as MCP errors", async () => {
+    const flowId = `flow-run-failed-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: {
+              selector: "#email",
+              candidates: [{ type: "css", value: "#email" }],
+            },
+            value: "{email}",
+          },
+        },
+      ]),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-toolchain-failed" } as any,
+      events: [],
+      result: {
+        runId: "run-toolchain-failed",
+        success: false,
+        summary: { total: 1, success: 0, failed: 1, tookMs: 4 },
+        outputs: null,
+        logs: [{ stepId: "fill-1", status: "failed", message: "Upload blocked" }],
+        paused: false,
+      },
+    });
+
+    const result = await flowRunTool.execute({
+      flowId,
+      args: { email: "alice@example.com" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseToolPayload(result)).toMatchObject({
+      runId: "run-toolchain-failed",
+      success: false,
+      summary: { total: 1, success: 0, failed: 1, tookMs: 4 },
+    });
+  });
+
   it("listPublishedFlowsTool reports published V3 workflows", async () => {
     const flowId = `flow-published-v3-${Date.now()}`;
     await createStoragePort().flows.save({

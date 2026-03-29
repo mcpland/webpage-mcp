@@ -93,7 +93,7 @@ class FlowRunTool {
           text: JSON.stringify(response),
         },
       ],
-      isError: false,
+      isError: response.success !== true,
     };
   }
 }
