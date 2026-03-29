@@ -19,17 +19,19 @@ async function loadAgentModules() {
   vi.resetModules();
   const [
     { upsertProject },
+    { createSession },
     { createMessage, getMessagesByProjectId },
     { dispatchAgentRpc },
     { closeDb },
   ] = await Promise.all([
     import('./project-service'),
+    import('./session-service'),
     import('./message-service'),
     import('./rpc-dispatcher'),
     import('./db/client'),
   ]);
 
-  return { upsertProject, createMessage, getMessagesByProjectId, dispatchAgentRpc, closeDb };
+  return { upsertProject, createSession, createMessage, getMessagesByProjectId, dispatchAgentRpc, closeDb };
 }
 
 function createRpcDeps(): { chatService: AgentChatService } {
@@ -107,5 +109,55 @@ describe('agent.chat.messages.create', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0]?.id).toBe('fixed-message-id');
     expect(messages[0]?.content).toBe('original content');
+  });
+
+  it('rejects session ids that belong to a different project', async () => {
+    const workspaceBase = await createTempDir('message-rpc-session-workspace-');
+    const dataDir = await createTempDir('message-rpc-session-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRootA = path.join(workspaceBase, 'project-a');
+    const projectRootB = path.join(workspaceBase, 'project-b');
+    await fs.mkdir(projectRootA, { recursive: true });
+    await fs.mkdir(projectRootB, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, getMessagesByProjectId, dispatchAgentRpc } =
+      await loadAgentModules();
+
+    const projectA = await upsertProject({
+      name: 'Project A',
+      rootPath: projectRootA,
+      allowCreate: true,
+    });
+    const projectB = await upsertProject({
+      name: 'Project B',
+      rootPath: projectRootB,
+      allowCreate: true,
+    });
+    const session = await createSession(projectA.id, 'codex' as any);
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.chat.messages.create',
+        params: { projectId: projectB.id },
+        body: {
+          content: 'cross-project injection',
+          sessionId: session.id,
+        },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json).toEqual({
+      success: false,
+      error: 'sessionId must belong to the target project',
+    });
+
+    const projectBMessages = await getMessagesByProjectId(projectB.id);
+    expect(projectBMessages).toHaveLength(0);
   });
 });

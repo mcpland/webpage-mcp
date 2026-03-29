@@ -677,11 +677,27 @@ export async function dispatchAgentRpc(
             ? (payload.metadata as Record<string, unknown>)
             : undefined;
         const customId = readString(payload.id)?.trim();
+        const targetSessionId = readString(payload.sessionId)?.trim();
         if (customId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
             success: false,
             error: 'id is not allowed for agent.chat.messages.create',
           });
+        }
+        if (targetSessionId) {
+          const session = await getSession(targetSessionId);
+          if (!session) {
+            return jsonResponse(HTTP_STATUS.NOT_FOUND, {
+              success: false,
+              error: 'Session not found',
+            });
+          }
+          if (session.projectId !== projectId) {
+            return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
+              success: false,
+              error: 'sessionId must belong to the target project',
+            });
+          }
         }
 
         const stored = await createStoredMessage({
@@ -690,7 +706,7 @@ export async function dispatchAgentRpc(
           messageType,
           content,
           metadata,
-          sessionId: readString(payload.sessionId),
+          sessionId: targetSessionId,
           conversationId: readString(payload.conversationId),
           cliSource: readString(payload.cliSource),
           requestId: readString(payload.requestId),
