@@ -290,7 +290,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
         ? await runInTabQueue(resolvedTarget.tabId, execute)
         : await execute();
 
-    if (sessionId) {
+    if (sessionId && result?.isError !== true) {
       const patch = extractSessionPatchFromResult(result);
       const tabIdToPersist =
         typeof patch.tabId === 'number'

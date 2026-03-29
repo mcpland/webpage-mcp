@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   navigateExecute: vi.fn(),
+  switchExecute: vi.fn(),
   getSessionContext: vi.fn(),
   patchSessionContext: vi.fn(),
   runInTabQueue: vi.fn(async (_tabId: number, task: () => Promise<unknown>) => await task()),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/entrypoints/background/tools/browser', () => ({
   navigateTool: { name: 'chrome_navigate', execute: mocks.navigateExecute },
+  switchTabTool: { name: 'chrome_switch_tab', execute: mocks.switchExecute },
 }));
 
 vi.mock('@/entrypoints/background/tools/record-replay', () => ({
@@ -68,6 +70,10 @@ describe('handleCallTool navigation routing', () => {
         },
       ],
       isError: false,
+    });
+    mocks.switchExecute.mockResolvedValue({
+      content: [{ type: 'text', text: 'switch failed' }],
+      isError: true,
     });
     mocks.tabsGet.mockResolvedValue({ id: 10, windowId: 55, url: 'https://github.com/unadlib' });
     mocks.tabsQuery.mockResolvedValue([{ id: 99, windowId: 88, active: true }]);
@@ -205,5 +211,17 @@ describe('handleCallTool navigation routing', () => {
       { tabId: 10, windowId: 55 },
       undefined,
     );
+  });
+
+  it('does not persist session target updates when chrome_switch_tab fails', async () => {
+    await handleCallTool({
+      name: TOOL_NAMES.BROWSER.SWITCH_TAB,
+      args: { tabId: 44 },
+      meta: { mcpSessionId: 'session-1' },
+    });
+
+    expect(mocks.runInTabQueue).toHaveBeenCalledTimes(1);
+    expect(mocks.switchExecute).toHaveBeenCalledWith({ tabId: 44 });
+    expect(mocks.patchSessionContext).not.toHaveBeenCalled();
   });
 });

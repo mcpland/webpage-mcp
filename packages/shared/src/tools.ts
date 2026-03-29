@@ -689,13 +689,13 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.SWITCH_TAB,
-    description: 'Switch to a specific browser tab',
+    description: 'Switch to a specific HTTP(S) browser tab',
     inputSchema: {
       type: 'object',
       properties: {
         tabId: {
           type: 'number',
-          description: 'The ID of the tab to switch to.',
+          description: 'The ID of the target HTTP(S) tab to switch to.',
         },
         windowId: {
           type: 'number',

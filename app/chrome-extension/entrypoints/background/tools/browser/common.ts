@@ -621,12 +621,17 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
     console.log(`Attempting to switch to tab ID: ${tabId} in window ID: ${windowId}`);
 
     try {
+      const targetTab = await chrome.tabs.get(tabId);
+      if (hasDisallowedPublicUrlScheme(String(targetTab.url || ''))) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_switch_tab',
+        );
+      }
+
       if (windowId !== undefined) {
         await chrome.windows.update(windowId, { focused: true });
       }
       await chrome.tabs.update(tabId, { active: true });
-
-      const updatedTab = await chrome.tabs.get(tabId);
 
       return {
         content: [
@@ -635,9 +640,9 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
             text: JSON.stringify({
               success: true,
               message: `Successfully switched to tab ID: ${tabId}`,
-              tabId: updatedTab.id,
-              windowId: updatedTab.windowId,
-              url: updatedTab.url,
+              tabId: targetTab.id,
+              windowId: targetTab.windowId,
+              url: targetTab.url,
             }),
           },
         ],
