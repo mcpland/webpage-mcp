@@ -19,6 +19,16 @@ interface ReadPageParams {
   windowId?: number; // when no tabId, pick active tab from this window
 }
 
+function hasDisallowedPublicPageScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
 class ReadPageTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.READ_PAGE;
 
@@ -54,6 +64,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       const tab = explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
       if (!tab.id)
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+      if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
+        return createErrorResponse(
+          'Only http:// and https:// pages are supported by chrome_read_page',
+        );
+      }
 
       // Load any user-marked elements for this URL (priority hints)
       const currentUrl = String(tab.url || '');
