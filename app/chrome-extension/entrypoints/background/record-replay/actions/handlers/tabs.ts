@@ -9,6 +9,13 @@
  */
 
 import { toPublicDownloadLocation } from '@/entrypoints/background/download-paths';
+import {
+  enforcesPublicPageRestrictions,
+  isAllowedPublicFlowOpenUrl,
+  isAllowedPublicFlowTabUrl,
+  PUBLIC_FLOW_OPEN_URL_ERROR,
+  PUBLIC_FLOW_SWITCH_TAB_ERROR,
+} from '../../public-pages';
 import { failed, invalid, ok, tryResolveString } from '../registry';
 import type { ActionHandler, DownloadInfo, DownloadState, VariableStore } from '../types';
 
@@ -17,10 +24,6 @@ const DEFAULT_TAB_TIMEOUT_MS = 10000;
 
 /** Default timeout for download operations */
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60000;
-
-function isLocalFileUrl(url?: string | null): boolean {
-  return typeof url === 'string' && /^file:/i.test(url);
-}
 
 function normalizeDownloadInfo(
   downloadInfo: DownloadInfo,
@@ -64,11 +67,11 @@ export const openTabHandler: ActionHandler<'openTab'> = {
       url = urlResult.value.trim() || undefined;
     }
 
-    if (ctx.execution?.disallowLocalFilePages === true && isLocalFileUrl(url)) {
-      return failed(
-        'VALIDATION_ERROR',
-        'Public flow runs cannot open local file URLs. Use an HTTP(S) page instead.',
-      );
+    if (
+      enforcesPublicPageRestrictions(ctx.execution) &&
+      !isAllowedPublicFlowOpenUrl(url)
+    ) {
+      return failed('VALIDATION_ERROR', PUBLIC_FLOW_OPEN_URL_ERROR);
     }
 
     try {
@@ -201,13 +204,10 @@ export const switchTabHandler: ActionHandler<'switchTab'> = {
 
       const targetTab = await chrome.tabs.get(targetTabId);
       if (
-        ctx.execution?.disallowLocalFilePages === true &&
-        isLocalFileUrl(targetTab.url)
+        enforcesPublicPageRestrictions(ctx.execution) &&
+        !isAllowedPublicFlowTabUrl(targetTab.url)
       ) {
-        return failed(
-          'VALIDATION_ERROR',
-          'Public flow runs cannot switch to local file tabs. Use an HTTP(S) tab instead.',
-        );
+        return failed('VALIDATION_ERROR', PUBLIC_FLOW_SWITCH_TAB_ERROR);
       }
 
       // Activate the tab

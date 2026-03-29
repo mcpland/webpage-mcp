@@ -286,7 +286,7 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       );
     });
 
-    it('openTab rejects local file URLs when execution forbids local file pages', async () => {
+    it('openTab rejects non-public URLs when execution forbids public-page escapes', async () => {
       const executor = createExecutor({ actionsAllowlist: new Set(['openTab']) });
       const ctx = createMockExecCtx({
         execution: { disallowLocalFilePages: true },
@@ -302,7 +302,29 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       await expect(
         executor.execute(ctx, step as never, { tabId: TAB_ID }),
       ).rejects.toThrow(
-        'Public flow runs cannot open local file URLs. Use an HTTP(S) page instead.',
+        'Public flow runs can only open HTTP(S) URLs. Omit the url for a blank tab or use an HTTP(S) page.',
+      );
+      expect(mocks.tabsCreate).not.toHaveBeenCalled();
+      expect(mocks.windowsCreate).not.toHaveBeenCalled();
+    });
+
+    it('openTab rejects data URLs when execution forbids public-page escapes', async () => {
+      const executor = createExecutor({ actionsAllowlist: new Set(['openTab']) });
+      const ctx = createMockExecCtx({
+        execution: { disallowLocalFilePages: true },
+      });
+
+      const step: TestStep = {
+        id: 'openTab_data_url_rejected',
+        type: 'openTab',
+        url: 'data:text/html,<h1>secret</h1>',
+        newWindow: false,
+      };
+
+      await expect(
+        executor.execute(ctx, step as never, { tabId: TAB_ID }),
+      ).rejects.toThrow(
+        'Public flow runs can only open HTTP(S) URLs. Omit the url for a blank tab or use an HTTP(S) page.',
       );
       expect(mocks.tabsCreate).not.toHaveBeenCalled();
       expect(mocks.windowsCreate).not.toHaveBeenCalled();
@@ -442,7 +464,7 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       );
     });
 
-    it('switchTab rejects local file tabs when execution forbids local file pages', async () => {
+    it('switchTab rejects non-public tabs when execution forbids public-page escapes', async () => {
       const executor = createExecutor({ actionsAllowlist: new Set(['switchTab']) });
       const ctx = createMockExecCtx({
         tabId: TAB_ID,
@@ -475,8 +497,44 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       await expect(
         executor.execute(ctx, step as never, { tabId: TAB_ID }),
       ).rejects.toThrow(
-        'Public flow runs cannot switch to local file tabs. Use an HTTP(S) tab instead.',
+        'Public flow runs can only switch to HTTP(S) tabs.',
       );
+      expect(mocks.tabsUpdate).not.toHaveBeenCalledWith(TARGET_TAB_ID, { active: true });
+    });
+
+    it('switchTab rejects data tabs when execution forbids public-page escapes', async () => {
+      const executor = createExecutor({ actionsAllowlist: new Set(['switchTab']) });
+      const ctx = createMockExecCtx({
+        tabId: TAB_ID,
+        execution: { disallowLocalFilePages: true },
+      });
+
+      mocks.tabsQuery.mockResolvedValueOnce([
+        {
+          id: TARGET_TAB_ID,
+          url: 'data:text/html,<h1>secret</h1>',
+          title: 'Secret',
+          windowId: TARGET_WINDOW_ID,
+          status: 'complete',
+        },
+      ]);
+      mocks.tabsGet.mockResolvedValueOnce({
+        id: TARGET_TAB_ID,
+        url: 'data:text/html,<h1>secret</h1>',
+        title: 'Secret',
+        windowId: TARGET_WINDOW_ID,
+        status: 'complete',
+      });
+
+      const step: TestStep = {
+        id: 'switchTab_data_tab_rejected',
+        type: 'switchTab',
+        titleContains: 'Secret',
+      };
+
+      await expect(
+        executor.execute(ctx, step as never, { tabId: TAB_ID }),
+      ).rejects.toThrow('Public flow runs can only switch to HTTP(S) tabs.');
       expect(mocks.tabsUpdate).not.toHaveBeenCalledWith(TARGET_TAB_ID, { active: true });
     });
   });

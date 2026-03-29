@@ -1,21 +1,25 @@
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { handleCallTool } from '@/entrypoints/background/tools';
+import {
+  enforcesPublicPageRestrictions,
+  isAllowedPublicFlowOpenUrl,
+  isAllowedPublicFlowTabUrl,
+  PUBLIC_FLOW_OPEN_URL_ERROR,
+  PUBLIC_FLOW_SWITCH_TAB_ERROR,
+} from '../public-pages';
 import type { StepOpenTab, StepSwitchTab, StepCloseTab } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
-
-function isLocalFileUrl(url?: string | null): boolean {
-  return typeof url === 'string' && /^file:/i.test(url);
-}
 
 export const openTabNode: NodeRuntime<StepOpenTab> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const nextUrl = typeof s.url === 'string' ? s.url.trim() : '';
-    if (ctx.execution?.disallowLocalFilePages === true && isLocalFileUrl(nextUrl)) {
-      throw new Error(
-        'Public flow runs cannot open local file URLs. Use an HTTP(S) page instead.',
-      );
+    if (
+      enforcesPublicPageRestrictions(ctx.execution) &&
+      !isAllowedPublicFlowOpenUrl(nextUrl)
+    ) {
+      throw new Error(PUBLIC_FLOW_OPEN_URL_ERROR);
     }
     if (s.newWindow) {
       const createdWindow = await chrome.windows.create({ url: s.url || undefined, focused: true });
@@ -51,10 +55,11 @@ export const switchTabNode: NodeRuntime<StepSwitchTab> = {
       targetTab = await chrome.tabs.get(targetTabId).catch(() => undefined);
     }
     if (!targetTabId) throw new Error('switchTab: no matching tab');
-    if (ctx.execution?.disallowLocalFilePages === true && isLocalFileUrl(targetTab?.url)) {
-      throw new Error(
-        'Public flow runs cannot switch to local file tabs. Use an HTTP(S) tab instead.',
-      );
+    if (
+      enforcesPublicPageRestrictions(ctx.execution) &&
+      !isAllowedPublicFlowTabUrl(targetTab?.url)
+    ) {
+      throw new Error(PUBLIC_FLOW_SWITCH_TAB_ERROR);
     }
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.SWITCH_TAB,

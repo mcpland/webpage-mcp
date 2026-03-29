@@ -769,9 +769,9 @@ export interface ExecutionFlags {
    */
   disallowLocalFileUploads?: boolean;
   /**
-   * When true, public flow runs must not bind to file:// pages.
-   * This prevents extract/screenshot/script actions from reading local files
-   * through an already-open local file tab.
+   * When true, public flow runs may only bind to HTTP(S) pages.
+   * The legacy flag name is retained for compatibility, but handlers should
+   * reject any non-public tab or URL rather than only file:// pages.
    */
   disallowLocalFilePages?: boolean;
   /**

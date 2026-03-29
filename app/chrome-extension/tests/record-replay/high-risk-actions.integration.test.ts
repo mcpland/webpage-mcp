@@ -298,7 +298,7 @@ describe('high-risk actions integration (M3-full batch 2)', () => {
       expect(result.executor).toBe('legacy');
     });
 
-    it('legacy openTab rejects local file URLs when execution forbids local file pages', async () => {
+    it('legacy openTab rejects non-public URLs when execution forbids public-page escapes', async () => {
       const executor = createExecutor();
       const ctx = createMockExecCtx({
         frameId: FRAME_ID,
@@ -313,7 +313,28 @@ describe('high-risk actions integration (M3-full batch 2)', () => {
       };
 
       await expect(executor.execute(ctx, step as never, { tabId: TAB_ID })).rejects.toThrow(
-        'Public flow runs cannot open local file URLs. Use an HTTP(S) page instead.',
+        'Public flow runs can only open HTTP(S) URLs. Omit the url for a blank tab or use an HTTP(S) page.',
+      );
+      expect(mocks.tabsCreate).not.toHaveBeenCalled();
+      expect(mocks.windowsCreate).not.toHaveBeenCalled();
+    });
+
+    it('legacy openTab rejects data URLs when execution forbids public-page escapes', async () => {
+      const executor = createExecutor();
+      const ctx = createMockExecCtx({
+        frameId: FRAME_ID,
+        execution: { disallowLocalFilePages: true },
+      });
+
+      const step: TestStep = {
+        id: 'openTab_legacy_data_url_rejected',
+        type: 'openTab',
+        url: 'data:text/html,<h1>secret</h1>',
+        newWindow: false,
+      };
+
+      await expect(executor.execute(ctx, step as never, { tabId: TAB_ID })).rejects.toThrow(
+        'Public flow runs can only open HTTP(S) URLs. Omit the url for a blank tab or use an HTTP(S) page.',
       );
       expect(mocks.tabsCreate).not.toHaveBeenCalled();
       expect(mocks.windowsCreate).not.toHaveBeenCalled();
@@ -334,7 +355,7 @@ describe('high-risk actions integration (M3-full batch 2)', () => {
       expect(result.executor).toBe('legacy');
     });
 
-    it('legacy switchTab rejects local file tabs when execution forbids local file pages', async () => {
+    it('legacy switchTab rejects non-public tabs when execution forbids public-page escapes', async () => {
       const executor = createExecutor();
       const ctx = createMockExecCtx({
         frameId: FRAME_ID,
@@ -358,7 +379,40 @@ describe('high-risk actions integration (M3-full batch 2)', () => {
       };
 
       await expect(executor.execute(ctx, step as never, { tabId: TAB_ID })).rejects.toThrow(
-        'Public flow runs cannot switch to local file tabs. Use an HTTP(S) tab instead.',
+        'Public flow runs can only switch to HTTP(S) tabs.',
+      );
+      expect(mocks.handleCallTool).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: TOOL_NAMES.BROWSER.SWITCH_TAB,
+        }),
+      );
+    });
+
+    it('legacy switchTab rejects data tabs when execution forbids public-page escapes', async () => {
+      const executor = createExecutor();
+      const ctx = createMockExecCtx({
+        frameId: FRAME_ID,
+        execution: { disallowLocalFilePages: true },
+      });
+
+      mocks.tabsQuery.mockResolvedValueOnce([
+        {
+          id: OTHER_TAB_ID,
+          url: 'data:text/html,<h1>secret</h1>',
+          title: 'Secret',
+          status: 'complete',
+          windowId: 2,
+        },
+      ]);
+
+      const step: TestStep = {
+        id: 'switchTab_legacy_data_tab_rejected',
+        type: 'switchTab',
+        titleContains: 'Secret',
+      };
+
+      await expect(executor.execute(ctx, step as never, { tabId: TAB_ID })).rejects.toThrow(
+        'Public flow runs can only switch to HTTP(S) tabs.',
       );
       expect(mocks.handleCallTool).not.toHaveBeenCalledWith(
         expect.objectContaining({
