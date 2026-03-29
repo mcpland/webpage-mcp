@@ -77,6 +77,16 @@ interface ComputerParams {
   background?: boolean; // avoid focusing/activating
 }
 
+function hasDisallowedPublicPageScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
 // Minimal CDP helper encapsulated here to avoid scattering CDP code
 class CDPHelper {
   static async attach(tabId: number): Promise<void> {
@@ -1194,6 +1204,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
         }
       }
       case 'zoom': {
+        if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
+          return createErrorResponse(
+            'Only http:// and https:// pages are supported by chrome_computer zoom',
+          );
+        }
         const region = params.region;
         if (!region) {
           return createErrorResponse('region is required for zoom action');

@@ -365,7 +365,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         action: {
           type: 'string',
           description:
-            'Action to perform: left_click | right_click | double_click | triple_click | left_click_drag | scroll | scroll_to | type | key | fill | fill_form | hover | wait | resize_page | zoom | screenshot',
+            'Action to perform: left_click | right_click | double_click | triple_click | left_click_drag | scroll | scroll_to | type | key | fill | fill_form | hover | wait | resize_page | zoom | screenshot. `zoom` and `screenshot` are only supported on HTTP(S) pages.',
         },
         ref: {
           type: 'string',
@@ -425,7 +425,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         region: {
           type: 'object',
           description:
-            'For action=zoom: rectangular region to capture (x0,y0)-(x1,y1) in viewport pixels (or screenshot-space if a recent screenshot context exists).',
+            'For action=zoom on an HTTP(S) page: rectangular region to capture (x0,y0)-(x1,y1) in viewport pixels (or screenshot-space if a recent screenshot context exists).',
           properties: {
             x0: { type: 'number' },
             y0: { type: 'number' },
