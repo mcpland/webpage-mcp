@@ -5,7 +5,7 @@ import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 interface FileUploadToolParams {
   selector: string; // CSS selector for the file input element
-  filePath?: string; // Local file path
+  filePath?: string; // Unsupported local file path input retained for explicit rejection
   fileUrl?: string; // URL to download file from
   base64Data?: string; // Base64 encoded file data
   fileName?: string; // Optional filename when using base64 or URL
@@ -37,8 +37,14 @@ class FileUploadTool extends BaseBrowserToolExecutor {
       return createErrorResponse('Selector is required for file upload');
     }
 
-    if (!filePath && !fileUrl && !base64Data) {
-      return createErrorResponse('One of filePath, fileUrl, or base64Data must be provided');
+    if (filePath) {
+      return createErrorResponse(
+        'Direct local file paths are not supported for uploads. Use fileUrl or base64Data instead.',
+      );
+    }
+
+    if (!fileUrl && !base64Data) {
+      return createErrorResponse('One of fileUrl or base64Data must be provided');
     }
 
     try {
@@ -51,10 +57,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
       // Prepare file paths
       let files: string[] = [];
 
-      if (filePath) {
-        // Direct file path provided
-        files = [filePath];
-      } else if (fileUrl || base64Data) {
+      if (fileUrl || base64Data) {
         // For URL or base64, we need to use the native messaging host
         // to download or save the file temporarily
         const tempFilePath = await this.prepareFileFromRemote({
