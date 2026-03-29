@@ -24,6 +24,16 @@ interface NavigateToolParams {
   background?: boolean; // when true, do not activate tab or focus window
 }
 
+function hasDisallowedPublicUrlScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
 /**
  * Tool for navigating to URLs in browser tabs or windows
  */
@@ -280,6 +290,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
           ],
           isError: false,
         };
+      }
+
+      if (hasDisallowedPublicUrlScheme(url)) {
+        return createErrorResponse(
+          'Only http:// and https:// URLs are allowed for chrome_navigate',
+        );
       }
 
       const effectiveOpenMode = this.normalizeOpenMode(

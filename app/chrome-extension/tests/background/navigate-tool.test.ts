@@ -205,4 +205,17 @@ describe('navigateTool', () => {
     expect(payload.message).toBe('Opened URL in new tab');
     expect(payload.tabId).toBe(88);
   });
+
+  it('rejects file URLs on the public navigate tool', async () => {
+    const result = await navigateTool.execute({
+      url: 'file:///tmp/secret.txt',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text)).toContain(
+      'Only http:// and https:// URLs are allowed for chrome_navigate',
+    );
+    expect(mocks.tabsUpdate).not.toHaveBeenCalled();
+    expect(mocks.tabsCreate).not.toHaveBeenCalled();
+  });
 });

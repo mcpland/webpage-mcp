@@ -6,6 +6,16 @@ import type { JsonObject } from "../record-replay-v3/domain/json";
 import { listPublishedFlowDetails } from "../record-replay-v3/flows/publish";
 import { enqueueRunAndWait } from "../record-replay-v3/compat";
 
+function hasDisallowedPublicUrlScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== "http" && protocol !== "https";
+}
+
 class FlowRunTool {
   name = TOOL_NAMES.RECORD_REPLAY.FLOW_RUN;
   async execute(args: any): Promise<ToolResult> {
@@ -43,6 +53,13 @@ class FlowRunTool {
     if (!flowId) return createErrorResponse("flowId is required");
     const flow = await createStoragePort().flows.get(flowId as FlowId);
     if (!flow) return createErrorResponse(`Flow not found: ${flowId}`);
+    const normalizedStartUrl =
+      typeof startUrl === "string" && startUrl.trim() ? startUrl.trim() : undefined;
+    if (normalizedStartUrl && hasDisallowedPublicUrlScheme(normalizedStartUrl)) {
+      return createErrorResponse(
+        "Only http:// and https:// URLs are allowed for startUrl",
+      );
+    }
     const normalizedBaselines =
       normalizeScreenshotBaselines(screenshotBaselines);
     const unsupportedOptions = {
@@ -70,7 +87,7 @@ class FlowRunTool {
           ? (vars as JsonObject)
           : undefined,
       execution: { disallowLocalFileUploads: true },
-      startUrl: typeof startUrl === "string" && startUrl.trim() ? startUrl.trim() : undefined,
+      startUrl: normalizedStartUrl,
       refresh: refresh === true,
       timeoutMs:
         typeof timeoutMs === "number" && Number.isFinite(timeoutMs)

@@ -328,7 +328,12 @@ async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
       properties['captureNetwork'] = { type: 'boolean', default: false };
     if (!properties['returnLogs']) properties['returnLogs'] = { type: 'boolean', default: false };
     if (!properties['timeoutMs']) properties['timeoutMs'] = { type: 'number', minimum: 0 };
-    if (!properties['startUrl']) properties['startUrl'] = { type: 'string' };
+    if (!properties['startUrl']) {
+      properties['startUrl'] = {
+        type: 'string',
+        description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
+      };
+    }
     if (!properties['tabId']) properties['tabId'] = { type: 'number' };
     if (!properties['debugStepByStep'])
       properties['debugStepByStep'] = {

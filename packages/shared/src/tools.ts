@@ -205,7 +205,10 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         returnLogs: { type: 'boolean', description: 'Return run logs (default false)' },
         timeoutMs: { type: 'number', description: 'Global timeout in ms (optional)' },
-        startUrl: { type: 'string', description: 'Optional start URL to open before running' },
+        startUrl: {
+          type: 'string',
+          description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
+        },
       },
       required: ['flowId'],
     },
@@ -529,7 +532,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         url: {
           type: 'string',
           description:
-            'URL to navigate to. Special values: "back" or "forward" to navigate browser history in the target tab.',
+            'URL to navigate to. Only http:// and https:// URLs are allowed. Special values: "back" or "forward" navigate browser history in the target tab.',
         },
         openMode: {
           type: 'string',

@@ -639,6 +639,36 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("flowRunTool rejects non-http startUrl values", async () => {
+    const flowId = `flow-run-file-start-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: {
+              selector: "#email",
+              candidates: [{ type: "css", value: "#email" }],
+            },
+            value: "{email}",
+          },
+        },
+      ]),
+    );
+
+    const result = await flowRunTool.execute({
+      flowId,
+      startUrl: "file:///tmp/secret.txt",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text)).toContain(
+      "Only http:// and https:// URLs are allowed for startUrl",
+    );
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+  });
+
   it("flowRunTool marks failed runs as MCP errors", async () => {
     const flowId = `flow-run-failed-${Date.now()}`;
     await createStoragePort().flows.save(
