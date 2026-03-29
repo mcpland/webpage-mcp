@@ -111,6 +111,10 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
           }
         } catch (e) {
           console.warn('Failed to construct FormData:', e);
+          return {
+            success: false,
+            error: `Failed to construct FormData: ${e instanceof Error ? e.message : String(e)}`,
+          };
         }
         // Let browser set the correct multipart boundary
         try {
