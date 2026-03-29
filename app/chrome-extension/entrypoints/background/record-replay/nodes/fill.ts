@@ -1,5 +1,6 @@
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { handleCallTool } from '@/entrypoints/background/tools';
+import { uploadLocalFileToInputInternal } from '@/entrypoints/background/tools/browser/file-upload';
 import type { StepFill } from '../types';
 import { locateElement } from '../selector-engine';
 import { expandTemplatesDeep } from '../rr-utils';
@@ -46,9 +47,10 @@ export const fillNode: NodeRuntime<StepFill> = {
         )) as any;
         const typeName = (attr && attr.value ? String(attr.value) : '').toLowerCase();
         if (typeName === 'file') {
-          const uploadRes = await handleCallTool({
-            name: TOOL_NAMES.BROWSER.FILE_UPLOAD,
-            args: { selector: cssSelector, filePath: String(value ?? ''), tabId },
+          const uploadRes = await uploadLocalFileToInputInternal({
+            selector: cssSelector,
+            filePath: String(value ?? ''),
+            tabId,
           });
           if ((uploadRes as any).isError) throw new Error('file upload failed');
           if (fallbackUsed)

@@ -28,6 +28,7 @@ import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 
 const mocks = vi.hoisted(() => ({
   handleCallTool: vi.fn(),
+  uploadLocalFileToInputInternal: vi.fn(),
   locate: vi.fn(),
   tabsSendMessage: vi.fn(),
   tabsGet: vi.fn(),
@@ -37,6 +38,10 @@ const mocks = vi.hoisted(() => ({
 // Mock tool bridge - all action handlers communicate with content scripts via this
 vi.mock('@/entrypoints/background/tools', () => ({
   handleCallTool: mocks.handleCallTool,
+}));
+
+vi.mock('@/entrypoints/background/tools/browser/file-upload', () => ({
+  uploadLocalFileToInputInternal: mocks.uploadLocalFileToInputInternal,
 }));
 
 // Mock selector locator - prevents real DOM queries
@@ -156,6 +161,10 @@ describe('hybrid mode actions integration (M3-full batch 1)', () => {
 
     // Setup default behaviors
     setupDefaultToolMock();
+    mocks.uploadLocalFileToInputInternal.mockResolvedValue({
+      content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
+      isError: false,
+    });
     setupDefaultTabsMessageMock();
     setupDefaultScriptingMock();
 
@@ -290,6 +299,48 @@ describe('hybrid mode actions integration (M3-full batch 1)', () => {
           args: expect.objectContaining({ value: 'john_doe' }),
         }),
       );
+    });
+
+    it('uses the internal file upload helper for file inputs', async () => {
+      const executor = createExecutor();
+      const ctx = createMockExecCtx({
+        frameId: FRAME_ID,
+        vars: { upload_path: '/tmp/demo.txt' },
+      });
+
+      mocks.locate.mockResolvedValueOnce({ ref: 'ref_fill', frameId: FRAME_ID, resolvedBy: 'css' });
+      mocks.tabsSendMessage.mockImplementation(async (_tabId: number, message: unknown) => {
+        const msg = message as { action?: string };
+        switch (msg.action) {
+          case 'getAttributeForSelector':
+            return { value: 'file' };
+          case TOOL_MESSAGE_TYPES.RESOLVE_REF:
+            return { success: true, rect: { width: 100, height: 20 }, center: { x: 1, y: 1 } };
+          default:
+            return { success: true };
+        }
+      });
+
+      const step: TestStep = {
+        id: 'fill_file_test',
+        type: 'fill',
+        target: { candidates: [{ type: 'css', value: '#upload' }] },
+        value: '{upload_path}',
+      };
+
+      const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });
+
+      expect(result.executor).toBe('actions');
+      expect(mocks.uploadLocalFileToInputInternal).toHaveBeenCalledWith({
+        selector: '#upload',
+        filePath: '/tmp/demo.txt',
+        tabId: TAB_ID,
+      });
+
+      const toolCalls = mocks.handleCallTool.mock.calls.map(([arg]) => arg.name);
+      expect(toolCalls).toContain(TOOL_NAMES.BROWSER.READ_PAGE);
+      expect(toolCalls).not.toContain(TOOL_NAMES.BROWSER.FILL);
+      expect(toolCalls).not.toContain(TOOL_NAMES.BROWSER.FILE_UPLOAD);
     });
   });
 

@@ -14,6 +14,14 @@ interface FileUploadToolParams {
   windowId?: number; // When no tabId, pick active tab from this window
 }
 
+interface InternalLocalFileUploadParams {
+  selector: string;
+  filePath: string;
+  multiple?: boolean;
+  tabId?: number;
+  windowId?: number;
+}
+
 /**
  * Tool for uploading files to web forms using Chrome DevTools Protocol
  * Similar to Playwright's setInputFiles implementation
@@ -48,115 +56,26 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     }
 
     try {
-      // Resolve tab
-      const explicit = await this.tryGetTab(args.tabId);
-      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
-      if (!tab.id) return createErrorResponse('No active tab found');
-      const tabId = tab.id;
-
-      // Prepare file paths
-      let files: string[] = [];
-
-      if (fileUrl || base64Data) {
-        // For URL or base64, we need to use the native messaging host
-        // to download or save the file temporarily
-        const tempFilePath = await this.prepareFileFromRemote({
-          fileUrl,
-          base64Data,
-          fileName: fileName || 'uploaded-file',
-        });
-        if (!tempFilePath) {
-          return createErrorResponse('Failed to prepare file for upload');
-        }
-        files = [tempFilePath];
+      const tempFilePath = await this.prepareFileFromRemote({
+        fileUrl,
+        base64Data,
+        fileName: fileName || 'uploaded-file',
+      });
+      if (!tempFilePath) {
+        return createErrorResponse('Failed to prepare file for upload');
       }
 
-      // Use shared CDP session manager to attach/do work/detach safely
-      await cdpSessionManager.withSession(tabId, 'file-upload', async () => {
-        // Enable necessary CDP domains
-        await cdpSessionManager.sendCommand(tabId, 'DOM.enable', {});
-        await cdpSessionManager.sendCommand(tabId, 'Runtime.enable', {});
-
-        // Get the document
-        const { root } = (await cdpSessionManager.sendCommand(tabId, 'DOM.getDocument', {
-          depth: -1,
-          pierce: true,
-        })) as { root: { nodeId: number } };
-
-        // Find the file input element using the selector
-        const { nodeId } = (await cdpSessionManager.sendCommand(tabId, 'DOM.querySelector', {
-          nodeId: root.nodeId,
-          selector: selector,
-        })) as { nodeId: number };
-
-        if (!nodeId || nodeId === 0) {
-          throw new Error(`Element with selector "${selector}" not found`);
-        }
-
-        // Verify it's actually a file input
-        const { node } = (await cdpSessionManager.sendCommand(tabId, 'DOM.describeNode', {
-          nodeId,
-        })) as { node: { nodeName: string; attributes?: string[] } };
-
-        if (node.nodeName !== 'INPUT') {
-          throw new Error(`Element with selector "${selector}" is not an input element`);
-        }
-
-        // Check if it's a file input by looking for type="file" in attributes
-        const attributes = node.attributes || [];
-        let isFileInput = false;
-        for (let i = 0; i < attributes.length; i += 2) {
-          if (attributes[i] === 'type' && attributes[i + 1] === 'file') {
-            isFileInput = true;
-            break;
-          }
-        }
-
-        if (!isFileInput) {
-          throw new Error(`Element with selector "${selector}" is not a file input (type="file")`);
-        }
-
-        // Set the files on the input element
-        await cdpSessionManager.sendCommand(tabId, 'DOM.setFileInputFiles', {
-          nodeId,
-          files,
-        });
-
-        // Trigger change event to ensure the page reacts to the file upload
-        await cdpSessionManager.sendCommand(tabId, 'Runtime.evaluate', {
-          expression: `
-            (function() {
-              const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
-              if (element) {
-                const event = new Event('change', { bubbles: true });
-                element.dispatchEvent(event);
-                return true;
-              }
-              return false;
-            })()
-          `,
-        });
-      });
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              success: true,
-              message: 'File(s) uploaded successfully',
-              files: files,
-              selector: selector,
-              fileCount: files.length,
-            }),
-          },
-        ],
-        isError: false,
-      };
+      return await this.uploadPreparedFiles(
+        {
+          selector,
+          multiple,
+          tabId: args.tabId,
+          windowId: args.windowId,
+        },
+        [tempFilePath],
+      );
     } catch (error) {
       console.error('Error in file upload operation:', error);
-
-      // Session manager handles detach; nothing extra needed here
 
       return createErrorResponse(
         `Error uploading file: ${error instanceof Error ? error.message : String(error)}`,
@@ -164,7 +83,123 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     }
   }
 
+  async uploadLocalFile(args: InternalLocalFileUploadParams): Promise<ToolResult> {
+    const selector = args.selector?.trim();
+    const filePath = args.filePath?.trim();
+
+    if (!selector) {
+      return createErrorResponse('Selector is required for file upload');
+    }
+    if (!filePath) {
+      return createErrorResponse('filePath is required for internal file upload');
+    }
+
+    try {
+      return await this.uploadPreparedFiles(
+        {
+          selector,
+          multiple: args.multiple,
+          tabId: args.tabId,
+          windowId: args.windowId,
+        },
+        [filePath],
+      );
+    } catch (error) {
+      console.error('Error in internal file upload operation:', error);
+      return createErrorResponse(
+        `Error uploading file: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   // All debugger attach/detach is centrally managed by cdpSessionManager
+
+  private async uploadPreparedFiles(
+    args: Pick<FileUploadToolParams, 'selector' | 'multiple' | 'tabId' | 'windowId'>,
+    files: string[],
+  ): Promise<ToolResult> {
+    const { selector, tabId: targetTabId, windowId } = args;
+
+    const explicit = await this.tryGetTab(targetTabId);
+    const tab = explicit || (await this.getActiveTabOrThrowInWindow(windowId));
+    if (!tab.id) return createErrorResponse('No active tab found');
+    const tabId = tab.id;
+
+    await cdpSessionManager.withSession(tabId, 'file-upload', async () => {
+      await cdpSessionManager.sendCommand(tabId, 'DOM.enable', {});
+      await cdpSessionManager.sendCommand(tabId, 'Runtime.enable', {});
+
+      const { root } = (await cdpSessionManager.sendCommand(tabId, 'DOM.getDocument', {
+        depth: -1,
+        pierce: true,
+      })) as { root: { nodeId: number } };
+
+      const { nodeId } = (await cdpSessionManager.sendCommand(tabId, 'DOM.querySelector', {
+        nodeId: root.nodeId,
+        selector,
+      })) as { nodeId: number };
+
+      if (!nodeId || nodeId === 0) {
+        throw new Error(`Element with selector "${selector}" not found`);
+      }
+
+      const { node } = (await cdpSessionManager.sendCommand(tabId, 'DOM.describeNode', {
+        nodeId,
+      })) as { node: { nodeName: string; attributes?: string[] } };
+
+      if (node.nodeName !== 'INPUT') {
+        throw new Error(`Element with selector "${selector}" is not an input element`);
+      }
+
+      const attributes = node.attributes || [];
+      let isFileInput = false;
+      for (let i = 0; i < attributes.length; i += 2) {
+        if (attributes[i] === 'type' && attributes[i + 1] === 'file') {
+          isFileInput = true;
+          break;
+        }
+      }
+
+      if (!isFileInput) {
+        throw new Error(`Element with selector "${selector}" is not a file input (type="file")`);
+      }
+
+      await cdpSessionManager.sendCommand(tabId, 'DOM.setFileInputFiles', {
+        nodeId,
+        files,
+      });
+
+      await cdpSessionManager.sendCommand(tabId, 'Runtime.evaluate', {
+        expression: `
+          (function() {
+            const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
+            if (element) {
+              const event = new Event('change', { bubbles: true });
+              element.dispatchEvent(event);
+              return true;
+            }
+            return false;
+          })()
+        `,
+      });
+    });
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: 'File(s) uploaded successfully',
+            files,
+            selector,
+            fileCount: files.length,
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
 
   /**
    * Prepare file from URL or base64 data using native messaging host
@@ -299,3 +334,13 @@ class FileUploadTool extends BaseBrowserToolExecutor {
 }
 
 export const fileUploadTool = new FileUploadTool();
+
+/**
+ * Internal-only helper for replay engines that need to upload user-selected local files
+ * without re-exposing local paths through the public MCP tool surface.
+ */
+export async function uploadLocalFileToInputInternal(
+  args: InternalLocalFileUploadParams,
+): Promise<ToolResult> {
+  return await fileUploadTool.uploadLocalFile(args);
+}

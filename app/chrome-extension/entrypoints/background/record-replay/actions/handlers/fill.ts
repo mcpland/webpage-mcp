@@ -9,6 +9,7 @@
  */
 
 import { handleCallTool } from '@/entrypoints/background/tools';
+import { uploadLocalFileToInputInternal } from '@/entrypoints/background/tools/browser/file-upload';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { failed, invalid, ok } from '../registry';
 import type { ActionHandler } from '../types';
@@ -102,9 +103,10 @@ export const fillHandler: ActionHandler<'fill'> = {
       const inputType = (attrResult.ok ? (attrResult.value?.value ?? '') : '').toLowerCase();
 
       if (inputType === 'file') {
-        const uploadResult = await handleCallTool({
-          name: TOOL_NAMES.BROWSER.FILE_UPLOAD,
-          args: { selector: selectorForTypeCheck, filePath: value, tabId },
+        const uploadResult = await uploadLocalFileToInputInternal({
+          selector: selectorForTypeCheck,
+          filePath: value,
+          tabId,
         });
 
         if ((uploadResult as { isError?: boolean })?.isError) {
