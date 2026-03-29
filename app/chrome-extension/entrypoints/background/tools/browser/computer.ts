@@ -87,6 +87,26 @@ function hasDisallowedPublicPageScheme(url: string): boolean {
   return protocol !== 'http' && protocol !== 'https';
 }
 
+function requiresPublicPageForAction(params: ComputerParams): boolean {
+  if (params.action === 'resize_page') {
+    return false;
+  }
+
+  if (params.action === 'wait') {
+    return typeof params.text === 'string' && params.text.trim().length > 0;
+  }
+
+  return true;
+}
+
+function getNonPublicPageError(action: string): string {
+  if (action === 'zoom' || action === 'screenshot') {
+    return `Only http:// and https:// pages are supported by chrome_computer ${action}`;
+  }
+
+  return 'Only http:// and https:// pages are supported by chrome_computer';
+}
+
 // Minimal CDP helper encapsulated here to avoid scattering CDP code
 class CDPHelper {
   static async attach(tabId: number): Promise<void> {
@@ -241,6 +261,12 @@ class ComputerTool extends BaseBrowserToolExecutor {
       const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id)
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+      if (
+        requiresPublicPageForAction(params) &&
+        hasDisallowedPublicPageScheme(String(tab.url || ''))
+      ) {
+        return createErrorResponse(getNonPublicPageError(params.action));
+      }
 
       // Execute the action and capture frame on success
       const result = await this.executeAction(params, tab);
@@ -1204,11 +1230,6 @@ class ComputerTool extends BaseBrowserToolExecutor {
         }
       }
       case 'zoom': {
-        if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
-          return createErrorResponse(
-            'Only http:// and https:// pages are supported by chrome_computer zoom',
-          );
-        }
         const region = params.region;
         if (!region) {
           return createErrorResponse('region is required for zoom action');
