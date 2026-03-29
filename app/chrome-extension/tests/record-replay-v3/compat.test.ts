@@ -385,10 +385,10 @@ describe("record-replay-v3 compat", () => {
     );
   });
 
-  it("rejects explicit file tabs for public flow runs", async () => {
+  it("rejects explicit non-public tabs for public flow runs", async () => {
     const fileTab = {
       id: 61,
-      url: "file:///tmp/secret.txt",
+      url: "data:text/html,<h1>secret</h1>",
       active: true,
       status: "complete",
       windowId: 1,
@@ -400,6 +400,30 @@ describe("record-replay-v3 compat", () => {
       enqueueRunAndWait({
         flowId: "flow-file-tab" as any,
         tabId: 61,
+        execution: { disallowLocalFilePages: true },
+      }),
+    ).rejects.toThrow(
+      "Public flow runs only support HTTP(S) tabs. Switch to an HTTP(S) page or provide an HTTP(S) startUrl.",
+    );
+
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+    expect(mocks.enqueueRun).not.toHaveBeenCalled();
+  });
+
+  it("rejects current-target public runs when no HTTP(S) tab is available", async () => {
+    const extensionTab = {
+      id: 73,
+      url: "chrome-extension://abc123/popup.html",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+
+    asMock(chrome.tabs.query).mockImplementation(async () => [extensionTab]);
+
+    await expect(
+      enqueueRunAndWait({
+        flowId: "flow-current-public-error" as any,
         execution: { disallowLocalFilePages: true },
       }),
     ).rejects.toThrow(

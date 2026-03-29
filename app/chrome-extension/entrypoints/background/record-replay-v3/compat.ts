@@ -9,6 +9,12 @@ import type { RunEvent, RunRecordV3 } from "./domain/events";
 import { isTerminalStatus } from "./domain/events";
 import type { FlowId, RunId } from "./domain/ids";
 import type { JsonObject } from "./domain/json";
+import {
+  enforcesPublicPageRestrictions,
+  isAllowedPublicFlowTabUrl,
+  isHttpUrl,
+  PUBLIC_FLOW_RUN_TARGET_ERROR,
+} from "@/entrypoints/background/record-replay/public-pages";
 import { bootstrapV3, type V3Runtime } from "./bootstrap";
 import { enqueueRun } from "./engine/queue/enqueue-run";
 import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
@@ -51,18 +57,10 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function isLocalFileUrl(url?: string | null): boolean {
-  return typeof url === "string" && /^file:/i.test(url);
-}
-
 function isWebUrl(url?: string | null, execution?: ExecutionFlags): boolean {
-  if (typeof url !== "string") {
-    return false;
-  }
-  if (/^https?:/i.test(url)) {
-    return true;
-  }
-  return execution?.disallowLocalFilePages === true ? false : isLocalFileUrl(url);
+  return enforcesPublicPageRestrictions(execution)
+    ? isAllowedPublicFlowTabUrl(url)
+    : isHttpUrl(url) || (typeof url === "string" && /^file:/i.test(url));
 }
 
 function normalizeRunTarget(target: unknown): RunTargetPreference {
@@ -161,10 +159,8 @@ export async function resolveRunTargetTab(
         targetUrl: startUrl,
       });
     } else if (!isWebUrl(explicitTab.url, input.execution)) {
-      if (input.execution?.disallowLocalFilePages === true && isLocalFileUrl(explicitTab.url)) {
-        throw new Error(
-          "Public flow runs only support HTTP(S) tabs. Switch to an HTTP(S) page or provide an HTTP(S) startUrl.",
-        );
+      if (enforcesPublicPageRestrictions(input.execution)) {
+        throw new Error(PUBLIC_FLOW_RUN_TARGET_ERROR);
       }
       return createFallbackRunTab();
     } else if (shouldRefresh && isWebUrl(explicitTab.url, input.execution)) {
@@ -236,6 +232,9 @@ export async function resolveRunTargetTab(
 
   if (targetTab?.id !== undefined) {
     if (!isWebUrl(targetTab.url, input.execution)) {
+      if (enforcesPublicPageRestrictions(input.execution)) {
+        throw new Error(PUBLIC_FLOW_RUN_TARGET_ERROR);
+      }
       return createFallbackRunTab();
     }
     if (shouldRefresh && isWebUrl(targetTab.url, input.execution)) {
