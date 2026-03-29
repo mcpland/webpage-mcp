@@ -51,6 +51,22 @@ const LAST_RESULTS = new Map<
   }
 >();
 const TRACE_STOP_TIMEOUT_MS = 10000;
+const PERFORMANCE_TRACE_PUBLIC_PAGE_ERROR =
+  'Only http:// and https:// pages are supported by performance trace tools';
+
+function hasDisallowedPublicPageScheme(url: string): boolean {
+  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  if (!match) {
+    return false;
+  }
+
+  const protocol = match[1]?.toLowerCase();
+  return protocol !== 'http' && protocol !== 'https';
+}
+
+function isNonPublicPageUrl(url: string | undefined): boolean {
+  return typeof url === 'string' && hasDisallowedPublicPageScheme(url);
+}
 
 function tracingCategories(): string[] {
   // Keep broadly consistent with other project
@@ -295,6 +311,9 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
       if (!activeTab?.id) {
         return createErrorResponse('No active tab found');
       }
+      if (isNonPublicPageUrl(activeTab.url)) {
+        return createErrorResponse(PERFORMANCE_TRACE_PUBLIC_PAGE_ERROR);
+      }
       tabId = activeTab.id;
       const existed = sessions.get(tabId);
       if (existed?.recording) {
@@ -411,6 +430,9 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
         };
       }
 
+      const discardNonPublicTrace =
+        isNonPublicPageUrl(activeTab.url) || isNonPublicPageUrl(session.pageUrl);
+
       let stopResult: { completed: boolean } = { completed: false };
       if (session.recording) {
         // End tracing and wait for completion signal
@@ -420,10 +442,33 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
         // Already auto-stopped; proceed to finalize without waiting
         stopResult = { completed: true };
       }
+
+      const endedAt = Date.now();
+      if (discardNonPublicTrace) {
+        LAST_RESULTS.delete(tabId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                discarded: true,
+                message:
+                  'Stopped a performance trace on a non-public page. Trace data was discarded.',
+                startedAt: session.startedAt,
+                endedAt,
+                durationMs: endedAt - session.startedAt,
+                tracingCompleted: stopResult?.completed === true,
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+
       // Fetch metrics before detach
       const metrics = await enablePerformanceMetrics(tabId);
 
-      const endedAt = Date.now();
       const trace = { traceEvents: session.events };
       const json = JSON.stringify(trace);
 
@@ -491,6 +536,9 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
       const explicit = await this.tryGetTab(targetTabIdParam);
       const activeTab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!activeTab?.id) return createErrorResponse('No active tab found');
+      if (isNonPublicPageUrl(activeTab.url)) {
+        return createErrorResponse(PERFORMANCE_TRACE_PUBLIC_PAGE_ERROR);
+      }
       const tabId = activeTab.id;
       const result = LAST_RESULTS.get(tabId);
       if (!result) {
@@ -503,6 +551,12 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
           ],
           isError: false,
         };
+      }
+      if (isNonPublicPageUrl(result.tabUrl)) {
+        LAST_RESULTS.delete(tabId);
+        return createErrorResponse(
+          'Performance traces recorded on non-public pages are not available via public tools',
+        );
       }
 
       // Prefer native-side deep analysis when we have a saved file path

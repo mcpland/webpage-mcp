@@ -255,7 +255,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE,
     description:
-      'Starts a performance trace recording on the selected page. Optionally reloads the page and/or auto-stops after a short duration.',
+      'Starts a performance trace recording on the selected HTTP(S) page. Optionally reloads the page and/or auto-stops after a short duration.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -278,7 +278,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE,
-    description: 'Stops the active performance trace recording on the selected page.',
+    description: 'Stops the active performance trace recording on the selected HTTP(S) page.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -297,7 +297,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT,
     description:
-      'Provides a lightweight summary of the last recorded trace. For deep insights (CWV, breakdowns), integrate native-side DevTools trace engine.',
+      'Provides a lightweight summary of the last recorded trace for an HTTP(S) page. For deep insights (CWV, breakdowns), integrate native-side DevTools trace engine.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -81,6 +81,20 @@ describe('performance trace tools', () => {
     expect(mocks.sendCommand).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects file URL tabs before starting a trace', async () => {
+    const { performanceStartTraceTool } = await loadPerformanceTools();
+    mocks.tabsGet.mockResolvedValue(makeTab({ url: 'file:///tmp/secret.txt' }));
+
+    const result = await performanceStartTraceTool.execute({ tabId: 7 });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'Only http:// and https:// pages are supported by performance trace tools',
+    );
+    expect(mocks.attach).not.toHaveBeenCalled();
+    expect(mocks.sendCommand).not.toHaveBeenCalled();
+  });
+
   it('cleans up debugger state when trace start fails so a retry can succeed', async () => {
     const { performanceStartTraceTool } = await loadPerformanceTools();
 
@@ -123,5 +137,40 @@ describe('performance trace tools', () => {
 
     expect(mocks.detach).toHaveBeenCalledTimes(1);
     expect(mocks.debuggerOnEventRemoveListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops and discards traces on non-public pages instead of saving them', async () => {
+    const { performanceStartTraceTool, performanceStopTraceTool } = await loadPerformanceTools();
+
+    const start = await performanceStartTraceTool.execute({});
+    expect(start.isError).toBe(false);
+
+    const traceListener = mocks.debuggerOnEventAddListener.mock.calls[0]?.[0];
+    if (typeof traceListener === 'function') {
+      traceListener({ tabId: 7 }, 'Tracing.tracingComplete', {});
+    }
+    mocks.tabsQuery.mockResolvedValue([makeTab({ url: 'file:///tmp/secret.txt' })]);
+
+    const stop = await performanceStopTraceTool.execute({});
+    const payload = JSON.parse(String((stop.content[0] as { text?: string })?.text || '{}'));
+
+    expect(stop.isError).toBe(false);
+    expect(payload.discarded).toBe(true);
+    expect(String(payload.message || '')).toContain('Trace data was discarded');
+    expect(mocks.detach).toHaveBeenCalledTimes(1);
+    expect(mocks.debuggerOnEventRemoveListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects trace analysis on file URL tabs', async () => {
+    const { performanceAnalyzeInsightTool } = await loadPerformanceTools();
+    mocks.tabsGet.mockResolvedValue(makeTab({ url: 'file:///tmp/secret.txt' }));
+
+    const result = await performanceAnalyzeInsightTool.execute({ tabId: 7 });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'Only http:// and https:// pages are supported by performance trace tools',
+    );
+    expect(mocks.sendCommand).not.toHaveBeenCalled();
   });
 });
