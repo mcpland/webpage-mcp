@@ -50,6 +50,7 @@ const LAST_RESULTS = new Map<
     metrics?: Record<string, number>;
   }
 >();
+const TRACE_STOP_TIMEOUT_MS = 10000;
 
 function tracingCategories(): string[] {
   // Keep broadly consistent with other project
@@ -220,6 +221,56 @@ function getOrCreateStopPromise(session: TraceSessionState): Promise<{ completed
   return session.stopPromise;
 }
 
+async function waitForTraceCompletion(
+  session: TraceSessionState,
+): Promise<{ completed: boolean }> {
+  const stopPromise = getOrCreateStopPromise(session);
+
+  return await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `Timed out waiting for performance trace completion after ${TRACE_STOP_TIMEOUT_MS}ms`,
+        ),
+      );
+    }, TRACE_STOP_TIMEOUT_MS);
+
+    stopPromise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function cleanupTraceSession(
+  tabId: number,
+  session?: TraceSessionState,
+): Promise<void> {
+  const activeSession = session ?? sessions.get(tabId);
+
+  try {
+    if (activeSession) {
+      chrome.debugger.onEvent.removeListener(activeSession.listener);
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    await cdpSessionManager.detach(tabId, 'performance');
+  } catch {
+    // ignore
+  }
+
+  sessions.delete(tabId);
+}
+
 /**
  * Start performance trace
  */
@@ -235,13 +286,16 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
       windowId,
     } = args || {};
 
+    let tabId: number | undefined;
+    let state: TraceSessionState | undefined;
+
     try {
       const explicit = await this.tryGetTab(targetTabIdParam);
       const activeTab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!activeTab?.id) {
         return createErrorResponse('No active tab found');
       }
-      const tabId = activeTab.id;
+      tabId = activeTab.id;
       const existed = sessions.get(tabId);
       if (existed?.recording) {
         return {
@@ -252,7 +306,7 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
 
       await cdpSessionManager.attach(tabId, 'performance');
 
-      const state: TraceSessionState = {
+      state = {
         recording: true,
         events: [],
         startedAt: Date.now(),
@@ -318,6 +372,9 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
         isError: false,
       };
     } catch (e: any) {
+      if (typeof tabId === 'number') {
+        await cleanupTraceSession(tabId, state);
+      }
       return createErrorResponse(`Failed to start performance trace: ${e?.message || e}`);
     }
   }
@@ -336,12 +393,15 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
       tabId: targetTabIdParam,
       windowId,
     } = args || {};
+    let tabId: number | undefined;
+    let session: TraceSessionState | undefined;
+
     try {
       const explicit = await this.tryGetTab(targetTabIdParam);
       const activeTab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!activeTab?.id) return createErrorResponse('No active tab found');
-      const tabId = activeTab.id;
-      const session = sessions.get(tabId);
+      tabId = activeTab.id;
+      session = sessions.get(tabId);
       if (!session) {
         return {
           content: [
@@ -355,26 +415,13 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
       if (session.recording) {
         // End tracing and wait for completion signal
         await cdpSessionManager.sendCommand(tabId, 'Tracing.end');
-        await getOrCreateStopPromise(session);
-        stopResult = await session.stopPromise!;
+        stopResult = await waitForTraceCompletion(session);
       } else {
         // Already auto-stopped; proceed to finalize without waiting
         stopResult = { completed: true };
       }
       // Fetch metrics before detach
       const metrics = await enablePerformanceMetrics(tabId);
-
-      // Cleanup event listener and detach
-      try {
-        chrome.debugger.onEvent.removeListener(session.listener);
-      } catch {
-        // ignore
-      }
-      try {
-        await cdpSessionManager.detach(tabId, 'performance');
-      } catch {
-        // ignore
-      }
 
       const endedAt = Date.now();
       const trace = { traceEvents: session.events };
@@ -400,8 +447,6 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
         metrics,
       });
 
-      sessions.delete(tabId);
-
       return {
         content: [
           {
@@ -424,6 +469,10 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
       };
     } catch (e: any) {
       return createErrorResponse(`Failed to stop performance trace: ${e?.message || e}`);
+    } finally {
+      if (typeof tabId === 'number' && session) {
+        await cleanupTraceSession(tabId, session);
+      }
     }
   }
 }
