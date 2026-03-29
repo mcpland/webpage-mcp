@@ -62,6 +62,8 @@ export interface RunnerConfig {
   tabId: number;
   /** initial parameters */
   args?: JsonObject;
+  /** Run-scoped execution restrictions forwarded to handlers */
+  execution?: RunRecordV3['execution'];
   /** Start node ID */
   startNodeId?: NodeId;
   /** Debug configuration */
@@ -443,6 +445,7 @@ class StorageBackedRunRunner implements RunRunner {
           maxAttempts: 1,
           args: this.config.args,
           debug: this.config.debug,
+          execution: this.config.execution,
           nextSeq: 1,
         };
         await this.env.storage.runs.save(record);
@@ -465,6 +468,7 @@ class StorageBackedRunRunner implements RunRunner {
       if (this.config.startNodeId !== undefined) patch.startNodeId = this.config.startNodeId;
       if (this.config.args !== undefined) patch.args = this.config.args;
       if (this.config.debug !== undefined) patch.debug = this.config.debug;
+      if (this.config.execution !== undefined) patch.execution = this.config.execution;
       await this.env.storage.runs.patch(this.runId, patch);
     });
   }
@@ -780,6 +784,7 @@ class StorageBackedRunRunner implements RunRunner {
       nodeId: node.id,
       tabId: this.config.tabId,
       vars: this.state.vars,
+      execution: this.config.execution,
       log: (level, message, data) => {
         void this.queue
           .run(() =>

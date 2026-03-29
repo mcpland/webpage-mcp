@@ -313,7 +313,14 @@ export function adaptActionHandlerToNodeDefinition<T extends ExecutableActionTyp
           if (r.ok) return r.base64;
           throw new Error(r.error.message);
         },
-        ...(options.executionFlags ? { execution: options.executionFlags } : {}),
+        ...((ctx.execution || options.executionFlags)
+          ? {
+              execution: {
+                ...(options.executionFlags ?? {}),
+                ...(ctx.execution ?? {}),
+              },
+            }
+          : {}),
       };
 
       const effectivePolicy = mergeNodePolicy(ctx.flow.policy?.defaultNodePolicy, node.policy);

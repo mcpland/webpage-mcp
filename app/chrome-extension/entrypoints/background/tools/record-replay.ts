@@ -69,6 +69,7 @@ class FlowRunTool {
         vars && typeof vars === "object" && !Array.isArray(vars)
           ? (vars as JsonObject)
           : undefined,
+      execution: { disallowLocalFileUploads: true },
       startUrl: typeof startUrl === "string" && startUrl.trim() ? startUrl.trim() : undefined,
       refresh: refresh === true,
       timeoutMs:

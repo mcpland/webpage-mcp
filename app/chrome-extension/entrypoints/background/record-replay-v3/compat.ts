@@ -20,6 +20,7 @@ import { normalizeFlowOptionalFields } from "./flows/normalize-flow-optional-fie
 import { validateReachableRuntimeNodes } from "./flows/runtime-validation";
 import { convertCompatFlowToV3 as convertCompatFlowDocumentToV3 } from "./storage/import/flow-convert";
 import { validateFlow } from "./storage/flows";
+import type { ExecutionFlags } from "@/entrypoints/background/replay-actions";
 
 const DEFAULT_RUN_TIMEOUT_MS = 60_000;
 const RUN_POLL_INTERVAL_MS = 150;
@@ -494,6 +495,7 @@ export async function enqueueRunAndWait(input: {
   tabId?: number;
   tabTarget?: RunTargetPreference;
   args?: JsonObject;
+  execution?: ExecutionFlags;
   startUrl?: string;
   refresh?: boolean;
   startNodeId?: string;
@@ -516,6 +518,7 @@ export async function enqueueRunAndWait(input: {
       flowId: input.flowId,
       tabId: resolvedTabId,
       args: input.args,
+      execution: input.execution,
       startNodeId: input.startNodeId as FlowV3["entryNodeId"] | undefined,
     },
   );

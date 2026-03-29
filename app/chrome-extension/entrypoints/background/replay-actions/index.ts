@@ -8,6 +8,7 @@ export type {
   ActionExecutionResult,
   ActionHandler,
   ActionPolicy,
+  ExecutionFlags,
   ExecutableActionType,
   ValidationResult,
 } from '@/entrypoints/background/record-replay/actions/types';

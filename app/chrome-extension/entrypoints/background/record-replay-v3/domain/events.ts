@@ -7,6 +7,7 @@ import type { JsonObject, JsonValue, UnixMillis } from './json';
 import type { EdgeLabel, FlowId, NodeId, RunId } from './ids';
 import type { RRError } from './errors';
 import type { TriggerFireContext } from './triggers';
+import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
 
 /** Unsubscribe function type */
 export type Unsubscribe = () => void;
@@ -160,6 +161,8 @@ export interface RunRecordV3 {
   trigger?: TriggerFireContext;
   /** Debug configuration */
   debug?: { breakpoints?: NodeId[]; pauseOnStart?: boolean };
+  /** Run-scoped execution restrictions forwarded to handlers */
+  execution?: ExecutionFlags;
 
   /** Error message (if failure) */
   error?: RRError;

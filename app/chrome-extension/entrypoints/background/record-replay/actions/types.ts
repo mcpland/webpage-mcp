@@ -761,6 +761,12 @@ export interface ExecutionFlags {
    * Action handlers (click, navigate) should skip their internal nav-wait logic.
    */
   skipNavWait?: boolean;
+  /**
+   * When true, handlers must reject attempts to read local file paths.
+   * Public MCP flow runs use this to prevent file-input uploads from
+   * reopening the local file exfiltration surface.
+   */
+  disallowLocalFileUploads?: boolean;
 }
 
 export interface ActionExecutionContext {

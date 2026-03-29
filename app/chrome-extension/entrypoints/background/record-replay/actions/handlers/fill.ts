@@ -103,6 +103,12 @@ export const fillHandler: ActionHandler<'fill'> = {
       const inputType = (attrResult.ok ? (attrResult.value?.value ?? '') : '').toLowerCase();
 
       if (inputType === 'file') {
+        if (ctx.execution?.disallowLocalFileUploads === true) {
+          return failed(
+            'VALIDATION_ERROR',
+            'Public flow runs cannot upload local files to file inputs',
+          );
+        }
         const uploadResult = await uploadLocalFileToInputInternal({
           selector: selectorForTypeCheck,
           filePath: value,

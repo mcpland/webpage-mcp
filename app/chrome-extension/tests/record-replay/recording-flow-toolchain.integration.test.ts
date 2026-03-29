@@ -578,6 +578,7 @@ describe("recording/editing/flow toolchain integration", () => {
       tabId: undefined,
       tabTarget: "new",
       args: { email: "alice@example.com" },
+      execution: { disallowLocalFileUploads: true },
       startUrl: "https://example.com/checkout",
       refresh: true,
       timeoutMs: undefined,

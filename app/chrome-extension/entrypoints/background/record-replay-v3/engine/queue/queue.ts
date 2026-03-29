@@ -6,6 +6,7 @@
 import type { JsonObject, UnixMillis } from '../../domain/json';
 import type { FlowId, NodeId, RunId } from '../../domain/ids';
 import type { TriggerFireContext } from '../../domain/triggers';
+import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
 
 /**
  * RunQueue Configuration
@@ -73,6 +74,8 @@ export interface RunQueueItem {
   lease?: Lease;
   /** Debug configuration */
   debug?: { breakpoints?: NodeId[]; pauseOnStart?: boolean };
+  /** Run-scoped execution restrictions forwarded to handlers */
+  execution?: ExecutionFlags;
 }
 
 /**

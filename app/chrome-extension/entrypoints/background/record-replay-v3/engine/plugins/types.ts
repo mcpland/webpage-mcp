@@ -12,6 +12,7 @@ import type { RRError } from '../../domain/errors';
 import type { NodePolicy } from '../../domain/policy';
 import type { FlowV3, NodeV3 } from '../../domain/flow';
 import type { TriggerKind } from '../../domain/triggers';
+import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
 
 /**
  * Schema Type
@@ -38,6 +39,8 @@ export interface NodeExecutionContext {
 
   /** Current variable table */
   vars: Record<string, JsonValue>;
+  /** Run-scoped execution restrictions forwarded to action handlers */
+  execution?: ExecutionFlags;
 
   /**
    * logging

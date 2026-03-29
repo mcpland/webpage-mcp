@@ -16,6 +16,7 @@ import { RUN_SCHEMA_VERSION, type RunRecordV3 } from '../../domain/events';
 import type { StoragePort } from '../storage/storage-port';
 import type { EventsBus } from '../transport/events-bus';
 import type { RunScheduler } from './scheduler';
+import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
 
 // ==================== Types ====================
 
@@ -58,6 +59,8 @@ export interface EnqueueRunInput {
     breakpoints?: NodeId[];
     pauseOnStart?: boolean;
   };
+  /** Run-scoped execution restrictions forwarded to handlers */
+  execution?: ExecutionFlags;
 }
 
 /**
@@ -186,6 +189,7 @@ export async function enqueueRun(
     args: input.args,
     trigger: input.trigger,
     debug: input.debug,
+    execution: input.execution,
     startNodeId: input.startNodeId,
     tabId: input.tabId,
     nextSeq: 0,
@@ -202,6 +206,7 @@ export async function enqueueRun(
     args: input.args,
     trigger: input.trigger,
     debug: input.debug,
+    execution: input.execution,
   });
 
   // 3. Post the run.queued event

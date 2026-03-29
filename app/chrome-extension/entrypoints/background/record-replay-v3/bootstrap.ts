@@ -300,6 +300,7 @@ function createDefaultRunExecutor(deps: {
         flow,
         tabId,
         args: item.args,
+        execution: run.execution ?? item.execution,
         startNodeId: run.startNodeId,
         debug: item.debug,
       });
