@@ -618,7 +618,10 @@ describe("recording/editing/flow toolchain integration", () => {
       tabId: undefined,
       tabTarget: "new",
       args: { email: "alice@example.com" },
-      execution: { disallowLocalFileUploads: true },
+      execution: {
+        disallowLocalFileUploads: true,
+        disallowLocalFilePages: true,
+      },
       startUrl: "https://example.com/checkout",
       refresh: true,
       timeoutMs: undefined,
@@ -675,6 +678,10 @@ describe("recording/editing/flow toolchain integration", () => {
         args: { email: "alice@example.com" },
         tabId: 21,
         tabTarget: "current",
+        execution: {
+          disallowLocalFileUploads: true,
+          disallowLocalFilePages: true,
+        },
       }),
     );
   });

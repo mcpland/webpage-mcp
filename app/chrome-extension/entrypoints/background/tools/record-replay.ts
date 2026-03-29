@@ -75,25 +75,35 @@ class FlowRunTool {
       .filter(([, value]) => value !== undefined && value !== false)
       .map(([key]) => key);
 
-    const { result } = await enqueueRunAndWait({
-      flowId: flow.id as FlowId,
-      tabId:
-        typeof tabId === "number" && Number.isFinite(tabId)
-          ? Math.floor(tabId)
-          : undefined,
-      tabTarget: tabTarget === "new" ? "new" : "current",
-      args:
-        vars && typeof vars === "object" && !Array.isArray(vars)
-          ? (vars as JsonObject)
-          : undefined,
-      execution: { disallowLocalFileUploads: true },
-      startUrl: normalizedStartUrl,
-      refresh: refresh === true,
-      timeoutMs:
-        typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
-          ? Math.max(1_000, Math.floor(timeoutMs))
-          : undefined,
-    });
+    let result;
+    try {
+      ({ result } = await enqueueRunAndWait({
+        flowId: flow.id as FlowId,
+        tabId:
+          typeof tabId === "number" && Number.isFinite(tabId)
+            ? Math.floor(tabId)
+            : undefined,
+        tabTarget: tabTarget === "new" ? "new" : "current",
+        args:
+          vars && typeof vars === "object" && !Array.isArray(vars)
+            ? (vars as JsonObject)
+            : undefined,
+        execution: {
+          disallowLocalFileUploads: true,
+          disallowLocalFilePages: true,
+        },
+        startUrl: normalizedStartUrl,
+        refresh: refresh === true,
+        timeoutMs:
+          typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
+            ? Math.max(1_000, Math.floor(timeoutMs))
+            : undefined,
+      }));
+    } catch (error) {
+      return createErrorResponse(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
 
     const response =
       ignoredOptions.length > 0

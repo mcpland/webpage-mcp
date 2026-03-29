@@ -385,6 +385,74 @@ describe("record-replay-v3 compat", () => {
     );
   });
 
+  it("rejects explicit file tabs for public flow runs", async () => {
+    const fileTab = {
+      id: 61,
+      url: "file:///tmp/secret.txt",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+
+    asMock(chrome.tabs.get).mockResolvedValue(fileTab);
+
+    await expect(
+      enqueueRunAndWait({
+        flowId: "flow-file-tab" as any,
+        tabId: 61,
+        execution: { disallowLocalFilePages: true },
+      }),
+    ).rejects.toThrow(
+      "Public flow runs only support HTTP(S) tabs. Switch to an HTTP(S) page or provide an HTTP(S) startUrl.",
+    );
+
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+    expect(mocks.enqueueRun).not.toHaveBeenCalled();
+  });
+
+  it("uses about:blank for public new-tab runs when the active tab is a local file page", async () => {
+    const fileTab = {
+      id: 71,
+      url: "file:///tmp/secret.txt",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+    const createdTab = {
+      id: 72,
+      url: "about:blank",
+      active: true,
+      status: "complete",
+      windowId: 1,
+    };
+
+    asMock(chrome.tabs.query).mockImplementation(async () => [fileTab]);
+    asMock(chrome.tabs.create).mockResolvedValue(createdTab);
+    asMock(chrome.tabs.get).mockImplementation(async (tabId: number) => {
+      if (tabId === 71) return fileTab;
+      if (tabId === 72) return createdTab;
+      throw new Error(`Unknown tab ${tabId}`);
+    });
+
+    await enqueueRunAndWait({
+      flowId: "flow-new-file-fallback" as any,
+      tabTarget: "new",
+      execution: { disallowLocalFilePages: true },
+    });
+
+    expect(chrome.tabs.create).toHaveBeenCalledWith({
+      active: true,
+      url: "about:blank",
+    });
+    expect(mocks.enqueueRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        flowId: "flow-new-file-fallback",
+        tabId: 72,
+      }),
+    );
+  });
+
   it("saveFlowToV3 converts steps-only compatibility flows before persisting", async () => {
     const runtime = createRuntime();
     mocks.bootstrapV3.mockResolvedValue(runtime);

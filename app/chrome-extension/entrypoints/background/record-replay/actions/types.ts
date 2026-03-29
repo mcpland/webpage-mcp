@@ -767,6 +767,12 @@ export interface ExecutionFlags {
    * reopening the local file exfiltration surface.
    */
   disallowLocalFileUploads?: boolean;
+  /**
+   * When true, public flow runs must not bind to file:// pages.
+   * This prevents extract/screenshot/script actions from reading local files
+   * through an already-open local file tab.
+   */
+  disallowLocalFilePages?: boolean;
 }
 
 export interface ActionExecutionContext {

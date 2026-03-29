@@ -51,8 +51,18 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function isWebUrl(url?: string | null): boolean {
-  return typeof url === "string" && /^(https?:|file:)/i.test(url);
+function isLocalFileUrl(url?: string | null): boolean {
+  return typeof url === "string" && /^file:/i.test(url);
+}
+
+function isWebUrl(url?: string | null, execution?: ExecutionFlags): boolean {
+  if (typeof url !== "string") {
+    return false;
+  }
+  if (/^https?:/i.test(url)) {
+    return true;
+  }
+  return execution?.disallowLocalFilePages === true ? false : isLocalFileUrl(url);
 }
 
 function normalizeRunTarget(target: unknown): RunTargetPreference {
@@ -129,7 +139,7 @@ async function createFallbackRunTab(): Promise<number> {
 }
 
 export async function resolveRunTargetTab(
-  input: RunTargetOptions,
+  input: RunTargetOptions & { execution?: ExecutionFlags },
 ): Promise<number | undefined> {
   const explicitTabId = isFiniteNumber(input.tabId)
     ? Math.floor(input.tabId)
@@ -150,9 +160,14 @@ export async function resolveRunTargetTab(
         previousUrl: explicitTab.url || undefined,
         targetUrl: startUrl,
       });
-    } else if (!isWebUrl(explicitTab.url)) {
+    } else if (!isWebUrl(explicitTab.url, input.execution)) {
+      if (input.execution?.disallowLocalFilePages === true && isLocalFileUrl(explicitTab.url)) {
+        throw new Error(
+          "Public flow runs only support HTTP(S) tabs. Switch to an HTTP(S) page or provide an HTTP(S) startUrl.",
+        );
+      }
       return createFallbackRunTab();
-    } else if (shouldRefresh && isWebUrl(explicitTab.url)) {
+    } else if (shouldRefresh && isWebUrl(explicitTab.url, input.execution)) {
       await chrome.tabs.reload(explicitTab.id);
       await waitForTabReady(explicitTab.id, {
         previousUrl: explicitTab.url || undefined,
@@ -169,7 +184,7 @@ export async function resolveRunTargetTab(
   if (tabTarget === "new") {
     const activeTabUrl = activeTab?.url;
     const urlToOpen =
-      startUrl ?? (isWebUrl(activeTabUrl) ? activeTabUrl : "about:blank");
+      startUrl ?? (isWebUrl(activeTabUrl, input.execution) ? activeTabUrl : "about:blank");
     const created = await chrome.tabs.create({
       active: true,
       url: urlToOpen,
@@ -189,9 +204,9 @@ export async function resolveRunTargetTab(
       ? activeTab
       : (currentWindowTabs.find((tab) => tab.id !== undefined) ?? null);
 
-  if (!startUrl && !isWebUrl(targetTab?.url)) {
+  if (!startUrl && !isWebUrl(targetTab?.url, input.execution)) {
     const webCandidate = currentWindowTabs.find(
-      (tab) => tab.id !== undefined && isWebUrl(tab.url),
+      (tab) => tab.id !== undefined && isWebUrl(tab.url, input.execution),
     );
     if (webCandidate?.id !== undefined) {
       const activatedTab = await chrome.tabs
@@ -220,10 +235,10 @@ export async function resolveRunTargetTab(
   }
 
   if (targetTab?.id !== undefined) {
-    if (!isWebUrl(targetTab.url)) {
+    if (!isWebUrl(targetTab.url, input.execution)) {
       return createFallbackRunTab();
     }
-    if (shouldRefresh && isWebUrl(targetTab.url)) {
+    if (shouldRefresh && isWebUrl(targetTab.url, input.execution)) {
       await chrome.tabs.reload(targetTab.id);
       await waitForTabReady(targetTab.id, {
         previousUrl: targetTab.url || undefined,
@@ -507,6 +522,7 @@ export async function enqueueRunAndWait(input: {
     tabTarget: input.tabTarget,
     startUrl: input.startUrl,
     refresh: input.refresh,
+    execution: input.execution,
   });
   const { runId } = await enqueueRun(
     {
