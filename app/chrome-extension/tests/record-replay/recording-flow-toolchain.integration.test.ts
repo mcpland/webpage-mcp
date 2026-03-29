@@ -374,7 +374,7 @@ describe("recording/editing/flow toolchain integration", () => {
     ]);
   });
 
-  it("flowUpdateTool normalizes legacy variable payloads before saving", async () => {
+  it("flowUpdateTool preserves typed variable metadata before saving", async () => {
     const flowId = `flow-update-vars-${Date.now()}`;
     await createStoragePort().flows.save(
       createFlow(flowId, [
@@ -393,8 +393,28 @@ describe("recording/editing/flow toolchain integration", () => {
           key: "email",
           label: "Email",
           default: "alice@example.com",
-          required: true,
+          type: "string",
+          rules: { required: true },
           scope: "flow",
+        },
+        {
+          name: "attempts",
+          kind: "number",
+          required: true,
+        },
+        {
+          key: "plan",
+          type: "enum",
+          rules: { enum: ["free", "pro"] },
+        },
+        {
+          name: "scores",
+          kind: "array",
+          item: "number",
+        },
+        {
+          name: "payload",
+          kind: "json",
         },
       ],
     });
@@ -406,7 +426,7 @@ describe("recording/editing/flow toolchain integration", () => {
       updated: true,
       flow: {
         id: flowId,
-        variableCount: 1,
+        variableCount: 5,
       },
     });
     expect(updated?.variables).toEqual([
@@ -414,8 +434,28 @@ describe("recording/editing/flow toolchain integration", () => {
         name: "email",
         label: "Email",
         default: "alice@example.com",
+        kind: "string",
         required: true,
         scope: "flow",
+      },
+      {
+        name: "attempts",
+        kind: "number",
+        required: true,
+      },
+      {
+        name: "plan",
+        kind: "enum",
+        options: ["free", "pro"],
+      },
+      {
+        name: "scores",
+        kind: "array",
+        item: "number",
+      },
+      {
+        name: "payload",
+        kind: "json",
       },
     ]);
   });

@@ -153,7 +153,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         variables: {
           type: 'array',
           description:
-            'Optional replacement V3 variables array. Each item should use `name` plus optional `label`, `description`, `default`, `required`, `sensitive`, and `scope` (`flow` or `run`). Legacy `key` inputs may be normalized but are deprecated.',
+            'Optional replacement V3 variables array. Each item should use `name` plus optional `label`, `description`, `default`, `required`, `sensitive`, `kind`, `options`, `item`, and `scope` (`flow` or `run`). Legacy `key`, `type`, and `rules` inputs may be normalized but are deprecated.',
           items: {
             type: 'object',
             properties: {
@@ -164,6 +164,36 @@ export const TOOL_SCHEMAS: Tool[] = [
               default: {},
               required: { type: 'boolean' },
               sensitive: { type: 'boolean' },
+              kind: {
+                type: 'string',
+                enum: ['string', 'number', 'boolean', 'json', 'enum', 'array'],
+              },
+              type: {
+                type: 'string',
+                enum: ['string', 'number', 'boolean', 'json', 'enum', 'array'],
+                description: 'Legacy alias for `kind`.',
+              },
+              options: {
+                type: 'array',
+                description: 'Allowed values when `kind` is `enum`.',
+                items: {},
+              },
+              item: {
+                type: 'string',
+                enum: ['string', 'number', 'boolean', 'json'],
+                description: 'Array item type when `kind` is `array`.',
+              },
+              rules: {
+                type: 'object',
+                description: 'Legacy compatibility wrapper for `required` and enum `options`.',
+                properties: {
+                  required: { type: 'boolean' },
+                  enum: {
+                    type: 'array',
+                    items: {},
+                  },
+                },
+              },
               scope: { type: 'string', enum: ['flow', 'run'] },
             },
           },

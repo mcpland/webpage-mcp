@@ -588,8 +588,21 @@ function convertCompatVariablesToV3(
           variable.default = convertedDefault;
         }
       }
+      if (
+        v.type === "string" ||
+        v.type === "number" ||
+        v.type === "boolean" ||
+        v.type === "enum" ||
+        v.type === "array"
+      ) {
+        variable.kind = v.type;
+      }
       if (v.rules?.required) {
         variable.required = v.rules.required;
+      }
+      if (Array.isArray(v.rules?.enum)) {
+        variable.options = v.rules.enum;
+        variable.kind = "enum";
       }
 
       return variable;

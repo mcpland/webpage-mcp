@@ -103,6 +103,9 @@ function sanitizePublishedVariables(
         ? { required: variable.required }
         : {}),
       ...(variable.default !== undefined ? { default: variable.default } : {}),
+      ...(variable.kind ? { kind: variable.kind } : {}),
+      ...(Array.isArray(variable.options) ? { options: variable.options } : {}),
+      ...(variable.item ? { item: variable.item } : {}),
       ...(variable.scope ? { scope: variable.scope } : {}),
     }));
 

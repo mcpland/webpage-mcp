@@ -9,7 +9,7 @@ import type {
   FlowToolMetadata,
   FlowV3,
 } from "../domain/flow";
-import type { VariableDefinition } from "../domain/variables";
+import { normalizeVariableDefinitions } from "../domain/variables";
 import { normalizeToolSlug } from "./publish";
 
 function isFiniteNumber(value: unknown): value is number {
@@ -35,30 +35,7 @@ export function normalizeFlowOptionalFields(
   }
 
   if (value.variables !== undefined && value.variables !== null) {
-    if (!Array.isArray(value.variables)) {
-      throw new Error("flow.variables must be an array");
-    }
-    const variables: VariableDefinition[] = [];
-    const varNameSet = new Set<string>();
-    for (let i = 0; i < value.variables.length; i++) {
-      const variable = value.variables[i];
-      if (!variable || typeof variable !== "object" || Array.isArray(variable)) {
-        throw new Error(`flow.variables[${i}] must be an object`);
-      }
-      const varObj = variable as JsonObject;
-      if (!varObj.name || typeof varObj.name !== "string" || !varObj.name.trim()) {
-        throw new Error(`flow.variables[${i}].name is required`);
-      }
-      const varName = varObj.name.trim();
-      if (varNameSet.has(varName)) {
-        throw new Error(`Duplicate variable name: "${varName}"`);
-      }
-      varNameSet.add(varName);
-      variables.push({
-        ...varObj,
-        name: varName,
-      } as VariableDefinition);
-    }
+    const variables = normalizeVariableDefinitions(value.variables, "flow.variables");
     if (variables.length > 0) {
       normalized.variables = variables;
     }

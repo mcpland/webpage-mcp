@@ -1058,6 +1058,63 @@ describe("V3 RPC Flow CRUD APIs", () => {
       expect(result.nodes[0].name).toBe("Start Node");
     });
 
+    it("normalizes typed variable metadata when saving flows", async () => {
+      const result = (await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.saveFlow",
+          params: {
+            flow: {
+              name: "Typed Variables",
+              entryNodeId: "node-1",
+              nodes: [{ id: "node-1", kind: "navigate", config: {} }],
+              edges: [],
+              variables: [
+                {
+                  key: "email",
+                  type: "string",
+                  default: "alice@example.com",
+                  rules: { required: true },
+                },
+                {
+                  name: "plan",
+                  kind: "enum",
+                  options: ["free", "pro"],
+                },
+                {
+                  name: "scores",
+                  kind: "array",
+                  item: "number",
+                },
+              ],
+            },
+          },
+          requestId: "req-typed-vars",
+        },
+        { subscriptions: new Set() },
+      )) as FlowV3;
+
+      expect(result.variables).toEqual([
+        {
+          name: "email",
+          kind: "string",
+          default: "alice@example.com",
+          required: true,
+        },
+        {
+          name: "plan",
+          kind: "enum",
+          options: ["free", "pro"],
+        },
+        {
+          name: "scores",
+          kind: "array",
+          item: "number",
+        },
+      ]);
+    });
+
     it("normalizes publish metadata and recording metadata", async () => {
       const result = (await (
         server as unknown as { handleRequest: Function }

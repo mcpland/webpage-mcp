@@ -163,20 +163,39 @@ function inferVariableType(variable: PublishedFlowVariable): string {
   return 'string';
 }
 
-function inferArrayItemType(variable: PublishedFlowVariable): string {
+function buildJsonValueSchema(): Record<string, unknown> {
+  return {
+    anyOf: [
+      { type: 'object' },
+      { type: 'array' },
+      { type: 'string' },
+      { type: 'number' },
+      { type: 'boolean' },
+      { type: 'null' },
+    ],
+  };
+}
+
+function buildArrayItemSchema(variable: PublishedFlowVariable): Record<string, unknown> {
+  if (variable.item === 'json') {
+    return buildJsonValueSchema();
+  }
   if (
     variable.item === 'string' ||
     variable.item === 'number' ||
     variable.item === 'boolean'
   ) {
-    return variable.item;
+    return { type: variable.item };
   }
   if (Array.isArray(variable.default) && variable.default.length > 0) {
     const sample = variable.default[0];
-    if (typeof sample === 'boolean') return 'boolean';
-    if (typeof sample === 'number') return 'number';
+    if (sample === null || Array.isArray(sample) || (sample && typeof sample === 'object')) {
+      return buildJsonValueSchema();
+    }
+    if (typeof sample === 'boolean') return { type: 'boolean' };
+    if (typeof sample === 'number') return { type: 'number' };
   }
-  return 'string';
+  return { type: 'string' };
 }
 
 function buildVariableSchema(variable: PublishedFlowVariable, variableName: string): Record<string, unknown> {
@@ -203,16 +222,9 @@ function buildVariableSchema(variable: PublishedFlowVariable, variableName: stri
     }
   } else if (type === 'array') {
     schema.type = 'array';
-    schema.items = { type: inferArrayItemType(variable) };
+    schema.items = buildArrayItemSchema(variable);
   } else if (type === 'json') {
-    schema.anyOf = [
-      { type: 'object' },
-      { type: 'array' },
-      { type: 'string' },
-      { type: 'number' },
-      { type: 'boolean' },
-      { type: 'null' },
-    ];
+    Object.assign(schema, buildJsonValueSchema());
   } else {
     schema.type = 'string';
   }

@@ -18,6 +18,16 @@ function createPublishedFlow(): FlowV3 {
         default: 'alice@example.com',
       },
       {
+        name: 'plan',
+        kind: 'enum',
+        options: ['free', 'pro'],
+      },
+      {
+        name: 'scores',
+        kind: 'array',
+        item: 'number',
+      },
+      {
         name: 'apiToken',
         sensitive: true,
         default: 'super-secret-token',
@@ -35,7 +45,7 @@ function createPublishedFlow(): FlowV3 {
 }
 
 describe('listPublishedFlowDetails', () => {
-  it('omits sensitive variables and defaults from published flow discovery', () => {
+  it('omits sensitive variables while preserving public type metadata', () => {
     const details = listPublishedFlowDetails([createPublishedFlow()]);
 
     expect(details).toEqual([
@@ -47,6 +57,16 @@ describe('listPublishedFlowDetails', () => {
             name: 'email',
             label: 'Email',
             default: 'alice@example.com',
+          },
+          {
+            name: 'plan',
+            kind: 'enum',
+            options: ['free', 'pro'],
+          },
+          {
+            name: 'scores',
+            kind: 'array',
+            item: 'number',
           },
         ],
       }),

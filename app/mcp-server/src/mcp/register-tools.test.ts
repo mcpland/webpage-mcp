@@ -47,6 +47,12 @@ describe('dynamic published flow tools', () => {
               default: 'secret-token',
             },
             {
+              name: 'attempts',
+              description: 'Retry count',
+              kind: 'number',
+              required: true,
+            },
+            {
               name: 'dryRun',
               description: 'Skip final submit',
               default: true,
@@ -54,7 +60,17 @@ describe('dynamic published flow tools', () => {
             {
               name: 'metadata',
               description: 'Arbitrary payload',
-              default: { role: 'admin' },
+              kind: 'json',
+            },
+            {
+              name: 'plan',
+              kind: 'enum',
+              options: ['free', 'pro'],
+            },
+            {
+              name: 'scores',
+              kind: 'array',
+              item: 'number',
             },
           ],
         },
@@ -68,12 +84,16 @@ describe('dynamic published flow tools', () => {
     expect(signupTool).toBeTruthy();
     expect(signupTool?.inputSchema).toMatchObject({
       type: 'object',
-      required: ['email'],
+      required: ['email', 'attempts'],
       properties: {
         email: {
           type: 'string',
           description: 'Email Address',
           default: 'alice@example.com',
+        },
+        attempts: {
+          type: 'number',
+          description: 'Retry count',
         },
         dryRun: {
           type: 'boolean',
@@ -82,7 +102,16 @@ describe('dynamic published flow tools', () => {
         },
         metadata: {
           description: 'Arbitrary payload',
-          default: { role: 'admin' },
+        },
+        plan: {
+          type: 'string',
+          enum: ['free', 'pro'],
+          description: 'plan',
+        },
+        scores: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'scores',
         },
       },
     });
