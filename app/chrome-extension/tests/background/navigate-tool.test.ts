@@ -218,4 +218,39 @@ describe('navigateTool', () => {
     expect(mocks.tabsUpdate).not.toHaveBeenCalled();
     expect(mocks.tabsCreate).not.toHaveBeenCalled();
   });
+
+  it('rejects refreshing a non-public target tab before reload', async () => {
+    mocks.tabsQuery.mockResolvedValueOnce([
+      makeTab({ id: 7, windowId: 20, url: 'file:///tmp/secret.txt' }),
+    ]);
+
+    const result = await navigateTool.execute({
+      refresh: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text)).toContain(
+      'Only http:// and https:// pages are supported by chrome_navigate refresh',
+    );
+    expect(mocks.tabsReload).not.toHaveBeenCalled();
+  });
+
+  it('fails history navigation if the updated tab lands on a non-public page', async () => {
+    mocks.tabsQuery.mockResolvedValueOnce([
+      makeTab({ id: 7, windowId: 20, url: 'https://example.com/' }),
+    ]);
+    mocks.tabsGet.mockResolvedValueOnce(
+      makeTab({ id: 7, windowId: 20, url: 'file:///tmp/secret.txt' }),
+    );
+
+    const result = await navigateTool.execute({
+      url: 'back',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text)).toContain(
+      'Only http:// and https:// pages are supported by chrome_navigate browser history navigation',
+    );
+    expect(mocks.tabsGoBack).toHaveBeenCalledWith(7);
+  });
 });

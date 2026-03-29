@@ -34,6 +34,12 @@ export function hasDisallowedPublicUrlScheme(url: string): boolean {
   return protocol !== 'http' && protocol !== 'https';
 }
 
+function getNavigateTargetPageError(operation: 'refresh' | 'history'): string {
+  return operation === 'refresh'
+    ? 'Only http:// and https:// pages are supported by chrome_navigate refresh'
+    : 'Only http:// and https:// pages are supported by chrome_navigate browser history navigation';
+}
+
 /**
  * Tool for navigating to URLs in browser tabs or windows
  */
@@ -217,12 +223,18 @@ class NavigateTool extends BaseBrowserToolExecutor {
         // Get target tab (explicit or active in provided window)
         const targetTab = explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
         if (!targetTab.id) return createErrorResponse('No target tab found to refresh');
+        if (hasDisallowedPublicUrlScheme(String(targetTab.url || ''))) {
+          return createErrorResponse(getNavigateTargetPageError('refresh'));
+        }
         await chrome.tabs.reload(targetTab.id);
 
         console.log(`Refreshed tab ID: ${targetTab.id}`);
 
         // Get updated tab information
         const updatedTab = await chrome.tabs.get(targetTab.id);
+        if (hasDisallowedPublicUrlScheme(String(updatedTab.url || ''))) {
+          return createErrorResponse(getNavigateTargetPageError('refresh'));
+        }
 
         // Trigger auto-capture on refresh
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
@@ -255,6 +267,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
         if (!targetTab.id) {
           return createErrorResponse('No target tab found for history navigation');
         }
+        if (hasDisallowedPublicUrlScheme(String(targetTab.url || ''))) {
+          return createErrorResponse(getNavigateTargetPageError('history'));
+        }
 
         // Respect background flag for focus behavior
         await this.ensureFocus(targetTab, {
@@ -271,6 +286,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
         }
 
         const updatedTab = await chrome.tabs.get(targetTab.id);
+        if (hasDisallowedPublicUrlScheme(String(updatedTab.url || ''))) {
+          return createErrorResponse(getNavigateTargetPageError('history'));
+        }
 
         // Trigger auto-capture on history navigation
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);

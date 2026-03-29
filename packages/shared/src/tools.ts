@@ -557,7 +557,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.NAVIGATE,
     description:
-      'Navigate the current tab, open a URL in a new tab or window, refresh the current tab, or navigate browser history (back/forward)',
+      'Navigate the current tab, open a URL in a new tab or window, refresh the current HTTP(S) tab, or navigate browser history (back/forward) on an HTTP(S) tab',
     inputSchema: {
       type: 'object',
       properties: {
@@ -610,7 +610,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         refresh: {
           type: 'boolean',
           description:
-            'Refresh the current active tab instead of navigating to a URL. When true, the url parameter is ignored. Defaults to false',
+            'Refresh the current active HTTP(S) tab instead of navigating to a URL. When true, the url parameter is ignored. Defaults to false',
         },
       },
       required: [],
