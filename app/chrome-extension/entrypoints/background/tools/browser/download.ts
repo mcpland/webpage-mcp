@@ -104,9 +104,7 @@ async function waitForDownload(opts: {
         return null;
       }
 
-      const freshItems = matchingItems.filter(
-        (item) => item.state === 'in_progress' || isRecentDownload(item),
-      );
+      const freshItems = matchingItems.filter((item) => isRecentDownload(item));
       const candidates = freshItems.length > 0 ? freshItems : [];
 
       if (!candidates.length) {

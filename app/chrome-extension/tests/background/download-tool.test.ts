@@ -99,7 +99,7 @@ describe('handleDownloadTool', () => {
     });
   });
 
-  it('ignores stale existing downloads and resolves when a new matching download is created', async () => {
+  it('ignores stale in-progress downloads and resolves when a new matching download is created', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-30T00:00:00.000Z'));
 
@@ -107,10 +107,9 @@ describe('handleDownloadTool', () => {
       id: 1,
       filename: '/Users/alice/Downloads/report.pdf',
       url: 'https://example.com/report.pdf',
-      state: 'complete',
+      state: 'in_progress',
       fileSize: 128,
       startTime: '2026-03-29T23:58:00.000Z',
-      endTime: '2026-03-29T23:58:05.000Z',
     };
     const freshHit = {
       id: 2,
