@@ -290,6 +290,46 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(codes.has("possible_redundant_step")).toBe(true);
   });
 
+  it("flowAnalyzeTool redacts sensitive variables from the returned flow", async () => {
+    const flowId = `flow-analyze-sensitive-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "start-1" as any,
+        kind: "navigate",
+        config: { url: "https://example.com" },
+      },
+    ]);
+    flow.variables = [
+      {
+        name: "email",
+        label: "Email",
+        default: "alice@example.com",
+      },
+      {
+        name: "apiToken",
+        label: "API token",
+        default: "secret-token",
+        sensitive: true,
+      },
+    ] as any;
+    await createStoragePort().flows.save(flow);
+
+    const result = await flowAnalyzeTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(payload.summary).toMatchObject({
+      flowId,
+      variableCount: 1,
+    });
+    expect(payload.flow.variables).toEqual([
+      {
+        name: "email",
+        label: "Email",
+        default: "alice@example.com",
+      },
+    ]);
+  });
+
   it("flowUpdateTool applies parameter suggestions and persists the edited flow", async () => {
     const flowId = `flow-update-${Date.now()}`;
     await createStoragePort().flows.save(

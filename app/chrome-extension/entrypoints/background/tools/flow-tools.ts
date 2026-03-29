@@ -20,6 +20,23 @@ function countFlowNodes(flow: FlowV3): number {
   return Array.isArray(flow.nodes) ? flow.nodes.length : 0;
 }
 
+function sanitizeAnalyzedFlow(flow: FlowV3): FlowV3 {
+  const visibleVariables = Array.isArray(flow.variables)
+    ? flow.variables
+        .filter((variable) => variable?.sensitive !== true)
+        .map((variable) => ({ ...variable }))
+    : undefined;
+
+  return {
+    ...flow,
+    ...(visibleVariables !== undefined
+      ? {
+          variables: visibleVariables.length > 0 ? visibleVariables : undefined,
+        }
+      : {}),
+  };
+}
+
 function collectFlowHints(flow: FlowV3): FlowHint[] {
   const hints: FlowHint[] = [];
   const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
@@ -90,6 +107,7 @@ class FlowAnalyzeTool {
     if (!flow) return createErrorResponse(`Flow not found: ${flowId}`);
 
     const hints = collectFlowHints(flow);
+    const sanitizedFlow = sanitizeAnalyzedFlow(flow);
     return {
       content: [
         {
@@ -101,11 +119,13 @@ class FlowAnalyzeTool {
               name: flow.name,
               nodeCount: countFlowNodes(flow),
               edgeCount: Array.isArray(flow.edges) ? flow.edges.length : 0,
-              variableCount: Array.isArray(flow.variables) ? flow.variables.length : 0,
+              variableCount: Array.isArray(sanitizedFlow.variables)
+                ? sanitizedFlow.variables.length
+                : 0,
               hintCount: hints.length,
             },
             hints,
-            flow,
+            flow: sanitizedFlow,
           }),
         },
       ],
