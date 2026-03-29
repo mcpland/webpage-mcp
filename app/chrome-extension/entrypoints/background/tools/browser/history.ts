@@ -187,7 +187,7 @@ class HistoryTool extends BaseBrowserToolExecutor {
         });
 
         if (openUrls.size > 0) {
-          filteredItems = historyItems.filter((item) => !(item.url && openUrls.has(item.url)));
+          filteredItems = filteredItems.filter((item) => !(item.url && openUrls.has(item.url)));
           console.log(
             `Filtered out ${historyItems.length - filteredItems.length} items that are currently open. ${filteredItems.length} items remaining.`,
           );
