@@ -1,6 +1,7 @@
 import { NODE_TYPES } from '@/common/node-types';
 
-export type VariableType = 'string' | 'number' | 'boolean' | 'enum' | 'array';
+export type VariableType = 'string' | 'number' | 'boolean' | 'json' | 'enum' | 'array';
+export type VariableArrayItemType = 'string' | 'number' | 'boolean' | 'json';
 
 export interface VariableDef {
   key: string;
@@ -8,7 +9,9 @@ export interface VariableDef {
   sensitive?: boolean;
   default?: any;
   type?: VariableType;
-  rules?: { required?: boolean; pattern?: string; enum?: string[] };
+  options?: unknown[];
+  item?: VariableArrayItemType;
+  rules?: { required?: boolean; pattern?: string; enum?: unknown[] };
 }
 
 export type NodeType = (typeof NODE_TYPES)[keyof typeof NODE_TYPES];

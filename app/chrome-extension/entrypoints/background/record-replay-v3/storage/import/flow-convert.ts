@@ -54,7 +54,9 @@ interface CompatVariableDef {
   sensitive?: boolean;
   default?: unknown;
   type?: string;
-  rules?: { required?: boolean; pattern?: string; enum?: string[] };
+  options?: unknown[];
+  item?: string;
+  rules?: { required?: boolean; pattern?: string; enum?: unknown[] };
 }
 
 /** Compatibility flow binding */
@@ -592,16 +594,36 @@ function convertCompatVariablesToV3(
         v.type === "string" ||
         v.type === "number" ||
         v.type === "boolean" ||
+        v.type === "json" ||
         v.type === "enum" ||
         v.type === "array"
       ) {
         variable.kind = v.type;
       }
+      if (Array.isArray(v.options)) {
+        variable.options = v.options
+          .map((option) => toJsonValue(option))
+          .filter((option): option is JsonValue => option !== undefined);
+        variable.kind = "enum";
+      }
+      if (
+        v.item === "string" ||
+        v.item === "number" ||
+        v.item === "boolean" ||
+        v.item === "json"
+      ) {
+        variable.item = v.item;
+        if (!variable.kind) {
+          variable.kind = "array";
+        }
+      }
       if (v.rules?.required) {
         variable.required = v.rules.required;
       }
       if (Array.isArray(v.rules?.enum)) {
-        variable.options = v.rules.enum;
+        variable.options = v.rules.enum
+          .map((option) => toJsonValue(option))
+          .filter((option): option is JsonValue => option !== undefined);
         variable.kind = "enum";
       }
 
@@ -763,7 +785,18 @@ export function convertFlowV3ToCompat(v3Flow: FlowV3): ConversionResult<CompatFl
     label: v.label,
     sensitive: v.sensitive,
     default: v.default,
-    rules: v.required ? { required: v.required } : undefined,
+    type: v.kind,
+    options: Array.isArray(v.options) ? [...v.options] : undefined,
+    item: v.item,
+    rules:
+      v.required || (Array.isArray(v.options) && v.options.every((option) => typeof option === "string"))
+        ? {
+            ...(v.required ? { required: v.required } : {}),
+            ...(Array.isArray(v.options) && v.options.every((option) => typeof option === "string")
+              ? { enum: [...(v.options as string[])] }
+              : {}),
+          }
+        : undefined,
   }));
 
   // 4. Convert metadata

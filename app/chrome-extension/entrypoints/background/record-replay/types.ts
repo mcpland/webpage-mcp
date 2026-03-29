@@ -59,7 +59,8 @@ import type { Step } from './legacy-types';
 // Variable Definitions
 // =============================================================================
 
-export type VariableType = 'string' | 'number' | 'boolean' | 'enum' | 'array';
+export type VariableType = 'string' | 'number' | 'boolean' | 'json' | 'enum' | 'array';
+export type VariableArrayItemType = 'string' | 'number' | 'boolean' | 'json';
 
 export interface VariableDef {
   key: string;
@@ -68,7 +69,9 @@ export interface VariableDef {
   // default value can be string/number/boolean/array depending on type
   default?: any; // keep broad for backward compatibility
   type?: VariableType; // default to 'string' when omitted
-  rules?: { required?: boolean; pattern?: string; enum?: string[] };
+  options?: unknown[];
+  item?: VariableArrayItemType;
+  rules?: { required?: boolean; pattern?: string; enum?: unknown[] };
 }
 
 // =============================================================================

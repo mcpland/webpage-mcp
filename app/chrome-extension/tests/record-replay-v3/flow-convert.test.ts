@@ -502,4 +502,85 @@ describe("compatibility-flow <-> V3 roundtrip conversion", () => {
       },
     });
   });
+
+  it("preserves typed variable metadata through V3 builder roundtrip", () => {
+    const iso = new Date("2026-01-01T00:00:00.000Z").toISOString();
+    const v3Flow = {
+      schemaVersion: 3,
+      id: "typed-vars-flow",
+      name: "Typed Vars Flow",
+      entryNodeId: "nav-1",
+      nodes: [
+        {
+          id: "nav-1",
+          kind: "navigate",
+          config: { url: "https://example.com" },
+        },
+      ],
+      edges: [],
+      variables: [
+        {
+          name: "payload",
+          kind: "json",
+          required: true,
+        },
+        {
+          name: "plan",
+          kind: "enum",
+          options: ["free", "pro"],
+        },
+        {
+          name: "scores",
+          kind: "array",
+          item: "number",
+          default: [1, 2, 3],
+        },
+      ],
+      createdAt: iso,
+      updatedAt: iso,
+    } as Parameters<typeof convertFlowV3ToCompat>[0];
+
+    const toCompat = convertFlowV3ToCompat(v3Flow);
+    expect(toCompat.success).toBe(true);
+    expect(toCompat.data?.variables).toEqual([
+      {
+        key: "payload",
+        type: "json",
+        rules: { required: true },
+      },
+      {
+        key: "plan",
+        type: "enum",
+        options: ["free", "pro"],
+        rules: { enum: ["free", "pro"] },
+      },
+      {
+        key: "scores",
+        type: "array",
+        item: "number",
+        default: [1, 2, 3],
+      },
+    ]);
+
+    const roundTrip = convertCompatFlowToV3(toCompat.data!);
+    expect(roundTrip.success).toBe(true);
+    expect(roundTrip.data?.variables).toEqual([
+      {
+        name: "payload",
+        kind: "json",
+        required: true,
+      },
+      {
+        name: "plan",
+        kind: "enum",
+        options: ["free", "pro"],
+      },
+      {
+        name: "scores",
+        kind: "array",
+        item: "number",
+        default: [1, 2, 3],
+      },
+    ]);
+  });
 });
