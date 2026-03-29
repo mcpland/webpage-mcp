@@ -43,6 +43,31 @@ describe('networkRequestTool', () => {
     expect(sendMessageToTab).not.toHaveBeenCalled();
   });
 
+  it('rejects non-public target tabs before injecting the helper', async () => {
+    const tryGetTab = vi
+      .spyOn(networkRequestTool as any, 'tryGetTab')
+      .mockResolvedValue(makeTab({ url: 'file:///tmp/secret.txt', title: 'Secret' }));
+    const injectContentScript = vi
+      .spyOn(networkRequestTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    const sendMessageToTab = vi
+      .spyOn(networkRequestTool as any, 'sendMessageToTab')
+      .mockResolvedValue({ success: true });
+
+    const result = await networkRequestTool.execute({
+      tabId: 7,
+      url: './relative-endpoint',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'Only http:// and https:// pages are supported by chrome_network_request',
+    );
+    expect(tryGetTab).toHaveBeenCalledWith(7);
+    expect(injectContentScript).not.toHaveBeenCalled();
+    expect(sendMessageToTab).not.toHaveBeenCalled();
+  });
+
   it('rejects non-public object-form fileUrl attachments before touching the browser', async () => {
     const injectContentScript = vi
       .spyOn(networkRequestTool as any, 'injectContentScript')

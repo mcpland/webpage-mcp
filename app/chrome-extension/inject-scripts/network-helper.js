@@ -22,6 +22,16 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
     return protocol !== 'http' && protocol !== 'https';
   };
 
+  const getPageContextUrl = () => {
+    if (typeof location?.href === 'string' && location.href.trim()) {
+      return location.href;
+    }
+    if (typeof window?.location?.href === 'string' && window.location.href.trim()) {
+      return window.location.href;
+    }
+    return '';
+  };
+
   /**
    * Replay a network request
    * @param {string} url - The URL to send the request to
@@ -40,6 +50,13 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
     formDataDescriptor = null,
   ) {
     try {
+      if (hasDisallowedPublicUrlScheme(getPageContextUrl())) {
+        return {
+          success: false,
+          error: 'Only http:// and https:// pages are supported by chrome_network_request.',
+        };
+      }
+
       if (hasDisallowedPublicUrlScheme(url)) {
         return {
           success: false,

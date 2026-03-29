@@ -11,10 +11,12 @@ describe('network-helper', () => {
   const fetchMock = vi.fn();
   let warnSpy: ReturnType<typeof vi.spyOn> | null = null;
 
-  async function loadHelper(): Promise<void> {
+  async function loadHelper(pageUrl = 'https://example.com/page'): Promise<void> {
     messageListener = null;
+    const location = new URL(pageUrl);
 
-    vi.stubGlobal('window', {});
+    vi.stubGlobal('window', { location });
+    vi.stubGlobal('location', location);
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('chrome', {
       runtime: {
@@ -81,6 +83,28 @@ describe('network-helper', () => {
       }),
     );
     expect(String(response.error || '')).toContain('Local file paths are not supported');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects requests from non-public page contexts before fetching relative URLs', async () => {
+    vi.resetModules();
+    await loadHelper('file:///tmp/secret.html');
+
+    const response = await dispatchMessage({
+      action: 'sendPureNetworkRequest',
+      url: './relative-endpoint',
+      method: 'GET',
+      timeout: 1000,
+    });
+
+    expect(response).toEqual(
+      expect.objectContaining({
+        success: false,
+      }),
+    );
+    expect(String(response.error || '')).toContain(
+      'Only http:// and https:// pages are supported by chrome_network_request',
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

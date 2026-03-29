@@ -748,14 +748,14 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.NETWORK_REQUEST,
     description:
-      'Send a network request from the browser with cookies and other browser context. Absolute target URLs and attachment fileUrl values must use HTTP(S).',
+      'Send a network request from an HTTP(S) browser page with cookies and other browser context. The target tab/page must be HTTP(S). Absolute target URLs and attachment fileUrl values must use HTTP(S).',
     inputSchema: {
       type: 'object',
       properties: {
         url: {
           type: 'string',
           description:
-            'Target URL to send the request to. Absolute URLs must use HTTP(S); relative URLs resolve against the page context.',
+            'Target URL to send the request to. Absolute URLs must use HTTP(S); relative URLs resolve against the current HTTP(S) page context.',
         },
         method: {
           type: 'string',

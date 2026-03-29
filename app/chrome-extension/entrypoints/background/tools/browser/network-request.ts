@@ -7,6 +7,8 @@ import { hasDisallowedPublicUrlScheme } from './common';
 const DEFAULT_NETWORK_REQUEST_TIMEOUT = 30000; // For sending a single request via content script
 const NON_PUBLIC_REQUEST_URL_ERROR =
   'Only http:// and https:// URLs are allowed for chrome_network_request.';
+const NON_PUBLIC_REQUEST_PAGE_ERROR =
+  'Only http:// and https:// pages are supported by chrome_network_request.';
 const NON_PUBLIC_FORM_DATA_URL_ERROR =
   'Only http:// and https:// URLs are allowed for chrome_network_request formData attachments.';
 
@@ -26,6 +28,10 @@ interface NetworkRequestToolParams {
 
 function hasDisallowedPublicRequestUrl(url: unknown): boolean {
   return typeof url === 'string' && url.trim().length > 0 && hasDisallowedPublicUrlScheme(url);
+}
+
+function isPublicRequestPage(url?: string | null): boolean {
+  return typeof url === 'string' && url.trim().length > 0 && !hasDisallowedPublicUrlScheme(url);
 }
 
 function getFormDataDescriptorError(formData: unknown): string | null {
@@ -104,6 +110,9 @@ class NetworkRequestTool extends BaseBrowserToolExecutor {
       const tab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!tab?.id) {
         return createErrorResponse('No active tab found or tab has no ID.');
+      }
+      if (!isPublicRequestPage(tab.url)) {
+        return createErrorResponse(NON_PUBLIC_REQUEST_PAGE_ERROR);
       }
       const targetTabId = tab.id;
 
