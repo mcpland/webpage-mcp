@@ -54,7 +54,8 @@ export const TOOL_NAMES = {
 export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
-    description: 'Get all currently open browser windows and tabs',
+    description:
+      'Get all currently open browser windows and tabs. Non-public tab URLs and titles are redacted.',
     inputSchema: {
       type: 'object',
       properties: {},

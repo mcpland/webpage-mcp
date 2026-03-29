@@ -1,6 +1,11 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
+import { hasDisallowedPublicUrlScheme } from './common';
+
+function shouldExposePublicTabDetails(url?: string | null): boolean {
+  return typeof url === 'string' && url.trim().length > 0 && !hasDisallowedPublicUrlScheme(url);
+}
 
 class WindowTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS;
@@ -13,11 +18,13 @@ class WindowTool extends BaseBrowserToolExecutor {
         const tabs =
           window.tabs?.map((tab) => {
             tabCount++;
+            const isPublicTab = shouldExposePublicTabDetails(tab.url);
             return {
               tabId: tab.id || 0,
-              url: tab.url || '',
-              title: tab.title || '',
+              url: isPublicTab ? tab.url || '' : null,
+              title: isPublicTab ? tab.title || '' : null,
               active: tab.active || false,
+              restricted: !isPublicTab,
             };
           }) || [];
 
