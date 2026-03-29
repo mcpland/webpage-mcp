@@ -727,6 +727,7 @@ export interface DownloadInfo {
   url?: string;
   state?: DownloadState;
   size?: number;
+  pathRedacted?: boolean;
 }
 
 /**
@@ -773,6 +774,12 @@ export interface ExecutionFlags {
    * through an already-open local file tab.
    */
   disallowLocalFilePages?: boolean;
+  /**
+   * When true, handlers must redact local download paths before storing them
+   * in variables or action outputs. Public MCP flow runs use this to avoid
+   * leaking browser download destinations back to the model.
+   */
+  redactDownloadPaths?: boolean;
 }
 
 export interface ActionExecutionContext {

@@ -8,6 +8,7 @@
  * - handleDownload: Monitor and capture download information
  */
 
+import { toPublicDownloadLocation } from '@/entrypoints/background/download-paths';
 import { failed, invalid, ok, tryResolveString } from '../registry';
 import type { ActionHandler, DownloadInfo, DownloadState, VariableStore } from '../types';
 
@@ -19,6 +20,20 @@ const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60000;
 
 function isLocalFileUrl(url?: string | null): boolean {
   return typeof url === 'string' && /^file:/i.test(url);
+}
+
+function normalizeDownloadInfo(
+  downloadInfo: DownloadInfo,
+  redactDownloadPaths: boolean,
+): DownloadInfo {
+  if (!redactDownloadPaths) {
+    return downloadInfo;
+  }
+
+  return {
+    ...downloadInfo,
+    ...toPublicDownloadLocation({ filename: downloadInfo.filename }),
+  };
 }
 
 // ================================
@@ -301,6 +316,7 @@ export const handleDownloadHandler: ActionHandler<'handleDownload'> = {
     const params = action.params;
     const timeoutMs = action.policy?.timeout?.ms ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
     const waitForComplete = params.waitForComplete !== false;
+    const redactDownloadPaths = ctx.execution?.redactDownloadPaths === true;
 
     // Resolve filename pattern if provided
     let filenamePattern: string | undefined;
@@ -377,12 +393,16 @@ export const handleDownloadHandler: ActionHandler<'handleDownload'> = {
       };
 
       const storeAndFinish = () => {
-        if (params.saveAs && downloadInfo) {
-          ctx.vars[params.saveAs] = downloadInfo as unknown as VariableStore[string];
+        const normalizedDownloadInfo = downloadInfo
+          ? normalizeDownloadInfo(downloadInfo, redactDownloadPaths)
+          : undefined;
+
+        if (params.saveAs && normalizedDownloadInfo) {
+          ctx.vars[params.saveAs] = normalizedDownloadInfo as unknown as VariableStore[string];
         }
         finish({
           status: 'success',
-          output: downloadInfo ? { download: downloadInfo } : undefined,
+          output: normalizedDownloadInfo ? { download: normalizedDownloadInfo } : undefined,
         });
       };
 

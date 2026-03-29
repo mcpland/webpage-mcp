@@ -716,6 +716,7 @@ describe("recording/editing/flow toolchain integration", () => {
       execution: {
         disallowLocalFileUploads: true,
         disallowLocalFilePages: true,
+        redactDownloadPaths: true,
       },
       startUrl: "https://example.com/checkout",
       refresh: true,
@@ -776,6 +777,7 @@ describe("recording/editing/flow toolchain integration", () => {
         execution: {
           disallowLocalFileUploads: true,
           disallowLocalFilePages: true,
+          redactDownloadPaths: true,
         },
       }),
     );

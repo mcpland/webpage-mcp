@@ -91,6 +91,7 @@ class FlowRunTool {
         execution: {
           disallowLocalFileUploads: true,
           disallowLocalFilePages: true,
+          redactDownloadPaths: true,
         },
         startUrl: normalizedStartUrl,
         refresh: refresh === true,
