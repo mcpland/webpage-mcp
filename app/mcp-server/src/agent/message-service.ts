@@ -29,6 +29,7 @@ export interface CreateAgentStoredMessageInput {
   requestId?: string;
   id?: string;
   createdAt?: string;
+  upsertById?: boolean;
 }
 
 // ============================================================
@@ -122,22 +123,26 @@ export async function createMessage(
     createdAt: input.createdAt || now,
   };
 
-  await db
-    .insert(messages)
-    .values(messageData)
-    .onConflictDoUpdate({
-      target: messages.id,
-      set: {
-        role: messageData.role,
-        messageType: messageData.messageType,
-        content: messageData.content,
-        metadata: messageData.metadata,
-        sessionId: messageData.sessionId,
-        conversationId: messageData.conversationId,
-        cliSource: messageData.cliSource,
-        requestId: messageData.requestId,
-      },
-    });
+  if (input.upsertById === true) {
+    await db
+      .insert(messages)
+      .values(messageData)
+      .onConflictDoUpdate({
+        target: messages.id,
+        set: {
+          role: messageData.role,
+          messageType: messageData.messageType,
+          content: messageData.content,
+          metadata: messageData.metadata,
+          sessionId: messageData.sessionId,
+          conversationId: messageData.conversationId,
+          cliSource: messageData.cliSource,
+          requestId: messageData.requestId,
+        },
+      });
+  } else {
+    await db.insert(messages).values(messageData);
+  }
 
   return rowToMessage(messageData);
 }

@@ -261,6 +261,7 @@ export class AgentChatService {
           id: userMessage.id,
           createdAt: userMessage.createdAt,
           metadata: userMessageMetadata,
+          upsertById: true,
         });
       } catch (error) {
         console.error('[AgentChatService] Failed to persist user message:', error);
@@ -316,6 +317,7 @@ export class AgentChatService {
             requestId: msg.requestId,
             id: msg.id,
             createdAt: msg.createdAt,
+            upsertById: true,
           }).catch((error) => {
             console.error('[AgentChatService] Failed to persist agent message:', error);
           });

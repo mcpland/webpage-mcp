@@ -676,6 +676,13 @@ export async function dispatchAgentRpc(
           payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
             ? (payload.metadata as Record<string, unknown>)
             : undefined;
+        const customId = readString(payload.id)?.trim();
+        if (customId) {
+          return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
+            success: false,
+            error: 'id is not allowed for agent.chat.messages.create',
+          });
+        }
 
         const stored = await createStoredMessage({
           projectId,
@@ -687,7 +694,6 @@ export async function dispatchAgentRpc(
           conversationId: readString(payload.conversationId),
           cliSource: readString(payload.cliSource),
           requestId: readString(payload.requestId),
-          id: readString(payload.id),
           createdAt: readString(payload.createdAt),
         });
 
