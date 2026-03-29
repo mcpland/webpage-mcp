@@ -34,6 +34,9 @@ export function hasDisallowedPublicUrlScheme(url: string): boolean {
   return protocol !== 'http' && protocol !== 'https';
 }
 
+const CLOSE_TABS_PUBLIC_PAGE_ERROR =
+  'Only http:// and https:// pages are supported by chrome_close_tabs';
+
 function getNavigateTargetPageError(operation: 'refresh' | 'history'): string {
   return operation === 'refresh'
     ? 'Only http:// and https:// pages are supported by chrome_navigate refresh'
@@ -455,6 +458,9 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
       // If URL is provided, close all tabs matching that URL
       if (urlPattern) {
         console.log(`Searching for tabs with URL: ${url}`);
+        if (hasDisallowedPublicUrlScheme(urlPattern)) {
+          return createErrorResponse(CLOSE_TABS_PUBLIC_PAGE_ERROR);
+        }
         try {
           // Build a proper Chrome match pattern from a concrete URL.
           // If caller already provided a match pattern with '*', use as-is.
@@ -480,7 +486,9 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
               : `${urlPattern}/*`;
         }
 
-        const tabs = await chrome.tabs.query({ url: urlPattern });
+        const tabs = (await chrome.tabs.query({ url: urlPattern })).filter(
+          (tab) => !hasDisallowedPublicUrlScheme(String(tab.url || '')),
+        );
 
         if (!tabs || tabs.length === 0) {
           console.log(`No tabs found with URL pattern: ${urlPattern}`);
@@ -546,6 +554,13 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           .filter((tab): tab is chrome.tabs.Tab => tab !== null)
           .map((tab) => tab.id)
           .filter((id): id is number => id !== undefined);
+        const hasRestrictedTab = existingTabs.some(
+          (tab) => tab && hasDisallowedPublicUrlScheme(String(tab.url || '')),
+        );
+
+        if (hasRestrictedTab) {
+          return createErrorResponse(CLOSE_TABS_PUBLIC_PAGE_ERROR);
+        }
 
         if (validTabIds.length === 0) {
           return {
@@ -593,6 +608,9 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
 
       if (!activeTab || !activeTab.id) {
         return createErrorResponse('No active tab found');
+      }
+      if (hasDisallowedPublicUrlScheme(String(activeTab.url || ''))) {
+        return createErrorResponse(CLOSE_TABS_PUBLIC_PAGE_ERROR);
       }
 
       await chrome.tabs.remove(activeTab.id);

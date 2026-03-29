@@ -660,28 +660,29 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.CLOSE_TABS,
-    description: 'Close one or more browser tabs',
+    description: 'Close one or more HTTP(S) browser tabs',
     inputSchema: {
       type: 'object',
       properties: {
         tabIds: {
           type: 'array',
           items: { type: 'number' },
-          description: 'Array of tab IDs to close. If not provided, will close the active tab.',
+          description:
+            'Array of HTTP(S) tab IDs to close. If not provided, will close the active HTTP(S) tab.',
         },
         url: {
           type: 'string',
-          description: 'Close tabs matching this URL. Can be used instead of tabIds.',
+          description: 'Close tabs matching this HTTP(S) URL. Can be used instead of tabIds.',
         },
         tabId: {
           type: 'number',
           description:
-            'Target tab ID to close when tabIds/url are omitted (default: current active tab).',
+            'Target HTTP(S) tab ID to close when tabIds/url are omitted (default: current active tab).',
         },
         windowId: {
           type: 'number',
           description:
-            'Window ID to select active tab from when tabId/tabIds/url are omitted.',
+            'Window ID to select the active HTTP(S) tab from when tabId/tabIds/url are omitted.',
         },
       },
       required: [],
