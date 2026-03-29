@@ -15,10 +15,16 @@ export interface McpToolContext {
 }
 
 interface PublishedFlowVariable {
-  key: string;
+  key?: string;
+  name?: string;
   label?: string;
+  description?: string;
   type?: string;
+  kind?: string;
   default?: unknown;
+  required?: boolean;
+  options?: unknown[];
+  item?: string;
   rules?: {
     required?: boolean;
     enum?: unknown[];
@@ -113,6 +119,110 @@ function normalizePublishedFlows(response: any): PublishedFlow[] {
     }));
 }
 
+function getPublishedVariableName(variable: PublishedFlowVariable | null | undefined): string | undefined {
+  if (!variable) {
+    return undefined;
+  }
+  if (typeof variable.name === 'string' && variable.name.trim()) {
+    return variable.name.trim();
+  }
+  if (typeof variable.key === 'string' && variable.key.trim()) {
+    return variable.key.trim();
+  }
+  return undefined;
+}
+
+function isPublishedVariableRequired(variable: PublishedFlowVariable): boolean {
+  return variable.required === true || variable.rules?.required === true;
+}
+
+function inferVariableType(variable: PublishedFlowVariable): string {
+  const declaredType =
+    typeof variable.kind === 'string'
+      ? variable.kind
+      : typeof variable.type === 'string'
+        ? variable.type
+        : undefined;
+  if (declaredType) {
+    return declaredType.toLowerCase();
+  }
+
+  if (Array.isArray(variable.default)) {
+    return 'array';
+  }
+  if (typeof variable.default === 'boolean') {
+    return 'boolean';
+  }
+  if (typeof variable.default === 'number') {
+    return 'number';
+  }
+  if (variable.default && typeof variable.default === 'object') {
+    return 'json';
+  }
+  return 'string';
+}
+
+function inferArrayItemType(variable: PublishedFlowVariable): string {
+  if (
+    variable.item === 'string' ||
+    variable.item === 'number' ||
+    variable.item === 'boolean'
+  ) {
+    return variable.item;
+  }
+  if (Array.isArray(variable.default) && variable.default.length > 0) {
+    const sample = variable.default[0];
+    if (typeof sample === 'boolean') return 'boolean';
+    if (typeof sample === 'number') return 'number';
+  }
+  return 'string';
+}
+
+function buildVariableSchema(variable: PublishedFlowVariable, variableName: string): Record<string, unknown> {
+  const description =
+    (typeof variable.label === 'string' && variable.label.trim()) ||
+    (typeof variable.description === 'string' && variable.description.trim()) ||
+    variableName;
+  const type = inferVariableType(variable);
+  const schema: Record<string, unknown> = { description };
+
+  if (type === 'boolean') {
+    schema.type = 'boolean';
+  } else if (type === 'number') {
+    schema.type = 'number';
+  } else if (type === 'enum') {
+    schema.type = 'string';
+    const enumValues = Array.isArray(variable.options)
+      ? variable.options
+      : Array.isArray(variable.rules?.enum)
+        ? variable.rules?.enum
+        : [];
+    if (enumValues.length > 0) {
+      schema.enum = enumValues;
+    }
+  } else if (type === 'array') {
+    schema.type = 'array';
+    schema.items = { type: inferArrayItemType(variable) };
+  } else if (type === 'json') {
+    schema.anyOf = [
+      { type: 'object' },
+      { type: 'array' },
+      { type: 'string' },
+      { type: 'number' },
+      { type: 'boolean' },
+      { type: 'null' },
+    ];
+  } else {
+    schema.type = 'string';
+  }
+
+  if (variable.default !== undefined) {
+    schema.default = variable.default;
+  }
+
+  return schema;
+}
+
 async function fetchPublishedFlows(
   ctx: McpToolContext,
   options?: { forceRefresh?: boolean },
@@ -198,27 +308,13 @@ async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
     const properties: Record<string, any> = {};
     const required: string[] = [];
     for (const v of item.variables || []) {
-      if (!v || typeof v.key !== 'string' || !v.key) {
+      const variableName = getPublishedVariableName(v);
+      if (!variableName) {
         continue;
       }
-      const desc = v.label || v.key;
-      const typ = (v.type || 'string').toLowerCase();
-      const prop: any = { description: desc };
-      if (typ === 'boolean') prop.type = 'boolean';
-      else if (typ === 'number') prop.type = 'number';
-      else if (typ === 'enum') {
-        prop.type = 'string';
-        if (v.rules && Array.isArray(v.rules.enum)) prop.enum = v.rules.enum;
-      } else if (typ === 'array') {
-        // default array of strings; can extend with itemType later
-        prop.type = 'array';
-        prop.items = { type: 'string' };
-      } else {
-        prop.type = 'string';
-      }
-      if (v.default !== undefined) prop.default = v.default;
-      if (v.rules && v.rules.required) required.push(v.key);
-      properties[v.key] = prop;
+      const prop = buildVariableSchema(v, variableName);
+      if (isPublishedVariableRequired(v)) required.push(variableName);
+      properties[variableName] = prop;
     }
     // Run options
     if (!properties['tabTarget'])
@@ -314,7 +410,7 @@ export const callToolForContext = async (
         const variableKeys = new Set(
           Array.isArray(match.variables)
             ? match.variables
-                .map((variable) => variable?.key)
+                .map((variable) => getPublishedVariableName(variable))
                 .filter((key): key is string => typeof key === 'string' && key.length > 0)
             : [],
         );
