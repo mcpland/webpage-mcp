@@ -31,6 +31,7 @@ import {
 import { createExecutor, type StepExecutorInterface } from './runners/step-executor';
 import { createReplayActionRegistry } from '../actions/handlers';
 import { compareScreenshotBase64 } from './utils/screenshot-compare';
+import type { ExecutionFlags } from '../actions/types';
 
 export interface RunOptions {
   tabTarget?: 'current' | 'new';
@@ -41,6 +42,7 @@ export interface RunOptions {
   timeoutMs?: number;
   startUrl?: string;
   args?: Record<string, any>;
+  execution?: ExecutionFlags;
   startNodeId?: string;
   plugins?: RunPlugin[];
 
@@ -757,6 +759,7 @@ class ExecutionOrchestrator {
     const ctx: ExecCtx = {
       vars: this.vars,
       tabId: this.tabId ?? undefined,
+      execution: this.options.execution,
       logger: (e: RunLogEntry) => this.logger.push(e),
     };
     if (currentId) {

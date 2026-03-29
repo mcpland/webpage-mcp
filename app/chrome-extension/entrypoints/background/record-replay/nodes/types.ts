@@ -1,3 +1,4 @@
+import type { ExecutionFlags } from '../actions/types';
 import type { RunLogEntry, Step, StepScript } from '../types';
 
 /**
@@ -9,6 +10,11 @@ export interface ExecCtx {
   vars: Record<string, any>;
   /** Logger function for recording execution events */
   logger: (e: RunLogEntry) => void;
+  /**
+   * Optional execution flags propagated from orchestrators.
+   * Legacy nodes should respect the same public-surface restrictions as action handlers.
+   */
+  execution?: ExecutionFlags;
   /**
    * Current tab ID for this execution context.
    * Managed by Scheduler, may change after openTab/switchTab actions.

@@ -451,7 +451,12 @@ export function createStepExecutor(registry: ActionRegistry) {
 
     // Build execution flags for handlers
     const execution: ExecutionFlags | undefined =
-      options?.skipNavWait === true ? { skipNavWait: true } : undefined;
+      ctx.execution || options?.skipNavWait === true
+        ? {
+            ...(ctx.execution ?? {}),
+            ...(options?.skipNavWait === true ? { skipNavWait: true } : {}),
+          }
+        : undefined;
 
     // Convert context with proper stepId for log attribution
     const actionCtx = execCtxToActionCtx(ctx, tabId, {

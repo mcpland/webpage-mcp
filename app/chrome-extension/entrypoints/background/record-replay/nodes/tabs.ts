@@ -4,9 +4,19 @@ import type { StepOpenTab, StepSwitchTab, StepCloseTab } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
 
+function isLocalFileUrl(url?: string | null): boolean {
+  return typeof url === 'string' && /^file:/i.test(url);
+}
+
 export const openTabNode: NodeRuntime<StepOpenTab> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
+    const nextUrl = typeof s.url === 'string' ? s.url.trim() : '';
+    if (ctx.execution?.disallowLocalFilePages === true && isLocalFileUrl(nextUrl)) {
+      throw new Error(
+        'Public flow runs cannot open local file URLs. Use an HTTP(S) page instead.',
+      );
+    }
     if (s.newWindow) {
       const createdWindow = await chrome.windows.create({ url: s.url || undefined, focused: true });
       const firstTabId = createdWindow.tabs?.[0]?.id;
@@ -27,6 +37,7 @@ export const switchTabNode: NodeRuntime<StepSwitchTab> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     let targetTabId: number | undefined = s.tabId;
+    let targetTab: chrome.tabs.Tab | undefined;
     if (!targetTabId) {
       const tabs = await chrome.tabs.query({});
       const hit = tabs.find(
@@ -34,9 +45,17 @@ export const switchTabNode: NodeRuntime<StepSwitchTab> = {
           (s.urlContains && (t.url || '').includes(String(s.urlContains))) ||
           (s.titleContains && (t.title || '').includes(String(s.titleContains))),
       );
+      targetTab = hit;
       targetTabId = (hit && hit.id) as number | undefined;
+    } else {
+      targetTab = await chrome.tabs.get(targetTabId).catch(() => undefined);
     }
     if (!targetTabId) throw new Error('switchTab: no matching tab');
+    if (ctx.execution?.disallowLocalFilePages === true && isLocalFileUrl(targetTab?.url)) {
+      throw new Error(
+        'Public flow runs cannot switch to local file tabs. Use an HTTP(S) tab instead.',
+      );
+    }
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.SWITCH_TAB,
       args: { tabId: targetTabId },

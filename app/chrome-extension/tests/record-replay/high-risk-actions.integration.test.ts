@@ -298,6 +298,27 @@ describe('high-risk actions integration (M3-full batch 2)', () => {
       expect(result.executor).toBe('legacy');
     });
 
+    it('legacy openTab rejects local file URLs when execution forbids local file pages', async () => {
+      const executor = createExecutor();
+      const ctx = createMockExecCtx({
+        frameId: FRAME_ID,
+        execution: { disallowLocalFilePages: true },
+      });
+
+      const step: TestStep = {
+        id: 'openTab_legacy_file_url_rejected',
+        type: 'openTab',
+        url: 'file:///tmp/secret.txt',
+        newWindow: false,
+      };
+
+      await expect(executor.execute(ctx, step as never, { tabId: TAB_ID })).rejects.toThrow(
+        'Public flow runs cannot open local file URLs. Use an HTTP(S) page instead.',
+      );
+      expect(mocks.tabsCreate).not.toHaveBeenCalled();
+      expect(mocks.windowsCreate).not.toHaveBeenCalled();
+    });
+
     it('switchTab routes to legacy', async () => {
       const executor = createExecutor();
       const ctx = createMockExecCtx({ frameId: FRAME_ID });
@@ -311,6 +332,39 @@ describe('high-risk actions integration (M3-full batch 2)', () => {
       const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });
 
       expect(result.executor).toBe('legacy');
+    });
+
+    it('legacy switchTab rejects local file tabs when execution forbids local file pages', async () => {
+      const executor = createExecutor();
+      const ctx = createMockExecCtx({
+        frameId: FRAME_ID,
+        execution: { disallowLocalFilePages: true },
+      });
+
+      mocks.tabsQuery.mockResolvedValueOnce([
+        {
+          id: OTHER_TAB_ID,
+          url: 'file:///tmp/secret.txt',
+          title: 'Secret',
+          status: 'complete',
+          windowId: 2,
+        },
+      ]);
+
+      const step: TestStep = {
+        id: 'switchTab_legacy_file_tab_rejected',
+        type: 'switchTab',
+        urlContains: 'secret.txt',
+      };
+
+      await expect(executor.execute(ctx, step as never, { tabId: TAB_ID })).rejects.toThrow(
+        'Public flow runs cannot switch to local file tabs. Use an HTTP(S) tab instead.',
+      );
+      expect(mocks.handleCallTool).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: TOOL_NAMES.BROWSER.SWITCH_TAB,
+        }),
+      );
     });
   });
 

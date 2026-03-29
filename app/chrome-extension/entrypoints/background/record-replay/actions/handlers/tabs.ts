@@ -17,6 +17,10 @@ const DEFAULT_TAB_TIMEOUT_MS = 10000;
 /** Default timeout for download operations */
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60000;
 
+function isLocalFileUrl(url?: string | null): boolean {
+  return typeof url === 'string' && /^file:/i.test(url);
+}
+
 // ================================
 // openTab Handler
 // ================================
@@ -43,6 +47,13 @@ export const openTabHandler: ActionHandler<'openTab'> = {
         return failed('VALIDATION_ERROR', `Failed to resolve URL: ${urlResult.error}`);
       }
       url = urlResult.value.trim() || undefined;
+    }
+
+    if (ctx.execution?.disallowLocalFilePages === true && isLocalFileUrl(url)) {
+      return failed(
+        'VALIDATION_ERROR',
+        'Public flow runs cannot open local file URLs. Use an HTTP(S) page instead.',
+      );
     }
 
     try {
@@ -173,13 +184,23 @@ export const switchTabHandler: ActionHandler<'switchTab'> = {
         return failed('TAB_NOT_FOUND', 'No matching tab found');
       }
 
+      const targetTab = await chrome.tabs.get(targetTabId);
+      if (
+        ctx.execution?.disallowLocalFilePages === true &&
+        isLocalFileUrl(targetTab.url)
+      ) {
+        return failed(
+          'VALIDATION_ERROR',
+          'Public flow runs cannot switch to local file tabs. Use an HTTP(S) tab instead.',
+        );
+      }
+
       // Activate the tab
       await chrome.tabs.update(targetTabId, { active: true });
 
       // Focus the window containing the tab
-      const tab = await chrome.tabs.get(targetTabId);
-      if (tab.windowId) {
-        await chrome.windows.update(tab.windowId, { focused: true });
+      if (targetTab.windowId) {
+        await chrome.windows.update(targetTab.windowId, { focused: true });
       }
 
       // Return newTabId for ctx.tabId sync
