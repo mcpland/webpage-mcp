@@ -110,7 +110,8 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.RECORD_REPLAY.FLOW_ANALYZE,
-    description: 'Analyze a recorded flow and return structure with optimization hints.',
+    description:
+      'Analyze a recorded flow and return optimization hints plus a minimized public flow view (summary structure, sanitized variables, and safe metadata only).',
     inputSchema: {
       type: 'object',
       properties: {

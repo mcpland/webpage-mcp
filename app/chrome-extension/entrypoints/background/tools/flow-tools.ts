@@ -16,24 +16,85 @@ interface FlowHint {
   nodeId?: string;
 }
 
+interface PublicAnalyzedNode {
+  id: FlowV3['nodes'][number]['id'];
+  kind: FlowV3['nodes'][number]['kind'];
+  name?: FlowV3['nodes'][number]['name'];
+  disabled?: FlowV3['nodes'][number]['disabled'];
+}
+
+interface PublicAnalyzedFlow {
+  id: FlowV3['id'];
+  name: FlowV3['name'];
+  description?: FlowV3['description'];
+  createdAt: FlowV3['createdAt'];
+  updatedAt: FlowV3['updatedAt'];
+  entryNodeId: FlowV3['entryNodeId'];
+  nodes: PublicAnalyzedNode[];
+  edges: FlowV3['edges'];
+  variables?: FlowV3['variables'];
+  meta?: Pick<
+    NonNullable<FlowV3['meta']>,
+    'domain' | 'tags' | 'bindings' | 'tool' | 'exposedOutputs'
+  >;
+}
+
 function countFlowNodes(flow: FlowV3): number {
   return Array.isArray(flow.nodes) ? flow.nodes.length : 0;
 }
 
-function sanitizeAnalyzedFlow(flow: FlowV3): FlowV3 {
+function sanitizeAnalyzedFlow(flow: FlowV3): PublicAnalyzedFlow {
   const visibleVariables = Array.isArray(flow.variables)
     ? flow.variables
         .filter((variable) => variable?.sensitive !== true)
         .map((variable) => ({ ...variable }))
     : undefined;
+  const publicMeta =
+    flow.meta &&
+    (flow.meta.domain ||
+      flow.meta.tags ||
+      flow.meta.bindings ||
+      flow.meta.tool ||
+      flow.meta.exposedOutputs)
+      ? {
+          ...(flow.meta.domain ? { domain: flow.meta.domain } : {}),
+          ...(Array.isArray(flow.meta.tags) ? { tags: [...flow.meta.tags] } : {}),
+          ...(Array.isArray(flow.meta.bindings)
+            ? {
+                bindings: flow.meta.bindings.map((binding) => ({ ...binding })),
+              }
+            : {}),
+          ...(flow.meta.tool ? { tool: { ...flow.meta.tool } } : {}),
+          ...(Array.isArray(flow.meta.exposedOutputs)
+            ? {
+                exposedOutputs: flow.meta.exposedOutputs.map((output) => ({ ...output })),
+              }
+            : {}),
+        }
+      : undefined;
 
   return {
-    ...flow,
+    id: flow.id,
+    name: flow.name,
+    ...(flow.description ? { description: flow.description } : {}),
+    createdAt: flow.createdAt,
+    updatedAt: flow.updatedAt,
+    entryNodeId: flow.entryNodeId,
+    nodes: Array.isArray(flow.nodes)
+      ? flow.nodes.map((node) => ({
+          id: node.id,
+          kind: node.kind,
+          ...(node.name ? { name: node.name } : {}),
+          ...(node.disabled === true ? { disabled: true } : {}),
+        }))
+      : [],
+    edges: Array.isArray(flow.edges) ? flow.edges.map((edge) => ({ ...edge })) : [],
     ...(visibleVariables !== undefined
       ? {
           variables: visibleVariables.length > 0 ? visibleVariables : undefined,
         }
       : {}),
+    ...(publicMeta ? { meta: publicMeta } : {}),
   };
 }
 

@@ -330,6 +330,61 @@ describe("recording/editing/flow toolchain integration", () => {
     ]);
   });
 
+  it("flowAnalyzeTool returns a minimized public flow view", async () => {
+    const flowId = `flow-analyze-public-${Date.now()}`;
+    const flow = createFlow(
+      flowId,
+      [
+        {
+          id: "script-1" as any,
+          kind: "script",
+          name: "Read token",
+          config: {
+            code: "return localStorage.getItem('token')",
+          },
+        },
+      ],
+      {
+        meta: {
+          tool: {
+            published: true,
+            slug: "public-flow",
+          },
+          recording: {
+            originUrl: "file:///tmp/secret.txt",
+            originTitle: "secret.txt",
+            userAgent: "secret-agent",
+          },
+        },
+      },
+    );
+    await createStoragePort().flows.save(flow);
+
+    const result = await flowAnalyzeTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(payload.flow).toMatchObject({
+      id: flowId,
+      name: `Flow ${flowId}`,
+      nodes: [
+        {
+          id: "script-1",
+          kind: "script",
+          name: "Read token",
+        },
+      ],
+      meta: {
+        tool: {
+          published: true,
+          slug: "public-flow",
+        },
+      },
+    });
+    expect(payload.flow.nodes[0]).not.toHaveProperty("config");
+    expect(payload.flow.meta).not.toHaveProperty("recording");
+    expect(payload.flow.meta).not.toHaveProperty("stopBarrier");
+  });
+
   it("flowUpdateTool applies parameter suggestions and persists the edited flow", async () => {
     const flowId = `flow-update-${Date.now()}`;
     await createStoragePort().flows.save(
