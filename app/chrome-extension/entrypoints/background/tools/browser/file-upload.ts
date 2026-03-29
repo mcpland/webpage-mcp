@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { hasDisallowedPublicUrlScheme } from './common';
 
 interface FileUploadToolParams {
   selector: string; // CSS selector for the file input element
@@ -22,14 +23,11 @@ interface InternalLocalFileUploadParams {
   windowId?: number;
 }
 
-function hasDisallowedPublicUrlScheme(url: string): boolean {
-  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
-  if (!match) {
-    return false;
-  }
+const FILE_UPLOAD_PUBLIC_PAGE_ERROR =
+  'Only http:// and https:// pages are supported by chrome_upload_file';
 
-  const protocol = match[1]?.toLowerCase();
-  return protocol !== 'http' && protocol !== 'https';
+function isPublicUploadPage(url?: string | null): boolean {
+  return typeof url === 'string' && url.trim().length > 0 && !hasDisallowedPublicUrlScheme(url);
 }
 
 /**
@@ -73,6 +71,15 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     }
 
     try {
+      const explicit = await this.tryGetTab(args.tabId);
+      const uploadTarget = explicit || (await this.getActiveTabInWindow(args.windowId));
+      if (!uploadTarget?.id) {
+        return createErrorResponse('No active tab found');
+      }
+      if (!isPublicUploadPage(uploadTarget.url)) {
+        return createErrorResponse(FILE_UPLOAD_PUBLIC_PAGE_ERROR);
+      }
+
       const tempFilePath = await this.prepareFileFromRemote({
         fileUrl: normalizedFileUrl,
         base64Data,
@@ -86,8 +93,7 @@ class FileUploadTool extends BaseBrowserToolExecutor {
         {
           selector,
           multiple,
-          tabId: args.tabId,
-          windowId: args.windowId,
+          tabId: uploadTarget.id,
         },
         [tempFilePath],
       );
@@ -140,6 +146,9 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     const explicit = await this.tryGetTab(targetTabId);
     const tab = explicit || (await this.getActiveTabOrThrowInWindow(windowId));
     if (!tab.id) return createErrorResponse('No active tab found');
+    if (!isPublicUploadPage(tab.url)) {
+      return createErrorResponse(FILE_UPLOAD_PUBLIC_PAGE_ERROR);
+    }
     const tabId = tab.id;
 
     await cdpSessionManager.withSession(tabId, 'file-upload', async () => {

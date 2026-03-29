@@ -131,6 +131,23 @@ describe('fileUploadTool', () => {
     expect(mocks.withSession).not.toHaveBeenCalled();
   });
 
+  it('rejects non-public target pages before touching CDP or the native host', async () => {
+    mocks.tabsGet.mockResolvedValueOnce(makeTab({ url: 'file:///tmp/secret.txt' }));
+
+    const result = await fileUploadTool.execute({
+      selector: '#upload',
+      base64Data: 'Zm9v',
+      tabId: 7,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'Only http:// and https:// pages are supported by chrome_upload_file',
+    );
+    expect(mocks.runtimeSendMessage).not.toHaveBeenCalled();
+    expect(mocks.withSession).not.toHaveBeenCalled();
+  });
+
   it('still uploads files prepared from base64 payloads', async () => {
     const result = await fileUploadTool.execute({
       selector: '#upload',

@@ -1361,18 +1361,18 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.FILE_UPLOAD,
     description:
-      'Upload files to web forms with file input elements using Chrome DevTools Protocol. Local file paths are not accepted; provide an http(s) fileUrl or base64Data.',
+      'Upload files to file input elements on an HTTP(S) page using Chrome DevTools Protocol. Local file paths are not accepted; provide an http(s) fileUrl or base64Data.',
     inputSchema: {
       type: 'object',
       properties: {
-        tabId: { type: 'number', description: 'Target tab ID (default: active tab)' },
+        tabId: { type: 'number', description: 'Target HTTP(S) tab ID (default: active tab)' },
         windowId: {
           type: 'number',
-          description: 'Target window ID to pick active tab when tabId is omitted',
+          description: 'Target window ID to pick the active HTTP(S) tab when tabId is omitted',
         },
         selector: {
           type: 'string',
-          description: 'CSS selector for the file input element (input[type="file"])',
+          description: 'CSS selector for the file input element (input[type="file"]) on the target HTTP(S) page',
         },
         fileUrl: {
           type: 'string',
