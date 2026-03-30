@@ -186,14 +186,14 @@ export async function getMessagesBySessionId(
   sessionId: string,
   limit = 0,
   offset = 0,
+  projectId?: string,
 ): Promise<AgentStoredMessage[]> {
   const db = getDb();
+  const filter = projectId
+    ? and(eq(messages.sessionId, sessionId), eq(messages.projectId, projectId))
+    : eq(messages.sessionId, sessionId);
 
-  const query = db
-    .select()
-    .from(messages)
-    .where(eq(messages.sessionId, sessionId))
-    .orderBy(asc(messages.createdAt));
+  const query = db.select().from(messages).where(filter).orderBy(asc(messages.createdAt));
 
   if (limit > 0) {
     query.limit(limit);
@@ -209,12 +209,18 @@ export async function getMessagesBySessionId(
 /**
  * Get count of messages by session ID.
  */
-export async function getMessagesCountBySessionId(sessionId: string): Promise<number> {
+export async function getMessagesCountBySessionId(
+  sessionId: string,
+  projectId?: string,
+): Promise<number> {
   const db = getDb();
+  const filter = projectId
+    ? and(eq(messages.sessionId, sessionId), eq(messages.projectId, projectId))
+    : eq(messages.sessionId, sessionId);
   const result = await db
     .select({ count: count() })
     .from(messages)
-    .where(eq(messages.sessionId, sessionId));
+    .where(filter);
   return result[0]?.count ?? 0;
 }
 

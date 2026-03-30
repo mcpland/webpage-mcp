@@ -426,8 +426,8 @@ export async function dispatchAgentRpc(
         }
 
         const [messages, totalCount] = await Promise.all([
-          getMessagesBySessionId(sessionId, safeLimit, safeOffset),
-          getMessagesCountBySessionId(sessionId),
+          getMessagesBySessionId(sessionId, safeLimit, safeOffset, session.projectId),
+          getMessagesCountBySessionId(sessionId, session.projectId),
         ]);
 
         return jsonResponse(HTTP_STATUS.OK, {

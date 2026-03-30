@@ -161,3 +161,61 @@ describe('agent.chat.messages.create', () => {
     expect(projectBMessages).toHaveLength(0);
   });
 });
+
+describe('agent.sessions.history', () => {
+  it('filters out messages whose project does not match the resolved session', async () => {
+    const workspaceBase = await createTempDir('session-history-workspace-');
+    const dataDir = await createTempDir('session-history-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRootA = path.join(workspaceBase, 'history-project-a');
+    const projectRootB = path.join(workspaceBase, 'history-project-b');
+    await fs.mkdir(projectRootA, { recursive: true });
+    await fs.mkdir(projectRootB, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, createMessage, dispatchAgentRpc } = await loadAgentModules();
+
+    const projectA = await upsertProject({
+      name: 'History Project A',
+      rootPath: projectRootA,
+      allowCreate: true,
+    });
+    const projectB = await upsertProject({
+      name: 'History Project B',
+      rootPath: projectRootB,
+      allowCreate: true,
+    });
+    const session = await createSession(projectA.id, 'codex' as any);
+
+    await createMessage({
+      projectId: projectA.id,
+      sessionId: session.id,
+      role: 'user',
+      messageType: 'chat',
+      content: 'expected session history message',
+    });
+    await createMessage({
+      projectId: projectB.id,
+      sessionId: session.id,
+      role: 'assistant',
+      messageType: 'chat',
+      content: 'cross-project leaked message',
+    });
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.sessions.history',
+        params: { sessionId: session.id },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json?.messages).toHaveLength(1);
+    expect(response.json?.messages?.[0]?.content).toBe('expected session history message');
+    expect(response.json?.totalCount).toBe(1);
+  });
+});
