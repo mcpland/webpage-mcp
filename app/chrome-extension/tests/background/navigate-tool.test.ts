@@ -235,6 +235,23 @@ describe('navigateTool', () => {
     expect(mocks.tabsReload).not.toHaveBeenCalled();
   });
 
+  it('rejects navigating the current tab when the explicit target is non-public', async () => {
+    mocks.tabsGet.mockResolvedValueOnce(
+      makeTab({ id: 7, windowId: 20, url: 'file:///tmp/secret.txt' }),
+    );
+
+    const result = await navigateTool.execute({
+      url: 'https://www.baidu.com',
+      tabId: 7,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text)).toContain(
+      'Only http:// and https:// pages are supported by chrome_navigate current_tab',
+    );
+    expect(mocks.tabsUpdate).not.toHaveBeenCalled();
+  });
+
   it('fails history navigation if the updated tab lands on a non-public page', async () => {
     mocks.tabsQuery.mockResolvedValueOnce([
       makeTab({ id: 7, windowId: 20, url: 'https://example.com/' }),

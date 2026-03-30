@@ -330,6 +330,11 @@ class NavigateTool extends BaseBrowserToolExecutor {
         if (!targetTab.id) {
           return createErrorResponse('No target tab found to navigate');
         }
+        if (hasDisallowedPublicUrlScheme(String(targetTab.url || ''))) {
+          return createErrorResponse(
+            'Only http:// and https:// pages are supported by chrome_navigate current_tab',
+          );
+        }
 
         const beforeUrl = targetTab.url || '';
         await chrome.tabs.update(targetTab.id, { url });
