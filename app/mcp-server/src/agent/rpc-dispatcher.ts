@@ -621,6 +621,10 @@ export async function dispatchAgentRpc(
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectId is required' });
         }
+        const project = await getProject(projectId);
+        if (!project) {
+          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
+        }
 
         const limit = readNumber(readQueryValue(query, 'limit'));
         const offset = readNumber(readQueryValue(query, 'offset'));
@@ -649,6 +653,10 @@ export async function dispatchAgentRpc(
         const projectId = readParam(params, 'projectId');
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectId is required' });
+        }
+        const project = await getProject(projectId);
+        if (!project) {
+          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
         }
 
         const payload = bodyAsRecord(body);
@@ -720,6 +728,10 @@ export async function dispatchAgentRpc(
         const projectId = readParam(params, 'projectId');
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectId is required' });
+        }
+        const project = await getProject(projectId);
+        if (!project) {
+          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
         }
 
         const conversationId = readString(readQueryValue(query, 'conversationId'));

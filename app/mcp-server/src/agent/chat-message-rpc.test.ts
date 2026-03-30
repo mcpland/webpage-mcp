@@ -219,3 +219,52 @@ describe('agent.sessions.history', () => {
     expect(response.json?.totalCount).toBe(1);
   });
 });
+
+describe('project-scoped chat message RPCs', () => {
+  it('returns Project not found consistently for list/create/delete', async () => {
+    const workspaceBase = await createTempDir('missing-project-workspace-');
+    const dataDir = await createTempDir('missing-project-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { dispatchAgentRpc } = await loadAgentModules();
+    const missingProjectId = 'missing-project';
+
+    const [listResponse, createResponse, deleteResponse] = await Promise.all([
+      dispatchAgentRpc(
+        {
+          operation: 'agent.chat.messages.list',
+          params: { projectId: missingProjectId },
+        },
+        createRpcDeps(),
+      ),
+      dispatchAgentRpc(
+        {
+          operation: 'agent.chat.messages.create',
+          params: { projectId: missingProjectId },
+          body: { content: 'hello' },
+        },
+        createRpcDeps(),
+      ),
+      dispatchAgentRpc(
+        {
+          operation: 'agent.chat.messages.delete',
+          params: { projectId: missingProjectId },
+        },
+        createRpcDeps(),
+      ),
+    ]);
+
+    expect(listResponse.statusCode).toBe(404);
+    expect(listResponse.json).toEqual({ error: 'Project not found' });
+
+    expect(createResponse.statusCode).toBe(404);
+    expect(createResponse.json).toEqual({ error: 'Project not found' });
+
+    expect(deleteResponse.statusCode).toBe(404);
+    expect(deleteResponse.json).toEqual({ error: 'Project not found' });
+  });
+});
