@@ -404,7 +404,7 @@ export interface AttachmentMetadata {
  */
 export interface AttachmentProjectStats {
   projectId: string;
-  /** Directory path for this project's attachments */
+  /** Redacted display path for this project's attachments */
   dirPath: string;
   /** Whether the directory exists */
   exists: boolean;
@@ -419,6 +419,7 @@ export interface AttachmentProjectStats {
  */
 export interface CleanupProjectResult {
   projectId: string;
+  /** Redacted display path for this project's attachments */
   dirPath: string;
   existed: boolean;
   removedFiles: number;
@@ -430,7 +431,9 @@ export interface CleanupProjectResult {
  */
 export interface AttachmentStatsResponse {
   success: boolean;
+  /** Redacted display path for the attachments root */
   rootDir: string;
+  pathRedacted: boolean;
   totalFiles: number;
   totalBytes: number;
   projects: Array<
@@ -456,6 +459,7 @@ export interface AttachmentCleanupRequest {
 export interface AttachmentCleanupResponse {
   success: boolean;
   scope: 'project' | 'selected' | 'all';
+  pathRedacted: boolean;
   removedFiles: number;
   removedBytes: number;
   results: CleanupProjectResult[];

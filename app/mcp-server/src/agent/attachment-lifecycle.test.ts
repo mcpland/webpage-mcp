@@ -143,4 +143,59 @@ describe("project attachment lifecycle", () => {
     expect(response.statusCode).toBe(404);
     expect(response.json).toEqual({ error: "Project not found" });
   });
+
+  it("redacts attachment paths in stats and cleanup RPC responses", async () => {
+    const workspaceBase = await createTempDir("attachment-stats-workspace-");
+    const dataDir = await createTempDir("attachment-stats-data-");
+    const dbFile = path.join(dataDir, "agent.db");
+    const projectRoot = path.join(workspaceBase, "project-root");
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, attachmentService, dispatchAgentRpc } = await loadAgentModules();
+    const project = await upsertProject({
+      name: "Attachment Path Redaction",
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+
+    await attachmentService.saveAttachment({
+      projectId: project.id,
+      messageId: "msg-3",
+      index: 0,
+      attachment: {
+        type: "image",
+        name: "stats.png",
+        mimeType: "image/png",
+        dataBase64: Buffer.from("stats-data").toString("base64"),
+      },
+    });
+
+    const statsResponse = await dispatchAgentRpc(
+      {
+        operation: "agent.attachments.stats",
+      },
+      createRpcDeps(),
+    );
+
+    expect(statsResponse.statusCode).toBe(200);
+    expect(statsResponse.json?.pathRedacted).toBe(true);
+    expect(statsResponse.json?.rootDir).toBe("attachments");
+    expect(statsResponse.json?.projects?.[0]?.dirPath).toBe(`attachments/${project.id}`);
+
+    const cleanupResponse = await dispatchAgentRpc(
+      {
+        operation: "agent.attachments.deleteByProject",
+        params: { projectId: project.id },
+      },
+      createRpcDeps(),
+    );
+
+    expect(cleanupResponse.statusCode).toBe(200);
+    expect(cleanupResponse.json?.pathRedacted).toBe(true);
+    expect(cleanupResponse.json?.results?.[0]?.dirPath).toBe(`attachments/${project.id}`);
+  });
 });

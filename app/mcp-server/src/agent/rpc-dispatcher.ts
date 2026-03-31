@@ -44,6 +44,11 @@ import type {
 } from 'webpage-mcp-shared';
 
 const VALID_OPEN_TARGETS: readonly OpenProjectTarget[] = ['vscode', 'terminal'];
+const ATTACHMENT_ROOT_DISPLAY_PATH = 'attachments';
+
+function toPublicAttachmentDirPath(projectId: string): string {
+  return `${ATTACHMENT_ROOT_DISPLAY_PATH}/${projectId}`;
+}
 
 function getRegisteredEngineNames(chatService: AgentChatService): EngineName[] {
   return chatService.getEngineInfos().map((engine) => engine.name);
@@ -818,6 +823,7 @@ export async function dispatchAgentRpc(
 
         const enrichedProjects = stats.projects.map((p) => ({
           ...p,
+          dirPath: toPublicAttachmentDirPath(p.projectId),
           projectName: projectMap.get(p.projectId),
           existsInDb: dbProjectIds.has(p.projectId),
         }));
@@ -828,7 +834,8 @@ export async function dispatchAgentRpc(
 
         const response: AttachmentStatsResponse = {
           success: true,
-          rootDir: stats.rootDir,
+          rootDir: ATTACHMENT_ROOT_DISPLAY_PATH,
+          pathRedacted: true,
           totalFiles: stats.totalFiles,
           totalBytes: stats.totalBytes,
           projects: enrichedProjects,
@@ -887,9 +894,13 @@ export async function dispatchAgentRpc(
         const response: AttachmentCleanupResponse = {
           success: true,
           scope: 'project',
+          pathRedacted: true,
           removedFiles: result.removedFiles,
           removedBytes: result.removedBytes,
-          results: result.results,
+          results: result.results.map((entry) => ({
+            ...entry,
+            dirPath: toPublicAttachmentDirPath(entry.projectId),
+          })),
         };
 
         return jsonResponse(HTTP_STATUS.OK, response);
@@ -906,9 +917,13 @@ export async function dispatchAgentRpc(
         const response: AttachmentCleanupResponse = {
           success: true,
           scope: projectIds && projectIds.length > 0 ? 'selected' : 'all',
+          pathRedacted: true,
           removedFiles: result.removedFiles,
           removedBytes: result.removedBytes,
-          results: result.results,
+          results: result.results.map((entry) => ({
+            ...entry,
+            dirPath: toPublicAttachmentDirPath(entry.projectId),
+          })),
         };
 
         return jsonResponse(HTTP_STATUS.OK, response);
