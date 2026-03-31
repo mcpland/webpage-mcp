@@ -418,6 +418,7 @@ export async function dispatchAgentRpc(
         if (!existing) {
           return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
         }
+        deps.chatService.cancelSessionExecutions(sessionId);
         await deleteSession(sessionId);
         return noContentResponse();
       }

@@ -303,4 +303,70 @@ describe('AgentChatService legacy session migration', () => {
       expect(service.getRunningExecutions()).toHaveLength(0);
     });
   });
+
+  it('does not persist late assistant messages after the session execution is cancelled', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+
+    const lateReply = 'late assistant reply';
+    const claudeEngine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        await new Promise<void>((resolve) => {
+          options.signal?.addEventListener(
+            'abort',
+            () => {
+              ctx.emit({
+                type: 'message',
+                data: {
+                  id: 'assistant-late-message',
+                  sessionId: legacySession.id,
+                  role: 'assistant',
+                  content: lateReply,
+                  messageType: 'chat',
+                  cliSource: 'claude',
+                  requestId: 'req-late-message',
+                  isStreaming: false,
+                  isFinal: true,
+                  createdAt: new Date().toISOString(),
+                },
+              });
+              resolve();
+            },
+            { once: true },
+          );
+        });
+      },
+    };
+
+    const service = new AgentChatService({
+      engines: [claudeEngine],
+      streamManager: new AgentStreamManager(),
+    });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Start and cancel',
+      dbSessionId: legacySession.id,
+      requestId: 'req-late-message',
+    });
+
+    await vi.waitFor(() => {
+      expect(service.getRunningExecutions()).toHaveLength(1);
+    });
+
+    expect(service.cancelSessionExecutions(legacySession.id)).toBe(1);
+
+    await vi.waitFor(() => {
+      expect(service.getRunningExecutions()).toHaveLength(0);
+    });
+
+    expect(messageServiceMocks.createMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: 'assistant',
+        content: lateReply,
+      }),
+    );
+  });
 });

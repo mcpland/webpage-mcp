@@ -357,16 +357,29 @@ export class AgentChatService {
             return;
           }
 
+          const persistedSessionId =
+            typeof msg.sessionId === 'string' && msg.sessionId.trim().length > 0
+              ? msg.sessionId
+              : sessionId;
+          const persistedRequestId =
+            typeof msg.requestId === 'string' && msg.requestId.trim().length > 0
+              ? msg.requestId
+              : requestId;
+
+          if (!this.isExecutionActive(persistedSessionId, persistedRequestId)) {
+            return;
+          }
+
           void persistAgentMessage({
             projectId,
             role: msg.role,
             messageType: msg.messageType,
             content,
             metadata: msg.metadata,
-            sessionId: msg.sessionId,
+            sessionId: persistedSessionId,
             conversationId: undefined,
             cliSource: msg.cliSource,
-            requestId: msg.requestId,
+            requestId: persistedRequestId,
             id: msg.id,
             createdAt: msg.createdAt,
             upsertById: true,
@@ -445,13 +458,14 @@ export class AgentChatService {
    * Returns true if the execution was found and cancelled, false otherwise.
    */
   cancelExecution(sessionId: string, requestId: string): boolean {
-    const execution = this.runningExecutions.get(executionKey(sessionId, requestId));
+    const key = executionKey(sessionId, requestId);
+    const execution = this.runningExecutions.get(key);
     if (!execution) {
       return false;
     }
 
-    // Abort the execution
-    execution.abortController.abort();
+    // Remove from registry first so late engine events are ignored.
+    this.runningExecutions.delete(key);
 
     // Emit cancelled status
     this.streamManager.publish({
@@ -464,8 +478,8 @@ export class AgentChatService {
       },
     });
 
-    // Remove from registry
-    this.runningExecutions.delete(executionKey(sessionId, requestId));
+    // Abort the execution after the registry has been cleared.
+    execution.abortController.abort();
 
     return true;
   }
@@ -478,8 +492,8 @@ export class AgentChatService {
     let cancelled = 0;
     for (const [key, execution] of this.runningExecutions) {
       if (execution.sessionId === sessionId) {
-        execution.abortController.abort();
         this.runningExecutions.delete(key);
+        execution.abortController.abort();
         cancelled++;
       }
     }
@@ -513,6 +527,10 @@ export class AgentChatService {
       return projectPreferredCli;
     }
     return this.defaultEngineName;
+  }
+
+  private isExecutionActive(sessionId: string, requestId: string): boolean {
+    return this.runningExecutions.has(executionKey(sessionId, requestId));
   }
 
   private async runEngine(

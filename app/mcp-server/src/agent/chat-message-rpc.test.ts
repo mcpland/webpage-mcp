@@ -46,6 +46,7 @@ function createRpcDeps(): { chatService: AgentChatService } {
   return {
     chatService: {
       getEngineInfos: () => [],
+      cancelSessionExecutions: () => 0,
     } as AgentChatService,
   };
 }
@@ -418,6 +419,44 @@ describe('agent.sessions.delete', () => {
 
     expect(response.statusCode).toBe(204);
     expect(await getMessagesByProjectId(project.id)).toHaveLength(0);
+  });
+
+  it('cancels running executions before deleting the session', async () => {
+    const workspaceBase = await createTempDir('session-delete-cancel-workspace-');
+    const dataDir = await createTempDir('session-delete-cancel-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'delete-cancel-project');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, dispatchAgentRpc } = await loadAgentModules();
+
+    const project = await upsertProject({
+      name: 'Session Delete Cancel',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const session = await createSession(project.id, 'codex' as any);
+    const cancelSessionExecutions = vi.fn().mockReturnValue(1);
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.sessions.delete',
+        params: { sessionId: session.id },
+      },
+      {
+        chatService: {
+          getEngineInfos: () => [],
+          cancelSessionExecutions,
+        } as unknown as AgentChatService,
+      },
+    );
+
+    expect(response.statusCode).toBe(204);
+    expect(cancelSessionExecutions).toHaveBeenCalledWith(session.id);
   });
 
   it('returns Session not found when deleting a missing session', async () => {
