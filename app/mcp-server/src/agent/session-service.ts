@@ -265,7 +265,13 @@ async function addPreviewsToSessions(rows: SessionRow[]): Promise<AgentSession[]
       const firstUserMessages = await db
         .select({ content: messages.content, metadata: messages.metadata })
         .from(messages)
-        .where(and(eq(messages.sessionId, row.id), eq(messages.role, 'user')))
+        .where(
+          and(
+            eq(messages.sessionId, row.id),
+            eq(messages.projectId, row.projectId),
+            eq(messages.role, 'user'),
+          ),
+        )
         .orderBy(asc(messages.createdAt))
         .limit(1);
 

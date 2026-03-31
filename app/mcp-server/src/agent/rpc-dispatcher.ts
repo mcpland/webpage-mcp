@@ -456,7 +456,7 @@ export async function dispatchAgentRpc(
         }
 
         await updateSession(sessionId, { engineSessionId: null });
-        const deletedMessages = await deleteMessagesBySessionId(sessionId);
+        const deletedMessages = await deleteMessagesBySessionId(sessionId, existing.projectId);
         const updated = await getSession(sessionId);
 
         return jsonResponse(HTTP_STATUS.OK, {

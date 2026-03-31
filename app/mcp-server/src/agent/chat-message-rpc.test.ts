@@ -19,7 +19,7 @@ async function loadAgentModules() {
   vi.resetModules();
   const [
     { upsertProject },
-    { createSession },
+    { createSession, getSessionsByProject },
     { createMessage, getMessagesByProjectId },
     { dispatchAgentRpc },
     { closeDb },
@@ -31,7 +31,15 @@ async function loadAgentModules() {
     import('./db/client'),
   ]);
 
-  return { upsertProject, createSession, createMessage, getMessagesByProjectId, dispatchAgentRpc, closeDb };
+  return {
+    upsertProject,
+    createSession,
+    getSessionsByProject,
+    createMessage,
+    getMessagesByProjectId,
+    dispatchAgentRpc,
+    closeDb,
+  };
 }
 
 function createRpcDeps(): { chatService: AgentChatService } {
@@ -309,5 +317,112 @@ describe('agent.sessions.delete', () => {
 
     expect(response.statusCode).toBe(204);
     expect(await getMessagesByProjectId(project.id)).toHaveLength(0);
+  });
+});
+
+describe('session-scoped message boundaries', () => {
+  it('builds session previews from messages that belong to the owning project', async () => {
+    const workspaceBase = await createTempDir('session-preview-workspace-');
+    const dataDir = await createTempDir('session-preview-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRootA = path.join(workspaceBase, 'preview-project-a');
+    const projectRootB = path.join(workspaceBase, 'preview-project-b');
+    await fs.mkdir(projectRootA, { recursive: true });
+    await fs.mkdir(projectRootB, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, getSessionsByProject, createMessage } =
+      await loadAgentModules();
+
+    const projectA = await upsertProject({
+      name: 'Preview Project A',
+      rootPath: projectRootA,
+      allowCreate: true,
+    });
+    const projectB = await upsertProject({
+      name: 'Preview Project B',
+      rootPath: projectRootB,
+      allowCreate: true,
+    });
+    const session = await createSession(projectA.id, 'codex' as any);
+
+    await createMessage({
+      projectId: projectB.id,
+      sessionId: session.id,
+      role: 'user',
+      messageType: 'chat',
+      content: 'foreign preview text',
+    });
+    await createMessage({
+      projectId: projectA.id,
+      sessionId: session.id,
+      role: 'user',
+      messageType: 'chat',
+      content: 'owning project preview text',
+    });
+
+    const sessions = await getSessionsByProject(projectA.id);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.preview).toBe('owning project preview text');
+  });
+
+  it('resets only messages that belong to the owning project', async () => {
+    const workspaceBase = await createTempDir('session-reset-workspace-');
+    const dataDir = await createTempDir('session-reset-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRootA = path.join(workspaceBase, 'reset-project-a');
+    const projectRootB = path.join(workspaceBase, 'reset-project-b');
+    await fs.mkdir(projectRootA, { recursive: true });
+    await fs.mkdir(projectRootB, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, createMessage, getMessagesByProjectId, dispatchAgentRpc } =
+      await loadAgentModules();
+
+    const projectA = await upsertProject({
+      name: 'Reset Project A',
+      rootPath: projectRootA,
+      allowCreate: true,
+    });
+    const projectB = await upsertProject({
+      name: 'Reset Project B',
+      rootPath: projectRootB,
+      allowCreate: true,
+    });
+    const session = await createSession(projectA.id, 'codex' as any);
+
+    await createMessage({
+      projectId: projectA.id,
+      sessionId: session.id,
+      role: 'user',
+      messageType: 'chat',
+      content: 'message owned by project A',
+    });
+    await createMessage({
+      projectId: projectB.id,
+      sessionId: session.id,
+      role: 'assistant',
+      messageType: 'chat',
+      content: 'dirty foreign message',
+    });
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.sessions.reset',
+        params: { sessionId: session.id },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json?.deletedMessages).toBe(1);
+    expect(await getMessagesByProjectId(projectA.id)).toHaveLength(0);
+    expect(await getMessagesByProjectId(projectB.id)).toHaveLength(1);
   });
 });

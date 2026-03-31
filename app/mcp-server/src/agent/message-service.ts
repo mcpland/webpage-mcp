@@ -228,12 +228,18 @@ export async function getMessagesCountBySessionId(
  * Delete all messages for a session.
  * Returns the number of deleted messages.
  */
-export async function deleteMessagesBySessionId(sessionId: string): Promise<number> {
+export async function deleteMessagesBySessionId(
+  sessionId: string,
+  projectId?: string,
+): Promise<number> {
   const db = getDb();
+  const filter = projectId
+    ? and(eq(messages.sessionId, sessionId), eq(messages.projectId, projectId))
+    : eq(messages.sessionId, sessionId);
 
-  const beforeCount = await getMessagesCountBySessionId(sessionId);
-  await db.delete(messages).where(eq(messages.sessionId, sessionId));
-  const afterCount = await getMessagesCountBySessionId(sessionId);
+  const beforeCount = await getMessagesCountBySessionId(sessionId, projectId);
+  await db.delete(messages).where(filter);
+  const afterCount = await getMessagesCountBySessionId(sessionId, projectId);
 
   return beforeCount - afterCount;
 }
