@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { eq, desc, and, asc } from 'drizzle-orm';
 import { getDb, sessions, messages, type SessionRow } from './db';
 import type { EngineName } from './engines/types';
+import { sanitizeAgentMessageForPublicRead } from './public-message-sanitizer';
 
 // ============================================================
 // Types
@@ -85,7 +86,8 @@ export interface AgentSessionPreviewMeta {
   /** Client metadata for special rendering */
   clientMeta?: {
     kind?: 'web_editor_apply_batch' | 'web_editor_apply_single';
-    pageUrl?: string;
+    pageUrl?: string | null;
+    pageUrlRedacted?: boolean;
     elementCount?: number;
     elementLabels?: string[];
   };
@@ -278,17 +280,31 @@ async function addPreviewsToSessions(rows: SessionRow[]): Promise<AgentSession[]
       if (firstUserMessages.length > 0 && firstUserMessages[0].content) {
         const content = firstUserMessages[0].content;
         const metadataJson = firstUserMessages[0].metadata;
+        let previewContent = content;
+        let previewMetadata: Record<string, unknown> | undefined;
 
-        session.preview = truncatePreview(content);
+        if (metadataJson && metadataJson.trim().length > 0) {
+          try {
+            const parsedMetadata = JSON.parse(metadataJson) as Record<string, unknown>;
+            const sanitized = sanitizeAgentMessageForPublicRead({
+              content,
+              metadata: parsedMetadata,
+            });
+            previewContent = sanitized.content;
+            previewMetadata = sanitized.metadata;
+          } catch {
+            // Ignore JSON parse errors, just use plain preview
+          }
+        }
+
+        session.preview = truncatePreview(previewContent);
 
         // Parse metadata to extract clientMeta/displayText for special rendering
-        if (metadataJson) {
+        if (previewMetadata) {
           try {
-            const parsed = JSON.parse(metadataJson) as Record<string, unknown>;
-
             // Type-safe extraction with validation
-            const rawClientMeta = parsed.clientMeta;
-            const rawDisplayText = parsed.displayText;
+            const rawClientMeta = previewMetadata.clientMeta;
+            const rawDisplayText = previewMetadata.displayText;
 
             // Validate displayText is a string
             const displayText = typeof rawDisplayText === 'string' ? rawDisplayText : undefined;
@@ -306,14 +322,14 @@ async function addPreviewsToSessions(rows: SessionRow[]): Promise<AgentSession[]
             // Only set previewMeta if we have valid special metadata
             if (clientMeta || displayText) {
               session.previewMeta = {
-                displayText: displayText || truncatePreview(content),
+                displayText: displayText || truncatePreview(previewContent),
                 clientMeta,
                 // Truncate fullContent to avoid payload bloat (200 chars max)
-                fullContent: truncatePreview(content, 200),
+                fullContent: truncatePreview(previewContent, 200),
               };
             }
           } catch {
-            // Ignore JSON parse errors, just use plain preview
+            // Ignore unexpected metadata shapes, just use plain preview
           }
         }
       }

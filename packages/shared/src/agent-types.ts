@@ -224,7 +224,8 @@ export interface AgentSessionPreviewMeta {
   displayText?: string;
   clientMeta?: {
     kind?: 'web_editor_apply_batch' | 'web_editor_apply_single';
-    pageUrl?: string;
+    pageUrl?: string | null;
+    pageUrlRedacted?: boolean;
     elementCount?: number;
     elementLabels?: string[];
   };

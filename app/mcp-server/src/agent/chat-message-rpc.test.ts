@@ -275,6 +275,62 @@ describe('project-scoped chat message RPCs', () => {
     expect(deleteResponse.statusCode).toBe(404);
     expect(deleteResponse.json).toEqual({ error: 'Project not found' });
   });
+
+  it('sanitizes non-public web editor page urls in stored messages', async () => {
+    const workspaceBase = await createTempDir('message-sanitize-workspace-');
+    const dataDir = await createTempDir('message-sanitize-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'message-sanitize-project');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, createMessage, dispatchAgentRpc } = await loadAgentModules();
+
+    const project = await upsertProject({
+      name: 'Message Sanitize Project',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const session = await createSession(project.id, 'codex' as any);
+
+    await createMessage({
+      projectId: project.id,
+      sessionId: session.id,
+      role: 'user',
+      messageType: 'chat',
+      content: 'Goal: apply the browser edit\n\nPage URL: file:///tmp/secret.txt\n\nContinue.',
+      metadata: {
+        clientMeta: {
+          kind: 'web_editor_apply_single',
+          pageUrl: 'file:///tmp/secret.txt',
+          elementCount: 1,
+        },
+        displayText: 'Apply change',
+      },
+    });
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.chat.messages.list',
+        params: { projectId: project.id },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json?.data).toHaveLength(1);
+    expect(response.json?.data?.[0]?.content).toContain('Page URL: [redacted non-public page]');
+    expect(response.json?.data?.[0]?.content).not.toContain('file:///tmp/secret.txt');
+    expect(response.json?.data?.[0]?.metadata?.clientMeta).toEqual({
+      kind: 'web_editor_apply_single',
+      pageUrl: null,
+      pageUrlRedacted: true,
+      elementCount: 1,
+    });
+  });
 });
 
 describe('agent.sessions.delete', () => {
@@ -367,6 +423,69 @@ describe('agent.projects.sessions.list', () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.json).toEqual({ error: 'Project not found' });
+  });
+
+  it('redacts non-public web editor preview metadata', async () => {
+    const workspaceBase = await createTempDir('project-sessions-preview-workspace-');
+    const dataDir = await createTempDir('project-sessions-preview-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'preview-project');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, createMessage, dispatchAgentRpc } = await loadAgentModules();
+
+    const project = await upsertProject({
+      name: 'Session Preview Redaction Project',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const session = await createSession(project.id, 'codex' as any);
+
+    await createMessage({
+      projectId: project.id,
+      sessionId: session.id,
+      role: 'user',
+      messageType: 'chat',
+      content: 'Goal: apply the browser edit\n\nPage URL: file:///tmp/private.html\n\nContinue.',
+      metadata: {
+        clientMeta: {
+          kind: 'web_editor_apply_batch',
+          pageUrl: 'file:///tmp/private.html',
+          elementCount: 2,
+          elementLabels: ['Headline', 'CTA'],
+        },
+        displayText: 'Apply 2 changes',
+      },
+    });
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.projects.sessions.list',
+        params: { projectId: project.id },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json?.sessions).toHaveLength(1);
+    expect(response.json?.sessions?.[0]?.previewMeta?.displayText).toBe('Apply 2 changes');
+    expect(response.json?.sessions?.[0]?.previewMeta?.clientMeta).toEqual({
+      kind: 'web_editor_apply_batch',
+      pageUrl: null,
+      pageUrlRedacted: true,
+      elementCount: 2,
+      elementLabels: ['Headline', 'CTA'],
+    });
+    expect(response.json?.sessions?.[0]?.previewMeta?.fullContent).toContain(
+      'Page URL: [redacted non-public page]',
+    );
+    expect(response.json?.sessions?.[0]?.previewMeta?.fullContent).not.toContain(
+      'file:///tmp/private.html',
+    );
   });
 });
 

@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { eq, asc, and, count } from 'drizzle-orm';
 import type { AgentRole, AgentStoredMessage } from 'webpage-mcp-shared';
 import { getDb, messages, type MessageRow } from './db';
+import { sanitizeAgentMessageForPublicRead } from './public-message-sanitizer';
 
 // ============================================================
 // Types
@@ -40,15 +41,20 @@ export interface CreateAgentStoredMessageInput {
  * Convert database row to AgentStoredMessage interface.
  */
 function rowToMessage(row: MessageRow): AgentStoredMessage {
+  const metadata = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined;
+  const sanitized = sanitizeAgentMessageForPublicRead({
+    content: row.content,
+    metadata,
+  });
   return {
     id: row.id,
     projectId: row.projectId,
     sessionId: row.sessionId,
     conversationId: row.conversationId,
     role: row.role as AgentRole,
-    content: row.content,
+    content: sanitized.content,
     messageType: row.messageType as AgentStoredMessage['messageType'],
-    metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    metadata: sanitized.metadata,
     cliSource: row.cliSource,
     requestId: row.requestId ?? undefined,
     createdAt: row.createdAt,
