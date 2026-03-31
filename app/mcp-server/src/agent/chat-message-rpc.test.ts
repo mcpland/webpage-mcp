@@ -318,6 +318,56 @@ describe('agent.sessions.delete', () => {
     expect(response.statusCode).toBe(204);
     expect(await getMessagesByProjectId(project.id)).toHaveLength(0);
   });
+
+  it('returns Session not found when deleting a missing session', async () => {
+    const workspaceBase = await createTempDir('session-delete-missing-workspace-');
+    const dataDir = await createTempDir('session-delete-missing-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'delete-missing-project');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { dispatchAgentRpc } = await loadAgentModules();
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.sessions.delete',
+        params: { sessionId: 'missing-session-id' },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json).toEqual({ error: 'Session not found' });
+  });
+});
+
+describe('agent.projects.sessions.list', () => {
+  it('returns Project not found when listing sessions for a missing project', async () => {
+    const workspaceBase = await createTempDir('project-sessions-list-workspace-');
+    const dataDir = await createTempDir('project-sessions-list-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { dispatchAgentRpc } = await loadAgentModules();
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.projects.sessions.list',
+        params: { projectId: 'missing-project-id' },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json).toEqual({ error: 'Project not found' });
+  });
 });
 
 describe('session-scoped message boundaries', () => {

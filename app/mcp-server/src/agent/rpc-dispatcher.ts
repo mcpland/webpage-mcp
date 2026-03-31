@@ -337,6 +337,10 @@ export async function dispatchAgentRpc(
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectId is required' });
         }
+        const project = await getProject(projectId);
+        if (!project) {
+          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
+        }
         const sessions = await getSessionsByProject(projectId);
         return jsonResponse(HTTP_STATUS.OK, { sessions });
       }
@@ -409,6 +413,10 @@ export async function dispatchAgentRpc(
         const sessionId = readParam(params, 'sessionId');
         if (!sessionId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'sessionId is required' });
+        }
+        const existing = await getSession(sessionId);
+        if (!existing) {
+          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
         }
         await deleteSession(sessionId);
         return noContentResponse();
