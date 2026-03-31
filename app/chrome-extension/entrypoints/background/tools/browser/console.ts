@@ -32,7 +32,8 @@ interface ConsoleMessage {
   args?: any[];
   argsSerialized?: any[];
   source?: string;
-  url?: string;
+  url?: string | null;
+  urlRedacted?: boolean;
   lineNumber?: number;
   stackTrace?: any;
 }
@@ -40,7 +41,8 @@ interface ConsoleMessage {
 interface ConsoleException {
   timestamp: number;
   text: string;
-  url?: string;
+  url?: string | null;
+  urlRedacted?: boolean;
   lineNumber?: number;
   columnNumber?: number;
   stackTrace?: any;
@@ -98,6 +100,62 @@ function parseRegexPattern(pattern?: string): RegExp | undefined {
 function matchesPattern(pattern: RegExp, text: string): boolean {
   pattern.lastIndex = 0;
   return pattern.test(text);
+}
+
+function sanitizeConsoleUrl(url: unknown): { url?: string | null; urlRedacted?: true } {
+  if (typeof url !== 'string' || !url.trim()) {
+    return {};
+  }
+  if (hasDisallowedPublicPageScheme(url)) {
+    return { url: null, urlRedacted: true };
+  }
+  return { url };
+}
+
+function sanitizeNestedUrls(value: unknown, depth = 0): unknown {
+  if (depth > 8 || value === null || value === undefined) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeNestedUrls(item, depth + 1));
+  }
+  if (typeof value !== 'object') {
+    return value;
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'url') {
+      const sanitized = sanitizeConsoleUrl(nested);
+      if ('url' in sanitized) {
+        result.url = sanitized.url;
+      }
+      if (sanitized.urlRedacted) {
+        result.urlRedacted = true;
+      }
+      continue;
+    }
+    result[key] = sanitizeNestedUrls(nested, depth + 1);
+  }
+  return result;
+}
+
+function sanitizeConsoleMessage(message: ConsoleMessage): ConsoleMessage {
+  const sanitizedUrl = sanitizeConsoleUrl(message.url);
+  return {
+    ...message,
+    ...sanitizedUrl,
+    ...(message.stackTrace ? { stackTrace: sanitizeNestedUrls(message.stackTrace) } : {}),
+  };
+}
+
+function sanitizeConsoleException(exception: ConsoleException): ConsoleException {
+  const sanitizedUrl = sanitizeConsoleUrl(exception.url);
+  return {
+    ...exception,
+    ...sanitizedUrl,
+    ...(exception.stackTrace ? { stackTrace: sanitizeNestedUrls(exception.stackTrace) } : {}),
+  };
 }
 
 function isErrorLevel(level?: string): boolean {
@@ -287,8 +345,8 @@ class ConsoleTool extends BaseBrowserToolExecutor {
           captureStartTime: read.captureStartTime,
           captureEndTime: read.captureEndTime,
           totalDurationMs: read.totalDurationMs,
-          messages: read.messages as ConsoleMessage[],
-          exceptions: read.exceptions as ConsoleException[],
+          messages: (read.messages as ConsoleMessage[]).map(sanitizeConsoleMessage),
+          exceptions: (read.exceptions as ConsoleException[]).map(sanitizeConsoleException),
           messageCount: read.messageCount,
           exceptionCount: read.exceptionCount,
           messageLimitReached: read.messageLimitReached,
@@ -549,12 +607,12 @@ class ConsoleTool extends BaseBrowserToolExecutor {
             level: entry.level || 'log',
             text: entry.text || '',
             source: entry.source,
-            url: entry.url,
+            ...sanitizeConsoleUrl(entry.url),
             lineNumber: entry.lineNumber,
           };
 
           if (entry.stackTrace) {
-            message.stackTrace = entry.stackTrace;
+            message.stackTrace = sanitizeNestedUrls(entry.stackTrace);
           }
 
           if (entry.args && Array.isArray(entry.args)) {
@@ -578,13 +636,13 @@ class ConsoleTool extends BaseBrowserToolExecutor {
               exceptionDetails.text ||
               exceptionDetails.exception?.description ||
               'Unknown exception',
-            url: exceptionDetails.url,
+            ...sanitizeConsoleUrl(exceptionDetails.url),
             lineNumber: exceptionDetails.lineNumber,
             columnNumber: exceptionDetails.columnNumber,
           };
 
           if (exceptionDetails.stackTrace) {
-            exception.stackTrace = exceptionDetails.stackTrace;
+            exception.stackTrace = sanitizeNestedUrls(exceptionDetails.stackTrace);
           }
 
           exceptions.push(exception);
