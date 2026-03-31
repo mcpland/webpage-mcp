@@ -430,11 +430,22 @@ export async function updateSessionEngineName(
 
 /**
  * Delete a session by ID.
- * Note: Messages associated with this session are NOT automatically deleted.
- * The caller should handle message cleanup if needed.
  */
 export async function deleteSession(sessionId: string): Promise<void> {
   const db = getDb();
+  const existing = await db
+    .select({ projectId: sessions.projectId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+
+  if (existing.length === 0) {
+    return;
+  }
+
+  await db
+    .delete(messages)
+    .where(and(eq(messages.sessionId, sessionId), eq(messages.projectId, existing[0].projectId)));
   await db.delete(sessions).where(eq(sessions.id, sessionId));
 }
 

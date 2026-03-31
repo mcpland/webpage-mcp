@@ -268,3 +268,46 @@ describe('project-scoped chat message RPCs', () => {
     expect(deleteResponse.json).toEqual({ error: 'Project not found' });
   });
 });
+
+describe('agent.sessions.delete', () => {
+  it('removes persisted session messages when deleting the session', async () => {
+    const workspaceBase = await createTempDir('session-delete-workspace-');
+    const dataDir = await createTempDir('session-delete-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'delete-project');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, createMessage, getMessagesByProjectId, dispatchAgentRpc } =
+      await loadAgentModules();
+
+    const project = await upsertProject({
+      name: 'Session Delete Cleanup',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const session = await createSession(project.id, 'codex' as any);
+
+    await createMessage({
+      projectId: project.id,
+      sessionId: session.id,
+      role: 'user',
+      messageType: 'chat',
+      content: 'message that should be deleted with the session',
+    });
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.sessions.delete',
+        params: { sessionId: session.id },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(204);
+    expect(await getMessagesByProjectId(project.id)).toHaveLength(0);
+  });
+});
