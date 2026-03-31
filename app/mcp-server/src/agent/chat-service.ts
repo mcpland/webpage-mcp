@@ -28,6 +28,10 @@ export interface AgentChatServiceOptions {
   defaultEngineName?: EngineName;
 }
 
+function executionKey(sessionId: string, requestId: string): string {
+  return `${sessionId}::${requestId}`;
+}
+
 function normalizeContextString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -87,7 +91,7 @@ export class AgentChatService {
   private readonly defaultEngineName: EngineName;
 
   /**
-   * Registry of currently running executions, keyed by requestId.
+   * Registry of currently running executions, keyed by sessionId + requestId.
    */
   private readonly runningExecutions = new Map<string, RunningExecution>();
 
@@ -416,8 +420,13 @@ export class AgentChatService {
     // Create abort controller for cancellation support
     const abortController = new AbortController();
 
+    const runningKey = executionKey(sessionId, requestId);
+    if (this.runningExecutions.has(runningKey)) {
+      throw new Error('requestId is already active for this session');
+    }
+
     // Register execution in the running executions registry
-    this.runningExecutions.set(requestId, {
+    this.runningExecutions.set(runningKey, {
       requestId,
       sessionId,
       engineName,
@@ -436,11 +445,8 @@ export class AgentChatService {
    * Returns true if the execution was found and cancelled, false otherwise.
    */
   cancelExecution(sessionId: string, requestId: string): boolean {
-    const execution = this.runningExecutions.get(requestId);
+    const execution = this.runningExecutions.get(executionKey(sessionId, requestId));
     if (!execution) {
-      return false;
-    }
-    if (execution.sessionId !== sessionId) {
       return false;
     }
 
@@ -459,7 +465,7 @@ export class AgentChatService {
     });
 
     // Remove from registry
-    this.runningExecutions.delete(requestId);
+    this.runningExecutions.delete(executionKey(sessionId, requestId));
 
     return true;
   }
@@ -470,10 +476,10 @@ export class AgentChatService {
    */
   cancelSessionExecutions(sessionId: string): number {
     let cancelled = 0;
-    for (const [requestId, execution] of this.runningExecutions) {
+    for (const [key, execution] of this.runningExecutions) {
       if (execution.sessionId === sessionId) {
         execution.abortController.abort();
-        this.runningExecutions.delete(requestId);
+        this.runningExecutions.delete(key);
         cancelled++;
       }
     }
@@ -577,7 +583,7 @@ export class AgentChatService {
       });
     } finally {
       // Always remove from running executions when done
-      this.runningExecutions.delete(requestId);
+      this.runningExecutions.delete(executionKey(sessionId, requestId));
     }
   }
 

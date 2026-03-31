@@ -782,10 +782,19 @@ export async function dispatchAgentRpc(
           });
         }
 
-        const { requestId } = await deps.chatService.handleAct(sessionId, {
-          ...(payload as AgentActRequest),
-          dbSessionId: sessionId,
-        });
+        let requestId: string;
+        try {
+          ({ requestId } = await deps.chatService.handleAct(sessionId, {
+            ...(payload as AgentActRequest),
+            dbSessionId: sessionId,
+          }));
+        } catch (error) {
+          const message = normalizeError(error);
+          if (message === 'requestId is already active for this session') {
+            return jsonResponse(HTTP_STATUS.CONFLICT, { error: message });
+          }
+          throw error;
+        }
         const response: AgentActResponse = {
           requestId,
           sessionId,

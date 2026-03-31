@@ -55,6 +55,18 @@ describe('AgentChatService legacy session migration', () => {
     createdAt: new Date('2026-03-25T00:00:00.000Z').toISOString(),
     updatedAt: new Date('2026-03-25T00:00:00.000Z').toISOString(),
   };
+  const alternateSession: AgentSession = {
+    id: 'second-db-session',
+    projectId: 'project-2',
+    engineName: 'claude',
+    engineSessionId: undefined,
+    model: undefined,
+    name: 'Second Session',
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
+    createdAt: new Date('2026-03-25T00:00:00.000Z').toISOString(),
+    updatedAt: new Date('2026-03-25T00:00:00.000Z').toISOString(),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -62,18 +74,41 @@ describe('AgentChatService legacy session migration', () => {
     legacySession.engineSessionId = 'cursor-session-123';
     legacySession.model = 'cursor-proprietary-model';
 
-    projectServiceMocks.getProject.mockResolvedValue({
-      id: 'project-1',
-      name: 'Project',
-      rootPath: process.cwd(),
-      preferredCli: 'claude',
-      createdAt: new Date('2026-03-25T00:00:00.000Z').toISOString(),
-      updatedAt: new Date('2026-03-25T00:00:00.000Z').toISOString(),
+    projectServiceMocks.getProject.mockImplementation(async (projectId: string) => {
+      if (projectId === 'project-1') {
+        return {
+          id: 'project-1',
+          name: 'Project',
+          rootPath: process.cwd(),
+          preferredCli: 'claude',
+          createdAt: new Date('2026-03-25T00:00:00.000Z').toISOString(),
+          updatedAt: new Date('2026-03-25T00:00:00.000Z').toISOString(),
+        };
+      }
+      if (projectId === 'project-2') {
+        return {
+          id: 'project-2',
+          name: 'Project Two',
+          rootPath: process.cwd(),
+          preferredCli: 'claude',
+          createdAt: new Date('2026-03-25T00:00:00.000Z').toISOString(),
+          updatedAt: new Date('2026-03-25T00:00:00.000Z').toISOString(),
+        };
+      }
+      return undefined;
     });
     projectServiceMocks.touchProjectActivity.mockResolvedValue(undefined);
     projectServiceMocks.updateProjectClaudeSessionId.mockResolvedValue(undefined);
     messageServiceMocks.createMessage.mockResolvedValue(undefined);
-    sessionServiceMocks.getSession.mockResolvedValue(legacySession);
+    sessionServiceMocks.getSession.mockImplementation(async (sessionId: string) => {
+      if (sessionId === legacySession.id) {
+        return legacySession;
+      }
+      if (sessionId === alternateSession.id) {
+        return alternateSession;
+      }
+      return undefined;
+    });
     sessionServiceMocks.updateEngineSessionId.mockResolvedValue(undefined);
     sessionServiceMocks.updateManagementInfo.mockResolvedValue(undefined);
     sessionServiceMocks.updateSessionEngineName.mockResolvedValue(undefined);
@@ -210,5 +245,62 @@ describe('AgentChatService legacy session migration', () => {
     });
 
     resolveRun?.();
+  });
+
+  it('allows the same requestId in different sessions while rejecting duplicates in one session', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+
+    const claudeEngine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options) {
+        await new Promise<void>((resolve) => {
+          options.signal?.addEventListener(
+            'abort',
+            () => {
+              resolve();
+            },
+            { once: true },
+          );
+        });
+      },
+    };
+
+    const service = new AgentChatService({
+      engines: [claudeEngine],
+      streamManager: new AgentStreamManager(),
+    });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Run one',
+      dbSessionId: legacySession.id,
+      requestId: 'shared-request-id',
+    });
+    await service.handleAct(alternateSession.id, {
+      instruction: 'Run two',
+      dbSessionId: alternateSession.id,
+      requestId: 'shared-request-id',
+    });
+
+    await vi.waitFor(() => {
+      expect(service.getRunningExecutions()).toHaveLength(2);
+    });
+
+    await expect(
+      service.handleAct(legacySession.id, {
+        instruction: 'Duplicate run',
+        dbSessionId: legacySession.id,
+        requestId: 'shared-request-id',
+      }),
+    ).rejects.toThrow('requestId is already active for this session');
+
+    expect(service.cancelExecution(legacySession.id, 'shared-request-id')).toBe(true);
+    expect(service.cancelExecution(alternateSession.id, 'shared-request-id')).toBe(true);
+
+    await vi.waitFor(() => {
+      expect(service.getRunningExecutions()).toHaveLength(0);
+    });
   });
 });

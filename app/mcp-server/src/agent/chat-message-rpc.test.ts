@@ -228,6 +228,51 @@ describe('agent.sessions.history', () => {
   });
 });
 
+describe('agent.chat.act', () => {
+  it('returns 409 when a requestId is already active for the same session', async () => {
+    const workspaceBase = await createTempDir('act-request-conflict-workspace-');
+    const dataDir = await createTempDir('act-request-conflict-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'project-root');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, dispatchAgentRpc } = await loadAgentModules();
+
+    const project = await upsertProject({
+      name: 'Act Conflict Project',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const session = await createSession(project.id, 'codex' as any);
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.chat.act',
+        params: { sessionId: session.id },
+        body: {
+          instruction: 'hello',
+          requestId: 'duplicate-request',
+        },
+      },
+      {
+        chatService: {
+          getEngineInfos: () => [],
+          handleAct: vi.fn().mockRejectedValue(new Error('requestId is already active for this session')),
+        } as unknown as AgentChatService,
+      },
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json).toEqual({
+      error: 'requestId is already active for this session',
+    });
+  });
+});
+
 describe('project-scoped chat message RPCs', () => {
   it('returns Project not found consistently for list/create/delete', async () => {
     const workspaceBase = await createTempDir('missing-project-workspace-');
