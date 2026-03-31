@@ -29,6 +29,10 @@ import {
   type CreateSessionOptions,
   type UpdateSessionInput,
 } from './session-service';
+import {
+  sanitizeManagementInfoForPublicRead,
+  sanitizeSessionForPublicRead,
+} from './public-session-sanitizer';
 import { getProject } from './project-service';
 import { getDefaultWorkspaceDir, getDefaultProjectRoot } from './storage';
 import { openDirectoryPicker } from './directory-picker';
@@ -328,7 +332,7 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.sessions.list': {
-        const sessions = await getAllSessions();
+        const sessions = (await getAllSessions()).map(sanitizeSessionForPublicRead);
         return jsonResponse(HTTP_STATUS.OK, { sessions });
       }
 
@@ -341,7 +345,7 @@ export async function dispatchAgentRpc(
         if (!project) {
           return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
         }
-        const sessions = await getSessionsByProject(projectId);
+        const sessions = (await getSessionsByProject(projectId)).map(sanitizeSessionForPublicRead);
         return jsonResponse(HTTP_STATUS.OK, { sessions });
       }
 
@@ -376,7 +380,7 @@ export async function dispatchAgentRpc(
           optionsConfig: payload.optionsConfig,
         });
 
-        return jsonResponse(HTTP_STATUS.CREATED, { session });
+        return jsonResponse(HTTP_STATUS.CREATED, { session: sanitizeSessionForPublicRead(session) });
       }
 
       case 'agent.sessions.get': {
@@ -388,7 +392,7 @@ export async function dispatchAgentRpc(
         if (!session) {
           return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
         }
-        return jsonResponse(HTTP_STATUS.OK, { session });
+        return jsonResponse(HTTP_STATUS.OK, { session: sanitizeSessionForPublicRead(session) });
       }
 
       case 'agent.sessions.update': {
@@ -406,7 +410,9 @@ export async function dispatchAgentRpc(
 
         await updateSession(sessionId, updates);
         const updated = await getSession(sessionId);
-        return jsonResponse(HTTP_STATUS.OK, { session: updated });
+        return jsonResponse(HTTP_STATUS.OK, {
+          session: updated ? sanitizeSessionForPublicRead(updated) : updated,
+        });
       }
 
       case 'agent.sessions.delete': {
@@ -478,7 +484,7 @@ export async function dispatchAgentRpc(
           sessionId,
           deletedMessages,
           clearedEngineSessionId: Boolean(existing.engineSessionId),
-          session: updated || null,
+          session: updated ? sanitizeSessionForPublicRead(updated) : null,
         });
       }
 
@@ -494,7 +500,7 @@ export async function dispatchAgentRpc(
         }
 
         return jsonResponse(HTTP_STATUS.OK, {
-          managementInfo: session.managementInfo || null,
+          managementInfo: sanitizeManagementInfoForPublicRead(session.managementInfo) ?? null,
           sessionId,
           engineName: session.engineName,
         });
@@ -523,7 +529,7 @@ export async function dispatchAgentRpc(
         const sourceSessionId = sessionsWithInfo[0]?.id;
 
         return jsonResponse(HTTP_STATUS.OK, {
-          managementInfo: latestInfo,
+          managementInfo: sanitizeManagementInfoForPublicRead(latestInfo) ?? null,
           sourceSessionId,
           projectId,
           sessionsWithInfo: sessionsWithInfo.length,

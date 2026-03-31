@@ -19,7 +19,7 @@ async function loadAgentModules() {
   vi.resetModules();
   const [
     { upsertProject },
-    { createSession, getSessionsByProject },
+    { createSession, getSessionsByProject, updateSession },
     { createMessage, getMessagesByProjectId },
     { dispatchAgentRpc },
     { closeDb },
@@ -35,6 +35,7 @@ async function loadAgentModules() {
     upsertProject,
     createSession,
     getSessionsByProject,
+    updateSession,
     createMessage,
     getMessagesByProjectId,
     dispatchAgentRpc,
@@ -45,10 +46,38 @@ async function loadAgentModules() {
 function createRpcDeps(): { chatService: AgentChatService } {
   return {
     chatService: {
-      getEngineInfos: () => [],
+      getEngineInfos: () => [{ name: 'claude' }],
       cancelSessionExecutions: () => 0,
     } as AgentChatService,
   };
+}
+
+function expectRedactedSessionOptions(session: any) {
+  expect(session?.optionsConfig).toEqual({
+    allowedTools: ['chrome_read_page'],
+    maxTurns: 3,
+  });
+  expect(session?.optionsConfig).not.toHaveProperty('env');
+}
+
+function expectRedactedSessionManagement(session: any) {
+  expect(session?.managementInfo).toEqual({
+    plugins: [{ name: 'filesystem' }],
+    outputStyle: 'concise',
+    lastUpdated: '2026-04-01T00:00:00.000Z',
+  });
+  expect(session?.managementInfo).not.toHaveProperty('cwd');
+  expect(session?.managementInfo?.plugins?.[0]).not.toHaveProperty('path');
+}
+
+function expectRedactedManagementInfo(managementInfo: any) {
+  expect(managementInfo).toEqual({
+    plugins: [{ name: 'filesystem' }],
+    outputStyle: 'concise',
+    lastUpdated: '2026-04-01T00:00:00.000Z',
+  });
+  expect(managementInfo).not.toHaveProperty('cwd');
+  expect(managementInfo?.plugins?.[0]).not.toHaveProperty('path');
 }
 
 afterEach(async () => {
@@ -271,6 +300,194 @@ describe('agent.chat.act', () => {
     expect(response.json).toEqual({
       error: 'requestId is already active for this session',
     });
+  });
+});
+
+describe('agent session public read sanitization', () => {
+  it('redacts env, cwd, and plugin paths from session read responses', async () => {
+    const workspaceBase = await createTempDir('session-read-sanitize-workspace-');
+    const dataDir = await createTempDir('session-read-sanitize-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'session-read-sanitize-project');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, updateSession, dispatchAgentRpc } =
+      await loadAgentModules();
+
+    const project = await upsertProject({
+      name: 'Session Read Sanitize Project',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const session = await createSession(project.id, 'claude' as any, {
+      optionsConfig: {
+        allowedTools: ['chrome_read_page'],
+        maxTurns: 3,
+        env: {
+          OPENAI_API_KEY: 'secret',
+        },
+      },
+    });
+
+    await updateSession(session.id, {
+      managementInfo: {
+        cwd: '/Users/example/private',
+        plugins: [{ name: 'filesystem', path: '/Users/example/.claude/plugins/filesystem' }],
+        outputStyle: 'concise',
+        lastUpdated: '2026-04-01T00:00:00.000Z',
+      },
+    });
+
+    const [
+      allSessionsResponse,
+      projectSessionsResponse,
+      getSessionResponse,
+      sessionClaudeInfoResponse,
+      projectClaudeInfoResponse,
+    ] = await Promise.all([
+      dispatchAgentRpc(
+        {
+          operation: 'agent.sessions.list',
+        },
+        createRpcDeps(),
+      ),
+      dispatchAgentRpc(
+        {
+          operation: 'agent.projects.sessions.list',
+          params: { projectId: project.id },
+        },
+        createRpcDeps(),
+      ),
+      dispatchAgentRpc(
+        {
+          operation: 'agent.sessions.get',
+          params: { sessionId: session.id },
+        },
+        createRpcDeps(),
+      ),
+      dispatchAgentRpc(
+        {
+          operation: 'agent.sessions.claudeInfo',
+          params: { sessionId: session.id },
+        },
+        createRpcDeps(),
+      ),
+      dispatchAgentRpc(
+        {
+          operation: 'agent.projects.claudeInfo',
+          params: { projectId: project.id },
+        },
+        createRpcDeps(),
+      ),
+    ]);
+
+    expect(allSessionsResponse.statusCode).toBe(200);
+    expect(allSessionsResponse.json?.sessions).toHaveLength(1);
+    expectRedactedSessionOptions(allSessionsResponse.json?.sessions?.[0]);
+    expectRedactedSessionManagement(allSessionsResponse.json?.sessions?.[0]);
+
+    expect(projectSessionsResponse.statusCode).toBe(200);
+    expect(projectSessionsResponse.json?.sessions).toHaveLength(1);
+    expectRedactedSessionOptions(projectSessionsResponse.json?.sessions?.[0]);
+    expectRedactedSessionManagement(projectSessionsResponse.json?.sessions?.[0]);
+
+    expect(getSessionResponse.statusCode).toBe(200);
+    expectRedactedSessionOptions(getSessionResponse.json?.session);
+    expectRedactedSessionManagement(getSessionResponse.json?.session);
+
+    expect(sessionClaudeInfoResponse.statusCode).toBe(200);
+    expectRedactedManagementInfo(sessionClaudeInfoResponse.json?.managementInfo);
+
+    expect(projectClaudeInfoResponse.statusCode).toBe(200);
+    expectRedactedManagementInfo(projectClaudeInfoResponse.json?.managementInfo);
+  });
+
+  it('redacts session payloads returned from create, update, and reset', async () => {
+    const workspaceBase = await createTempDir('session-write-sanitize-workspace-');
+    const dataDir = await createTempDir('session-write-sanitize-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'session-write-sanitize-project');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, dispatchAgentRpc } = await loadAgentModules();
+
+    const project = await upsertProject({
+      name: 'Session Write Sanitize Project',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+
+    const createResponse = await dispatchAgentRpc(
+      {
+        operation: 'agent.projects.sessions.create',
+        params: { projectId: project.id },
+        body: {
+          engineName: 'claude',
+          optionsConfig: {
+            allowedTools: ['chrome_read_page'],
+            maxTurns: 3,
+            env: {
+              OPENAI_API_KEY: 'secret',
+            },
+          },
+        },
+      },
+      createRpcDeps(),
+    );
+
+    expect(createResponse.statusCode).toBe(201);
+    expectRedactedSessionOptions(createResponse.json?.session);
+    expect(createResponse.json?.session?.managementInfo).toBeUndefined();
+
+    const sessionId = createResponse.json?.session?.id;
+    expect(typeof sessionId).toBe('string');
+
+    const updateResponse = await dispatchAgentRpc(
+      {
+        operation: 'agent.sessions.update',
+        params: { sessionId },
+        body: {
+          optionsConfig: {
+            allowedTools: ['chrome_read_page'],
+            maxTurns: 3,
+            env: {
+              OPENAI_API_KEY: 'secret',
+            },
+          },
+          managementInfo: {
+            cwd: '/Users/example/private',
+            plugins: [{ name: 'filesystem', path: '/Users/example/.claude/plugins/filesystem' }],
+            outputStyle: 'concise',
+            lastUpdated: '2026-04-01T00:00:00.000Z',
+          },
+        },
+      },
+      createRpcDeps(),
+    );
+
+    expect(updateResponse.statusCode).toBe(200);
+    expectRedactedSessionOptions(updateResponse.json?.session);
+    expectRedactedSessionManagement(updateResponse.json?.session);
+
+    const resetResponse = await dispatchAgentRpc(
+      {
+        operation: 'agent.sessions.reset',
+        params: { sessionId },
+      },
+      createRpcDeps(),
+    );
+
+    expect(resetResponse.statusCode).toBe(200);
+    expectRedactedSessionOptions(resetResponse.json?.session);
+    expectRedactedSessionManagement(resetResponse.json?.session);
   });
 });
 
