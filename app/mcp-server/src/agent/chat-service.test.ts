@@ -161,4 +161,54 @@ describe('AgentChatService legacy session migration', () => {
       }),
     );
   });
+
+  it('does not cancel a running execution when the session id does not match', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+
+    let resolveRun: (() => void) | undefined;
+    const claudeEngine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options) {
+        await new Promise<void>((resolve) => {
+          resolveRun = resolve;
+          options.signal?.addEventListener(
+            'abort',
+            () => {
+              resolve();
+            },
+            { once: true },
+          );
+        });
+      },
+    };
+
+    const service = new AgentChatService({
+      engines: [claudeEngine],
+      streamManager: new AgentStreamManager(),
+    });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Keep running',
+      dbSessionId: legacySession.id,
+      requestId: 'req-cancel-scope',
+    });
+
+    await vi.waitFor(() => {
+      expect(service.getRunningExecutions()).toHaveLength(1);
+    });
+
+    expect(service.cancelExecution('other-session', 'req-cancel-scope')).toBe(false);
+    expect(service.getRunningExecutions()).toHaveLength(1);
+
+    expect(service.cancelExecution(legacySession.id, 'req-cancel-scope')).toBe(true);
+
+    await vi.waitFor(() => {
+      expect(service.getRunningExecutions()).toHaveLength(0);
+    });
+
+    resolveRun?.();
+  });
 });

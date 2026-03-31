@@ -435,9 +435,12 @@ export class AgentChatService {
    * Cancel a running execution by requestId.
    * Returns true if the execution was found and cancelled, false otherwise.
    */
-  cancelExecution(requestId: string): boolean {
+  cancelExecution(sessionId: string, requestId: string): boolean {
     const execution = this.runningExecutions.get(requestId);
     if (!execution) {
+      return false;
+    }
+    if (execution.sessionId !== sessionId) {
       return false;
     }
 

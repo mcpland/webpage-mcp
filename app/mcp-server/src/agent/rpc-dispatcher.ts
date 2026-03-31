@@ -803,7 +803,7 @@ export async function dispatchAgentRpc(
           });
         }
 
-        const cancelled = deps.chatService.cancelExecution(requestId);
+        const cancelled = deps.chatService.cancelExecution(sessionId, requestId);
         if (cancelled) {
           return jsonResponse(HTTP_STATUS.OK, {
             success: true,
