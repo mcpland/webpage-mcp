@@ -82,11 +82,18 @@ export interface AgentAttachment {
 
 export type AgentCliPreference = 'claude' | 'codex';
 
+export interface AgentInstructionContext {
+  pageUrl?: string;
+  selectedText?: string;
+  elementInfo?: unknown;
+}
+
 export interface AgentActRequest {
   instruction: string;
   cliPreference?: AgentCliPreference;
   model?: string;
   attachments?: AgentAttachment[];
+  context?: AgentInstructionContext;
   /**
    * Optional logical project identifier. When provided, the backend
    * can resolve a stable workspace configuration instead of relying

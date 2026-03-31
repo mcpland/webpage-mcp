@@ -12,6 +12,7 @@ export {
   type AgentHeartbeatEvent,
   type RealtimeEvent,
   type AgentAttachment,
+  type AgentInstructionContext,
   type AgentCliPreference,
   type AgentActRequest,
   type AgentActResponse,

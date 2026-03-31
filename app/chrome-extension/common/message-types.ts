@@ -3,7 +3,7 @@
  * Note: Native message types are imported from the shared package
  */
 
-import type { RealtimeEvent } from 'webpage-mcp-shared';
+import type { AgentInstructionContext, RealtimeEvent } from 'webpage-mcp-shared';
 
 // Message targets for routing
 export enum MessageTarget {
@@ -239,17 +239,7 @@ export enum SendMessageType {
  * Context information that can be attached to a Quick Panel AI request.
  * Allows passing page-specific data to enhance the AI's understanding.
  */
-export interface QuickPanelAIContext {
-  /** Current page URL */
-  pageUrl?: string;
-  /** User's text selection on the page */
-  selectedText?: string;
-  /**
-   * Optional element metadata from the page.
-   * Kept as unknown to avoid tight coupling with specific element types.
-   */
-  elementInfo?: unknown;
-}
+export type QuickPanelAIContext = AgentInstructionContext;
 
 /**
  * Payload for sending a message to AI via Quick Panel.

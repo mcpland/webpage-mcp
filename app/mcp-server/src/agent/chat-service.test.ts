@@ -118,4 +118,47 @@ describe('AgentChatService legacy session migration', () => {
     expect(capturedOptions?.resumeClaudeSessionId).toBeUndefined();
     expect(capturedOptions?.model).toBeUndefined();
   });
+
+  it('forwards quick-panel context to the engine without changing persisted user content', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+
+    let capturedOptions: EngineInitOptions | undefined;
+    const claudeEngine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options) {
+        capturedOptions = options;
+      },
+    };
+
+    const service = new AgentChatService({
+      engines: [claudeEngine],
+      streamManager: new AgentStreamManager(),
+    });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Review this UI',
+      dbSessionId: legacySession.id,
+      context: {
+        pageUrl: 'https://example.com/settings',
+        selectedText: 'Save changes',
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(capturedOptions).toBeDefined();
+    });
+
+    expect(capturedOptions?.instruction).toContain('Review this UI');
+    expect(capturedOptions?.instruction).toContain('Additional page context:');
+    expect(capturedOptions?.instruction).toContain('Page URL: https://example.com/settings');
+    expect(capturedOptions?.instruction).toContain('Save changes');
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: 'Review this UI',
+      }),
+    );
+  });
 });

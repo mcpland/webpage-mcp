@@ -28,6 +28,53 @@ export interface AgentChatServiceOptions {
   defaultEngineName?: EngineName;
 }
 
+function normalizeContextString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function buildInstructionWithContext(
+  instruction: string,
+  context: AgentActRequest['context'],
+): string {
+  if (!context) {
+    return instruction;
+  }
+
+  const pageUrl = normalizeContextString(context.pageUrl);
+  const selectedText = normalizeContextString(context.selectedText);
+  let elementInfoText = '';
+
+  if (context.elementInfo !== undefined) {
+    try {
+      const serialized = JSON.stringify(context.elementInfo);
+      if (typeof serialized === 'string' && serialized !== '{}' && serialized !== '[]') {
+        elementInfoText = serialized.slice(0, 1000);
+      }
+    } catch {
+      // Ignore unserializable element info
+    }
+  }
+
+  if (!pageUrl && !selectedText && !elementInfoText) {
+    return instruction;
+  }
+
+  const lines = [instruction, '', 'Additional page context:'];
+  if (pageUrl) {
+    lines.push(`- Page URL: ${pageUrl}`);
+  }
+  if (selectedText) {
+    lines.push('- Selected text:');
+    lines.push('```text');
+    lines.push(selectedText);
+    lines.push('```');
+  }
+  if (elementInfoText) {
+    lines.push(`- Element info: ${elementInfoText}`);
+  }
+  return lines.join('\n');
+}
+
 /**
  * AgentChatService coordinates incoming agent.chat operations and delegates to engines.
  *
@@ -72,6 +119,7 @@ export class AgentChatService {
     if (!trimmed) {
       throw new Error('instruction is required');
     }
+    const engineInstruction = buildInstructionWithContext(trimmed, payload.context);
 
     const requestId = payload.requestId || randomUUID();
     let projectId = payload.projectId;
@@ -345,7 +393,7 @@ export class AgentChatService {
 
     const engineOptions: EngineInitOptions = {
       sessionId,
-      instruction: trimmed,
+      instruction: engineInstruction,
       model: effectiveModel,
       projectRoot,
       requestId,

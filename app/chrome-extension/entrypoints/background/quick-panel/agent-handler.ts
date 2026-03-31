@@ -68,6 +68,7 @@ interface ActiveRequest {
   readonly requestId: string;
   readonly sessionId: string;
   readonly instruction: string;
+  readonly context?: AgentActRequest['context'];
   readonly tabId: number;
   readonly windowId?: number;
   readonly frameId?: number;
@@ -97,6 +98,27 @@ function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function normalizeQuickPanelContext(value: unknown): AgentActRequest['context'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const raw = value as Record<string, unknown>;
+  const pageUrl = normalizeString(raw.pageUrl).trim();
+  const selectedText = normalizeString(raw.selectedText).trim();
+  const elementInfo = raw.elementInfo;
+
+  if (!pageUrl && !selectedText && elementInfo === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(pageUrl ? { pageUrl } : {}),
+    ...(selectedText ? { selectedText } : {}),
+    ...(elementInfo !== undefined ? { elementInfo } : {}),
+  };
+}
+
 function createRequestId(): string {
   // Prefer crypto.randomUUID for proper UUID format
   try {
@@ -114,6 +136,10 @@ function sleep(ms: number): Promise<void> {
 
 function isTerminalStatus(status: string): boolean {
   return status === 'completed' || status === 'error' || status === 'cancelled';
+}
+
+function toPromise<T>(value: Promise<T> | T): Promise<T> {
+  return Promise.resolve(value);
 }
 
 // ============================================================
@@ -414,6 +440,7 @@ async function postActRequest(request: ActiveRequest): Promise<void> {
     dbSessionId: request.sessionId,
     // Enables SSE-first flow and requestId filtering on session-scoped streams
     requestId: request.requestId,
+    ...(request.context ? { context: request.context } : {}),
   };
 
   const response = await requestAgentRpcFetch({
@@ -478,7 +505,9 @@ function isRequestStillActive(request: ActiveRequest): boolean {
 async function startRequest(request: ActiveRequest): Promise<void> {
   try {
     // Best-effort: ensure MCP server is running
-    await chrome.runtime.sendMessage({ type: NativeMessageType.ENSURE_NATIVE }).catch(() => null);
+    await toPromise(chrome.runtime.sendMessage({ type: NativeMessageType.ENSURE_NATIVE })).catch(
+      () => null,
+    );
 
     // Guard: check if cancelled during ENSURE_NATIVE
     if (!isRequestStillActive(request)) return;
@@ -499,13 +528,15 @@ async function startRequest(request: ActiveRequest): Promise<void> {
         ),
       );
       // Open sidepanel without deep-linking to invalid session
-      openAgentChatSidepanel(request.tabId, request.windowId).catch(() => {});
+      void toPromise(openAgentChatSidepanel(request.tabId, request.windowId)).catch(() => {});
       cleanupRequest(request.requestId, 'session_invalid');
       return;
     }
 
     // Best-effort: open sidepanel deep-linked to current session
-    openAgentChatSidepanel(request.tabId, request.windowId, request.sessionId).catch(() => {});
+    void toPromise(
+      openAgentChatSidepanel(request.tabId, request.windowId, request.sessionId),
+    ).catch(() => {});
 
     // Start SSE subscription BEFORE sending act request to avoid missing early events
     const sse = createSseSubscription(request);
@@ -580,13 +611,14 @@ async function handleSendToAI(
   if (!instruction) {
     return { success: false, error: 'instruction is required' };
   }
+  const context = normalizeQuickPanelContext(message?.payload?.context);
 
   const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
   const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
 
   if (!sessionId) {
     // No session selected: open sidepanel for user to select/create one
-    openAgentChatSidepanel(tabId, windowId).catch(() => {});
+    void toPromise(openAgentChatSidepanel(tabId, windowId)).catch(() => {});
     return {
       success: false,
       error:
@@ -619,6 +651,7 @@ async function handleSendToAI(
     requestId,
     sessionId,
     instruction,
+    context,
     tabId,
     windowId: typeof windowId === 'number' ? windowId : undefined,
     frameId,
