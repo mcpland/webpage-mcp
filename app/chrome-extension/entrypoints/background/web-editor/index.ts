@@ -1427,18 +1427,22 @@ export function initWebEditorListeners(): void {
         const payload = normalizeApplyPayload(message.payload);
         (async () => {
           const senderTabId = (_sender as any)?.tab?.id;
-          const sessionId =
-            typeof senderTabId === 'number' ? `web-editor-${senderTabId}` : 'web-editor';
+          const senderWindowId = (_sender as any)?.tab?.windowId;
 
-          const stored = await chrome.storage.local.get(['agent-selected-project-id']);
+          const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
+          const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
 
-          const projectId = normalizeString(stored?.['agent-selected-project-id']).trim() || '';
+          if (typeof senderTabId === 'number') {
+            openAgentChatSidepanel(senderTabId, senderWindowId, sessionId || undefined).catch(
+              () => {},
+            );
+          }
 
-          if (!projectId) {
+          if (!sessionId) {
             return sendResponse({
               success: false,
               error:
-                'No Agent project selected. Open Side Panel → Smart assistant and select/create a project first.',
+                'No Agent session selected. Please select or create a session in AgentChat, then try Apply again.',
             });
           }
 
@@ -1450,7 +1454,7 @@ export function initWebEditorListeners(): void {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               instruction,
-              projectId,
+              dbSessionId: sessionId,
             }),
           });
 

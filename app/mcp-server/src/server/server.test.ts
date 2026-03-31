@@ -107,7 +107,7 @@ describe("Server agent RPC runtime", () => {
 
     const response = await server.invokeAgentRpc({
       operation: "agent.chat.act",
-      params: { sessionId: "legacy-session-runtime" },
+      params: { sessionId: legacySession.id },
       body: {
         instruction: "Say hello",
         dbSessionId: legacySession.id,
@@ -119,6 +119,38 @@ describe("Server agent RPC runtime", () => {
 
     const healedSession = await getSession(legacySession.id);
     expect(healedSession?.engineName).toBe("codex");
+  });
+
+  test("agent.chat.act rejects mismatched session identifiers", async () => {
+    const projectResponse = await server.invokeAgentRpc({
+      operation: "agent.projects.upsert",
+      body: {
+        name: "Session Validation Project",
+        rootPath: projectRoot,
+        preferredCli: "codex",
+      },
+    });
+    const projectId = (projectResponse.json as { project?: { id?: string } })
+      .project?.id;
+
+    expect(projectResponse.statusCode).toBe(200);
+    expect(projectId).toBeTruthy();
+
+    const session = await createSession(projectId!, "codex");
+
+    const response = await server.invokeAgentRpc({
+      operation: "agent.chat.act",
+      params: { sessionId: session.id },
+      body: {
+        instruction: "Say hello",
+        dbSessionId: "different-session-id",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect((response.json as { error?: string }).error).toBe(
+      "dbSessionId must match the sessionId path parameter",
+    );
   });
 
   test("agent.projects.list sanitizes legacy preferredCli values that are no longer supported", async () => {

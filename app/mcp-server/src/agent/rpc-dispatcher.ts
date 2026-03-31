@@ -767,7 +767,25 @@ export async function dispatchAgentRpc(
           });
         }
 
-        const { requestId } = await deps.chatService.handleAct(sessionId, payload as AgentActRequest);
+        const session = await getSession(sessionId);
+        if (!session) {
+          return jsonResponse(HTTP_STATUS.NOT_FOUND, {
+            error: 'Session not found',
+          });
+        }
+
+        const rawDbSessionId =
+          typeof payload.dbSessionId === 'string' ? payload.dbSessionId.trim() : '';
+        if (rawDbSessionId && rawDbSessionId !== sessionId) {
+          return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
+            error: 'dbSessionId must match the sessionId path parameter',
+          });
+        }
+
+        const { requestId } = await deps.chatService.handleAct(sessionId, {
+          ...(payload as AgentActRequest),
+          dbSessionId: sessionId,
+        });
         const response: AgentActResponse = {
           requestId,
           sessionId,
