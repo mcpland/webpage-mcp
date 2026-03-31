@@ -255,3 +255,21 @@ describe('dynamic published flow tools', () => {
     });
   });
 });
+
+describe('public tool exposure', () => {
+  it('rejects direct calls to tools that are not exposed in listTools', async () => {
+    const sendRequestToExtensionAndWait = vi.fn();
+    const ctx = createContext('hidden-tool-call', sendRequestToExtensionAndWait);
+
+    const result = await callToolForContext(ctx, 'chrome_inject_script', {
+      type: 'MAIN',
+      jsScript: 'return 1;',
+    });
+
+    expect(sendRequestToExtensionAndWait).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'Error calling tool: Tool not found: chrome_inject_script' }],
+      isError: true,
+    });
+  });
+});

@@ -63,6 +63,7 @@ const SESSION_RUN_OPTION_KEYS = [
   'screenshotDiffThreshold',
 ] as const;
 const RUN_OPTION_KEY_SET = new Set<string>(SESSION_RUN_OPTION_KEYS);
+const PUBLIC_TOOL_NAME_SET = new Set<string>(TOOL_SCHEMAS.map((tool) => tool.name));
 const publishedFlowsCache = new Map<string, { fetchedAt: number; items: PublishedFlow[] }>();
 const publishedFlowsInflight = new Map<string, Promise<PublishedFlow[]>>();
 
@@ -445,6 +446,18 @@ export const callToolForContext = async (
   args: any,
 ): Promise<CallToolResult> => {
   try {
+    if (!name || (!name.startsWith('flow.') && !PUBLIC_TOOL_NAME_SET.has(name))) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error calling tool: Tool not found: ${name}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
     // If calling a dynamic flow tool (name starts with flow.), proxy to common flow-run tool
     if (name && name.startsWith('flow.')) {
       // We need to resolve flow by slug to ID
