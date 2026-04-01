@@ -304,6 +304,48 @@ describe('agent.chat.act', () => {
   });
 });
 
+describe('agent chat cancellation RPCs', () => {
+  it('returns Session not found for missing cancelRequest and cancelCurrent targets', async () => {
+    const workspaceBase = await createTempDir('chat-cancel-missing-workspace-');
+    const dataDir = await createTempDir('chat-cancel-missing-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { dispatchAgentRpc } = await loadAgentModules();
+
+    const [cancelRequestResponse, cancelCurrentResponse] = await Promise.all([
+      dispatchAgentRpc(
+        {
+          operation: 'agent.chat.cancelRequest',
+          params: {
+            sessionId: 'missing-session-id',
+            requestId: 'missing-request-id',
+          },
+        },
+        createRpcDeps(),
+      ),
+      dispatchAgentRpc(
+        {
+          operation: 'agent.chat.cancelCurrent',
+          params: {
+            sessionId: 'missing-session-id',
+          },
+        },
+        createRpcDeps(),
+      ),
+    ]);
+
+    expect(cancelRequestResponse.statusCode).toBe(404);
+    expect(cancelRequestResponse.json).toEqual({ error: 'Session not found' });
+
+    expect(cancelCurrentResponse.statusCode).toBe(404);
+    expect(cancelCurrentResponse.json).toEqual({ error: 'Session not found' });
+  });
+});
+
 describe('agent session public read sanitization', () => {
   it('redacts env, cwd, and plugin paths from session read responses', async () => {
     const workspaceBase = await createTempDir('session-read-sanitize-workspace-');

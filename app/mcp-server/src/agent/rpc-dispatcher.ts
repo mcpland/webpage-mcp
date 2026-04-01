@@ -831,6 +831,10 @@ export async function dispatchAgentRpc(
             error: 'sessionId and requestId are required',
           });
         }
+        const session = await getSession(sessionId);
+        if (!session) {
+          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
+        }
 
         const cancelled = deps.chatService.cancelExecution(sessionId, requestId);
         if (cancelled) {
@@ -854,6 +858,10 @@ export async function dispatchAgentRpc(
         const sessionId = readParam(params, 'sessionId');
         if (!sessionId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'sessionId is required' });
+        }
+        const session = await getSession(sessionId);
+        if (!session) {
+          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
         }
 
         const cancelledCount = deps.chatService.cancelSessionExecutions(sessionId);
