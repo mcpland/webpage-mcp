@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { eq } from "drizzle-orm";
 import { createSession, getSession } from "../agent/session-service";
 import { getDb, projects } from "../agent/db";
 import { Server } from "./index";
@@ -155,6 +156,7 @@ describe("Server agent RPC runtime", () => {
 
   test("agent.projects.list sanitizes legacy preferredCli values that are no longer supported", async () => {
     const now = new Date().toISOString();
+    const activeClaudeSessionId = `legacy-claude-session-${Date.now()}`;
     await getDb()
       .insert(projects)
       .values({
@@ -164,7 +166,7 @@ describe("Server agent RPC runtime", () => {
         rootPath: projectRoot,
         preferredCli: "cursor",
         selectedModel: null,
-        activeClaudeSessionId: null,
+        activeClaudeSessionId,
         enableWebpageMcp: "1",
         createdAt: now,
         updatedAt: now,
@@ -179,7 +181,7 @@ describe("Server agent RPC runtime", () => {
     const listedProjects =
       (
         response.json as {
-          projects?: Array<{ id: string; preferredCli?: string }>;
+          projects?: Array<{ id: string; preferredCli?: string; activeClaudeSessionId?: string }>;
         }
       ).projects ?? [];
     const legacyProject = listedProjects.find((project) =>
@@ -187,6 +189,44 @@ describe("Server agent RPC runtime", () => {
     );
     expect(legacyProject).toBeTruthy();
     expect(legacyProject?.preferredCli).toBeUndefined();
+    expect(legacyProject?.activeClaudeSessionId).toBeUndefined();
+  });
+
+  test("agent.projects.upsert redacts activeClaudeSessionId from public responses", async () => {
+    const initialResponse = await server.invokeAgentRpc({
+      operation: "agent.projects.upsert",
+      body: {
+        name: "Project Upsert Redaction",
+        rootPath: projectRoot,
+        preferredCli: "claude",
+      },
+    });
+
+    expect(initialResponse.statusCode).toBe(200);
+    const projectId = (initialResponse.json as { project?: { id?: string } }).project?.id;
+    expect(projectId).toBeTruthy();
+
+    const storedResumeId = `project-resume-${Date.now()}`;
+    await getDb()
+      .update(projects)
+      .set({ activeClaudeSessionId: storedResumeId })
+      .where(eq(projects.id, projectId as string));
+
+    const response = await server.invokeAgentRpc({
+      operation: "agent.projects.upsert",
+      body: {
+        id: projectId,
+        name: "Project Upsert Redaction",
+        rootPath: projectRoot,
+        preferredCli: "claude",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(
+      (response.json as { project?: { activeClaudeSessionId?: string } }).project
+        ?.activeClaudeSessionId,
+    ).toBeUndefined();
   });
 
   test("unsupported operation returns bad request", async () => {

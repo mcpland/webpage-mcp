@@ -33,6 +33,7 @@ import {
   sanitizeManagementInfoForPublicRead,
   sanitizeSessionForPublicRead,
 } from './public-session-sanitizer';
+import { sanitizeProjectForPublicRead } from './public-project-sanitizer';
 import { getProject } from './project-service';
 import { getDefaultWorkspaceDir, getDefaultProjectRoot } from './storage';
 import { openDirectoryPicker } from './directory-picker';
@@ -247,7 +248,7 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.projects.list': {
-        const projects = await listProjects();
+        const projects = (await listProjects()).map(sanitizeProjectForPublicRead);
         return jsonResponse(HTTP_STATUS.OK, { projects });
       }
 
@@ -265,7 +266,7 @@ export async function dispatchAgentRpc(
             error: `Invalid preferredCli. Must be one of: ${validEngineNames.join(', ')}`,
           });
         }
-        const project = await upsertProject(payload);
+        const project = sanitizeProjectForPublicRead(await upsertProject(payload));
         return jsonResponse(HTTP_STATUS.OK, { project });
       }
 
