@@ -35,6 +35,7 @@ export function sanitizeManagementInfoForPublicRead(
 export function sanitizeSessionForPublicRead(session: AgentSession): AgentSession {
   return {
     ...session,
+    engineSessionId: undefined,
     optionsConfig: sanitizeOptionsConfigForPublicRead(session.optionsConfig),
     managementInfo: sanitizeManagementInfoForPublicRead(session.managementInfo) ?? undefined,
   };

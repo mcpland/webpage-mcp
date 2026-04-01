@@ -53,6 +53,7 @@ function createRpcDeps(): { chatService: AgentChatService } {
 }
 
 function expectRedactedSessionOptions(session: any) {
+  expect(session?.engineSessionId).toBeUndefined();
   expect(session?.optionsConfig).toEqual({
     allowedTools: ['chrome_read_page'],
     maxTurns: 3,
@@ -324,6 +325,7 @@ describe('agent session public read sanitization', () => {
       allowCreate: true,
     });
     const session = await createSession(project.id, 'claude' as any, {
+      engineSessionId: 'claude-resume-token',
       optionsConfig: {
         allowedTools: ['chrome_read_page'],
         maxTurns: 3,
@@ -431,6 +433,7 @@ describe('agent session public read sanitization', () => {
         params: { projectId: project.id },
         body: {
           engineName: 'claude',
+          engineSessionId: 'should-not-echo',
           optionsConfig: {
             allowedTools: ['chrome_read_page'],
             maxTurns: 3,
