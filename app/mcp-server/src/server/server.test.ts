@@ -42,6 +42,20 @@ describe("Server agent RPC runtime", () => {
     ]);
   });
 
+  test("extension.ask is no longer exposed as a public agent RPC", async () => {
+    const response = await server.invokeAgentRpc({
+      operation: "extension.ask",
+      query: {
+        tool: "chrome_inject_script",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect((response.json as { error?: string }).error).toContain(
+      "Unsupported RPC operation",
+    );
+  });
+
   test("agent.projects.upsert rejects unsupported preferredCli values", async () => {
     const response = await server.invokeAgentRpc({
       operation: "agent.projects.upsert",

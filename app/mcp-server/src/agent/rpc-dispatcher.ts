@@ -231,17 +231,6 @@ export async function dispatchAgentRpc(
         return jsonResponse(HTTP_STATUS.OK, { status: 'ok', message: 'pong' });
       }
 
-      case 'extension.ask': {
-        if (!deps.requestExtension) {
-          return jsonResponse(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-            error: ERROR_MESSAGES.NATIVE_HOST_NOT_AVAILABLE,
-          });
-        }
-        const payload = query && typeof query === 'object' ? (query as Record<string, unknown>) : undefined;
-        const extensionResponse = await deps.requestExtension(payload);
-        return jsonResponse(HTTP_STATUS.OK, { status: 'success', data: extensionResponse });
-      }
-
       case 'agent.engines.list': {
         const engines = deps.chatService.getEngineInfos();
         return jsonResponse(HTTP_STATUS.OK, { engines });

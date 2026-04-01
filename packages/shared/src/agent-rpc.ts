@@ -1,6 +1,5 @@
 export const AGENT_RPC_OPERATIONS = [
   'health.ping',
-  'extension.ask',
   'agent.engines.list',
   'agent.projects.list',
   'agent.projects.upsert',
