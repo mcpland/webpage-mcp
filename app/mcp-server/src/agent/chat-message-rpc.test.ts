@@ -464,12 +464,6 @@ describe('agent session public read sanitization', () => {
               OPENAI_API_KEY: 'secret',
             },
           },
-          managementInfo: {
-            cwd: '/Users/example/private',
-            plugins: [{ name: 'filesystem', path: '/Users/example/.claude/plugins/filesystem' }],
-            outputStyle: 'concise',
-            lastUpdated: '2026-04-01T00:00:00.000Z',
-          },
         },
       },
       createRpcDeps(),
@@ -477,7 +471,7 @@ describe('agent session public read sanitization', () => {
 
     expect(updateResponse.statusCode).toBe(200);
     expectRedactedSessionOptions(updateResponse.json?.session);
-    expectRedactedSessionManagement(updateResponse.json?.session);
+    expect(updateResponse.json?.session?.managementInfo).toBeUndefined();
 
     const resetResponse = await dispatchAgentRpc(
       {
@@ -489,7 +483,7 @@ describe('agent session public read sanitization', () => {
 
     expect(resetResponse.statusCode).toBe(200);
     expectRedactedSessionOptions(resetResponse.json?.session);
-    expectRedactedSessionManagement(resetResponse.json?.session);
+    expect(resetResponse.json?.session?.managementInfo).toBeUndefined();
   });
 
   it('rejects caller-supplied engineSessionId on public create and update RPCs', async () => {
@@ -544,6 +538,46 @@ describe('agent session public read sanitization', () => {
     expect(updateResponse.statusCode).toBe(400);
     expect(updateResponse.json).toEqual({
       error: 'engineSessionId is managed by the engine and cannot be set',
+    });
+  });
+
+  it('rejects caller-supplied managementInfo on public update RPCs', async () => {
+    const workspaceBase = await createTempDir('session-management-info-guard-workspace-');
+    const dataDir = await createTempDir('session-management-info-guard-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'session-management-info-guard-project');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, dispatchAgentRpc } = await loadAgentModules();
+
+    const project = await upsertProject({
+      name: 'Session Management Info Guard Project',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const session = await createSession(project.id, 'claude' as any);
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.sessions.update',
+        params: { sessionId: session.id },
+        body: {
+          managementInfo: {
+            outputStyle: 'spoofed',
+            plugins: [{ name: 'filesystem', path: '/tmp/spoofed' }],
+          },
+        },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json).toEqual({
+      error: 'managementInfo is managed by the engine and cannot be set',
     });
   });
 });

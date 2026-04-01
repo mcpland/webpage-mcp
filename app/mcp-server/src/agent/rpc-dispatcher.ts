@@ -406,6 +406,11 @@ export async function dispatchAgentRpc(
             error: 'engineSessionId is managed by the engine and cannot be set',
           });
         }
+        if (updates.managementInfo !== undefined) {
+          return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
+            error: 'managementInfo is managed by the engine and cannot be set',
+          });
+        }
 
         const existing = await getSession(sessionId);
         if (!existing) {
