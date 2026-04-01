@@ -759,6 +759,51 @@ describe('agent.sessions.delete', () => {
   });
 });
 
+describe('agent.projects.delete', () => {
+  it('cancels running executions for every project session before deletion', async () => {
+    const workspaceBase = await createTempDir('project-delete-cancel-workspace-');
+    const dataDir = await createTempDir('project-delete-cancel-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'project-delete-cancel');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, dispatchAgentRpc, getSessionsByProject } =
+      await loadAgentModules();
+
+    const project = await upsertProject({
+      name: 'Project Delete Cancel',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const sessionA = await createSession(project.id, 'claude' as any);
+    const sessionB = await createSession(project.id, 'codex' as any);
+    const cancelSessionExecutions = vi.fn().mockReturnValue(1);
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.projects.delete',
+        params: { projectId: project.id },
+      },
+      {
+        chatService: {
+          getEngineInfos: () => [{ name: 'claude' }, { name: 'codex' }],
+          cancelSessionExecutions,
+        } as unknown as AgentChatService,
+      },
+    );
+
+    expect(response.statusCode).toBe(204);
+    expect(cancelSessionExecutions).toHaveBeenCalledTimes(2);
+    expect(cancelSessionExecutions).toHaveBeenCalledWith(sessionA.id);
+    expect(cancelSessionExecutions).toHaveBeenCalledWith(sessionB.id);
+    expect(await getSessionsByProject(project.id)).toHaveLength(0);
+  });
+});
+
 describe('agent.projects.sessions.list', () => {
   it('returns Project not found when listing sessions for a missing project', async () => {
     const workspaceBase = await createTempDir('project-sessions-list-workspace-');
