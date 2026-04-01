@@ -836,6 +836,29 @@ describe('agent.projects.delete', () => {
     expect(cancelSessionExecutions).toHaveBeenCalledWith(sessionB.id);
     expect(await getSessionsByProject(project.id)).toHaveLength(0);
   });
+
+  it('returns Project not found when deleting a missing project', async () => {
+    const workspaceBase = await createTempDir('project-delete-missing-workspace-');
+    const dataDir = await createTempDir('project-delete-missing-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { dispatchAgentRpc } = await loadAgentModules();
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.projects.delete',
+        params: { projectId: 'missing-project-id' },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json).toEqual({ error: 'Project not found' });
+  });
 });
 
 describe('agent.projects.sessions.list', () => {

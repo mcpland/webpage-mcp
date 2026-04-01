@@ -264,6 +264,10 @@ export async function dispatchAgentRpc(
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'project id is required' });
         }
+        const project = await getProject(projectId);
+        if (!project) {
+          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
+        }
         const sessions = await getSessionsByProject(projectId);
         for (const session of sessions) {
           deps.chatService.cancelSessionExecutions(session.id);
