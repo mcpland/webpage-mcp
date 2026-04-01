@@ -433,7 +433,6 @@ describe('agent session public read sanitization', () => {
         params: { projectId: project.id },
         body: {
           engineName: 'claude',
-          engineSessionId: 'should-not-echo',
           optionsConfig: {
             allowedTools: ['chrome_read_page'],
             maxTurns: 3,
@@ -491,6 +490,61 @@ describe('agent session public read sanitization', () => {
     expect(resetResponse.statusCode).toBe(200);
     expectRedactedSessionOptions(resetResponse.json?.session);
     expectRedactedSessionManagement(resetResponse.json?.session);
+  });
+
+  it('rejects caller-supplied engineSessionId on public create and update RPCs', async () => {
+    const workspaceBase = await createTempDir('session-engine-id-guard-workspace-');
+    const dataDir = await createTempDir('session-engine-id-guard-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'session-engine-id-guard-project');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createSession, dispatchAgentRpc } = await loadAgentModules();
+
+    const project = await upsertProject({
+      name: 'Session Engine ID Guard Project',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const session = await createSession(project.id, 'claude' as any);
+
+    const [createResponse, updateResponse] = await Promise.all([
+      dispatchAgentRpc(
+        {
+          operation: 'agent.projects.sessions.create',
+          params: { projectId: project.id },
+          body: {
+            engineName: 'claude',
+            engineSessionId: 'attacker-controlled-resume-token',
+          },
+        },
+        createRpcDeps(),
+      ),
+      dispatchAgentRpc(
+        {
+          operation: 'agent.sessions.update',
+          params: { sessionId: session.id },
+          body: {
+            engineSessionId: 'attacker-controlled-resume-token',
+          },
+        },
+        createRpcDeps(),
+      ),
+    ]);
+
+    expect(createResponse.statusCode).toBe(400);
+    expect(createResponse.json).toEqual({
+      error: 'engineSessionId is managed by the engine and cannot be set',
+    });
+
+    expect(updateResponse.statusCode).toBe(400);
+    expect(updateResponse.json).toEqual({
+      error: 'engineSessionId is managed by the engine and cannot be set',
+    });
   });
 });
 

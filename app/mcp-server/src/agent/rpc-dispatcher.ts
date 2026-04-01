@@ -360,6 +360,11 @@ export async function dispatchAgentRpc(
         if (!payload.engineName) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'engineName is required' });
         }
+        if (payload.engineSessionId !== undefined) {
+          return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
+            error: 'engineSessionId is managed by the engine and cannot be set',
+          });
+        }
         if (!isValidEngineName(payload.engineName, validEngineNames)) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
             error: `Invalid engineName. Must be one of: ${validEngineNames.join(', ')}`,
@@ -401,6 +406,11 @@ export async function dispatchAgentRpc(
 
         if (!sessionId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'sessionId is required' });
+        }
+        if (updates.engineSessionId !== undefined) {
+          return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
+            error: 'engineSessionId is managed by the engine and cannot be set',
+          });
         }
 
         const existing = await getSession(sessionId);
