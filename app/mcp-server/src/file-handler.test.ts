@@ -40,6 +40,22 @@ describe('FileHandler temp file safety', () => {
     expect(fs.readFileSync(result.filePath, 'utf8')).toBe('hello');
   });
 
+  it('replaces invalid filename characters before writing temp files', async () => {
+    const { handler, tempDir } = createTestHandler();
+    dirsToCleanup.push(tempDir);
+
+    const result = await handler.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('hello').toString('base64'),
+      fileName: 'bad\u0000name?.txt',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.fileName).toBe('bad_name_.txt');
+    expect(result.filePath).toBe(path.join(tempDir, 'bad_name_.txt'));
+    expect(fs.readFileSync(result.filePath, 'utf8')).toBe('hello');
+  });
+
   it('rejects cleanup paths that escape tempDir via traversal segments', async () => {
     const { handler, tempDir } = createTestHandler();
     dirsToCleanup.push(tempDir);

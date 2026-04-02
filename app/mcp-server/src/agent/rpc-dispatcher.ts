@@ -204,6 +204,32 @@ function toCreateOrUpdateProjectInput(
   };
 }
 
+function toAgentActRequest(payload: Record<string, unknown>): AgentActRequest {
+  return {
+    instruction: readString(payload.instruction) ?? '',
+    cliPreference: readString(payload.cliPreference) as AgentActRequest['cliPreference'],
+    model: readString(payload.model),
+    attachments: Array.isArray(payload.attachments)
+      ? (payload.attachments as AgentActRequest['attachments'])
+      : undefined,
+    context:
+      payload.context && typeof payload.context === 'object' && !Array.isArray(payload.context)
+        ? (payload.context as AgentActRequest['context'])
+        : undefined,
+    projectId: readString(payload.projectId),
+    dbSessionId: readString(payload.dbSessionId),
+    projectRoot: readString(payload.projectRoot),
+    requestId: readString(payload.requestId),
+    clientMeta:
+      payload.clientMeta &&
+      typeof payload.clientMeta === 'object' &&
+      !Array.isArray(payload.clientMeta)
+        ? (payload.clientMeta as Record<string, unknown>)
+        : undefined,
+    displayText: readString(payload.displayText),
+  };
+}
+
 function readOpenTargetFromBody(payload: Record<string, unknown>): string | undefined {
   return readString(payload.target)?.trim();
 }
@@ -786,6 +812,7 @@ export async function dispatchAgentRpc(
             error: 'Invalid act payload',
           });
         }
+        const payloadRecord = payload as Record<string, unknown>;
 
         const session = await getSession(sessionId);
         if (!session) {
@@ -795,7 +822,7 @@ export async function dispatchAgentRpc(
         }
 
         const rawDbSessionId =
-          typeof payload.dbSessionId === 'string' ? payload.dbSessionId.trim() : '';
+          typeof payloadRecord.dbSessionId === 'string' ? payloadRecord.dbSessionId.trim() : '';
         if (rawDbSessionId && rawDbSessionId !== sessionId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
             error: 'dbSessionId must match the sessionId path parameter',
@@ -805,7 +832,7 @@ export async function dispatchAgentRpc(
         let requestId: string;
         try {
           ({ requestId } = await deps.chatService.handleAct(sessionId, {
-            ...(payload as AgentActRequest),
+            ...toAgentActRequest(payloadRecord),
             dbSessionId: sessionId,
           }));
         } catch (error) {

@@ -45,7 +45,7 @@ if (typeof __MAX_CAP_RATE === 'number' && __MAX_CAP_RATE > 0) {
 }
 
 interface ScreenshotToolParams {
-  name: string;
+  name?: string;
   selector?: string;
   tabId?: number;
   background?: boolean;

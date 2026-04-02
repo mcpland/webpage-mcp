@@ -43,7 +43,7 @@ interface HistoryResult {
   query?: string;
 }
 
-function isPublicHistoryUrl(url?: string | null): boolean {
+function isPublicHistoryUrl(url?: string | null): url is string {
   return typeof url === 'string' && url.trim().length > 0 && !hasDisallowedPublicUrlScheme(url);
 }
 
@@ -181,8 +181,9 @@ class HistoryTool extends BaseBrowserToolExecutor {
         const openUrls = new Set<string>();
 
         currentTabs.forEach((tab) => {
-          if (isPublicHistoryUrl(tab.url)) {
-            openUrls.add(tab.url);
+          const { url } = tab;
+          if (isPublicHistoryUrl(url)) {
+            openUrls.add(url);
           }
         });
 

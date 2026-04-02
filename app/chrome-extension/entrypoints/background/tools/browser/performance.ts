@@ -39,6 +39,35 @@ interface TraceSessionState {
   stopPromise?: Promise<{ completed: boolean }>;
 }
 
+function createTraceSessionState(
+  tabId: number,
+  pageUrl: string,
+): TraceSessionState {
+  const state: TraceSessionState = {
+    recording: true,
+    events: [],
+    startedAt: Date.now(),
+    pageUrl,
+    listener: () => undefined,
+  };
+
+  state.listener = (source, method, params) => {
+    if (source.tabId !== tabId) return;
+    if (method === 'Tracing.dataCollected' && params?.value) {
+      try {
+        state.events.push(...(params.value as any[]));
+      } catch {
+        // ignore
+      }
+    } else if (method === 'Tracing.tracingComplete') {
+      state.recording = false;
+      state.stopResolver?.({ completed: true });
+    }
+  };
+
+  return state;
+}
+
 type SavedTraceArtifact = {
   downloadId?: number;
   filename?: string;
@@ -347,25 +376,7 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
 
       await cdpSessionManager.attach(tabId, 'performance');
 
-      state = {
-        recording: true,
-        events: [],
-        startedAt: Date.now(),
-        pageUrl: activeTab.url || '',
-        listener: (source, method, params) => {
-          if (source.tabId !== tabId) return;
-          if (method === 'Tracing.dataCollected' && params?.value) {
-            try {
-              state.events.push(...(params.value as any[]));
-            } catch {
-              // ignore
-            }
-          } else if (method === 'Tracing.tracingComplete') {
-            state.recording = false;
-            state.stopResolver?.({ completed: true });
-          }
-        },
-      };
+      state = createTraceSessionState(tabId, activeTab.url || '');
       chrome.debugger.onEvent.addListener(state.listener);
       sessions.set(tabId, state);
 
@@ -386,10 +397,11 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
       }
 
       if (autoStop) {
+        const traceTabId = tabId;
         setTimeout(
           async () => {
             try {
-              await cdpSessionManager.sendCommand(tabId, 'Tracing.end');
+              await cdpSessionManager.sendCommand(traceTabId, 'Tracing.end');
             } catch {
               // ignore
             }

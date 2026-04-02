@@ -3,6 +3,9 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 
+const INVALID_TEMP_FILE_NAME_CHARS = new Set(['<', '>', ':', '"', '/', '\\', '|', '?', '*']);
+const MAX_CONTROL_CHARACTER_CODE = 31;
+
 /**
  * File handler for managing file uploads through the native messaging host
  */
@@ -176,12 +179,26 @@ export class FileHandler {
       return null;
     }
 
-    const baseName = path.basename(trimmed).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim();
+    const baseName = this.sanitizeTempFileBaseName(path.basename(trimmed)).trim();
     if (!baseName || baseName === '.' || baseName === '..') {
       return null;
     }
 
     return baseName;
+  }
+
+  private sanitizeTempFileBaseName(fileName: string): string {
+    let sanitized = '';
+
+    for (const char of fileName) {
+      const charCode = char.charCodeAt(0);
+      sanitized +=
+        charCode <= MAX_CONTROL_CHARACTER_CODE || INVALID_TEMP_FILE_NAME_CHARS.has(char)
+          ? '_'
+          : char;
+    }
+
+    return sanitized;
   }
 
   private resolveTempFilePath(fileName: string): string {
