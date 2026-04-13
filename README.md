@@ -11,9 +11,9 @@
 <p align="center">
   <a href="https://github.com/mcpland/webpage-mcp/actions/workflows/ci.yml"><img src="https://github.com/mcpland/webpage-mcp/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://www.npmjs.com/package/webpage-mcp"><img src="https://img.shields.io/npm/v/webpage-mcp.svg" alt="npm" /></a>
-  <a href="https://github.com/mcpland/webpage-mcp/releases"><img src="https://img.shields.io/github/v/release/mcpland/webpage-mcp.svg" alt="Release" /></a>
+  <a href="https://chromewebstore.google.com/detail/webpage-mcp-connector/iehgbogeakiedihodennfcnigojnncag?hl=en"><img src="https://img.shields.io/github/v/release/mcpland/webpage-mcp.svg" alt="Release" /></a>
   <a href="https://github.com/mcpland/webpage-mcp/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/webpage-mcp" alt="License" /></a>
-  <a href="https://github.com/mcpland/webpage-mcp/releases"><img src="https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Extension" /></a>
+  <a href="https://chromewebstore.google.com/detail/webpage-mcp-connector/iehgbogeakiedihodennfcnigojnncag?hl=en"><img src="https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Extension" /></a>
 </p>
 
 <p align="center">
