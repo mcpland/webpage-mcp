@@ -1,4 +1,4 @@
-# webpage-mcp (MCP Server Package)
+# webpage-mcp
 
 [![CI](https://github.com/mcpland/webpage-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mcpland/webpage-mcp/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/webpage-mcp.svg)](https://www.npmjs.com/package/webpage-mcp)
