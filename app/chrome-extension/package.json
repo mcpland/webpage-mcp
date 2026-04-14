@@ -3,7 +3,7 @@
   "description": "A chrome extension connector to use your own webpage as a mcp server",
   "author": "unadlib",
   "private": true,
-  "version": "0.7.1",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",
