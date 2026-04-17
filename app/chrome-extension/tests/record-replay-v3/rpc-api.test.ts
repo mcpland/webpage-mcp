@@ -212,6 +212,7 @@ describe("V3 RPC Queue Management APIs", () => {
     scheduler = createMockScheduler();
     runIdCounter = 0;
     fixedNow = 1_700_000_000_000;
+    delete (chrome.runtime as any).getManifest;
 
     server = new RpcServer({
       storage,
@@ -223,6 +224,46 @@ describe("V3 RPC Queue Management APIs", () => {
   });
 
   describe("rr_v3.enqueueRun", () => {
+    it("binds UI-initiated runs to the current active tab by default", async () => {
+      const flow = createTestFlow("flow-active-tab");
+      getInternal(storage).flowsMap.set(flow.id, flow);
+
+      (chrome.runtime as any).getManifest = vi.fn(() => ({ manifest_version: 3 }));
+      const tabsQuery = chrome.tabs.query as ReturnType<typeof vi.fn>;
+      tabsQuery.mockResolvedValue([
+        {
+          id: 77,
+          active: true,
+          currentWindow: true,
+          url: "https://example.com/form",
+          status: "complete",
+          windowId: 1,
+        },
+      ]);
+
+      await (server as unknown as { handleRequest: Function }).handleRequest(
+        {
+          method: "rr_v3.enqueueRun",
+          params: { flowId: "flow-active-tab" },
+          requestId: "req-active-tab",
+        },
+        { subscriptions: new Set() },
+      );
+
+      expect(storage.runs.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flowId: "flow-active-tab",
+          tabId: 77,
+        }),
+      );
+      expect(storage.queue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flowId: "flow-active-tab",
+          tabId: 77,
+        }),
+      );
+    });
+
     it("creates run record, enqueues, emits event, and kicks scheduler", async () => {
       // Setup: add a flow
       const flow = createTestFlow("flow-1");

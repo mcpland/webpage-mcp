@@ -75,7 +75,8 @@
     const tag = el.tagName.toLowerCase();
     if (tag === 'select') {
       const sel = /** @type {HTMLSelectElement} */ (el);
-      const opt = sel.querySelector('option[selected]') || sel.options[sel.selectedIndex];
+      const opt =
+        sel.querySelector('option[selected]') || sel.options[sel.selectedIndex];
       if (opt && opt.textContent) return opt.textContent.trim();
     }
     const aria = el.getAttribute('aria-label');
@@ -87,15 +88,19 @@
     const alt = el.getAttribute('alt');
     if (alt && alt.trim()) return alt.trim();
     if (/** @type {HTMLElement} */ (el).id) {
-      const lab = document.querySelector(`label[for="${/** @type {HTMLElement} */ (el).id}"]`);
-      if (lab && lab.textContent && lab.textContent.trim()) return lab.textContent.trim();
+      const lab = document.querySelector(
+        `label[for="${/** @type {HTMLElement} */ (el).id}"]`,
+      );
+      if (lab && lab.textContent && lab.textContent.trim())
+        return lab.textContent.trim();
     }
     if (tag === 'input') {
       const input = /** @type {HTMLInputElement} */ (el);
       const type = input.getAttribute('type') || '';
       const val = input.getAttribute('value');
       if (type === 'submit' && val && val.trim()) return val.trim();
-      if (input.value && input.value.length < 50 && input.value.trim()) return input.value.trim();
+      if (input.value && input.value.length < 50 && input.value.trim())
+        return input.value.trim();
     }
     if (['button', 'a', 'summary'].includes(tag)) {
       let text = '';
@@ -134,7 +139,12 @@
    */
   function isVisible(el) {
     const cs = window.getComputedStyle(/** @type {HTMLElement} */ (el));
-    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+    if (
+      cs.display === 'none' ||
+      cs.visibility === 'hidden' ||
+      cs.opacity === '0'
+    )
+      return false;
     const he = /** @type {HTMLElement} */ (el);
     return he.offsetWidth > 0 && he.offsetHeight > 0;
   }
@@ -146,7 +156,17 @@
   function isInteractive(el) {
     // Native interactive tags
     const tag = el.tagName.toLowerCase();
-    if (['a', 'button', 'input', 'select', 'textarea', 'details', 'summary'].includes(tag))
+    if (
+      [
+        'a',
+        'button',
+        'input',
+        'select',
+        'textarea',
+        'details',
+        'summary',
+      ].includes(tag)
+    )
       return true;
 
     // Generic interactive hints
@@ -279,7 +299,9 @@
       if (!node || visited.has(node)) continue;
       visited.add(node);
       try {
-        const root = /** @type {any} */ (node).shadowRoot || (node.nodeType === 9 ? node : null);
+        const root =
+          /** @type {any} */ (node).shadowRoot ||
+          (node.nodeType === 9 ? node : null);
         if (root) {
           try {
             const hit = root.querySelector(selector);
@@ -293,7 +315,8 @@
         for (let i = 0; i < children.length; i++) stack.push(children[i]);
         const sr = /** @type {any} */ (node).shadowRoot;
         if (sr && sr.children) {
-          for (let i = 0; i < sr.children.length; i++) stack.push(sr.children[i]);
+          for (let i = 0; i < sr.children.length; i++)
+            stack.push(sr.children[i]);
         }
       } catch (_) {}
     }
@@ -368,7 +391,10 @@
             for (let i = 0; i < shadowMatches.length; i++) {
               if (recordMatch(shadowMatches[i])) {
                 // Early exit: either found first match (allowMultiple) or found multiple (not allowed)
-                return { element: firstMatch, matchCount: allowMultiple ? 1 : 2 };
+                return {
+                  element: firstMatch,
+                  matchCount: allowMultiple ? 1 : 2,
+                };
               }
             }
           } catch (e) {
@@ -463,13 +489,19 @@
    */
   function shouldInclude(el, cfg) {
     const tag = el.tagName.toLowerCase();
-    if (['script', 'style', 'meta', 'link', 'title', 'noscript'].includes(tag)) return false;
+    if (['script', 'style', 'meta', 'link', 'title', 'noscript'].includes(tag))
+      return false;
     if (el.getAttribute('aria-hidden') === 'true') return false;
     if (!isVisible(el)) return false;
     if (cfg.filter !== 'all') {
       const r = /** @type {HTMLElement} */ (el).getBoundingClientRect();
       if (
-        !(r.top < window.innerHeight && r.bottom > 0 && r.left < window.innerWidth && r.right > 0)
+        !(
+          r.top < window.innerHeight &&
+          r.bottom > 0 &&
+          r.left < window.innerWidth &&
+          r.right > 0
+        )
       )
         return false;
     }
@@ -500,7 +532,11 @@
     }
     let path = '';
     let current = el;
-    while (current && current.nodeType === Node.ELEMENT_NODE && current.tagName !== 'BODY') {
+    while (
+      current &&
+      current.nodeType === Node.ELEMENT_NODE &&
+      current.tagName !== 'BODY'
+    ) {
       let selector = current.tagName.toLowerCase();
       const parent = current.parentElement;
       if (parent) {
@@ -527,7 +563,8 @@
    * @param {Array<{ref:string, selector:string, rect:{x:number,y:number,width:number,height:number}}>} refMap
    */
   function traverse(el, depth, cfg, out, refMap, state) {
-    const maxDepth = cfg && typeof cfg.maxDepth === 'number' ? cfg.maxDepth : MAX_DEPTH;
+    const maxDepth =
+      cfg && typeof cfg.maxDepth === 'number' ? cfg.maxDepth : MAX_DEPTH;
     if (depth > maxDepth || !el || !el.tagName) return;
     if (state.processed >= MAX_NODES) return;
     if (state.visited.has(el)) return;
@@ -538,7 +575,10 @@
       let label = inferLabel(el);
       let refId = null;
       for (const k in window.__claudeElementMap) {
-        if (window.__claudeElementMap[k].deref && window.__claudeElementMap[k].deref() === el) {
+        if (
+          window.__claudeElementMap[k].deref &&
+          window.__claudeElementMap[k].deref() === el
+        ) {
           refId = k;
           break;
         }
@@ -556,7 +596,8 @@
         line += ` "${label.replace(/"/g, '\\"')}"`;
       }
       line += ` [ref=${refId}] (x=${cx},y=${cy})`;
-      if (/** @type {HTMLElement} */ (el).id) line += ` id="${/** @type {HTMLElement} */ (el).id}"`;
+      if (/** @type {HTMLElement} */ (el).id)
+        line += ` id="${/** @type {HTMLElement} */ (el).id}"`;
       const href = el.getAttribute('href');
       if (href) line += ` href="${href}"`;
       const type = el.getAttribute('type');
@@ -565,7 +606,9 @@
       if (placeholder) line += ` placeholder="${placeholder}"`;
       // Surface disabled/pointer-events for better agent judgement
       try {
-        const disabled = el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true';
+        const disabled =
+          el.hasAttribute('disabled') ||
+          el.getAttribute('aria-disabled') === 'true';
         if (disabled) line += ` disabled`;
         const cs = window.getComputedStyle(/** @type {HTMLElement} */ (el));
         if (cs && cs.pointerEvents === 'none') line += ` pe=none`;
@@ -596,7 +639,14 @@
       const children = /** @type {HTMLElement} */ (el).children;
       for (let i = 0; i < children.length; i++) {
         if (state.processed >= MAX_NODES) break;
-        traverse(children[i], include ? depth + 1 : depth, cfg, out, refMap, state);
+        traverse(
+          children[i],
+          include ? depth + 1 : depth,
+          cfg,
+          out,
+          refMap,
+          state,
+        );
       }
     }
     // Traverse shadow DOM roots (limited by maxDepth and MAX_NODES)
@@ -606,7 +656,14 @@
         const srChildren = anyEl.shadowRoot.children || [];
         for (let i = 0; i < srChildren.length; i++) {
           if (state.processed >= MAX_NODES) break;
-          traverse(srChildren[i], include ? depth + 1 : depth, cfg, out, refMap, state);
+          traverse(
+            srChildren[i],
+            include ? depth + 1 : depth,
+            cfg,
+            out,
+            refMap,
+            state,
+          );
         }
       }
     } catch (_) {
@@ -621,7 +678,8 @@
    */
   function __generateAccessibilityTree(filter, options) {
     try {
-      const start = performance && performance.now ? performance.now() : Date.now();
+      const start =
+        performance && performance.now ? performance.now() : Date.now();
       const out = [];
       const cfg = { filter: filter || undefined };
 
@@ -651,13 +709,17 @@
 
       if (root) traverse(root, 0, cfg, out, refMap, state);
       for (const k in window.__claudeElementMap) {
-        if (!window.__claudeElementMap[k].deref || !window.__claudeElementMap[k].deref())
+        if (
+          !window.__claudeElementMap[k].deref ||
+          !window.__claudeElementMap[k].deref()
+        )
           delete window.__claudeElementMap[k];
       }
       const pageContent = out
         .filter((line) => !/^\s*- generic \[ref=ref_\d+\]$/.test(line))
         .join('\n');
-      const end = performance && performance.now ? performance.now() : Date.now();
+      const end =
+        performance && performance.now ? performance.now() : Date.now();
       return {
         pageContent,
         focus,
@@ -732,6 +794,95 @@
     };
   }
 
+  function findChildFrameElementForWindow(sourceWindow) {
+    const frames = Array.from(document.querySelectorAll('iframe, frame'));
+    for (const frame of frames) {
+      try {
+        if (frame.contentWindow === sourceWindow) {
+          return frame;
+        }
+      } catch {}
+    }
+    return null;
+  }
+
+  function projectPointToTopViewport(point) {
+    const normalized = {
+      x: Number(point && point.x),
+      y: Number(point && point.y),
+    };
+    if (!Number.isFinite(normalized.x) || !Number.isFinite(normalized.y)) {
+      return Promise.reject(new Error('Invalid point for frame projection'));
+    }
+    if (window === window.top) {
+      return Promise.resolve({
+        x: Math.round(normalized.x),
+        y: Math.round(normalized.y),
+      });
+    }
+
+    return new Promise((resolve, reject) => {
+      const reqId = `rrp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      let timeoutHandle = null;
+
+      const cleanup = () => {
+        window.removeEventListener('message', listener, true);
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+      };
+
+      const listener = (ev) => {
+        try {
+          const data = ev && ev.data;
+          if (
+            !data ||
+            data.type !== 'rr-bridge-project-point-result' ||
+            data.reqId !== reqId
+          )
+            return;
+          if (ev.source !== window.parent) return;
+
+          cleanup();
+          if (data.success && data.point) {
+            resolve({
+              x: Math.round(Number(data.point.x)),
+              y: Math.round(Number(data.point.y)),
+            });
+            return;
+          }
+          reject(
+            new Error(data.error || 'Failed to project point to top viewport'),
+          );
+        } catch (error) {
+          cleanup();
+          reject(error);
+        }
+      };
+
+      window.addEventListener('message', listener, true);
+      timeoutHandle = setTimeout(() => {
+        cleanup();
+        reject(new Error('Timed out while projecting point to top viewport'));
+      }, 2000);
+
+      try {
+        window.parent.postMessage(
+          {
+            type: 'rr-bridge-project-point',
+            reqId,
+            point: normalized,
+          },
+          '*',
+        );
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    });
+  }
+
   function forwardHoverRefToChildren(ref) {
     return new Promise((resolve) => {
       const frames = Array.from(document.querySelectorAll('iframe, frame'));
@@ -742,18 +893,29 @@
       const reqId = `hover_ref_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const listener = (ev) => {
         const data = ev?.data;
-        if (!data || data.type !== 'rr-bridge-hover-ref-result' || data.reqId !== reqId) return;
+        if (
+          !data ||
+          data.type !== 'rr-bridge-hover-ref-result' ||
+          data.reqId !== reqId
+        )
+          return;
         window.removeEventListener('message', listener, true);
         resolve(data.result);
       };
       window.addEventListener('message', listener, true);
       setTimeout(() => {
         window.removeEventListener('message', listener, true);
-        resolve({ success: false, error: `ref "${ref}" not found in child frames` });
+        resolve({
+          success: false,
+          error: `ref "${ref}" not found in child frames`,
+        });
       }, 1500);
       for (const frame of frames) {
         try {
-          frame.contentWindow?.postMessage({ type: 'rr-bridge-hover-ref', reqId, ref }, '*');
+          frame.contentWindow?.postMessage(
+            { type: 'rr-bridge-hover-ref', reqId, ref },
+            '*',
+          );
         } catch {}
       }
     });
@@ -792,7 +954,10 @@
             });
             const title = document.createElement('div');
             title.textContent = 'Record-Replay Run log';
-            Object.assign(title.style, { fontWeight: 'bold', marginBottom: '6px' });
+            Object.assign(title.style, {
+              fontWeight: 'bold',
+              marginBottom: '6px',
+            });
             const body = document.createElement('div');
             body.id = '__rr_overlay_body';
             root.appendChild(title);
@@ -812,7 +977,10 @@
           sendResponse({ success: true });
           return true;
         } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          sendResponse({
+            success: false,
+            error: String(e && e.message ? e.message : e),
+          });
           return true;
         }
       }
@@ -932,12 +1100,14 @@
             }
             // aria
             const aria = el.getAttribute && el.getAttribute('aria-label');
-            if (aria) cands.push({ type: 'aria', value: `textbox[name=${aria}]` });
+            if (aria)
+              cands.push({ type: 'aria', value: `textbox[name=${aria}]` });
             // text for clickable
             const tag = (el.tagName || '').toLowerCase();
             if (['button', 'a', 'summary'].includes(tag)) {
               const text = (el.textContent || '').trim();
-              if (text) cands.push({ type: 'text', value: text.substring(0, 64) });
+              if (text)
+                cands.push({ type: 'text', value: text.substring(0, 64) });
             }
             // fallback path selector
             const gen = (node) => {
@@ -1016,7 +1186,10 @@
           document.addEventListener('keydown', onKey, true);
           return true; // async
         } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          sendResponse({
+            success: false,
+            error: String(e && e.message ? e.message : e),
+          });
           return true;
         }
       }
@@ -1027,7 +1200,10 @@
           sendResponse({ success: true });
           return true;
         } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          sendResponse({
+            success: false,
+            error: String(e && e.message ? e.message : e),
+          });
           return true;
         }
       }
@@ -1060,11 +1236,16 @@
                 // Find target frame element in current document
                 let frameEl = null;
                 try {
-                  frameEl = querySelectorDeepFirst(frameSel) || document.querySelector(frameSel);
+                  frameEl =
+                    querySelectorDeepFirst(frameSel) ||
+                    document.querySelector(frameSel);
                 } catch {}
                 if (
                   !frameEl ||
-                  !(frameEl instanceof HTMLIFrameElement || frameEl instanceof HTMLFrameElement)
+                  !(
+                    frameEl instanceof HTMLIFrameElement ||
+                    frameEl instanceof HTMLFrameElement
+                  )
                 ) {
                   sendResponse({
                     success: false,
@@ -1118,7 +1299,10 @@
                         href: data.href,
                       });
                     } else {
-                      sendResponse({ success: false, error: data.error || 'child failed' });
+                      sendResponse({
+                        success: false,
+                        error: data.error || 'child failed',
+                      });
                     }
                   } catch (e) {
                     if (!responded) {
@@ -1160,7 +1344,10 @@
                 return true; // async response via message bridge
               }
             } catch (e) {
-              sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+              sendResponse({
+                success: false,
+                error: String(e && e.message ? e.message : e),
+              });
               return true;
             }
           }
@@ -1182,7 +1369,8 @@
             const query = normalize(textQuery);
             const bigrams = (s) => {
               const arr = [];
-              for (let i = 0; i < s.length - 1; i++) arr.push(s.slice(i, i + 2));
+              for (let i = 0; i < s.length - 1; i++)
+                arr.push(s.slice(i, i + 2));
               return arr;
             };
             const dice = (a, b) => {
@@ -1210,14 +1398,23 @@
               const node = /** @type {any} */ (stack.pop());
               if (!node || !(node instanceof Element)) continue;
               try {
-                if (limitTag && String(node.tagName || '').toUpperCase() !== limitTag) {
+                if (
+                  limitTag &&
+                  String(node.tagName || '').toUpperCase() !== limitTag
+                ) {
                   // still traverse into children/shadow for performance? yes
                 } else {
                   const cs = window.getComputedStyle(node);
-                  if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') {
+                  if (
+                    cs.display === 'none' ||
+                    cs.visibility === 'hidden' ||
+                    cs.opacity === '0'
+                  ) {
                     /* skip hidden */
                   } else {
-                    const rect = /** @type {HTMLElement} */ (node).getBoundingClientRect();
+                    const rect = /** @type {HTMLElement} */ (
+                      node
+                    ).getBoundingClientRect();
                     if (rect.width > 0 && rect.height > 0) {
                       const txt = normalize(node.textContent || '');
                       if (txt) {
@@ -1227,7 +1424,10 @@
                         }
                         const sc = dice(txt, query);
                         if (sc > best.score)
-                          best = { el: /** @type {Element} */ (node), score: sc };
+                          best = {
+                            el: /** @type {Element} */ (node),
+                            score: sc,
+                          };
                       }
                     }
                   }
@@ -1236,12 +1436,14 @@
               // push children and shadow children
               try {
                 const children = node.children || [];
-                for (let i = 0; i < children.length; i++) stack.push(children[i]);
+                for (let i = 0; i < children.length; i++)
+                  stack.push(children[i]);
               } catch {}
               try {
                 const sr = node.shadowRoot;
                 if (sr && sr.children) {
-                  for (let i = 0; i < sr.children.length; i++) stack.push(sr.children[i]);
+                  for (let i = 0; i < sr.children.length; i++)
+                    stack.push(sr.children[i]);
                 }
               } catch {}
               if (++visited > 8000) break;
@@ -1258,7 +1460,10 @@
               return true;
             }
             if (result.matchCount === 0) {
-              sendResponse({ success: false, error: `selector not found: ${sel}` });
+              sendResponse({
+                success: false,
+                error: `selector not found: ${sel}`,
+              });
               return true;
             }
             if (!allowMultiple && result.matchCount > 1) {
@@ -1280,7 +1485,10 @@
               return true;
             }
             if (result.matchCount === 0) {
-              sendResponse({ success: false, error: `selector not found: ${sel}` });
+              sendResponse({
+                success: false,
+                error: `selector not found: ${sel}`,
+              });
               return true;
             }
             if (!allowMultiple && result.matchCount > 1) {
@@ -1293,12 +1501,18 @@
             el = result.element;
           }
           if (!el) {
-            sendResponse({ success: false, error: `selector not found: ${sel}` });
+            sendResponse({
+              success: false,
+              error: `selector not found: ${sel}`,
+            });
             return true;
           }
           let refId = null;
           for (const k in window.__claudeElementMap) {
-            if (window.__claudeElementMap[k].deref && window.__claudeElementMap[k].deref() === el) {
+            if (
+              window.__claudeElementMap[k].deref &&
+              window.__claudeElementMap[k].deref() === el
+            ) {
               refId = k;
               break;
             }
@@ -1318,7 +1532,10 @@
           });
           return true;
         } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          sendResponse({
+            success: false,
+            error: String(e && e.message ? e.message : e),
+          });
           return true;
         }
       }
@@ -1326,7 +1543,10 @@
         handleHoverForRef(String(request.ref || '').trim())
           .then((result) => sendResponse(result))
           .catch((error) =>
-            sendResponse({ success: false, error: error?.message || String(error) }),
+            sendResponse({
+              success: false,
+              error: error?.message || String(error),
+            }),
           );
         return true;
       }
@@ -1335,12 +1555,18 @@
           const sel = String(request.selector || '').trim();
           const name = String(request.name || '').trim();
           if (!sel || !name) {
-            sendResponse({ success: false, error: 'selector and name are required' });
+            sendResponse({
+              success: false,
+              error: 'selector and name are required',
+            });
             return true;
           }
           const el = document.querySelector(sel) || querySelectorDeepFirst(sel);
           if (!el) {
-            sendResponse({ success: false, error: `selector not found: ${sel}` });
+            sendResponse({
+              success: false,
+              error: `selector not found: ${sel}`,
+            });
             return true;
           }
           let value = null;
@@ -1358,7 +1584,10 @@
           sendResponse({ success: true, value });
           return true;
         } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          sendResponse({
+            success: false,
+            error: String(e && e.message ? e.message : e),
+          });
           return true;
         }
       }
@@ -1411,11 +1640,16 @@
             overflow: 'auto',
             boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
             padding: '16px',
-            fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif',
+            fontFamily:
+              'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif',
           });
           const title = document.createElement('div');
           title.textContent = 'Please enter playback parameters';
-          Object.assign(title.style, { fontSize: '16px', fontWeight: '600', marginBottom: '12px' });
+          Object.assign(title.style, {
+            fontSize: '16px',
+            fontWeight: '600',
+            marginBottom: '12px',
+          });
           const form = document.createElement('form');
           for (const v of vars) {
             const row = document.createElement('div');
@@ -1444,7 +1678,11 @@
             form.appendChild(row);
           }
           const actions = document.createElement('div');
-          Object.assign(actions.style, { display: 'flex', gap: '8px', marginTop: '12px' });
+          Object.assign(actions.style, {
+            display: 'flex',
+            gap: '8px',
+            marginTop: '12px',
+          });
           const ok = document.createElement('button');
           ok.type = 'submit';
           ok.textContent = 'OK';
@@ -1487,15 +1725,21 @@
           form.onsubmit = (e) => {
             e.preventDefault();
             for (const v of vars) {
-              const el = form.querySelector(`input[name="${CSS.escape(String(v.key))}"]`);
-              if (el) values[v.key] = /** @type {HTMLInputElement} */ (el).value;
+              const el = form.querySelector(
+                `input[name="${CSS.escape(String(v.key))}"]`,
+              );
+              if (el)
+                values[v.key] = /** @type {HTMLInputElement} */ (el).value;
             }
             cleanup();
             sendResponse({ success: true, values });
           };
           return true; // async
         } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          sendResponse({
+            success: false,
+            error: String(e && e.message ? e.message : e),
+          });
           return true;
         }
       }
@@ -1504,84 +1748,119 @@
         try {
           const map = window.__claudeElementMap;
           const weak = map && map[ref];
-          const el = weak && typeof weak.deref === 'function' ? weak.deref() : null;
+          const el =
+            weak && typeof weak.deref === 'function' ? weak.deref() : null;
           if (!el || !(el instanceof Element)) {
-            sendResponse({ success: false, error: `ref "${ref}" not found or expired` });
+            sendResponse({
+              success: false,
+              error: `ref "${ref}" not found or expired`,
+            });
             return true;
           }
           const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
-          sendResponse({
-            success: true,
-            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-            center: {
-              x: Math.round(rect.left + rect.width / 2),
-              y: Math.round(rect.top + rect.height / 2),
-            },
-            selector: (function () {
-              // Simple selector generation inline to avoid duplication
-              const generateSelector = function (node) {
-                if (!(node instanceof Element)) return '';
-                if (node.id) {
-                  const idSel = `#${CSS.escape(node.id)}`;
-                  if (document.querySelectorAll(idSel).length === 1) return idSel;
+          const center = {
+            x: Math.round(rect.left + rect.width / 2),
+            y: Math.round(rect.top + rect.height / 2),
+          };
+          const selector = (function () {
+            // Simple selector generation inline to avoid duplication
+            const generateSelector = function (node) {
+              if (!(node instanceof Element)) return '';
+              if (node.id) {
+                const idSel = `#${CSS.escape(node.id)}`;
+                if (document.querySelectorAll(idSel).length === 1) return idSel;
+              }
+              // prefer unique class selectors if available
+              try {
+                const classes = Array.from(node.classList || []).filter(
+                  (c) => c && /^[a-zA-Z0-9_-]+$/.test(c),
+                );
+                for (const cls of classes) {
+                  const sel = `.${CSS.escape(cls)}`;
+                  if (document.querySelectorAll(sel).length === 1) return sel;
                 }
-                // prefer unique class selectors if available
-                try {
-                  const classes = Array.from(node.classList || []).filter(
-                    (c) => c && /^[a-zA-Z0-9_-]+$/.test(c),
+                const tag = node.tagName ? node.tagName.toLowerCase() : '';
+                for (const cls of classes) {
+                  const sel = `${tag}.${CSS.escape(cls)}`;
+                  if (document.querySelectorAll(sel).length === 1) return sel;
+                }
+                for (let i = 0; i < Math.min(classes.length, 3); i++) {
+                  for (let j = i + 1; j < Math.min(classes.length, 3); j++) {
+                    const sel = `.${CSS.escape(classes[i])}.${CSS.escape(classes[j])}`;
+                    if (document.querySelectorAll(sel).length === 1) return sel;
+                  }
+                }
+              } catch {}
+              for (const attr of ['data-testid', 'data-cy', 'name']) {
+                const val = node.getAttribute(attr);
+                if (val) {
+                  const s = `[${attr}="${CSS.escape(val)}"]`;
+                  if (document.querySelectorAll(s).length === 1) return s;
+                }
+              }
+              let path = '';
+              let current = node;
+              while (
+                current &&
+                current.nodeType === Node.ELEMENT_NODE &&
+                current.tagName !== 'BODY'
+              ) {
+                let sel = current.tagName.toLowerCase();
+                const parent = current.parentElement;
+                if (parent) {
+                  const siblings = Array.from(parent.children).filter(
+                    (c) => c.tagName === current.tagName,
                   );
-                  for (const cls of classes) {
-                    const sel = `.${CSS.escape(cls)}`;
-                    if (document.querySelectorAll(sel).length === 1) return sel;
-                  }
-                  const tag = node.tagName ? node.tagName.toLowerCase() : '';
-                  for (const cls of classes) {
-                    const sel = `${tag}.${CSS.escape(cls)}`;
-                    if (document.querySelectorAll(sel).length === 1) return sel;
-                  }
-                  for (let i = 0; i < Math.min(classes.length, 3); i++) {
-                    for (let j = i + 1; j < Math.min(classes.length, 3); j++) {
-                      const sel = `.${CSS.escape(classes[i])}.${CSS.escape(classes[j])}`;
-                      if (document.querySelectorAll(sel).length === 1) return sel;
-                    }
-                  }
-                } catch {}
-                for (const attr of ['data-testid', 'data-cy', 'name']) {
-                  const val = node.getAttribute(attr);
-                  if (val) {
-                    const s = `[${attr}="${CSS.escape(val)}"]`;
-                    if (document.querySelectorAll(s).length === 1) return s;
+                  if (siblings.length > 1) {
+                    const idx = siblings.indexOf(current) + 1;
+                    sel += `:nth-of-type(${idx})`;
                   }
                 }
-                let path = '';
-                let current = node;
-                while (
-                  current &&
-                  current.nodeType === Node.ELEMENT_NODE &&
-                  current.tagName !== 'BODY'
-                ) {
-                  let sel = current.tagName.toLowerCase();
-                  const parent = current.parentElement;
-                  if (parent) {
-                    const siblings = Array.from(parent.children).filter(
-                      (c) => c.tagName === current.tagName,
-                    );
-                    if (siblings.length > 1) {
-                      const idx = siblings.indexOf(current) + 1;
-                      sel += `:nth-of-type(${idx})`;
-                    }
-                  }
-                  path = path ? `${sel} > ${path}` : sel;
-                  current = parent;
-                }
-                return path ? `body > ${path}` : 'body';
-              };
-              return generateSelector(el);
-            })(),
-          });
+                path = path ? `${sel} > ${path}` : sel;
+                current = parent;
+              }
+              return path ? `body > ${path}` : 'body';
+            };
+            return generateSelector(el);
+          })();
+
+          projectPointToTopViewport(center)
+            .then((viewportCenter) => {
+              sendResponse({
+                success: true,
+                rect: {
+                  x: rect.x,
+                  y: rect.y,
+                  width: rect.width,
+                  height: rect.height,
+                },
+                center,
+                viewportCenter,
+                selector,
+              });
+            })
+            .catch((error) => {
+              sendResponse({
+                success: true,
+                rect: {
+                  x: rect.x,
+                  y: rect.y,
+                  width: rect.width,
+                  height: rect.height,
+                },
+                center,
+                selector,
+                projectionError: String(
+                  error && error.message ? error.message : error,
+                ),
+              });
+            });
           return true;
         } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          sendResponse({
+            success: false,
+            error: String(e && e.message ? e.message : e),
+          });
           return true;
         }
       }
@@ -1590,20 +1869,29 @@
           const ref = String(request.ref || '').trim();
           const fingerprint = String(request.fingerprint || '').trim();
           if (!ref || !fingerprint) {
-            sendResponse({ success: false, error: 'ref and fingerprint are required' });
+            sendResponse({
+              success: false,
+              error: 'ref and fingerprint are required',
+            });
             return true;
           }
           const map = window.__claudeElementMap;
           const weak = map && map[ref];
-          const el = weak && typeof weak.deref === 'function' ? weak.deref() : null;
+          const el =
+            weak && typeof weak.deref === 'function' ? weak.deref() : null;
           if (!el || !(el instanceof Element)) {
-            sendResponse({ success: false, error: `ref "${ref}" not found or expired` });
+            sendResponse({
+              success: false,
+              error: `ref "${ref}" not found or expired`,
+            });
             return true;
           }
           // Verify fingerprint: parse the stored fingerprint and compare it with the current element
           const parts = fingerprint.split('|');
           const storedTag = parts[0] || 'unknown';
-          const currentTag = el.tagName ? String(el.tagName).toLowerCase() : 'unknown';
+          const currentTag = el.tagName
+            ? String(el.tagName).toLowerCase()
+            : 'unknown';
           // Tag must match
           if (storedTag !== currentTag) {
             sendResponse({ success: true, match: false });
@@ -1622,7 +1910,10 @@
           sendResponse({ success: true, match: true });
           return true;
         } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          sendResponse({
+            success: false,
+            error: String(e && e.message ? e.message : e),
+          });
           return true;
         }
       }
@@ -1631,9 +1922,13 @@
           const ref = String(request.ref || '');
           const map = window.__claudeElementMap || {};
           const weak = map[ref];
-          const el = weak && typeof weak.deref === 'function' ? weak.deref() : null;
+          const el =
+            weak && typeof weak.deref === 'function' ? weak.deref() : null;
           if (!el || !(el instanceof Element)) {
-            sendResponse({ success: false, error: `ref "${ref}" not found or expired` });
+            sendResponse({
+              success: false,
+              error: `ref "${ref}" not found or expired`,
+            });
             return true;
           }
           try {
@@ -1644,17 +1939,24 @@
             });
           } catch {}
           try {
-            /** @type {HTMLElement} */ (el).focus && /** @type {HTMLElement} */ (el).focus();
+            /** @type {HTMLElement} */ (el).focus &&
+              /** @type {HTMLElement} */ (el).focus();
           } catch {}
           sendResponse({ success: true });
           return true;
         } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          sendResponse({
+            success: false,
+            error: String(e && e.message ? e.message : e),
+          });
           return true;
         }
       }
     } catch (e) {
-      sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+      sendResponse({
+        success: false,
+        error: e && e.message ? e.message : String(e),
+      });
       return true;
     }
     return false;
@@ -1673,7 +1975,11 @@
             handleHoverForRef(data.ref)
               .then((result) => {
                 ev.source?.postMessage(
-                  { type: 'rr-bridge-hover-ref-result', reqId: data.reqId, result },
+                  {
+                    type: 'rr-bridge-hover-ref-result',
+                    reqId: data.reqId,
+                    result,
+                  },
                   '*',
                 );
               })
@@ -1682,11 +1988,73 @@
                   {
                     type: 'rr-bridge-hover-ref-result',
                     reqId: data.reqId,
-                    result: { success: false, error: error?.message || String(error) },
+                    result: {
+                      success: false,
+                      error: error?.message || String(error),
+                    },
                   },
                   '*',
                 );
               });
+            return;
+          }
+          if (data && data.type === 'rr-bridge-project-point') {
+            const { reqId } = data || {};
+            const respond = (payload) => {
+              try {
+                ev.source?.postMessage(
+                  { type: 'rr-bridge-project-point-result', reqId, ...payload },
+                  '*',
+                );
+              } catch {}
+            };
+
+            try {
+              const point = {
+                x: Number(data.point && data.point.x),
+                y: Number(data.point && data.point.y),
+              };
+              if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+                respond({
+                  success: false,
+                  error: 'Invalid point for frame projection',
+                });
+                return;
+              }
+
+              const frameEl = findChildFrameElementForWindow(ev.source);
+              if (!frameEl) {
+                respond({
+                  success: false,
+                  error: 'Unable to locate child frame element',
+                });
+                return;
+              }
+
+              const frameRect = frameEl.getBoundingClientRect();
+              const translatedPoint = {
+                x: point.x + frameRect.left,
+                y: point.y + frameRect.top,
+              };
+
+              projectPointToTopViewport(translatedPoint)
+                .then((projected) => {
+                  respond({ success: true, point: projected });
+                })
+                .catch((error) => {
+                  respond({
+                    success: false,
+                    error: String(
+                      error && error.message ? error.message : error,
+                    ),
+                  });
+                });
+            } catch (error) {
+              respond({
+                success: false,
+                error: String(error && error.message ? error.message : error),
+              });
+            }
             return;
           }
           if (!data || data.type !== 'rr-bridge-ensure-ref') return;
@@ -1715,7 +2083,8 @@
               const query = normalize(sel);
               const bigrams = (s) => {
                 const arr = [];
-                for (let i = 0; i < s.length - 1; i++) arr.push(s.slice(i, i + 2));
+                for (let i = 0; i < s.length - 1; i++)
+                  arr.push(s.slice(i, i + 2));
                 return arr;
               };
               const dice = (a, b) => {
@@ -1741,10 +2110,17 @@
                 const node = stack.pop();
                 if (!node || !(node instanceof Element)) continue;
                 try {
-                  if (limitTag && String(node.tagName || '').toUpperCase() !== limitTag) {
+                  if (
+                    limitTag &&
+                    String(node.tagName || '').toUpperCase() !== limitTag
+                  ) {
                   } else {
                     const cs = window.getComputedStyle(node);
-                    if (cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0') {
+                    if (
+                      cs.display !== 'none' &&
+                      cs.visibility !== 'hidden' &&
+                      cs.opacity !== '0'
+                    ) {
                       const rect = node.getBoundingClientRect();
                       if (rect.width > 0 && rect.height > 0) {
                         const txt = normalize(node.textContent || '');
@@ -1762,10 +2138,12 @@
                 } catch {}
                 try {
                   const children = node.children || [];
-                  for (let i = 0; i < children.length; i++) stack.push(children[i]);
+                  for (let i = 0; i < children.length; i++)
+                    stack.push(children[i]);
                   const sr = node.shadowRoot;
                   if (sr && sr.children)
-                    for (let i = 0; i < sr.children.length; i++) stack.push(sr.children[i]);
+                    for (let i = 0; i < sr.children.length; i++)
+                      stack.push(sr.children[i]);
                 } catch {}
               }
               if (!el && best.el) el = best.el;
@@ -1781,7 +2159,10 @@
                 return;
               }
               if (result.matchCount === 0) {
-                respond({ success: false, error: `Selector "${sel}" not found in child frame` });
+                respond({
+                  success: false,
+                  error: `Selector "${sel}" not found in child frame`,
+                });
                 return;
               }
               if (!allowMultiple && result.matchCount > 1) {
@@ -1798,13 +2179,19 @@
                 return;
               }
               const allowMultiple = !!data.allowMultiple;
-              const result = querySelectorWithUniquenessCheck(sel, allowMultiple);
+              const result = querySelectorWithUniquenessCheck(
+                sel,
+                allowMultiple,
+              );
               if (result.error) {
                 respond({ success: false, error: result.error });
                 return;
               }
               if (result.matchCount === 0) {
-                respond({ success: false, error: `Selector "${sel}" not found in child frame` });
+                respond({
+                  success: false,
+                  error: `Selector "${sel}" not found in child frame`,
+                });
                 return;
               }
               if (!allowMultiple && result.matchCount > 1) {
@@ -1817,7 +2204,10 @@
               el = result.element;
             }
             if (!el || !(el instanceof Element)) {
-              respond({ success: false, error: 'Element not found in child frame' });
+              respond({
+                success: false,
+                error: 'Element not found in child frame',
+              });
               return;
             }
             if (!window.__claudeElementMap) window.__claudeElementMap = {};
@@ -1825,7 +2215,12 @@
             let refId = null;
             for (const k in window.__claudeElementMap) {
               const w = window.__claudeElementMap[k];
-              if (w && typeof w.deref === 'function' && w.deref && w.deref() === el) {
+              if (
+                w &&
+                typeof w.deref === 'function' &&
+                w.deref &&
+                w.deref() === el
+              ) {
                 refId = k;
                 break;
               }
@@ -1845,7 +2240,10 @@
               href: String(location && location.href ? location.href : ''),
             });
           } catch (e) {
-            respond({ success: false, error: String(e && e.message ? e.message : e) });
+            respond({
+              success: false,
+              error: String(e && e.message ? e.message : e),
+            });
           }
         } catch {}
       },

@@ -34,6 +34,10 @@ export function hasDisallowedPublicUrlScheme(url: string): boolean {
   return protocol !== 'http' && protocol !== 'https';
 }
 
+function isChromeNewTabUrl(url: string): boolean {
+  return /^chrome:\/\/newtab(?:\/|$|[?#])/i.test(url.trim());
+}
+
 const CLOSE_TABS_PUBLIC_PAGE_ERROR =
   'Only http:// and https:// pages are supported by chrome_close_tabs';
 
@@ -313,9 +317,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
         };
       }
 
-      if (hasDisallowedPublicUrlScheme(url)) {
+      if (hasDisallowedPublicUrlScheme(url) && !isChromeNewTabUrl(url)) {
         return createErrorResponse(
-          'Only http:// and https:// URLs are allowed for chrome_navigate',
+          'Only http://, https://, and chrome://newtab/ URLs are allowed for chrome_navigate',
         );
       }
 
@@ -329,11 +333,6 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const targetTab = explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
         if (!targetTab.id) {
           return createErrorResponse('No target tab found to navigate');
-        }
-        if (hasDisallowedPublicUrlScheme(String(targetTab.url || ''))) {
-          return createErrorResponse(
-            'Only http:// and https:// pages are supported by chrome_navigate current_tab',
-          );
         }
 
         const beforeUrl = targetTab.url || '';

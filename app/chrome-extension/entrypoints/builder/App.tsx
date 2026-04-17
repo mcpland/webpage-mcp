@@ -13,6 +13,7 @@ import type {
 import type { JsonObject } from "@/entrypoints/background/record-replay-v3/domain/json";
 import {
   extractHiddenSensitiveVariables,
+  getActiveCurrentWindowTabId,
   flowBuilderToV3ForRpc,
   flowV3ToBuilderForEditor,
   isFlowV3,
@@ -470,9 +471,12 @@ export default function BuilderApp() {
 
       const node = store.nodes.find((n) => n.id === selectedId) || null;
       const startNodeId = node?.type === "trigger" ? undefined : selectedId;
+      const tabId = await getActiveCurrentWindowTabId();
 
       await rpc.request("rr_v3.enqueueRun", {
         flowId: saved.id as FlowId,
+        ...(tabId !== undefined ? { tabId } : {}),
+        tabTarget: "current",
         ...(startNodeId ? { startNodeId: startNodeId as NodeId } : {}),
       });
     } catch (error) {
@@ -502,7 +506,12 @@ export default function BuilderApp() {
       if (!saved) return;
 
       await rpc.ensureConnected();
-      await rpc.request("rr_v3.enqueueRun", { flowId: saved.id as FlowId });
+      const tabId = await getActiveCurrentWindowTabId();
+      await rpc.request("rr_v3.enqueueRun", {
+        flowId: saved.id as FlowId,
+        ...(tabId !== undefined ? { tabId } : {}),
+        tabTarget: "current",
+      });
     } catch (error) {
       pushToast(
         t("builderRunFailed", "Run failed: {0}", [

@@ -28,8 +28,12 @@ describe('computerTool', () => {
     const getActiveTabOrThrowInWindow = vi
       .spyOn(computerTool as any, 'getActiveTabOrThrowInWindow')
       .mockResolvedValue(makeTab({ url: 'file:///tmp/secret.txt' }));
-    const attach = vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
-    const sendCommand = vi.spyOn(cdpSessionManager, 'sendCommand').mockResolvedValue({});
+    const attach = vi
+      .spyOn(cdpSessionManager, 'attach')
+      .mockResolvedValue(undefined);
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockResolvedValue({});
 
     const result = await computerTool.execute({
       tabId: 7,
@@ -38,7 +42,9 @@ describe('computerTool', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+    expect(
+      String((result.content[0] as { text?: string })?.text || ''),
+    ).toContain(
       'Only http:// and https:// pages are supported by chrome_computer zoom',
     );
     expect(tryGetTab).toHaveBeenCalledWith(7);
@@ -54,7 +60,9 @@ describe('computerTool', () => {
     const sendMessageToTab = vi
       .spyOn(computerTool as any, 'sendMessageToTab')
       .mockResolvedValue({ success: true });
-    const attach = vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+    const attach = vi
+      .spyOn(cdpSessionManager, 'attach')
+      .mockResolvedValue(undefined);
 
     const result = await computerTool.execute({
       tabId: 7,
@@ -63,7 +71,9 @@ describe('computerTool', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+    expect(
+      String((result.content[0] as { text?: string })?.text || ''),
+    ).toContain(
       'Only http:// and https:// pages are supported by chrome_computer',
     );
     expect(tryGetTab).toHaveBeenCalledWith(7);
@@ -75,7 +85,9 @@ describe('computerTool', () => {
     const tryGetTab = vi
       .spyOn(computerTool as any, 'tryGetTab')
       .mockResolvedValue(makeTab({ url: 'file:///tmp/secret.txt' }));
-    const attach = vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+    const attach = vi
+      .spyOn(cdpSessionManager, 'attach')
+      .mockResolvedValue(undefined);
 
     const result = await computerTool.execute({
       tabId: 7,
@@ -84,10 +96,82 @@ describe('computerTool', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+    expect(
+      String((result.content[0] as { text?: string })?.text || ''),
+    ).toContain(
       'Only http:// and https:// pages are supported by chrome_computer',
     );
     expect(tryGetTab).toHaveBeenCalledWith(7);
     expect(attach).not.toHaveBeenCalled();
+  });
+
+  it('uses projected viewport coordinates for iframe hover targets', async () => {
+    vi.spyOn(computerTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    const injectContentScript = vi
+      .spyOn(computerTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    const sendMessageToTab = vi
+      .spyOn(computerTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({
+        success: true,
+        center: { x: 25, y: 35 },
+        viewportCenter: { x: 225, y: 335 },
+      });
+    const attach = vi
+      .spyOn(cdpSessionManager, 'attach')
+      .mockResolvedValue(undefined);
+    const detach = vi
+      .spyOn(cdpSessionManager, 'detach')
+      .mockResolvedValue(undefined);
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockResolvedValue({});
+
+    const result = await computerTool.execute({
+      tabId: 7,
+      action: 'hover',
+      ref: 'ref_iframe_hover',
+      frameId: 12,
+      duration: 0,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(injectContentScript).toHaveBeenCalledWith(
+      7,
+      ['inject-scripts/accessibility-tree-helper.js'],
+      false,
+      'ISOLATED',
+      false,
+      [12],
+    );
+    expect(sendMessageToTab).toHaveBeenNthCalledWith(
+      1,
+      7,
+      {
+        action: 'focusByRef',
+        ref: 'ref_iframe_hover',
+      },
+      12,
+    );
+    expect(sendMessageToTab).toHaveBeenNthCalledWith(
+      2,
+      7,
+      {
+        action: 'resolveRef',
+        ref: 'ref_iframe_hover',
+      },
+      12,
+    );
+    expect(attach).toHaveBeenCalledWith(7, 'computer');
+    expect(sendCommand).toHaveBeenCalledWith(7, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: 225,
+      y: 335,
+      modifiers: 0,
+      button: 'none',
+      buttons: 0,
+    });
+    expect(detach).toHaveBeenCalledWith(7, 'computer');
   });
 });

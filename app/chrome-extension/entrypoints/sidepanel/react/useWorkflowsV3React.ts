@@ -8,6 +8,7 @@ import type {
 } from "@/entrypoints/background/record-replay-v3/domain/ids";
 import type { JsonObject } from "@/entrypoints/background/record-replay-v3/domain/json";
 import { useRRV3Rpc } from "@/entrypoints/shared/react/useRRV3Rpc";
+import { getActiveCurrentWindowTabId } from "@/entrypoints/shared/utils";
 
 export interface FlowLite {
   id: string;
@@ -155,8 +156,11 @@ export function useWorkflowsV3React(
 
   async function runFlow(flowId: string): Promise<{ runId: string } | null> {
     try {
+      const tabId = await getActiveCurrentWindowTabId();
       const result = (await rpc.request("rr_v3.enqueueRun", {
         flowId: flowId as FlowId,
+        ...(tabId !== undefined ? { tabId } : {}),
+        tabTarget: "current",
       })) as { runId: RunId; position: number } | null;
       void refreshRuns();
       return result ? { runId: result.runId } : null;

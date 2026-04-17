@@ -36,6 +36,7 @@ import {
   type ActionMetadata,
   type GifEnhancedRenderingConfig,
 } from './gif-auto-capture';
+import { getResolvedViewportCoordinates } from './target-resolution';
 
 // ============================================================================
 // Constants
@@ -228,8 +229,9 @@ async function captureFrame(
   ctx: OffscreenCanvasRenderingContext2D,
 ): Promise<Uint8ClampedArray> {
   // Get viewport metrics
-  const metrics: { layoutViewport?: { clientWidth: number; clientHeight: number } } =
-    await cdpSessionManager.sendCommand(tabId, 'Page.getLayoutMetrics', {});
+  const metrics: {
+    layoutViewport?: { clientWidth: number; clientHeight: number };
+  } = await cdpSessionManager.sendCommand(tabId, 'Page.getLayoutMetrics', {});
 
   const viewportWidth = metrics.layoutViewport?.clientWidth || width;
   const viewportHeight = metrics.layoutViewport?.clientHeight || height;
@@ -250,7 +252,9 @@ async function captureFrame(
     },
   );
 
-  const imageBitmap = await createImageBitmapFromUrl(`data:image/png;base64,${screenshot.data}`);
+  const imageBitmap = await createImageBitmapFromUrl(
+    `data:image/png;base64,${screenshot.data}`,
+  );
 
   // Scale image to target dimensions
   ctx.clearRect(0, 0, width, height);
@@ -262,7 +266,12 @@ async function captureFrame(
 }
 
 async function captureAndEncodeFrame(state: RecordingState): Promise<void> {
-  const frameData = await captureFrame(state.tabId, state.width, state.height, state.ctx);
+  const frameData = await captureFrame(
+    state.tabId,
+    state.width,
+    state.height,
+    state.ctx,
+  );
 
   await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
     imageData: Array.from(frameData),
@@ -333,7 +342,11 @@ async function startRecording(
   maxColors: number,
   filename?: string,
 ): Promise<GifResult> {
-  if (stopPromise || recordingState?.isRecording || recordingState?.isStopping) {
+  if (
+    stopPromise ||
+    recordingState?.isRecording ||
+    recordingState?.isStopping
+  ) {
     return {
       success: false,
       action: 'start',
@@ -425,7 +438,10 @@ async function stopRecording(): Promise<GifResult> {
     return stopPromise;
   }
 
-  if (!recordingState || (!recordingState.isRecording && !recordingState.isStopping)) {
+  if (
+    !recordingState ||
+    (!recordingState.isRecording && !recordingState.isStopping)
+  ) {
     return {
       success: false,
       action: 'stop',
@@ -454,7 +470,12 @@ async function stopRecording(): Promise<GifResult> {
 
     // Best-effort final frame capture to preserve end state
     try {
-      const frameData = await captureFrame(state.tabId, state.width, state.height, state.ctx);
+      const frameData = await captureFrame(
+        state.tabId,
+        state.width,
+        state.height,
+        state.ctx,
+      );
       await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
         imageData: Array.from(frameData),
         width: state.width,
@@ -464,7 +485,10 @@ async function stopRecording(): Promise<GifResult> {
       });
       state.frameCount += 1;
     } catch (error) {
-      console.warn('GIF recorder: Final frame capture error (non-fatal):', error);
+      console.warn(
+        'GIF recorder: Final frame capture error (non-fatal):',
+        error,
+      );
     }
 
     const frameCount = state.frameCount;
@@ -526,7 +550,8 @@ async function stopRecording(): Promise<GifResult> {
 
       // Save GIF file
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const outputFilename = filename?.replace(/[^a-z0-9_-]/gi, '_') || `recording_${timestamp}`;
+      const outputFilename =
+        filename?.replace(/[^a-z0-9_-]/gi, '_') || `recording_${timestamp}`;
       const fullFilename = outputFilename.endsWith('.gif')
         ? outputFilename
         : `${outputFilename}.gif`;
@@ -611,7 +636,11 @@ function toBlobArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
-function normalizePositiveInt(value: unknown, fallback: number, max?: number): number {
+function normalizePositiveInt(
+  value: unknown,
+  fallback: number,
+  max?: number,
+): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
   }
@@ -628,7 +657,15 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
 
   async execute(args: GifRecorderParams): Promise<ToolResult> {
     const action = args.action;
-    const validActions = ['start', 'stop', 'status', 'auto_start', 'capture', 'clear', 'export'];
+    const validActions = [
+      'start',
+      'stop',
+      'status',
+      'auto_start',
+      'capture',
+      'clear',
+      'export',
+    ];
 
     if (!action || !validActions.includes(action)) {
       return createErrorResponse(
@@ -668,11 +705,27 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
           }
 
           const fps = normalizePositiveInt(args.fps, DEFAULT_FPS, 30);
-          const durationMs = normalizePositiveInt(args.durationMs, DEFAULT_DURATION_MS, 60000);
-          const maxFrames = normalizePositiveInt(args.maxFrames, DEFAULT_MAX_FRAMES, 300);
+          const durationMs = normalizePositiveInt(
+            args.durationMs,
+            DEFAULT_DURATION_MS,
+            60000,
+          );
+          const maxFrames = normalizePositiveInt(
+            args.maxFrames,
+            DEFAULT_MAX_FRAMES,
+            300,
+          );
           const width = normalizePositiveInt(args.width, DEFAULT_WIDTH, 1920);
-          const height = normalizePositiveInt(args.height, DEFAULT_HEIGHT, 1080);
-          const maxColors = normalizePositiveInt(args.maxColors, DEFAULT_MAX_COLORS, 256);
+          const height = normalizePositiveInt(
+            args.height,
+            DEFAULT_HEIGHT,
+            1080,
+          );
+          const maxColors = normalizePositiveInt(
+            args.maxColors,
+            DEFAULT_MAX_COLORS,
+            256,
+          );
 
           const result = await startRecording(
             tab.id,
@@ -723,14 +776,28 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
 
           // Check if auto-capture is already active
           if (isAutoCaptureActive(tab.id)) {
-            return createErrorResponse('Auto-capture is already active for this tab.');
+            return createErrorResponse(
+              'Auto-capture is already active for this tab.',
+            );
           }
 
           const width = normalizePositiveInt(args.width, DEFAULT_WIDTH, 1920);
-          const height = normalizePositiveInt(args.height, DEFAULT_HEIGHT, 1080);
-          const maxColors = normalizePositiveInt(args.maxColors, DEFAULT_MAX_COLORS, 256);
+          const height = normalizePositiveInt(
+            args.height,
+            DEFAULT_HEIGHT,
+            1080,
+          );
+          const maxColors = normalizePositiveInt(
+            args.maxColors,
+            DEFAULT_MAX_COLORS,
+            256,
+          );
           const maxFrames = normalizePositiveInt(args.maxFrames, 100, 300);
-          const captureDelayMs = normalizePositiveInt(args.captureDelayMs, 150, 2000);
+          const captureDelayMs = normalizePositiveInt(
+            args.captureDelayMs,
+            150,
+            2000,
+          );
           const frameDelayCs = normalizePositiveInt(args.frameDelayCs, 20, 100);
 
           const startResult = await startAutoCapture(tab.id, {
@@ -794,7 +861,8 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
 
           // Support optional annotation for manual captures
           const annotation =
-            typeof args.annotation === 'string' && args.annotation.trim().length > 0
+            typeof args.annotation === 'string' &&
+            args.annotation.trim().length > 0
               ? args.annotation.trim()
               : undefined;
 
@@ -802,7 +870,11 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             ? { type: 'annotation', label: annotation }
             : undefined;
 
-          const captureResult = await captureFrameOnAction(tab.id, action, true);
+          const captureResult = await captureFrameOnAction(
+            tab.id,
+            action,
+            true,
+          );
 
           return this.buildResponse({
             success: captureResult.success,
@@ -850,12 +922,15 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             };
 
             // Save GIF file
-            const blob = new Blob([toBlobArrayBuffer(stopResult.gifData)], { type: 'image/gif' });
+            const blob = new Blob([toBlobArrayBuffer(stopResult.gifData)], {
+              type: 'image/gif',
+            });
             const dataUrl = await blobToDataUrl(blob);
 
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
             const outputFilename =
-              filename?.replace(/[^a-z0-9_-]/gi, '_') || `recording_${timestamp}`;
+              filename?.replace(/[^a-z0-9_-]/gi, '_') ||
+              `recording_${timestamp}`;
             const fullFilename = outputFilename.endsWith('.gif')
               ? outputFilename
               : `${outputFilename}.gif`;
@@ -940,11 +1015,15 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
               // ignore
             }
             try {
-              await cdpSessionManager.detach(recordingState.tabId, CDP_SESSION_KEY);
+              await cdpSessionManager.detach(
+                recordingState.tabId,
+                CDP_SESSION_KEY,
+              );
             } catch {
               // ignore
             }
-            const wasRecording = recordingState.isRecording || recordingState.isStopping;
+            const wasRecording =
+              recordingState.isRecording || recordingState.isStopping;
             recordingState = null;
             stopPromise = null; // Clear any pending stop promise
             if (wasRecording) {
@@ -985,21 +1064,30 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
           }
 
           // Check cache expiration
-          if (Date.now() - lastRecordedGif.createdAt > EXPORT_CACHE_LIFETIME_MS) {
+          if (
+            Date.now() - lastRecordedGif.createdAt >
+            EXPORT_CACHE_LIFETIME_MS
+          ) {
             lastRecordedGif = null;
-            return createErrorResponse('Cached GIF has expired. Please record a new GIF.');
+            return createErrorResponse(
+              'Cached GIF has expired. Please record a new GIF.',
+            );
           }
 
           const download = args.download !== false; // Default to download
 
           if (download) {
             // Download mode
-            const blob = new Blob([toBlobArrayBuffer(lastRecordedGif.gifData)], { type: 'image/gif' });
+            const blob = new Blob(
+              [toBlobArrayBuffer(lastRecordedGif.gifData)],
+              { type: 'image/gif' },
+            );
             const dataUrl = await blobToDataUrl(blob);
 
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
             const filename = args.filename ?? lastRecordedGif.filename;
-            const outputFilename = filename?.replace(/[^a-z0-9_-]/gi, '_') || `export_${timestamp}`;
+            const outputFilename =
+              filename?.replace(/[^a-z0-9_-]/gi, '_') || `export_${timestamp}`;
             const fullFilename = outputFilename.endsWith('.gif')
               ? outputFilename
               : `${outputFilename}.gif`;
@@ -1073,9 +1161,10 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
                   action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
                   ref,
                 });
-                if (resolved?.success && resolved.center) {
-                  targetX = resolved.center.x;
-                  targetY = resolved.center.y;
+                const targetPoint = getResolvedViewportCoordinates(resolved);
+                if (resolved?.success && targetPoint) {
+                  targetX = targetPoint.x;
+                  targetY = targetPoint.y;
                 } else {
                   return createErrorResponse(`Could not resolve ref: ${ref}`);
                 }
@@ -1105,7 +1194,9 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
                   targetX = result.result.x;
                   targetY = result.result.y;
                 } else {
-                  return createErrorResponse(`Could not find element: ${selector}`);
+                  return createErrorResponse(
+                    `Could not find element: ${selector}`,
+                  );
                 }
               } catch (err) {
                 return createErrorResponse(
@@ -1125,12 +1216,21 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             try {
               const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
               const filename =
-                args.filename ?? lastRecordedGif.filename ?? `recording_${timestamp}`;
-              const fullFilename = filename.endsWith('.gif') ? filename : `${filename}.gif`;
+                args.filename ??
+                lastRecordedGif.filename ??
+                `recording_${timestamp}`;
+              const fullFilename = filename.endsWith('.gif')
+                ? filename
+                : `${filename}.gif`;
 
               const [result] = await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
-                func: (base64Data: string, x: number, y: number, fname: string) => {
+                func: (
+                  base64Data: string,
+                  x: number,
+                  y: number,
+                  fname: string,
+                ) => {
                   // Convert base64 to Blob
                   const byteChars = atob(base64Data);
                   const byteArray = new Uint8Array(byteChars.length);
@@ -1143,7 +1243,10 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
                   // Find drop target element
                   const target = document.elementFromPoint(x, y);
                   if (!target) {
-                    return { success: false, error: 'No element at drop coordinates' };
+                    return {
+                      success: false,
+                      error: 'No element at drop coordinates',
+                    };
                   }
 
                   // Create DataTransfer with the file
@@ -1173,7 +1276,9 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
               });
 
               if (!result?.result?.success) {
-                return createErrorResponse(result?.result?.error || 'Drag&drop upload failed');
+                return createErrorResponse(
+                  result?.result?.error || 'Drag&drop upload failed',
+                );
               }
 
               return this.buildResponse({
@@ -1219,7 +1324,9 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
     );
   }
 
-  private async resolveTargetTab(tabId?: number): Promise<chrome.tabs.Tab | null> {
+  private async resolveTargetTab(
+    tabId?: number,
+  ): Promise<chrome.tabs.Tab | null> {
     if (typeof tabId === 'number') {
       return this.tryGetTab(tabId);
     }

@@ -54,7 +54,9 @@ import {
   normalizeFlowToolMetadata,
 } from "../../flows/normalize-flow-optional-fields";
 import { validateReachableRuntimeNodes } from "../../flows/runtime-validation";
+import { resolveRunTargetTab } from "../../run-target";
 import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
+import type { ExecutionFlags } from "@/entrypoints/background/replay-actions";
 import {
   RR_V3_PORT_NAME,
   isRpcRequest,
@@ -239,6 +241,28 @@ export class RpcServer {
   private async handleEnqueueRun(
     params: JsonObject | undefined,
   ): Promise<JsonValue> {
+    let resolvedTabId =
+      typeof params?.tabId === "number" ? params.tabId : undefined;
+    const execution = params?.execution as ExecutionFlags | undefined;
+
+    if (typeof chrome.runtime?.getManifest === "function") {
+      try {
+        resolvedTabId = await resolveRunTargetTab({
+          tabId: resolvedTabId,
+          tabTarget: params?.tabTarget === "new" ? "new" : "current",
+          startUrl:
+            typeof params?.startUrl === "string" ? params.startUrl : undefined,
+          refresh: params?.refresh === true,
+          execution,
+        });
+      } catch (error) {
+        console.warn(
+          "[RR-V3][RPC] Failed to resolve run target tab, falling back to scheduler default:",
+          error,
+        );
+      }
+    }
+
     const result = await enqueueRun(
       {
         storage: this.storage,
@@ -249,11 +273,12 @@ export class RpcServer {
       },
       {
         flowId: params?.flowId as FlowId,
-        tabId: params?.tabId as number | undefined,
+        tabId: resolvedTabId,
         startNodeId: params?.startNodeId as NodeId | undefined,
         priority: params?.priority as number | undefined,
         maxAttempts: params?.maxAttempts as number | undefined,
         args: params?.args as JsonObject | undefined,
+        execution,
         debug: params?.debug as
           | { breakpoints?: string[]; pauseOnStart?: boolean }
           | undefined,

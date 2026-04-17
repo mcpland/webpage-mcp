@@ -213,10 +213,46 @@ describe('navigateTool', () => {
 
     expect(result.isError).toBe(true);
     expect(String((result.content[0] as { text?: string })?.text)).toContain(
-      'Only http:// and https:// URLs are allowed for chrome_navigate',
+      'Only http://, https://, and chrome://newtab/ URLs are allowed for chrome_navigate',
     );
     expect(mocks.tabsUpdate).not.toHaveBeenCalled();
     expect(mocks.tabsCreate).not.toHaveBeenCalled();
+  });
+
+  it('allows navigating the current tab to chrome://newtab/', async () => {
+    let currentUrl = 'https://example.com/';
+    mocks.tabsGet.mockImplementation(async (tabId: number) =>
+      makeTab({
+        id: tabId,
+        windowId: 20,
+        url: currentUrl,
+        status: currentUrl === 'chrome://newtab/' ? 'complete' : 'loading',
+        active: true,
+      }),
+    );
+    mocks.tabsUpdate.mockImplementationOnce(async (tabId: number, updateProperties: any) => {
+      if (typeof updateProperties?.url === 'string') {
+        currentUrl = updateProperties.url;
+      }
+      return makeTab({
+        id: tabId,
+        windowId: 20,
+        url: currentUrl,
+        status: 'loading',
+        active: true,
+      });
+    });
+
+    const result = await navigateTool.execute({
+      url: 'chrome://newtab/',
+      tabId: 7,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(mocks.tabsUpdate).toHaveBeenCalledWith(7, { url: 'chrome://newtab/' });
+    const payload = getTextPayload(result);
+    expect(payload.message).toBe('Navigated current tab');
+    expect(payload.url).toBe('chrome://newtab/');
   });
 
   it('rejects refreshing a non-public target tab before reload', async () => {
@@ -235,21 +271,40 @@ describe('navigateTool', () => {
     expect(mocks.tabsReload).not.toHaveBeenCalled();
   });
 
-  it('rejects navigating the current tab when the explicit target is non-public', async () => {
-    mocks.tabsGet.mockResolvedValueOnce(
-      makeTab({ id: 7, windowId: 20, url: 'file:///tmp/secret.txt' }),
+  it('allows navigating the current tab even when the current page is chrome://newtab', async () => {
+    let currentUrl = 'chrome://newtab/';
+    mocks.tabsGet.mockImplementation(async (tabId: number) =>
+      makeTab({
+        id: tabId,
+        windowId: 20,
+        url: currentUrl,
+        status: currentUrl === 'chrome://newtab/' ? 'complete' : 'loading',
+        active: true,
+      }),
     );
+    mocks.tabsUpdate.mockImplementationOnce(async (tabId: number, updateProperties: any) => {
+      if (typeof updateProperties?.url === 'string') {
+        currentUrl = updateProperties.url;
+      }
+      return makeTab({
+        id: tabId,
+        windowId: 20,
+        url: currentUrl,
+        status: 'loading',
+        active: true,
+      });
+    });
 
     const result = await navigateTool.execute({
       url: 'https://www.baidu.com',
       tabId: 7,
     });
 
-    expect(result.isError).toBe(true);
-    expect(String((result.content[0] as { text?: string })?.text)).toContain(
-      'Only http:// and https:// pages are supported by chrome_navigate current_tab',
-    );
-    expect(mocks.tabsUpdate).not.toHaveBeenCalled();
+    expect(result.isError).toBe(false);
+    expect(mocks.tabsUpdate).toHaveBeenCalledWith(7, { url: 'https://www.baidu.com' });
+    const payload = getTextPayload(result);
+    expect(payload.message).toBe('Navigated current tab');
+    expect(payload.url).toBe('https://www.baidu.com');
   });
 
   it('fails history navigation if the updated tab lands on a non-public page', async () => {

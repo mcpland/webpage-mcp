@@ -23,6 +23,7 @@ import type {
   RunId,
 } from "@/entrypoints/background/record-replay-v3/domain/ids";
 import { useRRV3Rpc } from "./useRRV3Rpc";
+import { getActiveCurrentWindowTabId } from "@/entrypoints/shared/utils";
 
 // ==================== UI Types ====================
 
@@ -205,8 +206,11 @@ export function useWorkflowsV3(
 
   async function runFlow(flowId: string): Promise<{ runId: string } | null> {
     try {
+      const tabId = await getActiveCurrentWindowTabId();
       const result = (await rpc.request("rr_v3.enqueueRun", {
         flowId: flowId as FlowId,
+        ...(tabId !== undefined ? { tabId } : {}),
+        tabTarget: "current",
       })) as { runId: RunId; position: number } | null;
       // Refresh runs to show the new run
       void refreshRuns();

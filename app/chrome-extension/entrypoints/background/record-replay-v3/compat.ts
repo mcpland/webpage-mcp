@@ -9,12 +9,6 @@ import type { RunEvent, RunRecordV3 } from "./domain/events";
 import { isTerminalStatus } from "./domain/events";
 import type { FlowId, RunId } from "./domain/ids";
 import type { JsonObject } from "./domain/json";
-import {
-  enforcesPublicPageRestrictions,
-  isAllowedPublicFlowTabUrl,
-  isHttpUrl,
-  PUBLIC_FLOW_RUN_TARGET_ERROR,
-} from "@/entrypoints/background/record-replay/public-pages";
 import { bootstrapV3, type V3Runtime } from "./bootstrap";
 import { enqueueRun } from "./engine/queue/enqueue-run";
 import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
@@ -26,227 +20,21 @@ import { normalizeFlowOptionalFields } from "./flows/normalize-flow-optional-fie
 import { validateReachableRuntimeNodes } from "./flows/runtime-validation";
 import { convertCompatFlowToV3 as convertCompatFlowDocumentToV3 } from "./storage/import/flow-convert";
 import { validateFlow } from "./storage/flows";
+import {
+  resolveRunTargetTab,
+  type RunTargetPreference,
+} from "./run-target";
 import type { ExecutionFlags } from "@/entrypoints/background/replay-actions";
 
 const DEFAULT_RUN_TIMEOUT_MS = 60_000;
 const RUN_POLL_INTERVAL_MS = 150;
-const TAB_RESOLUTION_WAIT_TIMEOUT_MS = 3_000;
-
-type RunTargetPreference = "current" | "new";
-
-interface RunTargetOptions {
-  tabId?: number;
-  tabTarget?: RunTargetPreference;
-  startUrl?: string;
-  refresh?: boolean;
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function isWebUrl(url?: string | null, execution?: ExecutionFlags): boolean {
-  return enforcesPublicPageRestrictions(execution)
-    ? isAllowedPublicFlowTabUrl(url)
-    : isHttpUrl(url) || (typeof url === "string" && /^file:/i.test(url));
-}
-
-function normalizeRunTarget(target: unknown): RunTargetPreference {
-  return target === "new" ? "new" : "current";
-}
-
-function normalizeStartUrl(url: unknown): string | undefined {
-  return typeof url === "string" && url.trim() ? url.trim() : undefined;
-}
-
-async function waitForTabReady(
-  tabId: number,
-  options: { previousUrl?: string; targetUrl?: string } = {},
-): Promise<chrome.tabs.Tab> {
-  const deadline = Date.now() + TAB_RESOLUTION_WAIT_TIMEOUT_MS;
-  let lastSeen = await chrome.tabs.get(tabId);
-  let sawNavigationSignal = false;
-
-  while (Date.now() < deadline) {
-    const current = await chrome.tabs.get(tabId);
-    lastSeen = current;
-    const pendingUrl =
-      (current as chrome.tabs.Tab & { pendingUrl?: string }).pendingUrl || "";
-    const currentUrl = current.url || "";
-    const observedUrl = pendingUrl || currentUrl;
-
-    if (options.targetUrl && observedUrl === options.targetUrl) {
-      sawNavigationSignal = true;
-      if (current.status === "complete") {
-        return current;
-      }
-    }
-
-    if (
-      options.previousUrl &&
-      observedUrl &&
-      observedUrl !== options.previousUrl
-    ) {
-      sawNavigationSignal = true;
-      if (current.status === "complete") {
-        return current;
-      }
-    }
-
-    if (current.status !== "complete") {
-      sawNavigationSignal = true;
-    }
-
-    if (current.status === "complete") {
-      if (!options.targetUrl && !options.previousUrl) {
-        return current;
-      }
-      if (sawNavigationSignal) {
-        return current;
-      }
-    }
-
-    await sleep(RUN_POLL_INTERVAL_MS);
-  }
-
-  return lastSeen;
-}
-
-async function createFallbackRunTab(): Promise<number> {
-  const created = await chrome.tabs.create({
-    url: "about:blank",
-    active: true,
-  });
-  if (created.id === undefined) {
-    throw new Error("chrome.tabs.create returned a tab without id");
-  }
-  await waitForTabReady(created.id, { targetUrl: "about:blank" });
-  return created.id;
-}
-
-export async function resolveRunTargetTab(
-  input: RunTargetOptions & { execution?: ExecutionFlags },
-): Promise<number | undefined> {
-  const explicitTabId = isFiniteNumber(input.tabId)
-    ? Math.floor(input.tabId)
-    : undefined;
-  const tabTarget = normalizeRunTarget(input.tabTarget);
-  const startUrl = normalizeStartUrl(input.startUrl);
-  const shouldRefresh = input.refresh === true;
-
-  const explicitTab =
-    explicitTabId !== undefined
-      ? await chrome.tabs.get(explicitTabId).catch(() => null)
-      : null;
-
-  if (explicitTab?.id !== undefined) {
-    if (startUrl) {
-      await chrome.tabs.update(explicitTab.id, { url: startUrl });
-      await waitForTabReady(explicitTab.id, {
-        previousUrl: explicitTab.url || undefined,
-        targetUrl: startUrl,
-      });
-    } else if (!isWebUrl(explicitTab.url, input.execution)) {
-      if (enforcesPublicPageRestrictions(input.execution)) {
-        throw new Error(PUBLIC_FLOW_RUN_TARGET_ERROR);
-      }
-      return createFallbackRunTab();
-    } else if (shouldRefresh && isWebUrl(explicitTab.url, input.execution)) {
-      await chrome.tabs.reload(explicitTab.id);
-      await waitForTabReady(explicitTab.id, {
-        previousUrl: explicitTab.url || undefined,
-      });
-    }
-    return explicitTab.id;
-  }
-
-  const currentWindowTabs = await chrome.tabs.query({ currentWindow: true });
-  const activeTab =
-    currentWindowTabs.find((tab) => tab.active) ??
-    (await chrome.tabs.query({ active: true, currentWindow: true })).at(0);
-
-  if (tabTarget === "new") {
-    const activeTabUrl = activeTab?.url;
-    const urlToOpen =
-      startUrl ?? (isWebUrl(activeTabUrl, input.execution) ? activeTabUrl : "about:blank");
-    const created = await chrome.tabs.create({
-      active: true,
-      url: urlToOpen,
-    });
-    if (created.id === undefined) {
-      throw new Error("chrome.tabs.create returned a tab without id");
-    }
-    await waitForTabReady(created.id, {
-      previousUrl: activeTab?.url || undefined,
-      targetUrl: urlToOpen,
-    });
-    return created.id;
-  }
-
-  let targetTab: chrome.tabs.Tab | null =
-    activeTab && activeTab.id !== undefined
-      ? activeTab
-      : (currentWindowTabs.find((tab) => tab.id !== undefined) ?? null);
-
-  if (!startUrl && !isWebUrl(targetTab?.url, input.execution)) {
-    const webCandidate = currentWindowTabs.find(
-      (tab) => tab.id !== undefined && isWebUrl(tab.url, input.execution),
-    );
-    if (webCandidate?.id !== undefined) {
-      const activatedTab = await chrome.tabs
-        .update(webCandidate.id, { active: true })
-        .catch(() => null);
-      targetTab = activatedTab ?? webCandidate;
-    }
-  }
-
-  if (startUrl) {
-    if (targetTab?.id !== undefined) {
-      await chrome.tabs.update(targetTab.id, { url: startUrl, active: true });
-      await waitForTabReady(targetTab.id, {
-        previousUrl: targetTab.url || undefined,
-        targetUrl: startUrl,
-      });
-      return targetTab.id;
-    }
-
-    const created = await chrome.tabs.create({ url: startUrl, active: true });
-    if (created.id === undefined) {
-      throw new Error("chrome.tabs.create returned a tab without id");
-    }
-    await waitForTabReady(created.id, { targetUrl: startUrl });
-    return created.id;
-  }
-
-  if (targetTab?.id !== undefined) {
-    if (!isWebUrl(targetTab.url, input.execution)) {
-      if (enforcesPublicPageRestrictions(input.execution)) {
-        throw new Error(PUBLIC_FLOW_RUN_TARGET_ERROR);
-      }
-      return createFallbackRunTab();
-    }
-    if (shouldRefresh && isWebUrl(targetTab.url, input.execution)) {
-      await chrome.tabs.reload(targetTab.id);
-      await waitForTabReady(targetTab.id, {
-        previousUrl: targetTab.url || undefined,
-      });
-    }
-    return targetTab.id;
-  }
-
-  return createFallbackRunTab();
 }
 
 export function isFlowV3Object(value: unknown): value is FlowV3 {

@@ -3,6 +3,11 @@ import { TOOL_NAMES } from "webpage-mcp-shared";
 
 import { TOOL_MESSAGE_TYPES } from "@/common/message-types";
 import { createStoragePort } from "@/entrypoints/background/record-replay-v3";
+import {
+  bootstrapV3,
+  getV3Runtime,
+} from "@/entrypoints/background/record-replay-v3/bootstrap";
+import { isTerminalStatus } from "@/entrypoints/background/record-replay-v3/domain/events";
 import { deleteRrV3Db } from "@/entrypoints/background/record-replay-v3/storage/db";
 
 const mocks = vi.hoisted(() => ({
@@ -72,12 +77,53 @@ function parseToolPayload(result: {
   return JSON.parse(text);
 }
 
+async function waitForRunTerminal(
+  runId: string,
+  timeoutMs = 5_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const run = await createStoragePort().runs.get(runId as any);
+    if (run && isTerminalStatus(run.status)) {
+      return run;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  throw new Error(`Run "${runId}" did not reach a terminal state`);
+}
+
+async function invokeRpcHandleRequest(
+  method: string,
+  params: Record<string, unknown>,
+) {
+  const runtime = await bootstrapV3();
+  const rpcServer = runtime.rpcServer as unknown as {
+    handleRequest: (
+      request: { method: string; params?: Record<string, unknown>; requestId: string },
+      conn: { subscriptions: Set<string | null> },
+    ) => Promise<unknown>;
+  };
+  return rpcServer.handleRequest(
+    {
+      method,
+      params,
+      requestId: `req_${Date.now()}`,
+    },
+    { subscriptions: new Set() },
+  );
+}
+
 describe("record to replay automation", () => {
   let currentTab: MockTab;
   let localStorageState: Record<string, unknown>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    if (getV3Runtime()) {
+      await getV3Runtime()?.stop();
+    }
     await deleteRrV3Db();
     currentTab = {
       id: TAB_ID,
@@ -166,6 +212,7 @@ describe("record to replay automation", () => {
       },
     );
     asMock(chrome.runtime.sendMessage).mockResolvedValue(undefined);
+    (chrome.runtime as any).getManifest = vi.fn(() => ({ manifest_version: 3 }));
     asMock(chrome.tabs.query).mockImplementation(
       async (queryInfo?: chrome.tabs.QueryInfo) => {
         if (queryInfo?.currentWindow === true) {
@@ -217,6 +264,9 @@ describe("record to replay automation", () => {
   });
 
   afterEach(async () => {
+    if (getV3Runtime()) {
+      await getV3Runtime()?.stop();
+    }
     if (recordingSession.getStatus() !== "idle") {
       await recordingSession.stopSession();
     }
@@ -304,5 +354,89 @@ describe("record to replay automation", () => {
     expect(toolNames).toContain(TOOL_NAMES.BROWSER.READ_PAGE);
     expect(toolNames).toContain(TOOL_NAMES.BROWSER.FILL);
     expect(currentTab.url).toBe("https://example.com/signup");
+  });
+
+  it("replays a recorded flow through the RR-V3 RPC path used by sidepanel", async () => {
+    await recordingStartTool.execute({
+      name: "Recorded Signup RPC",
+      tabId: TAB_ID,
+    });
+
+    recordingSession.appendSteps([
+      {
+        id: "fill-email",
+        type: "fill",
+        target: {
+          selector: "#email",
+          candidates: [{ type: "css", value: "#email" }],
+        },
+        value: "alice@example.com",
+      } as any,
+    ]);
+
+    const stopResult = await recordingStopTool.execute({
+      name: "Signup Replay RPC Flow",
+      description: "Captured for sidepanel RPC replay test",
+    });
+    const stopPayload = parseToolPayload(stopResult);
+    const flowId = stopPayload.flow.id as string;
+
+    const result = (await invokeRpcHandleRequest("rr_v3.enqueueRun", {
+      flowId,
+    })) as { runId: string; position: number };
+    const run = await waitForRunTerminal(result.runId);
+    const events = await createStoragePort().events.list(result.runId as any);
+    const toolNames = mocks.handleCallTool.mock.calls.map(([call]) => call.name);
+
+    expect(run.status).toBe("succeeded");
+    expect(events.filter((event) => event.type === "node.succeeded")).toHaveLength(2);
+    expect(toolNames).toContain(TOOL_NAMES.BROWSER.NAVIGATE);
+    expect(toolNames).toContain(TOOL_NAMES.BROWSER.READ_PAGE);
+    expect(toolNames).toContain(TOOL_NAMES.BROWSER.FILL);
+    expect(currentTab.url).toBe("https://example.com/signup");
+  });
+
+  it("replays sequential navigate steps from chrome://newtab/ to google through the RR-V3 RPC path", async () => {
+    const flowId = `flow-nav-seq-${Date.now()}`;
+    await createStoragePort().flows.save({
+      schemaVersion: 3,
+      id: flowId as any,
+      name: "Navigate Sequence",
+      entryNodeId: "nav-1" as any,
+      nodes: [
+        {
+          id: "nav-1" as any,
+          kind: "navigate",
+          config: { url: "chrome://newtab/" },
+        },
+        {
+          id: "nav-2" as any,
+          kind: "navigate",
+          config: { url: "https://www.google.com/" },
+        },
+      ],
+      edges: [
+        {
+          id: "edge-nav-1" as any,
+          from: "nav-1" as any,
+          to: "nav-2" as any,
+          label: "default",
+        },
+      ],
+      createdAt: new Date().toISOString() as any,
+      updatedAt: new Date().toISOString() as any,
+    });
+
+    const result = (await invokeRpcHandleRequest("rr_v3.enqueueRun", {
+      flowId,
+      tabId: TAB_ID,
+      tabTarget: "current",
+    })) as { runId: string; position: number };
+    const run = await waitForRunTerminal(result.runId);
+    const events = await createStoragePort().events.list(result.runId as any);
+
+    expect(run.status).toBe("succeeded");
+    expect(events.filter((event) => event.type === "node.succeeded")).toHaveLength(2);
+    expect(currentTab.url).toBe("https://www.google.com/");
   });
 });

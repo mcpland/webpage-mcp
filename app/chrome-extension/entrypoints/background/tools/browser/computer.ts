@@ -6,7 +6,10 @@ import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { clickTool, fillTool } from './interaction';
 import { keyboardTool } from './keyboard';
 import { screenshotTool } from './screenshot';
-import { screenshotContextManager, scaleCoordinates } from '@/utils/screenshot-context';
+import {
+  screenshotContextManager,
+  scaleCoordinates,
+} from '@/utils/screenshot-context';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
   captureFrameOnAction,
@@ -14,6 +17,11 @@ import {
   type ActionMetadata,
   type ActionType,
 } from './gif-recorder';
+import {
+  getResolvedViewportCoordinates,
+  isCompositeSelector,
+  resolveFrameIdForMessageResult,
+} from './target-resolution';
 
 type MouseButton = 'left' | 'right' | 'middle';
 
@@ -117,7 +125,11 @@ class CDPHelper {
     await cdpSessionManager.detach(tabId, 'computer');
   }
 
-  static async send(tabId: number, method: string, params?: object): Promise<any> {
+  static async send(
+    tabId: number,
+    method: string,
+    params?: object,
+  ): Promise<any> {
     return await cdpSessionManager.sendCommand(tabId, method, params);
   }
 
@@ -169,7 +181,10 @@ class CDPHelper {
   }
 
   // Enhanced key mapping for common non-character keys
-  private static KEY_ALIASES: Record<string, { key: string; code?: string; text?: string }> = {
+  private static KEY_ALIASES: Record<
+    string,
+    { key: string; code?: string; text?: string }
+  > = {
     enter: { key: 'Enter', code: 'Enter' },
     return: { key: 'Enter', code: 'Enter' },
     backspace: { key: 'Backspace', code: 'Backspace' },
@@ -188,7 +203,11 @@ class CDPHelper {
     arrowright: { key: 'ArrowRight', code: 'ArrowRight' },
   };
 
-  private static resolveKeyDef(token: string): { key: string; code?: string; text?: string } {
+  private static resolveKeyDef(token: string): {
+    key: string;
+    code?: string;
+    text?: string;
+  } {
     const t = (token || '').toLowerCase();
     if (this.KEY_ALIASES[t]) return this.KEY_ALIASES[t];
     if (/^f([1-9]|1[0-2])$/.test(t)) {
@@ -226,7 +245,17 @@ class CDPHelper {
     for (const pRaw of parts) {
       const p = pRaw.trim().toLowerCase();
       if (
-        ['ctrl', 'control', 'alt', 'shift', 'cmd', 'meta', 'command', 'win', 'windows'].includes(p)
+        [
+          'ctrl',
+          'control',
+          'alt',
+          'shift',
+          'cmd',
+          'meta',
+          'command',
+          'win',
+          'windows',
+        ].includes(p)
       )
         modifiers.push(p);
       else keyToken = pRaw.trim();
@@ -254,13 +283,17 @@ class ComputerTool extends BaseBrowserToolExecutor {
 
   async execute(args: ComputerParams): Promise<ToolResult> {
     const params = args || ({} as ComputerParams);
-    if (!params.action) return createErrorResponse('Action parameter is required');
+    if (!params.action)
+      return createErrorResponse('Action parameter is required');
 
     try {
       const explicit = await this.tryGetTab(args.tabId);
-      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
+      const tab =
+        explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id)
-        return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+        return createErrorResponse(
+          ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID',
+        );
       if (
         requiresPublicPageForAction(params) &&
         hasDisallowedPublicPageScheme(String(tab.url || ''))
@@ -272,13 +305,19 @@ class ComputerTool extends BaseBrowserToolExecutor {
       const result = await this.executeAction(params, tab);
 
       // Trigger auto-capture on successful actions (except screenshot which is read-only)
-      if (!result.isError && params.action !== 'screenshot' && params.action !== 'wait') {
+      if (
+        !result.isError &&
+        params.action !== 'screenshot' &&
+        params.action !== 'wait'
+      ) {
         const actionType = this.mapActionToCapture(params.action);
         if (actionType) {
           // Convert to viewport-space coordinates for GIF overlays
           // params.coordinates may be screenshot-space when screenshot context exists
           const ctx = screenshotContextManager.getContext(tab.id);
-          const toViewport = (c?: Coordinates): { x: number; y: number } | undefined => {
+          const toViewport = (
+            c?: Coordinates,
+          ): { x: number; y: number } | undefined => {
             if (!c) return undefined;
             if (!ctx) return { x: c.x, y: c.y };
             const scaled = scaleCoordinates(c.x, c.y, ctx);
@@ -328,9 +367,14 @@ class ComputerTool extends BaseBrowserToolExecutor {
     return mapping[action] || null;
   }
 
-  private async executeAction(params: ComputerParams, tab: chrome.tabs.Tab): Promise<ToolResult> {
+  private async executeAction(
+    params: ComputerParams,
+    tab: chrome.tabs.Tab,
+  ): Promise<ToolResult> {
     if (!tab.id) {
-      return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+      return createErrorResponse(
+        ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID',
+      );
     }
 
     // Helper to project coordinates using screenshot context when available
@@ -342,14 +386,115 @@ class ComputerTool extends BaseBrowserToolExecutor {
       return { x: scaled.x, y: scaled.y };
     };
 
+    const injectAccessibilityHelper = async (
+      frameId?: number,
+    ): Promise<void> => {
+      await this.injectContentScript(
+        tab.id!,
+        ['inject-scripts/accessibility-tree-helper.js'],
+        false,
+        'ISOLATED',
+        false,
+        typeof frameId === 'number' ? [frameId] : undefined,
+      );
+    };
+
+    const resolveRefPoint = async (
+      ref: string,
+      frameId?: number,
+    ): Promise<Coordinates | undefined> => {
+      await injectAccessibilityHelper(frameId);
+      const resolved = await this.sendMessageToTab(
+        tab.id!,
+        {
+          action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
+          ref,
+        },
+        frameId,
+      );
+      const point = getResolvedViewportCoordinates(resolved, frameId);
+      return point ? project(point) : undefined;
+    };
+
+    const resolveSelectorPoint = async (
+      selector: string,
+      selectorType: 'css' | 'xpath',
+      requestedFrameId?: number,
+    ): Promise<
+      | {
+          point: Coordinates;
+          frameId?: number;
+          ref?: string;
+        }
+      | undefined
+    > => {
+      await injectAccessibilityHelper(requestedFrameId);
+      const selectorFrameId = isCompositeSelector(selector)
+        ? undefined
+        : requestedFrameId;
+      const ensured = await this.sendMessageToTab(
+        tab.id!,
+        {
+          action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+          selector,
+          isXPath: selectorType === 'xpath',
+        },
+        selectorFrameId,
+      );
+      if (!ensured || !ensured.success) {
+        return undefined;
+      }
+      const resolvedFrameId = await resolveFrameIdForMessageResult(
+        tab.id!,
+        requestedFrameId,
+        ensured,
+      );
+      await injectAccessibilityHelper(resolvedFrameId);
+      const resolvedRef =
+        typeof ensured.ref === 'string' ? ensured.ref : undefined;
+      if (resolvedRef) {
+        try {
+          await this.sendMessageToTab(
+            tab.id!,
+            { action: 'focusByRef', ref: resolvedRef },
+            resolvedFrameId,
+          );
+        } catch {
+          // Best effort - continue even if scroll fails
+        }
+        const point = await resolveRefPoint(resolvedRef, resolvedFrameId);
+        if (point) {
+          return { point, frameId: resolvedFrameId, ref: resolvedRef };
+        }
+      }
+      const fallbackPoint = getResolvedViewportCoordinates(
+        ensured,
+        resolvedFrameId,
+      );
+      if (!fallbackPoint) {
+        return undefined;
+      }
+      return {
+        point: project(fallbackPoint)!,
+        frameId: resolvedFrameId,
+        ref: resolvedRef,
+      };
+    };
+
     switch (params.action) {
       case 'resize_page': {
-        const width = Number((params as any).coordinates?.x || (params as any).text);
-        const height = Number((params as any).coordinates?.y || (params as any).value);
+        const width = Number(
+          (params as any).coordinates?.x || (params as any).text,
+        );
+        const height = Number(
+          (params as any).coordinates?.y || (params as any).value,
+        );
         const w = Number((params as any).width ?? width);
         const h = Number((params as any).height ?? height);
         if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
-          return createErrorResponse('Provide width and height for resize_page (positive numbers)');
+          return createErrorResponse(
+            'Provide width and height for resize_page (positive numbers)',
+          );
         }
         try {
           // Prefer precise CDP emulation
@@ -383,7 +528,12 @@ class ComputerTool extends BaseBrowserToolExecutor {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ success: true, action: 'resize_page', width: w, height: h }),
+              text: JSON.stringify({
+                success: true,
+                action: 'resize_page',
+                width: w,
+                height: h,
+              }),
             },
           ],
           isError: false,
@@ -396,52 +546,28 @@ class ComputerTool extends BaseBrowserToolExecutor {
 
         try {
           if (params.ref) {
-            await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
-            // Scroll element into view first to ensure it's visible
             try {
-              await this.sendMessageToTab(tab.id, { action: 'focusByRef', ref: params.ref });
+              await injectAccessibilityHelper(params.frameId);
+              await this.sendMessageToTab(
+                tab.id,
+                { action: 'focusByRef', ref: params.ref },
+                params.frameId,
+              );
             } catch {
               // Best effort - continue even if scroll fails
             }
-            // Re-resolve coordinates after scroll
-            const resolved = await this.sendMessageToTab(tab.id, {
-              action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-              ref: params.ref,
-            });
-            if (resolved && resolved.success) {
-              coord = project({ x: resolved.center.x, y: resolved.center.y });
+            coord = await resolveRefPoint(params.ref, params.frameId);
+            if (coord) {
               resolvedBy = 'ref';
             }
           } else if (params.selector) {
-            await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
-            const selectorType = params.selectorType || 'css';
-            const ensured = await this.sendMessageToTab(tab.id, {
-              action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-              selector: params.selector,
-              isXPath: selectorType === 'xpath',
-            });
-            if (ensured && ensured.success) {
-              // Scroll element into view first to ensure it's visible
-              const resolvedRef = typeof ensured.ref === 'string' ? ensured.ref : undefined;
-              if (resolvedRef) {
-                try {
-                  await this.sendMessageToTab(tab.id, { action: 'focusByRef', ref: resolvedRef });
-                } catch {
-                  // Best effort - continue even if scroll fails
-                }
-                // Re-resolve coordinates after scroll
-                const reResolved = await this.sendMessageToTab(tab.id, {
-                  action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-                  ref: resolvedRef,
-                });
-                if (reResolved && reResolved.success) {
-                  coord = project({ x: reResolved.center.x, y: reResolved.center.y });
-                } else {
-                  coord = project({ x: ensured.center.x, y: ensured.center.y });
-                }
-              } else {
-                coord = project({ x: ensured.center.x, y: ensured.center.y });
-              }
+            const selectorResolution = await resolveSelectorPoint(
+              params.selector,
+              params.selectorType || 'css',
+              params.frameId,
+            );
+            if (selectorResolution) {
+              coord = selectorResolution.point;
               resolvedBy = 'selector';
             }
           } else if (params.coordinates) {
@@ -468,7 +594,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
             };
             const currentHostname = getHostname(tab.url || '');
             const ctx = screenshotContextManager.getContext(tab.id!);
-            const contextHostname = (ctx as any)?.hostname as string | undefined;
+            const contextHostname = (ctx as any)?.hostname as
+              | string
+              | undefined;
             if (contextHostname && contextHostname !== currentHostname) {
               return createErrorResponse(
                 `Security check failed: Domain changed since last screenshot (from ${contextHostname} to ${currentHostname}) during hover. Capture a new screenshot or use ref/selector.`,
@@ -517,8 +645,16 @@ class ComputerTool extends BaseBrowserToolExecutor {
             isError: false,
           };
         } catch (error) {
-          console.warn('[ComputerTool] CDP hover failed, attempting DOM fallback', error);
-          return await this.domHoverFallback(tab.id, coord, resolvedBy, params.ref);
+          console.warn(
+            '[ComputerTool] CDP hover failed, attempting DOM fallback',
+            error,
+          );
+          return await this.domHoverFallback(
+            tab.id,
+            coord,
+            resolvedBy,
+            params.ref,
+          );
         }
       }
       case 'left_click':
@@ -537,6 +673,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           // Prefer DOM click via ref
           const domResult = await clickTool.execute({
             ref: params.ref,
+            frameId: params.frameId,
             waitForNavigation: false,
             timeout: TIMEOUTS.DEFAULT_WAIT * 5,
             button: params.action === 'right_click' ? 'right' : 'left',
@@ -562,7 +699,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
           return domResult;
         }
         if (!params.coordinates)
-          return createErrorResponse('Provide ref, selector, or coordinates for click action');
+          return createErrorResponse(
+            'Provide ref, selector, or coordinates for click action',
+          );
         {
           const stale = ((): any => {
             const getHostname = (url: string): string => {
@@ -574,7 +713,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
             };
             const currentHostname = getHostname(tab.url || '');
             const ctx = screenshotContextManager.getContext(tab.id!);
-            const contextHostname = (ctx as any)?.hostname as string | undefined;
+            const contextHostname = (ctx as any)?.hostname as
+              | string
+              | undefined;
             if (contextHostname && contextHostname !== currentHostname) {
               return createErrorResponse(
                 `Security check failed: Domain changed since last screenshot (from ${contextHostname} to ${currentHostname}) during ${params.action}. Capture a new screenshot or use ref/selector.`,
@@ -601,7 +742,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
         // Fallback to CDP if DOM failed
         try {
           await CDPHelper.attach(tab.id);
-          const button: MouseButton = params.action === 'right_click' ? 'right' : 'left';
+          const button: MouseButton =
+            params.action === 'right_click' ? 'right' : 'left';
           const clickCount = 1;
           await CDPHelper.dispatchMouseEvent(tab.id, {
             type: 'mouseMoved',
@@ -668,43 +810,36 @@ class ComputerTool extends BaseBrowserToolExecutor {
           return createErrorResponse(
             'Provide ref, selector, or coordinates for double/triple click',
           );
-        let coord = params.coordinates ? project(params.coordinates)! : (undefined as any);
+        let coord = params.coordinates
+          ? project(params.coordinates)!
+          : (undefined as any);
         // If ref is provided, resolve center via accessibility helper
         if (params.ref) {
           try {
-            await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
-            const resolved = await this.sendMessageToTab(tab.id, {
-              action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-              ref: params.ref,
-            });
-            if (resolved && resolved.success) {
-              coord = project({ x: resolved.center.x, y: resolved.center.y })!;
-            }
+            coord =
+              (await resolveRefPoint(params.ref, params.frameId)) || coord;
           } catch (e) {
             // ignore and use provided coordinates
           }
         } else if (params.selector) {
           // Support selector-based click
           try {
-            await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
-            const selectorType = params.selectorType || 'css';
-            const ensured = await this.sendMessageToTab(
-              tab.id,
-              {
-                action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-                selector: params.selector,
-                isXPath: selectorType === 'xpath',
-              },
+            const selectorResolution = await resolveSelectorPoint(
+              params.selector,
+              params.selectorType || 'css',
               params.frameId,
             );
-            if (ensured && ensured.success) {
-              coord = project({ x: ensured.center.x, y: ensured.center.y })!;
+            if (selectorResolution) {
+              coord = selectorResolution.point;
             }
           } catch (e) {
             // ignore
           }
         }
-        if (!coord) return createErrorResponse('Failed to resolve coordinates from ref/selector');
+        if (!coord)
+          return createErrorResponse(
+            'Failed to resolve coordinates from ref/selector',
+          );
         {
           const stale = ((): any => {
             if (!params.coordinates) return null;
@@ -717,7 +852,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
             };
             const currentHostname = getHostname(tab.url || '');
             const ctx = screenshotContextManager.getContext(tab.id!);
-            const contextHostname = (ctx as any)?.hostname as string | undefined;
+            const contextHostname = (ctx as any)?.hostname as
+              | string
+              | undefined;
             if (contextHostname && contextHostname !== currentHostname) {
               return createErrorResponse(
                 `Security check failed: Domain changed since last screenshot (from ${contextHostname} to ${currentHostname}) during ${params.action}. Capture a new screenshot or use ref/selector.`,
@@ -782,13 +919,17 @@ class ComputerTool extends BaseBrowserToolExecutor {
       }
       case 'left_click_drag': {
         if (!params.startCoordinates && !params.startRef)
-          return createErrorResponse('Provide startRef or startCoordinates for drag');
+          return createErrorResponse(
+            'Provide startRef or startCoordinates for drag',
+          );
         if (!params.coordinates && !params.ref)
           return createErrorResponse('Provide ref or end coordinates for drag');
         let start = params.startCoordinates
           ? project(params.startCoordinates)!
           : (undefined as any);
-        let end = params.coordinates ? project(params.coordinates)! : (undefined as any);
+        let end = params.coordinates
+          ? project(params.coordinates)!
+          : (undefined as any);
         {
           const stale = ((): any => {
             if (!params.startCoordinates && !params.coordinates) return null;
@@ -801,7 +942,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
             };
             const currentHostname = getHostname(tab.url || '');
             const ctx = screenshotContextManager.getContext(tab.id!);
-            const contextHostname = (ctx as any)?.hostname as string | undefined;
+            const contextHostname = (ctx as any)?.hostname as
+              | string
+              | undefined;
             if (contextHostname && contextHostname !== currentHostname) {
               return createErrorResponse(
                 `Security check failed: Domain changed since last screenshot (from ${contextHostname} to ${currentHostname}) during left_click_drag. Capture a new screenshot or use ref/selector.`,
@@ -812,33 +955,25 @@ class ComputerTool extends BaseBrowserToolExecutor {
           if (stale) return stale;
         }
         if (params.startRef || params.ref) {
-          await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+          await injectAccessibilityHelper(params.frameId);
         }
         if (params.startRef) {
           try {
-            const resolved = await this.sendMessageToTab(tab.id, {
-              action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-              ref: params.startRef,
-            });
-            if (resolved && resolved.success)
-              start = project({ x: resolved.center.x, y: resolved.center.y })!;
+            start =
+              (await resolveRefPoint(params.startRef, params.frameId)) || start;
           } catch {
             // ignore
           }
         }
         if (params.ref) {
           try {
-            const resolved = await this.sendMessageToTab(tab.id, {
-              action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-              ref: params.ref,
-            });
-            if (resolved && resolved.success)
-              end = project({ x: resolved.center.x, y: resolved.center.y })!;
+            end = (await resolveRefPoint(params.ref, params.frameId)) || end;
           } catch {
             // ignore
           }
         }
-        if (!start || !end) return createErrorResponse('Failed to resolve drag coordinates');
+        if (!start || !end)
+          return createErrorResponse('Failed to resolve drag coordinates');
         try {
           await CDPHelper.attach(tab.id);
           await CDPHelper.dispatchMouseEvent(tab.id, {
@@ -876,34 +1011,39 @@ class ComputerTool extends BaseBrowserToolExecutor {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({ success: true, action: 'left_click_drag', start, end }),
+                text: JSON.stringify({
+                  success: true,
+                  action: 'left_click_drag',
+                  start,
+                  end,
+                }),
               },
             ],
             isError: false,
           };
         } catch (e) {
           await CDPHelper.detach(tab.id);
-          return createErrorResponse(`Drag failed: ${e instanceof Error ? e.message : String(e)}`);
+          return createErrorResponse(
+            `Drag failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
         }
       }
       case 'scroll': {
         if (!params.coordinates && !params.ref)
           return createErrorResponse('Provide ref or coordinates for scroll');
-        let coord = params.coordinates ? project(params.coordinates)! : (undefined as any);
+        let coord = params.coordinates
+          ? project(params.coordinates)!
+          : (undefined as any);
         if (params.ref) {
           try {
-            await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
-            const resolved = await this.sendMessageToTab(tab.id, {
-              action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-              ref: params.ref,
-            });
-            if (resolved && resolved.success)
-              coord = project({ x: resolved.center.x, y: resolved.center.y })!;
+            coord =
+              (await resolveRefPoint(params.ref, params.frameId)) || coord;
           } catch {
             // ignore
           }
         }
-        if (!coord) return createErrorResponse('Failed to resolve scroll coordinates');
+        if (!coord)
+          return createErrorResponse('Failed to resolve scroll coordinates');
         {
           const stale = ((): any => {
             if (!params.coordinates) return null;
@@ -916,7 +1056,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
             };
             const currentHostname = getHostname(tab.url || '');
             const ctx = screenshotContextManager.getContext(tab.id!);
-            const contextHostname = (ctx as any)?.hostname as string | undefined;
+            const contextHostname = (ctx as any)?.hostname as
+              | string
+              | undefined;
             if (contextHostname && contextHostname !== currentHostname) {
               return createErrorResponse(
                 `Security check failed: Domain changed since last screenshot (from ${contextHostname} to ${currentHostname}) during scroll. Capture a new screenshot or use ref/selector.`,
@@ -969,12 +1111,16 @@ class ComputerTool extends BaseBrowserToolExecutor {
         }
       }
       case 'type': {
-        if (!params.text) return createErrorResponse('Text parameter is required for type action');
+        if (!params.text)
+          return createErrorResponse(
+            'Text parameter is required for type action',
+          );
         try {
           // Optional focus via ref before typing
           if (params.ref) {
             await clickTool.execute({
               ref: params.ref,
+              frameId: params.frameId,
               waitForNavigation: false,
               timeout: TIMEOUTS.DEFAULT_WAIT * 5,
               tabId: tab.id,
@@ -1013,7 +1159,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
       }
       case 'fill': {
         if (!params.ref && !params.selector) {
-          return createErrorResponse('Provide ref or selector and a value for fill');
+          return createErrorResponse(
+            'Provide ref or selector and a value for fill',
+          );
         }
         // Reuse existing fill tool to leverage robust DOM event behavior
         const res = await fillTool.execute({
@@ -1033,12 +1181,18 @@ class ComputerTool extends BaseBrowserToolExecutor {
           value: string | number | boolean;
         }>;
         if (!Array.isArray(elements) || elements.length === 0) {
-          return createErrorResponse('elements must be a non-empty array for fill_form');
+          return createErrorResponse(
+            'elements must be a non-empty array for fill_form',
+          );
         }
         const results: Array<{ ref: string; ok: boolean; error?: string }> = [];
         for (const item of elements) {
           if (!item || !item.ref) {
-            results.push({ ref: String(item?.ref || ''), ok: false, error: 'missing ref' });
+            results.push({
+              ref: String(item?.ref || ''),
+              ok: false,
+              error: 'missing ref',
+            });
             continue;
           }
           try {
@@ -1050,7 +1204,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
               windowId: tab.windowId,
             } as any);
             const ok = !r.isError;
-            results.push({ ref: item.ref, ok, error: ok ? undefined : 'failed' });
+            results.push({
+              ref: item.ref,
+              ok,
+              error: ok ? undefined : 'failed',
+            });
           } catch (e) {
             results.push({
               ref: item.ref,
@@ -1084,13 +1242,16 @@ class ComputerTool extends BaseBrowserToolExecutor {
         const tokens = params.text.trim().split(/\s+/).filter(Boolean);
         const repeat = params.repeat ?? 1;
         if (!Number.isInteger(repeat) || repeat < 1 || repeat > 100) {
-          return createErrorResponse('repeat must be an integer between 1 and 100 for key action');
+          return createErrorResponse(
+            'repeat must be an integer between 1 and 100 for key action',
+          );
         }
         try {
           // Optional focus via ref before key events
           if (params.ref) {
             await clickTool.execute({
               ref: params.ref,
+              frameId: params.frameId,
               waitForNavigation: false,
               timeout: TIMEOUTS.DEFAULT_WAIT * 5,
               tabId: tab.id,
@@ -1109,7 +1270,12 @@ class ComputerTool extends BaseBrowserToolExecutor {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({ success: true, action: 'key', keys: tokens, repeat }),
+                text: JSON.stringify({
+                  success: true,
+                  action: 'key',
+                  keys: tokens,
+                  repeat,
+                }),
               },
             ],
             isError: false,
@@ -1119,7 +1285,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
           // Fallback to DOM keyboard simulation (comma-separated combinations)
           const keysStr = tokens.join(',');
           const repeatedKeys =
-            repeat === 1 ? keysStr : Array.from({ length: repeat }, () => keysStr).join(',');
+            repeat === 1
+              ? keysStr
+              : Array.from({ length: repeat }, () => keysStr).join(',');
           const res = await keyboardTool.execute({
             keys: repeatedKeys,
             frameId: params.frameId,
@@ -1131,7 +1299,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
       }
       case 'wait': {
         const hasTextCondition =
-          typeof (params as any).text === 'string' && (params as any).text.trim().length > 0;
+          typeof (params as any).text === 'string' &&
+          (params as any).text.trim().length > 0;
         if (hasTextCondition) {
           try {
             // Conditional wait for text appearance/disappearance using content script
@@ -1182,15 +1351,24 @@ class ComputerTool extends BaseBrowserToolExecutor {
             );
           }
         } else {
-          const seconds = Math.max(0, Math.min((params as any).duration || 0, 30));
+          const seconds = Math.max(
+            0,
+            Math.min((params as any).duration || 0, 30),
+          );
           if (!seconds)
-            return createErrorResponse('Duration parameter is required and must be > 0');
+            return createErrorResponse(
+              'Duration parameter is required and must be > 0',
+            );
           await new Promise((r) => setTimeout(r, seconds * 1000));
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({ success: true, action: 'wait', duration: seconds }),
+                text: JSON.stringify({
+                  success: true,
+                  action: 'wait',
+                  duration: seconds,
+                }),
               },
             ],
             isError: false,
@@ -1202,13 +1380,17 @@ class ComputerTool extends BaseBrowserToolExecutor {
           return createErrorResponse('ref is required for scroll_to action');
         }
         try {
-          await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+          await this.injectContentScript(tab.id, [
+            'inject-scripts/accessibility-tree-helper.js',
+          ]);
           const resp = await this.sendMessageToTab(tab.id, {
             action: 'focusByRef',
             ref: params.ref,
           });
           if (!resp || resp.success !== true) {
-            return createErrorResponse(resp?.error || 'scroll_to failed: element not found');
+            return createErrorResponse(
+              resp?.error || 'scroll_to failed: element not found',
+            );
           }
           return {
             content: [
@@ -1239,10 +1421,14 @@ class ComputerTool extends BaseBrowserToolExecutor {
         const x1 = Number(region.x1);
         const y1 = Number(region.y1);
         if (![x0, y0, x1, y1].every(Number.isFinite)) {
-          return createErrorResponse('region must contain finite numbers (x0, y0, x1, y1)');
+          return createErrorResponse(
+            'region must contain finite numbers (x0, y0, x1, y1)',
+          );
         }
         if (x0 < 0 || y0 < 0 || x1 <= x0 || y1 <= y0) {
-          return createErrorResponse('Invalid region: require x0>=0, y0>=0 and x1>x0, y1>y0');
+          return createErrorResponse(
+            'Invalid region: require x0>=0, y0>=0 and x1>x0, y1>y0',
+          );
         }
 
         // Project coordinates from screenshot space to viewport space
@@ -1279,7 +1465,11 @@ class ComputerTool extends BaseBrowserToolExecutor {
 
         try {
           await CDPHelper.attach(tab.id);
-          const metrics: any = await CDPHelper.send(tab.id, 'Page.getLayoutMetrics', {});
+          const metrics: any = await CDPHelper.send(
+            tab.id,
+            'Page.getLayoutMetrics',
+            {},
+          );
           const viewport = metrics?.layoutViewport ||
             metrics?.visualViewport || {
               clientWidth: 800,
@@ -1298,23 +1488,29 @@ class ComputerTool extends BaseBrowserToolExecutor {
           const pageX = Number(viewport.pageX || 0);
           const pageY = Number(viewport.pageY || 0);
 
-          const shot: any = await CDPHelper.send(tab.id, 'Page.captureScreenshot', {
-            format: 'png',
-            captureBeyondViewport: false,
-            fromSurface: true,
-            clip: {
-              x: pageX + rx0,
-              y: pageY + ry0,
-              width: w,
-              height: h,
-              scale: 1,
+          const shot: any = await CDPHelper.send(
+            tab.id,
+            'Page.captureScreenshot',
+            {
+              format: 'png',
+              captureBeyondViewport: false,
+              fromSurface: true,
+              clip: {
+                x: pageX + rx0,
+                y: pageY + ry0,
+                width: w,
+                height: h,
+                scale: 1,
+              },
             },
-          });
+          );
           await CDPHelper.detach(tab.id);
 
           const base64Data = String(shot?.data || '');
           if (!base64Data) {
-            return createErrorResponse('Failed to capture zoom screenshot via CDP');
+            return createErrorResponse(
+              'Failed to capture zoom screenshot via CDP',
+            );
           }
           return {
             content: [
@@ -1333,7 +1529,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
           };
         } catch (e) {
           await CDPHelper.detach(tab.id);
-          return createErrorResponse(`zoom failed: ${e instanceof Error ? e.message : String(e)}`);
+          return createErrorResponse(
+            `zoom failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
         }
       }
       case 'screenshot': {
@@ -1388,7 +1586,10 @@ class ComputerTool extends BaseBrowserToolExecutor {
           };
         }
       } catch (error) {
-        console.warn('[ComputerTool] DOM ref hover failed, falling back to coordinates', error);
+        console.warn(
+          '[ComputerTool] DOM ref hover failed, falling back to coordinates',
+          error,
+        );
       }
     }
 
@@ -1435,7 +1636,9 @@ class ComputerTool extends BaseBrowserToolExecutor {
 
       const payload = injection?.result;
       if (!payload?.success) {
-        return createErrorResponse(payload?.error || 'DOM hover fallback failed');
+        return createErrorResponse(
+          payload?.error || 'DOM hover fallback failed',
+        );
       }
 
       return {
