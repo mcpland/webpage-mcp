@@ -48,6 +48,7 @@ export const TOOL_NAMES = {
     RECORDING_STATUS: 'recording_status',
     FLOW_ANALYZE: 'flow_analyze',
     FLOW_UPDATE: 'flow_update',
+    WORKFLOW_DEBUG_VIEW: 'workflow_debug_view',
   },
 };
 
@@ -207,6 +208,46 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
       },
       required: ['flowId'],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
+    description:
+      'Return a safe debug view for a recorded or published workflow, including sanitized node configs, quality hints, and recent run events.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Flow ID to inspect. Either flowId or workflow is required.',
+        },
+        workflow: {
+          type: 'string',
+          description: 'Published workflow slug to inspect. Either workflow or flowId is required.',
+        },
+        runId: {
+          type: 'string',
+          description: 'Optional specific run ID to include in the debug view.',
+        },
+        includeRuns: {
+          type: 'boolean',
+          default: true,
+          description: 'Include recent run summaries and selected events.',
+        },
+        maxRuns: {
+          type: 'number',
+          minimum: 0,
+          maximum: 10,
+          description: 'Maximum recent runs to include when runId is omitted. Default: 3.',
+        },
+        maxEventsPerRun: {
+          type: 'number',
+          minimum: 0,
+          maximum: 100,
+          description: 'Maximum recent events to include per run. Default: 40.',
+        },
+      },
+      required: [],
     },
   },
   {

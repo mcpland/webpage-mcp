@@ -1,9 +1,12 @@
 import { createErrorResponse, type ToolResult } from '@/common/tool-handler';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import type { FlowV3 } from '../record-replay-v3/domain/flow';
+import type { RunEvent, RunRecordV3 } from '../record-replay-v3/domain/events';
+import type { FlowId, RunId } from '../record-replay-v3/domain/ids';
 import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variables';
 import { createStoragePort } from '../record-replay-v3';
 import { saveFlowToV3 } from '../record-replay-v3/compat';
+import { getPublishedFlowInfo } from '../record-replay-v3/flows/publish';
 import { findEntryNodeId } from '../record-replay-v3/storage/import/flow-convert';
 import { applyFlowParameterSuggestions } from './flow-parameterization';
 
@@ -38,6 +41,53 @@ interface PublicAnalyzedFlow {
     'domain' | 'tags' | 'bindings' | 'tool' | 'exposedOutputs'
   >;
 }
+
+interface WorkflowDebugNode extends PublicAnalyzedNode {
+  policy?: FlowV3['nodes'][number]['policy'];
+  config: Record<string, unknown>;
+}
+
+interface WorkflowDebugRun {
+  id: RunRecordV3['id'];
+  status: RunRecordV3['status'];
+  createdAt: RunRecordV3['createdAt'];
+  updatedAt: RunRecordV3['updatedAt'];
+  startedAt?: RunRecordV3['startedAt'];
+  finishedAt?: RunRecordV3['finishedAt'];
+  tookMs?: RunRecordV3['tookMs'];
+  tabId?: RunRecordV3['tabId'];
+  currentNodeId?: RunRecordV3['currentNodeId'];
+  attempt: RunRecordV3['attempt'];
+  maxAttempts: RunRecordV3['maxAttempts'];
+  args?: Record<string, unknown>;
+  execution?: RunRecordV3['execution'];
+  error?: unknown;
+  outputs?: unknown;
+  events: Array<Record<string, unknown>>;
+}
+
+const REDACTED = '<redacted>';
+const SENSITIVE_CONFIG_KEYS = new Set([
+  'authorization',
+  'auth',
+  'bearer',
+  'body',
+  'cookie',
+  'cookies',
+  'credential',
+  'credentials',
+  'data',
+  'headers',
+  'key',
+  'password',
+  'payload',
+  'secret',
+  'session',
+  'token',
+]);
+
+const SCRIPT_CONFIG_KEYS = new Set(['code', 'script', 'jsScript']);
+const SECRET_TEXT_PATTERN = /(authorization|bearer|cookie|password|secret|session|token)/i;
 
 function countFlowNodes(flow: FlowV3): number {
   return Array.isArray(flow.nodes) ? flow.nodes.length : 0;
@@ -96,6 +146,279 @@ function sanitizeAnalyzedFlow(flow: FlowV3): PublicAnalyzedFlow {
       : {}),
     ...(publicMeta ? { meta: publicMeta } : {}),
   };
+}
+
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+function truncateString(value: string, maxLength = 1000): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength)}...<truncated:${value.length - maxLength}>`;
+}
+
+function isVariableReference(value: string): string | null {
+  const match = value.trim().match(/^\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/);
+  return match ? match[1] : null;
+}
+
+function isSensitiveKey(key: string): boolean {
+  const normalized = key.trim().toLowerCase();
+  return SENSITIVE_CONFIG_KEYS.has(normalized) || SECRET_TEXT_PATTERN.test(normalized);
+}
+
+function redactUrl(value: string): string {
+  const credentialRedacted = value.replace(/^(https?:\/\/)([^/?#@]+)@/i, `$1${REDACTED}@`);
+  return credentialRedacted.replace(
+    /([?&][^=&]*(?:authorization|auth|bearer|cookie|key|password|secret|session|token)[^=&]*=)[^&#]*/gi,
+    `$1${REDACTED}`,
+  );
+}
+
+function sanitizeDebugValue(
+  value: unknown,
+  key: string,
+  sensitiveVariableNames: ReadonlySet<string>,
+): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    if (key === 'url') {
+      return truncateString(redactUrl(value));
+    }
+    if (SCRIPT_CONFIG_KEYS.has(key)) {
+      return `<redacted script:${value.length}>`;
+    }
+    if (key === 'value') {
+      const variableName = isVariableReference(value);
+      if (variableName) {
+        return sensitiveVariableNames.has(variableName) ? `{${variableName}}` : value;
+      }
+      return REDACTED;
+    }
+    if (isSensitiveKey(key) || SECRET_TEXT_PATTERN.test(value)) {
+      return REDACTED;
+    }
+    return truncateString(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 50).map((item) => sanitizeDebugValue(item, key, sensitiveVariableNames));
+  }
+
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+      if (isSensitiveKey(childKey)) {
+        out[childKey] = REDACTED;
+        continue;
+      }
+      const sanitizeKey = key === 'candidates' && childKey === 'value' ? 'selector' : childKey;
+      out[childKey] = sanitizeDebugValue(childValue, sanitizeKey, sensitiveVariableNames);
+    }
+    return out;
+  }
+
+  return value;
+}
+
+function sanitizeDebugConfig(
+  config: unknown,
+  sensitiveVariableNames: ReadonlySet<string>,
+): Record<string, unknown> {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return {};
+  }
+
+  return sanitizeDebugValue(config, 'config', sensitiveVariableNames) as Record<string, unknown>;
+}
+
+function sanitizeDebugVariables(flow: FlowV3): FlowV3['variables'] {
+  if (!Array.isArray(flow.variables)) {
+    return undefined;
+  }
+  const variables = flow.variables.map((variable) => {
+    if (variable?.sensitive === true) {
+      const { default: _default, ...rest } = variable;
+      return { ...rest, sensitive: true };
+    }
+    return { ...variable };
+  });
+  return variables.length > 0 ? variables : undefined;
+}
+
+function getSensitiveVariableNames(flow: FlowV3): Set<string> {
+  return new Set(
+    (flow.variables || [])
+      .filter((variable) => variable?.sensitive === true && typeof variable.name === 'string')
+      .map((variable) => variable.name),
+  );
+}
+
+function sanitizeDebugNodes(flow: FlowV3): WorkflowDebugNode[] {
+  const sensitiveVariableNames = getSensitiveVariableNames(flow);
+  return (Array.isArray(flow.nodes) ? flow.nodes : []).map((node) => ({
+    id: node.id,
+    kind: node.kind,
+    ...(node.name ? { name: node.name } : {}),
+    ...(node.disabled === true ? { disabled: true } : {}),
+    ...(node.policy ? { policy: node.policy } : {}),
+    config: sanitizeDebugConfig(node.config, sensitiveVariableNames),
+  }));
+}
+
+function sanitizeError(error: unknown, sensitiveVariableNames: ReadonlySet<string>): unknown {
+  if (!error || typeof error !== 'object') {
+    return error;
+  }
+  const record = error as Record<string, unknown>;
+  return {
+    ...(typeof record.code === 'string' ? { code: record.code } : {}),
+    ...(typeof record.message === 'string' ? { message: record.message } : {}),
+    ...(typeof record.retryable === 'boolean' ? { retryable: record.retryable } : {}),
+    ...(record.data !== undefined
+      ? { data: sanitizeDebugValue(record.data, 'data', sensitiveVariableNames) }
+      : {}),
+    ...(record.cause ? { cause: sanitizeError(record.cause, sensitiveVariableNames) } : {}),
+  };
+}
+
+function sanitizeRunObject(
+  value: unknown,
+  sensitiveVariableNames: ReadonlySet<string>,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    out[key] =
+      sensitiveVariableNames.has(key) || isSensitiveKey(key)
+        ? REDACTED
+        : sanitizeDebugValue(item, key, sensitiveVariableNames);
+  }
+  return out;
+}
+
+function sanitizeEvent(event: RunEvent, sensitiveVariableNames: ReadonlySet<string>): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    seq: event.seq,
+    ts: event.ts,
+    type: event.type,
+  };
+
+  if ('nodeId' in event && event.nodeId) base.nodeId = event.nodeId;
+  if ('attempt' in event) base.attempt = event.attempt;
+  if ('tookMs' in event) base.tookMs = event.tookMs;
+  if ('decision' in event) base.decision = event.decision;
+  if ('level' in event) base.level = event.level;
+  if ('message' in event) base.message = truncateString(event.message);
+  if ('tabId' in event) base.tabId = event.tabId;
+  if ('flowId' in event) base.flowId = event.flowId;
+  if ('reason' in event) base.reason = sanitizeDebugValue(event.reason, 'reason', sensitiveVariableNames);
+  if ('next' in event) base.next = event.next;
+  if ('error' in event) base.error = sanitizeError(event.error, sensitiveVariableNames);
+  if (event.type === 'vars.patch') {
+    base.patch = event.patch.map((patch) => ({
+      op: patch.op,
+      name: patch.name,
+      ...(patch.value !== undefined ? { value: sensitiveVariableNames.has(patch.name) ? REDACTED : '<set>' } : {}),
+    }));
+  }
+  if (event.type === 'artifact.screenshot') {
+    base.savedAs = event.savedAs;
+    base.data = `<redacted screenshot:${event.data.length}>`;
+  }
+  if (event.type === 'log' && event.data !== undefined) {
+    base.data = sanitizeDebugValue(event.data, 'data', sensitiveVariableNames);
+  }
+  if (event.type === 'run.succeeded' && event.outputs !== undefined) {
+    base.outputs = sanitizeRunObject(event.outputs, sensitiveVariableNames);
+  }
+
+  return base;
+}
+
+async function resolveFlowForWorkflowTool(args: any): Promise<FlowV3 | null> {
+  const storage = createStoragePort();
+  const flowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+  if (flowId) {
+    return storage.flows.get(flowId as FlowId);
+  }
+
+  const workflow = typeof args?.workflow === 'string' ? args.workflow.trim() : '';
+  if (!workflow) {
+    return null;
+  }
+
+  const flows = await storage.flows.list();
+  return flows.find((flow) => getPublishedFlowInfo(flow)?.slug === workflow) || null;
+}
+
+async function collectDebugRuns(flow: FlowV3, args: any): Promise<WorkflowDebugRun[]> {
+  const includeRuns = args?.includeRuns !== false;
+  const runId = typeof args?.runId === 'string' ? args.runId.trim() : '';
+  if (!includeRuns && !runId) {
+    return [];
+  }
+
+  const storage = createStoragePort();
+  const maxRuns = runId ? 1 : clampNumber(args?.maxRuns, 3, 0, 10);
+  const maxEventsPerRun = clampNumber(args?.maxEventsPerRun, 40, 0, 100);
+  const sensitiveVariableNames = getSensitiveVariableNames(flow);
+  let runs: RunRecordV3[] = [];
+
+  if (runId) {
+    const run = await storage.runs.get(runId as RunId);
+    if (run && run.flowId === flow.id) {
+      runs = [run];
+    }
+  } else if (maxRuns > 0) {
+    const allRuns = await storage.runs.list();
+    runs = allRuns
+      .filter((run) => run.flowId === flow.id)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, maxRuns);
+  }
+
+  const debugRuns: WorkflowDebugRun[] = [];
+  for (const run of runs) {
+    const fromSeq =
+      maxEventsPerRun > 0 && typeof run.nextSeq === 'number'
+        ? Math.max(0, run.nextSeq - maxEventsPerRun)
+        : 0;
+    const events =
+      maxEventsPerRun > 0
+        ? await storage.events.list(run.id, { fromSeq, limit: maxEventsPerRun })
+        : [];
+    debugRuns.push({
+      id: run.id,
+      status: run.status,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
+      ...(run.finishedAt !== undefined ? { finishedAt: run.finishedAt } : {}),
+      ...(run.tookMs !== undefined ? { tookMs: run.tookMs } : {}),
+      ...(run.tabId !== undefined ? { tabId: run.tabId } : {}),
+      ...(run.currentNodeId !== undefined ? { currentNodeId: run.currentNodeId } : {}),
+      attempt: run.attempt,
+      maxAttempts: run.maxAttempts,
+      ...(run.args ? { args: sanitizeRunObject(run.args, sensitiveVariableNames) } : {}),
+      ...(run.execution ? { execution: run.execution } : {}),
+      ...(run.error ? { error: sanitizeError(run.error, sensitiveVariableNames) } : {}),
+      ...(run.outputs ? { outputs: sanitizeRunObject(run.outputs, sensitiveVariableNames) } : {}),
+      events: events.map((event) => sanitizeEvent(event, sensitiveVariableNames)),
+    });
+  }
+
+  return debugRuns;
 }
 
 function collectFlowHints(flow: FlowV3): FlowHint[] {
@@ -187,6 +510,67 @@ class FlowAnalyzeTool {
             },
             hints,
             flow: sanitizedFlow,
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+}
+
+class WorkflowDebugViewTool {
+  name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW;
+
+  async execute(args: any): Promise<ToolResult> {
+    const requestedFlowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+    const requestedWorkflow = typeof args?.workflow === 'string' ? args.workflow.trim() : '';
+    if (!requestedFlowId && !requestedWorkflow) {
+      return createErrorResponse('flowId or workflow is required');
+    }
+
+    const flow = await resolveFlowForWorkflowTool(args);
+    if (!flow) {
+      return createErrorResponse(
+        requestedFlowId
+          ? `Flow not found: ${requestedFlowId}`
+          : `Published workflow not found: ${requestedWorkflow}`,
+      );
+    }
+
+    const publishedInfo = getPublishedFlowInfo(flow);
+    const hints = collectFlowHints(flow);
+    const runs = await collectDebugRuns(flow, args);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            summary: {
+              flowId: flow.id,
+              workflow: publishedInfo?.slug,
+              name: flow.name,
+              nodeCount: countFlowNodes(flow),
+              edgeCount: Array.isArray(flow.edges) ? flow.edges.length : 0,
+              variableCount: Array.isArray(flow.variables) ? flow.variables.length : 0,
+              hintCount: hints.length,
+              runCount: runs.length,
+            },
+            hints,
+            workflow: {
+              id: flow.id,
+              slug: publishedInfo?.slug,
+              name: flow.name,
+              description: flow.description,
+              entryNodeId: flow.entryNodeId,
+              nodes: sanitizeDebugNodes(flow),
+              edges: Array.isArray(flow.edges) ? flow.edges.map((edge) => ({ ...edge })) : [],
+              variables: sanitizeDebugVariables(flow),
+              policy: flow.policy,
+              meta: sanitizeAnalyzedFlow(flow).meta,
+            },
+            runs,
           }),
         },
       ],
@@ -301,3 +685,4 @@ class FlowUpdateTool {
 
 export const flowAnalyzeTool = new FlowAnalyzeTool();
 export const flowUpdateTool = new FlowUpdateTool();
+export const workflowDebugViewTool = new WorkflowDebugViewTool();

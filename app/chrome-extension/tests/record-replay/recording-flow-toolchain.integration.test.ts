@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createStoragePort } from "@/entrypoints/background/record-replay-v3";
+import {
+  RUN_SCHEMA_VERSION,
+  type RunRecordV3,
+} from "@/entrypoints/background/record-replay-v3/domain/events";
 import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import { deleteRrV3Db } from "@/entrypoints/background/record-replay-v3/storage/db";
 
@@ -37,6 +41,7 @@ vi.mock("@/entrypoints/background/record-replay-v3/compat", () => ({
 import {
   flowAnalyzeTool,
   flowUpdateTool,
+  workflowDebugViewTool,
 } from "@/entrypoints/background/tools/flow-tools";
 import {
   flowRunTool,
@@ -383,6 +388,194 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(payload.flow.nodes[0]).not.toHaveProperty("config");
     expect(payload.flow.meta).not.toHaveProperty("recording");
     expect(payload.flow.meta).not.toHaveProperty("stopBarrier");
+  });
+
+  it("workflowDebugViewTool returns sanitized node configs for a published workflow", async () => {
+    const flowId = `workflow-debug-${Date.now()}`;
+    const flow = createFlow(
+      flowId,
+      [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: {
+              selector: "#email",
+              candidates: [{ type: "css", value: "#email" }],
+            },
+            value: "alice@example.com",
+          },
+        },
+        {
+          id: "script-1" as any,
+          kind: "script",
+          config: {
+            code: "return localStorage.getItem('token')",
+          },
+        },
+      ],
+      {
+        meta: {
+          tool: {
+            published: true,
+            slug: "debug-flow",
+          },
+        },
+      },
+    );
+    flow.variables = [
+      {
+        name: "email",
+        default: "alice@example.com",
+      },
+      {
+        name: "apiToken",
+        default: "secret-token",
+        sensitive: true,
+      },
+    ] as any;
+    await createStoragePort().flows.save(flow);
+
+    const result = await workflowDebugViewTool.execute({
+      workflow: "debug-flow",
+      includeRuns: false,
+    });
+    const payload = parseToolPayload(result);
+    const fillNode = payload.workflow.nodes.find(
+      (node: { id: string }) => node.id === "fill-1",
+    );
+    const scriptNode = payload.workflow.nodes.find(
+      (node: { id: string }) => node.id === "script-1",
+    );
+
+    expect(payload.summary).toMatchObject({
+      flowId,
+      workflow: "debug-flow",
+      nodeCount: 2,
+      runCount: 0,
+    });
+    expect(fillNode.config.target.selector).toBe("#email");
+    expect(fillNode.config.target.candidates).toEqual([
+      { type: "css", value: "#email" },
+    ]);
+    expect(fillNode.config.value).toBe("<redacted>");
+    expect(scriptNode.config.code).toContain("<redacted script:");
+    expect(payload.workflow.variables).toEqual([
+      {
+        name: "email",
+        default: "alice@example.com",
+      },
+      {
+        name: "apiToken",
+        sensitive: true,
+      },
+    ]);
+    expect(payload.runs).toEqual([]);
+  });
+
+  it("workflowDebugViewTool includes sanitized recent run failures", async () => {
+    const flowId = `workflow-debug-run-${Date.now()}`;
+    const runId = `${flowId}-run`;
+    const storage = createStoragePort();
+    const flow = createFlow(flowId, [
+      {
+        id: "fill-1" as any,
+        kind: "fill",
+        config: {
+          target: { selector: "#email" },
+          value: "{email}",
+        },
+      },
+    ]);
+    flow.variables = [
+      { name: "email" },
+      { name: "apiToken", sensitive: true },
+    ] as any;
+    await storage.flows.save(flow);
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: runId as any,
+      flowId: flowId as any,
+      status: "failed",
+      createdAt: 1000 as any,
+      updatedAt: 2000 as any,
+      startedAt: 1000 as any,
+      finishedAt: 2000 as any,
+      tookMs: 1000,
+      tabId: 17,
+      currentNodeId: "fill-1" as any,
+      attempt: 1,
+      maxAttempts: 1,
+      args: {
+        email: "alice@example.com",
+        apiToken: "secret-token",
+      },
+      error: {
+        code: "TARGET_NOT_FOUND",
+        message: "Missing input",
+        data: { selector: "#email", token: "secret-token" },
+      },
+      nextSeq: 1,
+    } as RunRecordV3);
+    await storage.events.append({
+      runId: runId as any,
+      type: "run.started",
+      flowId: flowId as any,
+      tabId: 17,
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "node.failed",
+      nodeId: "fill-1" as any,
+      attempt: 1,
+      error: {
+        code: "TARGET_NOT_FOUND",
+        message: "Missing input",
+        data: { selector: "#email", token: "secret-token" },
+      },
+      decision: "stop",
+    });
+
+    const result = await workflowDebugViewTool.execute({
+      flowId,
+      runId,
+      maxEventsPerRun: 10,
+    });
+    const payload = parseToolPayload(result);
+    const failedEvent = payload.runs[0].events.find(
+      (event: { type: string }) => event.type === "node.failed",
+    );
+
+    expect(payload.summary.runCount).toBe(1);
+    expect(payload.runs[0]).toMatchObject({
+      id: runId,
+      status: "failed",
+      args: {
+        email: "alice@example.com",
+        apiToken: "<redacted>",
+      },
+      error: {
+        code: "TARGET_NOT_FOUND",
+        message: "Missing input",
+        data: {
+          selector: "#email",
+          token: "<redacted>",
+        },
+      },
+    });
+    expect(failedEvent).toMatchObject({
+      type: "node.failed",
+      nodeId: "fill-1",
+      decision: "stop",
+      error: {
+        code: "TARGET_NOT_FOUND",
+        message: "Missing input",
+        data: {
+          selector: "#email",
+          token: "<redacted>",
+        },
+      },
+    });
   });
 
   it("flowUpdateTool applies parameter suggestions and persists the edited flow", async () => {
