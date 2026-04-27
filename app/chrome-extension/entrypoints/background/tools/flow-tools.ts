@@ -551,9 +551,67 @@ function collectFlowHints(flow: FlowV3): FlowHint[] {
 }
 
 function hasRecordingParameterSuggestions(flow: FlowV3): boolean {
-  return Array.isArray(flow.meta?.recording?.parameterSuggestions)
-    ? flow.meta.recording.parameterSuggestions.length > 0
-    : false;
+  return getActionableRecordingParameterSuggestions(flow).length > 0;
+}
+
+function getExistingVariableNames(flow: FlowV3): Set<string> {
+  return new Set(
+    (flow.variables || [])
+      .map((variable) => getVariableName(variable))
+      .filter((name): name is string => typeof name === 'string' && name.length > 0),
+  );
+}
+
+function isValidRepairVariableKey(key: string): boolean {
+  return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
+}
+
+function getActionableRecordingParameterSuggestions(flow: FlowV3): Array<{ suggestedKey: string }> {
+  const suggestions = flow.meta?.recording?.parameterSuggestions;
+  if (!Array.isArray(suggestions) || suggestions.length === 0) {
+    return [];
+  }
+
+  const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
+  const existingVariables = getExistingVariableNames(flow);
+  const actionable: Array<{ suggestedKey: string }> = [];
+
+  for (const suggestion of suggestions) {
+    const nodeId = typeof suggestion?.nodeId === 'string' ? suggestion.nodeId.trim() : '';
+    const kind = suggestion?.kind;
+    const suggestedKey =
+      typeof suggestion?.suggestedKey === 'string' ? suggestion.suggestedKey.trim() : '';
+    const currentValue = typeof suggestion?.currentValue === 'string' ? suggestion.currentValue : '';
+    if (!nodeId || (kind !== 'fill' && kind !== 'navigate') || !isValidRepairVariableKey(suggestedKey)) {
+      continue;
+    }
+
+    const node = nodes.find((candidate) => candidate?.id === nodeId);
+    if (!node || !node.config || typeof node.config !== 'object') {
+      continue;
+    }
+
+    const placeholder = `{${suggestedKey}}`;
+    if (!existingVariables.has(suggestedKey)) {
+      actionable.push({ suggestedKey });
+      continue;
+    }
+
+    if (kind === 'fill') {
+      const value = (node.config as { value?: unknown }).value;
+      if (typeof value === 'string' && value !== placeholder) {
+        actionable.push({ suggestedKey });
+      }
+      continue;
+    }
+
+    const url = (node.config as { url?: unknown }).url;
+    if (typeof url === 'string' && currentValue && url.includes(currentValue)) {
+      actionable.push({ suggestedKey });
+    }
+  }
+
+  return actionable;
 }
 
 function getSanitizedErrorCode(error: unknown): string | undefined {
@@ -873,9 +931,9 @@ class WorkflowRepairTool {
     }
 
     const publishedInfo = getPublishedFlowInfo(flow);
-    const hints = collectFlowHints(flow);
+    const initialHints = collectFlowHints(flow);
     const runs = await collectDebugRuns(flow, args);
-    const recommendations = buildRepairRecommendations(flow, hints, runs);
+    const recommendationsBeforeApply = buildRepairRecommendations(flow, initialHints, runs);
     const shouldApply = args?.apply === true && args?.dryRun !== true;
     const changes: WorkflowRepairChange[] = [];
     let parameterization: ReturnType<typeof applyFlowParameterSuggestions> | undefined;
@@ -900,6 +958,14 @@ class WorkflowRepairTool {
       await saveFlowToV3(flow);
     }
 
+    const finalHints = shouldApply ? collectFlowHints(flow) : initialHints;
+    const recommendations = shouldApply
+      ? buildRepairRecommendations(flow, finalHints, runs)
+      : recommendationsBeforeApply;
+    const plannedAutoFixes = recommendations
+      .filter((recommendation) => recommendation.autoFix)
+      .map((recommendation) => recommendation.autoFix);
+
     return {
       content: [
         {
@@ -915,14 +981,20 @@ class WorkflowRepairTool {
               nodeCount: countFlowNodes(flow),
               edgeCount: Array.isArray(flow.edges) ? flow.edges.length : 0,
               variableCount: Array.isArray(flow.variables) ? flow.variables.length : 0,
-              hintCount: hints.length,
+              hintCount: finalHints.length,
               inspectedRunCount: runs.length,
               recommendationCount: recommendations.length,
             },
             recommendations,
-            plannedAutoFixes: recommendations
-              .filter((recommendation) => recommendation.autoFix)
-              .map((recommendation) => recommendation.autoFix),
+            plannedAutoFixes,
+            ...(shouldApply
+              ? {
+                  recommendationsBeforeApply,
+                  plannedAutoFixesBeforeApply: recommendationsBeforeApply
+                    .filter((recommendation) => recommendation.autoFix)
+                    .map((recommendation) => recommendation.autoFix),
+                }
+              : {}),
             changes,
             ...(parameterization ? { parameterization } : {}),
           }),

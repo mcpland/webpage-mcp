@@ -689,6 +689,16 @@ describe("recording/editing/flow toolchain integration", () => {
     });
     const payload = parseToolPayload(result);
     const updated = await createStoragePort().flows.get(flowId as any);
+    const remainingCodes = new Set(
+      payload.recommendations.map(
+        (recommendation: { code: string }) => recommendation.code,
+      ),
+    );
+    const beforeApplyCodes = new Set(
+      payload.recommendationsBeforeApply.map(
+        (recommendation: { code: string }) => recommendation.code,
+      ),
+    );
 
     expect(payload).toMatchObject({
       success: true,
@@ -709,6 +719,13 @@ describe("recording/editing/flow toolchain integration", () => {
         "failure_screenshot_added",
       ]),
     );
+    expect(beforeApplyCodes.has("missing_default_retry_policy")).toBe(true);
+    expect(beforeApplyCodes.has("missing_default_timeout_policy")).toBe(true);
+    expect(beforeApplyCodes.has("recorded_parameter_suggestions_available")).toBe(true);
+    expect(remainingCodes.has("missing_default_retry_policy")).toBe(false);
+    expect(remainingCodes.has("missing_default_timeout_policy")).toBe(false);
+    expect(remainingCodes.has("recorded_parameter_suggestions_available")).toBe(false);
+    expect(payload.plannedAutoFixes).toEqual([]);
     expect(
       (
         updated?.nodes.find((node) => node.id === "nav-1")?.config as {
