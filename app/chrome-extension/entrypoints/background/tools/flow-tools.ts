@@ -109,8 +109,53 @@ const RETRYABLE_STABILITY_ERROR_CODES = [
   RR_ERROR_CODES.NAVIGATION_FAILED,
 ] as const;
 
+type FlowVariable = NonNullable<FlowV3['variables']>[number];
+
 function isRetryableStabilityErrorCode(code: string): boolean {
   return (RETRYABLE_STABILITY_ERROR_CODES as readonly string[]).includes(code);
+}
+
+function getVariableName(variable: FlowVariable | null | undefined): string | undefined {
+  const record = variable as { name?: unknown; key?: unknown } | null | undefined;
+  const name = typeof record?.name === 'string' ? record.name.trim() : '';
+  if (name) {
+    return name;
+  }
+  const key = typeof record?.key === 'string' ? record.key.trim() : '';
+  return key || undefined;
+}
+
+function containsSensitiveDefault(value: unknown, depth = 0, seen = new Set<unknown>()): boolean {
+  if (value === null || value === undefined || depth > 6) {
+    return false;
+  }
+  if (typeof value === 'string') {
+    return SECRET_TEXT_PATTERN.test(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => containsSensitiveDefault(item, depth + 1, seen));
+  }
+  if (typeof value === 'object') {
+    if (seen.has(value)) {
+      return false;
+    }
+    seen.add(value);
+    return Object.entries(value as Record<string, unknown>).some(
+      ([key, item]) => isSensitiveKey(key) || containsSensitiveDefault(item, depth + 1, seen),
+    );
+  }
+  return false;
+}
+
+function isSensitiveVariableDefinition(variable: FlowVariable | null | undefined): boolean {
+  if (variable?.sensitive === true) {
+    return true;
+  }
+  const variableName = getVariableName(variable);
+  if (variableName && isSensitiveKey(variableName)) {
+    return true;
+  }
+  return containsSensitiveDefault((variable as { default?: unknown } | null | undefined)?.default);
 }
 
 function countFlowNodes(flow: FlowV3): number {
@@ -120,7 +165,7 @@ function countFlowNodes(flow: FlowV3): number {
 function sanitizeAnalyzedFlow(flow: FlowV3): PublicAnalyzedFlow {
   const visibleVariables = Array.isArray(flow.variables)
     ? flow.variables
-        .filter((variable) => variable?.sensitive !== true)
+        .filter((variable) => !isSensitiveVariableDefinition(variable))
         .map((variable) => ({ ...variable }))
     : undefined;
   const publicMeta =
@@ -269,7 +314,7 @@ function sanitizeDebugVariables(flow: FlowV3): FlowV3['variables'] {
     return undefined;
   }
   const variables = flow.variables.map((variable) => {
-    if (variable?.sensitive === true) {
+    if (isSensitiveVariableDefinition(variable)) {
       const { default: _default, ...rest } = variable;
       return { ...rest, sensitive: true };
     }
@@ -281,8 +326,9 @@ function sanitizeDebugVariables(flow: FlowV3): FlowV3['variables'] {
 function getSensitiveVariableNames(flow: FlowV3): Set<string> {
   return new Set(
     (flow.variables || [])
-      .filter((variable) => variable?.sensitive === true && typeof variable.name === 'string')
-      .map((variable) => variable.name),
+      .filter((variable) => isSensitiveVariableDefinition(variable))
+      .map((variable) => getVariableName(variable))
+      .filter((name): name is string => typeof name === 'string' && name.length > 0),
   );
 }
 

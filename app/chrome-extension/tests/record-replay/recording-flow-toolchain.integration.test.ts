@@ -315,7 +315,6 @@ describe("recording/editing/flow toolchain integration", () => {
         name: "apiToken",
         label: "API token",
         default: "secret-token",
-        sensitive: true,
       },
     ] as any;
     await createStoragePort().flows.save(flow);
@@ -432,7 +431,6 @@ describe("recording/editing/flow toolchain integration", () => {
       {
         name: "apiToken",
         default: "secret-token",
-        sensitive: true,
       },
     ] as any;
     await createStoragePort().flows.save(flow);
