@@ -616,6 +616,7 @@ class StorageBackedRunRunner implements RunRunner {
       );
 
       const exec = await this.executeNodeAttempt(flow, node);
+      const policy = this.resolveNodePolicy(flow, node);
       if (exec.status === 'succeeded') {
         const tookMs = this.env.now() - nodeStartAt;
 
@@ -635,6 +636,8 @@ class StorageBackedRunRunner implements RunRunner {
         if (exec.outputs) {
           this.outputs = { ...this.outputs, ...exec.outputs };
         }
+
+        await this.captureNodeArtifact(node, policy, false);
 
         // Emit node.succeeded
         await this.queue.run(() =>
@@ -657,7 +660,6 @@ class StorageBackedRunRunner implements RunRunner {
 
       // Handle failure
       const error = exec.error;
-      const policy = this.resolveNodePolicy(flow, node);
       const decision = this.decideOnError(flow, node, policy, error);
 
       // Emit node.failed
@@ -671,6 +673,8 @@ class StorageBackedRunRunner implements RunRunner {
           decision: decision.kind,
         } as RunEventInput),
       );
+
+      await this.captureNodeArtifact(node, policy, true);
 
       if (decision.kind === 'retry' && decision.retryPolicy) {
         const maxAttempts = 1 + Math.max(0, decision.retryPolicy.retries);
@@ -707,6 +711,67 @@ class StorageBackedRunRunner implements RunRunner {
 
       return { terminal: 'failed', error };
     }
+  }
+
+  private async captureNodeArtifact(
+    node: NodeV3,
+    policy: NodePolicy,
+    failed: boolean,
+  ): Promise<void> {
+    const artifactPolicy = policy.artifacts;
+    const screenshotPolicy = artifactPolicy?.screenshot ?? 'never';
+    const shouldCapture =
+      screenshotPolicy === 'always' || (screenshotPolicy === 'onFailure' && failed);
+    if (!shouldCapture) {
+      return;
+    }
+
+    const result = await this.env.artifactService.screenshot(this.config.tabId, {
+      background: this.config.execution?.backgroundTabs === true,
+    });
+    if (!result.ok) {
+      await this.queue.run(() =>
+        this.env.events.append({
+          runId: this.runId,
+          type: 'log',
+          level: 'warn',
+          message: `Failed to capture screenshot artifact for node "${node.id}": ${result.error.message}`,
+        } as RunEventInput),
+      );
+      return;
+    }
+
+    let savedAs: string | undefined;
+    if (artifactPolicy?.saveScreenshotAs) {
+      const saveResult = await this.env.artifactService.saveScreenshot(
+        this.runId,
+        node.id,
+        result.base64,
+        artifactPolicy.saveScreenshotAs,
+      );
+      if ('error' in saveResult) {
+        await this.queue.run(() =>
+          this.env.events.append({
+            runId: this.runId,
+            type: 'log',
+            level: 'warn',
+            message: `Failed to save screenshot artifact for node "${node.id}": ${saveResult.error.message}`,
+          } as RunEventInput),
+        );
+      } else {
+        savedAs = saveResult.savedAs;
+      }
+    }
+
+    await this.queue.run(() =>
+      this.env.events.append({
+        runId: this.runId,
+        type: 'artifact.screenshot',
+        nodeId: node.id,
+        data: result.base64,
+        ...(savedAs ? { savedAs } : {}),
+      } as RunEventInput),
+    );
   }
 
   private resolveNodePolicy(flow: FlowV3, node: NodeV3): NodePolicy {

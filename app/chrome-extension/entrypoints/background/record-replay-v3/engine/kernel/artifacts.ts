@@ -27,6 +27,7 @@ export interface ArtifactService {
     options?: {
       format?: 'png' | 'jpeg';
       quality?: number;
+      background?: boolean;
     },
   ): Promise<ScreenshotResult>;
 
@@ -75,6 +76,26 @@ export function createChromeArtifactService(): ArtifactService {
   return {
     screenshot: async (tabId, options) => {
       try {
+        const format = options?.format ?? 'png';
+        const quality = options?.quality ?? 100;
+        if (options?.background === true) {
+          const { cdpSessionManager } = await import('@/utils/cdp-session-manager');
+          const shot = await cdpSessionManager.withSession(tabId, 'rr-v3-artifact-screenshot', async () => {
+            return (await cdpSessionManager.sendCommand(tabId, 'Page.captureScreenshot', {
+              format,
+              ...(format === 'jpeg' ? { quality } : {}),
+            })) as { data?: unknown };
+          });
+          const base64 = typeof shot?.data === 'string' ? shot.data : '';
+          if (!base64) {
+            return {
+              ok: false,
+              error: createRRError(RR_ERROR_CODES.INTERNAL, 'CDP screenshot returned empty data'),
+            };
+          }
+          return { ok: true, base64 };
+        }
+
         // Get the window ID for the tab
         const tab = await chrome.tabs.get(tabId);
         if (!tab.windowId) {
@@ -85,9 +106,6 @@ export function createChromeArtifactService(): ArtifactService {
         }
 
         // Capture the visible tab
-        const format = options?.format ?? 'png';
-        const quality = options?.quality ?? 100;
-
         const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
           format,
           quality: format === 'jpeg' ? quality : undefined,

@@ -25,6 +25,7 @@ import { PluginRegistry } from '@/entrypoints/background/record-replay-v3/engine
 import { createNotImplementedStoragePort } from '@/entrypoints/background/record-replay-v3/engine/storage/storage-port';
 import { createRunRunnerFactory } from '@/entrypoints/background/record-replay-v3/engine/kernel/runner';
 import { resetBreakpointRegistry } from '@/entrypoints/background/record-replay-v3/engine/kernel/breakpoints';
+import type { ArtifactService } from '@/entrypoints/background/record-replay-v3/engine/kernel/artifacts';
 import type {
   NodeDefinition,
   NodeExecutionResult,
@@ -194,6 +195,10 @@ async function listEvents(bus: InMemoryEventsBus, runId: RunId): Promise<RunEven
 function createRunnerContext(
   runId: RunId,
   flow: FlowV3,
+  options: {
+    artifactService?: ArtifactService;
+    execution?: RunRecordV3['execution'];
+  } = {},
 ): {
   runner: RunRunner;
   bus: InMemoryEventsBus;
@@ -211,8 +216,17 @@ function createRunnerContext(
   storage.runs = runs;
   storage.persistentVars = createInMemoryPersistentVarsStore();
 
-  const factory = createRunRunnerFactory({ storage, events: bus, plugins });
-  const runner = factory.create(runId, { flow, tabId: 1 });
+  const factory = createRunRunnerFactory({
+    storage,
+    events: bus,
+    plugins,
+    ...(options.artifactService ? { artifactService: options.artifactService } : {}),
+  });
+  const runner = factory.create(runId, {
+    flow,
+    tabId: 1,
+    ...(options.execution ? { execution: options.execution } : {}),
+  });
 
   return { runner, bus, runsById, calls };
 }
@@ -447,6 +461,56 @@ describe('V3 RunRunner onError contracts', () => {
 
     const failed = nodeFailedEvents(events, 'A');
     expect(failed.map((e) => e.decision)).toEqual(['retry']);
+  });
+
+  it('artifacts: captures and records failure screenshots from node policy', async () => {
+    const runId = 'run-artifact-on-failure';
+    const artifactService: ArtifactService = {
+      screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'failure-shot' }),
+      saveScreenshot: vi.fn().mockResolvedValue({ savedAs: 'failure.png' }),
+    };
+    const flow = createFlow(
+      'A',
+      [
+        {
+          id: 'A',
+          kind: 'test',
+          config: { action: 'fail' },
+          policy: {
+            artifacts: { screenshot: 'onFailure', saveScreenshotAs: 'failure.png' },
+          },
+        },
+      ],
+      [],
+    );
+
+    const { runner, bus } = createRunnerContext(runId, flow, {
+      artifactService,
+      execution: { backgroundTabs: true },
+    });
+    const result = await runner.start();
+    expect(result.status).toBe('failed');
+
+    expect(artifactService.screenshot).toHaveBeenCalledWith(1, { background: true });
+    expect(artifactService.saveScreenshot).toHaveBeenCalledWith(
+      runId,
+      'A',
+      'failure-shot',
+      'failure.png',
+    );
+
+    const events = await listEvents(bus, runId);
+    const screenshots = events.filter(
+      (event): event is Extract<RunEvent, { type: 'artifact.screenshot' }> =>
+        event.type === 'artifact.screenshot',
+    );
+    expect(screenshots).toHaveLength(1);
+    expect(screenshots[0]).toMatchObject({
+      type: 'artifact.screenshot',
+      nodeId: 'A',
+      data: 'failure-shot',
+      savedAs: 'failure.png',
+    });
   });
 
   it('default: without onError policy, uses ON_ERROR edge when present', async () => {
