@@ -97,4 +97,25 @@ describe('flow parameterization suggestions', () => {
     expect(result.changed).toBe(true);
     expect((navNode.config as any).url).toBe('search?q={q}&page=1');
   });
+
+  it('skips recorded suggestions when node values were edited after recording', () => {
+    const flow = createFlow();
+    const fillNode = flow.nodes?.find((node) => node.id === 'fill-1');
+    const navNode = flow.nodes?.find((node) => node.id === 'nav-1');
+    if (!fillNode || !navNode) throw new Error('test nodes missing');
+    (fillNode.config as any).value = 'bob@example.com';
+    (navNode.config as any).url = 'https://example.com/search?q=bye&page=1';
+
+    const result = applyFlowParameterSuggestions(flow);
+
+    expect(result).toEqual({
+      changed: false,
+      applied: 0,
+      variablesAdded: 0,
+      skipped: 2,
+    });
+    expect((fillNode.config as any).value).toBe('bob@example.com');
+    expect((navNode.config as any).url).toBe('https://example.com/search?q=bye&page=1');
+    expect(flow.variables).toEqual([]);
+  });
 });

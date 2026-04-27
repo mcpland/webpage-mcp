@@ -139,6 +139,7 @@ export function applyFlowParameterSuggestions(flow: Flow | FlowV3): ApplyParamet
     }
 
     const placeholder = `{${suggestion.suggestedKey}}`;
+    let appliedSuggestion = false;
     if (suggestion.kind === 'fill') {
       const nodeKind = (node as { type?: string; kind?: string }).kind ?? (node as { type?: string }).type;
       if (nodeKind !== 'fill') {
@@ -150,9 +151,15 @@ export function applyFlowParameterSuggestions(flow: Flow | FlowV3): ApplyParamet
         skipped += 1;
         continue;
       }
-      if (currentValue !== placeholder) {
+      if (currentValue === placeholder) {
+        appliedSuggestion = true;
+      } else if (currentValue === suggestion.currentValue) {
         (node.config as any).value = placeholder;
         changed = true;
+        appliedSuggestion = true;
+      } else {
+        skipped += 1;
+        continue;
       }
     } else {
       const nodeKind = (node as { type?: string; kind?: string }).kind ?? (node as { type?: string }).type;
@@ -169,7 +176,18 @@ export function applyFlowParameterSuggestions(flow: Flow | FlowV3): ApplyParamet
       if (nextUrl !== currentUrl) {
         (node.config as any).url = nextUrl;
         changed = true;
+        appliedSuggestion = true;
+      } else if (currentUrl.includes(placeholder)) {
+        appliedSuggestion = true;
+      } else {
+        skipped += 1;
+        continue;
       }
+    }
+
+    if (!appliedSuggestion) {
+      skipped += 1;
+      continue;
     }
 
     if (!existingVariables.has(suggestion.suggestedKey)) {

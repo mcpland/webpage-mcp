@@ -805,6 +805,52 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("workflowRepairTool skips stale recorded parameter suggestions", async () => {
+    const flowId = `workflow-repair-stale-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: {
+              target: { selector: "#email" },
+              value: "bob@example.com",
+            },
+          },
+        ],
+        {
+          meta: {
+            recording: {
+              parameterSuggestions: [
+                {
+                  nodeId: "fill-1" as any,
+                  kind: "fill",
+                  suggestedKey: "email",
+                  currentValue: "alice@example.com",
+                },
+              ],
+            },
+          },
+        },
+      ),
+    );
+
+    const result = await workflowRepairTool.execute({
+      flowId,
+      apply: true,
+      applyDefaultStabilityPolicy: false,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(payload.updated).toBe(false);
+    expect(payload.plannedAutoFixes).not.toContain("parameterize_recorded_values");
+    expect(updated?.variables).toEqual([]);
+    expect((updated?.nodes[0].config as { value?: string }).value).toBe("bob@example.com");
+  });
+
   it("flowUpdateTool applies parameter suggestions and persists the edited flow", async () => {
     const flowId = `flow-update-${Date.now()}`;
     await createStoragePort().flows.save(

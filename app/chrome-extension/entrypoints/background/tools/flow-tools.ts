@@ -592,21 +592,22 @@ function getActionableRecordingParameterSuggestions(flow: FlowV3): Array<{ sugge
     }
 
     const placeholder = `{${suggestedKey}}`;
-    if (!existingVariables.has(suggestedKey)) {
-      actionable.push({ suggestedKey });
-      continue;
-    }
+    const hasVariable = existingVariables.has(suggestedKey);
 
     if (kind === 'fill') {
       const value = (node.config as { value?: unknown }).value;
-      if (typeof value === 'string' && value !== placeholder) {
+      if (typeof value === 'string' && value === placeholder && !hasVariable) {
+        actionable.push({ suggestedKey });
+      } else if (typeof value === 'string' && value !== placeholder && value === currentValue) {
         actionable.push({ suggestedKey });
       }
       continue;
     }
 
     const url = (node.config as { url?: unknown }).url;
-    if (typeof url === 'string' && currentValue && url.includes(currentValue)) {
+    if (typeof url === 'string' && url.includes(placeholder) && !hasVariable) {
+      actionable.push({ suggestedKey });
+    } else if (typeof url === 'string' && currentValue && url.includes(currentValue)) {
       actionable.push({ suggestedKey });
     }
   }
