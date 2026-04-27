@@ -3,7 +3,12 @@ import { ERROR_MESSAGES } from '@/common/constants';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import * as browserTools from './browser';
 import { flowRunTool, listPublishedFlowsTool } from './record-replay';
-import { flowAnalyzeTool, flowUpdateTool, workflowDebugViewTool } from './flow-tools';
+import {
+  flowAnalyzeTool,
+  flowUpdateTool,
+  workflowDebugViewTool,
+  workflowRepairTool,
+} from './flow-tools';
 import { recordingStartTool, recordingStatusTool, recordingStopTool } from './recording';
 import { getSessionContext, patchSessionContext } from '../session-context';
 import { runInTabQueue } from '../tab-queue';
@@ -15,6 +20,7 @@ const tools = {
   flowAnalyzeTool,
   flowUpdateTool,
   workflowDebugViewTool,
+  workflowRepairTool,
   recordingStartTool,
   recordingStopTool,
   recordingStatusTool,

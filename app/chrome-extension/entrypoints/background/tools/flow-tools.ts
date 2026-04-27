@@ -3,6 +3,7 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import type { FlowV3 } from '../record-replay-v3/domain/flow';
 import type { RunEvent, RunRecordV3 } from '../record-replay-v3/domain/events';
 import type { FlowId, RunId } from '../record-replay-v3/domain/ids';
+import { RR_ERROR_CODES } from '../record-replay-v3/domain/errors';
 import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variables';
 import { createStoragePort } from '../record-replay-v3';
 import { saveFlowToV3 } from '../record-replay-v3/compat';
@@ -66,6 +67,19 @@ interface WorkflowDebugRun {
   events: Array<Record<string, unknown>>;
 }
 
+interface WorkflowRepairRecommendation {
+  severity: 'info' | 'warning';
+  code: string;
+  message: string;
+  nodeId?: string;
+  autoFix?: 'parameterize_recorded_values' | 'default_stability_policy';
+}
+
+interface WorkflowRepairChange {
+  code: string;
+  message: string;
+}
+
 const REDACTED = '<redacted>';
 const SENSITIVE_CONFIG_KEYS = new Set([
   'authorization',
@@ -88,6 +102,16 @@ const SENSITIVE_CONFIG_KEYS = new Set([
 
 const SCRIPT_CONFIG_KEYS = new Set(['code', 'script', 'jsScript']);
 const SECRET_TEXT_PATTERN = /(authorization|bearer|cookie|password|secret|session|token)/i;
+const RETRYABLE_STABILITY_ERROR_CODES = [
+  RR_ERROR_CODES.TARGET_NOT_FOUND,
+  RR_ERROR_CODES.ELEMENT_NOT_VISIBLE,
+  RR_ERROR_CODES.TIMEOUT,
+  RR_ERROR_CODES.NAVIGATION_FAILED,
+] as const;
+
+function isRetryableStabilityErrorCode(code: string): boolean {
+  return (RETRYABLE_STABILITY_ERROR_CODES as readonly string[]).includes(code);
+}
 
 function countFlowNodes(flow: FlowV3): number {
   return Array.isArray(flow.nodes) ? flow.nodes.length : 0;
@@ -480,6 +504,210 @@ function collectFlowHints(flow: FlowV3): FlowHint[] {
   return hints;
 }
 
+function hasRecordingParameterSuggestions(flow: FlowV3): boolean {
+  return Array.isArray(flow.meta?.recording?.parameterSuggestions)
+    ? flow.meta.recording.parameterSuggestions.length > 0
+    : false;
+}
+
+function getSanitizedErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const code = (error as Record<string, unknown>).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+function buildRuntimeFailureRecommendations(
+  runs: WorkflowDebugRun[],
+): WorkflowRepairRecommendation[] {
+  const recommendations: WorkflowRepairRecommendation[] = [];
+  const retryableErrorCodes = new Set<string>();
+  const failedNodeIds = new Map<string, number>();
+
+  for (const run of runs) {
+    const runErrorCode = getSanitizedErrorCode(run.error);
+    if (runErrorCode && isRetryableStabilityErrorCode(runErrorCode)) {
+      retryableErrorCodes.add(runErrorCode);
+    }
+    if (typeof run.currentNodeId === 'string' && run.status === 'failed') {
+      failedNodeIds.set(run.currentNodeId, (failedNodeIds.get(run.currentNodeId) || 0) + 1);
+    }
+    for (const event of run.events) {
+      const eventErrorCode = getSanitizedErrorCode(event.error);
+      if (eventErrorCode && isRetryableStabilityErrorCode(eventErrorCode)) {
+        retryableErrorCodes.add(eventErrorCode);
+      }
+      if (event.type === 'node.failed' && typeof event.nodeId === 'string') {
+        failedNodeIds.set(event.nodeId, (failedNodeIds.get(event.nodeId) || 0) + 1);
+      }
+    }
+  }
+
+  if (retryableErrorCodes.size > 0) {
+    recommendations.push({
+      severity: 'warning',
+      code: 'runtime_flake_retryable_errors',
+      message: `Recent runs failed with retryable browser instability codes: ${Array.from(retryableErrorCodes).join(', ')}.`,
+      autoFix: 'default_stability_policy',
+    });
+  }
+
+  const hotNode = Array.from(failedNodeIds.entries()).sort((a, b) => b[1] - a[1])[0];
+  if (hotNode) {
+    recommendations.push({
+      severity: 'warning',
+      code: 'runtime_failure_hotspot',
+      message: `Recent run failures cluster on node ${hotNode[0]}. Inspect its selector, wait condition, or navigation assumptions.`,
+      nodeId: hotNode[0],
+    });
+  }
+
+  return recommendations;
+}
+
+function buildRepairRecommendations(
+  flow: FlowV3,
+  hints: FlowHint[],
+  runs: WorkflowDebugRun[],
+): WorkflowRepairRecommendation[] {
+  const recommendations: WorkflowRepairRecommendation[] = [];
+  const defaultNodePolicy = flow.policy?.defaultNodePolicy;
+
+  if (!defaultNodePolicy?.retry) {
+    recommendations.push({
+      severity: 'warning',
+      code: 'missing_default_retry_policy',
+      message:
+        'No default retry policy is configured. A single retry helps absorb transient target lookup, visibility, timeout, and navigation failures.',
+      autoFix: 'default_stability_policy',
+    });
+  }
+
+  if (!defaultNodePolicy?.timeout) {
+    recommendations.push({
+      severity: 'warning',
+      code: 'missing_default_timeout_policy',
+      message:
+        'No default node timeout is configured. A bounded attempt timeout makes failures more predictable.',
+      autoFix: 'default_stability_policy',
+    });
+  }
+
+  if (
+    defaultNodePolicy?.artifacts?.screenshot !== 'onFailure' &&
+    defaultNodePolicy?.artifacts?.screenshot !== 'always'
+  ) {
+    recommendations.push({
+      severity: 'info',
+      code: 'missing_failure_screenshot_policy',
+      message:
+        'Failure screenshots are not enabled by default. Capturing screenshots on failure improves future diagnosis.',
+      autoFix: 'default_stability_policy',
+    });
+  }
+
+  if (hasRecordingParameterSuggestions(flow)) {
+    recommendations.push({
+      severity: 'info',
+      code: 'recorded_parameter_suggestions_available',
+      message:
+        'Recording metadata contains parameter suggestions. Applying them reduces hard-coded replay inputs.',
+      autoFix: 'parameterize_recorded_values',
+    });
+  }
+
+  for (const hint of hints) {
+    if (hint.code === 'unstable_selector') {
+      recommendations.push({
+        severity: 'warning',
+        code: 'selector_needs_human_or_ai_repair',
+        message:
+          'A selector appears structural or XPath-based. Use workflow_debug_view plus flow_update to replace it with a stable data, aria, role, or text selector.',
+        ...(hint.nodeId ? { nodeId: hint.nodeId } : {}),
+      });
+    } else if (hint.code === 'missing_assertion') {
+      recommendations.push({
+        severity: 'warning',
+        code: 'missing_assertion_checkpoint',
+        message:
+          'The workflow has no assertion checkpoint. Add an assert node after the critical outcome so partial success is detectable.',
+      });
+    } else if (hint.code === 'literal_fill_value') {
+      recommendations.push({
+        severity: 'info',
+        code: 'literal_input_value',
+        message:
+          'A fill node still uses a literal value. Parameterize it when this workflow should be reused across accounts or datasets.',
+        ...(hint.nodeId ? { nodeId: hint.nodeId } : {}),
+        ...(hasRecordingParameterSuggestions(flow) ? { autoFix: 'parameterize_recorded_values' as const } : {}),
+      });
+    } else if (hint.code === 'possible_redundant_step') {
+      recommendations.push({
+        severity: 'info',
+        code: 'possible_redundant_step',
+        message:
+          'Consecutive steps operate on the same selector. Remove duplicates if they are recording noise.',
+        ...(hint.nodeId ? { nodeId: hint.nodeId } : {}),
+      });
+    }
+  }
+
+  return [...recommendations, ...buildRuntimeFailureRecommendations(runs)];
+}
+
+function applyDefaultStabilityPolicy(flow: FlowV3): WorkflowRepairChange[] {
+  const changes: WorkflowRepairChange[] = [];
+  const policy = flow.policy ?? {};
+  const defaultNodePolicy = policy.defaultNodePolicy ?? {};
+  const nextDefaultNodePolicy = { ...defaultNodePolicy };
+
+  if (!nextDefaultNodePolicy.timeout) {
+    nextDefaultNodePolicy.timeout = { ms: 15_000, scope: 'attempt' };
+    changes.push({
+      code: 'default_timeout_added',
+      message: 'Added default node attempt timeout of 15000ms.',
+    });
+  }
+
+  if (!nextDefaultNodePolicy.retry) {
+    nextDefaultNodePolicy.retry = {
+      retries: 1,
+      intervalMs: 500,
+      backoff: 'linear',
+      maxIntervalMs: 2_000,
+      jitter: 'full',
+      retryOn: RETRYABLE_STABILITY_ERROR_CODES,
+    };
+    changes.push({
+      code: 'default_retry_added',
+      message:
+        'Added one default retry for target lookup, visibility, timeout, and navigation failures.',
+    });
+  }
+
+  const artifacts = nextDefaultNodePolicy.artifacts ?? {};
+  if (artifacts.screenshot !== 'onFailure' && artifacts.screenshot !== 'always') {
+    nextDefaultNodePolicy.artifacts = {
+      ...artifacts,
+      screenshot: 'onFailure',
+    };
+    changes.push({
+      code: 'failure_screenshot_added',
+      message: 'Enabled screenshot capture on node failure.',
+    });
+  }
+
+  if (changes.length > 0) {
+    flow.policy = {
+      ...policy,
+      defaultNodePolicy: nextDefaultNodePolicy,
+    };
+  }
+
+  return changes;
+}
+
 class FlowAnalyzeTool {
   name = TOOL_NAMES.RECORD_REPLAY.FLOW_ANALYZE;
 
@@ -571,6 +799,86 @@ class WorkflowDebugViewTool {
               meta: sanitizeAnalyzedFlow(flow).meta,
             },
             runs,
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+}
+
+class WorkflowRepairTool {
+  name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR;
+
+  async execute(args: any): Promise<ToolResult> {
+    const requestedFlowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+    const requestedWorkflow = typeof args?.workflow === 'string' ? args.workflow.trim() : '';
+    if (!requestedFlowId && !requestedWorkflow) {
+      return createErrorResponse('flowId or workflow is required');
+    }
+
+    const flow = await resolveFlowForWorkflowTool(args);
+    if (!flow) {
+      return createErrorResponse(
+        requestedFlowId
+          ? `Flow not found: ${requestedFlowId}`
+          : `Published workflow not found: ${requestedWorkflow}`,
+      );
+    }
+
+    const publishedInfo = getPublishedFlowInfo(flow);
+    const hints = collectFlowHints(flow);
+    const runs = await collectDebugRuns(flow, args);
+    const recommendations = buildRepairRecommendations(flow, hints, runs);
+    const shouldApply = args?.apply === true && args?.dryRun !== true;
+    const changes: WorkflowRepairChange[] = [];
+    let parameterization: ReturnType<typeof applyFlowParameterSuggestions> | undefined;
+
+    if (shouldApply && args?.applyParameterSuggestions !== false && hasRecordingParameterSuggestions(flow)) {
+      parameterization = applyFlowParameterSuggestions(flow);
+      if (parameterization.changed) {
+        changes.push({
+          code: 'parameter_suggestions_applied',
+          message: `Applied ${parameterization.applied} recorded parameter suggestion(s).`,
+        });
+      }
+    }
+
+    if (shouldApply && args?.applyDefaultStabilityPolicy !== false) {
+      changes.push(...applyDefaultStabilityPolicy(flow));
+    }
+
+    const updated = shouldApply && changes.length > 0;
+    if (updated) {
+      flow.updatedAt = new Date().toISOString();
+      await saveFlowToV3(flow);
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            flowId: flow.id,
+            workflow: publishedInfo?.slug,
+            applied: shouldApply,
+            dryRun: args?.dryRun === true,
+            updated,
+            summary: {
+              nodeCount: countFlowNodes(flow),
+              edgeCount: Array.isArray(flow.edges) ? flow.edges.length : 0,
+              variableCount: Array.isArray(flow.variables) ? flow.variables.length : 0,
+              hintCount: hints.length,
+              inspectedRunCount: runs.length,
+              recommendationCount: recommendations.length,
+            },
+            recommendations,
+            plannedAutoFixes: recommendations
+              .filter((recommendation) => recommendation.autoFix)
+              .map((recommendation) => recommendation.autoFix),
+            changes,
+            ...(parameterization ? { parameterization } : {}),
           }),
         },
       ],
@@ -686,3 +994,4 @@ class FlowUpdateTool {
 export const flowAnalyzeTool = new FlowAnalyzeTool();
 export const flowUpdateTool = new FlowUpdateTool();
 export const workflowDebugViewTool = new WorkflowDebugViewTool();
+export const workflowRepairTool = new WorkflowRepairTool();

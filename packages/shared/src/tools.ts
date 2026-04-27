@@ -49,6 +49,7 @@ export const TOOL_NAMES = {
     FLOW_ANALYZE: 'flow_analyze',
     FLOW_UPDATE: 'flow_update',
     WORKFLOW_DEBUG_VIEW: 'workflow_debug_view',
+    WORKFLOW_REPAIR: 'workflow_repair',
   },
 };
 
@@ -245,6 +246,64 @@ export const TOOL_SCHEMAS: Tool[] = [
           minimum: 0,
           maximum: 100,
           description: 'Maximum recent events to include per run. Default: 40.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR,
+    description:
+      'Diagnose workflow replay stability and optionally apply low-risk repair actions such as parameterizing recorded literals and adding default retry/timeout policy.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Flow ID to repair. Either flowId or workflow is required.',
+        },
+        workflow: {
+          type: 'string',
+          description: 'Published workflow slug to repair. Either workflow or flowId is required.',
+        },
+        runId: {
+          type: 'string',
+          description: 'Optional recent run ID to use as failure context.',
+        },
+        apply: {
+          type: 'boolean',
+          default: false,
+          description:
+            'When true, apply safe automatic repairs. Default false returns recommendations only.',
+        },
+        dryRun: {
+          type: 'boolean',
+          default: false,
+          description: 'When true, never writes changes even if apply is true.',
+        },
+        applyParameterSuggestions: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Apply recorded parameter suggestions when apply is true. Converts supported literal fill/navigate values into variables.',
+        },
+        applyDefaultStabilityPolicy: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Add missing default retry/timeout/on-failure screenshot policy when apply is true.',
+        },
+        maxRuns: {
+          type: 'number',
+          minimum: 0,
+          maximum: 10,
+          description: 'Maximum recent runs to inspect when runId is omitted. Default: 3.',
+        },
+        maxEventsPerRun: {
+          type: 'number',
+          minimum: 0,
+          maximum: 100,
+          description: 'Maximum recent events to inspect per run. Default: 40.',
         },
       },
       required: [],

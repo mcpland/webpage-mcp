@@ -42,6 +42,7 @@ import {
   flowAnalyzeTool,
   flowUpdateTool,
   workflowDebugViewTool,
+  workflowRepairTool,
 } from "@/entrypoints/background/tools/flow-tools";
 import {
   flowRunTool,
@@ -575,6 +576,168 @@ describe("recording/editing/flow toolchain integration", () => {
           token: "<redacted>",
         },
       },
+    });
+  });
+
+  it("workflowRepairTool returns recommendations without mutating by default", async () => {
+    const flowId = `workflow-repair-dry-${Date.now()}`;
+    const flow = createFlow(
+      flowId,
+      [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: { selector: "/html/body/main/form/input[1]" },
+            value: "alice@example.com",
+          },
+        },
+      ],
+      {
+        meta: {
+          tool: {
+            published: true,
+            slug: "repair-dry",
+          },
+          recording: {
+            parameterSuggestions: [
+              {
+                nodeId: "fill-1" as any,
+                kind: "fill",
+                suggestedKey: "email",
+                currentValue: "alice@example.com",
+              },
+            ],
+          },
+        },
+      },
+    );
+    await createStoragePort().flows.save(flow);
+
+    const result = await workflowRepairTool.execute({ workflow: "repair-dry" });
+    const payload = parseToolPayload(result);
+    const persisted = await createStoragePort().flows.get(flowId as any);
+    const codes = new Set(
+      payload.recommendations.map(
+        (recommendation: { code: string }) => recommendation.code,
+      ),
+    );
+
+    expect(payload).toMatchObject({
+      success: true,
+      flowId,
+      workflow: "repair-dry",
+      applied: false,
+      updated: false,
+    });
+    expect(codes.has("missing_default_retry_policy")).toBe(true);
+    expect(codes.has("missing_default_timeout_policy")).toBe(true);
+    expect(codes.has("selector_needs_human_or_ai_repair")).toBe(true);
+    expect(codes.has("recorded_parameter_suggestions_available")).toBe(true);
+    expect(payload.plannedAutoFixes).toContain("default_stability_policy");
+    expect(payload.plannedAutoFixes).toContain("parameterize_recorded_values");
+    expect(persisted?.policy).toBeUndefined();
+    expect((persisted?.nodes[0].config as { value?: string }).value).toBe(
+      "alice@example.com",
+    );
+  });
+
+  it("workflowRepairTool applies safe parameterization and default stability policy", async () => {
+    const flowId = `workflow-repair-apply-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "nav-1" as any,
+            kind: "navigate",
+            config: { url: "https://example.com/search?q=laptop" },
+          },
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: {
+              target: { selector: "#email" },
+              value: "alice@example.com",
+            },
+          },
+        ],
+        {
+          meta: {
+            recording: {
+              parameterSuggestions: [
+                {
+                  nodeId: "nav-1" as any,
+                  kind: "navigate",
+                  suggestedKey: "q",
+                  currentValue: "laptop",
+                },
+                {
+                  nodeId: "fill-1" as any,
+                  kind: "fill",
+                  suggestedKey: "email",
+                  currentValue: "alice@example.com",
+                },
+              ],
+            },
+          },
+        },
+      ),
+    );
+
+    const result = await workflowRepairTool.execute({
+      flowId,
+      apply: true,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(payload).toMatchObject({
+      success: true,
+      flowId,
+      applied: true,
+      updated: true,
+      parameterization: {
+        changed: true,
+        applied: 2,
+        variablesAdded: 2,
+      },
+    });
+    expect(payload.changes.map((change: { code: string }) => change.code)).toEqual(
+      expect.arrayContaining([
+        "parameter_suggestions_applied",
+        "default_timeout_added",
+        "default_retry_added",
+        "failure_screenshot_added",
+      ]),
+    );
+    expect(
+      (
+        updated?.nodes.find((node) => node.id === "nav-1")?.config as {
+          url?: string;
+        }
+      )?.url,
+    ).toBe("https://example.com/search?q={q}");
+    expect(
+      (
+        updated?.nodes.find((node) => node.id === "fill-1")?.config as {
+          value?: string;
+        }
+      )?.value,
+    ).toBe("{email}");
+    expect(updated?.policy?.defaultNodePolicy?.timeout).toEqual({
+      ms: 15000,
+      scope: "attempt",
+    });
+    expect(updated?.policy?.defaultNodePolicy?.retry).toMatchObject({
+      retries: 1,
+      intervalMs: 500,
+      backoff: "linear",
+      maxIntervalMs: 2000,
+      jitter: "full",
+    });
+    expect(updated?.policy?.defaultNodePolicy?.artifacts).toEqual({
+      screenshot: "onFailure",
     });
   });
 
