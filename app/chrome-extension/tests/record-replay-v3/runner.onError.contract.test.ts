@@ -570,6 +570,73 @@ describe('V3 RunRunner onError contracts', () => {
     });
   });
 
+  it('artifacts: captures node background screenshots with the current runtime tab', async () => {
+    const runId = 'run-artifact-node-background-tab';
+    const artifactService: ArtifactService = {
+      screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'background-tab-shot' }),
+      saveScreenshot: vi.fn(),
+    };
+    const flow = createFlow(
+      'A',
+      [
+        { id: 'A', kind: 'test', config: { action: 'setTab', tabId: 42 } },
+        {
+          id: 'B',
+          kind: 'test',
+          config: { action: 'fail', background: true },
+          policy: {
+            artifacts: { screenshot: 'onFailure' },
+          },
+        },
+      ],
+      [{ id: 'e1', from: 'A', to: 'B', label: EDGE_LABELS.DEFAULT }],
+    );
+
+    const { runner } = createRunnerContext(runId, flow, {
+      artifactService,
+    });
+    const result = await runner.start();
+    expect(result.status).toBe('failed');
+
+    expect(artifactService.screenshot).toHaveBeenCalledWith(42, { background: true });
+  });
+
+  it('artifacts: captures inactive runtime tab screenshots in the background', async () => {
+    const runId = 'run-artifact-inactive-runtime-tab';
+    const artifactService: ArtifactService = {
+      screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'inactive-tab-shot' }),
+      saveScreenshot: vi.fn(),
+    };
+    (chrome.tabs.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: 42,
+      active: false,
+      windowId: 1,
+    } as chrome.tabs.Tab);
+    const flow = createFlow(
+      'A',
+      [
+        { id: 'A', kind: 'test', config: { action: 'setTab', tabId: 42 } },
+        {
+          id: 'B',
+          kind: 'test',
+          config: { action: 'fail' },
+          policy: {
+            artifacts: { screenshot: 'onFailure' },
+          },
+        },
+      ],
+      [{ id: 'e1', from: 'A', to: 'B', label: EDGE_LABELS.DEFAULT }],
+    );
+
+    const { runner } = createRunnerContext(runId, flow, {
+      artifactService,
+    });
+    const result = await runner.start();
+    expect(result.status).toBe('failed');
+
+    expect(artifactService.screenshot).toHaveBeenCalledWith(42, { background: true });
+  });
+
   it('default: without onError policy, uses ON_ERROR edge when present', async () => {
     const runId = 'run-default-goto';
     const flow = createFlow(

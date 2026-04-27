@@ -733,10 +733,7 @@ class StorageBackedRunRunner implements RunRunner {
       return;
     }
 
-    const tabId = this.getCurrentTabId();
-    const result = await this.env.artifactService.screenshot(tabId, {
-      background: this.config.execution?.backgroundTabs === true,
-    });
+    const result = await this.captureScreenshotForCurrentTab(node);
     if (!result.ok) {
       await this.queue.run(() =>
         this.env.events.append({
@@ -784,6 +781,37 @@ class StorageBackedRunRunner implements RunRunner {
 
   private getCurrentTabId(): number {
     return readRuntimeTabId(this.state.vars) ?? this.config.tabId;
+  }
+
+  private nodePrefersBackgroundScreenshot(node: NodeV3): boolean {
+    return node.config.background === true;
+  }
+
+  private async shouldCaptureInBackground(tabId: number, node: NodeV3): Promise<boolean> {
+    if (
+      this.config.execution?.backgroundTabs === true ||
+      this.nodePrefersBackgroundScreenshot(node)
+    ) {
+      return true;
+    }
+
+    if (typeof chrome === 'undefined' || !chrome.tabs?.get) {
+      return false;
+    }
+
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      return tab?.active === false;
+    } catch {
+      return false;
+    }
+  }
+
+  private async captureScreenshotForCurrentTab(node: NodeV3) {
+    const tabId = this.getCurrentTabId();
+    return this.env.artifactService.screenshot(tabId, {
+      background: await this.shouldCaptureInBackground(tabId, node),
+    });
   }
 
   private resolveNodePolicy(flow: FlowV3, node: NodeV3): NodePolicy {
@@ -880,7 +908,7 @@ class StorageBackedRunRunner implements RunRunner {
       },
       chooseNext: (label) => ({ kind: 'edgeLabel', label }),
       artifacts: {
-        screenshot: () => this.env.artifactService.screenshot(this.getCurrentTabId()),
+        screenshot: () => this.captureScreenshotForCurrentTab(node),
       },
       persistent: {
         get: async (name) => (await this.env.storage.persistentVars.get(name))?.value,
