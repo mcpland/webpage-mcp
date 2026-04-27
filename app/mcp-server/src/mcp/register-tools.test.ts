@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NativeMessageType } from 'webpage-mcp-shared';
 import {
   callToolForContext,
@@ -20,16 +20,39 @@ function createContext(
   };
 }
 
+const LEGACY_FLOW_TOOLS_ENV = 'WEBPAGE_MCP_EXPOSE_LEGACY_FLOW_TOOLS';
+const originalLegacyFlowToolsEnv = process.env[LEGACY_FLOW_TOOLS_ENV];
+
+function restoreLegacyFlowToolsEnv(): void {
+  if (originalLegacyFlowToolsEnv === undefined) {
+    delete process.env[LEGACY_FLOW_TOOLS_ENV];
+    return;
+  }
+  process.env[LEGACY_FLOW_TOOLS_ENV] = originalLegacyFlowToolsEnv;
+}
+
+function exposeLegacyFlowTools(): void {
+  process.env[LEGACY_FLOW_TOOLS_ENV] = '1';
+}
+
 describe('dynamic published flow tools', () => {
   beforeEach(() => {
+    restoreLegacyFlowToolsEnv();
     clearDynamicFlowCacheForSession('dynamic-flow-tools');
     clearDynamicFlowCacheForSession('dynamic-flow-call');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-run');
+    clearDynamicFlowCacheForSession('dynamic-flow-workflow-run-list');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-call');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-missing');
+    clearDynamicFlowCacheForSession('dynamic-flow-conflict');
   });
 
-  it('maps V3 published variables into dynamic tool schemas', async () => {
+  afterEach(() => {
+    restoreLegacyFlowToolsEnv();
+  });
+
+  it('maps V3 published variables into dynamic tool schemas when legacy listing is enabled', async () => {
+    exposeLegacyFlowTools();
     const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
       status: 'success',
       items: [
@@ -129,6 +152,25 @@ describe('dynamic published flow tools', () => {
       type: 'boolean',
       default: false,
     });
+  });
+
+  it('hides per-workflow dynamic tools by default while exposing workflow_run', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [
+        {
+          id: 'flow-signup',
+          slug: 'signup',
+          description: 'Published signup flow',
+        },
+      ],
+    });
+    const ctx = createContext('dynamic-flow-workflow-run-list', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+
+    expect(tools.find((tool) => tool.name === 'workflow_run')).toBeTruthy();
+    expect(tools.find((tool) => tool.name === 'flow.signup')).toBeUndefined();
   });
 
   it('exposes a compact workflow_run tool with workflow slugs as an enum', async () => {
@@ -314,6 +356,7 @@ describe('dynamic published flow tools', () => {
   });
 
   it('reserves dynamic run option names ahead of conflicting published variables', async () => {
+    exposeLegacyFlowTools();
     const sendRequestToExtensionAndWait = vi
       .fn()
       .mockResolvedValueOnce({

@@ -65,6 +65,7 @@ const SESSION_RUN_OPTION_KEYS = [
 ] as const;
 const RUN_OPTION_KEY_SET = new Set<string>(SESSION_RUN_OPTION_KEYS);
 const WORKFLOW_RUN_TOOL_NAME = 'workflow_run';
+const EXPOSE_LEGACY_FLOW_TOOLS_ENV = 'WEBPAGE_MCP_EXPOSE_LEGACY_FLOW_TOOLS';
 const PUBLIC_TOOL_NAME_SET = new Set<string>(TOOL_SCHEMAS.map((tool) => tool.name));
 const publishedFlowsCache = new Map<string, { fetchedAt: number; items: PublishedFlow[] }>();
 const publishedFlowsInflight = new Map<string, Promise<PublishedFlow[]>>();
@@ -98,6 +99,10 @@ function pruneDynamicFlowCaches(now = Date.now()): void {
     publishedFlowsCache.delete(target[0]);
     publishedFlowsInflight.delete(target[0]);
   }
+}
+
+function shouldExposeLegacyDynamicFlowTools(): boolean {
+  return process.env[EXPOSE_LEGACY_FLOW_TOOLS_ENV] === '1';
 }
 
 function normalizePublishedFlows(response: any): PublishedFlow[] {
@@ -537,8 +542,11 @@ export const setupTools = (server: Server, ctx: McpToolContext) => {
 
 export async function listToolsForContext(ctx: McpToolContext): Promise<Tool[]> {
   const items = await fetchPublishedFlows(ctx);
-  const dynamicTools = await listDynamicFlowTools(ctx, items);
-  return [...TOOL_SCHEMAS, buildWorkflowRunTool(items), ...dynamicTools];
+  const tools = [...TOOL_SCHEMAS, buildWorkflowRunTool(items)];
+  if (shouldExposeLegacyDynamicFlowTools()) {
+    tools.push(...(await listDynamicFlowTools(ctx, items)));
+  }
+  return tools;
 }
 
 export const callToolForContext = async (
