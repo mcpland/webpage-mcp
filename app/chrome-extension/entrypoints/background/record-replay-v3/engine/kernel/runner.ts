@@ -731,6 +731,9 @@ class StorageBackedRunRunner implements RunRunner {
       if (onErrorEdge) {
         return { kind: 'goto', target: { kind: 'edgeLabel', label: EDGE_LABELS.ON_ERROR } };
       }
+      if (policy.retry) {
+        return { kind: 'retry', retryPolicy: policy.retry };
+      }
       return { kind: 'stop' };
     }
 

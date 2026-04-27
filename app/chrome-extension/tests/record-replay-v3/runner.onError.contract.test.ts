@@ -419,6 +419,36 @@ describe('V3 RunRunner onError contracts', () => {
     expect(failed.map((e) => e.decision)).toEqual(['retry', 'retry', 'retry']);
   });
 
+  it('default retry policy retries when no explicit onError policy or ON_ERROR edge exists', async () => {
+    const runId = 'run-default-retry-succeed';
+    const flow = createFlow(
+      'A',
+      [
+        {
+          id: 'A',
+          kind: 'test',
+          config: { action: 'flaky', failTimes: 1 },
+          policy: { retry: { retries: 1, intervalMs: 0 } },
+        },
+      ],
+      [],
+    );
+
+    const { runner, bus, runsById } = createRunnerContext(runId, flow);
+    const result = await runner.start();
+    expect(result.status).toBe('succeeded');
+    expect(runsById.get(runId)?.status).toBe('succeeded');
+
+    const events = await listEvents(bus, runId);
+    const started = events.filter((e) => e.type === 'node.started') as Array<
+      Extract<RunEvent, { type: 'node.started' }>
+    >;
+    expect(started.map((e) => e.attempt)).toEqual([1, 2]);
+
+    const failed = nodeFailedEvents(events, 'A');
+    expect(failed.map((e) => e.decision)).toEqual(['retry']);
+  });
+
   it('default: without onError policy, uses ON_ERROR edge when present', async () => {
     const runId = 'run-default-goto';
     const flow = createFlow(
