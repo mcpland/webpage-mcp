@@ -316,6 +316,11 @@ describe("recording/editing/flow toolchain integration", () => {
         label: "API token",
         default: "secret-token",
       },
+      {
+        name: "apiKey",
+        label: "API key",
+        default: "opaque-value",
+      },
     ] as any;
     await createStoragePort().flows.save(flow);
 
@@ -432,6 +437,10 @@ describe("recording/editing/flow toolchain integration", () => {
         name: "apiToken",
         default: "secret-token",
       },
+      {
+        name: "apiKey",
+        default: "opaque-value",
+      },
     ] as any;
     await createStoragePort().flows.save(flow);
 
@@ -468,6 +477,10 @@ describe("recording/editing/flow toolchain integration", () => {
         name: "apiToken",
         sensitive: true,
       },
+      {
+        name: "apiKey",
+        sensitive: true,
+      },
     ]);
     expect(payload.runs).toEqual([]);
   });
@@ -489,6 +502,7 @@ describe("recording/editing/flow toolchain integration", () => {
     flow.variables = [
       { name: "email" },
       { name: "apiToken", sensitive: true },
+      { name: "apiKey" },
     ] as any;
     await storage.flows.save(flow);
     await storage.runs.save({
@@ -508,11 +522,12 @@ describe("recording/editing/flow toolchain integration", () => {
       args: {
         email: "alice@example.com",
         apiToken: "secret-token",
+        apiKey: "opaque-value",
       },
       error: {
         code: "TARGET_NOT_FOUND",
         message: "Missing input",
-        data: { selector: "#email", token: "secret-token" },
+        data: { selector: "#email", token: "secret-token", apiKey: "opaque-value" },
       },
       nextSeq: 1,
     } as RunRecordV3);
@@ -530,7 +545,7 @@ describe("recording/editing/flow toolchain integration", () => {
       error: {
         code: "TARGET_NOT_FOUND",
         message: "Missing input",
-        data: { selector: "#email", token: "secret-token" },
+        data: { selector: "#email", token: "secret-token", apiKey: "opaque-value" },
       },
       decision: "stop",
     });
@@ -552,6 +567,7 @@ describe("recording/editing/flow toolchain integration", () => {
       args: {
         email: "alice@example.com",
         apiToken: "<redacted>",
+        apiKey: "<redacted>",
       },
       error: {
         code: "TARGET_NOT_FOUND",
@@ -559,6 +575,7 @@ describe("recording/editing/flow toolchain integration", () => {
         data: {
           selector: "#email",
           token: "<redacted>",
+          apiKey: "<redacted>",
         },
       },
     });
@@ -572,6 +589,7 @@ describe("recording/editing/flow toolchain integration", () => {
         data: {
           selector: "#email",
           token: "<redacted>",
+          apiKey: "<redacted>",
         },
       },
     });

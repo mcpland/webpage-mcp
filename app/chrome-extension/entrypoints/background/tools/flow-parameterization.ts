@@ -1,5 +1,6 @@
 import type { Flow } from '@/common/workflow-compat-types';
 import type { FlowV3 } from '../record-replay-v3/domain/flow';
+import { containsSensitiveValue, isSensitiveKeyName } from '../record-replay-v3/flows/sensitive';
 
 interface ParameterSuggestion {
   nodeId: string;
@@ -20,8 +21,9 @@ function isValidVariableKey(key: string): boolean {
 }
 
 function isSensitiveParameterSuggestion(suggestion: ParameterSuggestion): boolean {
-  return /(authorization|auth|bearer|cookie|credential|key|password|secret|session|token)/i.test(
-    `${suggestion.suggestedKey} ${suggestion.currentValue}`,
+  return (
+    isSensitiveKeyName(suggestion.suggestedKey) ||
+    containsSensitiveValue(suggestion.currentValue)
   );
 }
 

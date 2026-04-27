@@ -8,6 +8,12 @@ import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variabl
 import { createStoragePort } from '../record-replay-v3';
 import { saveFlowToV3 } from '../record-replay-v3/compat';
 import { getPublishedFlowInfo } from '../record-replay-v3/flows/publish';
+import {
+  containsSensitiveValue,
+  getVariableLikeName,
+  isSensitiveKeyName,
+  isSensitiveVariableLike,
+} from '../record-replay-v3/flows/sensitive';
 import { findEntryNodeId } from '../record-replay-v3/storage/import/flow-convert';
 import { applyFlowParameterSuggestions } from './flow-parameterization';
 
@@ -81,27 +87,7 @@ interface WorkflowRepairChange {
 }
 
 const REDACTED = '<redacted>';
-const SENSITIVE_CONFIG_KEYS = new Set([
-  'authorization',
-  'auth',
-  'bearer',
-  'body',
-  'cookie',
-  'cookies',
-  'credential',
-  'credentials',
-  'data',
-  'headers',
-  'key',
-  'password',
-  'payload',
-  'secret',
-  'session',
-  'token',
-]);
-
 const SCRIPT_CONFIG_KEYS = new Set(['code', 'script', 'jsScript']);
-const SECRET_TEXT_PATTERN = /(authorization|bearer|cookie|password|secret|session|token)/i;
 const RETRYABLE_STABILITY_ERROR_CODES = [
   RR_ERROR_CODES.TARGET_NOT_FOUND,
   RR_ERROR_CODES.ELEMENT_NOT_VISIBLE,
@@ -116,46 +102,11 @@ function isRetryableStabilityErrorCode(code: string): boolean {
 }
 
 function getVariableName(variable: FlowVariable | null | undefined): string | undefined {
-  const record = variable as { name?: unknown; key?: unknown } | null | undefined;
-  const name = typeof record?.name === 'string' ? record.name.trim() : '';
-  if (name) {
-    return name;
-  }
-  const key = typeof record?.key === 'string' ? record.key.trim() : '';
-  return key || undefined;
-}
-
-function containsSensitiveDefault(value: unknown, depth = 0, seen = new Set<unknown>()): boolean {
-  if (value === null || value === undefined || depth > 6) {
-    return false;
-  }
-  if (typeof value === 'string') {
-    return SECRET_TEXT_PATTERN.test(value);
-  }
-  if (Array.isArray(value)) {
-    return value.some((item) => containsSensitiveDefault(item, depth + 1, seen));
-  }
-  if (typeof value === 'object') {
-    if (seen.has(value)) {
-      return false;
-    }
-    seen.add(value);
-    return Object.entries(value as Record<string, unknown>).some(
-      ([key, item]) => isSensitiveKey(key) || containsSensitiveDefault(item, depth + 1, seen),
-    );
-  }
-  return false;
+  return getVariableLikeName(variable);
 }
 
 function isSensitiveVariableDefinition(variable: FlowVariable | null | undefined): boolean {
-  if (variable?.sensitive === true) {
-    return true;
-  }
-  const variableName = getVariableName(variable);
-  if (variableName && isSensitiveKey(variableName)) {
-    return true;
-  }
-  return containsSensitiveDefault((variable as { default?: unknown } | null | undefined)?.default);
+  return isSensitiveVariableLike(variable);
 }
 
 function countFlowNodes(flow: FlowV3): number {
@@ -237,8 +188,7 @@ function isVariableReference(value: string): string | null {
 }
 
 function isSensitiveKey(key: string): boolean {
-  const normalized = key.trim().toLowerCase();
-  return SENSITIVE_CONFIG_KEYS.has(normalized) || SECRET_TEXT_PATTERN.test(normalized);
+  return isSensitiveKeyName(key);
 }
 
 function redactUrl(value: string): string {
@@ -272,7 +222,7 @@ function sanitizeDebugValue(
       }
       return REDACTED;
     }
-    if (isSensitiveKey(key) || SECRET_TEXT_PATTERN.test(value)) {
+    if (isSensitiveKey(key) || containsSensitiveValue(value)) {
       return REDACTED;
     }
     return truncateString(value);

@@ -37,6 +37,10 @@ function createPublishedFlow(): FlowV3 {
         default: 'opaque-value',
       },
       {
+        name: 'apiKey',
+        default: 'opaque-value',
+      },
+      {
         name: 'metadata',
         default: { headers: { authorization: 'Bearer opaque-value' } },
       },
