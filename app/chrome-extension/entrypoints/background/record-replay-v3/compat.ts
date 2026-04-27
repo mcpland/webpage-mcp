@@ -280,6 +280,7 @@ export function buildCompatRunResult(
   return {
     runId: run.id,
     success: run.status === "succeeded",
+    ...(typeof run.tabId === "number" ? { tabId: run.tabId } : {}),
     summary: {
       total,
       success: successCount,

@@ -386,6 +386,7 @@ export interface DragParams {
 export interface NavigateParams {
   url: Resolvable<string>;
   refresh?: boolean;
+  background?: boolean;
 }
 
 // --- Waiting and asserting ---
@@ -450,6 +451,7 @@ export interface ScriptParams {
 export interface ScreenshotParams {
   selector?: Resolvable<string>;
   fullPage?: boolean;
+  background?: boolean;
   saveAs?: VariableName;
 }
 
@@ -511,12 +513,14 @@ export interface LoopElementsParams {
 export interface OpenTabParams {
   url?: Resolvable<string>;
   newWindow?: boolean;
+  background?: boolean;
 }
 
 export interface SwitchTabParams {
   tabId?: number;
   urlContains?: Resolvable<string>;
   titleContains?: Resolvable<string>;
+  background?: boolean;
 }
 
 export interface CloseTabParams {
@@ -780,6 +784,11 @@ export interface ExecutionFlags {
    * leaking browser download destinations back to the model.
    */
   redactDownloadPaths?: boolean;
+  /**
+   * When true, tab-targeting operations should bind to tabs without activating
+   * the tab or focusing the window unless an action explicitly overrides it.
+   */
+  backgroundTabs?: boolean;
 }
 
 export interface ActionExecutionContext {

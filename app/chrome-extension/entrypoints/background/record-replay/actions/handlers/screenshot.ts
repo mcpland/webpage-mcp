@@ -66,6 +66,10 @@ export const screenshotHandler: ActionHandler<'screenshot'> = {
         fullPage: action.params.fullPage === true,
         selector,
         tabId,
+        background:
+          typeof action.params.background === 'boolean'
+            ? action.params.background
+            : ctx.execution?.backgroundTabs === true,
       },
     });
 

@@ -23,6 +23,11 @@ export function registerBuiltinSpecs() {
         help: "Target URL, supports variable template {var}",
         default: "",
       },
+      {
+        key: "background",
+        label: "Background",
+        type: "boolean",
+      },
     ],
     defaults: { url: "" },
     validate: (cfg) => {
@@ -380,6 +385,11 @@ export function registerBuiltinSpecs() {
         type: "boolean",
         default: false,
       },
+      {
+        key: "background",
+        label: "Background",
+        type: "boolean",
+      },
       { key: "saveAs", label: "Save Variable", type: "string" },
     ],
     defaults: { fullPage: false },
@@ -569,6 +579,11 @@ export function registerBuiltinSpecs() {
         type: "boolean",
         default: false,
       },
+      {
+        key: "background",
+        label: "Background",
+        type: "boolean",
+      },
     ],
     defaults: { newWindow: false },
   });
@@ -606,6 +621,11 @@ export function registerBuiltinSpecs() {
       { key: "tabId", label: "TabId", type: "number" },
       { key: "urlContains", label: "URL Contains", type: "string" },
       { key: "titleContains", label: "Title Contains", type: "string" },
+      {
+        key: "background",
+        label: "Background",
+        type: "boolean",
+      },
     ],
     defaults: {},
   });

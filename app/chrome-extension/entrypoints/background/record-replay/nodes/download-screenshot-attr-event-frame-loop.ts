@@ -28,7 +28,9 @@ export const screenshotNode: NodeRuntime<any> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const tabId = await resolveNodeTabId(ctx);
-    const args: any = { name: 'workflow', storeBase64: true, tabId };
+    const background =
+      typeof s.background === 'boolean' ? s.background : ctx.execution?.backgroundTabs === true;
+    const args: any = { name: 'workflow', storeBase64: true, tabId, background };
     if (s.fullPage) args.fullPage = true;
     if (s.selector && typeof s.selector === 'string' && s.selector.trim())
       args.selector = s.selector;

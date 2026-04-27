@@ -35,6 +35,10 @@ export const navigateHandler: ActionHandler<'navigate'> = {
     const tabId = ctx.tabId;
     // Check if StepRunner owns nav-wait (skip internal nav-wait logic)
     const skipNavWait = ctx.execution?.skipNavWait === true;
+    const background =
+      typeof action.params.background === 'boolean'
+        ? action.params.background
+        : ctx.execution?.backgroundTabs === true;
 
     if (typeof tabId !== 'number') {
       return failed('TAB_NOT_FOUND', 'No active tab found');
@@ -54,7 +58,7 @@ export const navigateHandler: ActionHandler<'navigate'> = {
     if (action.params.refresh) {
       const result = await handleCallTool({
         name: TOOL_NAMES.BROWSER.NAVIGATE,
-        args: { refresh: true, tabId },
+        args: { refresh: true, tabId, background },
       });
 
       if ((result as { isError?: boolean })?.isError) {
@@ -84,7 +88,7 @@ export const navigateHandler: ActionHandler<'navigate'> = {
 
     const result = await handleCallTool({
       name: TOOL_NAMES.BROWSER.NAVIGATE,
-      args: { url, tabId },
+      args: { url, tabId, background },
     });
 
     if ((result as { isError?: boolean })?.isError) {

@@ -48,4 +48,21 @@ describe('switchTabTool', () => {
     expect(tabsGet).toHaveBeenCalledWith(7);
     expect(tabsUpdate).not.toHaveBeenCalled();
   });
+
+  it('can select a public tab without activating or focusing it', async () => {
+    const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
+    const tabsUpdate = chrome.tabs.update as ReturnType<typeof vi.fn>;
+    const windowsUpdate = chrome.windows.update as ReturnType<typeof vi.fn>;
+    tabsGet.mockResolvedValue(makeTab({ url: 'https://example.com/', title: 'Example' }));
+
+    const result = await switchTabTool.execute({ tabId: 7, windowId: 2, background: true });
+
+    expect(result.isError).toBe(false);
+    expect(tabsGet).toHaveBeenCalledWith(7);
+    expect(tabsUpdate).not.toHaveBeenCalled();
+    expect(windowsUpdate).not.toHaveBeenCalled();
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'without activating it',
+    );
+  });
 });

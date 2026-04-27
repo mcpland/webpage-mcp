@@ -80,6 +80,7 @@ export interface StepScreenshot extends StepBase {
   type: 'screenshot';
   selector?: string;
   fullPage?: boolean;
+  background?: boolean;
   saveAs?: string; // variable name to store base64
 }
 
@@ -187,6 +188,7 @@ export interface StepOpenTab extends StepBase {
   type: 'openTab';
   url?: string;
   newWindow?: boolean;
+  background?: boolean;
 }
 
 export interface StepSwitchTab extends StepBase {
@@ -194,6 +196,7 @@ export interface StepSwitchTab extends StepBase {
   tabId?: number;
   urlContains?: string;
   titleContains?: string;
+  background?: boolean;
 }
 
 export interface StepCloseTab extends StepBase {
@@ -205,6 +208,7 @@ export interface StepCloseTab extends StepBase {
 export interface StepNavigate extends StepBase {
   type: 'navigate';
   url: string;
+  background?: boolean;
 }
 
 export interface StepHandleDownload extends StepBase {

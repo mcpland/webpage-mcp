@@ -647,6 +647,7 @@ export const closeTabsTool = new CloseTabsTool();
 interface SwitchTabToolParams {
   tabId: number;
   windowId?: number;
+  background?: boolean;
 }
 
 /**
@@ -656,7 +657,7 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.SWITCH_TAB;
 
   async execute(args: SwitchTabToolParams): Promise<ToolResult> {
-    const { tabId, windowId } = args;
+    const { tabId, windowId, background } = args;
 
     console.log(`Attempting to switch to tab ID: ${tabId} in window ID: ${windowId}`);
 
@@ -668,10 +669,12 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
         );
       }
 
-      if (windowId !== undefined) {
-        await chrome.windows.update(windowId, { focused: true });
+      if (background !== true) {
+        if (windowId !== undefined) {
+          await chrome.windows.update(windowId, { focused: true });
+        }
+        await chrome.tabs.update(tabId, { active: true });
       }
-      await chrome.tabs.update(tabId, { active: true });
 
       return {
         content: [
@@ -679,7 +682,10 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
             type: 'text',
             text: JSON.stringify({
               success: true,
-              message: `Successfully switched to tab ID: ${tabId}`,
+              message:
+                background === true
+                  ? `Successfully selected tab ID: ${tabId} without activating it`
+                  : `Successfully switched to tab ID: ${tabId}`,
               tabId: targetTab.id,
               windowId: targetTab.windowId,
               url: targetTab.url,

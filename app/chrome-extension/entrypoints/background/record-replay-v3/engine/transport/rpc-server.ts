@@ -243,7 +243,11 @@ export class RpcServer {
   ): Promise<JsonValue> {
     let resolvedTabId =
       typeof params?.tabId === "number" ? params.tabId : undefined;
-    const execution = params?.execution as ExecutionFlags | undefined;
+    const rawExecution = params?.execution as ExecutionFlags | undefined;
+    const execution =
+      params?.background === true
+        ? ({ ...(rawExecution ?? {}), backgroundTabs: true } as ExecutionFlags)
+        : rawExecution;
 
     if (typeof chrome.runtime?.getManifest === "function") {
       try {

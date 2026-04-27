@@ -11,10 +11,17 @@ import type { StepOpenTab, StepSwitchTab, StepCloseTab } from '../types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
 
+function shouldUseBackgroundTabs(ctx: ExecCtx, actionBackground: unknown): boolean {
+  return typeof actionBackground === 'boolean'
+    ? actionBackground
+    : ctx.execution?.backgroundTabs === true;
+}
+
 export const openTabNode: NodeRuntime<StepOpenTab> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
     const nextUrl = typeof s.url === 'string' ? s.url.trim() : '';
+    const background = shouldUseBackgroundTabs(ctx, s.background);
     if (
       enforcesPublicPageRestrictions(ctx.execution) &&
       !isAllowedPublicFlowOpenUrl(nextUrl)
@@ -22,13 +29,16 @@ export const openTabNode: NodeRuntime<StepOpenTab> = {
       throw new Error(PUBLIC_FLOW_OPEN_URL_ERROR);
     }
     if (s.newWindow) {
-      const createdWindow = await chrome.windows.create({ url: s.url || undefined, focused: true });
+      const createdWindow = await chrome.windows.create({
+        url: s.url || undefined,
+        focused: !background,
+      });
       const firstTabId = createdWindow.tabs?.[0]?.id;
       if (typeof firstTabId === 'number') {
         ctx.tabId = firstTabId;
       }
     } else {
-      const createdTab = await chrome.tabs.create({ url: s.url || undefined, active: true });
+      const createdTab = await chrome.tabs.create({ url: s.url || undefined, active: !background });
       if (typeof createdTab.id === 'number') {
         ctx.tabId = createdTab.id;
       }
@@ -61,9 +71,10 @@ export const switchTabNode: NodeRuntime<StepSwitchTab> = {
     ) {
       throw new Error(PUBLIC_FLOW_SWITCH_TAB_ERROR);
     }
+    const background = shouldUseBackgroundTabs(ctx, s.background);
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.SWITCH_TAB,
-      args: { tabId: targetTabId },
+      args: { tabId: targetTabId, background },
     });
     if ((res as any).isError) throw new Error('switchTab failed');
     ctx.tabId = targetTabId;

@@ -39,6 +39,13 @@ function normalizeDownloadInfo(
   };
 }
 
+function shouldUseBackgroundTabs(
+  executionBackground: boolean | undefined,
+  actionBackground: boolean | undefined,
+): boolean {
+  return typeof actionBackground === 'boolean' ? actionBackground : executionBackground === true;
+}
+
 // ================================
 // openTab Handler
 // ================================
@@ -76,12 +83,13 @@ export const openTabHandler: ActionHandler<'openTab'> = {
 
     try {
       let tabId: number;
+      const background = shouldUseBackgroundTabs(ctx.execution?.backgroundTabs, params.background);
 
       if (params.newWindow) {
         // Create new window
         const window = await chrome.windows.create({
           url: url || 'about:blank',
-          focused: true,
+          focused: !background,
         });
 
         const tab = window?.tabs?.[0];
@@ -93,7 +101,7 @@ export const openTabHandler: ActionHandler<'openTab'> = {
         // Create new tab in current window
         const tab = await chrome.tabs.create({
           url: url || 'about:blank',
-          active: true,
+          active: !background,
         });
 
         if (!tab.id) {
@@ -210,12 +218,16 @@ export const switchTabHandler: ActionHandler<'switchTab'> = {
         return failed('VALIDATION_ERROR', PUBLIC_FLOW_SWITCH_TAB_ERROR);
       }
 
-      // Activate the tab
-      await chrome.tabs.update(targetTabId, { active: true });
+      const background = shouldUseBackgroundTabs(ctx.execution?.backgroundTabs, params.background);
 
-      // Focus the window containing the tab
-      if (targetTab.windowId) {
-        await chrome.windows.update(targetTab.windowId, { focused: true });
+      if (!background) {
+        // Activate the tab
+        await chrome.tabs.update(targetTabId, { active: true });
+
+        // Focus the window containing the tab
+        if (targetTab.windowId) {
+          await chrome.windows.update(targetTab.windowId, { focused: true });
+        }
       }
 
       // Return newTabId for ctx.tabId sync

@@ -230,6 +230,11 @@ export const TOOL_SCHEMAS: Tool[] = [
           description: "Target tab: 'current' or 'new' (default: current)",
           enum: ['current', 'new'],
         },
+        background: {
+          type: 'boolean',
+          description:
+            'Run without activating/focusing target tabs or windows where Chrome APIs allow it. Default: false',
+        },
         refresh: { type: 'boolean', description: 'Refresh before running (default false)' },
         captureNetwork: {
           type: 'boolean',
@@ -701,6 +706,11 @@ export const TOOL_SCHEMAS: Tool[] = [
         windowId: {
           type: 'number',
           description: 'The ID of the window where the tab is located.',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'Select the target tab for subsequent tool calls without activating the tab or focusing the window. Default: false',
         },
       },
       required: ['tabId'],

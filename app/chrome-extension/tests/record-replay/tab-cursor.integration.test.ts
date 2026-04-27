@@ -286,6 +286,28 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       );
     });
 
+    it('openTab honors execution backgroundTabs for new tabs', async () => {
+      const executor = createExecutor({ actionsAllowlist: new Set(['openTab']) });
+      const ctx = createMockExecCtx({
+        execution: { backgroundTabs: true },
+      });
+
+      const step: TestStep = {
+        id: 'openTab_background_newTab',
+        type: 'openTab',
+        url: 'https://example.com/background',
+        newWindow: false,
+      };
+
+      const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });
+
+      expect(result.executor).toBe('actions');
+      expect(mocks.tabsCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'https://example.com/background', active: false }),
+      );
+      expect(ctx.tabId).toBe(NEW_TAB_ID);
+    });
+
     it('openTab rejects non-public URLs when execution forbids public-page escapes', async () => {
       const executor = createExecutor({ actionsAllowlist: new Set(['openTab']) });
       const ctx = createMockExecCtx({
@@ -436,6 +458,33 @@ describe('tab cursor integration (M3-full batch 2)', () => {
       expect(result.executor).toBe('actions');
       expect(mocks.tabsUpdate).toHaveBeenCalledWith(TARGET_TAB_ID, { active: true });
       expect(mocks.windowsUpdate).toHaveBeenCalledWith(TARGET_WINDOW_ID, { focused: true });
+    });
+
+    it('switchTab honors execution backgroundTabs without activating or focusing', async () => {
+      const executor = createExecutor({ actionsAllowlist: new Set(['switchTab']) });
+      const ctx = createMockExecCtx({
+        execution: { backgroundTabs: true },
+      });
+
+      mocks.tabsGet.mockResolvedValueOnce({
+        id: TARGET_TAB_ID,
+        url: 'https://example.com/',
+        windowId: TARGET_WINDOW_ID,
+        status: 'complete',
+      });
+
+      const step: TestStep = {
+        id: 'switchTab_background_byId',
+        type: 'switchTab',
+        tabId: TARGET_TAB_ID,
+      };
+
+      const result = await executor.execute(ctx, step as never, { tabId: TAB_ID });
+
+      expect(result.executor).toBe('actions');
+      expect(mocks.tabsUpdate).not.toHaveBeenCalled();
+      expect(mocks.windowsUpdate).not.toHaveBeenCalled();
+      expect(ctx.tabId).toBe(TARGET_TAB_ID);
     });
 
     it('switchTab fails when no matching tab found', async () => {

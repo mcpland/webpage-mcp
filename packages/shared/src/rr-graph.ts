@@ -52,6 +52,10 @@ function ensureTarget(t: any) {
   return t && typeof t === 'object' ? t : { candidates: [] };
 }
 
+function backgroundConfig(c: any): Record<string, boolean> {
+  return typeof c?.background === 'boolean' ? { background: c.background } : {};
+}
+
 // Topological order using Kahn's algorithm; edges considered as-is (caller may pre-filter labels)
 export function topoOrder<T extends RRNode>(nodes: T[], edges: RREdge[]): T[] {
   const id2n = new Map(nodes.map((n) => [n.id, n] as const));
@@ -151,7 +155,12 @@ export function mapNodeToStep(node: RRNode): any {
         maxIterations: Math.max(0, Number(c.maxIterations ?? 100)),
       };
     case RR_STEP_TYPES.NAVIGATE:
-      return { ...base, type: RR_STEP_TYPES.NAVIGATE, url: c.url || '' };
+      return {
+        ...base,
+        type: RR_STEP_TYPES.NAVIGATE,
+        url: c.url || '',
+        ...backgroundConfig(c),
+      };
     case RR_STEP_TYPES.SCRIPT:
       return {
         ...base,
@@ -192,6 +201,7 @@ export function mapNodeToStep(node: RRNode): any {
         type: RR_STEP_TYPES.SCREENSHOT,
         selector: c.selector || '',
         fullPage: !!c.fullPage,
+        ...backgroundConfig(c),
         saveAs: c.saveAs || '',
       };
     case RR_STEP_TYPES.SCROLL:
@@ -239,7 +249,13 @@ export function mapNodeToStep(node: RRNode): any {
         },
       };
     case RR_STEP_TYPES.OPEN_TAB:
-      return { ...base, type: RR_STEP_TYPES.OPEN_TAB, url: c.url || '', newWindow: !!c.newWindow };
+      return {
+        ...base,
+        type: RR_STEP_TYPES.OPEN_TAB,
+        url: c.url || '',
+        newWindow: !!c.newWindow,
+        ...backgroundConfig(c),
+      };
     case RR_STEP_TYPES.SWITCH_TAB:
       return {
         ...base,
@@ -247,6 +263,7 @@ export function mapNodeToStep(node: RRNode): any {
         tabId: c.tabId || undefined,
         urlContains: c.urlContains || '',
         titleContains: c.titleContains || '',
+        ...backgroundConfig(c),
       };
     case RR_STEP_TYPES.CLOSE_TAB:
       return {
