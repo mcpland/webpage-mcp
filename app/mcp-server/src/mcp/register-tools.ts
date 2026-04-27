@@ -49,6 +49,7 @@ const FLOW_TOOL_CACHE_STALE_MS = 5 * 60_000;
 const FLOW_TOOL_CACHE_MAX_SESSIONS = 500;
 const SESSION_RUN_OPTION_KEYS = [
   'tabTarget',
+  'background',
   'refresh',
   'captureNetwork',
   'returnLogs',
@@ -63,6 +64,7 @@ const SESSION_RUN_OPTION_KEYS = [
   'screenshotDiffThreshold',
 ] as const;
 const RUN_OPTION_KEY_SET = new Set<string>(SESSION_RUN_OPTION_KEYS);
+const WORKFLOW_RUN_TOOL_NAME = 'workflow_run';
 const PUBLIC_TOOL_NAME_SET = new Set<string>(TOOL_SCHEMAS.map((tool) => tool.name));
 const publishedFlowsCache = new Map<string, { fetchedAt: number; items: PublishedFlow[] }>();
 const publishedFlowsInflight = new Map<string, Promise<PublishedFlow[]>>();
@@ -337,8 +339,100 @@ function splitDynamicFlowArgs(
   return { variables, runOptions };
 }
 
-async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
-  const items = await fetchPublishedFlows(ctx);
+function getWorkflowSummary(items: PublishedFlow[]): string {
+  const workflows = items
+    .slice(0, 50)
+    .map((item) => {
+      const description = (item.meta && item.meta.tool && item.meta.tool.description) || item.description || '';
+      return description ? `${item.slug}: ${description}` : item.slug;
+    })
+    .join('\n');
+  return workflows || 'No published workflows were discovered for this browser session.';
+}
+
+function buildWorkflowRunTool(items: PublishedFlow[]): Tool {
+  const workflowSlugs = items.map((item) => item.slug).filter((slug) => slug.length > 0);
+  const workflowProperty: Record<string, unknown> = {
+    type: 'string',
+    description: 'Published workflow slug to run. Use record_replay_list_published for full metadata.',
+  };
+  if (workflowSlugs.length > 0) {
+    workflowProperty.enum = workflowSlugs;
+  }
+
+  return {
+    name: WORKFLOW_RUN_TOOL_NAME,
+    description: `Run a published workflow by slug using a compact schema. Available workflows:\n${getWorkflowSummary(items)}`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workflow: workflowProperty,
+        args: {
+          type: 'object',
+          description: 'Workflow variable values keyed by variable name.',
+          additionalProperties: true,
+        },
+        tabId: {
+          type: 'number',
+          description: 'Explicit tab to bind the run to. Overrides `tabTarget`.',
+        },
+        tabTarget: {
+          type: 'string',
+          enum: ['current', 'new'],
+          default: 'current',
+          description: "Target tab: 'current' or 'new'.",
+        },
+        background: {
+          type: 'boolean',
+          default: false,
+          description: 'Run without activating/focusing target tabs or windows where Chrome APIs allow it.',
+        },
+        refresh: { type: 'boolean', default: false },
+        captureNetwork: { type: 'boolean', default: false },
+        returnLogs: { type: 'boolean', default: false },
+        timeoutMs: { type: 'number', minimum: 0 },
+        startUrl: {
+          type: 'string',
+          description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
+        },
+        debugStepByStep: {
+          type: 'boolean',
+          default: false,
+          description: 'Include per-step debug trace in run result.',
+        },
+        stepDelayMs: {
+          type: 'number',
+          minimum: 0,
+          description: 'Optional delay between steps for visual debugging.',
+        },
+        captureStepScreenshots: {
+          type: 'boolean',
+          default: false,
+          description: 'Capture screenshot after each step and include in debug output.',
+        },
+        recordStepScreenshotBaselines: {
+          type: 'boolean',
+          default: false,
+          description: 'Capture screenshots keyed by stepId for future baseline comparison.',
+        },
+        screenshotBaselines: {
+          type: 'object',
+          description: 'Baseline screenshots keyed by stepId.',
+        },
+        screenshotDiffThreshold: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description: 'Similarity threshold for screenshot comparison (0-1).',
+        },
+      },
+      required: ['workflow'],
+    },
+  };
+}
+
+async function listDynamicFlowTools(ctx: McpToolContext, publishedFlows?: PublishedFlow[]): Promise<Tool[]> {
+  const items = publishedFlows || (await fetchPublishedFlows(ctx));
   const tools: Tool[] = [];
   for (const item of items) {
     const name = `flow.${item.slug}`;
@@ -365,6 +459,12 @@ async function listDynamicFlowTools(ctx: McpToolContext): Promise<Tool[]> {
     // Run options
     if (!properties['tabTarget'])
       properties['tabTarget'] = { type: 'string', enum: ['current', 'new'], default: 'current' };
+    if (!properties['background'])
+      properties['background'] = {
+        type: 'boolean',
+        default: false,
+        description: 'Run without activating/focusing target tabs or windows where Chrome APIs allow it.',
+      };
     if (!properties['refresh']) properties['refresh'] = { type: 'boolean', default: false };
     if (!properties['captureNetwork'])
       properties['captureNetwork'] = { type: 'boolean', default: false };
@@ -436,8 +536,9 @@ export const setupTools = (server: Server, ctx: McpToolContext) => {
 };
 
 export async function listToolsForContext(ctx: McpToolContext): Promise<Tool[]> {
-  const dynamicTools = await listDynamicFlowTools(ctx);
-  return [...TOOL_SCHEMAS, ...dynamicTools];
+  const items = await fetchPublishedFlows(ctx);
+  const dynamicTools = await listDynamicFlowTools(ctx, items);
+  return [...TOOL_SCHEMAS, buildWorkflowRunTool(items), ...dynamicTools];
 }
 
 export const callToolForContext = async (
@@ -446,7 +547,10 @@ export const callToolForContext = async (
   args: any,
 ): Promise<CallToolResult> => {
   try {
-    if (!name || (!name.startsWith('flow.') && !PUBLIC_TOOL_NAME_SET.has(name))) {
+    if (
+      !name ||
+      (name !== WORKFLOW_RUN_TOOL_NAME && !name.startsWith('flow.') && !PUBLIC_TOOL_NAME_SET.has(name))
+    ) {
       return {
         content: [
           {
@@ -456,6 +560,77 @@ export const callToolForContext = async (
         ],
         isError: true,
       };
+    }
+
+    if (name === WORKFLOW_RUN_TOOL_NAME) {
+      try {
+        const workflow = args && typeof args.workflow === 'string' ? args.workflow.trim() : '';
+        if (!workflow) {
+          throw new Error('Missing required workflow slug.');
+        }
+
+        let items = await fetchPublishedFlows(ctx);
+        let match = items.find((it) => it.slug === workflow);
+        if (!match) {
+          items = await fetchPublishedFlows(ctx, { forceRefresh: true });
+          match = items.find((it) => it.slug === workflow);
+        }
+        if (!match) {
+          const available = items.map((item) => item.slug).join(', ');
+          throw new Error(
+            available
+              ? `Workflow not found: ${workflow}. Available workflows: ${available}`
+              : `Workflow not found: ${workflow}`,
+          );
+        }
+
+        const variables =
+          args && args.args && typeof args.args === 'object' && !Array.isArray(args.args)
+            ? args.args
+            : {};
+        const runOptions: Record<string, unknown> = {};
+        if (args && typeof args === 'object' && !Array.isArray(args)) {
+          for (const key of SESSION_RUN_OPTION_KEYS) {
+            if (Object.prototype.hasOwnProperty.call(args, key)) {
+              runOptions[key] = args[key];
+            }
+          }
+        }
+
+        const proxyRes = await ctx.nativeHost.sendRequestToExtensionAndWait(
+          {
+            name: 'record_replay_flow_run',
+            args: {
+              flowId: match.id,
+              args: variables,
+              ...runOptions,
+            },
+            meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId },
+          },
+          NativeMessageType.CALL_TOOL,
+          120000,
+        );
+        if (proxyRes.status === 'success') return proxyRes.data;
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error calling workflow_run: ${proxyRes.error}`,
+            },
+          ],
+          isError: true,
+        };
+      } catch (err: any) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error resolving workflow_run: ${err?.message || String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
     }
 
     // If calling a dynamic flow tool (name starts with flow.), proxy to common flow-run tool

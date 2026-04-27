@@ -24,6 +24,9 @@ describe('dynamic published flow tools', () => {
   beforeEach(() => {
     clearDynamicFlowCacheForSession('dynamic-flow-tools');
     clearDynamicFlowCacheForSession('dynamic-flow-call');
+    clearDynamicFlowCacheForSession('dynamic-flow-workflow-run');
+    clearDynamicFlowCacheForSession('dynamic-flow-workflow-call');
+    clearDynamicFlowCacheForSession('dynamic-flow-workflow-missing');
   });
 
   it('maps V3 published variables into dynamic tool schemas', async () => {
@@ -120,6 +123,138 @@ describe('dynamic published flow tools', () => {
     ).toBeUndefined();
     expect((signupTool?.inputSchema as { properties?: Record<string, any> }).properties?.metadata)
       .toHaveProperty('anyOf');
+    expect(
+      (signupTool?.inputSchema as { properties?: Record<string, any> }).properties?.background,
+    ).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
+  });
+
+  it('exposes a compact workflow_run tool with workflow slugs as an enum', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [
+        {
+          id: 'flow-signup',
+          slug: 'signup',
+          description: 'Published signup flow',
+        },
+        {
+          id: 'flow-checkout',
+          slug: 'checkout',
+          meta: { tool: { description: 'Complete checkout' } },
+        },
+      ],
+    });
+    const ctx = createContext('dynamic-flow-workflow-run', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const workflowRunTool = tools.find((tool) => tool.name === 'workflow_run');
+    const input = workflowRunTool?.inputSchema as {
+      properties?: Record<string, any>;
+      required?: string[];
+    };
+
+    expect(workflowRunTool?.description).toContain('signup: Published signup flow');
+    expect(workflowRunTool?.description).toContain('checkout: Complete checkout');
+    expect(input.required).toEqual(['workflow']);
+    expect(input.properties?.workflow).toMatchObject({
+      type: 'string',
+      enum: ['signup', 'checkout'],
+    });
+    expect(input.properties?.args).toMatchObject({
+      type: 'object',
+      additionalProperties: true,
+    });
+    expect(input.properties?.background).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
+  });
+
+  it('runs workflow_run by resolving a published slug to the existing flow runner', async () => {
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [
+          {
+            id: 'flow-signup',
+            slug: 'signup',
+            variables: [{ name: 'email', required: true }],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
+          isError: false,
+        },
+      });
+    const ctx = createContext('dynamic-flow-workflow-call', sendRequestToExtensionAndWait);
+
+    const result = await callToolForContext(ctx, 'workflow_run', {
+      workflow: 'signup',
+      args: { email: 'alice@example.com' },
+      background: true,
+      refresh: true,
+      timeoutMs: 5000,
+    });
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenNthCalledWith(
+      2,
+      {
+        name: 'record_replay_flow_run',
+        args: {
+          flowId: 'flow-signup',
+          args: {
+            email: 'alice@example.com',
+          },
+          background: true,
+          refresh: true,
+          timeoutMs: 5000,
+        },
+        meta: { mcpSessionId: 'dynamic-flow-workflow-call', instanceId: 'unit-test' },
+      },
+      NativeMessageType.CALL_TOOL,
+      120000,
+    );
+    expect(result).toEqual({
+      content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
+      isError: false,
+    });
+  });
+
+  it('returns available workflow slugs when workflow_run cannot resolve a slug', async () => {
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [{ id: 'flow-signup', slug: 'signup' }],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [{ id: 'flow-signup', slug: 'signup' }],
+      });
+    const ctx = createContext('dynamic-flow-workflow-missing', sendRequestToExtensionAndWait);
+
+    const result = await callToolForContext(ctx, 'workflow_run', {
+      workflow: 'checkout',
+      args: {},
+    });
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      content: [
+        {
+          type: 'text',
+          text: 'Error resolving workflow_run: Workflow not found: checkout. Available workflows: signup',
+        },
+      ],
+      isError: true,
+    });
   });
 
   it('splits V3 dynamic tool arguments from run options by variable name', async () => {
