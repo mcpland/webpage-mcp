@@ -44,9 +44,10 @@ import type {
 // ==================== Test Helpers ====================
 
 type TestNodeConfig = {
-  action: 'succeed' | 'fail' | 'flaky';
+  action: 'succeed' | 'fail' | 'flaky' | 'setTab';
   failTimes?: number;
   errorCode?: string;
+  tabId?: number;
 };
 
 /**
@@ -59,9 +60,10 @@ function createTestNodeDefinition(
     kind: 'test',
     schema: z
       .object({
-        action: z.enum(['succeed', 'fail', 'flaky']),
+        action: z.enum(['succeed', 'fail', 'flaky', 'setTab']),
         failTimes: z.number().int().min(0).optional(),
         errorCode: z.string().optional(),
+        tabId: z.number().int().optional(),
       })
       .passthrough(),
     execute: async (ctx, node): Promise<NodeExecutionResult> => {
@@ -76,6 +78,18 @@ function createTestNodeDefinition(
       );
 
       if (cfg.action === 'succeed') return { status: 'succeeded' };
+      if (cfg.action === 'setTab') {
+        return {
+          status: 'succeeded',
+          varsPatch: [
+            {
+              op: 'set',
+              name: '__rr_runtime__tabId',
+              value: cfg.tabId ?? 1,
+            },
+          ],
+        };
+      }
       if (cfg.action === 'fail') return { status: 'failed', error };
 
       // flaky: fail for the first `failTimes` calls
@@ -510,6 +524,49 @@ describe('V3 RunRunner onError contracts', () => {
       nodeId: 'A',
       data: 'failure-shot',
       savedAs: 'failure.png',
+    });
+  });
+
+  it('artifacts: captures screenshots from the current runtime tab', async () => {
+    const runId = 'run-artifact-current-tab';
+    const artifactService: ArtifactService = {
+      screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'current-tab-shot' }),
+      saveScreenshot: vi.fn().mockResolvedValue({ savedAs: 'current.png' }),
+    };
+    const flow = createFlow(
+      'A',
+      [
+        { id: 'A', kind: 'test', config: { action: 'setTab', tabId: 42 } },
+        {
+          id: 'B',
+          kind: 'test',
+          config: { action: 'fail' },
+          policy: {
+            artifacts: { screenshot: 'onFailure' },
+          },
+        },
+      ],
+      [{ id: 'e1', from: 'A', to: 'B', label: EDGE_LABELS.DEFAULT }],
+    );
+
+    const { runner, bus } = createRunnerContext(runId, flow, {
+      artifactService,
+    });
+    const result = await runner.start();
+    expect(result.status).toBe('failed');
+
+    expect(artifactService.screenshot).toHaveBeenCalledWith(42, { background: false });
+
+    const events = await listEvents(bus, runId);
+    const screenshots = events.filter(
+      (event): event is Extract<RunEvent, { type: 'artifact.screenshot' }> =>
+        event.type === 'artifact.screenshot',
+    );
+    expect(screenshots).toHaveLength(1);
+    expect(screenshots[0]).toMatchObject({
+      type: 'artifact.screenshot',
+      nodeId: 'B',
+      data: 'current-tab-shot',
     });
   });
 

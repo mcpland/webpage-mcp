@@ -34,6 +34,8 @@ import type { RunResult } from './kernel';
 
 // ==================== Types ====================
 
+const RUNTIME_TAB_ID_VAR = '__rr_runtime__tabId';
+
 /**
  * RunRunner runtime status
  */
@@ -195,6 +197,11 @@ function applyVarsPatch(vars: Record<string, JsonValue>, patch: VarsPatchOp[]): 
       delete vars[op.name];
     }
   }
+}
+
+function readRuntimeTabId(vars: Record<string, JsonValue>): number | undefined {
+  const value = vars[RUNTIME_TAB_ID_VAR];
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : undefined;
 }
 
 function toRRError(err: unknown, fallback: { code: string; message: string }): RRError {
@@ -726,7 +733,8 @@ class StorageBackedRunRunner implements RunRunner {
       return;
     }
 
-    const result = await this.env.artifactService.screenshot(this.config.tabId, {
+    const tabId = this.getCurrentTabId();
+    const result = await this.env.artifactService.screenshot(tabId, {
       background: this.config.execution?.backgroundTabs === true,
     });
     if (!result.ok) {
@@ -772,6 +780,10 @@ class StorageBackedRunRunner implements RunRunner {
         ...(savedAs ? { savedAs } : {}),
       } as RunEventInput),
     );
+  }
+
+  private getCurrentTabId(): number {
+    return readRuntimeTabId(this.state.vars) ?? this.config.tabId;
   }
 
   private resolveNodePolicy(flow: FlowV3, node: NodeV3): NodePolicy {
@@ -868,7 +880,7 @@ class StorageBackedRunRunner implements RunRunner {
       },
       chooseNext: (label) => ({ kind: 'edgeLabel', label }),
       artifacts: {
-        screenshot: () => this.env.artifactService.screenshot(this.config.tabId),
+        screenshot: () => this.env.artifactService.screenshot(this.getCurrentTabId()),
       },
       persistent: {
         get: async (name) => (await this.env.storage.persistentVars.get(name))?.value,
