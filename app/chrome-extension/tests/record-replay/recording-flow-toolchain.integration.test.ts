@@ -418,6 +418,18 @@ describe("recording/editing/flow toolchain integration", () => {
             code: "return localStorage.getItem('token')",
           },
         },
+        {
+          id: "http-1" as any,
+          kind: "http",
+          config: {
+            url: "https://example.com/api",
+            method: "POST",
+            headers: { "x-session": "opaque-session-id" },
+            body: "card=4111111111111111",
+            payload: { raw: "opaque-payload" },
+            data: "opaque-data",
+          },
+        },
       ],
       {
         meta: {
@@ -455,11 +467,14 @@ describe("recording/editing/flow toolchain integration", () => {
     const scriptNode = payload.workflow.nodes.find(
       (node: { id: string }) => node.id === "script-1",
     );
+    const httpNode = payload.workflow.nodes.find(
+      (node: { id: string }) => node.id === "http-1",
+    );
 
     expect(payload.summary).toMatchObject({
       flowId,
       workflow: "debug-flow",
-      nodeCount: 2,
+      nodeCount: 3,
       runCount: 0,
     });
     expect(fillNode.config.target.selector).toBe("#email");
@@ -468,6 +483,14 @@ describe("recording/editing/flow toolchain integration", () => {
     ]);
     expect(fillNode.config.value).toBe("<redacted>");
     expect(scriptNode.config.code).toContain("<redacted script:");
+    expect(httpNode.config).toMatchObject({
+      url: "https://example.com/api",
+      method: "POST",
+      headers: "<redacted>",
+      body: "<redacted>",
+      payload: "<redacted>",
+      data: "<redacted>",
+    });
     expect(payload.workflow.variables).toEqual([
       {
         name: "email",
@@ -527,7 +550,14 @@ describe("recording/editing/flow toolchain integration", () => {
       error: {
         code: "TARGET_NOT_FOUND",
         message: "Missing input",
-        data: { selector: "#email", token: "secret-token", apiKey: "opaque-value" },
+        data: {
+          selector: "#email",
+          token: "secret-token",
+          apiKey: "opaque-value",
+          payload: "opaque-payload",
+          body: "card=4111111111111111",
+          headers: { "x-session": "opaque-session-id" },
+        },
       },
       nextSeq: 1,
     } as RunRecordV3);
@@ -545,7 +575,14 @@ describe("recording/editing/flow toolchain integration", () => {
       error: {
         code: "TARGET_NOT_FOUND",
         message: "Missing input",
-        data: { selector: "#email", token: "secret-token", apiKey: "opaque-value" },
+        data: {
+          selector: "#email",
+          token: "secret-token",
+          apiKey: "opaque-value",
+          payload: "opaque-payload",
+          body: "card=4111111111111111",
+          headers: { "x-session": "opaque-session-id" },
+        },
       },
       decision: "stop",
     });
@@ -576,6 +613,9 @@ describe("recording/editing/flow toolchain integration", () => {
           selector: "#email",
           token: "<redacted>",
           apiKey: "<redacted>",
+          payload: "<redacted>",
+          body: "<redacted>",
+          headers: "<redacted>",
         },
       },
     });
@@ -590,6 +630,9 @@ describe("recording/editing/flow toolchain integration", () => {
           selector: "#email",
           token: "<redacted>",
           apiKey: "<redacted>",
+          payload: "<redacted>",
+          body: "<redacted>",
+          headers: "<redacted>",
         },
       },
     });

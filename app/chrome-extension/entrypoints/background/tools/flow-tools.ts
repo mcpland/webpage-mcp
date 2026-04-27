@@ -87,6 +87,15 @@ interface WorkflowRepairChange {
 }
 
 const REDACTED = '<redacted>';
+const SENSITIVE_DEBUG_CONFIG_KEYS = new Set([
+  'body',
+  'data',
+  'formdata',
+  'headers',
+  'payload',
+  'postdata',
+  'requestbody',
+]);
 const SCRIPT_CONFIG_KEYS = new Set(['code', 'script', 'jsScript']);
 const RETRYABLE_STABILITY_ERROR_CODES = [
   RR_ERROR_CODES.TARGET_NOT_FOUND,
@@ -188,7 +197,8 @@ function isVariableReference(value: string): string | null {
 }
 
 function isSensitiveKey(key: string): boolean {
-  return isSensitiveKeyName(key);
+  const normalized = key.trim().toLowerCase();
+  return SENSITIVE_DEBUG_CONFIG_KEYS.has(normalized) || isSensitiveKeyName(normalized);
 }
 
 function redactUrl(value: string): string {
