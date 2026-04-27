@@ -87,7 +87,7 @@ export default defineConfig({
       //   description: 'Open workflow sidepanel',
       // },
       toggle_web_editor: {
-        suggested_key: { default: "Ctrl+Shift+O", mac: "Command+Shift+O" },
+        suggested_key: { default: "Ctrl+Shift+E", mac: "Command+Shift+E" },
         description: "__MSG_commandToggleWebEditorDesc__",
       },
       toggle_quick_panel: {

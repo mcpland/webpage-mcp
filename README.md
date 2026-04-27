@@ -303,7 +303,7 @@ Important:
 - **AI Agent Chat Sidepanel** — Built-in sidepanel for chatting with AI agents (Claude Code CLI, OpenAI Codex CLI) directly from Chrome, with project management, session history, and streaming output
 - **Record, Replay, and Publish** — Record browser actions, replay them as automated flows, publish reusable flows, and expose them as dynamic MCP tools (`flow.<slug>`)
 - **Triggerable Browser Workflows** — Launch flows from URL matches, DOM appearance, intervals, one-time schedules, keyboard commands, and context-menu actions
-- **Web Editor** — Visual in-page DOM editor overlay with a property panel, transaction system, undo/redo, and structured apply-to-code handoff (`Cmd+Shift+O`)
+- **Web Editor** — Visual in-page DOM editor overlay with a property panel, transaction system, undo/redo, and structured apply-to-code handoff (`Cmd+Shift+E`)
 - **Quick Panel** — Keyboard-triggered floating AI chat accessible from any page, with page context and streaming responses (`Cmd+Shift+U`)
 - **Semantic Search** — On-device embedding model ([all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)) with HNSW vector index for searching tab content across live browser state
 - **Element Marker** — Annotate DOM elements with stable names/selectors so agents and workflows can refer to page targets more reliably
