@@ -756,6 +756,55 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("workflowRepairTool marks inferred sensitive parameter variables", async () => {
+    const flowId = `workflow-repair-sensitive-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: {
+              target: { selector: "#token" },
+              value: "secret-token",
+            },
+          },
+        ],
+        {
+          meta: {
+            recording: {
+              parameterSuggestions: [
+                {
+                  nodeId: "fill-1" as any,
+                  kind: "fill",
+                  suggestedKey: "apiToken",
+                  currentValue: "secret-token",
+                },
+              ],
+            },
+          },
+        },
+      ),
+    );
+
+    const result = await workflowRepairTool.execute({
+      flowId,
+      apply: true,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(payload.updated).toBe(true);
+    expect(updated?.variables).toContainEqual({
+      name: "apiToken",
+      label: "apiToken",
+      default: "secret-token",
+      scope: "flow",
+      sensitive: true,
+    });
+  });
+
   it("flowUpdateTool applies parameter suggestions and persists the edited flow", async () => {
     const flowId = `flow-update-${Date.now()}`;
     await createStoragePort().flows.save(

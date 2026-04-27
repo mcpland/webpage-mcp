@@ -17,6 +17,7 @@ export interface PublishedFlowDetailsV3 extends PublishedFlowInfoV3 {
 
 export const TOOL_SLUG_MAX_LENGTH = 64;
 const TOOL_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SENSITIVE_KEY_PATTERN = /(authorization|auth|bearer|cookie|credential|key|password|secret|session|token)/i;
 
 function trimIfString(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -24,6 +25,38 @@ function trimIfString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function containsSensitiveDefault(value: unknown, depth = 0): boolean {
+  if (value === null || value === undefined || depth > 6) {
+    return false;
+  }
+  if (typeof value === "string") {
+    return SENSITIVE_KEY_PATTERN.test(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => containsSensitiveDefault(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).some(
+      ([key, item]) =>
+        SENSITIVE_KEY_PATTERN.test(key) ||
+        containsSensitiveDefault(item, depth + 1),
+    );
+  }
+  return false;
+}
+
+function isSensitivePublishedVariable(
+  variable: NonNullable<FlowV3["variables"]>[number],
+): boolean {
+  if (variable?.sensitive === true) {
+    return true;
+  }
+  if (SENSITIVE_KEY_PATTERN.test(variable?.name || "")) {
+    return true;
+  }
+  return containsSensitiveDefault(variable?.default);
 }
 
 export function toToolSlug(name: string): string {
@@ -93,7 +126,7 @@ function sanitizePublishedVariables(
   }
 
   const sanitized = variables
-    .filter((variable) => variable?.sensitive !== true)
+    .filter((variable) => !isSensitivePublishedVariable(variable))
     .map((variable) => ({
       name: variable.name,
       ...(variable.label ? { label: variable.label } : {}),

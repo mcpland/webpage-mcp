@@ -32,6 +32,14 @@ function createPublishedFlow(): FlowV3 {
         sensitive: true,
         default: 'super-secret-token',
       },
+      {
+        name: 'sessionToken',
+        default: 'opaque-value',
+      },
+      {
+        name: 'metadata',
+        default: { headers: { authorization: 'Bearer opaque-value' } },
+      },
     ],
     createdAt: iso as any,
     updatedAt: iso as any,

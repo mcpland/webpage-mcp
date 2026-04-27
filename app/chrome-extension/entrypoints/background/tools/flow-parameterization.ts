@@ -19,6 +19,12 @@ function isValidVariableKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
 }
 
+function isSensitiveParameterSuggestion(suggestion: ParameterSuggestion): boolean {
+  return /(authorization|auth|bearer|cookie|credential|key|password|secret|session|token)/i.test(
+    `${suggestion.suggestedKey} ${suggestion.currentValue}`,
+  );
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -173,6 +179,7 @@ export function applyFlowParameterSuggestions(flow: Flow | FlowV3): ApplyParamet
           label: suggestion.suggestedKey,
           default: suggestion.currentValue,
           scope: 'flow',
+          ...(isSensitiveParameterSuggestion(suggestion) ? { sensitive: true } : {}),
         });
       } else {
         (flow.variables as Flow['variables'])!.push({
@@ -180,6 +187,7 @@ export function applyFlowParameterSuggestions(flow: Flow | FlowV3): ApplyParamet
           label: suggestion.suggestedKey,
           type: 'string',
           default: suggestion.currentValue,
+          ...(isSensitiveParameterSuggestion(suggestion) ? { sensitive: true } : {}),
         });
       }
       existingVariables.add(suggestion.suggestedKey);
