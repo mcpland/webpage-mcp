@@ -117,4 +117,59 @@ describe('screenshotTool', () => {
     expect(payload.pathRedacted).toBe(true);
     expect('fullPath' in payload).toBe(false);
   });
+
+  it('rejects background full-page captures before using visible-tab capture', async () => {
+    const { screenshotTool } = await loadScreenshotTool();
+    const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
+    const captureVisibleTab = chrome.tabs.captureVisibleTab as ReturnType<typeof vi.fn>;
+    tabsGet.mockResolvedValue(makeTab());
+    const injectContentScript = vi
+      .spyOn(screenshotTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+
+    const result = await screenshotTool.execute({
+      tabId: 7,
+      background: true,
+      fullPage: true,
+      storeBase64: true,
+      savePng: false,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'Background screenshots support only viewport capture',
+    );
+    expect(cdpMocks.withSession).not.toHaveBeenCalled();
+    expect(injectContentScript).not.toHaveBeenCalled();
+    expect(captureVisibleTab).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to visible-tab capture when background CDP capture fails', async () => {
+    const { screenshotTool } = await loadScreenshotTool();
+    const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
+    const captureVisibleTab = chrome.tabs.captureVisibleTab as ReturnType<typeof vi.fn>;
+    tabsGet.mockResolvedValue(makeTab());
+    cdpMocks.sendCommand.mockImplementation(async (_tabId, method) => {
+      if (method === 'Page.getLayoutMetrics') {
+        return { layoutViewport: { clientWidth: 1280, clientHeight: 720 } };
+      }
+      if (method === 'Page.captureScreenshot') {
+        throw new Error('debugger unavailable');
+      }
+      return undefined;
+    });
+
+    const result = await screenshotTool.execute({
+      tabId: 7,
+      background: true,
+      storeBase64: true,
+      savePng: false,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'Background screenshot failed via CDP: debugger unavailable',
+    );
+    expect(captureVisibleTab).not.toHaveBeenCalled();
+  });
 });

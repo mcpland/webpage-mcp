@@ -89,6 +89,13 @@ const PAGE_DETAILS_REQUIRED_FIELDS: Array<keyof ScreenshotPageDetails> = [
   'currentScrollY',
 ];
 
+const BACKGROUND_SCREENSHOT_UNSUPPORTED_ERROR =
+  'Background screenshots support only viewport capture. fullPage and selector captures require foreground capture because Chrome captureVisibleTab captures the active visible tab.';
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Validates and asserts that the response from content script contains valid page details
  */
@@ -164,11 +171,12 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
     try {
       const background = args.background === true;
-      // CDP path: background=true with simple viewport capture (no fullPage, no selector)
-      const canUseCdpCapture = background && !fullPage && !selector;
+      if (background && (fullPage || selector)) {
+        throw new Error(BACKGROUND_SCREENSHOT_UNSUPPORTED_ERROR);
+      }
 
       // === Path 1: CDP viewport capture (no content script needed) ===
-      if (canUseCdpCapture) {
+      if (background) {
         try {
           const tabId = tab.id!;
           const { cdpSessionManager } = await import('@/utils/cdp-session-manager');
@@ -197,7 +205,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
             finalImageHeightCss = Math.round(viewport.clientHeight || 600);
           });
         } catch (e) {
-          console.warn('CDP viewport capture failed, falling back to helper path:', e);
+          throw new Error(`Background screenshot failed via CDP: ${formatErrorMessage(e)}`);
         }
       }
 
