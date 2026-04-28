@@ -868,6 +868,84 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("workflowRepairTool scopes flow-level onError retry to safe nodes", async () => {
+    const flowId = `workflow-repair-onerror-retry-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "wait-1" as any,
+            kind: "wait",
+            config: { condition: { kind: "selector", selector: "#ready" } },
+          },
+          {
+            id: "click-1" as any,
+            kind: "click",
+            config: { target: { selector: "#purchase" } },
+          },
+        ],
+        {
+          policy: {
+            defaultNodePolicy: {
+              onError: {
+                kind: "retry",
+                override: {
+                  retries: 3,
+                  intervalMs: 75 as any,
+                },
+              },
+            },
+          },
+        },
+      ),
+    );
+
+    const result = await workflowRepairTool.execute({
+      flowId,
+      apply: true,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+    const beforeApplyCodes = new Set(
+      payload.recommendationsBeforeApply.map(
+        (recommendation: { code: string }) => recommendation.code,
+      ),
+    );
+    const remainingCodes = new Set(
+      payload.recommendations.map(
+        (recommendation: { code: string }) => recommendation.code,
+      ),
+    );
+    const waitNode = updated?.nodes.find((node) => node.id === "wait-1");
+    const clickNode = updated?.nodes.find((node) => node.id === "click-1");
+
+    expect(payload).toMatchObject({
+      success: true,
+      flowId,
+      applied: true,
+      updated: true,
+    });
+    expect(payload.changes.map((change: { code: string }) => change.code)).toEqual(
+      expect.arrayContaining([
+        "global_retry_scoped_to_safe_nodes",
+        "default_retry_added",
+      ]),
+    );
+    expect(beforeApplyCodes.has("global_retry_policy_has_side_effect_risk")).toBe(true);
+    expect(remainingCodes.has("global_retry_policy_has_side_effect_risk")).toBe(false);
+    expect(updated?.policy?.defaultNodePolicy?.retry).toBeUndefined();
+    expect(updated?.policy?.defaultNodePolicy?.onError).toBeUndefined();
+    expect(waitNode?.policy?.retry).toMatchObject({
+      retries: 3,
+      intervalMs: 75,
+      backoff: "linear",
+      maxIntervalMs: 2000,
+      jitter: "full",
+    });
+    expect(clickNode?.policy?.retry).toBeUndefined();
+  });
+
   it("workflowRepairTool marks inferred sensitive parameter variables", async () => {
     const flowId = `workflow-repair-sensitive-${Date.now()}`;
     await createStoragePort().flows.save(

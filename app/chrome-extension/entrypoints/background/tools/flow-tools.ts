@@ -25,6 +25,7 @@ import {
 } from '../record-replay-v3/flows/sensitive';
 import { findEntryNodeId } from '../record-replay-v3/storage/import/flow-convert';
 import { applyFlowParameterSuggestions } from './flow-parameterization';
+import type { NodePolicy, RetryPolicy } from '../record-replay-v3/domain/policy';
 
 type FlowHintLevel = 'info' | 'warning';
 
@@ -131,6 +132,15 @@ const RETRYABLE_STABILITY_ERROR_CODES = [
 
 type FlowVariable = NonNullable<FlowV3['variables']>[number];
 
+const DEFAULT_SAFE_RETRY_POLICY: RetryPolicy = {
+  retries: 1,
+  intervalMs: 500,
+  backoff: 'linear',
+  maxIntervalMs: 2_000,
+  jitter: 'full',
+  retryOn: RETRYABLE_STABILITY_ERROR_CODES,
+};
+
 function getNodeSideEffectProfile(node: FlowV3['nodes'][number]): WorkflowSideEffectProfile {
   return normalizeWorkflowSideEffectProfile(node.kind, node.sideEffect);
 }
@@ -157,6 +167,23 @@ function sideEffectRetryEligibleNodes(flow: FlowV3): FlowV3['nodes'] {
 
 function isRetryableStabilityErrorCode(code: string): boolean {
   return (RETRYABLE_STABILITY_ERROR_CODES as readonly string[]).includes(code);
+}
+
+function policyHasRetryDirective(policy: NodePolicy | undefined): boolean {
+  return Boolean(policy?.retry || policy?.onError?.kind === 'retry');
+}
+
+function getRetryTemplateFromPolicy(policy: NodePolicy | undefined): RetryPolicy {
+  if (policy?.retry) {
+    return { ...policy.retry };
+  }
+  if (policy?.onError?.kind === 'retry') {
+    return {
+      ...DEFAULT_SAFE_RETRY_POLICY,
+      ...policy.onError.override,
+    };
+  }
+  return { ...DEFAULT_SAFE_RETRY_POLICY };
 }
 
 function getVariableName(variable: FlowVariable | null | undefined): string | undefined {
@@ -732,11 +759,13 @@ function buildRuntimeFailureRecommendations(
 }
 
 function safeRetryNodesMissingPolicy(flow: FlowV3): FlowV3['nodes'] {
-  return sideEffectRetryEligibleNodes(flow).filter((node) => !node.policy?.retry);
+  return sideEffectRetryEligibleNodes(flow).filter(
+    (node) => !policyHasRetryDirective(node.policy),
+  );
 }
 
 function flowDefaultRetryTouchesSideEffects(flow: FlowV3): boolean {
-  if (!flow.policy?.defaultNodePolicy?.retry) return false;
+  if (!policyHasRetryDirective(flow.policy?.defaultNodePolicy)) return false;
   return (Array.isArray(flow.nodes) ? flow.nodes : []).some((node) => !isSafeForFlowDefaultRetry(node));
 }
 
@@ -846,14 +875,7 @@ function applyDefaultStabilityPolicy(flow: FlowV3): WorkflowRepairChange[] {
   const policy = flow.policy ?? {};
   const defaultNodePolicy = policy.defaultNodePolicy ?? {};
   const nextDefaultNodePolicy = { ...defaultNodePolicy };
-  const retryTemplate = nextDefaultNodePolicy.retry ?? {
-    retries: 1,
-    intervalMs: 500,
-    backoff: 'linear' as const,
-    maxIntervalMs: 2_000,
-    jitter: 'full' as const,
-    retryOn: RETRYABLE_STABILITY_ERROR_CODES,
-  };
+  const retryTemplate = getRetryTemplateFromPolicy(nextDefaultNodePolicy);
 
   if (!nextDefaultNodePolicy.timeout) {
     nextDefaultNodePolicy.timeout = { ms: 15_000, scope: 'attempt' };
@@ -863,8 +885,11 @@ function applyDefaultStabilityPolicy(flow: FlowV3): WorkflowRepairChange[] {
     });
   }
 
-  if (nextDefaultNodePolicy.retry) {
+  if (policyHasRetryDirective(nextDefaultNodePolicy)) {
     delete nextDefaultNodePolicy.retry;
+    if (nextDefaultNodePolicy.onError?.kind === 'retry') {
+      delete nextDefaultNodePolicy.onError;
+    }
     changes.push({
       code: 'global_retry_scoped_to_safe_nodes',
       message:
