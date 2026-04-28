@@ -140,6 +140,34 @@ describe('listPublishedFlowDetails', () => {
       }),
     ]);
   });
+
+  it('omits builder trigger nodes from side-effect metadata', () => {
+    const flow = createPublishedFlow();
+    flow.nodes = [
+      {
+        id: 'trigger-1' as any,
+        kind: 'trigger',
+        config: { enabled: true },
+      },
+      {
+        id: 'node-1' as any,
+        kind: 'navigate',
+        config: { url: 'https://example.com' },
+      },
+    ];
+
+    const [details] = listPublishedFlowDetails([flow]);
+
+    expect(details.sideEffects.summary).toEqual({
+      safe: 0,
+      idempotent: 1,
+      dangerous: 0,
+      unknown: 0,
+    });
+    expect(details.sideEffects.nodes.map((node) => node.kind)).toEqual([
+      'navigate',
+    ]);
+  });
 });
 
 describe('buildWorkflowBackgroundSupport', () => {

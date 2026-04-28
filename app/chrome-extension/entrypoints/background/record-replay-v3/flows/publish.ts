@@ -244,7 +244,10 @@ export function buildWorkflowExampleArgs(flow: FlowV3): Record<string, unknown> 
 
 export function buildWorkflowSideEffectDescriptor(flow: FlowV3): WorkflowSideEffectDescriptor {
   const summary = createEmptyWorkflowSideEffectSummary();
-  const nodes = (Array.isArray(flow.nodes) ? flow.nodes : []).map((node) => {
+  const executableNodes = (Array.isArray(flow.nodes) ? flow.nodes : []).filter(
+    (node) => node.kind !== "trigger",
+  );
+  const nodes = executableNodes.map((node) => {
     const sideEffect = normalizeWorkflowSideEffectProfile(node.kind, node.sideEffect);
     summary[sideEffect.category] += 1;
     if (!isKnownWorkflowSideEffectKind(node.kind)) summary.unknown += 1;
