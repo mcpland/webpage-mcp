@@ -1046,8 +1046,14 @@
     "description": "Auto-generated i18n message"
   },
   "builderImportReadOnlyWarning": {
-    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. {0}",
-    "description": "Auto-generated i18n message"
+    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "builderInsertNodePlaceholder": {
     "message": "Insert node...",
@@ -1251,21 +1257,47 @@
     "message": "Tools",
     "description": "Auto-generated i18n message"
   },
+  "builderTriggerSyncFailed": {
+    "message": "Workflow saved, but trigger sync failed: $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
   "builderUndoTitle": {
     "message": "Undo (⌘/Ctrl+Z)",
     "description": "Auto-generated i18n message"
   },
   "builderUnsupportedV3Notice": {
-    "message": "Save and run are disabled for this workflow. {0}",
-    "description": "Auto-generated i18n message"
+    "message": "Save and run are disabled for this workflow. $ARG1$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "builderUnsupportedV3Status": {
     "message": "Unsupported V3 features",
     "description": "Auto-generated i18n message"
   },
   "builderV3CompatibilityBlocked": {
-    "message": "{0} is disabled until unsupported V3 workflow features are removed. {1}",
-    "description": "Auto-generated i18n message"
+    "message": "$ARG1$ is disabled until unsupported V3 workflow features are removed. $ARG2$",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
   },
   "builderViewEditPropertiesHint": {
     "message": "View and edit properties",
@@ -1773,6 +1805,10 @@
     "message": "Name",
     "description": "Name input label"
   },
+  "nativeConnectionSuccessNotification": {
+    "message": "Native host connected. Webpage MCP Connector is ready to use.",
+    "description": "Shown once after the first successful native host connection"
+  },
   "nativeServerConfigLabel": {
     "message": "MCP Server Configuration",
     "description": "Main section header for MCP server settings"
@@ -1867,6 +1903,10 @@
     "message": "Copy token",
     "description": "Auto-generated i18n message"
   },
+  "popupDismissButton": {
+    "message": "Dismiss",
+    "description": "Auto-generated i18n message"
+  },
   "popupDocsLink": {
     "message": "Docs",
     "description": "Auto-generated i18n message"
@@ -1889,6 +1929,22 @@
   },
   "popupFeatureUnderDevelopmentSuffix": {
     "message": "The feature is under development, please stay tuned",
+    "description": "Auto-generated i18n message"
+  },
+  "popupFlowDescriptionLabel": {
+    "message": "Description",
+    "description": "Auto-generated i18n message"
+  },
+  "popupFlowDescriptionPlaceholder": {
+    "message": "Describe this flow (optional)",
+    "description": "Auto-generated i18n message"
+  },
+  "popupFlowNameLabel": {
+    "message": "Flow name",
+    "description": "Auto-generated i18n message"
+  },
+  "popupFlowNamePlaceholder": {
+    "message": "Enter a flow name",
     "description": "Auto-generated i18n message"
   },
   "popupFooterTagline": {
@@ -1947,12 +2003,40 @@
     "message": "Quick tools",
     "description": "Auto-generated i18n message"
   },
+  "popupRecordedFlowDefaultName": {
+    "message": "New recording",
+    "description": "Auto-generated i18n message"
+  },
+  "popupRecordingBadge": {
+    "message": "Recording",
+    "description": "Auto-generated i18n message"
+  },
+  "popupRecordingPaused": {
+    "message": "Recording paused",
+    "description": "Auto-generated i18n message"
+  },
+  "popupRecordingStopping": {
+    "message": "Stopping...",
+    "description": "Auto-generated i18n message"
+  },
   "popupRecordingUnderDevelopment": {
     "message": "The recording function is under development",
     "description": "Auto-generated i18n message"
   },
   "popupRecordPlaybackFeature": {
     "message": "Record playback",
+    "description": "Auto-generated i18n message"
+  },
+  "popupSaveButton": {
+    "message": "Save",
+    "description": "Auto-generated i18n message"
+  },
+  "popupSaveRecordingTitle": {
+    "message": "Save recording",
+    "description": "Auto-generated i18n message"
+  },
+  "popupSavingButton": {
+    "message": "Saving...",
     "description": "Auto-generated i18n message"
   },
   "popupStatusDetecting": {
@@ -1983,8 +2067,24 @@
     "message": "Record",
     "description": "Auto-generated i18n message"
   },
+  "popupToolRecordDisabledHint": {
+    "message": "Recording is already in progress",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolRecordHint": {
+    "message": "Start recording browser actions",
+    "description": "Auto-generated i18n message"
+  },
   "popupToolStop": {
     "message": "Stop",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolStopDisabledHint": {
+    "message": "No active recording",
+    "description": "Auto-generated i18n message"
+  },
+  "popupToolStopHint": {
+    "message": "Stop recording and save flow",
     "description": "Auto-generated i18n message"
   },
   "popupTroubleshootingTitle": {
@@ -2209,6 +2309,10 @@
       }
     }
   },
+  "sidepanelConfirmDeleteTrigger": {
+    "message": "Delete this workflow trigger?",
+    "description": "Auto-generated i18n message"
+  },
   "sidepanelConfirmDeleteWorkflow": {
     "message": "Are you sure you want to delete this workflow? This action cannot be undone.",
     "description": "Confirm deleting workflow dialog text"
@@ -2410,10 +2514,6 @@
   "successNotification": {
     "message": "Operation completed successfully",
     "description": "Generic success notification"
-  },
-  "nativeConnectionSuccessNotification": {
-    "message": "Native host connected. Webpage MCP Connector is ready to use.",
-    "description": "Shown once after the first successful native host connection"
   },
   "switchingModelStatus": {
     "message": "Switching Model...",
@@ -2773,6 +2873,10 @@
     "message": "Description",
     "description": "Auto-generated i18n message"
   },
+  "workflowsEditAction": {
+    "message": "Edit",
+    "description": "Auto-generated i18n message"
+  },
   "workflowsEditTriggerTitle": {
     "message": "Edit",
     "description": "Edit trigger button tooltip"
@@ -2819,6 +2923,10 @@
     "message": "More actions",
     "description": "Auto-generated i18n message"
   },
+  "workflowsNewRecordingButton": {
+    "message": "New Recording",
+    "description": "Auto-generated i18n message"
+  },
   "workflowsNoDescription": {
     "message": "No description",
     "description": "Auto-generated i18n message"
@@ -2831,8 +2939,50 @@
     "message": "No triggers configured",
     "description": "Workflow triggers empty text"
   },
+  "workflowsNoWorkflowsOption": {
+    "message": "No workflows",
+    "description": "Auto-generated i18n message"
+  },
   "workflowsOptionalDescription": {
     "message": "Optional description",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStarting": {
+    "message": "Starting...",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStatusIdle": {
+    "message": "Idle",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStatusPaused": {
+    "message": "Paused",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStatusRecording": {
+    "message": "Recording",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStatusStopping": {
+    "message": "Stopping",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingStepCount": {
+    "message": "$ARG1$ steps",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsRecordingStopping": {
+    "message": "Stopping...",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsRecordingWaiting": {
+    "message": "Waiting for interaction...",
     "description": "Auto-generated i18n message"
   },
   "workflowsRefreshTitle": {
@@ -2909,9 +3059,143 @@
     "message": "s",
     "description": "Auto-generated i18n message"
   },
+  "workflowsStartRecordingTitle": {
+    "message": "Start recording",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsStopRecordingButton": {
+    "message": "Stop",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsStopRecordingTitle": {
+    "message": "Stop recording",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerArgs": {
+    "message": "Args JSON",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerCancelEdit": {
+    "message": "Cancel edit",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerCommand": {
+    "message": "Command",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerCommandKey": {
+    "message": "Command key",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerContextMenu": {
+    "message": "Context menu",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerContextScopes": {
+    "message": "Contexts",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerContextTitle": {
+    "message": "Menu title",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerCreate": {
+    "message": "Create trigger",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerDisable": {
+    "message": "Disable",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerDom": {
+    "message": "DOM",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerDomAppear": {
+    "message": "Appears",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerDomDebounce": {
+    "message": "Debounce ms",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerDomOnce": {
+    "message": "Once",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerDomSelector": {
+    "message": "Selector",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerEnable": {
+    "message": "Enable",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerEnabled": {
+    "message": "Enabled",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerEvery": {
+    "message": "Every minutes",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerFire": {
+    "message": "Run",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerInterval": {
+    "message": "Interval",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerIntervalDetail": {
+    "message": "Every $ARG1$ minutes",
+    "description": "Auto-generated i18n message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsTriggerManual": {
+    "message": "Manual",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerManualDetail": {
+    "message": "Manual run",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerOnce": {
+    "message": "Once",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerRules": {
+    "message": "Rules",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerSave": {
+    "message": "Save trigger",
+    "description": "Auto-generated i18n message"
+  },
   "workflowsTriggersSection": {
     "message": "Triggers",
     "description": "Workflow triggers section title"
+  },
+  "workflowsTriggerType": {
+    "message": "Type",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerUrl": {
+    "message": "URL",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerWhen": {
+    "message": "When",
+    "description": "Auto-generated i18n message"
+  },
+  "workflowsTriggerWorkflow": {
+    "message": "Workflow",
+    "description": "Auto-generated i18n message"
   },
   "workflowsUntitledName": {
     "message": "Untitled",
@@ -2932,123 +3216,5 @@
   "worldMain": {
     "message": "MAIN",
     "description": "MAIN world"
-  },
-  "popupDismissButton": {
-    "message": "Dismiss",
-    "description": "Auto-generated i18n message"
-  },
-  "popupFlowDescriptionLabel": {
-    "message": "Description",
-    "description": "Auto-generated i18n message"
-  },
-  "popupFlowDescriptionPlaceholder": {
-    "message": "Describe this flow (optional)",
-    "description": "Auto-generated i18n message"
-  },
-  "popupFlowNameLabel": {
-    "message": "Flow name",
-    "description": "Auto-generated i18n message"
-  },
-  "popupFlowNamePlaceholder": {
-    "message": "Enter a flow name",
-    "description": "Auto-generated i18n message"
-  },
-  "popupRecordedFlowDefaultName": {
-    "message": "New recording",
-    "description": "Auto-generated i18n message"
-  },
-  "popupRecordingBadge": {
-    "message": "Recording",
-    "description": "Auto-generated i18n message"
-  },
-  "popupRecordingPaused": {
-    "message": "Recording paused",
-    "description": "Auto-generated i18n message"
-  },
-  "popupRecordingStopping": {
-    "message": "Stopping...",
-    "description": "Auto-generated i18n message"
-  },
-  "popupSaveButton": {
-    "message": "Save",
-    "description": "Auto-generated i18n message"
-  },
-  "popupSaveRecordingTitle": {
-    "message": "Save recording",
-    "description": "Auto-generated i18n message"
-  },
-  "popupSavingButton": {
-    "message": "Saving...",
-    "description": "Auto-generated i18n message"
-  },
-  "popupToolRecordDisabledHint": {
-    "message": "Recording is already in progress",
-    "description": "Auto-generated i18n message"
-  },
-  "popupToolRecordHint": {
-    "message": "Start recording browser actions",
-    "description": "Auto-generated i18n message"
-  },
-  "popupToolStopDisabledHint": {
-    "message": "No active recording",
-    "description": "Auto-generated i18n message"
-  },
-  "popupToolStopHint": {
-    "message": "Stop recording and save flow",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsNewRecordingButton": {
-    "message": "New Recording",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsRecordingStarting": {
-    "message": "Starting...",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsRecordingStatusIdle": {
-    "message": "Idle",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsRecordingStatusPaused": {
-    "message": "Paused",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsRecordingStatusRecording": {
-    "message": "Recording",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsRecordingStatusStopping": {
-    "message": "Stopping",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsRecordingStepCount": {
-    "message": "$ARG1$ steps",
-    "description": "Auto-generated i18n message",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      }
-    }
-  },
-  "workflowsRecordingStopping": {
-    "message": "Stopping...",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsRecordingWaiting": {
-    "message": "Waiting for interaction...",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsStartRecordingTitle": {
-    "message": "Start recording",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsStopRecordingButton": {
-    "message": "Stop",
-    "description": "Auto-generated i18n message"
-  },
-  "workflowsStopRecordingTitle": {
-    "message": "Stop recording",
-    "description": "Auto-generated i18n message"
   }
 }

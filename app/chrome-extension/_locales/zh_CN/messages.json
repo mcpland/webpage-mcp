@@ -1046,8 +1046,14 @@
     "description": "自动生成的 i18n 文案"
   },
   "builderImportReadOnlyWarning": {
-    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. {0}",
-    "description": "自动生成的 i18n 文案"
+    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. $ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "builderInsertNodePlaceholder": {
     "message": "插入节点...",
@@ -1251,21 +1257,47 @@
     "message": "工具",
     "description": "自动生成的 i18n 文案"
   },
+  "builderTriggerSyncFailed": {
+    "message": "工作流程已保存，但触发器同步失败：$ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
   "builderUndoTitle": {
     "message": "撤消 (⌘/Ctrl+Z)",
     "description": "自动生成的 i18n 文案"
   },
   "builderUnsupportedV3Notice": {
-    "message": "Save and run are disabled for this workflow. {0}",
-    "description": "自动生成的 i18n 文案"
+    "message": "Save and run are disabled for this workflow. $ARG1$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "builderUnsupportedV3Status": {
     "message": "Unsupported V3 features",
     "description": "自动生成的 i18n 文案"
   },
   "builderV3CompatibilityBlocked": {
-    "message": "{0} is disabled until unsupported V3 workflow features are removed. {1}",
-    "description": "自动生成的 i18n 文案"
+    "message": "$ARG1$ is disabled until unsupported V3 workflow features are removed. $ARG2$",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
   },
   "builderViewEditPropertiesHint": {
     "message": "查看和编辑属性",
@@ -1773,6 +1805,10 @@
     "message": "名称",
     "description": "名称输入标签"
   },
+  "nativeConnectionSuccessNotification": {
+    "message": "本地主机已连接。Webpage MCP Connector 已可使用。",
+    "description": "首次成功连接本地主机后显示一次"
+  },
   "nativeServerConfigLabel": {
     "message": "MCP 服务器配置",
     "description": "MCP 服务器设置的主要节标题"
@@ -1867,6 +1903,10 @@
     "message": "复制令牌",
     "description": "自动生成的 i18n 文案"
   },
+  "popupDismissButton": {
+    "message": "关闭",
+    "description": "自动生成的 i18n 文案"
+  },
   "popupDocsLink": {
     "message": "文档",
     "description": "自动生成的 i18n 文案"
@@ -1889,6 +1929,22 @@
   },
   "popupFeatureUnderDevelopmentSuffix": {
     "message": "该功能正在开发中，敬请期待",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupFlowDescriptionLabel": {
+    "message": "描述",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupFlowDescriptionPlaceholder": {
+    "message": "描述此流程（可选）",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupFlowNameLabel": {
+    "message": "流程名称",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupFlowNamePlaceholder": {
+    "message": "输入流程名称",
     "description": "自动生成的 i18n 文案"
   },
   "popupFooterTagline": {
@@ -1947,12 +2003,40 @@
     "message": "快速工具",
     "description": "自动生成的 i18n 文案"
   },
+  "popupRecordedFlowDefaultName": {
+    "message": "新录制",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupRecordingBadge": {
+    "message": "录制中",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupRecordingPaused": {
+    "message": "录制已暂停",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupRecordingStopping": {
+    "message": "正在停止...",
+    "description": "自动生成的 i18n 文案"
+  },
   "popupRecordingUnderDevelopment": {
     "message": "录制功能正在开发中",
     "description": "自动生成的 i18n 文案"
   },
   "popupRecordPlaybackFeature": {
     "message": "录制与回放",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupSaveButton": {
+    "message": "保存",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupSaveRecordingTitle": {
+    "message": "保存录制",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupSavingButton": {
+    "message": "正在保存...",
     "description": "自动生成的 i18n 文案"
   },
   "popupStatusDetecting": {
@@ -1983,8 +2067,24 @@
     "message": "录制",
     "description": "自动生成的 i18n 文案"
   },
+  "popupToolRecordDisabledHint": {
+    "message": "录制已在进行中",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupToolRecordHint": {
+    "message": "开始录制浏览器操作",
+    "description": "自动生成的 i18n 文案"
+  },
   "popupToolStop": {
     "message": "停止",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupToolStopDisabledHint": {
+    "message": "当前没有进行中的录制",
+    "description": "自动生成的 i18n 文案"
+  },
+  "popupToolStopHint": {
+    "message": "停止录制并保存流程",
     "description": "自动生成的 i18n 文案"
   },
   "popupTroubleshootingTitle": {
@@ -2209,6 +2309,10 @@
       }
     }
   },
+  "sidepanelConfirmDeleteTrigger": {
+    "message": "删除此工作流程触发器吗？",
+    "description": "自动生成的 i18n 文案"
+  },
   "sidepanelConfirmDeleteWorkflow": {
     "message": "确认删除该工作流吗？此操作不可撤销。",
     "description": "Confirm deleting workflow dialog text"
@@ -2410,10 +2514,6 @@
   "successNotification": {
     "message": "操作成功完成",
     "description": "通用成功通知"
-  },
-  "nativeConnectionSuccessNotification": {
-    "message": "本地主机已连接。Webpage MCP Connector 已可使用。",
-    "description": "首次成功连接本地主机后显示一次"
   },
   "switchingModelStatus": {
     "message": "切换模型中...",
@@ -2773,6 +2873,10 @@
     "message": "描述",
     "description": "自动生成的 i18n 文案"
   },
+  "workflowsEditAction": {
+    "message": "编辑",
+    "description": "自动生成的 i18n 文案"
+  },
   "workflowsEditTriggerTitle": {
     "message": "编辑",
     "description": "Edit trigger button tooltip"
@@ -2819,6 +2923,10 @@
     "message": "更多操作",
     "description": "自动生成的 i18n 文案"
   },
+  "workflowsNewRecordingButton": {
+    "message": "新建录制",
+    "description": "自动生成的 i18n 文案"
+  },
   "workflowsNoDescription": {
     "message": "无描述",
     "description": "自动生成的 i18n 文案"
@@ -2831,8 +2939,50 @@
     "message": "未配置触发器",
     "description": "Workflow triggers empty text"
   },
+  "workflowsNoWorkflowsOption": {
+    "message": "无工作流程",
+    "description": "自动生成的 i18n 文案"
+  },
   "workflowsOptionalDescription": {
     "message": "可选描述",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStarting": {
+    "message": "正在启动...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStatusIdle": {
+    "message": "空闲",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStatusPaused": {
+    "message": "已暂停",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStatusRecording": {
+    "message": "录制中",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStatusStopping": {
+    "message": "正在停止",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingStepCount": {
+    "message": "$ARG1$ 步",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsRecordingStopping": {
+    "message": "正在停止...",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsRecordingWaiting": {
+    "message": "等待交互...",
     "description": "自动生成的 i18n 文案"
   },
   "workflowsRefreshTitle": {
@@ -2909,9 +3059,143 @@
     "message": "s",
     "description": "自动生成的 i18n 文案"
   },
+  "workflowsStartRecordingTitle": {
+    "message": "开始录制",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsStopRecordingButton": {
+    "message": "停止",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsStopRecordingTitle": {
+    "message": "停止录制",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerArgs": {
+    "message": "参数 JSON",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerCancelEdit": {
+    "message": "取消编辑",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerCommand": {
+    "message": "命令",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerCommandKey": {
+    "message": "命令键",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerContextMenu": {
+    "message": "上下文菜单",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerContextScopes": {
+    "message": "上下文",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerContextTitle": {
+    "message": "菜单标题",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerCreate": {
+    "message": "创建触发器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerDisable": {
+    "message": "禁用",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerDom": {
+    "message": "DOM",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerDomAppear": {
+    "message": "出现",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerDomDebounce": {
+    "message": "去抖毫秒",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerDomOnce": {
+    "message": "一次",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerDomSelector": {
+    "message": "选择器",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerEnable": {
+    "message": "使能够",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerEnabled": {
+    "message": "启用",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerEvery": {
+    "message": "每分钟",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerFire": {
+    "message": "跑步",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerInterval": {
+    "message": "间隔",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerIntervalDetail": {
+    "message": "每 $ARG1$ 分钟",
+    "description": "自动生成的 i18n 文案",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsTriggerManual": {
+    "message": "手动的",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerManualDetail": {
+    "message": "手动运行",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerOnce": {
+    "message": "一次",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerRules": {
+    "message": "规则",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerSave": {
+    "message": "保存触发器",
+    "description": "自动生成的 i18n 文案"
+  },
   "workflowsTriggersSection": {
     "message": "触发器",
     "description": "Workflow triggers section title"
+  },
+  "workflowsTriggerType": {
+    "message": "类型",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerUrl": {
+    "message": "网址",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerWhen": {
+    "message": "什么时候",
+    "description": "自动生成的 i18n 文案"
+  },
+  "workflowsTriggerWorkflow": {
+    "message": "工作流程",
+    "description": "自动生成的 i18n 文案"
   },
   "workflowsUntitledName": {
     "message": "无题",
@@ -2932,123 +3216,5 @@
   "worldMain": {
     "message": "页面 (MAIN)",
     "description": "MAIN world"
-  },
-  "popupDismissButton": {
-    "message": "关闭",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupFlowDescriptionLabel": {
-    "message": "描述",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupFlowDescriptionPlaceholder": {
-    "message": "描述此流程（可选）",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupFlowNameLabel": {
-    "message": "流程名称",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupFlowNamePlaceholder": {
-    "message": "输入流程名称",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupRecordedFlowDefaultName": {
-    "message": "新录制",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupRecordingBadge": {
-    "message": "录制中",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupRecordingPaused": {
-    "message": "录制已暂停",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupRecordingStopping": {
-    "message": "正在停止...",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupSaveButton": {
-    "message": "保存",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupSaveRecordingTitle": {
-    "message": "保存录制",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupSavingButton": {
-    "message": "正在保存...",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupToolRecordDisabledHint": {
-    "message": "录制已在进行中",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupToolRecordHint": {
-    "message": "开始录制浏览器操作",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupToolStopDisabledHint": {
-    "message": "当前没有进行中的录制",
-    "description": "自动生成的 i18n 文案"
-  },
-  "popupToolStopHint": {
-    "message": "停止录制并保存流程",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsNewRecordingButton": {
-    "message": "新建录制",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsRecordingStarting": {
-    "message": "正在启动...",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsRecordingStatusIdle": {
-    "message": "空闲",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsRecordingStatusPaused": {
-    "message": "已暂停",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsRecordingStatusRecording": {
-    "message": "录制中",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsRecordingStatusStopping": {
-    "message": "正在停止",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsRecordingStepCount": {
-    "message": "$ARG1$ 步",
-    "description": "自动生成的 i18n 文案",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      }
-    }
-  },
-  "workflowsRecordingStopping": {
-    "message": "正在停止...",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsRecordingWaiting": {
-    "message": "等待交互...",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsStartRecordingTitle": {
-    "message": "开始录制",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsStopRecordingButton": {
-    "message": "停止",
-    "description": "自动生成的 i18n 文案"
-  },
-  "workflowsStopRecordingTitle": {
-    "message": "停止录制",
-    "description": "自动生成的 i18n 文案"
   }
 }

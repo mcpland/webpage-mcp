@@ -1046,8 +1046,14 @@
     "description": "Auto-generated localized message"
   },
   "builderImportReadOnlyWarning": {
-    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. {0}",
-    "description": "Auto-generated localized message"
+    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "builderInsertNodePlaceholder": {
     "message": "Knoten einfügen...",
@@ -1251,21 +1257,47 @@
     "message": "Werkzeuge",
     "description": "Auto-generated localized message"
   },
+  "builderTriggerSyncFailed": {
+    "message": "Workflow gespeichert, aber die Triggersynchronisierung ist fehlgeschlagen: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
   "builderUndoTitle": {
     "message": "Rückgängig machen (⌘/Strg+Z)",
     "description": "Auto-generated localized message"
   },
   "builderUnsupportedV3Notice": {
-    "message": "Save and run are disabled for this workflow. {0}",
-    "description": "Auto-generated localized message"
+    "message": "Save and run are disabled for this workflow. $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "builderUnsupportedV3Status": {
     "message": "Unsupported V3 features",
     "description": "Auto-generated localized message"
   },
   "builderV3CompatibilityBlocked": {
-    "message": "{0} is disabled until unsupported V3 workflow features are removed. {1}",
-    "description": "Auto-generated localized message"
+    "message": "$ARG1$ is disabled until unsupported V3 workflow features are removed. $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
   },
   "builderViewEditPropertiesHint": {
     "message": "Eigenschaften anzeigen und bearbeiten",
@@ -1773,6 +1805,10 @@
     "message": "Name",
     "description": "Auto-generated localized message"
   },
+  "nativeConnectionSuccessNotification": {
+    "message": "Nativer Host verbunden. Webpage MCP Connector ist einsatzbereit.",
+    "description": "Wird einmal nach der ersten erfolgreichen Verbindung zum nativen Host angezeigt"
+  },
   "nativeServerConfigLabel": {
     "message": "MCP Server-Konfiguration",
     "description": "Hauptabschnittstitel für MCP Server-Einstellungen"
@@ -1867,6 +1903,10 @@
     "message": "Token kopieren",
     "description": "Auto-generated localized message"
   },
+  "popupDismissButton": {
+    "message": "Schließen",
+    "description": "Auto-generated localized message"
+  },
   "popupDocsLink": {
     "message": "Dokumente",
     "description": "Auto-generated localized message"
@@ -1889,6 +1929,22 @@
   },
   "popupFeatureUnderDevelopmentSuffix": {
     "message": "Die Funktion befindet sich in der Entwicklung, bitte bleiben Sie dran",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowDescriptionLabel": {
+    "message": "Beschreibung",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowDescriptionPlaceholder": {
+    "message": "Diesen Flow beschreiben (optional)",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowNameLabel": {
+    "message": "Flow-Name",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowNamePlaceholder": {
+    "message": "Flow-Namen eingeben",
     "description": "Auto-generated localized message"
   },
   "popupFooterTagline": {
@@ -1947,12 +2003,40 @@
     "message": "Schnellwerkzeuge",
     "description": "Auto-generated localized message"
   },
+  "popupRecordedFlowDefaultName": {
+    "message": "Neue Aufzeichnung",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingBadge": {
+    "message": "Aufzeichnung",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingPaused": {
+    "message": "Aufzeichnung pausiert",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingStopping": {
+    "message": "Wird gestoppt...",
+    "description": "Auto-generated localized message"
+  },
   "popupRecordingUnderDevelopment": {
     "message": "Die Aufnahmefunktion ist in der Entwicklung",
     "description": "Auto-generated localized message"
   },
   "popupRecordPlaybackFeature": {
     "message": "Aufnahmewiedergabe",
+    "description": "Auto-generated localized message"
+  },
+  "popupSaveButton": {
+    "message": "Speichern",
+    "description": "Auto-generated localized message"
+  },
+  "popupSaveRecordingTitle": {
+    "message": "Aufzeichnung speichern",
+    "description": "Auto-generated localized message"
+  },
+  "popupSavingButton": {
+    "message": "Wird gespeichert...",
     "description": "Auto-generated localized message"
   },
   "popupStatusDetecting": {
@@ -1983,8 +2067,24 @@
     "message": "Aufzeichnen",
     "description": "Auto-generated localized message"
   },
+  "popupToolRecordDisabledHint": {
+    "message": "Eine Aufzeichnung läuft bereits",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolRecordHint": {
+    "message": "Browseraktionen aufzeichnen starten",
+    "description": "Auto-generated localized message"
+  },
   "popupToolStop": {
     "message": "Stoppen",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStopDisabledHint": {
+    "message": "Keine aktive Aufzeichnung",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStopHint": {
+    "message": "Aufzeichnung beenden und Flow speichern",
     "description": "Auto-generated localized message"
   },
   "popupTroubleshootingTitle": {
@@ -2209,6 +2309,10 @@
       }
     }
   },
+  "sidepanelConfirmDeleteTrigger": {
+    "message": "Diesen Workflow-Trigger löschen?",
+    "description": "Auto-generated localized message"
+  },
   "sidepanelConfirmDeleteWorkflow": {
     "message": "Sind Sie sicher, dass Sie diesen Workflow löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.",
     "description": "Auto-generated localized message"
@@ -2410,10 +2514,6 @@
   "successNotification": {
     "message": "Vorgang erfolgreich abgeschlossen",
     "description": "Allgemeine Erfolgsmeldung"
-  },
-  "nativeConnectionSuccessNotification": {
-    "message": "Nativer Host verbunden. Webpage MCP Connector ist einsatzbereit.",
-    "description": "Wird einmal nach der ersten erfolgreichen Verbindung zum nativen Host angezeigt"
   },
   "switchingModelStatus": {
     "message": "Modell wird gewechselt...",
@@ -2773,6 +2873,10 @@
     "message": "Beschreibung",
     "description": "Auto-generated localized message"
   },
+  "workflowsEditAction": {
+    "message": "Bearbeiten",
+    "description": "Auto-generated localized message"
+  },
   "workflowsEditTriggerTitle": {
     "message": "Bearbeiten",
     "description": "Auto-generated localized message"
@@ -2819,6 +2923,10 @@
     "message": "Weitere Aktionen",
     "description": "Auto-generated localized message"
   },
+  "workflowsNewRecordingButton": {
+    "message": "Neue Aufzeichnung",
+    "description": "Auto-generated localized message"
+  },
   "workflowsNoDescription": {
     "message": "Keine Beschreibung",
     "description": "Auto-generated localized message"
@@ -2831,8 +2939,50 @@
     "message": "Keine Trigger konfiguriert",
     "description": "Auto-generated localized message"
   },
+  "workflowsNoWorkflowsOption": {
+    "message": "Keine Arbeitsabläufe",
+    "description": "Auto-generated localized message"
+  },
   "workflowsOptionalDescription": {
     "message": "Optionale Beschreibung",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStarting": {
+    "message": "Wird gestartet...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusIdle": {
+    "message": "Inaktiv",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusPaused": {
+    "message": "Pausiert",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusRecording": {
+    "message": "Aufzeichnung",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusStopping": {
+    "message": "Wird gestoppt",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStepCount": {
+    "message": "$ARG1$ Schritte",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsRecordingStopping": {
+    "message": "Wird gestoppt...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingWaiting": {
+    "message": "Warte auf Interaktion...",
     "description": "Auto-generated localized message"
   },
   "workflowsRefreshTitle": {
@@ -2909,8 +3059,142 @@
     "message": "S",
     "description": "Auto-generated localized message"
   },
+  "workflowsStartRecordingTitle": {
+    "message": "Aufzeichnung starten",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsStopRecordingButton": {
+    "message": "Stopp",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsStopRecordingTitle": {
+    "message": "Aufzeichnung beenden",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerArgs": {
+    "message": "Argumente JSON",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCancelEdit": {
+    "message": "Bearbeitung abbrechen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCommand": {
+    "message": "Befehl",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCommandKey": {
+    "message": "Befehlstaste",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerContextMenu": {
+    "message": "Kontextmenü",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerContextScopes": {
+    "message": "Kontexte",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerContextTitle": {
+    "message": "Menütitel",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCreate": {
+    "message": "Trigger erstellen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDisable": {
+    "message": "Deaktivieren",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDom": {
+    "message": "DOM",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomAppear": {
+    "message": "Erscheint",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomDebounce": {
+    "message": "Frau entprellen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomOnce": {
+    "message": "Einmal",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomSelector": {
+    "message": "Wähler",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerEnable": {
+    "message": "Aktivieren",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerEnabled": {
+    "message": "Ermöglicht",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerEvery": {
+    "message": "Alle Minuten",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerFire": {
+    "message": "Laufen",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerInterval": {
+    "message": "Intervall",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerIntervalDetail": {
+    "message": "Alle $ARG1$ Minuten",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsTriggerManual": {
+    "message": "Handbuch",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerManualDetail": {
+    "message": "Manueller Lauf",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerOnce": {
+    "message": "Einmal",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerRules": {
+    "message": "Regeln",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerSave": {
+    "message": "Auslöser speichern",
+    "description": "Auto-generated localized message"
+  },
   "workflowsTriggersSection": {
     "message": "Auslöser",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerType": {
+    "message": "Typ",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerUrl": {
+    "message": "URL",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerWhen": {
+    "message": "Wann",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerWorkflow": {
+    "message": "Arbeitsablauf",
     "description": "Auto-generated localized message"
   },
   "workflowsUntitledName": {
@@ -2931,124 +3215,6 @@
   },
   "worldMain": {
     "message": "HAUPTSÄCHLICH",
-    "description": "Auto-generated localized message"
-  },
-  "popupDismissButton": {
-    "message": "Schließen",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowDescriptionLabel": {
-    "message": "Beschreibung",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowDescriptionPlaceholder": {
-    "message": "Diesen Flow beschreiben (optional)",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowNameLabel": {
-    "message": "Flow-Name",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowNamePlaceholder": {
-    "message": "Flow-Namen eingeben",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordedFlowDefaultName": {
-    "message": "Neue Aufzeichnung",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordingBadge": {
-    "message": "Aufzeichnung",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordingPaused": {
-    "message": "Aufzeichnung pausiert",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordingStopping": {
-    "message": "Wird gestoppt...",
-    "description": "Auto-generated localized message"
-  },
-  "popupSaveButton": {
-    "message": "Speichern",
-    "description": "Auto-generated localized message"
-  },
-  "popupSaveRecordingTitle": {
-    "message": "Aufzeichnung speichern",
-    "description": "Auto-generated localized message"
-  },
-  "popupSavingButton": {
-    "message": "Wird gespeichert...",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolRecordDisabledHint": {
-    "message": "Eine Aufzeichnung läuft bereits",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolRecordHint": {
-    "message": "Browseraktionen aufzeichnen starten",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolStopDisabledHint": {
-    "message": "Keine aktive Aufzeichnung",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolStopHint": {
-    "message": "Aufzeichnung beenden und Flow speichern",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsNewRecordingButton": {
-    "message": "Neue Aufzeichnung",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStarting": {
-    "message": "Wird gestartet...",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusIdle": {
-    "message": "Inaktiv",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusPaused": {
-    "message": "Pausiert",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusRecording": {
-    "message": "Aufzeichnung",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusStopping": {
-    "message": "Wird gestoppt",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStepCount": {
-    "message": "$ARG1$ Schritte",
-    "description": "Auto-generated localized message",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      }
-    }
-  },
-  "workflowsRecordingStopping": {
-    "message": "Wird gestoppt...",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingWaiting": {
-    "message": "Warte auf Interaktion...",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsStartRecordingTitle": {
-    "message": "Aufzeichnung starten",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsStopRecordingButton": {
-    "message": "Stopp",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsStopRecordingTitle": {
-    "message": "Aufzeichnung beenden",
     "description": "Auto-generated localized message"
   }
 }

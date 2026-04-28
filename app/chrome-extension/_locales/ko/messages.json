@@ -1046,8 +1046,14 @@
     "description": "Auto-generated localized message"
   },
   "builderImportReadOnlyWarning": {
-    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. {0}",
-    "description": "Auto-generated localized message"
+    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "builderInsertNodePlaceholder": {
     "message": "노드 삽입...",
@@ -1251,21 +1257,47 @@
     "message": "도구",
     "description": "Auto-generated localized message"
   },
+  "builderTriggerSyncFailed": {
+    "message": "워크플로가 저장되었지만 트리거 동기화에 실패했습니다: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
   "builderUndoTitle": {
     "message": "실행 취소(⌘/Ctrl+Z)",
     "description": "Auto-generated localized message"
   },
   "builderUnsupportedV3Notice": {
-    "message": "Save and run are disabled for this workflow. {0}",
-    "description": "Auto-generated localized message"
+    "message": "Save and run are disabled for this workflow. $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "builderUnsupportedV3Status": {
     "message": "Unsupported V3 features",
     "description": "Auto-generated localized message"
   },
   "builderV3CompatibilityBlocked": {
-    "message": "{0} is disabled until unsupported V3 workflow features are removed. {1}",
-    "description": "Auto-generated localized message"
+    "message": "$ARG1$ is disabled until unsupported V3 workflow features are removed. $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
   },
   "builderViewEditPropertiesHint": {
     "message": "속성 보기 및 편집",
@@ -1773,6 +1805,10 @@
     "message": "이름",
     "description": "Auto-generated localized message"
   },
+  "nativeConnectionSuccessNotification": {
+    "message": "네이티브 호스트가 연결되었습니다. Webpage MCP Connector를 사용할 수 있습니다.",
+    "description": "네이티브 호스트에 처음 성공적으로 연결된 후 한 번만 표시됩니다"
+  },
   "nativeServerConfigLabel": {
     "message": "MCP 서버 설정",
     "description": "MCP 서버 설정의 주 섹션 제목"
@@ -1867,6 +1903,10 @@
     "message": "토큰 복사",
     "description": "Auto-generated localized message"
   },
+  "popupDismissButton": {
+    "message": "닫기",
+    "description": "Auto-generated localized message"
+  },
   "popupDocsLink": {
     "message": "문서",
     "description": "Auto-generated localized message"
@@ -1889,6 +1929,22 @@
   },
   "popupFeatureUnderDevelopmentSuffix": {
     "message": "해당 기능은 개발 중입니다. 계속 지켜봐 주시기 바랍니다.",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowDescriptionLabel": {
+    "message": "설명",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowDescriptionPlaceholder": {
+    "message": "이 플로우 설명(선택 사항)",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowNameLabel": {
+    "message": "플로우 이름",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowNamePlaceholder": {
+    "message": "플로우 이름 입력",
     "description": "Auto-generated localized message"
   },
   "popupFooterTagline": {
@@ -1947,12 +2003,40 @@
     "message": "빠른 도구",
     "description": "Auto-generated localized message"
   },
+  "popupRecordedFlowDefaultName": {
+    "message": "새 녹화",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingBadge": {
+    "message": "녹화 중",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingPaused": {
+    "message": "녹화 일시중지됨",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingStopping": {
+    "message": "중지 중...",
+    "description": "Auto-generated localized message"
+  },
   "popupRecordingUnderDevelopment": {
     "message": "녹음 기능은 개발 중입니다",
     "description": "Auto-generated localized message"
   },
   "popupRecordPlaybackFeature": {
     "message": "녹음 재생",
+    "description": "Auto-generated localized message"
+  },
+  "popupSaveButton": {
+    "message": "저장",
+    "description": "Auto-generated localized message"
+  },
+  "popupSaveRecordingTitle": {
+    "message": "녹화 저장",
+    "description": "Auto-generated localized message"
+  },
+  "popupSavingButton": {
+    "message": "저장 중...",
     "description": "Auto-generated localized message"
   },
   "popupStatusDetecting": {
@@ -1983,8 +2067,24 @@
     "message": "기록",
     "description": "Auto-generated localized message"
   },
+  "popupToolRecordDisabledHint": {
+    "message": "녹화가 이미 진행 중입니다",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolRecordHint": {
+    "message": "브라우저 작업 녹화 시작",
+    "description": "Auto-generated localized message"
+  },
   "popupToolStop": {
     "message": "멈추다",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStopDisabledHint": {
+    "message": "활성 녹화가 없습니다",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStopHint": {
+    "message": "녹화를 중지하고 플로우 저장",
     "description": "Auto-generated localized message"
   },
   "popupTroubleshootingTitle": {
@@ -2209,6 +2309,10 @@
       }
     }
   },
+  "sidepanelConfirmDeleteTrigger": {
+    "message": "이 워크플로 트리거를 삭제하시겠습니까?",
+    "description": "Auto-generated localized message"
+  },
   "sidepanelConfirmDeleteWorkflow": {
     "message": "이 워크플로를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
     "description": "Auto-generated localized message"
@@ -2410,10 +2514,6 @@
   "successNotification": {
     "message": "작업이 성공적으로 완료되었습니다",
     "description": "일반 성공 알림"
-  },
-  "nativeConnectionSuccessNotification": {
-    "message": "네이티브 호스트가 연결되었습니다. Webpage MCP Connector를 사용할 수 있습니다.",
-    "description": "네이티브 호스트에 처음 성공적으로 연결된 후 한 번만 표시됩니다"
   },
   "switchingModelStatus": {
     "message": "모델 전환 중...",
@@ -2773,6 +2873,10 @@
     "message": "설명",
     "description": "Auto-generated localized message"
   },
+  "workflowsEditAction": {
+    "message": "편집하다",
+    "description": "Auto-generated localized message"
+  },
   "workflowsEditTriggerTitle": {
     "message": "편집하다",
     "description": "Auto-generated localized message"
@@ -2819,6 +2923,10 @@
     "message": "추가 작업",
     "description": "Auto-generated localized message"
   },
+  "workflowsNewRecordingButton": {
+    "message": "새 녹화",
+    "description": "Auto-generated localized message"
+  },
   "workflowsNoDescription": {
     "message": "설명 없음",
     "description": "Auto-generated localized message"
@@ -2831,8 +2939,50 @@
     "message": "구성된 트리거가 없습니다.",
     "description": "Auto-generated localized message"
   },
+  "workflowsNoWorkflowsOption": {
+    "message": "워크플로 없음",
+    "description": "Auto-generated localized message"
+  },
   "workflowsOptionalDescription": {
     "message": "선택적 설명",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStarting": {
+    "message": "시작 중...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusIdle": {
+    "message": "대기",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusPaused": {
+    "message": "일시중지",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusRecording": {
+    "message": "녹화 중",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusStopping": {
+    "message": "중지 중",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStepCount": {
+    "message": "$ARG1$ 단계",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsRecordingStopping": {
+    "message": "중지 중...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingWaiting": {
+    "message": "상호작용 대기 중...",
     "description": "Auto-generated localized message"
   },
   "workflowsRefreshTitle": {
@@ -2909,8 +3059,142 @@
     "message": "에스",
     "description": "Auto-generated localized message"
   },
+  "workflowsStartRecordingTitle": {
+    "message": "녹화 시작",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsStopRecordingButton": {
+    "message": "중지",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsStopRecordingTitle": {
+    "message": "녹화 중지",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerArgs": {
+    "message": "인수 JSON",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCancelEdit": {
+    "message": "편집 취소",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCommand": {
+    "message": "명령",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCommandKey": {
+    "message": "명령 키",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerContextMenu": {
+    "message": "상황에 맞는 메뉴",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerContextScopes": {
+    "message": "컨텍스트",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerContextTitle": {
+    "message": "메뉴 제목",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCreate": {
+    "message": "트리거 만들기",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDisable": {
+    "message": "장애를 입히다",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDom": {
+    "message": "DOM",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomAppear": {
+    "message": "나타남",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomDebounce": {
+    "message": "디바운스 ms",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomOnce": {
+    "message": "한 번",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomSelector": {
+    "message": "선택자",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerEnable": {
+    "message": "할 수 있게 하다",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerEnabled": {
+    "message": "활성화됨",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerEvery": {
+    "message": "매분",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerFire": {
+    "message": "달리다",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerInterval": {
+    "message": "간격",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerIntervalDetail": {
+    "message": "$ARG1$분마다",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsTriggerManual": {
+    "message": "수동",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerManualDetail": {
+    "message": "수동 실행",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerOnce": {
+    "message": "한 번",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerRules": {
+    "message": "규칙",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerSave": {
+    "message": "트리거 저장",
+    "description": "Auto-generated localized message"
+  },
   "workflowsTriggersSection": {
     "message": "트리거",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerType": {
+    "message": "유형",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerUrl": {
+    "message": "URL",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerWhen": {
+    "message": "언제",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerWorkflow": {
+    "message": "작업 흐름",
     "description": "Auto-generated localized message"
   },
   "workflowsUntitledName": {
@@ -2931,124 +3215,6 @@
   },
   "worldMain": {
     "message": "기본",
-    "description": "Auto-generated localized message"
-  },
-  "popupDismissButton": {
-    "message": "닫기",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowDescriptionLabel": {
-    "message": "설명",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowDescriptionPlaceholder": {
-    "message": "이 플로우 설명(선택 사항)",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowNameLabel": {
-    "message": "플로우 이름",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowNamePlaceholder": {
-    "message": "플로우 이름 입력",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordedFlowDefaultName": {
-    "message": "새 녹화",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordingBadge": {
-    "message": "녹화 중",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordingPaused": {
-    "message": "녹화 일시중지됨",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordingStopping": {
-    "message": "중지 중...",
-    "description": "Auto-generated localized message"
-  },
-  "popupSaveButton": {
-    "message": "저장",
-    "description": "Auto-generated localized message"
-  },
-  "popupSaveRecordingTitle": {
-    "message": "녹화 저장",
-    "description": "Auto-generated localized message"
-  },
-  "popupSavingButton": {
-    "message": "저장 중...",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolRecordDisabledHint": {
-    "message": "녹화가 이미 진행 중입니다",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolRecordHint": {
-    "message": "브라우저 작업 녹화 시작",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolStopDisabledHint": {
-    "message": "활성 녹화가 없습니다",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolStopHint": {
-    "message": "녹화를 중지하고 플로우 저장",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsNewRecordingButton": {
-    "message": "새 녹화",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStarting": {
-    "message": "시작 중...",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusIdle": {
-    "message": "대기",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusPaused": {
-    "message": "일시중지",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusRecording": {
-    "message": "녹화 중",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusStopping": {
-    "message": "중지 중",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStepCount": {
-    "message": "$ARG1$ 단계",
-    "description": "Auto-generated localized message",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      }
-    }
-  },
-  "workflowsRecordingStopping": {
-    "message": "중지 중...",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingWaiting": {
-    "message": "상호작용 대기 중...",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsStartRecordingTitle": {
-    "message": "녹화 시작",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsStopRecordingButton": {
-    "message": "중지",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsStopRecordingTitle": {
-    "message": "녹화 중지",
     "description": "Auto-generated localized message"
   }
 }

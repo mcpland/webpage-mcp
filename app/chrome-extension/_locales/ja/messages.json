@@ -1046,8 +1046,14 @@
     "description": "Auto-generated localized message"
   },
   "builderImportReadOnlyWarning": {
-    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. {0}",
-    "description": "Auto-generated localized message"
+    "message": "Imported workflow uses unsupported V3 workflow features. It was loaded without saving. $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "builderInsertNodePlaceholder": {
     "message": "ノードを挿入...",
@@ -1251,21 +1257,47 @@
     "message": "ツール",
     "description": "Auto-generated localized message"
   },
+  "builderTriggerSyncFailed": {
+    "message": "ワークフローは保存されましたが、トリガーの同期に失敗しました: $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
   "builderUndoTitle": {
     "message": "元に戻す (⌘/Ctrl+Z)",
     "description": "Auto-generated localized message"
   },
   "builderUnsupportedV3Notice": {
-    "message": "Save and run are disabled for this workflow. {0}",
-    "description": "Auto-generated localized message"
+    "message": "Save and run are disabled for this workflow. $ARG1$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
   },
   "builderUnsupportedV3Status": {
     "message": "Unsupported V3 features",
     "description": "Auto-generated localized message"
   },
   "builderV3CompatibilityBlocked": {
-    "message": "{0} is disabled until unsupported V3 workflow features are removed. {1}",
-    "description": "Auto-generated localized message"
+    "message": "$ARG1$ is disabled until unsupported V3 workflow features are removed. $ARG2$",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      },
+      "arg2": {
+        "content": "$2$",
+        "example": "2"
+      }
+    }
   },
   "builderViewEditPropertiesHint": {
     "message": "プロパティの表示と編集",
@@ -1773,6 +1805,10 @@
     "message": "名前",
     "description": "Auto-generated localized message"
   },
+  "nativeConnectionSuccessNotification": {
+    "message": "ネイティブホストに接続しました。Webpage MCP Connector を利用できます。",
+    "description": "最初にネイティブホストへの接続が成功した後に一度だけ表示されます"
+  },
   "nativeServerConfigLabel": {
     "message": "MCPサーバー設定",
     "description": "Auto-generated localized message"
@@ -1867,6 +1903,10 @@
     "message": "トークンをコピーする",
     "description": "Auto-generated localized message"
   },
+  "popupDismissButton": {
+    "message": "閉じる",
+    "description": "Auto-generated localized message"
+  },
   "popupDocsLink": {
     "message": "ドキュメント",
     "description": "Auto-generated localized message"
@@ -1889,6 +1929,22 @@
   },
   "popupFeatureUnderDevelopmentSuffix": {
     "message": "この機能は開発中ですので、しばらくお待ちください",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowDescriptionLabel": {
+    "message": "説明",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowDescriptionPlaceholder": {
+    "message": "このフローの説明（任意）",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowNameLabel": {
+    "message": "フロー名",
+    "description": "Auto-generated localized message"
+  },
+  "popupFlowNamePlaceholder": {
+    "message": "フロー名を入力",
     "description": "Auto-generated localized message"
   },
   "popupFooterTagline": {
@@ -1947,12 +2003,40 @@
     "message": "クイックツール",
     "description": "Auto-generated localized message"
   },
+  "popupRecordedFlowDefaultName": {
+    "message": "新しい録画",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingBadge": {
+    "message": "録画中",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingPaused": {
+    "message": "録画を一時停止中",
+    "description": "Auto-generated localized message"
+  },
+  "popupRecordingStopping": {
+    "message": "停止中...",
+    "description": "Auto-generated localized message"
+  },
   "popupRecordingUnderDevelopment": {
     "message": "録音機能は開発中です",
     "description": "Auto-generated localized message"
   },
   "popupRecordPlaybackFeature": {
     "message": "録音再生",
+    "description": "Auto-generated localized message"
+  },
+  "popupSaveButton": {
+    "message": "保存",
+    "description": "Auto-generated localized message"
+  },
+  "popupSaveRecordingTitle": {
+    "message": "録画を保存",
+    "description": "Auto-generated localized message"
+  },
+  "popupSavingButton": {
+    "message": "保存中...",
     "description": "Auto-generated localized message"
   },
   "popupStatusDetecting": {
@@ -1983,8 +2067,24 @@
     "message": "記録",
     "description": "Auto-generated localized message"
   },
+  "popupToolRecordDisabledHint": {
+    "message": "録画はすでに進行中です",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolRecordHint": {
+    "message": "ブラウザー操作の録画を開始",
+    "description": "Auto-generated localized message"
+  },
   "popupToolStop": {
     "message": "停止",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStopDisabledHint": {
+    "message": "アクティブな録画はありません",
+    "description": "Auto-generated localized message"
+  },
+  "popupToolStopHint": {
+    "message": "録画を停止してフローを保存",
     "description": "Auto-generated localized message"
   },
   "popupTroubleshootingTitle": {
@@ -2209,6 +2309,10 @@
       }
     }
   },
+  "sidepanelConfirmDeleteTrigger": {
+    "message": "このワークフロー トリガーを削除しますか?",
+    "description": "Auto-generated localized message"
+  },
   "sidepanelConfirmDeleteWorkflow": {
     "message": "このワークフローを削除してもよろしいですか?この操作は元に戻すことができません。",
     "description": "Auto-generated localized message"
@@ -2410,10 +2514,6 @@
   "successNotification": {
     "message": "操作が正常に完了しました",
     "description": "Auto-generated localized message"
-  },
-  "nativeConnectionSuccessNotification": {
-    "message": "ネイティブホストに接続しました。Webpage MCP Connector を利用できます。",
-    "description": "最初にネイティブホストへの接続が成功した後に一度だけ表示されます"
   },
   "switchingModelStatus": {
     "message": "モデルを切り替え中...",
@@ -2773,6 +2873,10 @@
     "message": "説明",
     "description": "Auto-generated localized message"
   },
+  "workflowsEditAction": {
+    "message": "編集",
+    "description": "Auto-generated localized message"
+  },
   "workflowsEditTriggerTitle": {
     "message": "編集",
     "description": "Auto-generated localized message"
@@ -2819,6 +2923,10 @@
     "message": "さらなるアクション",
     "description": "Auto-generated localized message"
   },
+  "workflowsNewRecordingButton": {
+    "message": "新規録画",
+    "description": "Auto-generated localized message"
+  },
   "workflowsNoDescription": {
     "message": "説明なし",
     "description": "Auto-generated localized message"
@@ -2831,8 +2939,50 @@
     "message": "トリガーが設定されていません",
     "description": "Auto-generated localized message"
   },
+  "workflowsNoWorkflowsOption": {
+    "message": "ワークフローなし",
+    "description": "Auto-generated localized message"
+  },
   "workflowsOptionalDescription": {
     "message": "オプションの説明",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStarting": {
+    "message": "開始中...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusIdle": {
+    "message": "待機中",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusPaused": {
+    "message": "一時停止",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusRecording": {
+    "message": "録画中",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStatusStopping": {
+    "message": "停止中",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingStepCount": {
+    "message": "$ARG1$ ステップ",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsRecordingStopping": {
+    "message": "停止中...",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsRecordingWaiting": {
+    "message": "操作待機中...",
     "description": "Auto-generated localized message"
   },
   "workflowsRefreshTitle": {
@@ -2909,8 +3059,142 @@
     "message": "s",
     "description": "Auto-generated localized message"
   },
+  "workflowsStartRecordingTitle": {
+    "message": "録画を開始",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsStopRecordingButton": {
+    "message": "停止",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsStopRecordingTitle": {
+    "message": "録画を停止",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerArgs": {
+    "message": "引数JSON",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCancelEdit": {
+    "message": "編集をキャンセルする",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCommand": {
+    "message": "指示",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCommandKey": {
+    "message": "コマンドキー",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerContextMenu": {
+    "message": "コンテキストメニュー",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerContextScopes": {
+    "message": "コンテキスト",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerContextTitle": {
+    "message": "メニュータイトル",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerCreate": {
+    "message": "トリガーの作成",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDisable": {
+    "message": "無効にする",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDom": {
+    "message": "ドム",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomAppear": {
+    "message": "登場",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomDebounce": {
+    "message": "デバウンスミリ秒",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomOnce": {
+    "message": "一度",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerDomSelector": {
+    "message": "セレクタ",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerEnable": {
+    "message": "有効にする",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerEnabled": {
+    "message": "有効",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerEvery": {
+    "message": "毎分",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerFire": {
+    "message": "走る",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerInterval": {
+    "message": "間隔",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerIntervalDetail": {
+    "message": "$ARG1$分ごと",
+    "description": "Auto-generated localized message",
+    "placeholders": {
+      "arg1": {
+        "content": "$1$",
+        "example": "1"
+      }
+    }
+  },
+  "workflowsTriggerManual": {
+    "message": "マニュアル",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerManualDetail": {
+    "message": "手動実行",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerOnce": {
+    "message": "一度",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerRules": {
+    "message": "ルール",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerSave": {
+    "message": "保存トリガー",
+    "description": "Auto-generated localized message"
+  },
   "workflowsTriggersSection": {
     "message": "トリガー",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerType": {
+    "message": "タイプ",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerUrl": {
+    "message": "URL",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerWhen": {
+    "message": "いつ",
+    "description": "Auto-generated localized message"
+  },
+  "workflowsTriggerWorkflow": {
+    "message": "ワークフロー",
     "description": "Auto-generated localized message"
   },
   "workflowsUntitledName": {
@@ -2931,124 +3215,6 @@
   },
   "worldMain": {
     "message": "主要",
-    "description": "Auto-generated localized message"
-  },
-  "popupDismissButton": {
-    "message": "閉じる",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowDescriptionLabel": {
-    "message": "説明",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowDescriptionPlaceholder": {
-    "message": "このフローの説明（任意）",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowNameLabel": {
-    "message": "フロー名",
-    "description": "Auto-generated localized message"
-  },
-  "popupFlowNamePlaceholder": {
-    "message": "フロー名を入力",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordedFlowDefaultName": {
-    "message": "新しい録画",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordingBadge": {
-    "message": "録画中",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordingPaused": {
-    "message": "録画を一時停止中",
-    "description": "Auto-generated localized message"
-  },
-  "popupRecordingStopping": {
-    "message": "停止中...",
-    "description": "Auto-generated localized message"
-  },
-  "popupSaveButton": {
-    "message": "保存",
-    "description": "Auto-generated localized message"
-  },
-  "popupSaveRecordingTitle": {
-    "message": "録画を保存",
-    "description": "Auto-generated localized message"
-  },
-  "popupSavingButton": {
-    "message": "保存中...",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolRecordDisabledHint": {
-    "message": "録画はすでに進行中です",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolRecordHint": {
-    "message": "ブラウザー操作の録画を開始",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolStopDisabledHint": {
-    "message": "アクティブな録画はありません",
-    "description": "Auto-generated localized message"
-  },
-  "popupToolStopHint": {
-    "message": "録画を停止してフローを保存",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsNewRecordingButton": {
-    "message": "新規録画",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStarting": {
-    "message": "開始中...",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusIdle": {
-    "message": "待機中",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusPaused": {
-    "message": "一時停止",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusRecording": {
-    "message": "録画中",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStatusStopping": {
-    "message": "停止中",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingStepCount": {
-    "message": "$ARG1$ ステップ",
-    "description": "Auto-generated localized message",
-    "placeholders": {
-      "arg1": {
-        "content": "$1$",
-        "example": "1"
-      }
-    }
-  },
-  "workflowsRecordingStopping": {
-    "message": "停止中...",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsRecordingWaiting": {
-    "message": "操作待機中...",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsStartRecordingTitle": {
-    "message": "録画を開始",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsStopRecordingButton": {
-    "message": "停止",
-    "description": "Auto-generated localized message"
-  },
-  "workflowsStopRecordingTitle": {
-    "message": "録画を停止",
     "description": "Auto-generated localized message"
   }
 }
