@@ -1,8 +1,9 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   buildBuilderTriggerSpecs,
   isBuilderManagedTriggerForFlow,
+  syncBuilderManagedTriggers,
 } from "@/entrypoints/shared/utils/builder-trigger-sync";
 import { getNodeSpec } from "../../../../packages/shared/src/node-spec-registry";
 import { registerBuiltinSpecs } from "../../../../packages/shared/src/node-specs-builtin";
@@ -214,5 +215,91 @@ describe("builder trigger sync", () => {
         "flow-1",
       ),
     ).toBe(false);
+  });
+
+  it("syncs desired builder triggers before deleting stale builder-managed triggers", async () => {
+    const existingDesired = {
+      id: "builder_trg_flow-1_trigger-1_manual",
+      kind: "manual",
+      enabled: true,
+      flowId: "flow-1",
+    };
+    const staleBuilderTrigger = {
+      id: "builder_trg_flow-1_trigger-1_url",
+      kind: "url",
+      enabled: true,
+      flowId: "flow-1",
+      match: [{ kind: "domain", value: "old.example" }],
+    };
+    const externalTrigger = {
+      id: "manual-user-trigger",
+      kind: "manual",
+      enabled: true,
+      flowId: "flow-1",
+    };
+    const newDesired = {
+      id: "builder_trg_flow-1_trigger-1_context_menu",
+      kind: "contextMenu",
+      enabled: true,
+      flowId: "flow-1",
+      title: "Run flow",
+    };
+    const request = vi.fn(async (method: string) => {
+      if (method === "rr_v3.listTriggers") {
+        return [existingDesired, staleBuilderTrigger, externalTrigger];
+      }
+      return {};
+    });
+
+    await syncBuilderManagedTriggers({ request } as any, "flow-1" as any, [
+      existingDesired as any,
+      newDesired as any,
+    ]);
+
+    expect(request.mock.calls.map((call) => call[0])).toEqual([
+      "rr_v3.listTriggers",
+      "rr_v3.updateTrigger",
+      "rr_v3.createTrigger",
+      "rr_v3.deleteTrigger",
+    ]);
+    expect(request).toHaveBeenLastCalledWith("rr_v3.deleteTrigger", {
+      triggerId: staleBuilderTrigger.id,
+    });
+  });
+
+  it("does not delete stale builder triggers when desired trigger sync fails", async () => {
+    const staleBuilderTrigger = {
+      id: "builder_trg_flow-1_trigger-1_url",
+      kind: "url",
+      enabled: true,
+      flowId: "flow-1",
+      match: [{ kind: "domain", value: "old.example" }],
+    };
+    const desired = {
+      id: "builder_trg_flow-1_trigger-1_manual",
+      kind: "manual",
+      enabled: true,
+      flowId: "flow-1",
+    };
+    const request = vi.fn(async (method: string) => {
+      if (method === "rr_v3.listTriggers") {
+        return [staleBuilderTrigger];
+      }
+      if (method === "rr_v3.createTrigger") {
+        throw new Error("storage unavailable");
+      }
+      return {};
+    });
+
+    await expect(
+      syncBuilderManagedTriggers({ request } as any, "flow-1" as any, [
+        desired as any,
+      ]),
+    ).rejects.toThrow("storage unavailable");
+
+    expect(request.mock.calls.map((call) => call[0])).toEqual([
+      "rr_v3.listTriggers",
+      "rr_v3.createTrigger",
+    ]);
   });
 });

@@ -29,6 +29,10 @@ type BuilderTriggerMode =
   | "schedule";
 type BuilderTriggerSectionMode = "contextMenu" | "command" | "dom";
 
+export interface BuilderTriggerSyncRpc {
+  request(method: string, params?: JsonObject): Promise<unknown>;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -321,4 +325,36 @@ export function isBuilderManagedTriggerForFlow(
       `${BUILDER_TRIGGER_ID_PREFIX}_${sanitizeIdPart(String(flowId))}_`,
     )
   );
+}
+
+export async function syncBuilderManagedTriggers(
+  rpc: BuilderTriggerSyncRpc,
+  flowId: FlowId,
+  desiredTriggers: TriggerSpec[],
+): Promise<void> {
+  const existingTriggers = ((await rpc.request("rr_v3.listTriggers", {
+    flowId,
+  })) || []) as TriggerSpec[];
+  const existingById = new Map(
+    existingTriggers.map((trigger) => [trigger.id, trigger]),
+  );
+  const desiredIds = new Set(desiredTriggers.map((trigger) => trigger.id));
+
+  for (const trigger of desiredTriggers) {
+    await rpc.request(
+      existingById.has(trigger.id)
+        ? "rr_v3.updateTrigger"
+        : "rr_v3.createTrigger",
+      { trigger: trigger as unknown as JsonObject },
+    );
+  }
+
+  for (const trigger of existingTriggers) {
+    if (
+      isBuilderManagedTriggerForFlow(trigger, flowId) &&
+      !desiredIds.has(trigger.id)
+    ) {
+      await rpc.request("rr_v3.deleteTrigger", { triggerId: trigger.id });
+    }
+  }
 }
