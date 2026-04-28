@@ -354,6 +354,19 @@ export async function bootstrapV3(): Promise<V3Runtime> {
     // 2) EventsBus
     const events: EventsBus = new StorageBackedEventsBus(storage.events);
 
+    try {
+      const expired = await storage.artifacts.cleanupExpired(now());
+      const overLimit = await storage.artifacts.enforceRetention();
+      const deleted = expired + overLimit;
+      if (deleted > 0) {
+        logger.debug(`[RR-V3] Cleaned ${deleted} expired/over-limit artifact(s)`);
+      }
+    } catch (e) {
+      logger.warn(
+        `[RR-V3] Artifact cleanup failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
     // 3) Lease owner identity (per SW instance)
     const ownerId = generateOwnerId();
     logger.debug(`[RR-V3] Owner ID: ${ownerId}`);
@@ -388,7 +401,7 @@ export async function bootstrapV3(): Promise<V3Runtime> {
       storage,
       events,
       plugins,
-      artifactService: createChromeArtifactService(),
+      artifactService: createChromeArtifactService({ store: storage.artifacts }),
       now,
     });
 

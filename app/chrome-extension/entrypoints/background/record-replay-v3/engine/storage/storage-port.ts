@@ -9,6 +9,7 @@ import type { RunEvent, RunEventInput, RunRecordV3 } from '../../domain/events';
 import type { PersistentVarRecord, PersistentVariableName } from '../../domain/variables';
 import type { TriggerSpec } from '../../domain/triggers';
 import type { RunQueue } from '../queue/queue';
+import type { ArtifactStore } from '../../storage/artifacts';
 
 /**
  * FlowsStore interface
@@ -107,6 +108,8 @@ export interface StoragePort {
   persistentVars: PersistentVarsStore;
   /** trigger storage */
   triggers: TriggersStore;
+  /** persisted debug artifacts */
+  artifacts: ArtifactStore;
 }
 
 /**
@@ -140,5 +143,6 @@ export function createNotImplementedStoragePort(): StoragePort {
     queue: createNotImplementedStore<RunQueue>('RunQueue'),
     persistentVars: createNotImplementedStore<PersistentVarsStore>('PersistentVarsStore'),
     triggers: createNotImplementedStore<TriggersStore>('TriggersStore'),
+    artifacts: createNotImplementedStore<ArtifactStore>('ArtifactStore'),
   };
 }

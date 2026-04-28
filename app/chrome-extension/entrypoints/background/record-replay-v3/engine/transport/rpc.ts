@@ -18,6 +18,10 @@ export type RpcMethod =
   | "rr_v3.listRuns"
   | "rr_v3.getRun"
   | "rr_v3.getEvents"
+  | "rr_v3.listArtifacts"
+  | "rr_v3.getArtifact"
+  | "rr_v3.deleteRunArtifacts"
+  | "rr_v3.cleanupArtifacts"
   // Flow management methods
   | "rr_v3.getFlow"
   | "rr_v3.listFlows"

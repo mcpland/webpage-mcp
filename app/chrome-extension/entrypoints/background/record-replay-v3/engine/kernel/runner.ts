@@ -746,26 +746,26 @@ class StorageBackedRunRunner implements RunRunner {
       return;
     }
 
-    let savedAs: string | undefined;
-    if (artifactPolicy?.saveScreenshotAs) {
-      const saveResult = await this.env.artifactService.saveScreenshot(
-        this.runId,
-        node.id,
-        result.base64,
-        artifactPolicy.saveScreenshotAs,
+    const saveResult = await this.env.artifactService.saveScreenshot(
+      this.runId,
+      node.id,
+      result.base64,
+      artifactPolicy?.saveScreenshotAs,
+    );
+    if (!saveResult || 'error' in saveResult) {
+      const message =
+        saveResult && 'error' in saveResult
+          ? saveResult.error.message
+          : 'ArtifactService.saveScreenshot returned no result';
+      await this.queue.run(() =>
+        this.env.events.append({
+          runId: this.runId,
+          type: 'log',
+          level: 'warn',
+          message: `Failed to save screenshot artifact for node "${node.id}": ${message}`,
+        } as RunEventInput),
       );
-      if ('error' in saveResult) {
-        await this.queue.run(() =>
-          this.env.events.append({
-            runId: this.runId,
-            type: 'log',
-            level: 'warn',
-            message: `Failed to save screenshot artifact for node "${node.id}": ${saveResult.error.message}`,
-          } as RunEventInput),
-        );
-      } else {
-        savedAs = saveResult.savedAs;
-      }
+      return;
     }
 
     await this.queue.run(() =>
@@ -773,8 +773,8 @@ class StorageBackedRunRunner implements RunRunner {
         runId: this.runId,
         type: 'artifact.screenshot',
         nodeId: node.id,
-        data: result.base64,
-        ...(savedAs ? { savedAs } : {}),
+        ...(saveResult.artifactId ? { artifactId: saveResult.artifactId } : {}),
+        ...(saveResult.savedAs ? { savedAs: saveResult.savedAs } : {}),
       } as RunEventInput),
     );
   }

@@ -3,6 +3,7 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import type { FlowV3 } from '../record-replay-v3/domain/flow';
 import type { RunEvent, RunRecordV3 } from '../record-replay-v3/domain/events';
 import type { FlowId, RunId } from '../record-replay-v3/domain/ids';
+import type { ArtifactRecord } from '../record-replay-v3/storage/artifacts';
 import { RR_ERROR_CODES } from '../record-replay-v3/domain/errors';
 import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variables';
 import { createStoragePort } from '../record-replay-v3';
@@ -71,6 +72,21 @@ interface WorkflowDebugRun {
   error?: unknown;
   outputs?: unknown;
   events: Array<Record<string, unknown>>;
+  artifacts?: WorkflowDebugArtifact[];
+}
+
+interface WorkflowDebugArtifact {
+  id: string;
+  nodeId: string;
+  kind: ArtifactRecord['kind'];
+  savedAs: string;
+  mimeType: ArtifactRecord['mimeType'];
+  sizeBytes: number;
+  createdAt: number;
+  expiresAt: number;
+  metadata?: ArtifactRecord['metadata'];
+  dataBase64?: string;
+  dataBase64Omitted?: 'not_requested' | 'too_large';
 }
 
 interface WorkflowRepairRecommendation {
@@ -364,7 +380,10 @@ function sanitizeEvent(event: RunEvent, sensitiveVariableNames: ReadonlySet<stri
   }
   if (event.type === 'artifact.screenshot') {
     base.savedAs = event.savedAs;
-    base.data = `<redacted screenshot:${event.data.length}>`;
+    base.artifactId = event.artifactId;
+    if (event.data !== undefined) {
+      base.data = `<redacted screenshot:${event.data.length}>`;
+    }
   }
   if (event.type === 'log' && event.data !== undefined) {
     base.data = sanitizeDebugValue(event.data, 'data', sensitiveVariableNames);
@@ -374,6 +393,38 @@ function sanitizeEvent(event: RunEvent, sensitiveVariableNames: ReadonlySet<stri
   }
 
   return base;
+}
+
+function shouldIncludeArtifactData(args: any, runId: string): boolean {
+  if (args?.includeArtifactData === true) return true;
+  if (args?.includeArtifactData === false) return false;
+  return runId.length > 0;
+}
+
+function sanitizeDebugArtifact(
+  artifact: ArtifactRecord,
+  includeData: boolean,
+  maxArtifactDataBytes: number,
+): WorkflowDebugArtifact {
+  const safe: WorkflowDebugArtifact = {
+    id: artifact.id,
+    nodeId: artifact.nodeId,
+    kind: artifact.kind,
+    savedAs: artifact.filename,
+    mimeType: artifact.mimeType,
+    sizeBytes: artifact.sizeBytes,
+    createdAt: artifact.createdAt,
+    expiresAt: artifact.expiresAt,
+    ...(artifact.metadata ? { metadata: artifact.metadata } : {}),
+  };
+  if (!includeData) {
+    safe.dataBase64Omitted = 'not_requested';
+  } else if (artifact.sizeBytes > maxArtifactDataBytes) {
+    safe.dataBase64Omitted = 'too_large';
+  } else {
+    safe.dataBase64 = artifact.dataBase64;
+  }
+  return safe;
 }
 
 async function resolveFlowForWorkflowTool(args: any): Promise<FlowV3 | null> {
@@ -402,6 +453,14 @@ async function collectDebugRuns(flow: FlowV3, args: any): Promise<WorkflowDebugR
   const storage = createStoragePort();
   const maxRuns = runId ? 1 : clampNumber(args?.maxRuns, 3, 0, 10);
   const maxEventsPerRun = clampNumber(args?.maxEventsPerRun, 40, 0, 100);
+  const includeArtifacts = args?.includeArtifacts !== false;
+  const includeArtifactData = shouldIncludeArtifactData(args, runId);
+  const maxArtifactDataBytes = clampNumber(
+    args?.maxArtifactDataBytes,
+    2 * 1024 * 1024,
+    0,
+    8 * 1024 * 1024,
+  );
   const sensitiveVariableNames = getSensitiveVariableNames(flow);
   let runs: RunRecordV3[] = [];
 
@@ -428,6 +487,11 @@ async function collectDebugRuns(flow: FlowV3, args: any): Promise<WorkflowDebugR
       maxEventsPerRun > 0
         ? await storage.events.list(run.id, { fromSeq, limit: maxEventsPerRun })
         : [];
+    const artifacts = includeArtifacts
+      ? (await storage.artifacts.listByRun(run.id)).map((artifact) =>
+          sanitizeDebugArtifact(artifact, includeArtifactData, maxArtifactDataBytes),
+        )
+      : undefined;
     debugRuns.push({
       id: run.id,
       status: run.status,
@@ -445,6 +509,7 @@ async function collectDebugRuns(flow: FlowV3, args: any): Promise<WorkflowDebugR
       ...(run.error ? { error: sanitizeError(run.error, sensitiveVariableNames) } : {}),
       ...(run.outputs ? { outputs: sanitizeRunObject(run.outputs, sensitiveVariableNames) } : {}),
       events: events.map((event) => sanitizeEvent(event, sensitiveVariableNames)),
+      ...(artifacts ? { artifacts } : {}),
     });
   }
 

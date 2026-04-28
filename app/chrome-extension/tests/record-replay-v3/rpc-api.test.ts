@@ -21,6 +21,7 @@ import type { EventsBus } from "@/entrypoints/background/record-replay-v3/engine
 import type { RunScheduler } from "@/entrypoints/background/record-replay-v3/engine/queue/scheduler";
 import type { RunQueueItem } from "@/entrypoints/background/record-replay-v3/engine/queue/queue";
 import { RpcServer } from "@/entrypoints/background/record-replay-v3/engine/transport/rpc-server";
+import type { ArtifactRecord } from "@/entrypoints/background/record-replay-v3/storage/artifacts";
 
 // ==================== Test Utilities ====================
 
@@ -28,6 +29,7 @@ function createMockStorage(): StoragePort {
   const flowsMap = new Map<string, FlowV3>();
   const runsMap = new Map<string, RunRecordV3>();
   const queueMap = new Map<string, RunQueueItem>();
+  const artifactsMap = new Map<string, ArtifactRecord>();
   const eventsLog: Array<{ runId: string; type: string }> = [];
 
   return {
@@ -106,13 +108,45 @@ function createMockStorage(): StoragePort {
       save: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
     },
+    artifacts: {
+      saveScreenshot: vi.fn(async (input) => {
+        const record: ArtifactRecord = {
+          id: `${input.runId}/${input.nodeId}/artifact`,
+          runId: input.runId,
+          nodeId: input.nodeId,
+          kind: "screenshot",
+          filename: input.filename ?? "artifact.png",
+          mimeType: input.mimeType ?? "image/png",
+          dataBase64: input.base64,
+          sizeBytes: input.base64.length,
+          createdAt: 1_700_000_000_000,
+          expiresAt: 1_700_000_001_000,
+        };
+        artifactsMap.set(record.id, record);
+        return record;
+      }),
+      get: vi.fn(async (id: string) => artifactsMap.get(id) ?? null),
+      listByRun: vi.fn(async (runId: string) =>
+        Array.from(artifactsMap.values()).filter((artifact) => artifact.runId === runId),
+      ),
+      deleteByRun: vi.fn(async (runId: string) => {
+        const ids = Array.from(artifactsMap.values())
+          .filter((artifact) => artifact.runId === runId)
+          .map((artifact) => artifact.id);
+        ids.forEach((id) => artifactsMap.delete(id));
+        return ids.length;
+      }),
+      cleanupExpired: vi.fn(async () => 1),
+      enforceRetention: vi.fn(async () => 2),
+    },
     // Expose internal maps for assertions
-    _internal: { flowsMap, runsMap, queueMap, eventsLog },
+    _internal: { flowsMap, runsMap, queueMap, artifactsMap, eventsLog },
   } as unknown as StoragePort & {
     _internal: {
       flowsMap: Map<string, FlowV3>;
       runsMap: Map<string, RunRecordV3>;
       queueMap: Map<string, RunQueueItem>;
+      artifactsMap: Map<string, ArtifactRecord>;
       eventsLog: Array<{ runId: string; type: string }>;
     };
   };
@@ -188,6 +222,7 @@ interface MockStorageInternal {
   flowsMap: Map<string, FlowV3>;
   runsMap: Map<string, RunRecordV3>;
   queueMap: Map<string, RunQueueItem>;
+  artifactsMap: Map<string, ArtifactRecord>;
   eventsLog: Array<{ runId: string; type: string }>;
 }
 
@@ -220,6 +255,104 @@ describe("V3 RPC Queue Management APIs", () => {
       scheduler,
       generateRunId: () => `run-${++runIdCounter}`,
       now: () => fixedNow,
+    });
+  });
+
+  describe("rr_v3 artifact APIs", () => {
+    it("lists artifact metadata without inline screenshot data", async () => {
+      getInternal(storage).artifactsMap.set("artifact-1", {
+        id: "artifact-1",
+        runId: "run-artifacts" as never,
+        nodeId: "node-a" as never,
+        kind: "screenshot",
+        filename: "failure.png",
+        mimeType: "image/png",
+        dataBase64: "ZmFpbHVyZS1zaG90",
+        sizeBytes: 12,
+        createdAt: 1000,
+        expiresAt: 2000,
+        metadata: { source: "test" },
+      });
+
+      const result = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.listArtifacts",
+          params: { runId: "run-artifacts" },
+          requestId: "req-artifacts-list",
+        },
+        { subscriptions: new Set() },
+      );
+
+      expect(result).toEqual([
+        {
+          id: "artifact-1",
+          runId: "run-artifacts",
+          nodeId: "node-a",
+          kind: "screenshot",
+          savedAs: "failure.png",
+          mimeType: "image/png",
+          sizeBytes: 12,
+          createdAt: 1000,
+          expiresAt: 2000,
+          metadata: { source: "test" },
+        },
+      ]);
+      expect(result[0]).not.toHaveProperty("dataBase64");
+    });
+
+    it("returns artifact screenshot data by artifactId and supports cleanup", async () => {
+      getInternal(storage).artifactsMap.set("artifact-1", {
+        id: "artifact-1",
+        runId: "run-artifacts" as never,
+        nodeId: "node-a" as never,
+        kind: "screenshot",
+        filename: "failure.png",
+        mimeType: "image/png",
+        dataBase64: "ZmFpbHVyZS1zaG90",
+        sizeBytes: 12,
+        createdAt: 1000,
+        expiresAt: 2000,
+      });
+
+      const artifact = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.getArtifact",
+          params: { artifactId: "artifact-1" },
+          requestId: "req-artifact-get",
+        },
+        { subscriptions: new Set() },
+      );
+      const deleted = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.deleteRunArtifacts",
+          params: { runId: "run-artifacts" },
+          requestId: "req-artifact-delete",
+        },
+        { subscriptions: new Set() },
+      );
+      const cleanup = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.cleanupArtifacts",
+          params: {},
+          requestId: "req-artifact-cleanup",
+        },
+        { subscriptions: new Set() },
+      );
+
+      expect(artifact).toMatchObject({
+        id: "artifact-1",
+        dataBase64: "ZmFpbHVyZS1zaG90",
+      });
+      expect(deleted).toEqual({ deleted: 1 });
+      expect(cleanup).toEqual({ deleted: 3 });
     });
   });
 

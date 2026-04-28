@@ -247,6 +247,23 @@ export const TOOL_SCHEMAS: Tool[] = [
           maximum: 100,
           description: 'Maximum recent events to include per run. Default: 40.',
         },
+        includeArtifacts: {
+          type: 'boolean',
+          default: true,
+          description: 'Include persisted debug artifact metadata for returned runs.',
+        },
+        includeArtifactData: {
+          type: 'boolean',
+          description:
+            'Include screenshot base64 data for returned artifacts. Defaults to true when runId is provided and false otherwise.',
+        },
+        maxArtifactDataBytes: {
+          type: 'number',
+          minimum: 0,
+          maximum: 8388608,
+          description:
+            'Maximum artifact payload size to inline when includeArtifactData is true. Default: 2097152.',
+        },
       },
       required: [],
     },

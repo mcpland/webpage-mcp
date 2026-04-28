@@ -481,7 +481,10 @@ describe('V3 RunRunner onError contracts', () => {
     const runId = 'run-artifact-on-failure';
     const artifactService: ArtifactService = {
       screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'failure-shot' }),
-      saveScreenshot: vi.fn().mockResolvedValue({ savedAs: 'failure.png' }),
+      saveScreenshot: vi.fn().mockResolvedValue({
+        savedAs: 'failure.png',
+        artifactId: 'run-artifact-on-failure/A/1',
+      }),
     };
     const flow = createFlow(
       'A',
@@ -522,16 +525,20 @@ describe('V3 RunRunner onError contracts', () => {
     expect(screenshots[0]).toMatchObject({
       type: 'artifact.screenshot',
       nodeId: 'A',
-      data: 'failure-shot',
+      artifactId: 'run-artifact-on-failure/A/1',
       savedAs: 'failure.png',
     });
+    expect(screenshots[0]).not.toHaveProperty('data');
   });
 
   it('artifacts: captures screenshots from the current runtime tab', async () => {
     const runId = 'run-artifact-current-tab';
     const artifactService: ArtifactService = {
       screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'current-tab-shot' }),
-      saveScreenshot: vi.fn().mockResolvedValue({ savedAs: 'current.png' }),
+      saveScreenshot: vi.fn().mockResolvedValue({
+        savedAs: 'run-artifact-current-tab_B_1.png',
+        artifactId: 'run-artifact-current-tab/B/1',
+      }),
     };
     const flow = createFlow(
       'A',
@@ -556,6 +563,12 @@ describe('V3 RunRunner onError contracts', () => {
     expect(result.status).toBe('failed');
 
     expect(artifactService.screenshot).toHaveBeenCalledWith(42, { background: false });
+    expect(artifactService.saveScreenshot).toHaveBeenCalledWith(
+      runId,
+      'B',
+      'current-tab-shot',
+      undefined,
+    );
 
     const events = await listEvents(bus, runId);
     const screenshots = events.filter(
@@ -566,15 +579,20 @@ describe('V3 RunRunner onError contracts', () => {
     expect(screenshots[0]).toMatchObject({
       type: 'artifact.screenshot',
       nodeId: 'B',
-      data: 'current-tab-shot',
+      artifactId: 'run-artifact-current-tab/B/1',
+      savedAs: 'run-artifact-current-tab_B_1.png',
     });
+    expect(screenshots[0]).not.toHaveProperty('data');
   });
 
   it('artifacts: captures node background screenshots with the current runtime tab', async () => {
     const runId = 'run-artifact-node-background-tab';
     const artifactService: ArtifactService = {
       screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'background-tab-shot' }),
-      saveScreenshot: vi.fn(),
+      saveScreenshot: vi.fn().mockResolvedValue({
+        savedAs: 'run-artifact-node-background-tab_B_1.png',
+        artifactId: 'run-artifact-node-background-tab/B/1',
+      }),
     };
     const flow = createFlow(
       'A',
@@ -599,13 +617,22 @@ describe('V3 RunRunner onError contracts', () => {
     expect(result.status).toBe('failed');
 
     expect(artifactService.screenshot).toHaveBeenCalledWith(42, { background: true });
+    expect(artifactService.saveScreenshot).toHaveBeenCalledWith(
+      runId,
+      'B',
+      'background-tab-shot',
+      undefined,
+    );
   });
 
   it('artifacts: captures inactive runtime tab screenshots in the background', async () => {
     const runId = 'run-artifact-inactive-runtime-tab';
     const artifactService: ArtifactService = {
       screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'inactive-tab-shot' }),
-      saveScreenshot: vi.fn(),
+      saveScreenshot: vi.fn().mockResolvedValue({
+        savedAs: 'run-artifact-inactive-runtime-tab_B_1.png',
+        artifactId: 'run-artifact-inactive-runtime-tab/B/1',
+      }),
     };
     (chrome.tabs.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       id: 42,
@@ -635,6 +662,12 @@ describe('V3 RunRunner onError contracts', () => {
     expect(result.status).toBe('failed');
 
     expect(artifactService.screenshot).toHaveBeenCalledWith(42, { background: true });
+    expect(artifactService.saveScreenshot).toHaveBeenCalledWith(
+      runId,
+      'B',
+      'inactive-tab-shot',
+      undefined,
+    );
   });
 
   it('default: without onError policy, uses ON_ERROR edge when present', async () => {

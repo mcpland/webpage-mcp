@@ -89,7 +89,17 @@ export type RunEvent =
       type: 'vars.patch';
       patch: Array<{ op: 'set' | 'delete'; name: string; value?: JsonValue }>;
     })
-  | (EventBase & { type: 'artifact.screenshot'; nodeId: NodeId; data: string; savedAs?: string })
+  | (EventBase & {
+      type: 'artifact.screenshot';
+      nodeId: NodeId;
+      artifactId?: string;
+      savedAs?: string;
+      /**
+       * Legacy inline screenshot payload. New events should reference persisted
+       * artifacts instead of duplicating base64 into the run event stream.
+       */
+      data?: string;
+    })
   | (EventBase & {
       type: 'log';
       level: 'debug' | 'info' | 'warn' | 'error';

@@ -7,7 +7,7 @@
 export const RR_V3_DB_NAME = 'rr_v3';
 
 /** Database version */
-export const RR_V3_DB_VERSION = 1;
+export const RR_V3_DB_VERSION = 2;
 
 /**
  * Store Name constant
@@ -19,6 +19,7 @@ export const RR_V3_STORES = {
   QUEUE: 'queue',
   PERSISTENT_VARS: 'persistent_vars',
   TRIGGERS: 'triggers',
+  ARTIFACTS: 'artifacts',
 } as const;
 
 /**
@@ -93,6 +94,17 @@ export const RR_V3_STORE_SCHEMAS: Record<string, StoreConfig> = {
       { name: 'kind_enabled', keyPath: ['kind', 'enabled'] },
     ],
   },
+  [RR_V3_STORES.ARTIFACTS]: {
+    keyPath: 'id',
+    indexes: [
+      { name: 'runId', keyPath: 'runId' },
+      { name: 'nodeId', keyPath: 'nodeId' },
+      { name: 'kind', keyPath: 'kind' },
+      { name: 'createdAt', keyPath: 'createdAt' },
+      { name: 'expiresAt', keyPath: 'expiresAt' },
+      { name: 'runId_nodeId', keyPath: ['runId', 'nodeId'] },
+    ],
+  },
 };
 
 /**
@@ -113,6 +125,18 @@ export function handleUpgrade(db: IDBDatabase, oldVersion: number, _newVersion: 
           store.createIndex(index.name, index.keyPath, index.options);
         }
       }
+    }
+  }
+
+  // Version 1 -> 2: Add durable artifact storage.
+  if (oldVersion >= 1 && oldVersion < 2 && !db.objectStoreNames.contains(RR_V3_STORES.ARTIFACTS)) {
+    const config = RR_V3_STORE_SCHEMAS[RR_V3_STORES.ARTIFACTS];
+    const store = db.createObjectStore(RR_V3_STORES.ARTIFACTS, {
+      keyPath: config.keyPath,
+      autoIncrement: config.autoIncrement,
+    });
+    for (const index of config.indexes || []) {
+      store.createIndex(index.name, index.keyPath, index.options);
     }
   }
 }

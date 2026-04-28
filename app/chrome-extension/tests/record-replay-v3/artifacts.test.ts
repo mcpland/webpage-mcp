@@ -13,9 +13,17 @@ vi.mock('@/utils/cdp-session-manager', () => ({
 }));
 
 import { createChromeArtifactService } from '@/entrypoints/background/record-replay-v3/engine/kernel/artifacts';
+import { createIndexedDbArtifactStore } from '@/entrypoints/background/record-replay-v3/storage/artifacts';
+import {
+  closeRrV3Db,
+  deleteRrV3Db,
+} from '@/entrypoints/background/record-replay-v3/storage/db';
 
 describe('createChromeArtifactService', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await deleteRrV3Db();
+    closeRrV3Db();
+
     cdpMocks.withSession.mockReset();
     cdpMocks.sendCommand.mockReset();
     cdpMocks.withSession.mockImplementation(async (_tabId, _owner, fn) => await fn());
@@ -29,9 +37,11 @@ describe('createChromeArtifactService', () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    await deleteRrV3Db();
+    closeRrV3Db();
   });
 
   it('uses CDP without visible-tab fallback for background screenshots', async () => {
@@ -67,5 +77,111 @@ describe('createChromeArtifactService', () => {
       quality: undefined,
     });
     expect(cdpMocks.withSession).not.toHaveBeenCalled();
+  });
+
+  it('persists saved screenshots in IndexedDB across service instances', async () => {
+    const service = createChromeArtifactService({
+      now: () => 1_700_000_000_000,
+    });
+
+    const saveResult = await service.saveScreenshot(
+      'run-artifacts' as never,
+      'node-a' as never,
+      'c2NyZWVuc2hvdA==',
+      'failure.png',
+    );
+
+    expect(saveResult).toMatchObject({ savedAs: 'failure.png' });
+    expect('artifactId' in saveResult && saveResult.artifactId).toBeTruthy();
+
+    const nextService = createChromeArtifactService();
+    const artifacts = await nextService.listArtifacts?.('run-artifacts' as never);
+    expect(artifacts).toEqual([
+      expect.objectContaining({
+        savedAs: 'failure.png',
+        sizeBytes: 10,
+      }),
+    ]);
+  });
+
+  it('redacts sensitive filenames before persisting artifacts', async () => {
+    const service = createChromeArtifactService();
+
+    const saveResult = await service.saveScreenshot(
+      'run-redact' as never,
+      'node-a' as never,
+      'c2NyZWVuc2hvdA==',
+      '/Users/alice/Downloads/password=my-secret-token.png',
+    );
+
+    expect(saveResult).toMatchObject({ savedAs: '[REDACTED].png' });
+    const artifacts = await service.listArtifacts?.('run-redact' as never);
+    expect(artifacts?.[0]?.savedAs).not.toContain('/Users/alice');
+    expect(artifacts?.[0]?.savedAs).not.toContain('password');
+    expect(artifacts?.[0]?.savedAs).not.toContain('secret');
+    expect(artifacts?.[0]?.savedAs).not.toContain('token');
+  });
+
+  it('applies TTL and run-scoped cleanup', async () => {
+    let now = 1_000;
+    const store = createIndexedDbArtifactStore({ ttlMs: 10 }, () => now);
+    const service = createChromeArtifactService({ store });
+
+    await service.saveScreenshot('run-ttl' as never, 'node-a' as never, 'b2xk');
+    now = 1_011;
+
+    expect(await service.cleanupArtifacts?.()).toEqual({ deleted: 1 });
+    expect(await service.listArtifacts?.('run-ttl' as never)).toEqual([]);
+
+    await service.saveScreenshot('run-delete' as never, 'node-a' as never, 'bmV3');
+    await service.saveScreenshot('run-delete' as never, 'node-b' as never, 'bmV3Mg==');
+    expect(await service.deleteRunArtifacts?.('run-delete' as never)).toEqual({ deleted: 2 });
+    expect(await service.listArtifacts?.('run-delete' as never)).toEqual([]);
+  });
+
+  it('enforces total size retention by pruning oldest artifacts', async () => {
+    let now = 10;
+    const store = createIndexedDbArtifactStore({ maxTotalBytes: 6 }, () => now);
+    const service = createChromeArtifactService({ store });
+
+    await service.saveScreenshot('run-size' as never, 'node-a' as never, 'YWJjZA=='); // 4 bytes
+    now = 20;
+    await service.saveScreenshot('run-size' as never, 'node-b' as never, 'ZWZnaA=='); // 4 bytes
+
+    const artifacts = await service.listArtifacts?.('run-size' as never);
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts?.[0]?.savedAs).toContain('node-b');
+  });
+
+  it('rejects artifacts that cannot fit within the normalized total size budget', async () => {
+    const store = createIndexedDbArtifactStore(
+      { maxTotalBytes: 3, maxArtifactBytes: 10 },
+      () => 10,
+    );
+    const service = createChromeArtifactService({ store });
+
+    const saveResult = await service.saveScreenshot(
+      'run-too-large' as never,
+      'node-a' as never,
+      'YWJjZA==', // 4 bytes
+    );
+
+    expect(saveResult).toHaveProperty('error');
+    expect(await service.listArtifacts?.('run-too-large' as never)).toEqual([]);
+  });
+
+  it('keeps the just-saved artifact when same-timestamp records exceed retention', async () => {
+    const store = createIndexedDbArtifactStore(
+      { maxTotalBytes: 4, maxArtifactsPerRun: 1 },
+      () => 10,
+    );
+    const service = createChromeArtifactService({ store });
+
+    await service.saveScreenshot('run-same-time' as never, 'node-a' as never, 'YWJjZA==');
+    await service.saveScreenshot('run-same-time' as never, 'node-b' as never, 'ZWZnaA==');
+
+    const artifacts = await service.listArtifacts?.('run-same-time' as never);
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts?.[0]?.savedAs).toContain('node-b');
   });
 });

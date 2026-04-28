@@ -201,6 +201,7 @@ describe('RecoveryCoordinator', () => {
       queue: queue as any,
       persistentVars: {} as any,
       triggers: {} as any,
+      artifacts: {} as any,
       _queueMap: queueMap,
       _runsMap: runsMap,
     };

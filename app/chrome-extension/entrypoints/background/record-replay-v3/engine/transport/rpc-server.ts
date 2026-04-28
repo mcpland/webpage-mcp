@@ -408,6 +408,58 @@ export class RpcServer {
         return events as unknown as JsonValue;
       }
 
+      case "rr_v3.listArtifacts": {
+        const runId = params?.runId as RunId | undefined;
+        if (!runId) throw new Error("runId is required");
+        const artifacts = await this.storage.artifacts.listByRun(runId);
+        return artifacts.map((artifact) => ({
+          id: artifact.id,
+          runId: artifact.runId,
+          nodeId: artifact.nodeId,
+          kind: artifact.kind,
+          savedAs: artifact.filename,
+          mimeType: artifact.mimeType,
+          sizeBytes: artifact.sizeBytes,
+          createdAt: artifact.createdAt,
+          expiresAt: artifact.expiresAt,
+          ...(artifact.metadata ? { metadata: artifact.metadata } : {}),
+        })) as unknown as JsonValue;
+      }
+
+      case "rr_v3.getArtifact": {
+        const artifactId = params?.artifactId as string | undefined;
+        if (!artifactId) throw new Error("artifactId is required");
+        const artifact = await this.storage.artifacts.get(artifactId);
+        if (!artifact) return null;
+        return {
+          id: artifact.id,
+          runId: artifact.runId,
+          nodeId: artifact.nodeId,
+          kind: artifact.kind,
+          savedAs: artifact.filename,
+          mimeType: artifact.mimeType,
+          sizeBytes: artifact.sizeBytes,
+          createdAt: artifact.createdAt,
+          expiresAt: artifact.expiresAt,
+          dataBase64: artifact.dataBase64,
+          ...(artifact.metadata ? { metadata: artifact.metadata } : {}),
+        } as unknown as JsonValue;
+      }
+
+      case "rr_v3.deleteRunArtifacts": {
+        const runId = params?.runId as RunId | undefined;
+        if (!runId) throw new Error("runId is required");
+        return {
+          deleted: await this.storage.artifacts.deleteByRun(runId),
+        } as unknown as JsonValue;
+      }
+
+      case "rr_v3.cleanupArtifacts": {
+        const expired = await this.storage.artifacts.cleanupExpired(this.now());
+        const overLimit = await this.storage.artifacts.enforceRetention();
+        return { deleted: expired + overLimit } as unknown as JsonValue;
+      }
+
       case "rr_v3.getFlow": {
         const flowId = params?.flowId as FlowId | undefined;
         if (!flowId) throw new Error("flowId is required");

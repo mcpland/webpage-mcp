@@ -15,6 +15,7 @@ import { createEventsStore } from './storage/events';
 import { createQueueStore } from './storage/queue';
 import { createPersistentVarsStore } from './storage/persistent-vars';
 import { createTriggersStore } from './storage/triggers';
+import { createIndexedDbArtifactStore } from './storage/artifacts';
 
 export { closeRrV3Db, deleteRrV3Db } from './storage/db';
 
@@ -29,6 +30,7 @@ export function createStoragePort(): StoragePort {
     queue: createQueueStore(),
     persistentVars: createPersistentVarsStore(),
     triggers: createTriggersStore(),
+    artifacts: createIndexedDbArtifactStore(),
   };
 }
 

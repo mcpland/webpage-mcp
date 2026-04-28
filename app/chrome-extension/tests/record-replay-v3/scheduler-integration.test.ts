@@ -55,6 +55,7 @@ function createMockStorage(
     queue: queueStore,
     persistentVars: {} as any,
     triggers: {} as any,
+    artifacts: {} as any,
   };
 }
 

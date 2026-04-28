@@ -586,6 +586,23 @@ describe("recording/editing/flow toolchain integration", () => {
       },
       decision: "stop",
     });
+    const artifact = await storage.artifacts.saveScreenshot({
+      runId: runId as any,
+      nodeId: "fill-1" as any,
+      base64: "ZmFpbHVyZS1zaG90",
+      filename: "password=secret-token.png",
+      metadata: {
+        note: "failure screenshot",
+        token: "secret-token",
+      },
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "artifact.screenshot",
+      nodeId: "fill-1" as any,
+      artifactId: artifact.id,
+      savedAs: artifact.filename,
+    });
 
     const result = await workflowDebugViewTool.execute({
       flowId,
@@ -595,6 +612,9 @@ describe("recording/editing/flow toolchain integration", () => {
     const payload = parseToolPayload(result);
     const failedEvent = payload.runs[0].events.find(
       (event: { type: string }) => event.type === "node.failed",
+    );
+    const artifactEvent = payload.runs[0].events.find(
+      (event: { type: string }) => event.type === "artifact.screenshot",
     );
 
     expect(payload.summary.runCount).toBe(1);
@@ -618,6 +638,18 @@ describe("recording/editing/flow toolchain integration", () => {
           headers: "<redacted>",
         },
       },
+      artifacts: [
+        {
+          id: artifact.id,
+          nodeId: "fill-1",
+          savedAs: "[REDACTED].png",
+          dataBase64: "ZmFpbHVyZS1zaG90",
+          metadata: {
+            note: "failure screenshot",
+            "[REDACTED]": "[REDACTED]-[REDACTED]",
+          },
+        },
+      ],
     });
     expect(failedEvent).toMatchObject({
       type: "node.failed",
@@ -636,6 +668,13 @@ describe("recording/editing/flow toolchain integration", () => {
         },
       },
     });
+    expect(artifactEvent).toMatchObject({
+      type: "artifact.screenshot",
+      nodeId: "fill-1",
+      artifactId: artifact.id,
+      savedAs: "[REDACTED].png",
+    });
+    expect(artifactEvent).not.toHaveProperty("data");
   });
 
   it("workflowRepairTool returns recommendations without mutating by default", async () => {

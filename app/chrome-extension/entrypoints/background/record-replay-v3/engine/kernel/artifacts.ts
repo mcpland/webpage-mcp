@@ -6,6 +6,11 @@
 import type { NodeId, RunId } from '../../domain/ids';
 import type { RRError } from '../../domain/errors';
 import { RR_ERROR_CODES, createRRError } from '../../domain/errors';
+import {
+  createIndexedDbArtifactStore,
+  type ArtifactRetentionPolicy,
+  type ArtifactStore,
+} from '../../storage/artifacts';
 
 /**
  * Screenshot results
@@ -43,7 +48,22 @@ export interface ArtifactService {
     nodeId: NodeId,
     base64: string,
     filename?: string,
-  ): Promise<{ savedAs: string } | { error: RRError }>;
+  ): Promise<{ savedAs: string; artifactId?: string } | { error: RRError }>;
+
+  /**
+   * List persisted artifacts for a run.
+   */
+  listArtifacts?(runId: RunId): Promise<Array<{ id: string; savedAs: string; sizeBytes: number }>>;
+
+  /**
+   * Delete all artifacts for a run.
+   */
+  deleteRunArtifacts?(runId: RunId): Promise<{ deleted: number } | { error: RRError }>;
+
+  /**
+   * Apply artifact TTL and size retention.
+   */
+  cleanupArtifacts?(): Promise<{ deleted: number } | { error: RRError }>;
 }
 
 /**
@@ -62,6 +82,9 @@ export function createNotImplementedArtifactService(): ArtifactService {
         'ArtifactService.saveScreenshot not implemented',
       ),
     }),
+    listArtifacts: async () => [],
+    deleteRunArtifacts: async () => ({ deleted: 0 }),
+    cleanupArtifacts: async () => ({ deleted: 0 }),
   };
 }
 
@@ -69,9 +92,13 @@ export function createNotImplementedArtifactService(): ArtifactService {
  * Create an ArtifactService based on chrome.tabs.captureVisibleTab
  * @description Use Chrome API to capture visible tabs
  */
-export function createChromeArtifactService(): ArtifactService {
-  // In-memory storage for screenshots (could be replaced with IndexedDB)
-  const screenshotStore = new Map<string, string>();
+export function createChromeArtifactService(options: {
+  store?: ArtifactStore;
+  retention?: Partial<ArtifactRetentionPolicy>;
+  now?: () => number;
+} = {}): ArtifactService {
+  const artifactStore =
+    options.store ?? createIndexedDbArtifactStore(options.retention, options.now);
 
   return {
     screenshot: async (tabId, options) => {
@@ -132,18 +159,53 @@ export function createChromeArtifactService(): ArtifactService {
 
     saveScreenshot: async (runId, nodeId, base64, filename) => {
       try {
-        // Generate filename if not provided
-        const savedAs = filename ?? `${runId}_${nodeId}_${Date.now()}.png`;
-        const key = `${runId}/${savedAs}`;
+        const record = await artifactStore.saveScreenshot({
+          runId,
+          nodeId,
+          base64,
+          filename,
+          mimeType: 'image/png',
+          metadata: { source: 'rr-v3-artifact-service' },
+        });
 
-        // Store in memory (in production, this would go to IndexedDB or cloud storage)
-        screenshotStore.set(key, base64);
-
-        return { savedAs };
+        return { savedAs: record.filename, artifactId: record.id };
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         return {
           error: createRRError(RR_ERROR_CODES.INTERNAL, `Save screenshot failed: ${message}`),
+        };
+      }
+    },
+
+    listArtifacts: async (runId) => {
+      const records = await artifactStore.listByRun(runId);
+      return records.map((record) => ({
+        id: record.id,
+        savedAs: record.filename,
+        sizeBytes: record.sizeBytes,
+      }));
+    },
+
+    deleteRunArtifacts: async (runId) => {
+      try {
+        return { deleted: await artifactStore.deleteByRun(runId) };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        return {
+          error: createRRError(RR_ERROR_CODES.INTERNAL, `Delete artifacts failed: ${message}`),
+        };
+      }
+    },
+
+    cleanupArtifacts: async () => {
+      try {
+        const expired = await artifactStore.cleanupExpired();
+        const overLimit = await artifactStore.enforceRetention();
+        return { deleted: expired + overLimit };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        return {
+          error: createRRError(RR_ERROR_CODES.INTERNAL, `Cleanup artifacts failed: ${message}`),
         };
       }
     },
@@ -169,7 +231,7 @@ export interface ArtifactPolicyExecutor {
       failed: boolean;
       saveAs?: string;
     },
-  ): Promise<{ captured: boolean; savedAs?: string; error?: RRError }>;
+  ): Promise<{ captured: boolean; savedAs?: string; artifactId?: string; error?: RRError }>;
 }
 
 /**
@@ -191,21 +253,21 @@ export function createArtifactPolicyExecutor(service: ArtifactService): Artifact
         return { captured: false, error: result.error };
       }
 
-      // Save (if filename specified)
-      if (context.saveAs) {
-        const saveResult = await service.saveScreenshot(
-          context.runId,
-          context.nodeId,
-          result.base64,
-          context.saveAs,
-        );
-        if ('error' in saveResult) {
-          return { captured: true, error: saveResult.error };
-        }
-        return { captured: true, savedAs: saveResult.savedAs };
+      const saveResult = await service.saveScreenshot(
+        context.runId,
+        context.nodeId,
+        result.base64,
+        context.saveAs,
+      );
+      if ('error' in saveResult) {
+        return { captured: true, error: saveResult.error };
       }
 
-      return { captured: true };
+      return {
+        captured: true,
+        savedAs: saveResult.savedAs,
+        artifactId: saveResult.artifactId,
+      };
     },
   };
 }
