@@ -9,7 +9,10 @@ vi.mock('@/entrypoints/background/tools', () => ({
   handleCallTool: mocks.handleCallTool,
 }));
 
-import { screenshotNode } from '@/entrypoints/background/record-replay/nodes/download-screenshot-attr-event-frame-loop';
+import {
+  handleDownloadNode,
+  screenshotNode,
+} from '@/entrypoints/background/record-replay/nodes/download-screenshot-attr-event-frame-loop';
 import { createMockExecCtx } from './_test-helpers';
 
 const TAB_ID = 7;
@@ -76,5 +79,33 @@ describe('legacy screenshot node', () => {
         saveAs: 'capturedImage',
       } as never),
     ).rejects.toThrow('screenshot tool returned empty base64Data');
+  });
+
+  it('passes the workflow tabId to handleDownload', async () => {
+    mocks.handleCallTool.mockResolvedValueOnce({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ download: { id: 1, filename: 'report.pdf' } }),
+        },
+      ],
+    });
+    const ctx = createMockExecCtx({ tabId: TAB_ID });
+
+    await handleDownloadNode.run(ctx, {
+      id: 'download',
+      type: 'handleDownload',
+      filenameContains: 'report',
+      saveAs: 'downloadInfo',
+    } as never);
+
+    expect(mocks.handleCallTool).toHaveBeenCalledWith({
+      name: TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD,
+      args: expect.objectContaining({
+        tabId: TAB_ID,
+        filenameContains: 'report',
+      }),
+    });
+    expect(ctx.vars.downloadInfo).toEqual({ id: 1, filename: 'report.pdf' });
   });
 });

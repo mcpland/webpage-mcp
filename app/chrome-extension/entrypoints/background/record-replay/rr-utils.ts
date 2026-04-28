@@ -58,10 +58,12 @@ export async function ensureTab(options: {
   tabId?: number;
   startUrl?: string;
   refresh?: boolean;
+  background?: boolean;
 }): Promise<{ tabId: number; url?: string }> {
   const target = options.tabTarget || 'current';
   const explicitTabId = options.tabId;
   const startUrl = options.startUrl;
+  const background = options.background === true;
   const isWebUrl = (u?: string | null) => !!u && /^(https?:|file:)/i.test(u);
 
   const explicitTab =
@@ -88,7 +90,7 @@ export async function ensureTab(options: {
   if (target === 'new') {
     let urlToOpen = startUrl;
     if (!urlToOpen) urlToOpen = isWebUrl(active?.url) ? active!.url! : 'about:blank';
-    const created = await chrome.tabs.create({ url: urlToOpen, active: true });
+    const created = await chrome.tabs.create({ url: urlToOpen, active: !background });
     await new Promise((r) => setTimeout(r, 300));
     return { tabId: created.id!, url: created.url };
   }
@@ -125,7 +127,9 @@ export async function ensureTab(options: {
   if (!isWebUrl(url) && !startUrl) {
     const candidate = tabs.find((t) => isWebUrl(t.url));
     if (candidate?.id) {
-      await chrome.tabs.update(candidate.id, { active: true });
+      if (!background) {
+        await chrome.tabs.update(candidate.id, { active: true });
+      }
       tabId = candidate.id;
       url = candidate.url;
     }
@@ -191,7 +195,7 @@ export async function waitForNavigation(
   if (typeof tabId === 'number') {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab?.id) {
-      tabId = undefined;
+      throw new Error(`Workflow tab ${tabId} not found`);
     }
   }
   if (typeof tabId !== 'number') {

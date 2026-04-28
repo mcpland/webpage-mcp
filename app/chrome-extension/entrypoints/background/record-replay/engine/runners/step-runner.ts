@@ -86,8 +86,7 @@ export class StepRunner {
         return { url: tab.url || '', status: (tab.status as string) || '' };
       }
     }
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    return { url: tab?.url || '', status: (tab?.status as string) || '' };
+    return { url: '', status: '' };
   }
 
   private async emitStepFinished(event: StepExecutionEvent) {
@@ -150,16 +149,11 @@ export class StepRunner {
       await withRetry(
         async () => {
           // Execute step via injected executor (legacy, actions, or hybrid)
-          // tabId is expected to be set by Scheduler in ctx; fallback to active tab if missing
-          let tabId = ctx.tabId;
+          // tabId is expected to be set by Scheduler in ctx and must remain workflow-scoped.
+          const tabId = ctx.tabId;
           if (typeof tabId !== 'number') {
-            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-            tabId = tabs?.[0]?.id;
+            throw new Error('Workflow tab is not set for step execution');
           }
-          if (typeof tabId !== 'number') {
-            throw new Error('No active tab found for step execution');
-          }
-          ctx.tabId = tabId;
           this.env.logger.setTargetTabId(tabId);
 
           const execResult = await this.env.stepExecutor.execute(ctx, step, {
@@ -276,7 +270,7 @@ export class StepRunner {
         message,
         tookMs: Date.now() - t0,
       });
-      await this.env.logger.screenshotOnFailure();
+      await this.env.logger.screenshotOnFailure(ctx.tabId);
       await appendOverlayFail(step, e as ErrorLike);
       try {
         const hook = await this.env.pluginManager.onError({

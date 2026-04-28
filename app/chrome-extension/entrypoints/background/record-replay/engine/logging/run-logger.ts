@@ -89,8 +89,8 @@ export class RunLogger {
     }
   }
 
-  async screenshotOnFailure() {
-    const img = await this.captureScreenshotBase64();
+  async screenshotOnFailure(tabId?: number) {
+    const img = await this.captureScreenshotBase64(tabId);
     if (img && this.logs.length > 0) this.logs[this.logs.length - 1].screenshotBase64 = img;
   }
 

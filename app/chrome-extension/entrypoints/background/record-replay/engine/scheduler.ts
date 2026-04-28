@@ -428,6 +428,7 @@ class ExecutionOrchestrator {
       tabId: this.options.tabId,
       startUrl: this.options.startUrl || derivedStartUrl,
       refresh: this.options.refresh,
+      background: this.options.execution?.backgroundTabs === true,
     });
     // Capture tabId for use in ExecCtx
     this.tabId = ensured?.tabId ?? null;

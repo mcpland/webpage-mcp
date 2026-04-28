@@ -1,4 +1,5 @@
 import type { ExecCtx, ExecResult, NodeRuntime } from "./types";
+import { resolveNodeTabId } from "./tab-context";
 
 export const executeFlowNode: NodeRuntime<any> = {
   validate: (step) => {
@@ -18,6 +19,7 @@ export const executeFlowNode: NodeRuntime<any> = {
         args: s.args || {},
         returnLogs: false,
         tabId: ctx.tabId,
+        execution: ctx.execution,
       });
       return {} as ExecResult;
     }
@@ -59,19 +61,8 @@ export const executeFlowNode: NodeRuntime<any> = {
       while (true) {
         try {
           const beforeInfo = await (async () => {
-            if (typeof ctx.tabId === "number") {
-              const tab = await chrome.tabs.get(ctx.tabId).catch(() => null);
-              if (tab?.id) {
-                return { url: tab.url || "", status: (tab as any)?.status || "" };
-              }
-            }
-            const [tab] = await chrome.tabs.query({
-              active: true,
-              currentWindow: true,
-            });
-            if (typeof tab?.id === "number") {
-              ctx.tabId = tab.id;
-            }
+            const tabId = await resolveNodeTabId(ctx);
+            const tab = await chrome.tabs.get(tabId).catch(() => null);
             return { url: tab?.url || "", status: (tab as any)?.status || "" };
           })();
           const { executeStep } = await import("../nodes");

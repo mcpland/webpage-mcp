@@ -112,6 +112,20 @@ describe('LegacyStepExecutor', () => {
     expect(mockLegacyExecuteStep).toHaveBeenCalledWith(ctx, step);
   });
 
+  it('propagates the scheduler tabId into legacy ExecCtx', async () => {
+    const executor = new LegacyStepExecutor();
+    const ctx = createMockExecCtx({ tabId: 99 });
+    const step = createMockStep('fill');
+
+    await executor.execute(ctx, step, { tabId: 42 });
+
+    expect(ctx.tabId).toBe(42);
+    expect(mockLegacyExecuteStep).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 42 }),
+      step,
+    );
+  });
+
   it('returns executor type as legacy', async () => {
     const executor = new LegacyStepExecutor();
     const result = await executor.execute(createMockExecCtx(), createMockStep('click'), {
@@ -139,14 +153,16 @@ describe('HybridStepExecutor routing', () => {
     const config = createHybridConfig({ actionsAllowlist: new Set(['fill']) });
     const mockReg = createMockRegistry();
     const executor = new HybridStepExecutor(mockReg as any, config);
+    const ctx = createMockExecCtx({ tabId: 99 });
 
     await executor.execute(
-      createMockExecCtx(),
+      ctx,
       createMockStep('click', { target: { candidates: [] } }),
       { tabId: 1 },
     );
 
     expect(mockLegacyExecuteStep).toHaveBeenCalled();
+    expect(ctx.tabId).toBe(1);
   });
 
   it('returns legacy executor type for non-allowlisted types', async () => {

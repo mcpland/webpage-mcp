@@ -16,10 +16,12 @@ function extractToolText(result: unknown): string | undefined {
 export const handleDownloadNode: NodeRuntime<any> = {
   run: async (ctx, step) => {
     const s: any = expandTemplatesDeep(step as any, ctx.vars);
+    const tabId = await resolveNodeTabId(ctx);
     const args: any = {
       filenameContains: s.filenameContains || undefined,
       timeoutMs: Math.max(1000, Math.min(Number(s.timeoutMs ?? 60000), 300000)),
       waitForComplete: s.waitForComplete !== false,
+      tabId,
     };
     const res = await handleCallTool({ name: TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD, args });
     const text = (res as any)?.content?.find((c: any) => c.type === 'text')?.text;

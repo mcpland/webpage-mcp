@@ -2,21 +2,20 @@ import type { ExecCtx } from './types';
 
 /**
  * Resolve the runtime tab for a replay step.
- * Prefer the scheduler-provided ctx.tabId, then fall back to active tab.
+ * Legacy replay must use the scheduler-provided workflow tab. Falling back to
+ * the active tab makes background/currentTab/newTab execution depend on focus.
  */
 export async function resolveNodeTabId(ctx: ExecCtx): Promise<number> {
-  if (typeof ctx.tabId === 'number') {
-    const tab = await chrome.tabs.get(ctx.tabId).catch(() => null);
-    if (typeof tab?.id === 'number') {
-      return tab.id;
-    }
-    ctx.tabId = undefined;
+  if (typeof ctx.tabId !== 'number') {
+    throw new Error('Workflow tab is not set for legacy step execution');
   }
 
-  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (typeof active?.id !== 'number') {
-    throw new Error('Active tab not found');
+  const requestedTabId = ctx.tabId;
+  const tab = await chrome.tabs.get(requestedTabId).catch(() => null);
+  if (typeof tab?.id === 'number') {
+    return tab.id;
   }
-  ctx.tabId = active.id;
-  return active.id;
+
+  ctx.tabId = undefined;
+  throw new Error(`Workflow tab ${requestedTabId} not found`);
 }

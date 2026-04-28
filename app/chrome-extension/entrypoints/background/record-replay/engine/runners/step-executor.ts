@@ -70,18 +70,18 @@ export interface StepExecutorInterface {
  * Legacy step executor using nodes/executeStep
  *
  * This executor delegates to the existing node execution system.
- * The options parameter is accepted but not used - retry/timeout/navigation
- * waiting are handled by StepRunner to maintain existing behavior.
+ * retry/timeout/navigation waiting are handled by StepRunner to maintain
+ * existing behavior. The scheduler-owned tabId is written into ExecCtx before
+ * dispatch so legacy nodes use the workflow tab instead of rediscovering the
+ * active tab.
  */
 export class LegacyStepExecutor implements StepExecutorInterface {
   async execute(
     ctx: ExecCtx,
     step: Step,
-    _options: StepExecutionOptions,
+    options: StepExecutionOptions,
   ): Promise<StepExecutionResult> {
-    // Note: tabId from options is not used here because legacy executeStep
-    // queries the active tab internally. In hybrid/actions mode, tabId is
-    // passed through to ActionRegistry handlers.
+    ctx.tabId = options.tabId;
     const result = await legacyExecuteStep(ctx, step);
     return {
       result: result || {},
@@ -176,6 +176,7 @@ export class HybridStepExecutor implements StepExecutorInterface {
     // Check if step should use actions based on config
     if (!shouldUseActions(step, this.config)) {
       // Use legacy directly
+      ctx.tabId = options.tabId;
       const result = await legacyExecuteStep(ctx, step);
       return {
         result: result || {},
@@ -209,6 +210,7 @@ export class HybridStepExecutor implements StepExecutorInterface {
       });
     }
 
+    ctx.tabId = options.tabId;
     const legacyResult = await legacyExecuteStep(ctx, step);
     return {
       result: legacyResult || {},
