@@ -473,10 +473,6 @@ export default function WorkflowsView({
       const ok = await onDeleteTrigger(triggerId);
       if (ok && editingTriggerId === triggerId) {
         resetTriggerForm(selectedTriggerFlowId);
-      } else if (!ok) {
-        setTriggerFormError(
-          t("workflowsTriggerOperationFailed", "Trigger operation failed"),
-        );
       }
     } catch (error) {
       setTriggerFormError(formatError(error));
