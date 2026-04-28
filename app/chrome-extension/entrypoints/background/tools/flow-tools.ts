@@ -41,7 +41,8 @@ interface PublicAnalyzedNode {
   kind: FlowV3['nodes'][number]['kind'];
   name?: FlowV3['nodes'][number]['name'];
   disabled?: FlowV3['nodes'][number]['disabled'];
-  sideEffect: WorkflowSideEffectProfile;
+  executable?: boolean;
+  sideEffect?: WorkflowSideEffectProfile;
 }
 
 interface PublicAnalyzedFlow {
@@ -145,6 +146,17 @@ function getNodeSideEffectProfile(node: FlowV3['nodes'][number]): WorkflowSideEf
   return normalizeWorkflowNodeSideEffectProfile(node.kind, node.config, node.sideEffect);
 }
 
+function getPublicNodeExecutionMetadata(
+  node: FlowV3['nodes'][number],
+): Pick<PublicAnalyzedNode, 'executable' | 'sideEffect'> {
+  if (node.kind === 'trigger') {
+    return { executable: false };
+  }
+  return {
+    sideEffect: getNodeSideEffectProfile(node),
+  };
+}
+
 function summarizeWorkflowSideEffects(flow: FlowV3): WorkflowSideEffectSummary {
   const summary = createEmptyWorkflowSideEffectSummary();
   for (const node of Array.isArray(flow.nodes) ? flow.nodes : []) {
@@ -241,7 +253,7 @@ function sanitizeAnalyzedFlow(flow: FlowV3): PublicAnalyzedFlow {
           kind: node.kind,
           ...(node.name ? { name: node.name } : {}),
           ...(node.disabled === true ? { disabled: true } : {}),
-          sideEffect: getNodeSideEffectProfile(node),
+          ...getPublicNodeExecutionMetadata(node),
         }))
       : [],
     edges: Array.isArray(flow.edges) ? flow.edges.map((edge) => ({ ...edge })) : [],
@@ -376,7 +388,7 @@ function sanitizeDebugNodes(flow: FlowV3): WorkflowDebugNode[] {
     kind: node.kind,
     ...(node.name ? { name: node.name } : {}),
     ...(node.disabled === true ? { disabled: true } : {}),
-    sideEffect: getNodeSideEffectProfile(node),
+    ...getPublicNodeExecutionMetadata(node),
     ...(node.policy ? { policy: node.policy } : {}),
     config: sanitizeDebugConfig(node.config, sensitiveVariableNames),
   }));

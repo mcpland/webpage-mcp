@@ -396,6 +396,44 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(payload.flow.meta).not.toHaveProperty("stopBarrier");
   });
 
+  it("flowAnalyzeTool marks trigger nodes non-executable without side effects", async () => {
+    const flowId = `flow-analyze-trigger-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "trigger-1" as any,
+          kind: "trigger",
+          config: { enabled: true },
+        },
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { ms: 100 },
+        },
+      ]),
+    );
+
+    const result = await flowAnalyzeTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+    const triggerNode = payload.flow.nodes.find(
+      (node: { id: string }) => node.id === "trigger-1",
+    );
+    const waitNode = payload.flow.nodes.find(
+      (node: { id: string }) => node.id === "wait-1",
+    );
+
+    expect(triggerNode).toMatchObject({
+      id: "trigger-1",
+      kind: "trigger",
+      executable: false,
+    });
+    expect(triggerNode).not.toHaveProperty("sideEffect");
+    expect(waitNode.sideEffect).toMatchObject({
+      category: "safe",
+      retry: "default",
+    });
+  });
+
   it("workflowDebugViewTool returns sanitized node configs for a published workflow", async () => {
     const flowId = `workflow-debug-${Date.now()}`;
     const flow = createFlow(
@@ -507,6 +545,58 @@ describe("recording/editing/flow toolchain integration", () => {
       },
     ]);
     expect(payload.runs).toEqual([]);
+  });
+
+  it("workflowDebugViewTool marks trigger nodes non-executable without side effects", async () => {
+    const flowId = `workflow-debug-trigger-${Date.now()}`;
+    const flow = createFlow(
+      flowId,
+      [
+        {
+          id: "trigger-1" as any,
+          kind: "trigger",
+          config: { enabled: true },
+        },
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { ms: 100 },
+        },
+      ],
+      {
+        meta: {
+          tool: {
+            published: true,
+            slug: "debug-trigger-flow",
+          },
+        },
+      },
+    );
+    await createStoragePort().flows.save(flow);
+
+    const result = await workflowDebugViewTool.execute({
+      workflow: "debug-trigger-flow",
+      includeRuns: false,
+    });
+    const payload = parseToolPayload(result);
+    const triggerNode = payload.workflow.nodes.find(
+      (node: { id: string }) => node.id === "trigger-1",
+    );
+    const waitNode = payload.workflow.nodes.find(
+      (node: { id: string }) => node.id === "wait-1",
+    );
+
+    expect(triggerNode).toMatchObject({
+      id: "trigger-1",
+      kind: "trigger",
+      executable: false,
+      config: { enabled: true },
+    });
+    expect(triggerNode).not.toHaveProperty("sideEffect");
+    expect(waitNode.sideEffect).toMatchObject({
+      category: "safe",
+      retry: "default",
+    });
   });
 
   it("workflowDebugViewTool includes sanitized recent run failures", async () => {
