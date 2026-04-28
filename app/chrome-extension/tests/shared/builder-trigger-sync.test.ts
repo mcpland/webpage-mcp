@@ -99,6 +99,59 @@ describe("builder trigger sync", () => {
     );
   });
 
+  it("uses nested section enabled flags to opt into optional trigger modes", () => {
+    const triggers = buildBuilderTriggerSpecs({
+      id: "flow-1",
+      name: "Test Flow",
+      nodes: [
+        {
+          id: "trigger-1",
+          type: "trigger",
+          config: {
+            enabled: true,
+            modes: { manual: false },
+            contextMenu: { enabled: true, title: "Run from menu" },
+            command: { enabled: true, commandKey: "run-test-flow" },
+            dom: { enabled: true, selector: ".ready" },
+          },
+        },
+      ],
+    });
+
+    expect(triggers.map((trigger) => trigger.kind)).toEqual([
+      "contextMenu",
+      "command",
+      "dom",
+    ]);
+  });
+
+  it("lets nested section enabled flags suppress enabled trigger modes", () => {
+    const triggers = buildBuilderTriggerSpecs({
+      id: "flow-1",
+      name: "Test Flow",
+      nodes: [
+        {
+          id: "trigger-1",
+          type: "trigger",
+          config: {
+            enabled: true,
+            modes: {
+              manual: false,
+              contextMenu: true,
+              command: true,
+              dom: true,
+            },
+            contextMenu: { enabled: false, title: "Run from menu" },
+            command: { enabled: false, commandKey: "run-test-flow" },
+            dom: { enabled: false, selector: ".ready" },
+          },
+        },
+      ],
+    });
+
+    expect(triggers).toEqual([]);
+  });
+
   it("rejects URL trigger mode without a concrete URL rule", () => {
     expect(() =>
       buildBuilderTriggerSpecs({

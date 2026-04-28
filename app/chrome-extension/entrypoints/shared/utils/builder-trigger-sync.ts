@@ -27,6 +27,7 @@ type BuilderTriggerMode =
   | "command"
   | "dom"
   | "schedule";
+type BuilderTriggerSectionMode = "contextMenu" | "command" | "dom";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -68,6 +69,20 @@ function isModeEnabled(
   fallback: boolean,
 ): boolean {
   return readBoolean(modes[mode], fallback);
+}
+
+function isSectionModeEnabled(
+  config: Record<string, unknown>,
+  modes: Record<string, unknown>,
+  mode: BuilderTriggerSectionMode,
+  fallback: boolean,
+): boolean {
+  const section = asRecord(config[mode]);
+  const sectionEnabled = section?.enabled;
+  if (typeof sectionEnabled === "boolean") {
+    return sectionEnabled;
+  }
+  return isModeEnabled(modes, mode, fallback);
 }
 
 function sanitizeIdPart(value: string): string {
@@ -244,7 +259,7 @@ export function buildBuilderTriggerSpecs(
       } as TriggerSpec);
     }
 
-    if (isModeEnabled(modes, "contextMenu", false)) {
+    if (isSectionModeEnabled(config, modes, "contextMenu", false)) {
       const contextMenu = asRecord(config.contextMenu) || {};
       const title = readString(contextMenu.title) || flowName || "Run Workflow";
       specs.push({
@@ -255,7 +270,7 @@ export function buildBuilderTriggerSpecs(
       } as TriggerSpec);
     }
 
-    if (isModeEnabled(modes, "command", false)) {
+    if (isSectionModeEnabled(config, modes, "command", false)) {
       const command = asRecord(config.command) || {};
       const commandKey = readString(command.commandKey);
       if (!commandKey) {
@@ -270,7 +285,7 @@ export function buildBuilderTriggerSpecs(
       } as TriggerSpec);
     }
 
-    if (isModeEnabled(modes, "dom", false)) {
+    if (isSectionModeEnabled(config, modes, "dom", false)) {
       const dom = asRecord(config.dom) || {};
       const selector = readString(dom.selector);
       if (!selector) {
