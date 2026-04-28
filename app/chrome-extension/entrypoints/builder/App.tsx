@@ -20,7 +20,12 @@ import {
   extractFlowCandidates,
   mergeHiddenSensitiveVariables,
 } from "@/entrypoints/shared/utils";
+import {
+  buildBuilderTriggerSpecs,
+  isBuilderManagedTriggerForFlow,
+} from "@/entrypoints/shared/utils/builder-trigger-sync";
 import { getV3AuthoringCompatibility } from "@/entrypoints/shared/utils/v3-authoring";
+import type { TriggerSpec } from "@/entrypoints/background/record-replay-v3/domain/triggers";
 
 import { validateFlow } from "@/entrypoints/popup/components/builder/model/validation";
 import { useBuilderStore } from "@/entrypoints/popup/components/builder/store/useBuilderStore";
@@ -296,6 +301,7 @@ export default function BuilderApp() {
       const saved = (await rpc.request("rr_v3.saveFlow", {
         flow: flowToSave as unknown as JsonObject,
       })) as unknown as FlowV3;
+      await syncBuilderTriggers(flowV2, saved);
       hiddenSensitiveVariablesRef.current =
         extractHiddenSensitiveVariables(saved);
 
@@ -314,6 +320,42 @@ export default function BuilderApp() {
         "error",
       );
       return null;
+    }
+  }
+
+  async function syncBuilderTriggers(
+    flowV2: BuilderFlow,
+    savedFlow: FlowV3,
+  ): Promise<void> {
+    const desiredTriggers = buildBuilderTriggerSpecs(
+      flowV2,
+      savedFlow.id,
+      savedFlow.name,
+    );
+    const existingTriggers = ((await rpc.request("rr_v3.listTriggers", {
+      flowId: savedFlow.id as FlowId,
+    })) || []) as unknown as TriggerSpec[];
+    const existingById = new Map(
+      existingTriggers.map((trigger) => [trigger.id, trigger]),
+    );
+    const desiredIds = new Set(desiredTriggers.map((trigger) => trigger.id));
+
+    for (const trigger of existingTriggers) {
+      if (
+        isBuilderManagedTriggerForFlow(trigger, savedFlow.id) &&
+        !desiredIds.has(trigger.id)
+      ) {
+        await rpc.request("rr_v3.deleteTrigger", { triggerId: trigger.id });
+      }
+    }
+
+    for (const trigger of desiredTriggers) {
+      await rpc.request(
+        existingById.has(trigger.id)
+          ? "rr_v3.updateTrigger"
+          : "rr_v3.createTrigger",
+        { trigger: trigger as unknown as JsonObject },
+      );
     }
   }
 
