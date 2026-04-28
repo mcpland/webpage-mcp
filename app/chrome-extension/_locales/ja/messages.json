@@ -3143,6 +3143,10 @@
     "message": "走る",
     "description": "Auto-generated localized message"
   },
+  "workflowsTriggerOperationFailed": {
+    "message": "トリガー操作に失敗しました",
+    "description": "Auto-generated localized message"
+  },
   "workflowsTriggerInterval": {
     "message": "間隔",
     "description": "Auto-generated localized message"

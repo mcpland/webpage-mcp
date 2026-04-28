@@ -151,10 +151,33 @@ export interface UseWorkflowsV3ReactReturn {
   getFlowById: (flowId: string) => Promise<FlowV3 | null>;
   getRunEvents: (runId: string) => Promise<unknown[]>;
   createTrigger: (trigger: TriggerDraft) => Promise<TriggerSpec | null>;
-  updateTrigger: (trigger: TriggerDraft & { id: string }) => Promise<TriggerSpec | null>;
+  updateTrigger: (
+    trigger: TriggerDraft & { id: string },
+  ) => Promise<TriggerSpec | null>;
   deleteTrigger: (triggerId: string) => Promise<boolean>;
   setTriggerEnabled: (triggerId: string, enabled: boolean) => Promise<boolean>;
   fireTrigger: (triggerId: string) => Promise<{ runId: string } | null>;
+  clearError: () => void;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof (error as { message?: unknown }).message === "string"
+  ) {
+    return String((error as { message: string }).message);
+  }
+  return fallback;
+}
+
+function toError(error: unknown, fallback: string): Error {
+  return error instanceof Error
+    ? error
+    : new Error(errorMessage(error, fallback));
 }
 
 export function useWorkflowsV3React(
@@ -169,6 +192,16 @@ export function useWorkflowsV3React(
   const [flows, setFlows] = useState<FlowLite[]>([]);
   const [runs, setRuns] = useState<RunLite[]>([]);
   const [triggers, setTriggers] = useState<TriggerSpec[]>([]);
+
+  function clearError(): void {
+    setError(null);
+  }
+
+  function captureError(error: unknown, fallback: string): Error {
+    const normalized = toError(error, fallback);
+    setError(errorMessage(normalized, fallback));
+    return normalized;
+  }
 
   async function refreshFlows(): Promise<void> {
     try {
@@ -225,24 +258,24 @@ export function useWorkflowsV3React(
         ...(tabId !== undefined ? { tabId } : {}),
         tabTarget: "current",
       })) as { runId: RunId; position: number } | null;
+      clearError();
       void refreshRuns();
       return result ? { runId: result.runId } : null;
     } catch (err) {
       console.warn("[useWorkflowsV3React] Failed to run flow:", err);
-      setError(err instanceof Error ? err.message : String(err));
-      return null;
+      throw captureError(err, "Failed to run workflow");
     }
   }
 
   async function deleteFlow(flowId: string): Promise<boolean> {
     try {
       await rpc.request("rr_v3.deleteFlow", { flowId: flowId as FlowId });
+      clearError();
       void refreshFlows();
       return true;
     } catch (err) {
       console.warn("[useWorkflowsV3React] Failed to delete flow:", err);
-      setError(err instanceof Error ? err.message : String(err));
-      return false;
+      throw captureError(err, "Failed to delete workflow");
     }
   }
 
@@ -251,11 +284,11 @@ export function useWorkflowsV3React(
       const result = (await rpc.request("rr_v3.getFlow", {
         flowId: flowId as FlowId,
       })) as FlowV3 | null;
+      clearError();
       return result;
     } catch (err) {
       console.warn("[useWorkflowsV3React] Failed to export flow:", err);
-      setError(err instanceof Error ? err.message : String(err));
-      return null;
+      throw captureError(err, "Failed to export workflow");
     }
   }
 
@@ -264,12 +297,12 @@ export function useWorkflowsV3React(
       const result = (await rpc.request("rr_v3.saveFlow", {
         flow: flow as unknown as JsonObject,
       })) as FlowV3 | null;
+      clearError();
       void refreshFlows();
       return result;
     } catch (err) {
       console.warn("[useWorkflowsV3React] Failed to save flow:", err);
-      setError(err instanceof Error ? err.message : String(err));
-      return null;
+      throw captureError(err, "Failed to save workflow");
     }
   }
 
@@ -295,31 +328,35 @@ export function useWorkflowsV3React(
     }
   }
 
-  async function createTrigger(trigger: TriggerDraft): Promise<TriggerSpec | null> {
+  async function createTrigger(
+    trigger: TriggerDraft,
+  ): Promise<TriggerSpec | null> {
     try {
       const result = (await rpc.request("rr_v3.createTrigger", {
         trigger: trigger as unknown as JsonObject,
       })) as TriggerSpec | null;
+      clearError();
       void refreshTriggers();
       return result;
     } catch (err) {
       console.warn("[useWorkflowsV3React] Failed to create trigger:", err);
-      setError(err instanceof Error ? err.message : String(err));
-      return null;
+      throw captureError(err, "Failed to create trigger");
     }
   }
 
-  async function updateTrigger(trigger: TriggerDraft & { id: string }): Promise<TriggerSpec | null> {
+  async function updateTrigger(
+    trigger: TriggerDraft & { id: string },
+  ): Promise<TriggerSpec | null> {
     try {
       const result = (await rpc.request("rr_v3.updateTrigger", {
         trigger: trigger as unknown as JsonObject,
       })) as TriggerSpec | null;
+      clearError();
       void refreshTriggers();
       return result;
     } catch (err) {
       console.warn("[useWorkflowsV3React] Failed to update trigger:", err);
-      setError(err instanceof Error ? err.message : String(err));
-      return null;
+      throw captureError(err, "Failed to update trigger");
     }
   }
 
@@ -328,42 +365,53 @@ export function useWorkflowsV3React(
       await rpc.request("rr_v3.deleteTrigger", {
         triggerId: triggerId as TriggerId,
       });
+      clearError();
       void refreshTriggers();
       return true;
     } catch (err) {
       console.warn("[useWorkflowsV3React] Failed to delete trigger:", err);
-      setError(err instanceof Error ? err.message : String(err));
-      return false;
+      throw captureError(err, "Failed to delete trigger");
     }
   }
 
-  async function setTriggerEnabled(triggerId: string, enabled: boolean): Promise<boolean> {
+  async function setTriggerEnabled(
+    triggerId: string,
+    enabled: boolean,
+  ): Promise<boolean> {
     try {
-      await rpc.request(enabled ? "rr_v3.enableTrigger" : "rr_v3.disableTrigger", {
-        triggerId: triggerId as TriggerId,
-      });
+      await rpc.request(
+        enabled ? "rr_v3.enableTrigger" : "rr_v3.disableTrigger",
+        {
+          triggerId: triggerId as TriggerId,
+        },
+      );
+      clearError();
       void refreshTriggers();
       return true;
     } catch (err) {
-      console.warn("[useWorkflowsV3React] Failed to update trigger state:", err);
-      setError(err instanceof Error ? err.message : String(err));
-      return false;
+      console.warn(
+        "[useWorkflowsV3React] Failed to update trigger state:",
+        err,
+      );
+      throw captureError(err, "Failed to update trigger state");
     }
   }
 
-  async function fireTrigger(triggerId: string): Promise<{ runId: string } | null> {
+  async function fireTrigger(
+    triggerId: string,
+  ): Promise<{ runId: string } | null> {
     try {
       const triggerContext = await getActiveTriggerContext();
       const result = (await rpc.request("rr_v3.fireTrigger", {
         triggerId: triggerId as TriggerId,
         ...triggerContext,
       })) as { runId: RunId } | null;
+      clearError();
       void refreshRuns();
       return result ? { runId: result.runId } : null;
     } catch (err) {
       console.warn("[useWorkflowsV3React] Failed to fire trigger:", err);
-      setError(err instanceof Error ? err.message : String(err));
-      return null;
+      throw captureError(err, "Failed to run trigger");
     }
   }
 
@@ -435,5 +483,6 @@ export function useWorkflowsV3React(
     deleteTrigger,
     setTriggerEnabled,
     fireTrigger,
+    clearError,
   };
 }

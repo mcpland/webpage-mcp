@@ -73,6 +73,7 @@ export type WorkflowsViewProps = {
   recordingState: RecordingStateLite;
   timelineSteps: TimelineStepLite[];
   recordingAction: "start" | "stop" | null;
+  error?: string | null;
   onlyBound: boolean;
   openRunId: string | null;
   onRefresh: () => void;
@@ -91,6 +92,7 @@ export type WorkflowsViewProps = {
   onToggleTrigger: (id: string, enabled: boolean) => Promise<boolean> | boolean;
   onDeleteTrigger: (id: string) => Promise<boolean> | boolean;
   onFireTrigger: (id: string) => Promise<boolean> | boolean;
+  onDismissError?: () => void;
   onOnlyBoundChange: (value: boolean) => void;
   onToggleRun: (id: string) => void;
 };
@@ -207,6 +209,7 @@ export default function WorkflowsView({
   recordingState,
   timelineSteps,
   recordingAction,
+  error,
   onlyBound,
   openRunId,
   onRefresh,
@@ -223,6 +226,7 @@ export default function WorkflowsView({
   onToggleTrigger,
   onDeleteTrigger,
   onFireTrigger,
+  onDismissError,
   onOnlyBoundChange,
   onToggleRun,
 }: WorkflowsViewProps) {
@@ -318,6 +322,10 @@ export default function WorkflowsView({
     return parsed as JsonObject;
   }
 
+  function formatError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
   function parseContextMenuContexts(): string[] | undefined {
     const contexts = triggerForm.contextMenuContextsText
       .split(",")
@@ -365,9 +373,7 @@ export default function WorkflowsView({
   }
 
   function loadTriggerForEdit(trigger: TriggerSpec): void {
-    const argsText = trigger.args
-      ? JSON.stringify(trigger.args, null, 2)
-      : "";
+    const argsText = trigger.args ? JSON.stringify(trigger.args, null, 2) : "";
     const next = createDefaultTriggerForm(trigger.flowId);
     next.kind = trigger.kind;
     next.enabled = trigger.enabled;
@@ -452,16 +458,57 @@ export default function WorkflowsView({
         : await onCreateTrigger(draft);
       if (ok) {
         resetTriggerForm(selectedTriggerFlowId);
+      } else {
+        setTriggerFormError(
+          t("workflowsTriggerOperationFailed", "Trigger operation failed"),
+        );
       }
     } catch (error) {
-      setTriggerFormError(error instanceof Error ? error.message : String(error));
+      setTriggerFormError(formatError(error));
     }
   }
 
   async function deleteTriggerFromList(triggerId: string): Promise<void> {
-    const ok = await onDeleteTrigger(triggerId);
-    if (ok && editingTriggerId === triggerId) {
-      resetTriggerForm(selectedTriggerFlowId);
+    try {
+      const ok = await onDeleteTrigger(triggerId);
+      if (ok && editingTriggerId === triggerId) {
+        resetTriggerForm(selectedTriggerFlowId);
+      } else if (!ok) {
+        setTriggerFormError(
+          t("workflowsTriggerOperationFailed", "Trigger operation failed"),
+        );
+      }
+    } catch (error) {
+      setTriggerFormError(formatError(error));
+    }
+  }
+
+  async function toggleTriggerFromList(
+    triggerId: string,
+    enabled: boolean,
+  ): Promise<void> {
+    try {
+      const ok = await onToggleTrigger(triggerId, enabled);
+      if (!ok) {
+        setTriggerFormError(
+          t("workflowsTriggerOperationFailed", "Trigger operation failed"),
+        );
+      }
+    } catch (error) {
+      setTriggerFormError(formatError(error));
+    }
+  }
+
+  async function fireTriggerFromList(triggerId: string): Promise<void> {
+    try {
+      const ok = await onFireTrigger(triggerId);
+      if (!ok) {
+        setTriggerFormError(
+          t("workflowsTriggerOperationFailed", "Trigger operation failed"),
+        );
+      }
+    } catch (error) {
+      setTriggerFormError(formatError(error));
     }
   }
 
@@ -695,6 +742,17 @@ export default function WorkflowsView({
           </div>
         ) : null}
 
+        {error ? (
+          <div className="workflow-error-banner" role="alert">
+            <span>{error}</span>
+            {onDismissError ? (
+              <button type="button" onClick={onDismissError}>
+                {t("agentDismissTitle", "Dismiss")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="workflows-summary-row">
           <label
             className="flex items-center gap-2 text-sm cursor-pointer"
@@ -916,7 +974,9 @@ export default function WorkflowsView({
 
                     {triggerForm.kind === "interval" ? (
                       <label className="trigger-field">
-                        <span>{t("workflowsTriggerEvery", "Every minutes")}</span>
+                        <span>
+                          {t("workflowsTriggerEvery", "Every minutes")}
+                        </span>
                         <input
                           type="number"
                           min={1}
@@ -949,7 +1009,9 @@ export default function WorkflowsView({
 
                     {triggerForm.kind === "command" ? (
                       <label className="trigger-field trigger-field-wide">
-                        <span>{t("workflowsTriggerCommandKey", "Command key")}</span>
+                        <span>
+                          {t("workflowsTriggerCommandKey", "Command key")}
+                        </span>
                         <input
                           value={triggerForm.commandKey}
                           onChange={(event) =>
@@ -982,10 +1044,7 @@ export default function WorkflowsView({
                         </label>
                         <label className="trigger-field trigger-field-wide">
                           <span>
-                            {t(
-                              "workflowsTriggerContextScopes",
-                              "Contexts",
-                            )}
+                            {t("workflowsTriggerContextScopes", "Contexts")}
                           </span>
                           <input
                             value={triggerForm.contextMenuContextsText}
@@ -1005,7 +1064,9 @@ export default function WorkflowsView({
                     {triggerForm.kind === "dom" ? (
                       <>
                         <label className="trigger-field trigger-field-wide">
-                          <span>{t("workflowsTriggerDomSelector", "Selector")}</span>
+                          <span>
+                            {t("workflowsTriggerDomSelector", "Selector")}
+                          </span>
                           <input
                             value={triggerForm.domSelector}
                             onChange={(event) =>
@@ -1044,7 +1105,9 @@ export default function WorkflowsView({
                               }))
                             }
                           />
-                          <span>{t("workflowsTriggerDomAppear", "Appears")}</span>
+                          <span>
+                            {t("workflowsTriggerDomAppear", "Appears")}
+                          </span>
                         </label>
                         <label className="trigger-toggle">
                           <input
@@ -1097,7 +1160,10 @@ export default function WorkflowsView({
                   ) : null}
 
                   <div className="trigger-actions-row">
-                    <button type="button" onClick={() => void submitTriggerForm()}>
+                    <button
+                      type="button"
+                      onClick={() => void submitTriggerForm()}
+                    >
                       {editingTriggerId
                         ? t("workflowsTriggerSave", "Save trigger")
                         : t("workflowsTriggerCreate", "Create trigger")}
@@ -1128,7 +1194,9 @@ export default function WorkflowsView({
                         <div key={trigger.id} className="trigger-item">
                           <div className="trigger-item-main">
                             <div className="trigger-item-title">
-                              <span className="trigger-kind">{trigger.kind}</span>
+                              <span className="trigger-kind">
+                                {trigger.kind}
+                              </span>
                               <span>{getFlowName(trigger.flowId)}</span>
                             </div>
                             <div className="trigger-item-detail">
@@ -1140,7 +1208,9 @@ export default function WorkflowsView({
                               <button
                                 type="button"
                                 disabled={!trigger.enabled}
-                                onClick={() => void onFireTrigger(trigger.id)}
+                                onClick={() =>
+                                  void fireTriggerFromList(trigger.id)
+                                }
                               >
                                 {t("workflowsTriggerFire", "Run")}
                               </button>
@@ -1154,7 +1224,7 @@ export default function WorkflowsView({
                             <button
                               type="button"
                               onClick={() =>
-                                void onToggleTrigger(
+                                void toggleTriggerFromList(
                                   trigger.id,
                                   !trigger.enabled,
                                 )
@@ -1167,7 +1237,9 @@ export default function WorkflowsView({
                             <button
                               type="button"
                               className="trigger-danger"
-                              onClick={() => void deleteTriggerFromList(trigger.id)}
+                              onClick={() =>
+                                void deleteTriggerFromList(trigger.id)
+                              }
                             >
                               {t("workflowsDeleteAction", "Delete")}
                             </button>

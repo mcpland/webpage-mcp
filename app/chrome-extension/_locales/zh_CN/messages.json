@@ -3143,6 +3143,10 @@
     "message": "跑步",
     "description": "自动生成的 i18n 文案"
   },
+  "workflowsTriggerOperationFailed": {
+    "message": "触发器操作失败",
+    "description": "自动生成的 i18n 文案"
+  },
   "workflowsTriggerInterval": {
     "message": "间隔",
     "description": "自动生成的 i18n 文案"

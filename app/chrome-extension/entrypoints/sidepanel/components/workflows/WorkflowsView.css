@@ -64,6 +64,37 @@
   cursor: default;
 }
 
+.workflow-error-banner {
+  margin-top: 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border: var(--ac-border-width, 1px) solid rgba(220, 38, 38, 0.35);
+  border-radius: var(--ac-radius-button, 8px);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--ac-danger, #b91c1c);
+  padding: 9px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workflow-error-banner span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workflow-error-banner button {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0;
+}
+
 .recording-panel {
   margin-top: 10px;
   border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);

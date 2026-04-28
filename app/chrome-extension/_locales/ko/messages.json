@@ -3143,6 +3143,10 @@
     "message": "달리다",
     "description": "Auto-generated localized message"
   },
+  "workflowsTriggerOperationFailed": {
+    "message": "트리거 작업에 실패했습니다",
+    "description": "Auto-generated localized message"
+  },
   "workflowsTriggerInterval": {
     "message": "간격",
     "description": "Auto-generated localized message"

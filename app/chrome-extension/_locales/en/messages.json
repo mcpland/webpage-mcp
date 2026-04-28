@@ -3143,6 +3143,10 @@
     "message": "Run",
     "description": "Auto-generated i18n message"
   },
+  "workflowsTriggerOperationFailed": {
+    "message": "Trigger operation failed",
+    "description": "Auto-generated i18n message"
+  },
   "workflowsTriggerInterval": {
     "message": "Interval",
     "description": "Auto-generated i18n message"

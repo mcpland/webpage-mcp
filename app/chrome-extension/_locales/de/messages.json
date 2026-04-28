@@ -3143,6 +3143,10 @@
     "message": "Laufen",
     "description": "Auto-generated localized message"
   },
+  "workflowsTriggerOperationFailed": {
+    "message": "Trigger-Aktion fehlgeschlagen",
+    "description": "Auto-generated localized message"
+  },
   "workflowsTriggerInterval": {
     "message": "Intervall",
     "description": "Auto-generated localized message"

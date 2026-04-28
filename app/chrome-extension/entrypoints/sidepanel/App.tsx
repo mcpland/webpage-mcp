@@ -358,8 +358,8 @@ export default function SidepanelApp() {
       if (!result) {
         console.warn("Playback failed");
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn("Playback failed:", error);
     }
   }
 
@@ -397,8 +397,8 @@ export default function SidepanelApp() {
         return;
       }
       await workflows.deleteFlow(id);
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn("Failed to delete workflow:", error);
     }
   }
 
@@ -731,6 +731,7 @@ export default function SidepanelApp() {
     recordingState,
     timelineSteps,
     recordingAction,
+    error: workflows.error,
     onlyBound,
     openRunId,
     onRefresh: () => void handleWorkflowRefresh(),
@@ -749,6 +750,7 @@ export default function SidepanelApp() {
       toggleTrigger(id, enabled),
     onDeleteTrigger: (id: string) => deleteTrigger(id),
     onFireTrigger: (id: string) => fireTrigger(id),
+    onDismissError: workflows.clearError,
     onOnlyBoundChange: (value: boolean) => setOnlyBound(value),
     onToggleRun: (id: string) => toggleRun(id),
   };
