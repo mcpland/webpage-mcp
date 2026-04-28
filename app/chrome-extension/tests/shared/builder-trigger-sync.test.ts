@@ -1,11 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   buildBuilderTriggerSpecs,
   isBuilderManagedTriggerForFlow,
 } from "@/entrypoints/shared/utils/builder-trigger-sync";
+import { getNodeSpec } from "../../../../packages/shared/src/node-spec-registry";
+import { registerBuiltinSpecs } from "../../../../packages/shared/src/node-specs-builtin";
+import { STEP_TYPES } from "../../../../packages/shared/src/step-types";
 
 describe("builder trigger sync", () => {
+  beforeAll(() => {
+    registerBuiltinSpecs();
+  });
+
   it("turns a builder trigger node into a manual trigger by default", () => {
     const triggers = buildBuilderTriggerSpecs({
       id: "flow-1",
@@ -109,6 +116,21 @@ describe("builder trigger sync", () => {
         ],
       }),
     ).toThrow(/URL mode needs at least one URL rule/);
+  });
+
+  it("only exposes schedule types supported by builder trigger sync", () => {
+    const triggerSpec = getNodeSpec(STEP_TYPES.TRIGGER);
+    const schedulesField = triggerSpec?.schema.find(
+      (field) => field.key === "schedules",
+    ) as any;
+    const typeField = schedulesField?.item?.fields.find(
+      (field: any) => field.key === "type",
+    );
+
+    expect(typeField?.options.map((option: any) => option.value)).toEqual([
+      "once",
+      "interval",
+    ]);
   });
 
   it("recognizes only builder-managed triggers for the same flow", () => {

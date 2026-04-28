@@ -873,7 +873,6 @@ export function registerBuiltinSpecs() {
               options: [
                 { label: "Once", value: "once" },
                 { label: "Interval", value: "interval" },
-                { label: "Daily", value: "daily" },
               ] as any,
             },
             { key: "when", label: "Time (ISO)", type: "string" },
