@@ -79,6 +79,25 @@ function normalizeRetryMode(value: unknown): WorkflowRetryMode | undefined {
     : undefined;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isJsExtractConfig(config: unknown): boolean {
+  if (!isRecord(config)) {
+    return false;
+  }
+  const mode = typeof config.mode === 'string' ? config.mode.trim().toLowerCase() : '';
+  if (mode === 'js') {
+    return true;
+  }
+  if (mode === 'selector') {
+    return false;
+  }
+  const code = config.code ?? config.js ?? config.script ?? config.jsScript;
+  return typeof code === 'string' && code.trim().length > 0;
+}
+
 export function getDefaultWorkflowSideEffectProfile(kind: string): WorkflowSideEffectProfile {
   if (SAFE_QUERY_NODE_KINDS.has(kind)) {
     return {
@@ -108,6 +127,20 @@ export function getDefaultWorkflowSideEffectProfile(kind: string): WorkflowSideE
   };
 }
 
+export function getDefaultWorkflowNodeSideEffectProfile(
+  kind: string,
+  config?: unknown,
+): WorkflowSideEffectProfile {
+  if (kind === 'extract' && isJsExtractConfig(config)) {
+    return {
+      category: 'dangerous',
+      retry: 'explicit',
+      description: 'Executes custom JavaScript in the page; retry requires explicit opt-in.',
+    };
+  }
+  return getDefaultWorkflowSideEffectProfile(kind);
+}
+
 export function isKnownWorkflowSideEffectKind(kind: string): boolean {
   return (
     SAFE_QUERY_NODE_KINDS.has(kind) ||
@@ -116,11 +149,10 @@ export function isKnownWorkflowSideEffectKind(kind: string): boolean {
   );
 }
 
-export function normalizeWorkflowSideEffectProfile(
-  kind: string,
+function normalizeWorkflowSideEffectProfileFromBase(
+  base: WorkflowSideEffectProfile,
   override?: Partial<WorkflowSideEffectProfile>,
 ): WorkflowSideEffectProfile {
-  const base = getDefaultWorkflowSideEffectProfile(kind);
   const overrideCategory = normalizeCategory(override?.category);
   const category = overrideCategory ?? base.category;
   const retry =
@@ -139,6 +171,27 @@ export function normalizeWorkflowSideEffectProfile(
     retry,
     ...(description ? { description } : {}),
   };
+}
+
+export function normalizeWorkflowSideEffectProfile(
+  kind: string,
+  override?: Partial<WorkflowSideEffectProfile>,
+): WorkflowSideEffectProfile {
+  return normalizeWorkflowSideEffectProfileFromBase(
+    getDefaultWorkflowSideEffectProfile(kind),
+    override,
+  );
+}
+
+export function normalizeWorkflowNodeSideEffectProfile(
+  kind: string,
+  config?: unknown,
+  override?: Partial<WorkflowSideEffectProfile>,
+): WorkflowSideEffectProfile {
+  return normalizeWorkflowSideEffectProfileFromBase(
+    getDefaultWorkflowNodeSideEffectProfile(kind, config),
+    override,
+  );
 }
 
 export function workflowSideEffectAllowsRetry(

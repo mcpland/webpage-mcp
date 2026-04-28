@@ -62,7 +62,7 @@ import { resolveRunTargetTab } from "../../run-target";
 import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
 import type { ExecutionFlags } from "@/entrypoints/background/replay-actions";
 import {
-  normalizeWorkflowSideEffectProfile,
+  normalizeWorkflowNodeSideEffectProfile,
   type WorkflowSideEffectProfile,
 } from "webpage-mcp-shared";
 import {
@@ -954,6 +954,7 @@ export class RpcServer {
       node.sideEffect = this.normalizeNodeSideEffect(
         raw.sideEffect,
         kind,
+        node.config,
         index,
       );
     }
@@ -976,6 +977,7 @@ export class RpcServer {
   private normalizeNodeSideEffect(
     value: unknown,
     kind: string,
+    config: JsonObject,
     index: number,
   ): WorkflowSideEffectProfile {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -1023,7 +1025,7 @@ export class RpcServer {
       override.description = raw.description;
     }
 
-    return normalizeWorkflowSideEffectProfile(kind, override);
+    return normalizeWorkflowNodeSideEffectProfile(kind, config, override);
   }
 
   /**

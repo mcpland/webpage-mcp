@@ -32,7 +32,7 @@ import type {
   VariableStore,
 } from './types';
 import {
-  normalizeWorkflowSideEffectProfile,
+  normalizeWorkflowNodeSideEffectProfile,
   workflowSideEffectAllowsRetry,
 } from 'webpage-mcp-shared';
 
@@ -518,7 +518,11 @@ export class ActionRegistry {
 
     // Calculate retry and timeout parameters
     const requestedRetryPolicy = action.policy?.retry;
-    const sideEffectProfile = normalizeWorkflowSideEffectProfile(action.type, action.sideEffect);
+    const sideEffectProfile = normalizeWorkflowNodeSideEffectProfile(
+      action.type,
+      action.params,
+      action.sideEffect,
+    );
     const retryPolicy =
       requestedRetryPolicy && workflowSideEffectAllowsRetry(sideEffectProfile, 'node')
         ? requestedRetryPolicy

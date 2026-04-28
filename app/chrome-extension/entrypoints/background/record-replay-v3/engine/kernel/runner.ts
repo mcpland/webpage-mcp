@@ -20,7 +20,7 @@ import { RR_ERROR_CODES, createRRError, type RRError } from '../../domain/errors
 import type { NodePolicy, RetryPolicy } from '../../domain/policy';
 import { mergeNodePolicy } from '../../domain/policy';
 import {
-  normalizeWorkflowSideEffectProfile,
+  normalizeWorkflowNodeSideEffectProfile,
   workflowSideEffectAllowsRetry,
   type WorkflowRetrySource,
 } from 'webpage-mcp-shared';
@@ -849,7 +849,11 @@ class StorageBackedRunRunner implements RunRunner {
       return policy;
     }
 
-    const profile = normalizeWorkflowSideEffectProfile(node.kind, node.sideEffect);
+    const profile = normalizeWorkflowNodeSideEffectProfile(
+      node.kind,
+      node.config,
+      node.sideEffect,
+    );
     if (workflowSideEffectAllowsRetry(profile, retrySource)) {
       return policy;
     }

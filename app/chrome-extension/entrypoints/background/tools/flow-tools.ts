@@ -3,7 +3,7 @@ import {
   TOOL_NAMES,
   createEmptyWorkflowSideEffectSummary,
   isKnownWorkflowSideEffectKind,
-  normalizeWorkflowSideEffectProfile,
+  normalizeWorkflowNodeSideEffectProfile,
   workflowSideEffectAllowsRetry,
   type WorkflowSideEffectProfile,
   type WorkflowSideEffectSummary,
@@ -142,7 +142,7 @@ const DEFAULT_SAFE_RETRY_POLICY: RetryPolicy = {
 };
 
 function getNodeSideEffectProfile(node: FlowV3['nodes'][number]): WorkflowSideEffectProfile {
-  return normalizeWorkflowSideEffectProfile(node.kind, node.sideEffect);
+  return normalizeWorkflowNodeSideEffectProfile(node.kind, node.config, node.sideEffect);
 }
 
 function summarizeWorkflowSideEffects(flow: FlowV3): WorkflowSideEffectSummary {

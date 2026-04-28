@@ -5,7 +5,7 @@ import { isSensitiveVariableLike } from "./sensitive";
 import {
   createEmptyWorkflowSideEffectSummary,
   isKnownWorkflowSideEffectKind,
-  normalizeWorkflowSideEffectProfile,
+  normalizeWorkflowNodeSideEffectProfile,
   type WorkflowSideEffectProfile,
   type WorkflowSideEffectSummary,
 } from "webpage-mcp-shared";
@@ -248,7 +248,11 @@ export function buildWorkflowSideEffectDescriptor(flow: FlowV3): WorkflowSideEff
     (node) => node.kind !== "trigger",
   );
   const nodes = executableNodes.map((node) => {
-    const sideEffect = normalizeWorkflowSideEffectProfile(node.kind, node.sideEffect);
+    const sideEffect = normalizeWorkflowNodeSideEffectProfile(
+      node.kind,
+      node.config,
+      node.sideEffect,
+    );
     summary[sideEffect.category] += 1;
     if (!isKnownWorkflowSideEffectKind(node.kind)) summary.unknown += 1;
     return {

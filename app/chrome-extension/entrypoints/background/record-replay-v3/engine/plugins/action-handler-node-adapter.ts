@@ -28,7 +28,7 @@ import type { NodePolicy } from '../../domain/policy';
 import { mergeNodePolicy } from '../../domain/policy';
 import type { NodeV3 } from '../../domain/flow';
 import {
-  normalizeWorkflowSideEffectProfile,
+  normalizeWorkflowNodeSideEffectProfile,
   workflowSideEffectAllowsRetry,
   type WorkflowRetrySource,
 } from 'webpage-mcp-shared';
@@ -296,7 +296,11 @@ function applySideEffectRetryGuard(
     return policy;
   }
 
-  const profile = normalizeWorkflowSideEffectProfile(kind, node.sideEffect);
+  const profile = normalizeWorkflowNodeSideEffectProfile(
+    kind,
+    node.config,
+    node.sideEffect,
+  );
   if (workflowSideEffectAllowsRetry(profile, retrySource)) {
     return policy;
   }
@@ -377,7 +381,11 @@ export function adaptActionHandlerToNodeDefinition<T extends ExecutableActionTyp
         type: handler.type,
         ...(node.name ? { name: node.name } : {}),
         ...(node.disabled ? { disabled: true } : {}),
-        sideEffect: normalizeWorkflowSideEffectProfile(handler.type, node.sideEffect),
+        sideEffect: normalizeWorkflowNodeSideEffectProfile(
+          handler.type,
+          node.config,
+          node.sideEffect,
+        ),
         ...(actionPolicy ? { policy: actionPolicy } : {}),
         params: node.config as unknown as Action<T>['params'],
         ...(node.ui ? { ui: node.ui as Action<T>['ui'] } : {}),

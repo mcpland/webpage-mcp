@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  normalizeWorkflowNodeSideEffectProfile,
   normalizeWorkflowSideEffectProfile,
   workflowSideEffectAllowsRetry,
 } from "../../../../packages/shared/src/workflow-side-effects";
@@ -41,5 +42,46 @@ describe("workflow side-effect profiles", () => {
       retry: "never",
     });
     expect(workflowSideEffectAllowsRetry(profile, "node")).toBe(false);
+  });
+
+  it("classifies JavaScript extract nodes as dangerous by default", () => {
+    const profile = normalizeWorkflowNodeSideEffectProfile("extract", {
+      mode: "js",
+      code: "localStorage.setItem('sent', '1'); return document.title;",
+    });
+
+    expect(profile).toMatchObject({
+      category: "dangerous",
+      retry: "explicit",
+    });
+    expect(workflowSideEffectAllowsRetry(profile, "flowDefault")).toBe(false);
+  });
+
+  it("keeps selector extract nodes flow-default retryable", () => {
+    const profile = normalizeWorkflowNodeSideEffectProfile("extract", {
+      mode: "selector",
+      selector: "#price",
+      attr: "textContent",
+    });
+
+    expect(profile).toMatchObject({
+      category: "safe",
+      retry: "default",
+    });
+    expect(workflowSideEffectAllowsRetry(profile, "flowDefault")).toBe(true);
+  });
+
+  it("allows explicit side-effect overrides for JavaScript extract nodes", () => {
+    const profile = normalizeWorkflowNodeSideEffectProfile(
+      "extract",
+      { mode: "js", code: "return window.__stableRead;" },
+      { category: "safe" },
+    );
+
+    expect(profile).toMatchObject({
+      category: "safe",
+      retry: "default",
+    });
+    expect(workflowSideEffectAllowsRetry(profile, "flowDefault")).toBe(true);
   });
 });

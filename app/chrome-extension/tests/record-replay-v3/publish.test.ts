@@ -168,6 +168,40 @@ describe('listPublishedFlowDetails', () => {
       'navigate',
     ]);
   });
+
+  it('classifies JavaScript extract nodes as dangerous in side-effect metadata', () => {
+    const flow = createPublishedFlow();
+    flow.nodes = [
+      {
+        id: 'extract-1' as any,
+        kind: 'extract',
+        config: {
+          mode: 'js',
+          code: "localStorage.setItem('replayed', '1'); return document.title;",
+          saveAs: 'title',
+        },
+      },
+    ];
+
+    const [details] = listPublishedFlowDetails([flow]);
+
+    expect(details.sideEffects.summary).toEqual({
+      safe: 0,
+      idempotent: 0,
+      dangerous: 1,
+      unknown: 0,
+    });
+    expect(details.sideEffects.nodes[0]).toEqual(
+      expect.objectContaining({
+        id: 'extract-1',
+        kind: 'extract',
+        sideEffect: expect.objectContaining({
+          category: 'dangerous',
+          retry: 'explicit',
+        }),
+      }),
+    );
+  });
 });
 
 describe('buildWorkflowBackgroundSupport', () => {

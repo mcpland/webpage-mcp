@@ -946,6 +946,50 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(clickNode?.policy?.retry).toBeUndefined();
   });
 
+  it("workflowRepairTool does not add automatic retry to JavaScript extract nodes", async () => {
+    const flowId = `workflow-repair-js-extract-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "extract-1" as any,
+            kind: "extract",
+            config: {
+              mode: "js",
+              code: "localStorage.setItem('submit', 'again'); return document.title;",
+              saveAs: "title",
+            },
+          },
+        ],
+      ),
+    );
+
+    const result = await workflowRepairTool.execute({
+      flowId,
+      apply: true,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+    const extractNode = updated?.nodes.find((node) => node.id === "extract-1");
+    const changeCodes = payload.changes.map((change: { code: string }) => change.code);
+    const beforeApplyCodes = new Set(
+      payload.recommendationsBeforeApply.map(
+        (recommendation: { code: string }) => recommendation.code,
+      ),
+    );
+
+    expect(payload).toMatchObject({
+      success: true,
+      flowId,
+      applied: true,
+      updated: true,
+    });
+    expect(beforeApplyCodes.has("missing_default_retry_policy")).toBe(false);
+    expect(changeCodes).not.toContain("default_retry_added");
+    expect(extractNode?.policy?.retry).toBeUndefined();
+  });
+
   it("workflowRepairTool marks inferred sensitive parameter variables", async () => {
     const flowId = `workflow-repair-sensitive-${Date.now()}`;
     await createStoragePort().flows.save(
