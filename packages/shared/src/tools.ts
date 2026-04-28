@@ -48,6 +48,7 @@ export const TOOL_NAMES = {
     RECORDING_STATUS: 'recording_status',
     FLOW_ANALYZE: 'flow_analyze',
     FLOW_UPDATE: 'flow_update',
+    WORKFLOW_DESCRIBE: 'workflow_describe',
     WORKFLOW_DEBUG_VIEW: 'workflow_debug_view',
     WORKFLOW_REPAIR: 'workflow_repair',
   },
@@ -212,9 +213,28 @@ export const TOOL_SCHEMAS: Tool[] = [
     },
   },
   {
+    name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DESCRIBE,
+    description:
+      'Describe a recorded or published workflow for agent use, including parameter schema, example args, background support, side-effect summary, outputs, and quality hints.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Flow ID to describe. Either flowId or workflow is required.',
+        },
+        workflow: {
+          type: 'string',
+          description: 'Published workflow slug to describe. Either workflow or flowId is required.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
     description:
-      'Return a safe debug view for a recorded or published workflow, including sanitized node configs, quality hints, and recent run events.',
+      'Return a safe debug view for a recorded or published workflow, including descriptor metadata, sanitized node configs, quality hints, and recent run events.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -271,7 +291,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR,
     description:
-      'Diagnose workflow replay stability and optionally apply low-risk repair actions such as parameterizing recorded literals and adding default retry/timeout policy.',
+      'Diagnose workflow replay stability and optionally apply low-risk repair actions such as parameterizing recorded literals, adding timeout/failure screenshots, and scoping retry to safe read/query steps.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -308,7 +328,7 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'boolean',
           default: true,
           description:
-            'Add missing default retry/timeout/on-failure screenshot policy when apply is true.',
+            'Add missing timeout/on-failure screenshots and side-effect-scoped retry for safe read/query nodes when apply is true.',
         },
         maxRuns: {
           type: 'number',
@@ -336,7 +356,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         flowId: { type: 'string', description: 'ID of the flow to run' },
         args: {
           type: 'object',
-          description: 'Variable values for the flow (flat object of key/value)',
+          description:
+            'Variable values for the flow (flat object of key/value). Use workflow_describe or record_replay_list_published to inspect the parameter schema and example args.',
         },
         tabId: {
           type: 'number',
@@ -369,7 +390,8 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED,
-    description: 'List published flows available as dynamic tools (for discovery).',
+    description:
+      'List published flows available as dynamic tools, including parameter schema, example args, background support, side-effect metadata, and outputs.',
     inputSchema: {
       type: 'object',
       properties: {},

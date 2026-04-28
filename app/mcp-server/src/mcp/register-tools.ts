@@ -32,11 +32,40 @@ interface PublishedFlowVariable {
   };
 }
 
+interface PublishedFlowParameterSchema {
+  type?: string;
+  properties?: Record<string, Record<string, unknown>>;
+  required?: string[];
+  additionalProperties?: boolean;
+}
+
+interface PublishedFlowBackgroundSupport {
+  supported?: boolean;
+  modes?: string[];
+  caveats?: string[];
+}
+
+interface PublishedFlowSideEffectSummary {
+  safe?: number;
+  idempotent?: number;
+  dangerous?: number;
+  unknown?: number;
+}
+
+interface PublishedFlowSideEffects {
+  summary?: PublishedFlowSideEffectSummary;
+}
+
 interface PublishedFlow {
   id: string;
   slug: string;
   description?: string;
   variables?: PublishedFlowVariable[];
+  parameters?: PublishedFlowParameterSchema;
+  exampleArgs?: Record<string, unknown>;
+  backgroundSupport?: PublishedFlowBackgroundSupport;
+  sideEffects?: PublishedFlowSideEffects;
+  outputs?: Array<Record<string, unknown>>;
   meta?: {
     tool?: {
       description?: string;
@@ -124,6 +153,25 @@ function normalizePublishedFlows(response: any): PublishedFlow[] {
       slug: item.slug,
       description: item.description,
       variables: Array.isArray(item.variables) ? item.variables : [],
+      parameters:
+        item.parameters && typeof item.parameters === 'object' && !Array.isArray(item.parameters)
+          ? item.parameters
+          : undefined,
+      exampleArgs:
+        item.exampleArgs && typeof item.exampleArgs === 'object' && !Array.isArray(item.exampleArgs)
+          ? item.exampleArgs
+          : undefined,
+      backgroundSupport:
+        item.backgroundSupport &&
+        typeof item.backgroundSupport === 'object' &&
+        !Array.isArray(item.backgroundSupport)
+          ? item.backgroundSupport
+          : undefined,
+      sideEffects:
+        item.sideEffects && typeof item.sideEffects === 'object' && !Array.isArray(item.sideEffects)
+          ? item.sideEffects
+          : undefined,
+      outputs: Array.isArray(item.outputs) ? item.outputs : undefined,
       meta: item.meta,
     }));
 }
@@ -171,6 +219,47 @@ function getDynamicToolVariables(
     const variableName = getPublishedVariableName(variable);
     return typeof variableName === 'string' && variableName.length > 0 && !RUN_OPTION_KEY_SET.has(variableName);
   });
+}
+
+function getSchemaParameterNames(parameters: PublishedFlowParameterSchema | undefined): string[] {
+  if (!parameters?.properties || typeof parameters.properties !== 'object') {
+    return [];
+  }
+  return Object.keys(parameters.properties).filter((name) => name.length > 0);
+}
+
+function getReservedDynamicToolParameterNames(item: PublishedFlow): string[] {
+  const names = new Set<string>(getReservedDynamicToolVariableNames(item.variables));
+  for (const name of getSchemaParameterNames(item.parameters)) {
+    if (RUN_OPTION_KEY_SET.has(name)) {
+      names.add(name);
+    }
+  }
+  return Array.from(names);
+}
+
+function buildDynamicToolParameterSchemaFromDescriptor(
+  item: PublishedFlow,
+): { properties: Record<string, any>; required: string[] } | null {
+  const schema = item.parameters;
+  if (!schema?.properties || typeof schema.properties !== 'object') {
+    return null;
+  }
+
+  const properties: Record<string, any> = {};
+  for (const [name, value] of Object.entries(schema.properties)) {
+    if (!name || RUN_OPTION_KEY_SET.has(name)) {
+      continue;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      properties[name] = { ...value };
+    }
+  }
+
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((name) => typeof name === 'string' && name in properties)
+    : [];
+  return { properties, required };
 }
 
 function inferVariableType(variable: PublishedFlowVariable): string {
@@ -349,7 +438,19 @@ function getWorkflowSummary(items: PublishedFlow[]): string {
     .slice(0, 50)
     .map((item) => {
       const description = (item.meta && item.meta.tool && item.meta.tool.description) || item.description || '';
-      return description ? `${item.slug}: ${description}` : item.slug;
+      const sideEffects = item.sideEffects?.summary;
+      const effectSummary = sideEffects
+        ? ` [side effects: safe ${sideEffects.safe ?? 0}, idempotent ${sideEffects.idempotent ?? 0}, dangerous ${sideEffects.dangerous ?? 0}]`
+        : '';
+      const background =
+        item.backgroundSupport?.supported === false
+          ? ' [background: no]'
+          : item.backgroundSupport?.supported === true
+            ? ' [background: yes]'
+            : '';
+      return description
+        ? `${item.slug}: ${description}${background}${effectSummary}`
+        : `${item.slug}${background}${effectSummary}`;
     })
     .join('\n');
   return workflows || 'No published workflows were discovered for this browser session.';
@@ -359,7 +460,8 @@ function buildWorkflowRunTool(items: PublishedFlow[]): Tool {
   const workflowSlugs = items.map((item) => item.slug).filter((slug) => slug.length > 0);
   const workflowProperty: Record<string, unknown> = {
     type: 'string',
-    description: 'Published workflow slug to run. Use record_replay_list_published for full metadata.',
+    description:
+      'Published workflow slug to run. Use workflow_describe or record_replay_list_published for parameter schema, examples, background support, and side-effect metadata.',
   };
   if (workflowSlugs.length > 0) {
     workflowProperty.enum = workflowSlugs;
@@ -367,7 +469,7 @@ function buildWorkflowRunTool(items: PublishedFlow[]): Tool {
 
   return {
     name: WORKFLOW_RUN_TOOL_NAME,
-    description: `Run a published workflow by slug using a compact schema. Available workflows:\n${getWorkflowSummary(items)}`,
+    description: `Run a published workflow by slug using a compact schema. Use workflow_describe before running when you need exact args or side-effect/background details. Available workflows:\n${getWorkflowSummary(items)}`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -441,25 +543,39 @@ async function listDynamicFlowTools(ctx: McpToolContext, publishedFlows?: Publis
   const tools: Tool[] = [];
   for (const item of items) {
     const name = `flow.${item.slug}`;
-    const reservedVariableNames = getReservedDynamicToolVariableNames(item.variables);
+    const reservedVariableNames = getReservedDynamicToolParameterNames(item);
     const descriptionBase =
       (item.meta && item.meta.tool && item.meta.tool.description) ||
       item.description ||
       'Recorded flow';
+    const sideEffects = item.sideEffects?.summary;
+    const backgroundSupport =
+      item.backgroundSupport?.supported === true
+        ? 'Background execution: supported.'
+        : item.backgroundSupport?.supported === false
+          ? `Background execution: not supported${item.backgroundSupport.caveats?.length ? ` (${item.backgroundSupport.caveats.join('; ')})` : ''}.`
+          : '';
+    const sideEffectDescription = sideEffects
+      ? `Side effects: safe ${sideEffects.safe ?? 0}, idempotent ${sideEffects.idempotent ?? 0}, dangerous ${sideEffects.dangerous ?? 0}, unknown ${sideEffects.unknown ?? 0}.`
+      : '';
+    const descriptionParts = [descriptionBase, backgroundSupport, sideEffectDescription].filter(Boolean);
     const description =
       reservedVariableNames.length > 0
-        ? `${descriptionBase} Reserved dynamic tool parameter names are ignored as flow variables: ${reservedVariableNames.join(', ')}. Use record_replay_flow_run with args for those values.`
-        : descriptionBase;
-    const properties: Record<string, any> = {};
-    const required: string[] = [];
-    for (const v of getDynamicToolVariables(item.variables)) {
-      const variableName = getPublishedVariableName(v);
-      if (!variableName) {
-        continue;
+        ? `${descriptionParts.join(' ')} Reserved dynamic tool parameter names are ignored as flow variables: ${reservedVariableNames.join(', ')}. Use record_replay_flow_run with args for those values.`
+        : descriptionParts.join(' ');
+    const descriptorSchema = buildDynamicToolParameterSchemaFromDescriptor(item);
+    const properties: Record<string, any> = descriptorSchema?.properties ?? {};
+    const required: string[] = descriptorSchema?.required ?? [];
+    if (!descriptorSchema) {
+      for (const v of getDynamicToolVariables(item.variables)) {
+        const variableName = getPublishedVariableName(v);
+        if (!variableName) {
+          continue;
+        }
+        const prop = buildVariableSchema(v, variableName);
+        if (isPublishedVariableRequired(v)) required.push(variableName);
+        properties[variableName] = prop;
       }
-      const prop = buildVariableSchema(v, variableName);
-      if (isPublishedVariableRequired(v)) required.push(variableName);
-      properties[variableName] = prop;
     }
     // Run options
     if (!properties['tabTarget'])

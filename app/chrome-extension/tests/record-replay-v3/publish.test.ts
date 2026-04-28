@@ -66,7 +66,7 @@ describe('listPublishedFlowDetails', () => {
     const details = listPublishedFlowDetails([createPublishedFlow()]);
 
     expect(details).toEqual([
-      {
+      expect.objectContaining({
         id: 'flow-sensitive',
         slug: 'sensitive-flow',
         version: 3,
@@ -89,7 +89,52 @@ describe('listPublishedFlowDetails', () => {
             item: 'number',
           },
         ],
-      },
+        parameters: expect.objectContaining({
+          type: 'object',
+          additionalProperties: false,
+          properties: expect.objectContaining({
+            email: expect.objectContaining({
+              type: 'string',
+              title: 'Email',
+              default: 'alice@example.com',
+            }),
+            plan: expect.objectContaining({
+              type: 'string',
+              enum: ['free', 'pro'],
+            }),
+            scores: expect.objectContaining({
+              type: 'array',
+              items: { type: 'number' },
+            }),
+            apiToken: expect.not.objectContaining({ default: 'super-secret-token' }),
+            metadata: expect.not.objectContaining({
+              default: { headers: { authorization: 'Bearer opaque-value' } },
+            }),
+          }),
+        }),
+        exampleArgs: expect.objectContaining({
+          email: 'alice@example.com',
+          plan: 'free',
+          scores: [],
+          apiToken: '<apiToken>',
+          sessionToken: '<sessionToken>',
+          apiKey: '<apiKey>',
+          metadata: '<metadata>',
+        }),
+        backgroundSupport: {
+          supported: true,
+          modes: ['currentTab', 'newTab', 'background'],
+          caveats: [],
+        },
+        sideEffects: expect.objectContaining({
+          summary: {
+            safe: 0,
+            idempotent: 1,
+            dangerous: 0,
+            unknown: 0,
+          },
+        }),
+      }),
     ]);
   });
 });

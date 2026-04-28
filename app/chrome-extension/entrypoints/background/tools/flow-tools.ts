@@ -16,7 +16,7 @@ import { RR_ERROR_CODES } from '../record-replay-v3/domain/errors';
 import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variables';
 import { createStoragePort } from '../record-replay-v3';
 import { saveFlowToV3 } from '../record-replay-v3/compat';
-import { getPublishedFlowInfo } from '../record-replay-v3/flows/publish';
+import { buildWorkflowToolDescriptor, getPublishedFlowInfo } from '../record-replay-v3/flows/publish';
 import {
   containsSensitiveValue,
   getVariableLikeName,
@@ -920,6 +920,7 @@ class FlowAnalyzeTool {
 
     const hints = collectFlowHints(flow);
     const sanitizedFlow = sanitizeAnalyzedFlow(flow);
+    const descriptor = buildWorkflowToolDescriptor(flow);
     return {
       content: [
         {
@@ -935,9 +936,61 @@ class FlowAnalyzeTool {
                 ? sanitizedFlow.variables.length
                 : 0,
               hintCount: hints.length,
+              sideEffects: descriptor.sideEffects.summary,
             },
             hints,
+            descriptor,
             flow: sanitizedFlow,
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+}
+
+class WorkflowDescribeTool {
+  name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DESCRIBE;
+
+  async execute(args: any): Promise<ToolResult> {
+    const requestedFlowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+    const requestedWorkflow = typeof args?.workflow === 'string' ? args.workflow.trim() : '';
+    if (!requestedFlowId && !requestedWorkflow) {
+      return createErrorResponse('flowId or workflow is required');
+    }
+
+    const flow = await resolveFlowForWorkflowTool(args);
+    if (!flow) {
+      return createErrorResponse(
+        requestedFlowId
+          ? `Flow not found: ${requestedFlowId}`
+          : `Published workflow not found: ${requestedWorkflow}`,
+      );
+    }
+
+    const publishedInfo = getPublishedFlowInfo(flow);
+    const descriptor = buildWorkflowToolDescriptor(flow);
+    const hints = collectFlowHints(flow);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            flowId: flow.id,
+            workflow: publishedInfo?.slug,
+            name: flow.name,
+            description: publishedInfo?.description ?? flow.description,
+            category: publishedInfo?.category,
+            runTool: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
+            runArgs: {
+              flowId: flow.id,
+              args: descriptor.exampleArgs,
+              tabTarget: 'current',
+              ...(descriptor.backgroundSupport.supported ? { background: true } : {}),
+            },
+            descriptor,
+            hints,
           }),
         },
       ],
@@ -968,6 +1021,7 @@ class WorkflowDebugViewTool {
     const publishedInfo = getPublishedFlowInfo(flow);
     const hints = collectFlowHints(flow);
     const runs = await collectDebugRuns(flow, args);
+    const descriptor = buildWorkflowToolDescriptor(flow);
 
     return {
       content: [
@@ -984,8 +1038,10 @@ class WorkflowDebugViewTool {
               variableCount: Array.isArray(flow.variables) ? flow.variables.length : 0,
               hintCount: hints.length,
               runCount: runs.length,
+              sideEffects: descriptor.sideEffects.summary,
             },
             hints,
+            descriptor,
             workflow: {
               id: flow.id,
               slug: publishedInfo?.slug,
@@ -1207,5 +1263,6 @@ class FlowUpdateTool {
 
 export const flowAnalyzeTool = new FlowAnalyzeTool();
 export const flowUpdateTool = new FlowUpdateTool();
+export const workflowDescribeTool = new WorkflowDescribeTool();
 export const workflowDebugViewTool = new WorkflowDebugViewTool();
 export const workflowRepairTool = new WorkflowRepairTool();

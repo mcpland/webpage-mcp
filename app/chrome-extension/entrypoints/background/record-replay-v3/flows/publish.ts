@@ -2,6 +2,13 @@ import type { FlowId } from "../domain/ids";
 import type { FlowMeta, FlowToolMetadata, FlowV3 } from "../domain/flow";
 import { FLOW_SCHEMA_VERSION } from "../domain/flow";
 import { isSensitiveVariableLike } from "./sensitive";
+import {
+  createEmptyWorkflowSideEffectSummary,
+  isKnownWorkflowSideEffectKind,
+  normalizeWorkflowSideEffectProfile,
+  type WorkflowSideEffectProfile,
+  type WorkflowSideEffectSummary,
+} from "webpage-mcp-shared";
 
 export interface PublishedFlowInfoV3 {
   id: FlowId;
@@ -14,6 +21,41 @@ export interface PublishedFlowInfoV3 {
 
 export interface PublishedFlowDetailsV3 extends PublishedFlowInfoV3 {
   variables?: FlowV3["variables"];
+  parameters: WorkflowParameterSchema;
+  exampleArgs: Record<string, unknown>;
+  backgroundSupport: WorkflowBackgroundSupport;
+  sideEffects: WorkflowSideEffectDescriptor;
+  outputs?: NonNullable<FlowV3["meta"]>["exposedOutputs"];
+}
+
+export interface WorkflowParameterSchema {
+  type: "object";
+  properties: Record<string, Record<string, unknown>>;
+  required: string[];
+  additionalProperties: boolean;
+}
+
+export interface WorkflowBackgroundSupport {
+  supported: boolean;
+  modes: Array<"currentTab" | "newTab" | "background">;
+  caveats: string[];
+}
+
+export interface WorkflowSideEffectDescriptor {
+  summary: WorkflowSideEffectSummary;
+  nodes: Array<{
+    id: string;
+    kind: string;
+    sideEffect: WorkflowSideEffectProfile;
+  }>;
+}
+
+export interface WorkflowToolDescriptor {
+  parameters: WorkflowParameterSchema;
+  exampleArgs: Record<string, unknown>;
+  backgroundSupport: WorkflowBackgroundSupport;
+  sideEffects: WorkflowSideEffectDescriptor;
+  outputs?: NonNullable<FlowV3["meta"]>["exposedOutputs"];
 }
 
 export const TOOL_SLUG_MAX_LENGTH = 64;
@@ -112,6 +154,140 @@ function sanitizePublishedVariables(
   return sanitized.length > 0 ? sanitized : undefined;
 }
 
+function inferVariableKind(variable: NonNullable<FlowV3["variables"]>[number]): string {
+  if (variable.kind) return variable.kind;
+  if (typeof variable.default === "number") return "number";
+  if (typeof variable.default === "boolean") return "boolean";
+  if (Array.isArray(variable.default)) return "array";
+  if (variable.default && typeof variable.default === "object") return "json";
+  return "string";
+}
+
+function schemaForVariable(
+  variable: NonNullable<FlowV3["variables"]>[number],
+): Record<string, unknown> {
+  const kind = inferVariableKind(variable);
+  const sensitive = isSensitiveVariableLike(variable);
+  const schema: Record<string, unknown> = {
+    type:
+      kind === "number"
+        ? "number"
+        : kind === "boolean"
+          ? "boolean"
+          : kind === "array"
+            ? "array"
+            : kind === "json"
+              ? ["object", "array", "string", "number", "boolean", "null"]
+              : "string",
+  };
+  if (variable.label) schema.title = variable.label;
+  if (variable.description) schema.description = variable.description;
+  if (sensitive) {
+    schema.description = [schema.description, "Sensitive value; default is not exposed."]
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (kind === "enum" && Array.isArray(variable.options) && variable.options.length > 0) {
+    schema.enum = variable.options;
+  }
+  if (kind === "array" && variable.item) {
+    schema.items = { type: variable.item === "json" ? "object" : variable.item };
+  }
+  if (!sensitive && variable.default !== undefined) {
+    schema.default = variable.default;
+  }
+  return schema;
+}
+
+export function buildWorkflowParameterSchema(flow: FlowV3): WorkflowParameterSchema {
+  const properties: WorkflowParameterSchema["properties"] = {};
+  const required: string[] = [];
+  for (const variable of flow.variables || []) {
+    if (!variable?.name) continue;
+    properties[variable.name] = schemaForVariable(variable);
+    if (variable.required === true && variable.default === undefined) {
+      required.push(variable.name);
+    }
+  }
+  return {
+    type: "object",
+    properties,
+    required,
+    additionalProperties: false,
+  };
+}
+
+export function buildWorkflowExampleArgs(flow: FlowV3): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+  for (const variable of flow.variables || []) {
+    if (!variable?.name) continue;
+    if (isSensitiveVariableLike(variable)) {
+      args[variable.name] = `<${variable.name}>`;
+    } else if (variable.default !== undefined) {
+      args[variable.name] = variable.default;
+    } else if (variable.kind === "number") {
+      args[variable.name] = 1;
+    } else if (variable.kind === "boolean") {
+      args[variable.name] = true;
+    } else if (variable.kind === "array") {
+      args[variable.name] = [];
+    } else if (variable.kind === "json") {
+      args[variable.name] = {};
+    } else if (variable.kind === "enum" && Array.isArray(variable.options) && variable.options.length > 0) {
+      args[variable.name] = variable.options[0];
+    } else {
+      args[variable.name] = `<${variable.name}>`;
+    }
+  }
+  return args;
+}
+
+export function buildWorkflowSideEffectDescriptor(flow: FlowV3): WorkflowSideEffectDescriptor {
+  const summary = createEmptyWorkflowSideEffectSummary();
+  const nodes = (Array.isArray(flow.nodes) ? flow.nodes : []).map((node) => {
+    const sideEffect = normalizeWorkflowSideEffectProfile(node.kind, node.sideEffect);
+    summary[sideEffect.category] += 1;
+    if (!isKnownWorkflowSideEffectKind(node.kind)) summary.unknown += 1;
+    return {
+      id: node.id,
+      kind: node.kind,
+      sideEffect,
+    };
+  });
+  return { summary, nodes };
+}
+
+export function buildWorkflowBackgroundSupport(flow: FlowV3): WorkflowBackgroundSupport {
+  const caveats: string[] = [];
+  for (const node of flow.nodes || []) {
+    if (node.kind === "screenshot") {
+      const config = node.config || {};
+      if (config.fullPage === true || typeof config.selector === "string") {
+        caveats.push(
+          `Node ${node.id} uses full-page or selector screenshot capture, which requires foreground capture.`,
+        );
+      }
+    }
+  }
+  return {
+    supported: caveats.length === 0,
+    modes: caveats.length === 0 ? ["currentTab", "newTab", "background"] : ["currentTab", "newTab"],
+    caveats,
+  };
+}
+
+export function buildWorkflowToolDescriptor(flow: FlowV3): WorkflowToolDescriptor {
+  return {
+    parameters: buildWorkflowParameterSchema(flow),
+    exampleArgs: buildWorkflowExampleArgs(flow),
+    backgroundSupport: buildWorkflowBackgroundSupport(flow),
+    sideEffects: buildWorkflowSideEffectDescriptor(flow),
+    ...(Array.isArray(flow.meta?.exposedOutputs) && flow.meta.exposedOutputs.length > 0
+      ? { outputs: flow.meta.exposedOutputs.map((output) => ({ ...output })) }
+      : {}),
+  };
+}
+
 export function listPublishedFlowDetails(
   flows: FlowV3[],
 ): PublishedFlowDetailsV3[] {
@@ -125,6 +301,7 @@ export function listPublishedFlowDetails(
       return {
         ...info,
         ...(publishedVariables ? { variables: publishedVariables } : {}),
+        ...buildWorkflowToolDescriptor(flow),
       };
     })
     .filter((info): info is PublishedFlowDetailsV3 => Boolean(info))

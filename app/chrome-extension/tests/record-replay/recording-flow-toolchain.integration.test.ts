@@ -41,6 +41,7 @@ vi.mock("@/entrypoints/background/record-replay-v3/compat", () => ({
 import {
   flowAnalyzeTool,
   flowUpdateTool,
+  workflowDescribeTool,
   workflowDebugViewTool,
   workflowRepairTool,
 } from "@/entrypoints/background/tools/flow-tools";
@@ -1433,6 +1434,112 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("workflowDescribeTool returns schema, example args, background, and side-effect metadata", async () => {
+    const flowId = `workflow-describe-${Date.now()}`;
+    await createStoragePort().flows.save({
+      schemaVersion: 3,
+      id: flowId as any,
+      name: "Described Flow",
+      entryNodeId: "wait-1" as any,
+      nodes: [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { ms: 100 },
+        },
+        {
+          id: "click-1" as any,
+          kind: "click",
+          config: { target: { selector: "#submit" } },
+        },
+      ],
+      edges: [{ id: "edge-1" as any, from: "wait-1" as any, to: "click-1" as any }],
+      variables: [
+        {
+          name: "email",
+          kind: "string",
+          required: true,
+        },
+        {
+          name: "apiToken",
+          default: "secret-token",
+        },
+      ] as any,
+      createdAt: new Date(0).toISOString() as any,
+      updatedAt: new Date(0).toISOString() as any,
+      meta: {
+        tool: {
+          published: true,
+          slug: "describe-flow",
+          description: "Describe me",
+        },
+        exposedOutputs: [{ nodeId: "wait-1" as any, as: "ready" }],
+      },
+    });
+
+    const result = await workflowDescribeTool.execute({ workflow: "describe-flow" });
+    const payload = parseToolPayload(result);
+
+    expect(payload).toMatchObject({
+      success: true,
+      flowId,
+      workflow: "describe-flow",
+      name: "Described Flow",
+      description: "Describe me",
+      runTool: "record_replay_flow_run",
+      runArgs: {
+        flowId,
+        args: {
+          email: "<email>",
+          apiToken: "<apiToken>",
+        },
+        tabTarget: "current",
+        background: true,
+      },
+      descriptor: {
+        parameters: {
+          type: "object",
+          required: ["email"],
+          additionalProperties: false,
+          properties: {
+            email: expect.objectContaining({ type: "string" }),
+            apiToken: expect.not.objectContaining({ default: "secret-token" }),
+          },
+        },
+        exampleArgs: {
+          email: "<email>",
+          apiToken: "<apiToken>",
+        },
+        backgroundSupport: {
+          supported: true,
+          modes: ["currentTab", "newTab", "background"],
+          caveats: [],
+        },
+        sideEffects: {
+          summary: {
+            safe: 1,
+            idempotent: 0,
+            dangerous: 1,
+            unknown: 0,
+          },
+        },
+        outputs: [{ nodeId: "wait-1", as: "ready" }],
+      },
+    });
+    expect(payload.descriptor.sideEffects.nodes).toEqual([
+      expect.objectContaining({
+        id: "wait-1",
+        kind: "wait",
+        sideEffect: expect.objectContaining({ category: "safe" }),
+      }),
+      expect.objectContaining({
+        id: "click-1",
+        kind: "click",
+        sideEffect: expect.objectContaining({ category: "dangerous" }),
+      }),
+    ]);
+  });
+
   it("listPublishedFlowsTool reports published V3 workflows", async () => {
     const flowId = `flow-published-v3-${Date.now()}`;
     await createStoragePort().flows.save({
@@ -1450,6 +1557,7 @@ describe("recording/editing/flow toolchain integration", () => {
       edges: [],
       variables: [
         { name: "target_url", default: "https://example.com" } as any,
+        { name: "apiToken", default: "secret-token" } as any,
       ],
       createdAt: new Date(0).toISOString() as any,
       updatedAt: new Date(0).toISOString() as any,
@@ -1474,6 +1582,32 @@ describe("recording/editing/flow toolchain integration", () => {
           name: "Published V3 Flow",
           description: "Published from V3",
           variables: [expect.objectContaining({ name: "target_url" })],
+          parameters: expect.objectContaining({
+            properties: expect.objectContaining({
+              target_url: expect.objectContaining({
+                type: "string",
+                default: "https://example.com",
+              }),
+              apiToken: expect.not.objectContaining({ default: "secret-token" }),
+            }),
+          }),
+          exampleArgs: {
+            target_url: "https://example.com",
+            apiToken: "<apiToken>",
+          },
+          backgroundSupport: {
+            supported: true,
+            modes: ["currentTab", "newTab", "background"],
+            caveats: [],
+          },
+          sideEffects: expect.objectContaining({
+            summary: {
+              safe: 0,
+              idempotent: 1,
+              dangerous: 0,
+              unknown: 0,
+            },
+          }),
         }),
       ],
     });

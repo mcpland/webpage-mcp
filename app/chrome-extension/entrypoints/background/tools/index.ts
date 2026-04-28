@@ -6,6 +6,7 @@ import { flowRunTool, listPublishedFlowsTool } from './record-replay';
 import {
   flowAnalyzeTool,
   flowUpdateTool,
+  workflowDescribeTool,
   workflowDebugViewTool,
   workflowRepairTool,
 } from './flow-tools';
@@ -19,6 +20,7 @@ const tools = {
   listPublishedFlowsTool,
   flowAnalyzeTool,
   flowUpdateTool,
+  workflowDescribeTool,
   workflowDebugViewTool,
   workflowRepairTool,
   recordingStartTool,

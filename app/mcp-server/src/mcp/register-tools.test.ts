@@ -39,6 +39,7 @@ describe('dynamic published flow tools', () => {
   beforeEach(() => {
     restoreLegacyFlowToolsEnv();
     clearDynamicFlowCacheForSession('dynamic-flow-tools');
+    clearDynamicFlowCacheForSession('dynamic-flow-tools-descriptor');
     clearDynamicFlowCacheForSession('dynamic-flow-call');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-run');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-run-list');
@@ -149,6 +150,76 @@ describe('dynamic published flow tools', () => {
     expect(
       (signupTool?.inputSchema as { properties?: Record<string, any> }).properties?.background,
     ).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
+  });
+
+  it('uses published descriptor schemas and metadata for legacy dynamic workflow tools', async () => {
+    exposeLegacyFlowTools();
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [
+        {
+          id: 'flow-signup',
+          slug: 'signup',
+          description: 'Published signup flow',
+          parameters: {
+            type: 'object',
+            required: ['email', 'background'],
+            additionalProperties: false,
+            properties: {
+              email: {
+                type: 'string',
+                description: 'Email address',
+              },
+              apiToken: {
+                type: 'string',
+                description: 'Sensitive value; default is not exposed.',
+              },
+              background: {
+                type: 'string',
+                description: 'Reserved variable name',
+              },
+            },
+          },
+          backgroundSupport: {
+            supported: false,
+            modes: ['currentTab', 'newTab'],
+            caveats: ['Node shot uses foreground capture.'],
+          },
+          sideEffects: {
+            summary: {
+              safe: 1,
+              idempotent: 0,
+              dangerous: 1,
+              unknown: 0,
+            },
+          },
+        },
+      ],
+    });
+    const ctx = createContext('dynamic-flow-tools-descriptor', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const signupTool = tools.find((tool) => tool.name === 'flow.signup');
+    const input = signupTool?.inputSchema as {
+      properties?: Record<string, any>;
+      required?: string[];
+    };
+
+    expect(signupTool?.description).toContain('Background execution: not supported');
+    expect(signupTool?.description).toContain('Side effects: safe 1, idempotent 0, dangerous 1');
+    expect(input.required).toEqual(['email']);
+    expect(input.properties?.email).toMatchObject({
+      type: 'string',
+      description: 'Email address',
+    });
+    expect(input.properties?.apiToken).toMatchObject({
+      type: 'string',
+      description: 'Sensitive value; default is not exposed.',
+    });
+    expect(input.properties?.background).toMatchObject({
       type: 'boolean',
       default: false,
     });

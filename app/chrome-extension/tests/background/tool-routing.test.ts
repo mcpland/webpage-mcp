@@ -24,6 +24,7 @@ vi.mock('@/entrypoints/background/tools/record-replay', () => ({
 vi.mock('@/entrypoints/background/tools/flow-tools', () => ({
   flowAnalyzeTool: { name: 'flow_analyze', execute: vi.fn() },
   flowUpdateTool: { name: 'flow_update', execute: vi.fn() },
+  workflowDescribeTool: { name: 'workflow_describe', execute: vi.fn() },
   workflowDebugViewTool: { name: 'workflow_debug_view', execute: vi.fn() },
   workflowRepairTool: { name: 'workflow_repair', execute: vi.fn() },
 }));
