@@ -190,6 +190,148 @@
   background-color: var(--ac-hover-bg, #f5f5f4) !important;
 }
 
+.trigger-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.trigger-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.trigger-field,
+.trigger-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ac-text-muted, #6e6e6e);
+}
+
+.trigger-field-wide {
+  grid-column: 1 / -1;
+}
+
+.trigger-field input,
+.trigger-field select,
+.trigger-field textarea {
+  width: 100%;
+  min-width: 0;
+  border: var(--ac-border-width, 1px) solid var(--ac-border, #e7e5e4);
+  border-radius: var(--ac-radius-button, 8px);
+  background: var(--ac-surface, #ffffff);
+  color: var(--ac-text, #1a1a1a);
+  font-size: 12px;
+  font-weight: 400;
+  padding: 7px 8px;
+  outline: none;
+}
+
+.trigger-field textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.trigger-toggle {
+  flex-direction: row;
+  align-items: center;
+  grid-column: 1 / -1;
+}
+
+.trigger-toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.trigger-form-error {
+  color: var(--ac-danger, #ef4444);
+  font-size: 12px;
+}
+
+.trigger-actions-row,
+.trigger-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.trigger-actions-row button,
+.trigger-item-actions button {
+  border: none;
+  border-radius: var(--ac-radius-button, 8px);
+  background: var(--ac-surface-muted, #f2f0eb);
+  color: var(--ac-text, #1a1a1a);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 9px;
+}
+
+.trigger-actions-row button:first-child {
+  background: var(--ac-accent, #d97757);
+  color: var(--ac-accent-contrast, #ffffff);
+}
+
+.trigger-item-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.trigger-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trigger-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--ac-radius-button, 8px);
+  background: var(--ac-surface-muted, #f2f0eb);
+}
+
+.trigger-item-main {
+  min-width: 0;
+}
+
+.trigger-item-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ac-text, #1a1a1a);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.trigger-kind {
+  border-radius: 999px;
+  background: var(--ac-accent-subtle, rgba(217, 119, 87, 0.12));
+  color: var(--ac-accent, #d97757);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  text-transform: uppercase;
+}
+
+.trigger-item-detail {
+  margin-top: 4px;
+  color: var(--ac-text-muted, #6e6e6e);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.trigger-danger {
+  color: var(--ac-danger, #ef4444) !important;
+}
+
 @media (max-width: 360px) {
   .workflow-action-button {
     flex-basis: 100%;
@@ -197,6 +339,14 @@
 
   .workflow-icon-button {
     flex-basis: 40px;
+  }
+
+  .trigger-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trigger-item {
+    flex-direction: column;
   }
 }
 

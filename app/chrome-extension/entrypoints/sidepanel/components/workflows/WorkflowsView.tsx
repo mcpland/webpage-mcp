@@ -1,10 +1,33 @@
 import { type CSSProperties, useMemo, useState } from "react";
 
+import type { JsonObject } from "@/entrypoints/background/record-replay-v3/domain/json";
+import type {
+  TriggerKind,
+  TriggerSpec,
+} from "@/entrypoints/background/record-replay-v3/domain/triggers";
 import { getMessage } from "@/utils/i18n";
 import WorkflowListItem, { type WorkflowFlowLite } from "./WorkflowListItem";
 import "./WorkflowsView.css";
 
 export type FlowLite = WorkflowFlowLite;
+
+export type TriggerDraft = {
+  id?: string;
+  kind: TriggerKind;
+  enabled: boolean;
+  flowId: string;
+  args?: JsonObject;
+  match?: Array<{ kind: "url" | "domain" | "path"; value: string }>;
+  periodMinutes?: number;
+  whenMs?: number;
+  commandKey?: string;
+  title?: string;
+  contexts?: string[];
+  selector?: string;
+  appear?: boolean;
+  once?: boolean;
+  debounceMs?: number;
+};
 
 export interface RunLite {
   id: string;
@@ -46,6 +69,7 @@ export interface TimelineStepLite {
 export type WorkflowsViewProps = {
   flows: FlowLite[];
   runs: RunLite[];
+  triggers: TriggerSpec[];
   recordingState: RecordingStateLite;
   timelineSteps: TimelineStepLite[];
   recordingAction: "start" | "stop" | null;
@@ -59,6 +83,14 @@ export type WorkflowsViewProps = {
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onExport: (id: string) => void;
+  onRefreshTriggers: () => void;
+  onCreateTrigger: (trigger: TriggerDraft) => Promise<boolean> | boolean;
+  onUpdateTrigger: (
+    trigger: TriggerDraft & { id: string },
+  ) => Promise<boolean> | boolean;
+  onToggleTrigger: (id: string, enabled: boolean) => Promise<boolean> | boolean;
+  onDeleteTrigger: (id: string) => Promise<boolean> | boolean;
+  onFireTrigger: (id: string) => Promise<boolean> | boolean;
   onOnlyBoundChange: (value: boolean) => void;
   onToggleRun: (id: string) => void;
 };
@@ -124,9 +156,56 @@ const runItemStyle: CSSProperties = {
   borderRadius: "var(--ac-radius-button)",
 };
 
+function toLocalDateTimeInputValue(date: Date): string {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+const defaultOnceAt = () =>
+  toLocalDateTimeInputValue(new Date(Date.now() + 60 * 60_000));
+
+type TriggerFormState = {
+  flowId: string;
+  kind: TriggerKind;
+  enabled: boolean;
+  argsText: string;
+  urlRuleKind: "url" | "domain" | "path";
+  urlRuleValue: string;
+  periodMinutes: string;
+  onceAt: string;
+  commandKey: string;
+  contextMenuTitle: string;
+  contextMenuContextsText: string;
+  domSelector: string;
+  domAppear: boolean;
+  domOnce: boolean;
+  domDebounceMs: string;
+};
+
+function createDefaultTriggerForm(flowId = ""): TriggerFormState {
+  return {
+    flowId,
+    kind: "manual",
+    enabled: true,
+    argsText: "",
+    urlRuleKind: "domain",
+    urlRuleValue: "",
+    periodMinutes: "60",
+    onceAt: defaultOnceAt(),
+    commandKey: "",
+    contextMenuTitle: "",
+    contextMenuContextsText: "page",
+    domSelector: "",
+    domAppear: true,
+    domOnce: true,
+    domDebounceMs: "800",
+  };
+}
+
 export default function WorkflowsView({
   flows,
   runs,
+  triggers,
   recordingState,
   timelineSteps,
   recordingAction,
@@ -140,6 +219,12 @@ export default function WorkflowsView({
   onEdit,
   onDelete,
   onExport,
+  onRefreshTriggers,
+  onCreateTrigger,
+  onUpdateTrigger,
+  onToggleTrigger,
+  onDeleteTrigger,
+  onFireTrigger,
   onOnlyBoundChange,
   onToggleRun,
 }: WorkflowsViewProps) {
@@ -149,6 +234,11 @@ export default function WorkflowsView({
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(),
   );
+  const [triggerForm, setTriggerForm] = useState<TriggerFormState>(() =>
+    createDefaultTriggerForm(),
+  );
+  const [triggerFormError, setTriggerFormError] = useState<string | null>(null);
+  const [editingTriggerId, setEditingTriggerId] = useState<string | null>(null);
 
   const filteredFlows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -172,10 +262,179 @@ export default function WorkflowsView({
   const isRecordingActive = recordingState.status !== "idle";
   const canStartRecording = !isRecordingActive && recordingAction === null;
   const canStopRecording = isRecordingActive && recordingAction === null;
+  const selectedTriggerFlowId =
+    triggerForm.flowId || filteredFlows[0]?.id || flows[0]?.id || "";
+  const sortedTriggers = useMemo(
+    () =>
+      [...triggers].sort((a, b) => {
+        const flowCompare = getFlowName(a.flowId).localeCompare(
+          getFlowName(b.flowId),
+        );
+        if (flowCompare !== 0) return flowCompare;
+        return a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id);
+      }),
+    [triggers, flows],
+  );
 
   function getFlowName(flowId: string): string {
     const flow = flows.find((item) => item.id === flowId);
     return flow?.name || flowId;
+  }
+
+  function formatTriggerDetail(trigger: TriggerSpec): string {
+    if (trigger.kind === "manual") {
+      return t("workflowsTriggerManualDetail", "Manual run");
+    }
+    if (trigger.kind === "url") {
+      return trigger.match
+        .map((rule) => `${rule.kind}:${rule.value}`)
+        .join(", ");
+    }
+    if (trigger.kind === "interval") {
+      return t("workflowsTriggerIntervalDetail", "Every {0} minutes", [
+        String(trigger.periodMinutes),
+      ]);
+    }
+    if (trigger.kind === "once") {
+      return new Date(trigger.whenMs).toLocaleString();
+    }
+    if (trigger.kind === "command") {
+      return trigger.commandKey;
+    }
+    if (trigger.kind === "contextMenu") {
+      return trigger.title;
+    }
+    if (trigger.kind === "dom") {
+      return trigger.selector;
+    }
+    return String((trigger as { id: string }).id);
+  }
+
+  function parseTriggerArgs(): JsonObject | undefined {
+    const raw = triggerForm.argsText.trim();
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Trigger args must be a JSON object");
+    }
+    return parsed as JsonObject;
+  }
+
+  function parseContextMenuContexts(): string[] | undefined {
+    const contexts = triggerForm.contextMenuContextsText
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return contexts.length > 0 ? contexts : undefined;
+  }
+
+  function resetTriggerForm(flowId = selectedTriggerFlowId): void {
+    setEditingTriggerId(null);
+    setTriggerForm(createDefaultTriggerForm(flowId));
+    setTriggerFormError(null);
+  }
+
+  function loadTriggerForEdit(trigger: TriggerSpec): void {
+    const argsText = trigger.args
+      ? JSON.stringify(trigger.args, null, 2)
+      : "";
+    const next = createDefaultTriggerForm(trigger.flowId);
+    next.kind = trigger.kind;
+    next.enabled = trigger.enabled;
+    next.argsText = argsText;
+
+    if (trigger.kind === "url") {
+      const firstRule = trigger.match[0];
+      next.urlRuleKind = firstRule?.kind ?? "domain";
+      next.urlRuleValue = firstRule?.value ?? "";
+    } else if (trigger.kind === "interval") {
+      next.periodMinutes = String(trigger.periodMinutes);
+    } else if (trigger.kind === "once") {
+      next.onceAt = toLocalDateTimeInputValue(new Date(trigger.whenMs));
+    } else if (trigger.kind === "command") {
+      next.commandKey = trigger.commandKey;
+    } else if (trigger.kind === "contextMenu") {
+      next.contextMenuTitle = trigger.title;
+      next.contextMenuContextsText = (trigger.contexts ?? ["page"]).join(", ");
+    } else if (trigger.kind === "dom") {
+      next.domSelector = trigger.selector;
+      next.domAppear = trigger.appear !== false;
+      next.domOnce = trigger.once !== false;
+      next.domDebounceMs = String(trigger.debounceMs ?? 800);
+    }
+
+    setTriggerForm(next);
+    setEditingTriggerId(trigger.id);
+    setTriggerFormError(null);
+  }
+
+  async function submitTriggerForm(): Promise<void> {
+    setTriggerFormError(null);
+    try {
+      if (!selectedTriggerFlowId) {
+        throw new Error("Select a workflow first");
+      }
+      const args = parseTriggerArgs();
+      const draft: TriggerDraft = {
+        kind: triggerForm.kind,
+        enabled: triggerForm.enabled,
+        flowId: selectedTriggerFlowId,
+        ...(args ? { args } : {}),
+      };
+      if (triggerForm.kind === "url") {
+        const value = triggerForm.urlRuleValue.trim();
+        if (!value) throw new Error("URL trigger rule value is required");
+        draft.match = [{ kind: triggerForm.urlRuleKind, value }];
+      } else if (triggerForm.kind === "interval") {
+        const periodMinutes = Number(triggerForm.periodMinutes);
+        if (!Number.isFinite(periodMinutes) || periodMinutes < 1) {
+          throw new Error("Interval must be at least 1 minute");
+        }
+        draft.periodMinutes = Math.floor(periodMinutes);
+      } else if (triggerForm.kind === "once") {
+        const whenMs = new Date(triggerForm.onceAt).getTime();
+        if (!Number.isFinite(whenMs)) {
+          throw new Error("Scheduled time is invalid");
+        }
+        draft.whenMs = whenMs;
+      } else if (triggerForm.kind === "command") {
+        const commandKey = triggerForm.commandKey.trim();
+        if (!commandKey) throw new Error("Command key is required");
+        draft.commandKey = commandKey;
+      } else if (triggerForm.kind === "contextMenu") {
+        const title = triggerForm.contextMenuTitle.trim();
+        if (!title) throw new Error("Context menu title is required");
+        draft.title = title;
+        draft.contexts = parseContextMenuContexts();
+      } else if (triggerForm.kind === "dom") {
+        const selector = triggerForm.domSelector.trim();
+        if (!selector) throw new Error("DOM selector is required");
+        const debounceMs = Number(triggerForm.domDebounceMs);
+        if (!Number.isFinite(debounceMs) || debounceMs < 0) {
+          throw new Error("DOM debounce must be 0 or greater");
+        }
+        draft.selector = selector;
+        draft.appear = triggerForm.domAppear;
+        draft.once = triggerForm.domOnce;
+        draft.debounceMs = Math.floor(debounceMs);
+      }
+
+      const ok = editingTriggerId
+        ? await onUpdateTrigger({ ...draft, id: editingTriggerId })
+        : await onCreateTrigger(draft);
+      if (ok) {
+        resetTriggerForm(selectedTriggerFlowId);
+      }
+    } catch (error) {
+      setTriggerFormError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function deleteTriggerFromList(triggerId: string): Promise<void> {
+    const ok = await onDeleteTrigger(triggerId);
+    if (ok && editingTriggerId === triggerId) {
+      resetTriggerForm(selectedTriggerFlowId);
+    }
   }
 
   function getRunStatusColor(run: RunLite): string {
@@ -511,6 +770,411 @@ export default function WorkflowsView({
             >
               {t("workflowsAdvancedSection", "Advanced")}
             </span>
+          </div>
+
+          <div className="advanced-section" style={sectionStyle}>
+            <button
+              className="advanced-section-header"
+              style={sectionHeaderStyle}
+              onClick={() => toggleSection("triggers")}
+              type="button"
+            >
+              <div className="flex items-center gap-2">
+                <svg
+                  className={`w-4 h-4 transition-transform${expandedSections.has("triggers") ? " rotate-90" : ""}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+                <span>{t("workflowsTriggersSection", "Triggers")}</span>
+              </div>
+              <span
+                className="text-xs"
+                style={{ color: "var(--ac-text-subtle)" }}
+              >
+                {triggers.length}
+              </span>
+            </button>
+
+            {expandedSections.has("triggers") ? (
+              <div className="advanced-section-content">
+                <div className="trigger-manager">
+                  <div className="trigger-form-grid">
+                    <label className="trigger-field">
+                      <span>{t("workflowsTriggerWorkflow", "Workflow")}</span>
+                      <select
+                        value={selectedTriggerFlowId}
+                        onChange={(event) =>
+                          setTriggerForm((current) => ({
+                            ...current,
+                            flowId: event.currentTarget.value,
+                          }))
+                        }
+                      >
+                        {flows.length === 0 ? (
+                          <option value="">
+                            {t("workflowsNoWorkflowsOption", "No workflows")}
+                          </option>
+                        ) : (
+                          flows.map((flow) => (
+                            <option key={flow.id} value={flow.id}>
+                              {flow.name || flow.id}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </label>
+
+                    <label className="trigger-field">
+                      <span>{t("workflowsTriggerType", "Type")}</span>
+                      <select
+                        value={triggerForm.kind}
+                        onChange={(event) =>
+                          setTriggerForm((current) => ({
+                            ...current,
+                            kind: event.currentTarget.value as TriggerKind,
+                          }))
+                        }
+                      >
+                        <option value="manual">
+                          {t("workflowsTriggerManual", "Manual")}
+                        </option>
+                        <option value="url">
+                          {t("workflowsTriggerUrl", "URL")}
+                        </option>
+                        <option value="interval">
+                          {t("workflowsTriggerInterval", "Interval")}
+                        </option>
+                        <option value="once">
+                          {t("workflowsTriggerOnce", "Once")}
+                        </option>
+                        <option value="command">
+                          {t("workflowsTriggerCommand", "Command")}
+                        </option>
+                        <option value="contextMenu">
+                          {t("workflowsTriggerContextMenu", "Context menu")}
+                        </option>
+                        <option value="dom">
+                          {t("workflowsTriggerDom", "DOM")}
+                        </option>
+                      </select>
+                    </label>
+
+                    {triggerForm.kind === "url" ? (
+                      <>
+                        <label className="trigger-field">
+                          <span>{t("workflowsTriggerRule", "Rule")}</span>
+                          <select
+                            value={triggerForm.urlRuleKind}
+                            onChange={(event) =>
+                              setTriggerForm((current) => ({
+                                ...current,
+                                urlRuleKind: event.currentTarget.value as
+                                  | "url"
+                                  | "domain"
+                                  | "path",
+                              }))
+                            }
+                          >
+                            <option value="domain">
+                              {t("workflowsTriggerRuleDomain", "Domain")}
+                            </option>
+                            <option value="path">
+                              {t("workflowsTriggerRulePath", "Path")}
+                            </option>
+                            <option value="url">
+                              {t("workflowsTriggerRuleUrl", "URL")}
+                            </option>
+                          </select>
+                        </label>
+                        <label className="trigger-field trigger-field-wide">
+                          <span>{t("workflowsTriggerRuleValue", "Value")}</span>
+                          <input
+                            value={triggerForm.urlRuleValue}
+                            onChange={(event) =>
+                              setTriggerForm((current) => ({
+                                ...current,
+                                urlRuleValue: event.currentTarget.value,
+                              }))
+                            }
+                            placeholder="example.com"
+                          />
+                        </label>
+                      </>
+                    ) : null}
+
+                    {triggerForm.kind === "interval" ? (
+                      <label className="trigger-field">
+                        <span>{t("workflowsTriggerEvery", "Every minutes")}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={triggerForm.periodMinutes}
+                          onChange={(event) =>
+                            setTriggerForm((current) => ({
+                              ...current,
+                              periodMinutes: event.currentTarget.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    ) : null}
+
+                    {triggerForm.kind === "once" ? (
+                      <label className="trigger-field trigger-field-wide">
+                        <span>{t("workflowsTriggerWhen", "When")}</span>
+                        <input
+                          type="datetime-local"
+                          value={triggerForm.onceAt}
+                          onChange={(event) =>
+                            setTriggerForm((current) => ({
+                              ...current,
+                              onceAt: event.currentTarget.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    ) : null}
+
+                    {triggerForm.kind === "command" ? (
+                      <label className="trigger-field trigger-field-wide">
+                        <span>{t("workflowsTriggerCommandKey", "Command key")}</span>
+                        <input
+                          value={triggerForm.commandKey}
+                          onChange={(event) =>
+                            setTriggerForm((current) => ({
+                              ...current,
+                              commandKey: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="run-workflow"
+                        />
+                      </label>
+                    ) : null}
+
+                    {triggerForm.kind === "contextMenu" ? (
+                      <>
+                        <label className="trigger-field trigger-field-wide">
+                          <span>
+                            {t("workflowsTriggerContextTitle", "Menu title")}
+                          </span>
+                          <input
+                            value={triggerForm.contextMenuTitle}
+                            onChange={(event) =>
+                              setTriggerForm((current) => ({
+                                ...current,
+                                contextMenuTitle: event.currentTarget.value,
+                              }))
+                            }
+                            placeholder="Run workflow"
+                          />
+                        </label>
+                        <label className="trigger-field trigger-field-wide">
+                          <span>
+                            {t(
+                              "workflowsTriggerContextScopes",
+                              "Contexts",
+                            )}
+                          </span>
+                          <input
+                            value={triggerForm.contextMenuContextsText}
+                            onChange={(event) =>
+                              setTriggerForm((current) => ({
+                                ...current,
+                                contextMenuContextsText:
+                                  event.currentTarget.value,
+                              }))
+                            }
+                            placeholder="page, selection, link"
+                          />
+                        </label>
+                      </>
+                    ) : null}
+
+                    {triggerForm.kind === "dom" ? (
+                      <>
+                        <label className="trigger-field trigger-field-wide">
+                          <span>{t("workflowsTriggerDomSelector", "Selector")}</span>
+                          <input
+                            value={triggerForm.domSelector}
+                            onChange={(event) =>
+                              setTriggerForm((current) => ({
+                                ...current,
+                                domSelector: event.currentTarget.value,
+                              }))
+                            }
+                            placeholder=".ready"
+                          />
+                        </label>
+                        <label className="trigger-field">
+                          <span>
+                            {t("workflowsTriggerDomDebounce", "Debounce ms")}
+                          </span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={triggerForm.domDebounceMs}
+                            onChange={(event) =>
+                              setTriggerForm((current) => ({
+                                ...current,
+                                domDebounceMs: event.currentTarget.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="trigger-toggle">
+                          <input
+                            type="checkbox"
+                            checked={triggerForm.domAppear}
+                            onChange={(event) =>
+                              setTriggerForm((current) => ({
+                                ...current,
+                                domAppear: event.currentTarget.checked,
+                              }))
+                            }
+                          />
+                          <span>{t("workflowsTriggerDomAppear", "Appears")}</span>
+                        </label>
+                        <label className="trigger-toggle">
+                          <input
+                            type="checkbox"
+                            checked={triggerForm.domOnce}
+                            onChange={(event) =>
+                              setTriggerForm((current) => ({
+                                ...current,
+                                domOnce: event.currentTarget.checked,
+                              }))
+                            }
+                          />
+                          <span>{t("workflowsTriggerDomOnce", "Once")}</span>
+                        </label>
+                      </>
+                    ) : null}
+
+                    <label className="trigger-field trigger-field-wide">
+                      <span>{t("workflowsTriggerArgs", "Args JSON")}</span>
+                      <textarea
+                        value={triggerForm.argsText}
+                        onChange={(event) =>
+                          setTriggerForm((current) => ({
+                            ...current,
+                            argsText: event.currentTarget.value,
+                          }))
+                        }
+                        placeholder='{"query":"value"}'
+                        rows={2}
+                      />
+                    </label>
+
+                    <label className="trigger-toggle">
+                      <input
+                        type="checkbox"
+                        checked={triggerForm.enabled}
+                        onChange={(event) =>
+                          setTriggerForm((current) => ({
+                            ...current,
+                            enabled: event.currentTarget.checked,
+                          }))
+                        }
+                      />
+                      <span>{t("workflowsTriggerEnabled", "Enabled")}</span>
+                    </label>
+                  </div>
+
+                  {triggerFormError ? (
+                    <div className="trigger-form-error">{triggerFormError}</div>
+                  ) : null}
+
+                  <div className="trigger-actions-row">
+                    <button type="button" onClick={() => void submitTriggerForm()}>
+                      {editingTriggerId
+                        ? t("workflowsTriggerSave", "Save trigger")
+                        : t("workflowsTriggerCreate", "Create trigger")}
+                    </button>
+                    {editingTriggerId ? (
+                      <button
+                        type="button"
+                        onClick={() => resetTriggerForm(selectedTriggerFlowId)}
+                      >
+                        {t("workflowsTriggerCancelEdit", "Cancel edit")}
+                      </button>
+                    ) : null}
+                    <button type="button" onClick={onRefreshTriggers}>
+                      {t("workflowsRefreshTitle", "Refresh")}
+                    </button>
+                  </div>
+
+                  {sortedTriggers.length === 0 ? (
+                    <div
+                      className="text-sm py-3"
+                      style={{ color: "var(--ac-text-muted)" }}
+                    >
+                      {t("workflowsNoTriggers", "No triggers yet")}
+                    </div>
+                  ) : (
+                    <div className="trigger-list">
+                      {sortedTriggers.map((trigger) => (
+                        <div key={trigger.id} className="trigger-item">
+                          <div className="trigger-item-main">
+                            <div className="trigger-item-title">
+                              <span className="trigger-kind">{trigger.kind}</span>
+                              <span>{getFlowName(trigger.flowId)}</span>
+                            </div>
+                            <div className="trigger-item-detail">
+                              {formatTriggerDetail(trigger)}
+                            </div>
+                          </div>
+                          <div className="trigger-item-actions">
+                            {trigger.kind === "manual" ? (
+                              <button
+                                type="button"
+                                disabled={!trigger.enabled}
+                                onClick={() => void onFireTrigger(trigger.id)}
+                              >
+                                {t("workflowsTriggerFire", "Run")}
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => loadTriggerForEdit(trigger)}
+                            >
+                              {t("workflowsEditAction", "Edit")}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void onToggleTrigger(
+                                  trigger.id,
+                                  !trigger.enabled,
+                                )
+                              }
+                            >
+                              {trigger.enabled
+                                ? t("workflowsTriggerDisable", "Disable")
+                                : t("workflowsTriggerEnable", "Enable")}
+                            </button>
+                            <button
+                              type="button"
+                              className="trigger-danger"
+                              onClick={() => void deleteTriggerFromList(trigger.id)}
+                            >
+                              {t("workflowsDeleteAction", "Delete")}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="advanced-section" style={sectionStyle}>

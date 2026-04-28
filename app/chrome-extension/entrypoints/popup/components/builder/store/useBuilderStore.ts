@@ -19,8 +19,7 @@ import {
   getV3AuthoringPaletteTypes,
 } from "@/entrypoints/shared/utils/v3-authoring";
 
-// Route A scope: keep trigger/schedule automation out of connector authoring surface.
-const ENABLE_TRIGGER_NODE_CREATION = false;
+const ENABLE_TRIGGER_NODE_CREATION = true;
 
 export function useBuilderStore(initial?: BuilderFlow | null) {
   const flowLocal = reactive<BuilderFlow>({
@@ -53,6 +52,51 @@ export function useBuilderStore(initial?: BuilderFlow | null) {
       "warn",
     );
     return false;
+  }
+
+  function isTriggerType(type: NodeBase["type"] | string): boolean {
+    return type === ("trigger" as NodeBase["type"]);
+  }
+
+  function findTriggerNode(): NodeBase | undefined {
+    return nodes.find((node) => isTriggerType(node.type));
+  }
+
+  function findFirstExecutableNode(): NodeBase | undefined {
+    return nodes.find((node) => !isTriggerType(node.type));
+  }
+
+  function connectTriggerToFirstExecutable(triggerId: string): void {
+    const firstExecutable = findFirstExecutableNode();
+    if (!firstExecutable) return;
+    if (
+      edges.some(
+        (edge) => edge.from === triggerId && edge.to === firstExecutable.id,
+      )
+    ) {
+      return;
+    }
+    edges.push({
+      id: newId("e"),
+      from: triggerId,
+      to: firstExecutable.id,
+      label: "default",
+    });
+  }
+
+  function addTriggerNode(node: NodeBase): boolean {
+    const existing = findTriggerNode();
+    if (existing) {
+      activeNodeId.value = existing.id;
+      activeEdgeId.value = null;
+      toast("This workflow already has a trigger node", "warn");
+      return false;
+    }
+    nodes.unshift(node);
+    connectTriggerToFirstExecutable(node.id);
+    activeNodeId.value = node.id;
+    activeEdgeId.value = null;
+    return true;
   }
 
   // --- history (undo/redo) ---
@@ -160,6 +204,10 @@ export function useBuilderStore(initial?: BuilderFlow | null) {
       config: defaultConfigOf(t),
       ui: { x: 200 + nodes.length * 24, y: 120 + nodes.length * 96 },
     };
+    if (isTriggerType(t)) {
+      if (addTriggerNode(n)) recordChange();
+      return;
+    }
     nodes.push(n);
     if (nodes.length > 1) {
       const prev = nodes[nodes.length - 2];
@@ -179,6 +227,10 @@ export function useBuilderStore(initial?: BuilderFlow | null) {
       config: defaultConfigOf(t),
       ui: { x: Math.round(x), y: Math.round(y) },
     };
+    if (isTriggerType(t)) {
+      if (addTriggerNode(n)) recordChange();
+      return;
+    }
     nodes.push(n);
     activeNodeId.value = id;
     recordChange();
@@ -187,6 +239,12 @@ export function useBuilderStore(initial?: BuilderFlow | null) {
   function duplicateNode(id: string) {
     const src = nodes.find((n) => n.id === id);
     if (!src) return;
+    if (isTriggerType(src.type)) {
+      activeNodeId.value = src.id;
+      activeEdgeId.value = null;
+      toast("This workflow already has a trigger node", "warn");
+      return;
+    }
     const cp: NodeBase = JSON.parse(JSON.stringify(src));
     cp.id = newId(src.type);
     cp.name = src.name ? `${src.name} Copy` : "";

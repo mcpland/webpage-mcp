@@ -19,9 +19,15 @@ import {
 import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import type { RunRecordV3 } from "@/entrypoints/background/record-replay-v3/domain/events";
 import type {
+  TriggerKind,
+  TriggerSpec,
+} from "@/entrypoints/background/record-replay-v3/domain/triggers";
+import type {
   FlowId,
   RunId,
+  TriggerId,
 } from "@/entrypoints/background/record-replay-v3/domain/ids";
+import type { JsonObject } from "@/entrypoints/background/record-replay-v3/domain/json";
 import { useRRV3Rpc } from "./useRRV3Rpc";
 import { getActiveCurrentWindowTabId } from "@/entrypoints/shared/utils";
 
@@ -59,6 +65,24 @@ export interface RunLite {
   status: RunRecordV3["status"];
   entries: unknown[];
 }
+
+export type TriggerDraft = {
+  id?: string;
+  kind: TriggerKind;
+  enabled: boolean;
+  flowId: string;
+  args?: JsonObject;
+  match?: Array<{ kind: "url" | "domain" | "path"; value: string }>;
+  periodMinutes?: number;
+  whenMs?: number;
+  commandKey?: string;
+  title?: string;
+  contexts?: string[];
+  selector?: string;
+  appear?: boolean;
+  once?: boolean;
+  debounceMs?: number;
+};
 
 // ==================== Mappers ====================
 
@@ -130,11 +154,13 @@ export interface UseWorkflowsV3Return {
   // Data
   flows: Ref<FlowLite[]>;
   runs: Ref<RunLite[]>;
+  triggers: Ref<TriggerSpec[]>;
 
   // Actions
   refresh: () => Promise<void>;
   refreshFlows: () => Promise<void>;
   refreshRuns: () => Promise<void>;
+  refreshTriggers: (flowId?: string) => Promise<void>;
   runFlow: (flowId: string) => Promise<{ runId: string } | null>;
   deleteFlow: (flowId: string) => Promise<boolean>;
   exportFlow: (flowId: string) => Promise<FlowV3 | null>;
@@ -142,6 +168,11 @@ export interface UseWorkflowsV3Return {
   // V3-specific
   getFlowById: (flowId: string) => Promise<FlowV3 | null>;
   getRunEvents: (runId: string) => Promise<unknown[]>;
+  createTrigger: (trigger: TriggerDraft) => Promise<TriggerSpec | null>;
+  updateTrigger: (trigger: TriggerDraft & { id: string }) => Promise<TriggerSpec | null>;
+  deleteTrigger: (triggerId: string) => Promise<boolean>;
+  setTriggerEnabled: (triggerId: string, enabled: boolean) => Promise<boolean>;
+  fireTrigger: (triggerId: string) => Promise<{ runId: string } | null>;
 }
 
 /**
@@ -160,6 +191,7 @@ export function useWorkflowsV3(
   const error = ref<string | null>(null);
   const flows = ref<FlowLite[]>([]);
   const runs = ref<RunLite[]>([]);
+  const triggers = ref<TriggerSpec[]>([]);
 
   // Auto-refresh timer
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -194,11 +226,23 @@ export function useWorkflowsV3(
     }
   }
 
+  async function refreshTriggers(flowId?: string): Promise<void> {
+    try {
+      const result = (await rpc.request("rr_v3.listTriggers", {
+        ...(flowId ? { flowId: flowId as FlowId } : {}),
+      })) as TriggerSpec[] | null;
+      triggers.value = result || [];
+    } catch (e) {
+      console.warn("[useWorkflowsV3] Failed to refresh triggers:", e);
+      error.value = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   async function refresh(): Promise<void> {
     loading.value = true;
     error.value = null;
     try {
-      await Promise.all([refreshFlows(), refreshRuns()]);
+      await Promise.all([refreshFlows(), refreshRuns(), refreshTriggers()]);
     } finally {
       loading.value = false;
     }
@@ -270,6 +314,76 @@ export function useWorkflowsV3(
     }
   }
 
+  async function createTrigger(trigger: TriggerDraft): Promise<TriggerSpec | null> {
+    try {
+      const result = (await rpc.request("rr_v3.createTrigger", {
+        trigger: trigger as unknown as JsonObject,
+      })) as TriggerSpec | null;
+      void refreshTriggers();
+      return result;
+    } catch (e) {
+      console.warn("[useWorkflowsV3] Failed to create trigger:", e);
+      error.value = e instanceof Error ? e.message : String(e);
+      return null;
+    }
+  }
+
+  async function updateTrigger(trigger: TriggerDraft & { id: string }): Promise<TriggerSpec | null> {
+    try {
+      const result = (await rpc.request("rr_v3.updateTrigger", {
+        trigger: trigger as unknown as JsonObject,
+      })) as TriggerSpec | null;
+      void refreshTriggers();
+      return result;
+    } catch (e) {
+      console.warn("[useWorkflowsV3] Failed to update trigger:", e);
+      error.value = e instanceof Error ? e.message : String(e);
+      return null;
+    }
+  }
+
+  async function deleteTrigger(triggerId: string): Promise<boolean> {
+    try {
+      await rpc.request("rr_v3.deleteTrigger", {
+        triggerId: triggerId as TriggerId,
+      });
+      void refreshTriggers();
+      return true;
+    } catch (e) {
+      console.warn("[useWorkflowsV3] Failed to delete trigger:", e);
+      error.value = e instanceof Error ? e.message : String(e);
+      return false;
+    }
+  }
+
+  async function setTriggerEnabled(triggerId: string, enabled: boolean): Promise<boolean> {
+    try {
+      await rpc.request(enabled ? "rr_v3.enableTrigger" : "rr_v3.disableTrigger", {
+        triggerId: triggerId as TriggerId,
+      });
+      void refreshTriggers();
+      return true;
+    } catch (e) {
+      console.warn("[useWorkflowsV3] Failed to update trigger state:", e);
+      error.value = e instanceof Error ? e.message : String(e);
+      return false;
+    }
+  }
+
+  async function fireTrigger(triggerId: string): Promise<{ runId: string } | null> {
+    try {
+      const result = (await rpc.request("rr_v3.fireTrigger", {
+        triggerId: triggerId as TriggerId,
+      })) as { runId: RunId } | null;
+      void refreshRuns();
+      return result ? { runId: result.runId } : null;
+    } catch (e) {
+      console.warn("[useWorkflowsV3] Failed to fire trigger:", e);
+      error.value = e instanceof Error ? e.message : String(e);
+      return null;
+    }
+  }
+
   // ==================== Lifecycle ====================
 
   onMounted(async () => {
@@ -326,13 +440,20 @@ export function useWorkflowsV3(
     error,
     flows,
     runs,
+    triggers,
     refresh,
     refreshFlows,
     refreshRuns,
+    refreshTriggers,
     runFlow,
     deleteFlow,
     exportFlow,
     getFlowById,
     getRunEvents,
+    createTrigger,
+    updateTrigger,
+    deleteTrigger,
+    setTriggerEnabled,
+    fireTrigger,
   };
 }

@@ -92,10 +92,6 @@ export interface V3Runtime {
 let runtime: V3Runtime | null = null;
 let bootstrapPromise: Promise<V3Runtime> | null = null;
 
-// Route A scope: disable platform-style trigger/schedule automation surfaces.
-const ENABLE_V3_TRIGGERS_AND_SCHEDULES = false;
-const V3_TRIGGER_ALARM_PREFIXES = ["rr_v3_"] as const;
-
 // ==================== Utilities ====================
 
 function errorMessage(err: unknown): string {
@@ -132,28 +128,6 @@ async function safeRemoveTab(tabId: number, logger: Logger): Promise<void> {
     await chrome.tabs.remove(tabId);
   } catch (e) {
     logger.debug(`[RR-V3] Failed to close tab ${tabId}:`, e);
-  }
-}
-
-async function clearV3TriggerAlarms(logger: Logger): Promise<void> {
-  try {
-    if (!chrome.alarms?.getAll || !chrome.alarms?.clear) {
-      logger.debug("[RR-V3] chrome.alarms unavailable; skipping trigger alarm cleanup");
-      return;
-    }
-    const alarms = await chrome.alarms.getAll();
-    const toClear = alarms
-      .map((alarm) => alarm?.name || "")
-      .filter((name) =>
-        V3_TRIGGER_ALARM_PREFIXES.some((prefix) => name.startsWith(prefix)),
-      );
-    if (toClear.length === 0) return;
-    await Promise.all(toClear.map((name) => chrome.alarms.clear(name)));
-    logger.info(
-      `[RR-V3] Cleared ${toClear.length} trigger alarm(s) (scope disabled)`,
-    );
-  } catch (e) {
-    logger.warn("[RR-V3] Failed to clear disabled trigger alarms:", e);
   }
 }
 
@@ -489,20 +463,9 @@ export async function bootstrapV3(): Promise<V3Runtime> {
       logger.info("[RR-V3] Running crash recovery...");
       await recoverFromCrash({ storage, events, ownerId, now, logger });
 
-      if (!ENABLE_V3_TRIGGERS_AND_SCHEDULES) {
-        logger.info(
-          "[RR-V3] Trigger/schedule automation surface disabled by connector scope",
-        );
-        await clearV3TriggerAlarms(logger);
-      }
-
       // 11) Start components
       scheduler.start();
-      if (ENABLE_V3_TRIGGERS_AND_SCHEDULES) {
-        await triggers.start();
-      } else {
-        await triggers.stop().catch(() => {});
-      }
+      await triggers.start();
       rpcServer.start();
 
       logger.info("[RR-V3] Bootstrap complete");

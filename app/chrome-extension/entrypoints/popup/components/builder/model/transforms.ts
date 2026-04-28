@@ -68,9 +68,12 @@ export function topoOrder(nodes: NodeBase[], edges: BuilderEdge[]): NodeBase[] {
 export function nodesToSteps(nodes: NodeBase[], edges: BuilderEdge[]): any[] {
   // Exclude non-executable nodes like 'trigger' and cut edges from them
   const execNodes = (nodes || []).filter((n) => n.type !== ('trigger' as any));
+  const execNodeIds = new Set(execNodes.map((n) => n.id));
   const filtered = (edges || []).filter(
     (e) =>
-      (!e.label || e.label === EDGE_LABELS.DEFAULT) && !execNodes.every((n) => n.id !== e.from),
+      (!e.label || e.label === EDGE_LABELS.DEFAULT) &&
+      execNodeIds.has(e.from) &&
+      execNodeIds.has(e.to),
   );
   return sharedNodesToSteps(execNodes as any, filtered as any);
 }

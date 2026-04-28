@@ -97,11 +97,6 @@ function defaultGenerateRunId(): RunId {
   return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// Route A scope: disable platform-style trigger/schedule automation surfaces.
-const ENABLE_V3_TRIGGERS_AND_SCHEDULES = false;
-const TRIGGER_SURFACE_DISABLED_ERROR =
-  "Triggers and schedules are disabled in Connector scope.";
-
 /**
  * RPC Server
  * @description Handle RPC requests from the UI
@@ -1014,16 +1009,6 @@ export class RpcServer {
       | "rr_v3.fireTrigger",
     params: JsonObject | undefined,
   ): Promise<JsonValue> {
-    if (!ENABLE_V3_TRIGGERS_AND_SCHEDULES) {
-      if (method === "rr_v3.listTriggers") {
-        return [] as unknown as JsonValue;
-      }
-      if (method === "rr_v3.getTrigger") {
-        return null;
-      }
-      throw new Error(TRIGGER_SURFACE_DISABLED_ERROR);
-    }
-
     switch (method) {
       case "rr_v3.createTrigger":
         return this.handleCreateTrigger(params);

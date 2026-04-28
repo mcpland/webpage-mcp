@@ -3,8 +3,13 @@ import { useEffect, useState } from "react";
 import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import type { RunRecordV3 } from "@/entrypoints/background/record-replay-v3/domain/events";
 import type {
+  TriggerKind,
+  TriggerSpec,
+} from "@/entrypoints/background/record-replay-v3/domain/triggers";
+import type {
   FlowId,
   RunId,
+  TriggerId,
 } from "@/entrypoints/background/record-replay-v3/domain/ids";
 import type { JsonObject } from "@/entrypoints/background/record-replay-v3/domain/json";
 import { useRRV3Rpc } from "@/entrypoints/shared/react/useRRV3Rpc";
@@ -39,6 +44,24 @@ export interface RunLite {
     tookMs?: number;
   }>;
 }
+
+export type TriggerDraft = {
+  id?: string;
+  kind: TriggerKind;
+  enabled: boolean;
+  flowId: string;
+  args?: JsonObject;
+  match?: Array<{ kind: "url" | "domain" | "path"; value: string }>;
+  periodMinutes?: number;
+  whenMs?: number;
+  commandKey?: string;
+  title?: string;
+  contexts?: string[];
+  selector?: string;
+  appear?: boolean;
+  once?: boolean;
+  debounceMs?: number;
+};
 
 function mapFlowV3ToLite(flow: FlowV3): FlowLite {
   const domainBinding = flow.meta?.bindings?.find(
@@ -96,15 +119,22 @@ export interface UseWorkflowsV3ReactReturn {
   error: string | null;
   flows: FlowLite[];
   runs: RunLite[];
+  triggers: TriggerSpec[];
   refresh: () => Promise<void>;
   refreshFlows: () => Promise<void>;
   refreshRuns: () => Promise<void>;
+  refreshTriggers: (flowId?: string) => Promise<void>;
   runFlow: (flowId: string) => Promise<{ runId: string } | null>;
   deleteFlow: (flowId: string) => Promise<boolean>;
   exportFlow: (flowId: string) => Promise<FlowV3 | null>;
   saveFlow: (flow: FlowV3) => Promise<FlowV3 | null>;
   getFlowById: (flowId: string) => Promise<FlowV3 | null>;
   getRunEvents: (runId: string) => Promise<unknown[]>;
+  createTrigger: (trigger: TriggerDraft) => Promise<TriggerSpec | null>;
+  updateTrigger: (trigger: TriggerDraft & { id: string }) => Promise<TriggerSpec | null>;
+  deleteTrigger: (triggerId: string) => Promise<boolean>;
+  setTriggerEnabled: (triggerId: string, enabled: boolean) => Promise<boolean>;
+  fireTrigger: (triggerId: string) => Promise<{ runId: string } | null>;
 }
 
 export function useWorkflowsV3React(
@@ -118,6 +148,7 @@ export function useWorkflowsV3React(
   const [error, setError] = useState<string | null>(null);
   const [flows, setFlows] = useState<FlowLite[]>([]);
   const [runs, setRuns] = useState<RunLite[]>([]);
+  const [triggers, setTriggers] = useState<TriggerSpec[]>([]);
 
   async function refreshFlows(): Promise<void> {
     try {
@@ -144,11 +175,23 @@ export function useWorkflowsV3React(
     }
   }
 
+  async function refreshTriggers(flowId?: string): Promise<void> {
+    try {
+      const result = (await rpc.request("rr_v3.listTriggers", {
+        ...(flowId ? { flowId: flowId as FlowId } : {}),
+      })) as TriggerSpec[] | null;
+      setTriggers(result || []);
+    } catch (err) {
+      console.warn("[useWorkflowsV3React] Failed to refresh triggers:", err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function refresh(): Promise<void> {
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([refreshFlows(), refreshRuns()]);
+      await Promise.all([refreshFlows(), refreshRuns(), refreshTriggers()]);
     } finally {
       setLoading(false);
     }
@@ -232,6 +275,76 @@ export function useWorkflowsV3React(
     }
   }
 
+  async function createTrigger(trigger: TriggerDraft): Promise<TriggerSpec | null> {
+    try {
+      const result = (await rpc.request("rr_v3.createTrigger", {
+        trigger: trigger as unknown as JsonObject,
+      })) as TriggerSpec | null;
+      void refreshTriggers();
+      return result;
+    } catch (err) {
+      console.warn("[useWorkflowsV3React] Failed to create trigger:", err);
+      setError(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }
+
+  async function updateTrigger(trigger: TriggerDraft & { id: string }): Promise<TriggerSpec | null> {
+    try {
+      const result = (await rpc.request("rr_v3.updateTrigger", {
+        trigger: trigger as unknown as JsonObject,
+      })) as TriggerSpec | null;
+      void refreshTriggers();
+      return result;
+    } catch (err) {
+      console.warn("[useWorkflowsV3React] Failed to update trigger:", err);
+      setError(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }
+
+  async function deleteTrigger(triggerId: string): Promise<boolean> {
+    try {
+      await rpc.request("rr_v3.deleteTrigger", {
+        triggerId: triggerId as TriggerId,
+      });
+      void refreshTriggers();
+      return true;
+    } catch (err) {
+      console.warn("[useWorkflowsV3React] Failed to delete trigger:", err);
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  }
+
+  async function setTriggerEnabled(triggerId: string, enabled: boolean): Promise<boolean> {
+    try {
+      await rpc.request(enabled ? "rr_v3.enableTrigger" : "rr_v3.disableTrigger", {
+        triggerId: triggerId as TriggerId,
+      });
+      void refreshTriggers();
+      return true;
+    } catch (err) {
+      console.warn("[useWorkflowsV3React] Failed to update trigger state:", err);
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  }
+
+  async function fireTrigger(triggerId: string): Promise<{ runId: string } | null> {
+    try {
+      const result = (await rpc.request("rr_v3.fireTrigger", {
+        triggerId: triggerId as TriggerId,
+      })) as { runId: RunId } | null;
+      void refreshRuns();
+      return result ? { runId: result.runId } : null;
+    } catch (err) {
+      console.warn("[useWorkflowsV3React] Failed to fire trigger:", err);
+      setError(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }
+
   useEffect(() => {
     let refreshTimer: ReturnType<typeof setInterval> | null = null;
     let unsubscribeEvent: (() => void) | null = null;
@@ -284,14 +397,21 @@ export function useWorkflowsV3React(
     error,
     flows,
     runs,
+    triggers,
     refresh,
     refreshFlows,
     refreshRuns,
+    refreshTriggers,
     runFlow,
     deleteFlow,
     exportFlow,
     saveFlow,
     getFlowById,
     getRunEvents,
+    createTrigger,
+    updateTrigger,
+    deleteTrigger,
+    setTriggerEnabled,
+    fireTrigger,
   };
 }

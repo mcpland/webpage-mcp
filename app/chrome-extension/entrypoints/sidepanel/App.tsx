@@ -13,6 +13,7 @@ import { getMessage } from "@/utils/i18n";
 import type { AgentThemeId } from "./composables/useAgentTheme";
 import SidepanelNavigator from "./components/SidepanelNavigator";
 import { WorkflowsView } from "./components/workflows";
+import type { TriggerDraft } from "./components/workflows/WorkflowsView";
 import {
   useWorkflowsV3React,
   type FlowLite,
@@ -101,7 +102,7 @@ export default function SidepanelApp() {
   const [activeTab, setActiveTab] = useState<TabType>("workflows");
 
   const workflows = useWorkflowsV3React({ autoConnect: true });
-  const { flows, runs } = workflows;
+  const { flows, runs, triggers } = workflows;
 
   const [onlyBound, setOnlyBound] = useState(false);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
@@ -185,6 +186,12 @@ export default function SidepanelApp() {
     }
     return flows.filter(isBoundToCurrentUrl);
   }, [flows, onlyBound, currentUrl]);
+
+  const filteredTriggers = useMemo(() => {
+    if (!onlyBound) return triggers;
+    const visibleFlowIds = new Set(filteredFlows.map((flow) => flow.id));
+    return triggers.filter((trigger) => visibleFlowIds.has(trigger.flowId));
+  }, [filteredFlows, onlyBound, triggers]);
 
   function normalizeRecordingState(payload: unknown): RecordingState {
     if (!payload || typeof payload !== "object") {
@@ -387,6 +394,35 @@ export default function SidepanelApp() {
     } catch {
       // ignore
     }
+  }
+
+  async function createTrigger(trigger: TriggerDraft): Promise<boolean> {
+    const result = await workflows.createTrigger(trigger);
+    return Boolean(result);
+  }
+
+  async function updateTrigger(
+    trigger: TriggerDraft & { id: string },
+  ): Promise<boolean> {
+    const result = await workflows.updateTrigger(trigger);
+    return Boolean(result);
+  }
+
+  async function toggleTrigger(id: string, enabled: boolean): Promise<boolean> {
+    return workflows.setTriggerEnabled(id, enabled);
+  }
+
+  async function deleteTrigger(id: string): Promise<boolean> {
+    const ok = confirm(
+      t("sidepanelConfirmDeleteTrigger", "Delete this workflow trigger?"),
+    );
+    if (!ok) return false;
+    return workflows.deleteTrigger(id);
+  }
+
+  async function fireTrigger(id: string): Promise<boolean> {
+    const result = await workflows.fireTrigger(id);
+    return Boolean(result);
   }
 
   function resetForm(nextUrl?: string): void {
@@ -685,6 +721,7 @@ export default function SidepanelApp() {
   const workflowsProps = {
     flows: filteredFlows,
     runs,
+    triggers: filteredTriggers,
     recordingState,
     timelineSteps,
     recordingAction,
@@ -698,6 +735,14 @@ export default function SidepanelApp() {
     onEdit: (id: string) => void edit(id),
     onDelete: (id: string) => void remove(id),
     onExport: (id: string) => void exportFlow(id),
+    onRefreshTriggers: () => void workflows.refreshTriggers(),
+    onCreateTrigger: (trigger: TriggerDraft) => createTrigger(trigger),
+    onUpdateTrigger: (trigger: TriggerDraft & { id: string }) =>
+      updateTrigger(trigger),
+    onToggleTrigger: (id: string, enabled: boolean) =>
+      toggleTrigger(id, enabled),
+    onDeleteTrigger: (id: string) => deleteTrigger(id),
+    onFireTrigger: (id: string) => fireTrigger(id),
     onOnlyBoundChange: (value: boolean) => setOnlyBound(value),
     onToggleRun: (id: string) => toggleRun(id),
   };

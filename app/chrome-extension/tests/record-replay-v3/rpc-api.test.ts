@@ -21,6 +21,8 @@ import type { EventsBus } from "@/entrypoints/background/record-replay-v3/engine
 import type { RunScheduler } from "@/entrypoints/background/record-replay-v3/engine/queue/scheduler";
 import type { RunQueueItem } from "@/entrypoints/background/record-replay-v3/engine/queue/queue";
 import { RpcServer } from "@/entrypoints/background/record-replay-v3/engine/transport/rpc-server";
+import type { TriggerManager } from "@/entrypoints/background/record-replay-v3/engine/triggers/trigger-manager";
+import type { TriggerSpec } from "@/entrypoints/background/record-replay-v3/domain/triggers";
 import type { ArtifactRecord } from "@/entrypoints/background/record-replay-v3/storage/artifacts";
 
 // ==================== Test Utilities ====================
@@ -29,6 +31,7 @@ function createMockStorage(): StoragePort {
   const flowsMap = new Map<string, FlowV3>();
   const runsMap = new Map<string, RunRecordV3>();
   const queueMap = new Map<string, RunQueueItem>();
+  const triggersMap = new Map<string, TriggerSpec>();
   const artifactsMap = new Map<string, ArtifactRecord>();
   const eventsLog: Array<{ runId: string; type: string }> = [];
 
@@ -103,10 +106,14 @@ function createMockStorage(): StoragePort {
       list: vi.fn(async () => []),
     },
     triggers: {
-      list: vi.fn(async () => []),
-      get: vi.fn(async () => null),
-      save: vi.fn(async () => {}),
-      delete: vi.fn(async () => {}),
+      list: vi.fn(async () => Array.from(triggersMap.values())),
+      get: vi.fn(async (id: string) => triggersMap.get(id) ?? null),
+      save: vi.fn(async (spec: TriggerSpec) => {
+        triggersMap.set(spec.id, spec);
+      }),
+      delete: vi.fn(async (id: string) => {
+        triggersMap.delete(id);
+      }),
     },
     artifacts: {
       saveScreenshot: vi.fn(async (input) => {
@@ -140,12 +147,13 @@ function createMockStorage(): StoragePort {
       enforceRetention: vi.fn(async () => 2),
     },
     // Expose internal maps for assertions
-    _internal: { flowsMap, runsMap, queueMap, artifactsMap, eventsLog },
+    _internal: { flowsMap, runsMap, queueMap, triggersMap, artifactsMap, eventsLog },
   } as unknown as StoragePort & {
     _internal: {
       flowsMap: Map<string, FlowV3>;
       runsMap: Map<string, RunRecordV3>;
       queueMap: Map<string, RunQueueItem>;
+      triggersMap: Map<string, TriggerSpec>;
       artifactsMap: Map<string, ArtifactRecord>;
       eventsLog: Array<{ runId: string; type: string }>;
     };
@@ -190,6 +198,23 @@ function createMockScheduler(): RunScheduler {
   };
 }
 
+function createMockTriggerManager(): TriggerManager {
+  return {
+    start: vi.fn(async () => {}),
+    stop: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}),
+    fire: vi.fn(async (triggerId) => ({
+      runId: `run-${triggerId}`,
+      position: 0,
+    })),
+    dispose: vi.fn(async () => {}),
+    getState: vi.fn(() => ({
+      started: true,
+      installedTriggerIds: [],
+    })),
+  };
+}
+
 function createTestFlow(
   id: string,
   options: { withNodes?: boolean } = {},
@@ -222,6 +247,7 @@ interface MockStorageInternal {
   flowsMap: Map<string, FlowV3>;
   runsMap: Map<string, RunRecordV3>;
   queueMap: Map<string, RunQueueItem>;
+  triggersMap: Map<string, TriggerSpec>;
   artifactsMap: Map<string, ArtifactRecord>;
   eventsLog: Array<{ runId: string; type: string }>;
 }
@@ -846,6 +872,151 @@ describe("V3 RPC Queue Management APIs", () => {
         }),
       );
     });
+  });
+});
+
+describe("V3 RPC Trigger Management APIs", () => {
+  let storage: ReturnType<typeof createMockStorage>;
+  let events: EventsBus;
+  let scheduler: RunScheduler;
+  let triggerManager: TriggerManager;
+  let server: RpcServer;
+
+  beforeEach(() => {
+    storage = createMockStorage();
+    events = createMockEventsBus();
+    scheduler = createMockScheduler();
+    triggerManager = createMockTriggerManager();
+    server = new RpcServer({
+      storage,
+      events,
+      scheduler,
+      triggerManager,
+      now: () => 1_700_000_000_000,
+    });
+    getInternal(storage).flowsMap.set("flow-1", createTestFlow("flow-1"));
+  });
+
+  it("creates, lists, toggles, fires, and deletes workflow triggers", async () => {
+    const created = (await (
+      server as unknown as { handleRequest: Function }
+    ).handleRequest(
+      {
+        method: "rr_v3.createTrigger",
+        params: {
+          trigger: {
+            id: "trg-1",
+            kind: "manual",
+            enabled: true,
+            flowId: "flow-1",
+            args: { query: "value" },
+          },
+        },
+        requestId: "req-trigger-create",
+      },
+      { subscriptions: new Set() },
+    )) as TriggerSpec;
+
+    expect(created).toEqual({
+      id: "trg-1",
+      kind: "manual",
+      enabled: true,
+      flowId: "flow-1",
+      args: { query: "value" },
+    });
+    expect(triggerManager.refresh).toHaveBeenCalledTimes(1);
+
+    const listed = await (
+      server as unknown as { handleRequest: Function }
+    ).handleRequest(
+      {
+        method: "rr_v3.listTriggers",
+        params: { flowId: "flow-1" },
+        requestId: "req-trigger-list",
+      },
+      { subscriptions: new Set() },
+    );
+    expect(listed).toEqual([created]);
+
+    const updated = (await (
+      server as unknown as { handleRequest: Function }
+    ).handleRequest(
+      {
+        method: "rr_v3.updateTrigger",
+        params: {
+          trigger: {
+            id: "trg-1",
+            kind: "manual",
+            enabled: true,
+            flowId: "flow-1",
+            args: { query: "updated" },
+          },
+        },
+        requestId: "req-trigger-update",
+      },
+      { subscriptions: new Set() },
+    )) as TriggerSpec;
+    expect(updated).toEqual({
+      id: "trg-1",
+      kind: "manual",
+      enabled: true,
+      flowId: "flow-1",
+      args: { query: "updated" },
+    });
+    expect(getInternal(storage).triggersMap.get("trg-1")).toEqual(updated);
+
+    const disabled = (await (
+      server as unknown as { handleRequest: Function }
+    ).handleRequest(
+      {
+        method: "rr_v3.disableTrigger",
+        params: { triggerId: "trg-1" },
+        requestId: "req-trigger-disable",
+      },
+      { subscriptions: new Set() },
+    )) as TriggerSpec;
+    expect(disabled.enabled).toBe(false);
+
+    const enabled = (await (
+      server as unknown as { handleRequest: Function }
+    ).handleRequest(
+      {
+        method: "rr_v3.enableTrigger",
+        params: { triggerId: "trg-1" },
+        requestId: "req-trigger-enable",
+      },
+      { subscriptions: new Set() },
+    )) as TriggerSpec;
+    expect(enabled.enabled).toBe(true);
+
+    const fired = await (
+      server as unknown as { handleRequest: Function }
+    ).handleRequest(
+      {
+        method: "rr_v3.fireTrigger",
+        params: { triggerId: "trg-1" },
+        requestId: "req-trigger-fire",
+      },
+      { subscriptions: new Set() },
+    );
+    expect(fired).toEqual({ runId: "run-trg-1", position: 0 });
+    expect(triggerManager.fire).toHaveBeenCalledWith("trg-1", {
+      sourceTabId: undefined,
+      sourceUrl: undefined,
+    });
+
+    const deleted = await (
+      server as unknown as { handleRequest: Function }
+    ).handleRequest(
+      {
+        method: "rr_v3.deleteTrigger",
+        params: { triggerId: "trg-1" },
+        requestId: "req-trigger-delete",
+      },
+      { subscriptions: new Set() },
+    );
+    expect(deleted).toEqual({ ok: true, triggerId: "trg-1" });
+    expect(getInternal(storage).triggersMap.has("trg-1")).toBe(false);
   });
 });
 
