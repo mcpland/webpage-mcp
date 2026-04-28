@@ -13,7 +13,7 @@ import type {
 import type { JsonObject } from "@/entrypoints/background/record-replay-v3/domain/json";
 import {
   extractHiddenSensitiveVariables,
-  getActiveCurrentWindowTabId,
+  getActiveCurrentWindowTab,
   flowBuilderToV3ForRpc,
   flowV3ToBuilderForEditor,
   isFlowV3,
@@ -47,6 +47,17 @@ function getQuery(): Record<string, string> {
     q[k] = v;
   });
   return q;
+}
+
+function readTabId(value: string | undefined): number | undefined {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0
+    ? Math.floor(parsed)
+    : undefined;
+}
+
+function isRunnableTabUrl(url: string | undefined): boolean {
+  return typeof url === "string" && /^https?:\/\//i.test(url);
 }
 
 export default function BuilderApp() {
@@ -100,6 +111,7 @@ export default function BuilderApp() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootstrapDoneRef = useRef(false);
+  const sourceTabIdRef = useRef(readTabId(getQuery().sourceTabId));
   const hiddenSensitiveVariablesRef = useRef<FlowV3["variables"]>(undefined);
 
   const rpc = useRRV3Rpc({
@@ -274,6 +286,27 @@ export default function BuilderApp() {
     store.flowLocal.name = renameName.trim();
     (store.flowLocal as any).description = renameDesc;
     setRenameVisible(false);
+  }
+
+  async function getRunTargetTabId(): Promise<number | undefined> {
+    const sourceTabId = sourceTabIdRef.current;
+    if (sourceTabId !== undefined) {
+      const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
+      if (typeof sourceTab?.id === "number") {
+        return sourceTab.id;
+      }
+      sourceTabIdRef.current = undefined;
+    }
+
+    const activeTab = await getActiveCurrentWindowTab();
+    if (
+      typeof activeTab?.id === "number" &&
+      isRunnableTabUrl(activeTab.url)
+    ) {
+      return activeTab.id;
+    }
+
+    return undefined;
   }
 
   async function save(): Promise<FlowV3 | null> {
@@ -494,7 +527,7 @@ export default function BuilderApp() {
 
       const node = store.nodes.find((n) => n.id === selectedId) || null;
       const startNodeId = node?.type === "trigger" ? undefined : selectedId;
-      const tabId = await getActiveCurrentWindowTabId();
+      const tabId = await getRunTargetTabId();
 
       await rpc.request("rr_v3.enqueueRun", {
         flowId: saved.id as FlowId,
@@ -529,7 +562,7 @@ export default function BuilderApp() {
       if (!saved) return;
 
       await rpc.ensureConnected();
-      const tabId = await getActiveCurrentWindowTabId();
+      const tabId = await getRunTargetTabId();
       await rpc.request("rr_v3.enqueueRun", {
         flowId: saved.id as FlowId,
         ...(tabId !== undefined ? { tabId } : {}),

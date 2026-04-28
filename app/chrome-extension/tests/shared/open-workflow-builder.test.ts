@@ -4,6 +4,7 @@ import { openWorkflowBuilder } from "@/entrypoints/shared/utils";
 
 describe("openWorkflowBuilder", () => {
   const getURL = vi.fn((path: string) => `chrome-extension://test/${path}`);
+  const query = vi.fn(async () => [{ id: 42, url: "https://example.com/" }]);
   const create = vi.fn(async (options: chrome.tabs.CreateProperties) => ({
     id: 1,
     ...options,
@@ -11,6 +12,7 @@ describe("openWorkflowBuilder", () => {
 
   beforeEach(() => {
     getURL.mockClear();
+    query.mockClear();
     create.mockClear();
     Object.assign(globalThis, {
       chrome: {
@@ -18,6 +20,7 @@ describe("openWorkflowBuilder", () => {
           getURL,
         },
         tabs: {
+          query,
           create,
         },
       },
@@ -42,6 +45,25 @@ describe("openWorkflowBuilder", () => {
     );
     expect(create).toHaveBeenCalledWith({
       url: "chrome-extension://test/builder.html?flowId=flow-1&focus=node-7",
+      active: true,
+    });
+  });
+
+  it("preserves the active source tab when requested", async () => {
+    await openWorkflowBuilder({
+      flowId: "flow-1",
+      preserveActiveTabContext: true,
+    });
+
+    expect(query).toHaveBeenCalledWith({
+      active: true,
+      currentWindow: true,
+    });
+    expect(getURL).toHaveBeenCalledWith(
+      "builder.html?flowId=flow-1&sourceTabId=42",
+    );
+    expect(create).toHaveBeenCalledWith({
+      url: "chrome-extension://test/builder.html?flowId=flow-1&sourceTabId=42",
       active: true,
     });
   });

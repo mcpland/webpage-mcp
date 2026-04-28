@@ -365,7 +365,10 @@ export default function SidepanelApp() {
 
   async function edit(id: string): Promise<void> {
     try {
-      await openWorkflowBuilder({ flowId: id });
+      await openWorkflowBuilder({
+        flowId: id,
+        preserveActiveTabContext: true,
+      });
     } catch (error) {
       console.warn("Failed to open workflow builder:", error);
     }
@@ -373,7 +376,10 @@ export default function SidepanelApp() {
 
   async function createFlow(): Promise<void> {
     try {
-      await openWorkflowBuilder({ createNew: true });
+      await openWorkflowBuilder({
+        createNew: true,
+        preserveActiveTabContext: true,
+      });
     } catch (error) {
       console.warn("Failed to open workflow builder:", error);
     }
