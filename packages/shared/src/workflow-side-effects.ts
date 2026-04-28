@@ -57,6 +57,16 @@ function defaultRetryMode(category: WorkflowSideEffectCategory): WorkflowRetryMo
   return 'explicit';
 }
 
+function defaultDescriptionForCategory(category: WorkflowSideEffectCategory): string {
+  if (category === 'safe') {
+    return 'Read-only, waiting, assertion, or diagnostic step.';
+  }
+  if (category === 'idempotent') {
+    return 'Mutates local browser/page state but is usually repeatable when explicitly configured.';
+  }
+  return 'May trigger external, irreversible, or repeated side effects; retry requires explicit opt-in.';
+}
+
 function normalizeCategory(value: unknown): WorkflowSideEffectCategory | undefined {
   return value === 'safe' || value === 'idempotent' || value === 'dangerous'
     ? value
@@ -111,12 +121,19 @@ export function normalizeWorkflowSideEffectProfile(
   override?: Partial<WorkflowSideEffectProfile>,
 ): WorkflowSideEffectProfile {
   const base = getDefaultWorkflowSideEffectProfile(kind);
-  const category = normalizeCategory(override?.category) ?? base.category;
-  const retry = normalizeRetryMode(override?.retry) ?? base.retry ?? defaultRetryMode(category);
+  const overrideCategory = normalizeCategory(override?.category);
+  const category = overrideCategory ?? base.category;
+  const retry =
+    normalizeRetryMode(override?.retry) ??
+    (overrideCategory ? defaultRetryMode(category) : base.retry ?? defaultRetryMode(category));
+  const fallbackDescription =
+    overrideCategory && overrideCategory !== base.category
+      ? defaultDescriptionForCategory(category)
+      : base.description;
   const description =
     typeof override?.description === 'string' && override.description.trim()
       ? override.description.trim()
-      : base.description;
+      : fallbackDescription;
   return {
     category,
     retry,
