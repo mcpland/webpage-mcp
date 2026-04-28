@@ -1403,6 +1403,72 @@ describe("V3 RPC Flow CRUD APIs", () => {
       expect(result.nodes[0].name).toBe("Start Node");
     });
 
+    it("preserves node side-effect profiles when saving flows", async () => {
+      const result = (await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.saveFlow",
+          params: {
+            flow: {
+              name: "Side Effects",
+              entryNodeId: "node-1",
+              nodes: [
+                {
+                  id: "node-1",
+                  kind: "click",
+                  config: { selector: "#buy" },
+                  sideEffect: {
+                    category: "dangerous",
+                    retry: "never",
+                    description: "Do not click twice",
+                  },
+                },
+              ],
+              edges: [],
+            },
+          },
+          requestId: "req-1",
+        },
+        { subscriptions: new Set() },
+      )) as FlowV3;
+
+      expect(result.nodes[0].sideEffect).toEqual({
+        category: "dangerous",
+        retry: "never",
+        description: "Do not click twice",
+      });
+    });
+
+    it("rejects invalid node side-effect profiles", async () => {
+      await expect(
+        (server as unknown as { handleRequest: Function }).handleRequest(
+          {
+            method: "rr_v3.saveFlow",
+            params: {
+              flow: {
+                name: "Side Effects",
+                entryNodeId: "node-1",
+                nodes: [
+                  {
+                    id: "node-1",
+                    kind: "click",
+                    config: { selector: "#buy" },
+                    sideEffect: { category: "unsafe" },
+                  },
+                ],
+                edges: [],
+              },
+            },
+            requestId: "req-1",
+          },
+          { subscriptions: new Set() },
+        ),
+      ).rejects.toThrow(
+        "flow.nodes[0].sideEffect.category must be one of",
+      );
+    });
+
     it("normalizes typed variable metadata when saving flows", async () => {
       const result = (await (
         server as unknown as { handleRequest: Function }

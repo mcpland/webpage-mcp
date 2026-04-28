@@ -58,6 +58,10 @@ import { resolveRunTargetTab } from "../../run-target";
 import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
 import type { ExecutionFlags } from "@/entrypoints/background/replay-actions";
 import {
+  normalizeWorkflowSideEffectProfile,
+  type WorkflowSideEffectProfile,
+} from "webpage-mcp-shared";
+import {
   RR_V3_PORT_NAME,
   isRpcRequest,
   createRpcResponseOk,
@@ -89,6 +93,13 @@ interface PortConnection {
   port: chrome.runtime.Port;
   subscriptions: Set<RunId | null>; // null means subscribe to all
 }
+
+const SIDE_EFFECT_CATEGORIES = new Set<
+  WorkflowSideEffectProfile["category"]
+>(["safe", "idempotent", "dangerous"]);
+const SIDE_EFFECT_RETRY_MODES = new Set<
+  NonNullable<WorkflowSideEffectProfile["retry"]>
+>(["default", "explicit", "never", "always"]);
 
 /**
  * Default RunId generator
@@ -930,6 +941,13 @@ export class RpcServer {
       }
       node.disabled = raw.disabled;
     }
+    if (raw.sideEffect !== undefined && raw.sideEffect !== null) {
+      node.sideEffect = this.normalizeNodeSideEffect(
+        raw.sideEffect,
+        kind,
+        index,
+      );
+    }
     if (raw.policy !== undefined && raw.policy !== null) {
       if (typeof raw.policy !== "object" || Array.isArray(raw.policy)) {
         throw new Error(`flow.nodes[${index}].policy must be an object`);
@@ -944,6 +962,59 @@ export class RpcServer {
     }
 
     return node;
+  }
+
+  private normalizeNodeSideEffect(
+    value: unknown,
+    kind: string,
+    index: number,
+  ): WorkflowSideEffectProfile {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`flow.nodes[${index}].sideEffect must be an object`);
+    }
+    const raw = value as JsonObject;
+    const override: Partial<WorkflowSideEffectProfile> = {};
+
+    if (raw.category !== undefined && raw.category !== null) {
+      if (
+        typeof raw.category !== "string" ||
+        !SIDE_EFFECT_CATEGORIES.has(
+          raw.category as WorkflowSideEffectProfile["category"],
+        )
+      ) {
+        throw new Error(
+          `flow.nodes[${index}].sideEffect.category must be one of: safe, idempotent, dangerous`,
+        );
+      }
+      override.category = raw.category as WorkflowSideEffectProfile["category"];
+    }
+
+    if (raw.retry !== undefined && raw.retry !== null) {
+      if (
+        typeof raw.retry !== "string" ||
+        !SIDE_EFFECT_RETRY_MODES.has(
+          raw.retry as NonNullable<WorkflowSideEffectProfile["retry"]>,
+        )
+      ) {
+        throw new Error(
+          `flow.nodes[${index}].sideEffect.retry must be one of: default, explicit, never, always`,
+        );
+      }
+      override.retry = raw.retry as NonNullable<
+        WorkflowSideEffectProfile["retry"]
+      >;
+    }
+
+    if (raw.description !== undefined && raw.description !== null) {
+      if (typeof raw.description !== "string") {
+        throw new Error(
+          `flow.nodes[${index}].sideEffect.description must be a string`,
+        );
+      }
+      override.description = raw.description;
+    }
+
+    return normalizeWorkflowSideEffectProfile(kind, override);
   }
 
   /**
