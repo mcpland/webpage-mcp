@@ -262,7 +262,9 @@ export function buildWorkflowBackgroundSupport(flow: FlowV3): WorkflowBackground
   for (const node of flow.nodes || []) {
     if (node.kind === "screenshot") {
       const config = node.config || {};
-      if (config.fullPage === true || typeof config.selector === "string") {
+      const selector =
+        typeof config.selector === "string" ? config.selector.trim() : "";
+      if (config.fullPage === true || selector) {
         caveats.push(
           `Node ${node.id} uses full-page or selector screenshot capture, which requires foreground capture.`,
         );

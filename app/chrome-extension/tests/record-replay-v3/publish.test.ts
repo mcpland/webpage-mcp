@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { listPublishedFlowDetails } from '@/entrypoints/background/record-replay-v3/flows/publish';
+import {
+  buildWorkflowBackgroundSupport,
+  listPublishedFlowDetails,
+} from '@/entrypoints/background/record-replay-v3/flows/publish';
 import type { FlowV3 } from '@/entrypoints/background/record-replay-v3/domain/flow';
 
 function createPublishedFlow(): FlowV3 {
@@ -136,5 +139,43 @@ describe('listPublishedFlowDetails', () => {
         }),
       }),
     ]);
+  });
+});
+
+describe('buildWorkflowBackgroundSupport', () => {
+  it('does not treat an empty screenshot selector as foreground-only', () => {
+    const flow = createPublishedFlow();
+    flow.nodes = [
+      {
+        id: 'node-1' as any,
+        kind: 'screenshot',
+        config: { selector: '', fullPage: false },
+      },
+    ];
+
+    expect(buildWorkflowBackgroundSupport(flow)).toEqual({
+      supported: true,
+      modes: ['currentTab', 'newTab', 'background'],
+      caveats: [],
+    });
+  });
+
+  it('flags concrete selector screenshot capture as foreground-only', () => {
+    const flow = createPublishedFlow();
+    flow.nodes = [
+      {
+        id: 'node-1' as any,
+        kind: 'screenshot',
+        config: { selector: 'main', fullPage: false },
+      },
+    ];
+
+    expect(buildWorkflowBackgroundSupport(flow)).toEqual({
+      supported: false,
+      modes: ['currentTab', 'newTab'],
+      caveats: [
+        'Node node-1 uses full-page or selector screenshot capture, which requires foreground capture.',
+      ],
+    });
   });
 });
