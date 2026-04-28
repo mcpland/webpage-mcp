@@ -16,6 +16,7 @@ export {
 } from "./rr-flow-convert";
 
 export {
+  isWorkflowRunTargetTabUrl,
   openWorkflowBuilder,
   type OpenWorkflowBuilderOptions,
 } from "./open-workflow-builder";

@@ -18,6 +18,7 @@ import {
   flowV3ToBuilderForEditor,
   isFlowV3,
   extractFlowCandidates,
+  isWorkflowRunTargetTabUrl,
   mergeHiddenSensitiveVariables,
 } from "@/entrypoints/shared/utils";
 import {
@@ -56,8 +57,14 @@ function readTabId(value: string | undefined): number | undefined {
     : undefined;
 }
 
-function isRunnableTabUrl(url: string | undefined): boolean {
-  return typeof url === "string" && /^https?:\/\//i.test(url);
+function getTabNavigationUrl(
+  tab: chrome.tabs.Tab | null | undefined,
+): string | undefined {
+  const candidate = tab as
+    | (chrome.tabs.Tab & { pendingUrl?: string })
+    | null
+    | undefined;
+  return candidate?.pendingUrl || tab?.url || undefined;
 }
 
 export default function BuilderApp() {
@@ -292,7 +299,10 @@ export default function BuilderApp() {
     const sourceTabId = sourceTabIdRef.current;
     if (sourceTabId !== undefined) {
       const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
-      if (typeof sourceTab?.id === "number") {
+      if (
+        typeof sourceTab?.id === "number" &&
+        isWorkflowRunTargetTabUrl(getTabNavigationUrl(sourceTab))
+      ) {
         return sourceTab.id;
       }
       sourceTabIdRef.current = undefined;
@@ -301,7 +311,7 @@ export default function BuilderApp() {
     const activeTab = await getActiveCurrentWindowTab();
     if (
       typeof activeTab?.id === "number" &&
-      isRunnableTabUrl(activeTab.url)
+      isWorkflowRunTargetTabUrl(getTabNavigationUrl(activeTab))
     ) {
       return activeTab.id;
     }

@@ -67,4 +67,23 @@ describe("openWorkflowBuilder", () => {
       active: true,
     });
   });
+
+  it("does not preserve non-runnable active source tabs", async () => {
+    query.mockResolvedValueOnce([{ id: 42, url: "chrome://extensions/" }]);
+
+    await openWorkflowBuilder({
+      flowId: "flow-1",
+      preserveActiveTabContext: true,
+    });
+
+    expect(query).toHaveBeenCalledWith({
+      active: true,
+      currentWindow: true,
+    });
+    expect(getURL).toHaveBeenCalledWith("builder.html?flowId=flow-1");
+    expect(create).toHaveBeenCalledWith({
+      url: "chrome-extension://test/builder.html?flowId=flow-1",
+      active: true,
+    });
+  });
 });

@@ -14,6 +14,21 @@ function normalizeTabId(value: unknown): number | undefined {
     : undefined;
 }
 
+export function isWorkflowRunTargetTabUrl(
+  url: string | null | undefined,
+): boolean {
+  return typeof url === "string" && /^https?:\/\//i.test(url.trim());
+}
+
+function getTabNavigationUrl(
+  tab: chrome.tabs.Tab | undefined,
+): string | undefined {
+  const candidate = tab as
+    | (chrome.tabs.Tab & { pendingUrl?: string })
+    | undefined;
+  return candidate?.pendingUrl || tab?.url || undefined;
+}
+
 export async function openWorkflowBuilder(
   options: OpenWorkflowBuilderOptions = {},
 ): Promise<chrome.tabs.Tab> {
@@ -22,7 +37,9 @@ export async function openWorkflowBuilder(
 
   if (sourceTabId === undefined && options.preserveActiveTabContext === true) {
     const sourceTab = await getActiveCurrentWindowTab();
-    sourceTabId = normalizeTabId(sourceTab?.id);
+    if (isWorkflowRunTargetTabUrl(getTabNavigationUrl(sourceTab))) {
+      sourceTabId = normalizeTabId(sourceTab?.id);
+    }
   }
 
   if (options.flowId) {
