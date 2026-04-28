@@ -30,7 +30,11 @@ import type {
 } from "../../domain/flow";
 import { FLOW_SCHEMA_VERSION as CURRENT_FLOW_SCHEMA_VERSION } from "../../domain/flow";
 import type { VariableDefinition } from "../../domain/variables";
-import type { TriggerKind, TriggerSpec } from "../../domain/triggers";
+import type {
+  TriggerKind,
+  TriggerSpec,
+  UrlMatchRule,
+} from "../../domain/triggers";
 import type { StoragePort } from "../storage/storage-port";
 import type { EventsBus } from "./events-bus";
 import type {
@@ -100,6 +104,11 @@ const SIDE_EFFECT_CATEGORIES = new Set<
 const SIDE_EFFECT_RETRY_MODES = new Set<
   NonNullable<WorkflowSideEffectProfile["retry"]>
 >(["default", "explicit", "never", "always"]);
+const URL_MATCH_RULE_KINDS = new Set<UrlMatchRule["kind"]>([
+  "url",
+  "domain",
+  "path",
+]);
 
 /**
  * Default RunId generator
@@ -1271,6 +1280,37 @@ export class RpcServer {
     return result as unknown as JsonValue;
   }
 
+  private normalizeUrlMatchRules(value: unknown): UrlMatchRule[] {
+    if (!Array.isArray(value)) {
+      throw new Error("trigger.match must be an array");
+    }
+    if (value.length === 0) {
+      throw new Error("trigger.match must include at least one URL rule");
+    }
+
+    return value.map((entry, index): UrlMatchRule => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new Error(`trigger.match[${index}] must be an object`);
+      }
+      const raw = entry as JsonObject;
+      const kind =
+        typeof raw.kind === "string" ? raw.kind.trim() : undefined;
+      if (!kind || !URL_MATCH_RULE_KINDS.has(kind as UrlMatchRule["kind"])) {
+        throw new Error(
+          `trigger.match[${index}].kind must be one of: url, domain, path`,
+        );
+      }
+      const ruleValue =
+        typeof raw.value === "string" ? raw.value.trim() : undefined;
+      if (!ruleValue) {
+        throw new Error(
+          `trigger.match[${index}].value must be a non-empty string`,
+        );
+      }
+      return { kind: kind as UrlMatchRule["kind"], value: ruleValue };
+    });
+  }
+
   /**
    * Normalize TriggerSpec input
    */
@@ -1343,13 +1383,10 @@ export class RpcServer {
         return base as TriggerSpec;
 
       case "url": {
-        let match: unknown[] = [];
-        if (raw.match !== undefined && raw.match !== null) {
-          if (!Array.isArray(raw.match)) {
-            throw new Error("trigger.match must be an array");
-          }
-          match = raw.match;
+        if (raw.match === undefined || raw.match === null) {
+          throw new Error("trigger.match is required for url triggers");
         }
+        const match = this.normalizeUrlMatchRules(raw.match);
         return { ...base, match } as TriggerSpec;
       }
 

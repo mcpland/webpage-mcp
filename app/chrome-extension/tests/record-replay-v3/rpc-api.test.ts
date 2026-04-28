@@ -1018,6 +1018,103 @@ describe("V3 RPC Trigger Management APIs", () => {
     expect(deleted).toEqual({ ok: true, triggerId: "trg-1" });
     expect(getInternal(storage).triggersMap.has("trg-1")).toBe(false);
   });
+
+  it("validates and normalizes URL trigger match rules", async () => {
+    const created = (await (
+      server as unknown as { handleRequest: Function }
+    ).handleRequest(
+      {
+        method: "rr_v3.createTrigger",
+        params: {
+          trigger: {
+            id: "trg-url",
+            kind: "url",
+            enabled: true,
+            flowId: "flow-1",
+            match: [
+              { kind: "domain", value: " example.com " },
+              { kind: "path", value: "/checkout" },
+            ],
+          },
+        },
+        requestId: "req-trigger-url",
+      },
+      { subscriptions: new Set() },
+    )) as TriggerSpec;
+
+    expect(created).toEqual({
+      id: "trg-url",
+      kind: "url",
+      enabled: true,
+      flowId: "flow-1",
+      args: undefined,
+      match: [
+        { kind: "domain", value: "example.com" },
+        { kind: "path", value: "/checkout" },
+      ],
+    });
+  });
+
+  it("rejects URL triggers without concrete match rules", async () => {
+    await expect(
+      (server as unknown as { handleRequest: Function }).handleRequest(
+        {
+          method: "rr_v3.createTrigger",
+          params: {
+            trigger: {
+              id: "trg-url",
+              kind: "url",
+              enabled: true,
+              flowId: "flow-1",
+              match: [],
+            },
+          },
+          requestId: "req-trigger-url",
+        },
+        { subscriptions: new Set() },
+      ),
+    ).rejects.toThrow("trigger.match must include at least one URL rule");
+
+    await expect(
+      (server as unknown as { handleRequest: Function }).handleRequest(
+        {
+          method: "rr_v3.createTrigger",
+          params: {
+            trigger: {
+              id: "trg-url",
+              kind: "url",
+              enabled: true,
+              flowId: "flow-1",
+              match: [{ kind: "host", value: "example.com" }],
+            },
+          },
+          requestId: "req-trigger-url",
+        },
+        { subscriptions: new Set() },
+      ),
+    ).rejects.toThrow(
+      "trigger.match[0].kind must be one of: url, domain, path",
+    );
+
+    await expect(
+      (server as unknown as { handleRequest: Function }).handleRequest(
+        {
+          method: "rr_v3.createTrigger",
+          params: {
+            trigger: {
+              id: "trg-url",
+              kind: "url",
+              enabled: true,
+              flowId: "flow-1",
+              match: [{ kind: "domain", value: " " }],
+            },
+          },
+          requestId: "req-trigger-url",
+        },
+        { subscriptions: new Set() },
+      ),
+    ).rejects.toThrow("trigger.match[0].value must be a non-empty string");
+  });
 });
 
 describe("V3 RPC Flow CRUD APIs", () => {
