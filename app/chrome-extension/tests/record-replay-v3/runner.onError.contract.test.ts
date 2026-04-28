@@ -477,6 +477,64 @@ describe('V3 RunRunner onError contracts', () => {
     expect(failed.map((e) => e.decision)).toEqual(['retry']);
   });
 
+  it('flow default retry applies only to side-effect safe nodes', async () => {
+    const runId = 'run-side-effect-safe-default-retry';
+    const flow = createFlow(
+      'A',
+      [
+        {
+          id: 'A',
+          kind: 'test',
+          sideEffect: { category: 'safe', retry: 'default' },
+          config: { action: 'flaky', failTimes: 1 },
+        },
+      ],
+      [],
+    );
+    flow.policy = { defaultNodePolicy: { retry: { retries: 1, intervalMs: 0 } } };
+
+    const { runner, bus, runsById } = createRunnerContext(runId, flow);
+    const result = await runner.start();
+    expect(result.status).toBe('succeeded');
+    expect(runsById.get(runId)?.status).toBe('succeeded');
+
+    const events = await listEvents(bus, runId);
+    const started = events.filter((e) => e.type === 'node.started') as Array<
+      Extract<RunEvent, { type: 'node.started' }>
+    >;
+    expect(started.map((e) => e.attempt)).toEqual([1, 2]);
+    expect(nodeFailedEvents(events, 'A').map((e) => e.decision)).toEqual(['retry']);
+  });
+
+  it('flow default retry is suppressed for side-effecting nodes', async () => {
+    const runId = 'run-side-effect-danger-default-retry';
+    const flow = createFlow(
+      'A',
+      [
+        {
+          id: 'A',
+          kind: 'test',
+          sideEffect: { category: 'dangerous', retry: 'explicit' },
+          config: { action: 'flaky', failTimes: 1 },
+        },
+      ],
+      [],
+    );
+    flow.policy = { defaultNodePolicy: { retry: { retries: 1, intervalMs: 0 } } };
+
+    const { runner, bus, runsById } = createRunnerContext(runId, flow);
+    const result = await runner.start();
+    expect(result.status).toBe('failed');
+    expect(runsById.get(runId)?.status).toBe('failed');
+
+    const events = await listEvents(bus, runId);
+    const started = events.filter((e) => e.type === 'node.started') as Array<
+      Extract<RunEvent, { type: 'node.started' }>
+    >;
+    expect(started.map((e) => e.attempt)).toEqual([1]);
+    expect(nodeFailedEvents(events, 'A').map((e) => e.decision)).toEqual(['stop']);
+  });
+
   it('artifacts: captures and records failure screenshots from node policy', async () => {
     const runId = 'run-artifact-on-failure';
     const artifactService: ArtifactService = {

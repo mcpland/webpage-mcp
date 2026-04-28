@@ -9,3 +9,4 @@ export * from './node-spec-registry';
 export * from './node-specs-builtin';
 export * from './agent-types';
 export * from './agent-rpc';
+export * from './workflow-side-effects';

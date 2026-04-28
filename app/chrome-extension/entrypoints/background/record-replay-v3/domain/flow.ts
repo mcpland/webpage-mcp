@@ -3,6 +3,7 @@
  * @description Defining Flow IR (Intermediate Representation) in Record-Replay V3
  */
 
+import type { WorkflowSideEffectProfile } from "webpage-mcp-shared";
 import type { ISODateTimeString, JsonObject } from "./json";
 import type { EdgeId, EdgeLabel, FlowId, NodeId } from "./ids";
 import type { FlowPolicy, NodePolicy } from "./policy";
@@ -42,6 +43,8 @@ export interface NodeV3 {
   name?: string;
   /** Whether to disable */
   disabled?: boolean;
+  /** Side-effect and retry safety classification */
+  sideEffect?: WorkflowSideEffectProfile;
   /** Node level policy */
   policy?: NodePolicy;
   /** Node configuration (type determined by kind) */

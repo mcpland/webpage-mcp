@@ -31,6 +31,10 @@ import type {
   VariablePointer,
   VariableStore,
 } from './types';
+import {
+  normalizeWorkflowSideEffectProfile,
+  workflowSideEffectAllowsRetry,
+} from 'webpage-mcp-shared';
 
 // ================================
 // type definition
@@ -513,9 +517,24 @@ export class ActionRegistry {
     }
 
     // Calculate retry and timeout parameters
-    const retryPolicy = action.policy?.retry;
+    const requestedRetryPolicy = action.policy?.retry;
+    const sideEffectProfile = normalizeWorkflowSideEffectProfile(action.type, action.sideEffect);
+    const retryPolicy =
+      requestedRetryPolicy && workflowSideEffectAllowsRetry(sideEffectProfile, 'node')
+        ? requestedRetryPolicy
+        : undefined;
     const timeoutPolicy = action.policy?.timeout;
     const maxAttempts = 1 + Math.max(0, Math.floor(retryPolicy?.retries ?? 0));
+    if (requestedRetryPolicy && !retryPolicy) {
+      try {
+        ctx.log(
+          `Retry suppressed for action "${action.type}" because sideEffect.retry=${sideEffectProfile.retry}`,
+          'warn',
+        );
+      } catch {
+        // ignore
+      }
+    }
 
     const actionDeadline =
       timeoutPolicy && timeoutPolicy.ms > 0 && (timeoutPolicy.scope ?? 'attempt') === 'action'

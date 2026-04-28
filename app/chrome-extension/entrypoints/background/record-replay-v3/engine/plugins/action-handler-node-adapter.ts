@@ -26,6 +26,12 @@ import type { JsonValue, JsonObject } from '../../domain/json';
 import { RR_ERROR_CODES, createRRError, type RRError, type RRErrorCode } from '../../domain/errors';
 import type { NodePolicy } from '../../domain/policy';
 import { mergeNodePolicy } from '../../domain/policy';
+import type { NodeV3 } from '../../domain/flow';
+import {
+  normalizeWorkflowSideEffectProfile,
+  workflowSideEffectAllowsRetry,
+  type WorkflowRetrySource,
+} from 'webpage-mcp-shared';
 
 import type {
   NodeDefinition,
@@ -271,6 +277,40 @@ function toJsonRecord(value: unknown): Record<string, JsonValue> {
   return out;
 }
 
+function resolveRetrySource(
+  flowDefault: NodePolicy | undefined,
+  nodePolicy: NodePolicy | undefined,
+): WorkflowRetrySource | undefined {
+  if (nodePolicy?.retry || nodePolicy?.onError?.kind === 'retry') return 'node';
+  if (flowDefault?.retry || flowDefault?.onError?.kind === 'retry') return 'flowDefault';
+  return undefined;
+}
+
+function applySideEffectRetryGuard(
+  kind: string,
+  node: NodeV3,
+  policy: NodePolicy,
+  retrySource: WorkflowRetrySource | undefined,
+): NodePolicy {
+  if (!retrySource || (!policy.retry && policy.onError?.kind !== 'retry')) {
+    return policy;
+  }
+
+  const profile = normalizeWorkflowSideEffectProfile(kind, node.sideEffect);
+  if (workflowSideEffectAllowsRetry(profile, retrySource)) {
+    return policy;
+  }
+
+  const guarded: NodePolicy = { ...policy };
+  if (guarded.retry) {
+    delete guarded.retry;
+  }
+  if (guarded.onError?.kind === 'retry') {
+    guarded.onError = { kind: 'stop' };
+  }
+  return guarded;
+}
+
 // ==================== Main Adapter ====================
 
 /**
@@ -323,7 +363,13 @@ export function adaptActionHandlerToNodeDefinition<T extends ExecutableActionTyp
           : {}),
       };
 
-      const effectivePolicy = mergeNodePolicy(ctx.flow.policy?.defaultNodePolicy, node.policy);
+      const flowDefaultPolicy = ctx.flow.policy?.defaultNodePolicy;
+      const effectivePolicy = applySideEffectRetryGuard(
+        handler.type,
+        node,
+        mergeNodePolicy(flowDefaultPolicy, node.policy),
+        resolveRetrySource(flowDefaultPolicy, node.policy),
+      );
       const actionPolicy = toActionPolicy(effectivePolicy);
 
       const action: Action<T> = {
@@ -331,6 +377,7 @@ export function adaptActionHandlerToNodeDefinition<T extends ExecutableActionTyp
         type: handler.type,
         ...(node.name ? { name: node.name } : {}),
         ...(node.disabled ? { disabled: true } : {}),
+        sideEffect: normalizeWorkflowSideEffectProfile(handler.type, node.sideEffect),
         ...(actionPolicy ? { policy: actionPolicy } : {}),
         params: node.config as unknown as Action<T>['params'],
         ...(node.ui ? { ui: node.ui as Action<T>['ui'] } : {}),

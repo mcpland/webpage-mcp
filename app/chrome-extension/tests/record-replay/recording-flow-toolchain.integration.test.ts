@@ -690,6 +690,11 @@ describe("recording/editing/flow toolchain integration", () => {
             value: "alice@example.com",
           },
         },
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
       ],
       {
         meta: {
@@ -758,6 +763,11 @@ describe("recording/editing/flow toolchain integration", () => {
               target: { selector: "#email" },
               value: "alice@example.com",
             },
+          },
+          {
+            id: "wait-1" as any,
+            kind: "wait",
+            config: { condition: { kind: "selector", selector: "#results" } },
           },
         ],
         {
@@ -844,7 +854,8 @@ describe("recording/editing/flow toolchain integration", () => {
       ms: 15000,
       scope: "attempt",
     });
-    expect(updated?.policy?.defaultNodePolicy?.retry).toMatchObject({
+    expect(updated?.policy?.defaultNodePolicy?.retry).toBeUndefined();
+    expect(updated?.nodes.find((node) => node.id === "wait-1")?.policy?.retry).toMatchObject({
       retries: 1,
       intervalMs: 500,
       backoff: "linear",

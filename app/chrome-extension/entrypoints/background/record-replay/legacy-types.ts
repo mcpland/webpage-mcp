@@ -15,6 +15,7 @@
  */
 
 import { STEP_TYPES } from '@/common/step-types';
+import type { WorkflowSideEffectProfile } from 'webpage-mcp-shared';
 
 // =============================================================================
 // Legacy Selector Types
@@ -44,6 +45,7 @@ export interface StepBase {
   type: StepType;
   timeoutMs?: number; // default 10000
   retry?: { count: number; intervalMs: number; backoff?: 'none' | 'exp' };
+  sideEffect?: WorkflowSideEffectProfile;
   screenshotOnFail?: boolean; // default true
 }
 

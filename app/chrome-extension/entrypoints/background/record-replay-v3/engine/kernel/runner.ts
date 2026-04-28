@@ -19,6 +19,11 @@ import type { JsonObject, JsonValue } from '../../domain/json';
 import { RR_ERROR_CODES, createRRError, type RRError } from '../../domain/errors';
 import type { NodePolicy, RetryPolicy } from '../../domain/policy';
 import { mergeNodePolicy } from '../../domain/policy';
+import {
+  normalizeWorkflowSideEffectProfile,
+  workflowSideEffectAllowsRetry,
+  type WorkflowRetrySource,
+} from 'webpage-mcp-shared';
 
 import type { EventsBus } from '../transport/events-bus';
 import type { StoragePort } from '../storage/storage-port';
@@ -819,7 +824,44 @@ class StorageBackedRunRunner implements RunRunner {
     const flowDefault = flow.policy?.defaultNodePolicy;
     const pluginDefault = def?.defaultPolicy;
     const merged1 = mergeNodePolicy(flowDefault, pluginDefault);
-    return mergeNodePolicy(merged1, node.policy);
+    const merged = mergeNodePolicy(merged1, node.policy);
+    const retrySource = this.resolveRetrySource(flowDefault, pluginDefault, node.policy);
+    return this.applySideEffectRetryGuard(node, merged, retrySource);
+  }
+
+  private resolveRetrySource(
+    flowDefault: NodePolicy | undefined,
+    pluginDefault: NodePolicy | undefined,
+    nodePolicy: NodePolicy | undefined,
+  ): WorkflowRetrySource | undefined {
+    if (nodePolicy?.retry || nodePolicy?.onError?.kind === 'retry') return 'node';
+    if (pluginDefault?.retry || pluginDefault?.onError?.kind === 'retry') return 'pluginDefault';
+    if (flowDefault?.retry || flowDefault?.onError?.kind === 'retry') return 'flowDefault';
+    return undefined;
+  }
+
+  private applySideEffectRetryGuard(
+    node: NodeV3,
+    policy: NodePolicy,
+    retrySource: WorkflowRetrySource | undefined,
+  ): NodePolicy {
+    if (!retrySource || (!policy.retry && policy.onError?.kind !== 'retry')) {
+      return policy;
+    }
+
+    const profile = normalizeWorkflowSideEffectProfile(node.kind, node.sideEffect);
+    if (workflowSideEffectAllowsRetry(profile, retrySource)) {
+      return policy;
+    }
+
+    const guarded: NodePolicy = { ...policy };
+    if (guarded.retry) {
+      delete guarded.retry;
+    }
+    if (guarded.onError?.kind === 'retry') {
+      guarded.onError = { kind: 'stop' };
+    }
+    return guarded;
   }
 
   private decideOnError(

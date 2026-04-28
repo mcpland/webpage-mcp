@@ -1,5 +1,13 @@
 import { createErrorResponse, type ToolResult } from '@/common/tool-handler';
-import { TOOL_NAMES } from 'webpage-mcp-shared';
+import {
+  TOOL_NAMES,
+  createEmptyWorkflowSideEffectSummary,
+  isKnownWorkflowSideEffectKind,
+  normalizeWorkflowSideEffectProfile,
+  workflowSideEffectAllowsRetry,
+  type WorkflowSideEffectProfile,
+  type WorkflowSideEffectSummary,
+} from 'webpage-mcp-shared';
 import type { FlowV3 } from '../record-replay-v3/domain/flow';
 import type { RunEvent, RunRecordV3 } from '../record-replay-v3/domain/events';
 import type { FlowId, RunId } from '../record-replay-v3/domain/ids';
@@ -32,6 +40,7 @@ interface PublicAnalyzedNode {
   kind: FlowV3['nodes'][number]['kind'];
   name?: FlowV3['nodes'][number]['name'];
   disabled?: FlowV3['nodes'][number]['disabled'];
+  sideEffect: WorkflowSideEffectProfile;
 }
 
 interface PublicAnalyzedFlow {
@@ -122,6 +131,30 @@ const RETRYABLE_STABILITY_ERROR_CODES = [
 
 type FlowVariable = NonNullable<FlowV3['variables']>[number];
 
+function getNodeSideEffectProfile(node: FlowV3['nodes'][number]): WorkflowSideEffectProfile {
+  return normalizeWorkflowSideEffectProfile(node.kind, node.sideEffect);
+}
+
+function summarizeWorkflowSideEffects(flow: FlowV3): WorkflowSideEffectSummary {
+  const summary = createEmptyWorkflowSideEffectSummary();
+  for (const node of Array.isArray(flow.nodes) ? flow.nodes : []) {
+    const profile = getNodeSideEffectProfile(node);
+    summary[profile.category] += 1;
+    if (!isKnownWorkflowSideEffectKind(node.kind)) {
+      summary.unknown += 1;
+    }
+  }
+  return summary;
+}
+
+function isSafeForFlowDefaultRetry(node: FlowV3['nodes'][number]): boolean {
+  return workflowSideEffectAllowsRetry(getNodeSideEffectProfile(node), 'flowDefault');
+}
+
+function sideEffectRetryEligibleNodes(flow: FlowV3): FlowV3['nodes'] {
+  return (Array.isArray(flow.nodes) ? flow.nodes : []).filter(isSafeForFlowDefaultRetry);
+}
+
 function isRetryableStabilityErrorCode(code: string): boolean {
   return (RETRYABLE_STABILITY_ERROR_CODES as readonly string[]).includes(code);
 }
@@ -181,6 +214,7 @@ function sanitizeAnalyzedFlow(flow: FlowV3): PublicAnalyzedFlow {
           kind: node.kind,
           ...(node.name ? { name: node.name } : {}),
           ...(node.disabled === true ? { disabled: true } : {}),
+          sideEffect: getNodeSideEffectProfile(node),
         }))
       : [],
     edges: Array.isArray(flow.edges) ? flow.edges.map((edge) => ({ ...edge })) : [],
@@ -315,6 +349,7 @@ function sanitizeDebugNodes(flow: FlowV3): WorkflowDebugNode[] {
     kind: node.kind,
     ...(node.name ? { name: node.name } : {}),
     ...(node.disabled === true ? { disabled: true } : {}),
+    sideEffect: getNodeSideEffectProfile(node),
     ...(node.policy ? { policy: node.policy } : {}),
     config: sanitizeDebugConfig(node.config, sensitiveVariableNames),
   }));
@@ -696,6 +731,15 @@ function buildRuntimeFailureRecommendations(
   return recommendations;
 }
 
+function safeRetryNodesMissingPolicy(flow: FlowV3): FlowV3['nodes'] {
+  return sideEffectRetryEligibleNodes(flow).filter((node) => !node.policy?.retry);
+}
+
+function flowDefaultRetryTouchesSideEffects(flow: FlowV3): boolean {
+  if (!flow.policy?.defaultNodePolicy?.retry) return false;
+  return (Array.isArray(flow.nodes) ? flow.nodes : []).some((node) => !isSafeForFlowDefaultRetry(node));
+}
+
 function buildRepairRecommendations(
   flow: FlowV3,
   hints: FlowHint[],
@@ -703,13 +747,24 @@ function buildRepairRecommendations(
 ): WorkflowRepairRecommendation[] {
   const recommendations: WorkflowRepairRecommendation[] = [];
   const defaultNodePolicy = flow.policy?.defaultNodePolicy;
+  const missingSafeRetryNodes = safeRetryNodesMissingPolicy(flow);
 
-  if (!defaultNodePolicy?.retry) {
+  if (missingSafeRetryNodes.length > 0) {
     recommendations.push({
       severity: 'warning',
       code: 'missing_default_retry_policy',
       message:
-        'No default retry policy is configured. A single retry helps absorb transient target lookup, visibility, timeout, and navigation failures.',
+        `No side-effect-scoped retry policy is configured for ${missingSafeRetryNodes.length} safe query/read node(s). A single retry helps absorb transient lookup, wait, assertion, screenshot, and read failures without repeating dangerous side effects.`,
+      autoFix: 'default_stability_policy',
+    });
+  }
+
+  if (flowDefaultRetryTouchesSideEffects(flow)) {
+    recommendations.push({
+      severity: 'warning',
+      code: 'global_retry_policy_has_side_effect_risk',
+      message:
+        'The workflow has a flow-level default retry policy. Repair will scope retry to safe query/read nodes so clicks, scripts, HTTP requests, and other side-effecting nodes are not retried automatically.',
       autoFix: 'default_stability_policy',
     });
   }
@@ -791,6 +846,14 @@ function applyDefaultStabilityPolicy(flow: FlowV3): WorkflowRepairChange[] {
   const policy = flow.policy ?? {};
   const defaultNodePolicy = policy.defaultNodePolicy ?? {};
   const nextDefaultNodePolicy = { ...defaultNodePolicy };
+  const retryTemplate = nextDefaultNodePolicy.retry ?? {
+    retries: 1,
+    intervalMs: 500,
+    backoff: 'linear' as const,
+    maxIntervalMs: 2_000,
+    jitter: 'full' as const,
+    retryOn: RETRYABLE_STABILITY_ERROR_CODES,
+  };
 
   if (!nextDefaultNodePolicy.timeout) {
     nextDefaultNodePolicy.timeout = { ms: 15_000, scope: 'attempt' };
@@ -800,19 +863,26 @@ function applyDefaultStabilityPolicy(flow: FlowV3): WorkflowRepairChange[] {
     });
   }
 
-  if (!nextDefaultNodePolicy.retry) {
-    nextDefaultNodePolicy.retry = {
-      retries: 1,
-      intervalMs: 500,
-      backoff: 'linear',
-      maxIntervalMs: 2_000,
-      jitter: 'full',
-      retryOn: RETRYABLE_STABILITY_ERROR_CODES,
+  if (nextDefaultNodePolicy.retry) {
+    delete nextDefaultNodePolicy.retry;
+    changes.push({
+      code: 'global_retry_scoped_to_safe_nodes',
+      message:
+        'Removed flow-level default retry so side-effecting nodes are not retried automatically.',
+    });
+  }
+
+  const safeNodesMissingRetry = safeRetryNodesMissingPolicy(flow);
+  for (const node of safeNodesMissingRetry) {
+    node.policy = {
+      ...(node.policy ?? {}),
+      retry: { ...retryTemplate },
     };
+  }
+  if (safeNodesMissingRetry.length > 0) {
     changes.push({
       code: 'default_retry_added',
-      message:
-        'Added one default retry for target lookup, visibility, timeout, and navigation failures.',
+      message: `Added one retry to ${safeNodesMissingRetry.length} safe query/read node(s).`,
     });
   }
 

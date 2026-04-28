@@ -1,3 +1,5 @@
+import type { WorkflowSideEffectProfile } from 'webpage-mcp-shared';
+
 /**
  * Action Type System for Record & Replay
  * Core type definitions for commercial-grade recording and playback
@@ -699,6 +701,7 @@ export interface ActionBase<T extends ActionType> {
   name?: string;
   disabled?: boolean;
   tags?: ReadonlyArray<string>;
+  sideEffect?: WorkflowSideEffectProfile;
   policy?: ActionPolicy;
   ui?: { x: number; y: number };
 }
