@@ -29,7 +29,10 @@ import type {
 } from "@/entrypoints/background/record-replay-v3/domain/ids";
 import type { JsonObject } from "@/entrypoints/background/record-replay-v3/domain/json";
 import { useRRV3Rpc } from "./useRRV3Rpc";
-import { getActiveCurrentWindowTabId } from "@/entrypoints/shared/utils";
+import {
+  getActiveCurrentWindowTab,
+  getActiveCurrentWindowTabId,
+} from "@/entrypoints/shared/utils";
 
 // ==================== UI Types ====================
 
@@ -133,6 +136,23 @@ function mapRunV3ToLite(run: RunRecordV3): RunLite {
     isInProgress,
     status: run.status,
     entries: [], // V3 doesn't have entries in RunRecord, use getEvents for details
+  };
+}
+
+async function getActiveTriggerContext(): Promise<{
+  sourceTabId?: number;
+  sourceUrl?: string;
+}> {
+  const tab = await getActiveCurrentWindowTab();
+  const sourceTabId =
+    typeof tab?.id === "number" && Number.isFinite(tab.id)
+      ? Math.floor(tab.id)
+      : undefined;
+  const sourceUrl = typeof tab?.url === "string" ? tab.url : undefined;
+
+  return {
+    ...(sourceTabId !== undefined ? { sourceTabId } : {}),
+    ...(sourceUrl ? { sourceUrl } : {}),
   };
 }
 
@@ -372,8 +392,10 @@ export function useWorkflowsV3(
 
   async function fireTrigger(triggerId: string): Promise<{ runId: string } | null> {
     try {
+      const triggerContext = await getActiveTriggerContext();
       const result = (await rpc.request("rr_v3.fireTrigger", {
         triggerId: triggerId as TriggerId,
+        ...triggerContext,
       })) as { runId: RunId } | null;
       void refreshRuns();
       return result ? { runId: result.runId } : null;

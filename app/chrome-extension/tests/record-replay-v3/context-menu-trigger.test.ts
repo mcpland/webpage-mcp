@@ -151,6 +151,31 @@ describe('V3 ContextMenuTriggerHandler', () => {
       );
     });
 
+    it('removes stale menu item before creating on install', async () => {
+      const fireCallback: TriggerFireCallback = {
+        onFire: vi.fn(async () => {}),
+      };
+
+      const handler = createContextMenuTriggerHandlerFactory({ logger: createSilentLogger() })(
+        fireCallback,
+      );
+
+      const trigger: TriggerSpecByKind<'contextMenu'> = {
+        id: 't1' as never,
+        kind: 'contextMenu',
+        enabled: true,
+        flowId: 'flow-1' as never,
+        title: 'Run My Flow',
+      };
+
+      await handler.install(trigger);
+
+      expect(contextMenusMock.remove).toHaveBeenCalledWith('rr_v3_t1', expect.any(Function));
+      expect(contextMenusMock.remove.mock.invocationCallOrder[0]).toBeLessThan(
+        contextMenusMock.create.mock.invocationCallOrder[0],
+      );
+    });
+
     it('uses default contexts when not specified', async () => {
       const fireCallback: TriggerFireCallback = {
         onFire: vi.fn(async () => {}),
@@ -316,6 +341,7 @@ describe('V3 ContextMenuTriggerHandler', () => {
 
       await handler.install(t1);
       await handler.install(t2);
+      contextMenusMock.remove.mockClear();
       await handler.uninstallAll();
 
       expect(contextMenusMock.remove).toHaveBeenCalledTimes(2);

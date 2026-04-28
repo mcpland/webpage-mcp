@@ -169,8 +169,7 @@ type TriggerFormState = {
   kind: TriggerKind;
   enabled: boolean;
   argsText: string;
-  urlRuleKind: "url" | "domain" | "path";
-  urlRuleValue: string;
+  urlRulesText: string;
   periodMinutes: string;
   onceAt: string;
   commandKey: string;
@@ -188,8 +187,7 @@ function createDefaultTriggerForm(flowId = ""): TriggerFormState {
     kind: "manual",
     enabled: true,
     argsText: "",
-    urlRuleKind: "domain",
-    urlRuleValue: "",
+    urlRulesText: "",
     periodMinutes: "60",
     onceAt: defaultOnceAt(),
     commandKey: "",
@@ -328,6 +326,38 @@ export default function WorkflowsView({
     return contexts.length > 0 ? contexts : undefined;
   }
 
+  function parseUrlTriggerRules(): Array<{
+    kind: "url" | "domain" | "path";
+    value: string;
+  }> {
+    const lines = triggerForm.urlRulesText
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (lines.length === 0) {
+      throw new Error("At least one URL trigger rule is required");
+    }
+
+    return lines.map((line, index) => {
+      const separatorIndex = line.indexOf(":");
+      if (separatorIndex < 1) {
+        throw new Error(`URL trigger rule ${index + 1} must use kind:value`);
+      }
+
+      const kind = line.slice(0, separatorIndex).trim();
+      const value = line.slice(separatorIndex + 1).trim();
+      if (kind !== "url" && kind !== "domain" && kind !== "path") {
+        throw new Error(
+          `URL trigger rule ${index + 1} kind must be url, domain, or path`,
+        );
+      }
+      if (!value) {
+        throw new Error(`URL trigger rule ${index + 1} value is required`);
+      }
+      return { kind, value };
+    });
+  }
+
   function resetTriggerForm(flowId = selectedTriggerFlowId): void {
     setEditingTriggerId(null);
     setTriggerForm(createDefaultTriggerForm(flowId));
@@ -344,9 +374,9 @@ export default function WorkflowsView({
     next.argsText = argsText;
 
     if (trigger.kind === "url") {
-      const firstRule = trigger.match[0];
-      next.urlRuleKind = firstRule?.kind ?? "domain";
-      next.urlRuleValue = firstRule?.value ?? "";
+      next.urlRulesText = trigger.match
+        .map((rule) => `${rule.kind}:${rule.value}`)
+        .join("\n");
     } else if (trigger.kind === "interval") {
       next.periodMinutes = String(trigger.periodMinutes);
     } else if (trigger.kind === "once") {
@@ -382,9 +412,7 @@ export default function WorkflowsView({
         ...(args ? { args } : {}),
       };
       if (triggerForm.kind === "url") {
-        const value = triggerForm.urlRuleValue.trim();
-        if (!value) throw new Error("URL trigger rule value is required");
-        draft.match = [{ kind: triggerForm.urlRuleKind, value }];
+        draft.match = parseUrlTriggerRules();
       } else if (triggerForm.kind === "interval") {
         const periodMinutes = Number(triggerForm.periodMinutes);
         if (!Number.isFinite(periodMinutes) || periodMinutes < 1) {
@@ -868,46 +896,22 @@ export default function WorkflowsView({
                     </label>
 
                     {triggerForm.kind === "url" ? (
-                      <>
-                        <label className="trigger-field">
-                          <span>{t("workflowsTriggerRule", "Rule")}</span>
-                          <select
-                            value={triggerForm.urlRuleKind}
-                            onChange={(event) =>
-                              setTriggerForm((current) => ({
-                                ...current,
-                                urlRuleKind: event.currentTarget.value as
-                                  | "url"
-                                  | "domain"
-                                  | "path",
-                              }))
-                            }
-                          >
-                            <option value="domain">
-                              {t("workflowsTriggerRuleDomain", "Domain")}
-                            </option>
-                            <option value="path">
-                              {t("workflowsTriggerRulePath", "Path")}
-                            </option>
-                            <option value="url">
-                              {t("workflowsTriggerRuleUrl", "URL")}
-                            </option>
-                          </select>
-                        </label>
-                        <label className="trigger-field trigger-field-wide">
-                          <span>{t("workflowsTriggerRuleValue", "Value")}</span>
-                          <input
-                            value={triggerForm.urlRuleValue}
-                            onChange={(event) =>
-                              setTriggerForm((current) => ({
-                                ...current,
-                                urlRuleValue: event.currentTarget.value,
-                              }))
-                            }
-                            placeholder="example.com"
-                          />
-                        </label>
-                      </>
+                      <label className="trigger-field trigger-field-wide">
+                        <span>{t("workflowsTriggerRules", "Rules")}</span>
+                        <textarea
+                          value={triggerForm.urlRulesText}
+                          onChange={(event) =>
+                            setTriggerForm((current) => ({
+                              ...current,
+                              urlRulesText: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder={
+                            "domain:example.com\npath:/dashboard\nurl:https://example.com/app"
+                          }
+                          rows={3}
+                        />
+                      </label>
                     ) : null}
 
                     {triggerForm.kind === "interval" ? (

@@ -149,6 +149,22 @@ export function createContextMenuTriggerHandler(
     return [normalized[0], ...normalized.slice(1)];
   }
 
+  async function removeMenuItemIfPresent(menuItemId: string): Promise<void> {
+    if (!chrome.contextMenus?.remove) return;
+
+    await new Promise<void>((resolve) => {
+      chrome.contextMenus.remove(menuItemId, () => {
+        const message = chrome.runtime.lastError?.message;
+        if (message && !/not found|cannot find|does not exist/i.test(message)) {
+          logger.debug(
+            `[ContextMenuTriggerHandler] Failed to remove stale menu item: ${message}`,
+          );
+        }
+        resolve();
+      });
+    });
+  }
+
   return {
     kind: 'contextMenu',
 
@@ -161,6 +177,10 @@ export function createContextMenuTriggerHandler(
         logger.warn('[ContextMenuTriggerHandler] chrome.contextMenus.create is unavailable');
         return;
       }
+
+      await removeMenuItemIfPresent(menuItemId);
+      installed.delete(id);
+      menuItemIdToTriggerId.delete(menuItemId);
 
       // Create menu item
       await new Promise<void>((resolve, reject) => {

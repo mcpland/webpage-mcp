@@ -20,4 +20,7 @@ export {
   type OpenWorkflowBuilderOptions,
 } from "./open-workflow-builder";
 
-export { getActiveCurrentWindowTabId } from "./active-tab";
+export {
+  getActiveCurrentWindowTab,
+  getActiveCurrentWindowTabId,
+} from "./active-tab";
