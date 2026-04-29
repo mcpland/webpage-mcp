@@ -14,6 +14,7 @@
   <a href="https://chromewebstore.google.com/detail/webpage-mcp-connector/iehgbogeakiedihodennfcnigojnncag?hl=en"><img src="https://img.shields.io/github/v/release/mcpland/webpage-mcp.svg" alt="Release" /></a>
   <a href="https://github.com/mcpland/webpage-mcp/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/webpage-mcp" alt="License" /></a>
   <a href="https://chromewebstore.google.com/detail/webpage-mcp-connector/iehgbogeakiedihodennfcnigojnncag?hl=en"><img src="https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Extension" /></a>
+[![SafeSkill 56/100](https://img.shields.io/badge/SafeSkill-56%2F100_Use%20with%20Caution-orange)](https://safeskill.dev/scan/mcpland-webpage-mcp)
 </p>
 
 <p align="center">
