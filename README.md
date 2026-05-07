@@ -98,7 +98,7 @@ A strong local setup is to use Chrome DevTools MCP as the debugging engine and W
 
 ### Quick Start
 
-**1.** Install the **Webpage MCP Connector** Chrome extension first in chrome web store. [https://chromewebstore.google.com/detail/webpage-mcp-connector/iehgbogeakiedihodennfcnigojnncag?hl=en](https://chromewebstore.google.com/detail/webpage-mcp-connector/iehgbogeakiedihodennfcnigojnncag?hl=en). 
+**1.** Install the **Webpage MCP Connector** Chrome extension first in chrome web store. [https://chromewebstore.google.com/detail/webpage-mcp-connector/iehgbogeakiedihodennfcnigojnncag?hl=en](https://chromewebstore.google.com/detail/webpage-mcp-connector/iehgbogeakiedihodennfcnigojnncag?hl=en).
 
 **2.** Add `webpage-mcp` to your MCP client config:
 
@@ -494,10 +494,10 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 
 ---
 
-## License
-
-MIT
-
 ## Acknowledgements
 
 This project is based on [hangwin/mcp-chrome](https://github.com/hangwin/mcp-chrome). Special thanks to the original author and all contributors for their foundational work.
+
+## License
+
+MIT
