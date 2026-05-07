@@ -1058,7 +1058,7 @@ export function connectNativeHost(): boolean {
           const result = await handleCallTool({
             name: String(payload.name || ""),
             args: payload.args,
-            meta: payload.meta,
+            meta: { ...payload.meta, source: "mcp" },
           });
           nativePort?.postMessage({
             responseToRequestId: requestId,

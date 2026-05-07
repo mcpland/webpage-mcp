@@ -2,6 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { LINKS } from "@/common/constants";
 import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import {
+  MCP_BACKGROUND_MODE_STORAGE_KEY,
+  readMcpBackgroundModeDefault,
+  writeMcpBackgroundModeDefault,
+} from "@/common/mcp-background-mode";
 import { getMessage } from "@/utils/i18n";
 import type { AgentThemeId } from "../sidepanel/composables/useAgentTheme";
 import {
@@ -109,6 +114,7 @@ export default function PopupApp() {
   const [nativeConnectionError, setNativeConnectionError] = useState<
     string | null
   >(null);
+  const [mcpBackgroundMode, setMcpBackgroundMode] = useState(false);
 
   const copyTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const authCopyTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -331,6 +337,22 @@ export default function PopupApp() {
         t("popupCopyRegisterCommand", "Copy register command"),
       );
     }, 2000);
+  }
+
+  async function loadMcpBackgroundMode() {
+    setMcpBackgroundMode(await readMcpBackgroundModeDefault());
+  }
+
+  async function toggleMcpBackgroundMode() {
+    const nextEnabled = !mcpBackgroundMode;
+    setMcpBackgroundMode(nextEnabled);
+
+    try {
+      await writeMcpBackgroundModeDefault(nextEnabled);
+    } catch (error) {
+      setMcpBackgroundMode(!nextEnabled);
+      console.warn("Failed to update MCP background mode:", error);
+    }
   }
 
   async function refreshNativeAuthToken() {
@@ -580,6 +602,11 @@ export default function PopupApp() {
         setAgentTheme(themeChange.newValue);
         document.documentElement.dataset.agentTheme = themeChange.newValue;
       }
+
+      const backgroundModeChange = changes[MCP_BACKGROUND_MODE_STORAGE_KEY];
+      if (backgroundModeChange) {
+        setMcpBackgroundMode(backgroundModeChange.newValue === true);
+      }
     };
 
     chrome.runtime.onMessage.addListener(onRuntimeMessage);
@@ -589,6 +616,7 @@ export default function PopupApp() {
       await checkNativeConnection();
       await checkServerStatus();
       await refreshRecordingState();
+      await loadMcpBackgroundMode();
     })();
 
     return () => {
@@ -725,6 +753,41 @@ export default function PopupApp() {
                   {nativeConnectionError}
                 </p>
               ) : null}
+
+              <div className="mcp-background-mode-section">
+                <div className="mcp-background-mode-info">
+                  <p className="mcp-config-label">
+                    {t("popupMcpBackgroundModeLabel", "Background MCP mode")}
+                  </p>
+                  <span
+                    className={`mcp-background-mode-state${
+                      mcpBackgroundMode ? " is-on" : ""
+                    }`}
+                  >
+                    {mcpBackgroundMode
+                      ? t("popupMcpBackgroundModeOn", "On")
+                      : t("popupMcpBackgroundModeOff", "Off")}
+                  </span>
+                </div>
+                <label
+                  className="mcp-background-mode-toggle has-tooltip"
+                  data-tooltip={t(
+                    "popupMcpBackgroundModeTooltip",
+                    "Supported MCP tools run without focusing tabs",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={mcpBackgroundMode}
+                    onChange={() => void toggleMcpBackgroundMode()}
+                    aria-label={t(
+                      "popupMcpBackgroundModeLabel",
+                      "Background MCP mode",
+                    )}
+                  />
+                  <span className="mcp-background-mode-slider" />
+                </label>
+              </div>
 
               <div className="mcp-config-section">
                 <div className="mcp-config-header">

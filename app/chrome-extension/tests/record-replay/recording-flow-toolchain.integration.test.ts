@@ -1706,7 +1706,6 @@ describe("recording/editing/flow toolchain integration", () => {
           apiToken: "<apiToken>",
         },
         tabTarget: "current",
-        background: true,
       },
       descriptor: {
         parameters: {

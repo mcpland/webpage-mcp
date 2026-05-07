@@ -1,5 +1,6 @@
 import { createErrorResponse } from '@/common/tool-handler';
 import { ERROR_MESSAGES } from '@/common/constants';
+import { readMcpBackgroundModeDefault } from '@/common/mcp-background-mode';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import * as browserTools from './browser';
 import { flowRunTool, listPublishedFlowsTool } from './record-replay';
@@ -39,6 +40,19 @@ const URL_PRIORITY_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.WEB_FETCHER,
   TOOL_NAMES.BROWSER.INJECT_SCRIPT,
 ]);
+const BACKGROUND_DEFAULT_SUPPORTED_TOOLS = new Set<string>([
+  TOOL_NAMES.BROWSER.NAVIGATE,
+  TOOL_NAMES.BROWSER.SCREENSHOT,
+  TOOL_NAMES.BROWSER.SWITCH_TAB,
+  TOOL_NAMES.BROWSER.WEB_FETCHER,
+  TOOL_NAMES.BROWSER.NETWORK_CAPTURE,
+  TOOL_NAMES.BROWSER.NETWORK_CAPTURE_START,
+  TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_START,
+  TOOL_NAMES.BROWSER.INJECT_SCRIPT,
+  TOOL_NAMES.BROWSER.CONSOLE,
+  TOOL_NAMES.BROWSER.COMPUTER,
+  TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
+]);
 
 interface ResolvedExecutionTarget {
   tabId?: number;
@@ -63,6 +77,7 @@ export interface ToolCallParam {
   meta?: {
     mcpSessionId?: string;
     instanceId?: string;
+    source?: 'mcp' | 'ui';
   };
 }
 
@@ -225,6 +240,40 @@ function mergeArgsWithResolvedTarget(args: any, resolvedTarget: ResolvedExecutio
   return nextArgs;
 }
 
+function isPlainArgsObject(args: any): args is Record<string, unknown> {
+  return args != null && typeof args === 'object' && !Array.isArray(args);
+}
+
+function supportsBackgroundDefaultForArgs(toolName: string, args: any): boolean {
+  if (!BACKGROUND_DEFAULT_SUPPORTED_TOOLS.has(toolName)) {
+    return false;
+  }
+
+  if (toolName !== TOOL_NAMES.BROWSER.SCREENSHOT || !isPlainArgsObject(args)) {
+    return true;
+  }
+
+  const hasSelectorCapture = typeof args.selector === 'string' && args.selector.length > 0;
+  return args.fullPage !== true && !hasSelectorCapture;
+}
+
+async function mergeArgsWithDefaultBackground(toolName: string, args: any): Promise<any> {
+  if (!supportsBackgroundDefaultForArgs(toolName, args)) {
+    return args;
+  }
+
+  if (isPlainArgsObject(args) && typeof args.background === 'boolean') {
+    return args;
+  }
+
+  const backgroundModeEnabled = await readMcpBackgroundModeDefault();
+  if (!backgroundModeEnabled) {
+    return args;
+  }
+
+  return isPlainArgsObject(args) ? { ...args, background: true } : { background: true };
+}
+
 function findNumericField(
   value: unknown,
   key: 'tabId' | 'windowId',
@@ -290,7 +339,11 @@ export const handleCallTool = async (param: ToolCallParam) => {
   const sessionId = param.meta?.mcpSessionId?.trim() || undefined;
   const instanceId = param.meta?.instanceId?.trim() || undefined;
   const resolvedTarget = await resolveExecutionTarget(param.name, param.args, sessionId, instanceId);
-  const mergedArgs = mergeArgsWithResolvedTarget(param.args, resolvedTarget);
+  const targetMergedArgs = mergeArgsWithResolvedTarget(param.args, resolvedTarget);
+  const shouldApplyMcpBackgroundDefault = param.meta?.source === 'mcp' || !!sessionId;
+  const mergedArgs = shouldApplyMcpBackgroundDefault
+    ? await mergeArgsWithDefaultBackground(param.name, targetMergedArgs)
+    : targetMergedArgs;
 
   try {
     const execute = async () => await tool.execute(mergedArgs);

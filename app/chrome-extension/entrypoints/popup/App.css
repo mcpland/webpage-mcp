@@ -295,6 +295,94 @@
   margin: 0;
 }
 
+.mcp-background-mode-section {
+  border-top: 1px solid var(--ac-border, #e7e5e4);
+  padding-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mcp-background-mode-info {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.mcp-background-mode-state {
+  flex-shrink: 0;
+  border: 1px solid var(--ac-border, #e7e5e4);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ac-text-subtle, #a8a29e);
+  background: var(--ac-surface-inset, #f2f0eb);
+}
+
+.mcp-background-mode-state.is-on {
+  border-color: rgba(16, 185, 129, 0.26);
+  color: #047857;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.mcp-background-mode-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.mcp-background-mode-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mcp-background-mode-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--ac-surface-inset, #f2f0eb);
+  border: 1px solid var(--ac-border, #e7e5e4);
+  transition:
+    background var(--ac-motion-fast, 120ms) ease,
+    border-color var(--ac-motion-fast, 120ms) ease;
+}
+
+.mcp-background-mode-slider::before {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  background: var(--ac-surface, #ffffff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: transform var(--ac-motion-fast, 120ms) ease;
+}
+
+.mcp-background-mode-toggle input:checked + .mcp-background-mode-slider {
+  border-color: var(--ac-accent, #d97757);
+  background: var(--ac-accent, #d97757);
+}
+
+.mcp-background-mode-toggle input:checked + .mcp-background-mode-slider::before {
+  transform: translateX(18px);
+}
+
+.mcp-background-mode-toggle input:focus-visible + .mcp-background-mode-slider {
+  outline: 2px solid var(--ac-accent, #d97757);
+  outline-offset: 2px;
+}
+
 .copy-config-button {
   background: none;
   border: none;

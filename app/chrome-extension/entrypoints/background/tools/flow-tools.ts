@@ -1024,7 +1024,6 @@ class WorkflowDescribeTool {
               flowId: flow.id,
               args: descriptor.exampleArgs,
               tabTarget: 'current',
-              ...(descriptor.backgroundSupport.supported ? { background: true } : {}),
             },
             descriptor,
             hints,
