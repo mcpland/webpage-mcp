@@ -147,6 +147,12 @@ If you did run manual registration, it is typically one-time per machine/profile
 
 </details>
 
+### Version Compatibility
+
+The Chrome extension and the `webpage-mcp` npm package are built and released from the same CI pipeline, but Chrome Web Store review and rollout timing is not fixed. This means the latest npm package may be available before the matching Chrome extension version reaches users.
+
+We aim to keep nearby versions compatible. If you run into connection, protocol, or tool behavior issues, first make sure the Chrome extension and the MCP npm package use the same version for the best compatibility.
+
 ### Build From Source (Developers)
 
 <details>
@@ -427,8 +433,9 @@ The extension popup and welcome page can generate this command automatically usi
 
 1. Ensure the native host is registered: `npx -y webpage-mcp@latest doctor`
 2. Check that Node.js >= 20 is available at the registered path
-3. Prefer the exact register command generated in extension popup/welcome and run it once
-4. Fully restart Chrome (quit all Chrome processes), then click Connect again
+3. Check that the Chrome extension and `webpage-mcp` npm package versions match, especially after a fresh npm release
+4. Prefer the exact register command generated in extension popup/welcome and run it once
+5. Fully restart Chrome (quit all Chrome processes), then click Connect again
 
 </details>
 

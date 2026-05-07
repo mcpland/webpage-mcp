@@ -53,6 +53,12 @@ npx -y webpage-mcp@latest doctor --fix
 
 Recommended: copy the register command from extension popup/welcome page, because it already includes the current extension ID.
 
+## Version Compatibility
+
+The Webpage MCP Connector Chrome extension and this `webpage-mcp` npm package are built and released from the same CI pipeline, but Chrome Web Store review and rollout timing is not fixed. This means the latest npm package may be available before the matching Chrome extension version reaches users.
+
+We aim to keep nearby versions compatible. If you run into connection, protocol, or tool behavior issues, first make sure the Chrome extension and the MCP npm package use the same version for the best compatibility.
+
 ## Is Register One-Time?
 
 Usually yes. In many cases you do not need manual register because startup bootstrap handles it.
@@ -152,19 +158,20 @@ Current behavior:
 If you see `ENOENT` / "Unable to connect to native bridge socket":
 
 1. Confirm extension is enabled and connected.
-2. Re-run registration with current extension ID:
+2. Check that the Chrome extension and `webpage-mcp` npm package versions match, especially after a fresh npm release.
+3. Re-run registration with current extension ID:
 
 ```bash
 npx -y webpage-mcp@latest register --browser chrome --force --extension-id <your_extension_id>
 ```
 
-3. Run:
+4. Run:
 
 ```bash
 npx -y webpage-mcp@latest doctor --fix
 ```
 
-4. Fully restart Chrome and retry.
+5. Fully restart Chrome and retry.
 
 ## Related Docs
 
