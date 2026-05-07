@@ -1991,6 +1991,22 @@
     "message": "Name, z. B. „Anmeldeschaltfläche“",
     "description": "Auto-generated localized message"
   },
+  "popupMcpBackgroundModeLabel": {
+    "message": "MCP-Hintergrundmodus",
+    "description": "Auto-generated localized message"
+  },
+  "popupMcpBackgroundModeOff": {
+    "message": "Aus",
+    "description": "Auto-generated localized message"
+  },
+  "popupMcpBackgroundModeOn": {
+    "message": "Ein",
+    "description": "Auto-generated localized message"
+  },
+  "popupMcpBackgroundModeTooltip": {
+    "message": "Unterstützte MCP-Werkzeuge laufen, ohne Tabs zu fokussieren",
+    "description": "Auto-generated localized message"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "Einmalige Host-Registrierung (aktuelle Erweiterungs-ID)",
     "description": "Auto-generated localized message"

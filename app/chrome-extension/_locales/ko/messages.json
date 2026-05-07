@@ -1991,6 +1991,22 @@
     "message": "\"로그인 버튼\"과 같은 이름",
     "description": "Auto-generated localized message"
   },
+  "popupMcpBackgroundModeLabel": {
+    "message": "MCP 백그라운드 모드",
+    "description": "Auto-generated localized message"
+  },
+  "popupMcpBackgroundModeOff": {
+    "message": "꺼짐",
+    "description": "Auto-generated localized message"
+  },
+  "popupMcpBackgroundModeOn": {
+    "message": "켜짐",
+    "description": "Auto-generated localized message"
+  },
+  "popupMcpBackgroundModeTooltip": {
+    "message": "지원되는 MCP 도구는 탭에 포커스를 맞추지 않고 실행됩니다",
+    "description": "Auto-generated localized message"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "일회성 호스트 등록(현재 확장 프로그램 ID)",
     "description": "Auto-generated localized message"

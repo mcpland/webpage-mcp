@@ -1991,6 +1991,22 @@
     "message": "名稱，例如“登入按鈕”",
     "description": "自動生成的 i18n 文案"
   },
+  "popupMcpBackgroundModeLabel": {
+    "message": "MCP 背景模式",
+    "description": "MCP 背景模式開關標籤"
+  },
+  "popupMcpBackgroundModeOff": {
+    "message": "關閉",
+    "description": "MCP 背景模式關閉狀態"
+  },
+  "popupMcpBackgroundModeOn": {
+    "message": "開啟",
+    "description": "MCP 背景模式開啟狀態"
+  },
+  "popupMcpBackgroundModeTooltip": {
+    "message": "支援的 MCP 工具無需聚焦分頁即可執行",
+    "description": "MCP 背景模式開關提示"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "一次性主機註冊（目前擴充功能 ID）",
     "description": "自動生成的 i18n 文案"

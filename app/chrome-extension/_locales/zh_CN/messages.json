@@ -1991,6 +1991,22 @@
     "message": "名称，例如“登录按钮”",
     "description": "自动生成的 i18n 文案"
   },
+  "popupMcpBackgroundModeLabel": {
+    "message": "MCP 后台模式",
+    "description": "MCP 后台模式开关标签"
+  },
+  "popupMcpBackgroundModeOff": {
+    "message": "关闭",
+    "description": "MCP 后台模式关闭状态"
+  },
+  "popupMcpBackgroundModeOn": {
+    "message": "开启",
+    "description": "MCP 后台模式开启状态"
+  },
+  "popupMcpBackgroundModeTooltip": {
+    "message": "支持的 MCP 工具无需聚焦标签页即可运行",
+    "description": "MCP 后台模式开关提示"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "一次性主机注册（当前扩展程序 ID）",
     "description": "自动生成的 i18n 文案"

@@ -1991,6 +1991,22 @@
     "message": "Name, such as \"Login Button\"",
     "description": "Auto-generated i18n message"
   },
+  "popupMcpBackgroundModeLabel": {
+    "message": "Background MCP mode",
+    "description": "Label for the popup MCP background mode toggle"
+  },
+  "popupMcpBackgroundModeOff": {
+    "message": "Off",
+    "description": "Disabled state label for the popup MCP background mode toggle"
+  },
+  "popupMcpBackgroundModeOn": {
+    "message": "On",
+    "description": "Enabled state label for the popup MCP background mode toggle"
+  },
+  "popupMcpBackgroundModeTooltip": {
+    "message": "Supported MCP tools run without focusing tabs",
+    "description": "Tooltip for the popup MCP background mode toggle"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "One-time host registration (current extension ID)",
     "description": "Auto-generated i18n message"

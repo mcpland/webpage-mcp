@@ -1991,6 +1991,22 @@
     "message": "名前（「ログインボタン」など）",
     "description": "Auto-generated localized message"
   },
+  "popupMcpBackgroundModeLabel": {
+    "message": "MCP バックグラウンドモード",
+    "description": "Auto-generated localized message"
+  },
+  "popupMcpBackgroundModeOff": {
+    "message": "オフ",
+    "description": "Auto-generated localized message"
+  },
+  "popupMcpBackgroundModeOn": {
+    "message": "オン",
+    "description": "Auto-generated localized message"
+  },
+  "popupMcpBackgroundModeTooltip": {
+    "message": "対応する MCP ツールはタブをフォーカスせずに実行されます",
+    "description": "Auto-generated localized message"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "ワンタイムホスト登録（現在の拡張機能 ID）",
     "description": "Auto-generated localized message"
