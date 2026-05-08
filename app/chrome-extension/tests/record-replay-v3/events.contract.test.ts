@@ -112,6 +112,103 @@ describe('V3 Events contracts', () => {
       expect(list.map((e) => e.seq)).toContain(10);
     });
 
+    it('keeps timestamps monotonic and persists observation event schemas', async () => {
+      const runs = createRunsStore();
+      const events = createEventsStore();
+
+      await runs.save(createRunRecord('run-1', { nextSeq: 1, updatedAt: 10_000 }));
+
+      const navigation = await events.append(
+        createEventInput('run-1', {
+          type: 'navigation.observed',
+          nodeId: 'nav-1',
+          beforeUrl: 'https://example.com/start',
+          afterUrl: 'https://example.com/result',
+          frameId: 0,
+          sameDocument: false,
+          status: 'completed',
+          ts: 9_000,
+        } as Partial<RunEventInput>),
+      );
+      const network = await events.append(
+        createEventInput('run-1', {
+          type: 'network.observed',
+          nodeId: 'nav-1',
+          requestId: 'req-1',
+          url: 'https://example.com/api?token=secret',
+          resourceType: 'fetch',
+          currentFrame: true,
+          startedAt: 10_100,
+          endedAt: 10_200,
+          status: 200,
+          frameId: 0,
+          method: 'GET',
+          ts: 1,
+        } as Partial<RunEventInput>),
+      );
+      const visibility = await events.append(
+        createEventInput('run-1', {
+          type: 'dom.visibility',
+          nodeId: 'wait-1',
+          selector: '#ready',
+          matchCount: 1,
+          appearedAt: 10_250,
+          stableForMs: 300,
+          status: 'stable',
+          ts: 2,
+        } as Partial<RunEventInput>),
+      );
+      const selector = await events.append(
+        createEventInput('run-1', {
+          type: 'selector.resolution',
+          nodeId: 'click-1',
+          primarySelector: '#submit',
+          resolvedBy: 'primary',
+          matchCount: 1,
+          fingerprint: { status: 'matched', score: 0.98 },
+          ts: 3,
+        } as Partial<RunEventInput>),
+      );
+
+      expect([navigation.seq, network.seq, visibility.seq, selector.seq]).toEqual([1, 2, 3, 4]);
+      expect(network.ts).toBeGreaterThanOrEqual(navigation.ts);
+      expect(visibility.ts).toBeGreaterThanOrEqual(network.ts);
+      expect(selector.ts).toBeGreaterThanOrEqual(visibility.ts);
+
+      const list = await events.list('run-1');
+      expect(list).toEqual([
+        expect.objectContaining({
+          type: 'navigation.observed',
+          nodeId: 'nav-1',
+          beforeUrl: 'https://example.com/start',
+          afterUrl: 'https://example.com/result',
+          frameId: 0,
+          sameDocument: false,
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          type: 'network.observed',
+          requestId: 'req-1',
+          resourceType: 'fetch',
+          currentFrame: true,
+          status: 200,
+        }),
+        expect.objectContaining({
+          type: 'dom.visibility',
+          selector: '#ready',
+          matchCount: 1,
+          stableForMs: 300,
+          status: 'stable',
+        }),
+        expect.objectContaining({
+          type: 'selector.resolution',
+          primarySelector: '#submit',
+          resolvedBy: 'primary',
+          fingerprint: { status: 'matched', score: 0.98 },
+        }),
+      ]);
+    });
+
     it('throws RRError when appending to a missing run', async () => {
       const events = createEventsStore();
 

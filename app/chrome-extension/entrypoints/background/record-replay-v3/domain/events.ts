@@ -48,6 +48,38 @@ export type PauseReason =
 /** Reason for recovery */
 export type RecoveryReason = 'sw_restart' | 'lease_expired';
 
+export type NavigationObservationStatus = 'started' | 'completed' | 'failed' | 'unknown';
+export type NetworkResourceType =
+  | 'document'
+  | 'stylesheet'
+  | 'image'
+  | 'media'
+  | 'font'
+  | 'script'
+  | 'xhr'
+  | 'fetch'
+  | 'websocket'
+  | 'eventsource'
+  | 'other'
+  | 'unknown';
+export type VisibilityObservationStatus =
+  | 'appeared'
+  | 'disappeared'
+  | 'stable'
+  | 'changed'
+  | 'timeout'
+  | 'unknown';
+export type SelectorResolvedBy =
+  | 'primary'
+  | 'candidate'
+  | 'fingerprint'
+  | 'domPath'
+  | 'text'
+  | 'role'
+  | 'none'
+  | 'unknown';
+export type SelectorFingerprintStatus = 'matched' | 'mismatch' | 'missing' | 'unknown';
+
 /**
  * Run event union type
  * @description All possible runtime events
@@ -98,6 +130,54 @@ export type RunEvent =
       decision: 'retry' | 'continue' | 'stop' | 'goto';
     })
   | (EventBase & { type: 'node.skipped'; nodeId: NodeId; reason: 'disabled' | 'unreachable' })
+
+  // ===== Browser / DOM observation events =====
+  | (EventBase & {
+      type: 'navigation.observed';
+      nodeId?: NodeId;
+      beforeUrl?: string;
+      afterUrl?: string;
+      frameId?: number | string;
+      sameDocument?: boolean;
+      status: NavigationObservationStatus;
+    })
+  | (EventBase & {
+      type: 'network.observed';
+      nodeId?: NodeId;
+      requestId: string;
+      url: string;
+      resourceType: NetworkResourceType;
+      currentFrame: boolean;
+      startedAt: UnixMillis;
+      endedAt?: UnixMillis;
+      status?: number;
+      frameId?: number | string;
+      method?: string;
+      fromCache?: boolean;
+    })
+  | (EventBase & {
+      type: 'dom.visibility';
+      nodeId?: NodeId;
+      selector: string;
+      candidateIndex?: number;
+      matchCount: number;
+      appearedAt?: UnixMillis;
+      disappearedAt?: UnixMillis;
+      stableForMs?: number;
+      status: VisibilityObservationStatus;
+    })
+  | (EventBase & {
+      type: 'selector.resolution';
+      nodeId: NodeId;
+      primarySelector: string;
+      resolvedBy: SelectorResolvedBy;
+      candidateIndex?: number;
+      matchCount: number;
+      fingerprint?: {
+        status: SelectorFingerprintStatus;
+        score?: number;
+      };
+    })
 
   // ===== Variables and Log Events =====
   | (EventBase & {

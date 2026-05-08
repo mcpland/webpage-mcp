@@ -71,10 +71,11 @@ export function createEventsStore(): EventsStore {
           }
 
           // Step 2: Create complete event with allocated seq
+          const timestamp = Math.max(input.ts ?? Date.now(), run.updatedAt);
           const event: RunEvent = {
             ...input,
             seq,
-            ts: input.ts ?? Date.now(),
+            ts: timestamp,
           } as RunEvent;
 
           // Step 3: Write event to events store
@@ -84,7 +85,7 @@ export function createEventsStore(): EventsStore {
           const updatedRun: RunRecordV3 = {
             ...run,
             nextSeq: seq + 1,
-            updatedAt: Date.now(),
+            updatedAt: Math.max(Date.now(), timestamp),
           };
 
           await idbRequest(

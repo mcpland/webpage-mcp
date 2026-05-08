@@ -516,6 +516,23 @@ describe("recording/editing/flow toolchain integration", () => {
       workflow: "debug-flow",
       nodeCount: 3,
       runCount: 0,
+      capabilityStatus: {
+        screenshots: "partial",
+        navigationEvents: "partial",
+        networkEvents: "none",
+        mutationEvents: "none",
+        selectorResolution: "partial",
+      },
+    });
+    expect(payload.capabilities).toMatchObject({
+      domSnapshot: "none",
+      accessibilitySnapshot: "none",
+      downloads: "unknown",
+      mfa: "unknown",
+      captcha: "unknown",
+      unsupportedReasons: expect.arrayContaining([
+        expect.stringContaining("persisted observations only"),
+      ]),
     });
     expect(fillNode.config.target.selector).toBe("#email");
     expect(fillNode.config.target.candidates).toEqual([
@@ -695,6 +712,29 @@ describe("recording/editing/flow toolchain integration", () => {
       artifactId: artifact.id,
       savedAs: artifact.filename,
     });
+    await storage.events.append({
+      runId: runId as any,
+      type: "network.observed",
+      nodeId: "fill-1" as any,
+      requestId: "req-1",
+      url: "https://example.com/api?token=secret-token",
+      resourceType: "fetch",
+      currentFrame: true,
+      startedAt: 1_000,
+      endedAt: 1_200,
+      status: 200,
+      frameId: 0,
+      method: "GET",
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "selector.resolution",
+      nodeId: "fill-1" as any,
+      primarySelector: "#email",
+      resolvedBy: "primary",
+      matchCount: 0,
+      fingerprint: { status: "missing" },
+    });
 
     const result = await workflowDebugViewTool.execute({
       flowId,
@@ -708,8 +748,19 @@ describe("recording/editing/flow toolchain integration", () => {
     const artifactEvent = payload.runs[0].events.find(
       (event: { type: string }) => event.type === "artifact.screenshot",
     );
+    const networkEvent = payload.runs[0].events.find(
+      (event: { type: string }) => event.type === "network.observed",
+    );
+    const selectorEvent = payload.runs[0].events.find(
+      (event: { type: string }) => event.type === "selector.resolution",
+    );
 
     expect(payload.summary.runCount).toBe(1);
+    expect(payload.summary.capabilityStatus).toMatchObject({
+      navigationEvents: "partial",
+      networkEvents: "none",
+      selectorResolution: "partial",
+    });
     expect(payload.artifactPolicy).toMatchObject({
       contentTrust: "untrusted",
       dataInline: "explicit_request_only_and_blocked_when_redaction_is_low_confidence",
@@ -786,6 +837,27 @@ describe("recording/editing/flow toolchain integration", () => {
     });
     expect(artifactEvent).not.toHaveProperty("data");
     expect(payload.runs[0].artifacts[0]).not.toHaveProperty("dataBase64");
+    expect(networkEvent).toMatchObject({
+      type: "network.observed",
+      nodeId: "fill-1",
+      requestId: "req-1",
+      url: "https://example.com/api?token=<redacted>",
+      resourceType: "fetch",
+      currentFrame: true,
+      startedAt: 1000,
+      endedAt: 1200,
+      status: 200,
+      frameId: 0,
+      method: "GET",
+    });
+    expect(selectorEvent).toMatchObject({
+      type: "selector.resolution",
+      nodeId: "fill-1",
+      primarySelector: "#email",
+      resolvedBy: "primary",
+      matchCount: 0,
+      fingerprint: { status: "missing" },
+    });
   });
 
   it("workflowDebugViewTool filters debug output and cleans run artifacts", async () => {
@@ -1339,6 +1411,18 @@ describe("recording/editing/flow toolchain integration", () => {
       "missing_default_timeout_policy",
     );
     expect(payload.capabilities.unsupportedReasons[0]).toContain("analyze-only safety core");
+    expect(payload.capabilities).toMatchObject({
+      domSnapshot: "none",
+      accessibilitySnapshot: "none",
+      navigationEvents: "partial",
+      networkEvents: "none",
+      mutationEvents: "none",
+      selectorResolution: "partial",
+      screenshots: "partial",
+      downloads: "unknown",
+      mfa: "unknown",
+      captcha: "unknown",
+    });
     expect(updated?.updatedAt).toBe(new Date(0).toISOString());
   });
 

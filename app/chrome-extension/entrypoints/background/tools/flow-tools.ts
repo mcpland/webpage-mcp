@@ -142,6 +142,25 @@ interface WorkflowStabilizeWarning {
   nodeId?: string;
 }
 
+type WorkflowCapabilityStatus = 'full' | 'partial' | 'none' | 'unknown';
+
+interface WorkflowCapabilityMatrix {
+  replayValidation: WorkflowCapabilityStatus;
+  domSnapshot: WorkflowCapabilityStatus;
+  accessibilitySnapshot: WorkflowCapabilityStatus;
+  navigationEvents: WorkflowCapabilityStatus;
+  networkEvents: WorkflowCapabilityStatus;
+  mutationEvents: WorkflowCapabilityStatus;
+  selectorResolution: WorkflowCapabilityStatus;
+  screenshots: WorkflowCapabilityStatus;
+  crossOriginFrames: WorkflowCapabilityStatus;
+  closedShadowDom: WorkflowCapabilityStatus;
+  downloads: WorkflowCapabilityStatus;
+  mfa: WorkflowCapabilityStatus;
+  captcha: WorkflowCapabilityStatus;
+  unsupportedReasons: string[];
+}
+
 const REDACTED = '<redacted>';
 const SENSITIVE_DEBUG_CONFIG_KEYS = new Set([
   'body',
@@ -170,6 +189,56 @@ const DEFAULT_SAFE_RETRY_POLICY: RetryPolicy = {
   jitter: 'full',
   retryOn: RETRYABLE_STABILITY_ERROR_CODES,
 };
+
+function flowDisablesFailureScreenshots(flow: FlowV3): boolean {
+  const defaultScreenshot = flow.policy?.defaultNodePolicy?.artifacts?.screenshot;
+  if (defaultScreenshot !== 'never') {
+    return false;
+  }
+  return (Array.isArray(flow.nodes) ? flow.nodes : []).every((node) => {
+    const nodeScreenshot = node.policy?.artifacts?.screenshot;
+    return !nodeScreenshot || nodeScreenshot === 'never';
+  });
+}
+
+function buildWorkflowCapabilityMatrix(
+  flow: FlowV3,
+  mode: 'debug' | 'stabilize',
+): WorkflowCapabilityMatrix {
+  const unsupportedReasons: string[] = [];
+  if (mode === 'stabilize') {
+    unsupportedReasons.push(
+      'workflow_stabilize validation replay is not enabled in the analyze-only safety core',
+    );
+  } else {
+    unsupportedReasons.push(
+      'workflow_debug_view reports persisted observations only and does not probe the live page',
+    );
+  }
+  unsupportedReasons.push(
+    'DOM and accessibility snapshots are not captured as structured artifacts yet',
+    'Network and mutation observation events are schema-defined but not collected by default',
+    'Cross-origin iframe and closed shadow DOM observability cannot be proven from persisted run data',
+    'MFA, CAPTCHA, and download observability are reported as unknown unless future runtime events prove support',
+  );
+
+  return {
+    replayValidation: mode === 'stabilize' ? 'none' : 'unknown',
+    domSnapshot: 'none',
+    accessibilitySnapshot: 'none',
+    navigationEvents: 'partial',
+    networkEvents: 'none',
+    mutationEvents: 'none',
+    selectorResolution: 'partial',
+    screenshots: flowDisablesFailureScreenshots(flow) ? 'none' : 'partial',
+    crossOriginFrames: 'unknown',
+    closedShadowDom: 'none',
+    downloads: 'unknown',
+    mfa: 'unknown',
+    captcha: 'unknown',
+    unsupportedReasons,
+  };
+}
 
 function getNodeSideEffectProfile(node: FlowV3['nodes'][number]): WorkflowSideEffectProfile {
   return normalizeWorkflowNodeSideEffectProfile(node.kind, node.config, node.sideEffect);
@@ -611,6 +680,49 @@ function sanitizeEvent(event: RunEvent, sensitiveVariableNames: ReadonlySet<stri
     if (event.data !== undefined) {
       base.data = `<redacted screenshot:${event.data.length}>`;
     }
+  }
+  if (event.type === 'navigation.observed') {
+    if (event.beforeUrl !== undefined) {
+      base.beforeUrl = sanitizeDebugValue(event.beforeUrl, 'url', sensitiveVariableNames);
+    }
+    if (event.afterUrl !== undefined) {
+      base.afterUrl = sanitizeDebugValue(event.afterUrl, 'url', sensitiveVariableNames);
+    }
+    if (event.frameId !== undefined) base.frameId = event.frameId;
+    if (event.sameDocument !== undefined) base.sameDocument = event.sameDocument;
+    base.status = event.status;
+  }
+  if (event.type === 'network.observed') {
+    base.requestId = truncateString(event.requestId, 120);
+    base.url = sanitizeDebugValue(event.url, 'url', sensitiveVariableNames);
+    base.resourceType = event.resourceType;
+    base.currentFrame = event.currentFrame;
+    base.startedAt = event.startedAt;
+    if (event.endedAt !== undefined) base.endedAt = event.endedAt;
+    if (event.status !== undefined) base.status = event.status;
+    if (event.frameId !== undefined) base.frameId = event.frameId;
+    if (event.method !== undefined) base.method = truncateString(event.method, 20);
+    if (event.fromCache !== undefined) base.fromCache = event.fromCache;
+  }
+  if (event.type === 'dom.visibility') {
+    base.selector = sanitizeDebugValue(event.selector, 'selector', sensitiveVariableNames);
+    if (event.candidateIndex !== undefined) base.candidateIndex = event.candidateIndex;
+    base.matchCount = event.matchCount;
+    if (event.appearedAt !== undefined) base.appearedAt = event.appearedAt;
+    if (event.disappearedAt !== undefined) base.disappearedAt = event.disappearedAt;
+    if (event.stableForMs !== undefined) base.stableForMs = event.stableForMs;
+    base.status = event.status;
+  }
+  if (event.type === 'selector.resolution') {
+    base.primarySelector = sanitizeDebugValue(
+      event.primarySelector,
+      'selector',
+      sensitiveVariableNames,
+    );
+    base.resolvedBy = event.resolvedBy;
+    if (event.candidateIndex !== undefined) base.candidateIndex = event.candidateIndex;
+    base.matchCount = event.matchCount;
+    if (event.fingerprint !== undefined) base.fingerprint = event.fingerprint;
   }
   if (event.type === 'log' && event.data !== undefined) {
     base.data = sanitizeDebugValue(event.data, 'data', sensitiveVariableNames);
@@ -1356,6 +1468,7 @@ class WorkflowDebugViewTool {
     }
     const runs = await collectDebugRuns(flow, args);
     const descriptor = buildWorkflowToolDescriptor(flow);
+    const capabilities = buildWorkflowCapabilityMatrix(flow, 'debug');
 
     return {
       content: [
@@ -1374,8 +1487,16 @@ class WorkflowDebugViewTool {
               runCount: runs.length,
               artifactCount: runs.reduce((sum, run) => sum + (run.artifacts?.length ?? 0), 0),
               expiredArtifactCleanupCount,
+              capabilityStatus: {
+                screenshots: capabilities.screenshots,
+                navigationEvents: capabilities.navigationEvents,
+                networkEvents: capabilities.networkEvents,
+                mutationEvents: capabilities.mutationEvents,
+                selectorResolution: capabilities.selectorResolution,
+              },
               sideEffects: descriptor.sideEffects.summary,
             },
+            capabilities,
             artifactPolicy: {
               contentTrust: 'untrusted',
               dataInline: 'explicit_request_only_and_blocked_when_redaction_is_low_confidence',
@@ -1621,6 +1742,7 @@ class WorkflowStabilizeTool {
 
     const failedRuns = runs.filter((run) => run.status === 'failed').length;
     const passedRuns = runs.filter((run) => run.status === 'succeeded').length;
+    const capabilities = buildWorkflowCapabilityMatrix(flow, 'stabilize');
 
     return {
       content: [
@@ -1657,18 +1779,7 @@ class WorkflowStabilizeTool {
               sideEffects,
               approvalReferenceAccepted: false,
             },
-            capabilities: {
-              replayValidation: 'none',
-              domSnapshot: 'unknown',
-              accessibilitySnapshot: 'unknown',
-              networkEvents: 'unknown',
-              screenshots: 'partial',
-              crossOriginFrames: 'unknown',
-              closedShadowDom: 'unknown',
-              unsupportedReasons: [
-                'workflow_stabilize validation replay is not enabled in the analyze-only safety core',
-              ],
-            },
+            capabilities,
             hints,
             recommendations,
             changes: [],
