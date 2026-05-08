@@ -347,6 +347,7 @@ const AUDIT_EVENT_KIND_VALUES = [
   "risk_override",
   "repair_apply",
   "repair_rollback",
+  "schema_migration",
   "quality_downgrade",
   "secret_ref_use",
   "policy_change",

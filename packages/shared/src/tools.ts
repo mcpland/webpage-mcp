@@ -54,6 +54,7 @@ export const TOOL_NAMES = {
     WORKFLOW_REPAIR: 'workflow_repair',
     WORKFLOW_REPAIR_ROLLBACK: 'workflow_repair_rollback',
     WORKFLOW_STABILIZE: 'workflow_stabilize',
+    WORKFLOW_MIGRATE: 'workflow_migrate',
     WORKFLOW_PUBLISH: 'workflow_publish',
     WORKFLOW_UNPUBLISH: 'workflow_unpublish',
   },
@@ -642,6 +643,76 @@ export const TOOL_SCHEMAS: Tool[] = [
           },
         },
       ],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_MIGRATE,
+    description:
+      'Dry-run, apply, or rollback workflow schema/runtime metadata migrations. Reports per-flow compatibility, quality staleness, and audit/rollback information without executing workflows.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Flow ID to migrate. Exactly one of flowId, workflow, or all=true is required.',
+        },
+        workflow: {
+          type: 'string',
+          description: 'Published workflow slug to migrate. Exactly one of workflow, flowId, or all=true is required.',
+        },
+        all: {
+          type: 'boolean',
+          default: false,
+          description: 'Inspect or migrate all stored workflows. Cannot be used for rollback.',
+        },
+        dryRun: {
+          type: 'boolean',
+          default: true,
+          description: 'Return the migration report without writing changes.',
+        },
+        apply: {
+          type: 'boolean',
+          default: false,
+          description: 'Persist the reported migration changes. Cannot be true when dryRun is true.',
+        },
+        rollbackMigrationId: {
+          type: 'string',
+          description: 'Rollback a previously applied migration on a single flow/workflow using the audit rollback snapshot.',
+        },
+      },
+      oneOf: [
+        {
+          required: ['flowId'],
+          not: { anyOf: [{ required: ['workflow'] }, { required: ['all'] }] },
+        },
+        {
+          required: ['workflow'],
+          not: { anyOf: [{ required: ['flowId'] }, { required: ['all'] }] },
+        },
+        {
+          required: ['all'],
+          properties: { all: { const: true } },
+          not: {
+            anyOf: [
+              { required: ['flowId'] },
+              { required: ['workflow'] },
+              { required: ['rollbackMigrationId'] },
+            ],
+          },
+        },
+      ],
+      allOf: [
+        {
+          not: {
+            required: ['apply', 'dryRun'],
+            properties: {
+              apply: { const: true },
+              dryRun: { const: true },
+            },
+          },
+        },
+      ],
+      additionalProperties: false,
     },
   },
   {

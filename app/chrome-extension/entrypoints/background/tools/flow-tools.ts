@@ -13,6 +13,7 @@ import {
 import {
   FLOW_DSL_VERSION,
   FLOW_NODE_SEMANTICS_VERSION,
+  FLOW_SCHEMA_VERSION,
   type FlowRepairHistoryEntry,
   type FlowQualityMeta,
   type FlowV3,
@@ -5207,6 +5208,396 @@ class WorkflowStabilizeTool {
   }
 }
 
+function createWorkflowMigrationId(): string {
+  return `migration-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildTargetRuntimeMeta(flow: FlowV3): NonNullable<FlowV3['meta']>['runtime'] {
+  return {
+    ...(flow.meta?.runtime ?? {}),
+    protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
+    capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
+    dslVersion: FLOW_DSL_VERSION,
+    nodeSemanticsVersion: FLOW_NODE_SEMANTICS_VERSION,
+  };
+}
+
+function inferMigrationQualityStaleReason(flow: FlowV3): string | undefined {
+  if (
+    flow.meta?.runtime?.dslVersion &&
+    flow.meta.runtime.dslVersion !== FLOW_DSL_VERSION
+  ) {
+    return 'dsl_version_mismatch';
+  }
+  if (
+    flow.meta?.runtime?.nodeSemanticsVersion &&
+    flow.meta.runtime.nodeSemanticsVersion !== FLOW_NODE_SEMANTICS_VERSION
+  ) {
+    return 'node_semantics_mismatch';
+  }
+  return undefined;
+}
+
+function normalizeMigrationQuality(
+  quality: FlowQualityMeta | undefined,
+  staleReason: string | undefined,
+): FlowQualityMeta | undefined {
+  if (!quality) {
+    return undefined;
+  }
+  if (!staleReason) {
+    return cloneJson(quality);
+  }
+  const warning = `Quality marked stale by workflow_migrate: ${staleReason}`;
+  return {
+    ...cloneJson(quality),
+    status: 'stale',
+    staleReason,
+    revalidation: {
+      ...(quality.revalidation ?? {}),
+      ...(quality.revalidation?.policy ? { status: 'deferred' as const } : {}),
+      lastDeferredReason: staleReason,
+    },
+    warnings: Array.from(new Set([...(quality.warnings ?? []), warning])),
+  };
+}
+
+function buildMigrationRollbackSnapshot(flow: FlowV3): JsonObject {
+  return {
+    schemaVersion: flow.schemaVersion,
+    updatedAt: flow.updatedAt,
+    runtime: flow.meta?.runtime ? cloneJson(flow.meta.runtime as unknown as JsonObject) : null,
+    quality: flow.meta?.quality ? cloneJson(flow.meta.quality as unknown as JsonObject) : null,
+  };
+}
+
+function getMigrationRollbackSnapshot(flow: FlowV3, migrationId: string): JsonObject | null {
+  const events = Array.isArray(flow.meta?.audit?.events) ? flow.meta.audit.events : [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.kind !== 'schema_migration') {
+      continue;
+    }
+    const metadata = event.metadata;
+    if (
+      metadata &&
+      metadata.migrationId === migrationId &&
+      isRecord(metadata.rollbackSnapshot)
+    ) {
+      return metadata.rollbackSnapshot;
+    }
+  }
+  return null;
+}
+
+function buildWorkflowMigrationPlan(flow: FlowV3, migrationId: string): Record<string, unknown> {
+  const publishedInfo = getPublishedFlowInfo(flow);
+  const targetRuntime = buildTargetRuntimeMeta(flow);
+  const changes: Array<Record<string, unknown>> = [];
+  const beforeRuntime = flow.meta?.runtime ?? {};
+  const compareRuntimeField = (
+    field: 'protocolVersion' | 'capabilityVersion' | 'dslVersion' | 'nodeSemanticsVersion',
+  ) => {
+    if (beforeRuntime[field] !== targetRuntime?.[field]) {
+      changes.push({
+        code: `runtime_${field}_updated`,
+        path: `/meta/runtime/${field}`,
+        before: beforeRuntime[field] ?? null,
+        after: targetRuntime?.[field] ?? null,
+      });
+    }
+  };
+
+  if (flow.schemaVersion !== FLOW_SCHEMA_VERSION) {
+    changes.push({
+      code: 'schema_version_updated',
+      path: '/schemaVersion',
+      before: flow.schemaVersion,
+      after: FLOW_SCHEMA_VERSION,
+    });
+  }
+  compareRuntimeField('protocolVersion');
+  compareRuntimeField('capabilityVersion');
+  compareRuntimeField('dslVersion');
+  compareRuntimeField('nodeSemanticsVersion');
+
+  const staleReason = inferMigrationQualityStaleReason(flow);
+  if (staleReason && flow.meta?.quality) {
+    changes.push({
+      code: 'quality_marked_stale',
+      path: '/meta/quality',
+      reason: staleReason,
+      before: buildWorkflowQualitySummary(flow).status,
+      after: 'stale',
+    });
+  }
+
+  const affectedNodeKinds =
+    staleReason === 'node_semantics_mismatch'
+      ? Array.from(new Set(flow.nodes.map((node) => node.kind))).sort()
+      : [];
+  return {
+    migrationId,
+    flowId: flow.id,
+    workflow: publishedInfo?.slug,
+    name: flow.name,
+    current: {
+      schemaVersion: flow.schemaVersion,
+      runtime: beforeRuntime,
+      quality: buildWorkflowQualitySummary(flow),
+    },
+    target: {
+      schemaVersion: FLOW_SCHEMA_VERSION,
+      runtime: targetRuntime,
+    },
+    compatibility: {
+      decision:
+        changes.length === 0
+          ? 'current'
+          : staleReason
+            ? 'requires_revalidation'
+            : 'metadata_only_compatible',
+      staleReason: staleReason ?? null,
+      affectedNodeKinds,
+      affectedFields: changes.map((change) => change.path),
+    },
+    rollback: {
+      available: true,
+      scope: 'workflow_metadata_only',
+      externalSideEffectsReversible: false,
+    },
+    changes,
+    changed: changes.length > 0,
+  };
+}
+
+function applyWorkflowMigration(flow: FlowV3, migrationId: string): FlowV3 {
+  const staleReason = inferMigrationQualityStaleReason(flow);
+  const beforeQuality = buildWorkflowQualitySummary(flow);
+  let nextFlow: FlowV3 = {
+    ...cloneJson(flow),
+    schemaVersion: FLOW_SCHEMA_VERSION,
+    updatedAt: new Date().toISOString() as FlowV3['updatedAt'],
+    meta: {
+      ...(flow.meta ? cloneJson(flow.meta) : {}),
+      runtime: buildTargetRuntimeMeta(flow),
+      ...(flow.meta?.quality
+        ? { quality: normalizeMigrationQuality(flow.meta.quality, staleReason) }
+        : {}),
+    },
+  };
+  const afterQuality = buildWorkflowQualitySummary(nextFlow);
+  nextFlow = appendWorkflowAuditEvent(nextFlow, {
+    kind: 'schema_migration',
+    actor: 'mcp',
+    revision: calculateWorkflowRevision(nextFlow),
+    previousStatus: beforeQuality.status,
+    nextStatus: afterQuality.status,
+    reason: 'workflow_migrate_apply',
+    metadata: {
+      migrationId,
+      schemaVersionBefore: flow.schemaVersion,
+      schemaVersionAfter: FLOW_SCHEMA_VERSION,
+      compatibilityDecision: staleReason ? 'requires_revalidation' : 'metadata_only_compatible',
+      staleReason: staleReason ?? null,
+      rollbackSnapshot: buildMigrationRollbackSnapshot(flow),
+      externalSideEffectsReversible: false,
+    },
+  });
+  return nextFlow;
+}
+
+function applyWorkflowMigrationRollback(
+  flow: FlowV3,
+  rollbackMigrationId: string,
+  snapshot: JsonObject,
+): FlowV3 {
+  const beforeQuality = buildWorkflowQualitySummary(flow);
+  const restoredRuntime = isRecord(snapshot.runtime) ? cloneJson(snapshot.runtime) : undefined;
+  const restoredQuality = isRecord(snapshot.quality) ? cloneJson(snapshot.quality) : undefined;
+  let nextMeta: NonNullable<FlowV3['meta']> = {
+    ...(flow.meta ? cloneJson(flow.meta) : {}),
+  };
+  if (restoredRuntime) {
+    nextMeta.runtime = restoredRuntime as NonNullable<FlowV3['meta']>['runtime'];
+  } else if (nextMeta.runtime) {
+    delete nextMeta.runtime;
+  }
+  if (restoredQuality) {
+    nextMeta.quality = restoredQuality as FlowQualityMeta;
+  } else if (nextMeta.quality) {
+    delete nextMeta.quality;
+  }
+  let nextFlow: FlowV3 = {
+    ...cloneJson(flow),
+    schemaVersion: FLOW_SCHEMA_VERSION,
+    updatedAt: new Date().toISOString() as FlowV3['updatedAt'],
+    meta: nextMeta,
+  };
+  const afterQuality = buildWorkflowQualitySummary(nextFlow);
+  nextFlow = appendWorkflowAuditEvent(nextFlow, {
+    kind: 'schema_migration',
+    actor: 'mcp',
+    revision: calculateWorkflowRevision(nextFlow),
+    previousStatus: beforeQuality.status,
+    nextStatus: afterQuality.status,
+    reason: 'workflow_migrate_rollback',
+    metadata: {
+      migrationId: createWorkflowMigrationId(),
+      rollbackMigrationId,
+      restoredRuntime: restoredRuntime ?? null,
+      restoredQuality: restoredQuality ? { status: afterQuality.status } : null,
+      externalSideEffectsReversible: false,
+    },
+  });
+  return nextFlow;
+}
+
+class WorkflowMigrateTool {
+  name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_MIGRATE;
+
+  async execute(args: any): Promise<ToolResult> {
+    const requestedFlowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+    const requestedWorkflow = typeof args?.workflow === 'string' ? args.workflow.trim() : '';
+    const rollbackMigrationId =
+      typeof args?.rollbackMigrationId === 'string' ? args.rollbackMigrationId.trim() : '';
+    const dryRun = args?.dryRun !== false;
+    if (args?.apply === true && args?.dryRun !== false) {
+      return createErrorResponse('apply=true requires dryRun=false');
+    }
+    if (!requestedFlowId && !requestedWorkflow && args?.all !== true) {
+      return createErrorResponse('flowId, workflow, or all=true is required');
+    }
+    if (rollbackMigrationId && args?.all === true) {
+      return createErrorResponse('rollbackMigrationId requires a single flowId or workflow target');
+    }
+
+    if (rollbackMigrationId) {
+      const flow = await resolveFlowForWorkflowTool(args);
+      if (!flow) {
+        return createErrorResponse(
+          requestedFlowId
+            ? `Flow not found: ${requestedFlowId}`
+            : `Published workflow not found: ${requestedWorkflow}`,
+        );
+      }
+      const snapshot = getMigrationRollbackSnapshot(flow, rollbackMigrationId);
+      if (!snapshot) {
+        return createErrorResponse(`No migration rollback snapshot found for ${rollbackMigrationId}`);
+      }
+      if (dryRun) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                dryRun: true,
+                rollback: {
+                  migrationId: rollbackMigrationId,
+                  flowId: flow.id,
+                  workflow: getPublishedFlowInfo(flow)?.slug,
+                  snapshot,
+                  externalSideEffectsReversible: false,
+                },
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+      const rolledBack = await saveFlowToV3(
+        applyWorkflowMigrationRollback(flow, rollbackMigrationId, snapshot),
+      );
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              dryRun: false,
+              rollback: {
+                migrationId: rollbackMigrationId,
+                flowId: rolledBack.id,
+                workflow: getPublishedFlowInfo(rolledBack)?.slug,
+                quality: buildWorkflowQualitySummary(rolledBack),
+                externalSideEffectsReversible: false,
+              },
+            }),
+          },
+        ],
+        isError: false,
+      };
+    }
+
+    const migrationId = createWorkflowMigrationId();
+    const flows =
+      args?.all === true
+        ? await createStoragePort().flows.list()
+        : await (async () => {
+            const flow = await resolveFlowForWorkflowTool(args);
+            return flow ? [flow] : [];
+          })();
+    if (flows.length === 0) {
+      return createErrorResponse(
+        requestedFlowId
+          ? `Flow not found: ${requestedFlowId}`
+          : requestedWorkflow
+            ? `Published workflow not found: ${requestedWorkflow}`
+            : 'No workflows found',
+      );
+    }
+
+    const reports: Array<Record<string, unknown>> = [];
+    for (const flow of flows) {
+      const report = buildWorkflowMigrationPlan(flow, migrationId);
+      if (!dryRun && report.changed === true) {
+        try {
+          const migrated = await saveFlowToV3(applyWorkflowMigration(flow, migrationId));
+          reports.push({
+            ...buildWorkflowMigrationPlan(migrated, migrationId),
+            applied: true,
+            auditRecorded: true,
+          });
+        } catch (error) {
+          reports.push({
+            ...report,
+            applied: false,
+            error: error instanceof Error ? error.message : String(error),
+            recoverable: true,
+          });
+        }
+      } else {
+        reports.push({
+          ...report,
+          applied: false,
+        });
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: !reports.some((report) => typeof report.error === 'string'),
+            dryRun,
+            migrationId,
+            summary: {
+              inspected: reports.length,
+              changed: reports.filter((report) => report.changed === true).length,
+              applied: reports.filter((report) => report.applied === true).length,
+              failed: reports.filter((report) => typeof report.error === 'string').length,
+            },
+            flows: reports,
+          }),
+        },
+      ],
+      isError: reports.some((report) => typeof report.error === 'string'),
+    };
+  }
+}
+
 class FlowUpdateTool {
   name = TOOL_NAMES.RECORD_REPLAY.FLOW_UPDATE;
 
@@ -5318,3 +5709,4 @@ export const workflowDebugViewTool = new WorkflowDebugViewTool();
 export const workflowRepairTool = new WorkflowRepairTool();
 export const workflowRepairRollbackTool = new WorkflowRepairRollbackTool();
 export const workflowStabilizeTool = new WorkflowStabilizeTool();
+export const workflowMigrateTool = new WorkflowMigrateTool();

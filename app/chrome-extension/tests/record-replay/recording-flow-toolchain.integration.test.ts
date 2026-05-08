@@ -47,6 +47,7 @@ import {
   flowUpdateTool,
   workflowDescribeTool,
   workflowDebugViewTool,
+  workflowMigrateTool,
   workflowRepairRollbackTool,
   workflowRepairTool,
   workflowStabilizeTool,
@@ -1347,6 +1348,114 @@ describe("recording/editing/flow toolchain integration", () => {
     });
     expect(restored?.meta?.audit?.events?.map((event) => event.kind)).toEqual(
       expect.arrayContaining(["repair_apply", "policy_change", "repair_rollback"]),
+    );
+  });
+
+  it("workflowMigrateTool dry-runs, applies, audits, and rolls back runtime metadata migrations", async () => {
+    const flowId = `workflow-migrate-${Date.now()}`;
+    const storage = createStoragePort();
+    const flow = createFlow(flowId, [
+      {
+        id: "wait-1" as any,
+        kind: "wait",
+        config: { condition: { kind: "selector", selector: "#ready" } },
+      },
+    ]);
+    const revision = calculateWorkflowRevision(flow);
+    flow.meta = {
+      runtime: {
+        dslVersion: "legacy-dsl",
+        nodeSemanticsVersion: "legacy-node-semantics",
+      },
+      quality: {
+        revision,
+        status: "stable",
+        level: "stable",
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        lastValidatedAt: new Date(0).toISOString() as any,
+        freshnessExpiresAt: new Date(Date.now() + 60_000).toISOString() as any,
+      },
+    };
+    await storage.flows.save(flow);
+
+    const dryRun = parseToolPayload(await workflowMigrateTool.execute({ flowId }));
+    expect(dryRun).toMatchObject({
+      success: true,
+      dryRun: true,
+      summary: {
+        inspected: 1,
+        changed: 1,
+        applied: 0,
+      },
+    });
+    expect(dryRun.flows[0].compatibility).toMatchObject({
+      decision: "requires_revalidation",
+      staleReason: "dsl_version_mismatch",
+    });
+    expect((await storage.flows.get(flowId as any))?.meta?.runtime?.dslVersion).toBe(
+      "legacy-dsl",
+    );
+
+    const applied = parseToolPayload(
+      await workflowMigrateTool.execute({ flowId, apply: true, dryRun: false }),
+    );
+    const migrationId = applied.migrationId;
+    const migrated = await storage.flows.get(flowId as any);
+    expect(applied).toMatchObject({
+      success: true,
+      dryRun: false,
+      summary: {
+        inspected: 1,
+        applied: 1,
+      },
+    });
+    expect(migrated?.meta?.runtime?.dslVersion).not.toBe("legacy-dsl");
+    expect(migrated?.meta?.quality).toMatchObject({
+      status: "stale",
+      staleReason: "dsl_version_mismatch",
+    });
+    const migrationEvent = migrated?.meta?.audit?.events?.find(
+      (event) => event.kind === "schema_migration" && event.reason === "workflow_migrate_apply",
+    );
+    expect(migrationEvent?.metadata).toMatchObject({
+      migrationId,
+      compatibilityDecision: "requires_revalidation",
+      staleReason: "dsl_version_mismatch",
+      externalSideEffectsReversible: false,
+      rollbackSnapshot: {
+        runtime: {
+          dslVersion: "legacy-dsl",
+          nodeSemanticsVersion: "legacy-node-semantics",
+        },
+      },
+    });
+
+    const rollback = parseToolPayload(
+      await workflowMigrateTool.execute({
+        flowId,
+        rollbackMigrationId: migrationId,
+        apply: true,
+        dryRun: false,
+      }),
+    );
+    const rolledBack = await storage.flows.get(flowId as any);
+    expect(rollback).toMatchObject({
+      success: true,
+      dryRun: false,
+      rollback: {
+        migrationId,
+        flowId,
+        externalSideEffectsReversible: false,
+      },
+    });
+    expect(rolledBack?.meta?.runtime).toMatchObject({
+      dslVersion: "legacy-dsl",
+      nodeSemanticsVersion: "legacy-node-semantics",
+    });
+    expect(rolledBack?.meta?.audit?.events?.map((event) => event.reason)).toEqual(
+      expect.arrayContaining(["workflow_migrate_apply", "workflow_migrate_rollback"]),
     );
   });
 

@@ -349,6 +349,38 @@ describe('dynamic published flow tools', () => {
     });
   });
 
+  it('exposes workflow_migrate with dry-run/apply/rollback guards', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [],
+    });
+    const ctx = createContext('workflow-migrate-schema', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const migrateTool = tools.find((tool) => tool.name === 'workflow_migrate');
+    const input = migrateTool?.inputSchema as {
+      additionalProperties?: boolean;
+      oneOf?: unknown[];
+      allOf?: unknown[];
+      properties?: Record<string, any>;
+    };
+
+    expect(input.additionalProperties).toBe(false);
+    expect(input.oneOf).toHaveLength(3);
+    expect(input.allOf).toHaveLength(1);
+    expect(input.properties?.all).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
+    expect(input.properties?.dryRun).toMatchObject({
+      type: 'boolean',
+      default: true,
+    });
+    expect(input.properties?.rollbackMigrationId).toMatchObject({
+      type: 'string',
+    });
+  });
+
   it('exposes record_replay_run_cancel with terminal wait controls', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
       status: 'success',

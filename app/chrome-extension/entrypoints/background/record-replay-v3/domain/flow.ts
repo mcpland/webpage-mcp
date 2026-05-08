@@ -290,6 +290,7 @@ export type FlowAuditEventKind =
   | "risk_override"
   | "repair_apply"
   | "repair_rollback"
+  | "schema_migration"
   | "quality_downgrade"
   | "secret_ref_use"
   | "policy_change";
