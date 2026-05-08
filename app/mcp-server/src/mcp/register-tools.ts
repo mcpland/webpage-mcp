@@ -7,7 +7,6 @@ import {
 import {
   NativeMessageType,
   TOOL_SCHEMAS,
-  TOOL_NAMES,
   WEBPAGE_MCP_CAPABILITY_VERSION,
   WEBPAGE_MCP_PROTOCOL_VERSION,
   WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS,
@@ -16,6 +15,10 @@ import {
 } from 'webpage-mcp-shared';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { NativeMessagingHost } from '../native-messaging-host';
+import {
+  isSuccessfulMcpToolResult,
+  shouldRefreshWorkflowToolList,
+} from './tool-list-change';
 
 export interface McpToolContext {
   sessionId: string;
@@ -114,13 +117,6 @@ const DEFAULT_SUPPORTED_RUN_OPTION_KEYS = [
 const WORKFLOW_RUN_TOOL_NAME = 'workflow_run';
 const EXPOSE_LEGACY_FLOW_TOOLS_ENV = 'WEBPAGE_MCP_EXPOSE_LEGACY_FLOW_TOOLS';
 const PUBLIC_TOOL_NAME_SET = new Set<string>(TOOL_SCHEMAS.map((tool) => tool.name));
-const ALWAYS_INVALIDATE_PUBLISHED_FLOW_CACHE_TOOLS = new Set<string>([
-  TOOL_NAMES.RECORD_REPLAY.FLOW_UPDATE,
-  TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR,
-  TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR_ROLLBACK,
-  TOOL_NAMES.RECORD_REPLAY.WORKFLOW_PUBLISH,
-  TOOL_NAMES.RECORD_REPLAY.WORKFLOW_UNPUBLISH,
-]);
 const publishedFlowsCache = new Map<string, { fetchedAt: number; items: PublishedFlow[] }>();
 const publishedFlowsInflight = new Map<string, Promise<PublishedFlow[]>>();
 const extensionCapabilitiesCache = new Map<
@@ -317,32 +313,6 @@ function pruneDynamicFlowCaches(now = Date.now()): void {
 
 function shouldExposeLegacyDynamicFlowTools(): boolean {
   return process.env[EXPOSE_LEGACY_FLOW_TOOLS_ENV] === '1';
-}
-
-function shouldInvalidatePublishedFlowCache(name: string, args: unknown): boolean {
-  if (ALWAYS_INVALIDATE_PUBLISHED_FLOW_CACHE_TOOLS.has(name)) {
-    return true;
-  }
-  if (name !== TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE) {
-    return false;
-  }
-  return Boolean(
-    args &&
-      typeof args === 'object' &&
-      !Array.isArray(args) &&
-      (args as Record<string, unknown>).apply === true,
-  );
-}
-
-function isSuccessfulToolResult(response: unknown): boolean {
-  if (!response || typeof response !== 'object' || Array.isArray(response)) {
-    return false;
-  }
-  const data = (response as Record<string, unknown>).data;
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    return true;
-  }
-  return (data as Record<string, unknown>).isError !== true;
 }
 
 function createFallbackExtensionCapabilities(
@@ -1217,7 +1187,13 @@ export const callToolForContext = async (
       120000, // Extended to 120 seconds to avoid timeout for long tasks such as performance analysis
     );
     if (response.status === 'success') {
-      if (shouldInvalidatePublishedFlowCache(name, args) && isSuccessfulToolResult(response)) {
+      if (
+        shouldRefreshWorkflowToolList(name, args) &&
+        (response.data === undefined ||
+          response.data === null ||
+          typeof response.data !== 'object' ||
+          isSuccessfulMcpToolResult(response.data))
+      ) {
         clearDynamicFlowCacheForSession(ctx.sessionId);
       }
       return response.data;

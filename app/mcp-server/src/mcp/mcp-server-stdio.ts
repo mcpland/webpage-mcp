@@ -16,6 +16,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { getLegacyNativeSocketPath, getNativeSocketPath } from '../ipc/socket-path';
 import { autoBootstrapNativeMessagingForStdio } from '../scripts/utils';
 import { resolveMcpClientCapabilities } from './register-tools';
+import { shouldNotifyWorkflowToolListChanged } from './tool-list-change';
 
 function parsePositiveInt(input: string | undefined, fallback: number): number {
   if (!input) {
@@ -305,10 +306,13 @@ function getStdioMcpServer(): Server {
     },
     {
       capabilities: {
-        tools: {},
+        tools: {
+          listChanged: true,
+        },
         resources: {},
         prompts: {},
       },
+      debouncedNotificationMethods: ['notifications/tools/list_changed'],
     },
   );
 
@@ -353,7 +357,19 @@ function setupHandlers(server: Server): void {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
-      return await callToolFromBridge(request.params.name, request.params.arguments || {});
+      const args = request.params.arguments || {};
+      const result = await callToolFromBridge(request.params.name, args);
+      if (shouldNotifyWorkflowToolListChanged(request.params.name, args, result)) {
+        try {
+          await server.sendToolListChanged();
+        } catch (notificationError) {
+          console.warn(
+            '[webpage-mcp-stdio] Failed to send tools/list_changed notification:',
+            notificationError,
+          );
+        }
+      }
+      return result;
     } catch (error: any) {
       return {
         content: [
