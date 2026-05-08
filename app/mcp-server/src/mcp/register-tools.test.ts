@@ -381,6 +381,31 @@ describe('dynamic published flow tools', () => {
     });
   });
 
+  it('exposes workflow_approval_store without approval creation operations', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [],
+    });
+    const ctx = createContext('workflow-approval-store-schema', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const approvalTool = tools.find((tool) => tool.name === 'workflow_approval_store');
+    const input = approvalTool?.inputSchema as {
+      additionalProperties?: boolean;
+      properties?: Record<string, any>;
+    };
+
+    expect(input.additionalProperties).toBe(false);
+    expect(input.properties?.operation).toMatchObject({
+      type: 'string',
+      enum: ['list', 'get', 'revoke'],
+    });
+    expect(input.properties?.operation.enum).not.toContain('create');
+    expect(input.properties?.approvalId).toMatchObject({
+      type: 'string',
+    });
+  });
+
   it('exposes record_replay_run_cancel with terminal wait controls', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
       status: 'success',

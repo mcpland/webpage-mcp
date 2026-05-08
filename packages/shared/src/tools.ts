@@ -55,6 +55,7 @@ export const TOOL_NAMES = {
     WORKFLOW_REPAIR_ROLLBACK: 'workflow_repair_rollback',
     WORKFLOW_STABILIZE: 'workflow_stabilize',
     WORKFLOW_MIGRATE: 'workflow_migrate',
+    WORKFLOW_APPROVAL_STORE: 'workflow_approval_store',
     WORKFLOW_PUBLISH: 'workflow_publish',
     WORKFLOW_UNPUBLISH: 'workflow_unpublish',
   },
@@ -709,6 +710,45 @@ export const TOOL_SCHEMAS: Tool[] = [
               apply: { const: true },
               dryRun: { const: true },
             },
+          },
+        },
+      ],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_APPROVAL_STORE,
+    description:
+      'Inspect or revoke trusted workflow approval records. This tool cannot create approvals; approval creation must come from UI/user confirmation or a preconfigured policy store.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operation: {
+          type: 'string',
+          enum: ['list', 'get', 'revoke'],
+          default: 'list',
+        },
+        approvalId: {
+          type: 'string',
+          description: 'Approval ID required for get and revoke operations.',
+        },
+        includeRevoked: {
+          type: 'boolean',
+          default: false,
+          description: 'Include revoked records when listing approvals.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Optional reason recorded when revoking an approval.',
+        },
+      },
+      allOf: [
+        {
+          if: {
+            properties: { operation: { enum: ['get', 'revoke'] } },
+          },
+          then: {
+            required: ['approvalId'],
           },
         },
       ],

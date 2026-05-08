@@ -333,6 +333,12 @@ interface WorkflowApprovalCheck {
   reason?: string;
 }
 
+interface StoredWorkflowApproval extends TrustedWorkflowApproval {
+  revoked: boolean;
+  revokedAt?: string;
+  expired: boolean;
+}
+
 interface WorkflowStabilizeScore {
   passRate: number;
   passedRuns: number;
@@ -594,6 +600,92 @@ function getStoredApprovalRecord(store: unknown, approvalId: string): unknown {
     return store[approvalId];
   }
   return undefined;
+}
+
+function normalizeStoredApprovalRecord(
+  approvalId: string,
+  value: unknown,
+): StoredWorkflowApproval | undefined {
+  const approval = normalizeApprovalRecord(approvalId, value);
+  if (!approval) {
+    return undefined;
+  }
+  const revoked = isRecord(value) && value.revoked === true;
+  const revokedAt =
+    isRecord(value) && typeof value.revokedAt === 'string' && value.revokedAt.trim()
+      ? value.revokedAt.trim()
+      : undefined;
+  const expiresAtMs = Date.parse(approval.expiresAt);
+  return {
+    ...approval,
+    revoked,
+    ...(revokedAt ? { revokedAt } : {}),
+    expired: !Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now(),
+  };
+}
+
+function listStoredApprovalRecords(
+  store: unknown,
+  includeRevoked = false,
+): StoredWorkflowApproval[] {
+  const records: StoredWorkflowApproval[] = [];
+  if (Array.isArray(store)) {
+    for (const item of store) {
+      if (!isRecord(item) || typeof item.approvalId !== 'string') {
+        continue;
+      }
+      const record = normalizeStoredApprovalRecord(item.approvalId, item);
+      if (record && (includeRevoked || !record.revoked)) {
+        records.push(record);
+      }
+    }
+  } else if (isRecord(store)) {
+    for (const [approvalId, value] of Object.entries(store)) {
+      const record = normalizeStoredApprovalRecord(approvalId, value);
+      if (record && (includeRevoked || !record.revoked)) {
+        records.push(record);
+      }
+    }
+  }
+  return records.sort((a, b) => a.approvalId.localeCompare(b.approvalId));
+}
+
+function revokeApprovalRecordInStore(
+  store: unknown,
+  approvalId: string,
+  revokedAt: string,
+  reason: string,
+): { nextStore: unknown; record?: StoredWorkflowApproval } {
+  const rawRecord = getStoredApprovalRecord(store, approvalId);
+  const record = normalizeStoredApprovalRecord(approvalId, rawRecord);
+  if (!record || !isRecord(rawRecord)) {
+    return { nextStore: store };
+  }
+  const revokedRecord = {
+    ...rawRecord,
+    approvalId,
+    revoked: true,
+    revokedAt,
+    ...(reason ? { revokeReason: reason } : {}),
+  };
+  if (Array.isArray(store)) {
+    return {
+      nextStore: store.map((item) =>
+        isRecord(item) && item.approvalId === approvalId ? revokedRecord : item,
+      ),
+      record,
+    };
+  }
+  if (isRecord(store)) {
+    return {
+      nextStore: {
+        ...store,
+        [approvalId]: revokedRecord,
+      },
+      record,
+    };
+  }
+  return { nextStore: store };
 }
 
 async function resolveTrustedWorkflowApproval(options: {
@@ -5208,6 +5300,185 @@ class WorkflowStabilizeTool {
   }
 }
 
+function markQualityStaleForApprovalRevoke(
+  quality: FlowQualityMeta | undefined,
+): FlowQualityMeta | undefined {
+  if (!quality) {
+    return undefined;
+  }
+  return {
+    ...cloneJson(quality),
+    status: 'stale',
+    staleReason: 'approval_revoked',
+    revalidation: {
+      ...(quality.revalidation ?? {}),
+      ...(quality.revalidation?.policy ? { status: 'deferred' as const } : {}),
+      lastDeferredReason: 'approval_revoked',
+    },
+    warnings: Array.from(
+      new Set([...(quality.warnings ?? []), 'Quality marked stale because trusted approval was revoked.']),
+    ),
+  };
+}
+
+async function auditApprovalRevocation(
+  approval: StoredWorkflowApproval,
+  reason: string,
+): Promise<Record<string, unknown>> {
+  const flow = await createStoragePort().flows.get(approval.scope.flowId as FlowId);
+  if (!flow) {
+    return {
+      audited: false,
+      flowId: approval.scope.flowId,
+      reason: 'flow_not_found',
+    };
+  }
+  const previousQuality = buildWorkflowQualitySummary(flow);
+  let nextFlow: FlowV3 = {
+    ...flow,
+    meta: {
+      ...(flow.meta ?? {}),
+      ...(flow.meta?.quality
+        ? { quality: markQualityStaleForApprovalRevoke(flow.meta.quality) }
+        : {}),
+    },
+  };
+  const nextQuality = buildWorkflowQualitySummary(nextFlow);
+  nextFlow = appendWorkflowAuditEvent(nextFlow, {
+    kind: 'approval_revoke',
+    actor: 'mcp',
+    revision: calculateWorkflowRevision(nextFlow),
+    previousStatus: previousQuality.status,
+    nextStatus: nextQuality.status,
+    reason: 'workflow_approval_store_revoke',
+    metadata: {
+      approvalId: approval.approvalId,
+      approvedBy: approval.approvedBy,
+      approvedAt: approval.approvedAt,
+      expiresAt: approval.expiresAt,
+      scope: approval.scope,
+      revokeReason: reason || 'not_specified',
+    },
+  });
+  if (previousQuality.current && !nextQuality.current) {
+    nextFlow = appendWorkflowAuditEvent(nextFlow, {
+      kind: 'quality_downgrade',
+      actor: 'mcp',
+      revision: calculateWorkflowRevision(nextFlow),
+      previousStatus: previousQuality.status,
+      nextStatus: nextQuality.status,
+      reason: 'approval_revoked',
+      metadata: {
+        approvalId: approval.approvalId,
+        tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_APPROVAL_STORE,
+      },
+    });
+  }
+  await saveFlowToV3(nextFlow);
+  return {
+    audited: true,
+    flowId: flow.id,
+    workflow: getPublishedFlowInfo(flow)?.slug,
+    previousStatus: previousQuality.status,
+    nextStatus: nextQuality.status,
+    staleReason: nextQuality.staleReason ?? null,
+  };
+}
+
+class WorkflowApprovalStoreTool {
+  name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_APPROVAL_STORE;
+
+  async execute(args: any): Promise<ToolResult> {
+    const operation =
+      args?.operation === 'get' || args?.operation === 'revoke' ? args.operation : 'list';
+    const approvalId = typeof args?.approvalId === 'string' ? args.approvalId.trim() : '';
+    if ((operation === 'get' || operation === 'revoke') && !approvalId) {
+      return createErrorResponse('approvalId is required for get and revoke operations');
+    }
+
+    let rawStore: unknown;
+    try {
+      const result = (await chrome.storage.local.get(WORKFLOW_APPROVAL_STORE_KEY)) as Record<string, unknown>;
+      rawStore = result?.[WORKFLOW_APPROVAL_STORE_KEY];
+    } catch {
+      return createErrorResponse('approval store unavailable');
+    }
+
+    if (operation === 'list') {
+      const approvals = listStoredApprovalRecords(rawStore, args?.includeRevoked === true);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              operation,
+              approvalCreation: 'ui_user_or_policy_store_only',
+              count: approvals.length,
+              approvals,
+            }),
+          },
+        ],
+        isError: false,
+      };
+    }
+
+    const rawRecord = getStoredApprovalRecord(rawStore, approvalId);
+    const approval = normalizeStoredApprovalRecord(approvalId, rawRecord);
+    if (!approval) {
+      return createErrorResponse(`Approval record not found or invalid: ${approvalId}`);
+    }
+
+    if (operation === 'get') {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              operation,
+              approval,
+              approvalCreation: 'ui_user_or_policy_store_only',
+            }),
+          },
+        ],
+        isError: false,
+      };
+    }
+
+    const revokedAt = new Date().toISOString();
+    const reason = typeof args?.reason === 'string' ? args.reason.trim() : '';
+    const revoked = revokeApprovalRecordInStore(rawStore, approvalId, revokedAt, reason);
+    if (!revoked.record) {
+      return createErrorResponse(`Approval record not found or invalid: ${approvalId}`);
+    }
+    await chrome.storage.local.set({
+      [WORKFLOW_APPROVAL_STORE_KEY]: revoked.nextStore,
+    });
+    const audit = await auditApprovalRevocation(revoked.record, reason);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            operation,
+            approval: {
+              ...revoked.record,
+              revoked: true,
+              revokedAt,
+              ...(reason ? { revokeReason: reason } : {}),
+            },
+            approvalCreation: 'ui_user_or_policy_store_only',
+            audit,
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+}
+
 function createWorkflowMigrationId(): string {
   return `migration-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -5710,3 +5981,4 @@ export const workflowRepairTool = new WorkflowRepairTool();
 export const workflowRepairRollbackTool = new WorkflowRepairRollbackTool();
 export const workflowStabilizeTool = new WorkflowStabilizeTool();
 export const workflowMigrateTool = new WorkflowMigrateTool();
+export const workflowApprovalStoreTool = new WorkflowApprovalStoreTool();

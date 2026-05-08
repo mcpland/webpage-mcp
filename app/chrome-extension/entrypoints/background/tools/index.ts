@@ -13,6 +13,7 @@ import {
 import {
   flowAnalyzeTool,
   flowUpdateTool,
+  workflowApprovalStoreTool,
   workflowDescribeTool,
   workflowDebugViewTool,
   workflowMigrateTool,
@@ -33,6 +34,7 @@ const tools = {
   workflowUnpublishTool,
   flowAnalyzeTool,
   flowUpdateTool,
+  workflowApprovalStoreTool,
   workflowDescribeTool,
   workflowDebugViewTool,
   workflowMigrateTool,

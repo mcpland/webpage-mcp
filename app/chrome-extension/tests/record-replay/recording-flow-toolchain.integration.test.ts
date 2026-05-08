@@ -45,6 +45,7 @@ vi.mock("@/entrypoints/background/record-replay-v3/compat", () => ({
 import {
   flowAnalyzeTool,
   flowUpdateTool,
+  workflowApprovalStoreTool,
   workflowDescribeTool,
   workflowDebugViewTool,
   workflowMigrateTool,
@@ -2472,6 +2473,107 @@ describe("recording/editing/flow toolchain integration", () => {
     );
     expect(updated?.meta?.audit?.events).toBeUndefined();
     expect(updated?.meta?.quality).toBeUndefined();
+  });
+
+  it("workflowApprovalStoreTool lists and revokes approvals without creating them", async () => {
+    const flowId = `workflow-approval-revoke-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "click-1" as any,
+        kind: "click",
+        config: { target: { selector: "#submit" } },
+      },
+    ]);
+    const revision = calculateWorkflowRevision(flow);
+    flow.meta = {
+      quality: {
+        revision,
+        status: "stable",
+        level: "stable",
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        lastValidatedAt: new Date(0).toISOString() as any,
+        freshnessExpiresAt: new Date(Date.now() + 60_000).toISOString() as any,
+      },
+    };
+    await createStoragePort().flows.save(flow);
+    let approvalStore: any = {
+      "approval-revoke": {
+        approvedBy: "policy",
+        approvedAt: "2026-01-01T00:00:00.000Z",
+        expiresAt: "2999-01-01T00:00:00.000Z",
+        scope: {
+          flowId,
+          revision,
+        },
+      },
+    };
+    asMock(chrome.storage.local.get).mockImplementation(async () => ({
+      webpageMcpWorkflowApprovals: approvalStore,
+    }));
+    asMock(chrome.storage.local.set).mockImplementation(async (payload: any) => {
+      approvalStore = payload.webpageMcpWorkflowApprovals;
+    });
+
+    const list = parseToolPayload(
+      await workflowApprovalStoreTool.execute({ operation: "list" }),
+    );
+    expect(list).toMatchObject({
+      success: true,
+      operation: "list",
+      approvalCreation: "ui_user_or_policy_store_only",
+      count: 1,
+      approvals: [
+        {
+          approvalId: "approval-revoke",
+          approvedBy: "policy",
+          revoked: false,
+          expired: false,
+          scope: {
+            flowId,
+            revision,
+          },
+        },
+      ],
+    });
+
+    const revoke = parseToolPayload(
+      await workflowApprovalStoreTool.execute({
+        operation: "revoke",
+        approvalId: "approval-revoke",
+        reason: "test policy disabled",
+      }),
+    );
+    const updated = await createStoragePort().flows.get(flowId as any);
+    expect(revoke).toMatchObject({
+      success: true,
+      operation: "revoke",
+      approvalCreation: "ui_user_or_policy_store_only",
+      approval: {
+        approvalId: "approval-revoke",
+        revoked: true,
+        revokeReason: "test policy disabled",
+      },
+      audit: {
+        audited: true,
+        flowId,
+        previousStatus: "stable",
+        nextStatus: "stale",
+        staleReason: "approval_revoked",
+      },
+    });
+    expect(approvalStore["approval-revoke"]).toMatchObject({
+      revoked: true,
+      revokeReason: "test policy disabled",
+    });
+    expect(updated?.meta?.quality).toMatchObject({
+      status: "stale",
+      staleReason: "approval_revoked",
+    });
+    expect(updated?.meta?.audit?.events?.map((event) => event.kind)).toEqual(
+      expect.arrayContaining(["approval_revoke", "quality_downgrade"]),
+    );
   });
 
   it("workflowStabilizeTool applies safe repairs and reruns validation", async () => {
