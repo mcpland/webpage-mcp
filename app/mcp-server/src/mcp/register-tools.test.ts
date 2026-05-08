@@ -60,6 +60,7 @@ describe('dynamic published flow tools', () => {
     clearDynamicFlowCacheForSession('unsupported-capability-call');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-missing');
     clearDynamicFlowCacheForSession('dynamic-flow-conflict');
+    clearDynamicFlowCacheForSession('dynamic-flow-cache-invalidation');
   });
 
   afterEach(() => {
@@ -675,6 +676,44 @@ describe('dynamic published flow tools', () => {
       NativeMessageType.CALL_TOOL,
       120000,
     );
+  });
+
+  it('invalidates the published workflow cache after successful publish mutations', async () => {
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [{ id: 'flow-before', slug: 'before' }],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ success: true, published: true }) }],
+          isError: false,
+        },
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [{ id: 'flow-after', slug: 'after' }],
+      });
+    const ctx = createContext('dynamic-flow-cache-invalidation', sendRequestToExtensionAndWait, {
+      toolListChanged: true,
+    });
+
+    const beforeTools = await listToolsForContext(ctx);
+    const beforeWorkflowRun = beforeTools.find((tool) => tool.name === 'workflow_run');
+    expect((beforeWorkflowRun?.inputSchema as any).properties.workflow.enum).toEqual(['before']);
+
+    const publishResult = await callToolForContext(ctx, 'workflow_publish', {
+      flowId: 'flow-after',
+      slug: 'after',
+    });
+    expect(publishResult.isError).toBe(false);
+
+    const afterTools = await listToolsForContext(ctx);
+    const afterWorkflowRun = afterTools.find((tool) => tool.name === 'workflow_run');
+    expect((afterWorkflowRun?.inputSchema as any).properties.workflow.enum).toEqual(['after']);
+    expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(3);
   });
 
   it('does not forward workflow_run debug options that are not publicly supported', async () => {
