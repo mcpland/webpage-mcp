@@ -96,7 +96,15 @@ export interface WorkflowQualitySummary {
   lastStabilizedAt?: string;
   freshnessExpiresAt?: string;
   nextRevalidateAt?: string;
-  revalidationStatus: "current" | "stale" | "overdue" | "not_configured";
+  revalidationStatus:
+    | "current"
+    | "stale"
+    | "overdue"
+    | "missed"
+    | "deferred"
+    | "queued"
+    | "in_progress"
+    | "not_configured";
   revalidationReason?: string;
   slo: {
     targetPassRate: number;
@@ -332,6 +340,14 @@ function getRevalidationStatus(
   if (!quality?.revalidation?.policy) {
     return "not_configured";
   }
+  if (
+    quality.revalidation.status === "missed" ||
+    quality.revalidation.status === "deferred" ||
+    quality.revalidation.status === "queued" ||
+    quality.revalidation.status === "in_progress"
+  ) {
+    return quality.revalidation.status;
+  }
   if (staleReason) {
     return staleReason === "revalidation_overdue" ? "overdue" : "stale";
   }
@@ -417,6 +433,13 @@ export function buildWorkflowQualitySummary(
   } else if (slo.status === "warning") {
     warnings.add("slo_warning");
   }
+  if (quality?.revalidation?.status === "missed") {
+    warnings.add("revalidation_missed");
+  } else if (quality?.revalidation?.status === "deferred") {
+    warnings.add("revalidation_deferred");
+  }
+  const revalidationReason =
+    quality?.revalidation?.lastDeferredReason ?? quality?.revalidation?.lastRevalidateReason;
 
   return {
     level,
@@ -445,9 +468,7 @@ export function buildWorkflowQualitySummary(
       ? { nextRevalidateAt: quality.revalidation.nextRevalidateAt }
       : {}),
     revalidationStatus: getRevalidationStatus(quality, staleReason, nowMs),
-    ...(quality?.revalidation?.lastRevalidateReason
-      ? { revalidationReason: quality.revalidation.lastRevalidateReason }
-      : {}),
+    ...(revalidationReason ? { revalidationReason } : {}),
     slo,
     verification: {
       oracle: quality?.verification?.oracle ?? "none",

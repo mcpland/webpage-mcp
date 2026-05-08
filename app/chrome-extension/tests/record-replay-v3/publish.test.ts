@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildWorkflowQualitySummary,
   buildWorkflowBackgroundSupport,
   calculateWorkflowRevision,
   evaluateWorkflowPublishGate,
@@ -221,6 +222,55 @@ describe('listPublishedFlowDetails', () => {
       capabilities: {
         replayValidation: 'partial',
       },
+    });
+  });
+
+  it('reports deferred scheduled revalidation without counting it as a validation failure', () => {
+    const flow = createPublishedFlow();
+    const revision = calculateWorkflowRevision(flow);
+    flow.meta = {
+      ...flow.meta,
+      quality: {
+        revision,
+        level: 'stable',
+        status: 'stable',
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        lastValidatedAt: '2026-05-08T00:00:00.000Z' as any,
+        freshnessExpiresAt: '2999-01-01T00:00:00.000Z' as any,
+        verification: {
+          oracle: 'assertion',
+          oracleStrength: 'normal',
+        },
+        revalidation: {
+          policy: 'scheduled',
+          status: 'deferred',
+          nextRevalidateAt: '2026-05-09T00:00:00.000Z' as any,
+          lastAttemptedAt: '2026-05-09T00:05:00.000Z' as any,
+          lastDeferredReason: 'extension_offline',
+          autoDowngrade: true,
+        },
+      },
+    };
+
+    const quality = buildWorkflowQualitySummary(flow, {
+      nowMs: Date.parse('2026-05-09T01:00:00.000Z'),
+    });
+
+    expect(quality).toMatchObject({
+      current: false,
+      staleReason: 'revalidation_overdue',
+      revalidationStatus: 'deferred',
+      revalidationReason: 'extension_offline',
+      countedValidationRuns: 3,
+      passedRuns: 3,
+      failedRuns: 0,
+      warnings: expect.arrayContaining(['revalidation_overdue', 'revalidation_deferred']),
     });
   });
 

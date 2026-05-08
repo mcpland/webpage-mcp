@@ -225,8 +225,11 @@ export interface FlowQualityMeta {
   staleReason?: string;
   revalidation?: {
     policy?: "manual" | "onFailure" | "scheduled" | "siteChange";
+    status?: "current" | "queued" | "in_progress" | "missed" | "deferred";
     nextRevalidateAt?: ISODateTimeString;
+    lastAttemptedAt?: ISODateTimeString;
     lastRevalidateReason?: string;
+    lastDeferredReason?: string;
     autoDowngrade?: boolean;
   };
   slo?: {

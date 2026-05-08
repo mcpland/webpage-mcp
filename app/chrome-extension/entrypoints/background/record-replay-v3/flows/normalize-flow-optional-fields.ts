@@ -331,6 +331,13 @@ const QUALITY_CAPABILITY_VALUES = ["full", "partial", "none", "unknown"] as cons
 const QUALITY_ORACLE_VALUES = ["none", "assertion", "declaredOutput", "expectedOutcome"] as const;
 const QUALITY_ORACLE_STRENGTH_VALUES = ["weak", "normal", "strong"] as const;
 const REVALIDATION_POLICY_VALUES = ["manual", "onFailure", "scheduled", "siteChange"] as const;
+const REVALIDATION_STATUS_VALUES = [
+  "current",
+  "queued",
+  "in_progress",
+  "missed",
+  "deferred",
+] as const;
 const AUDIT_EVENT_KIND_VALUES = [
   "workflow_publish",
   "workflow_unpublish",
@@ -586,13 +593,19 @@ function normalizeFlowQualityMeta(value: JsonObject): FlowQualityMeta | undefine
 
   if (isRecord(value.revalidation)) {
     const policy = enumValue(value.revalidation.policy, REVALIDATION_POLICY_VALUES);
+    const status = enumValue(value.revalidation.status, REVALIDATION_STATUS_VALUES);
     const nextRevalidateAt = optionalIsoString(value.revalidation.nextRevalidateAt);
+    const lastAttemptedAt = optionalIsoString(value.revalidation.lastAttemptedAt);
     const lastRevalidateReason = trimmedString(value.revalidation.lastRevalidateReason);
+    const lastDeferredReason = trimmedString(value.revalidation.lastDeferredReason);
     const autoDowngrade = optionalBoolean(value.revalidation.autoDowngrade);
     quality.revalidation = {
       ...(policy ? { policy } : {}),
+      ...(status ? { status } : {}),
       ...(nextRevalidateAt ? { nextRevalidateAt } : {}),
+      ...(lastAttemptedAt ? { lastAttemptedAt } : {}),
       ...(lastRevalidateReason ? { lastRevalidateReason } : {}),
+      ...(lastDeferredReason ? { lastDeferredReason } : {}),
       ...(autoDowngrade !== undefined ? { autoDowngrade } : {}),
     };
   }
