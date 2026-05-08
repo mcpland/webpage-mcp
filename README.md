@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  Let AI assistants like Claude, Cursor, Windsurf, and other <a href="https://modelcontextprotocol.io/">MCP</a>-compatible clients control your webpage — navigate pages, take screenshots, click elements, read content, capture network traffic, run JavaScript, and much more.
+  Let AI assistants like Claude, Cursor, Windsurf, Codex, and other <a href="https://modelcontextprotocol.io/">MCP</a>-compatible clients control your webpage — navigate pages, take screenshots, click elements, read content, capture network traffic, run JavaScript, and much more.
 </p>
 
 ---
@@ -234,6 +234,28 @@ Use stdio transport via `npx`:
 ### Claude Desktop Configuration
 
 Add to your Claude Desktop MCP config (`claude_desktop_config.json`) — use the same `npx` stdio config above.
+
+### Codex Configuration
+
+Codex stores MCP configuration in `~/.codex/config.toml` by default. You can also use a project-local `.codex/config.toml` when the server should only be enabled for one repository.
+
+Add `webpage-mcp` with a `[mcp_servers.<server-name>]` TOML table:
+
+```toml
+[mcp_servers."webpage-mcp"]
+command = "npx"
+args = ["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"]
+```
+
+`command` is required. `args` is optional and should be an array when used.
+
+You can also add it with Codex CLI:
+
+```bash
+codex mcp add webpage-mcp -- npx -y -p webpage-mcp@latest webpage-mcp-stdio
+```
+
+After adding the server, restart Codex if needed and use `/mcp` in the Codex TUI to confirm `webpage-mcp` is enabled.
 
 ### Local Absolute Path (Dev)
 
