@@ -6,6 +6,7 @@ import * as browserTools from './browser';
 import {
   flowRunTool,
   listPublishedFlowsTool,
+  runCancelTool,
   workflowPublishTool,
   workflowUnpublishTool,
 } from './record-replay';
@@ -25,6 +26,7 @@ import { runInTabQueue } from '../tab-queue';
 const tools = {
   ...browserTools,
   flowRunTool,
+  runCancelTool,
   listPublishedFlowsTool,
   workflowPublishTool,
   workflowUnpublishTool,

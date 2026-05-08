@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   buildRecordingStateSnapshot: vi.fn(),
   saveFlowToV3: vi.fn(),
   enqueueRunAndWait: vi.fn(),
+  ensureV3Runtime: vi.fn(),
 }));
 
 vi.mock(
@@ -38,6 +39,7 @@ vi.mock(
 vi.mock("@/entrypoints/background/record-replay-v3/compat", () => ({
   saveFlowToV3: mocks.saveFlowToV3,
   enqueueRunAndWait: mocks.enqueueRunAndWait,
+  ensureV3Runtime: mocks.ensureV3Runtime,
 }));
 
 import {
@@ -52,6 +54,7 @@ import {
 import {
   flowRunTool,
   listPublishedFlowsTool,
+  runCancelTool,
   workflowPublishTool,
   workflowUnpublishTool,
 } from "@/entrypoints/background/tools/record-replay";
@@ -117,6 +120,27 @@ describe("recording/editing/flow toolchain integration", () => {
       };
       await createStoragePort().flows.save(persisted as FlowV3);
       return persisted;
+    });
+    mocks.ensureV3Runtime.mockImplementation(async () => {
+      const storage = createStoragePort();
+      return {
+        storage,
+        events: {
+          append: (event: any) => storage.events.append(event),
+          list: ({ runId, fromSeq, limit }: any) =>
+            storage.events.list(runId, { fromSeq, limit }),
+          subscribe: vi.fn(() => () => undefined),
+        },
+        runners: {
+          get: vi.fn(() => undefined),
+          register: vi.fn(),
+          unregister: vi.fn(),
+          list: vi.fn(() => []),
+        },
+        scheduler: {
+          kick: vi.fn(async () => undefined),
+        },
+      };
     });
   });
 
@@ -3119,6 +3143,115 @@ describe("recording/editing/flow toolchain integration", () => {
 
     const unchanged = await createStoragePort().flows.get(flowId as any);
     expect(unchanged?.nodes.map((node) => node.id)).toEqual(["start"]);
+  });
+
+  it("runCancelTool cancels queued runs and emits a terminal event", async () => {
+    const flowId = `run-cancel-queued-flow-${Date.now()}`;
+    const runId = `run-cancel-queued-${Date.now()}`;
+    const storage = createStoragePort();
+    await storage.flows.save(
+      createFlow(flowId, [
+        {
+          id: "start" as any,
+          kind: "wait",
+          config: { ms: 1 },
+        },
+      ]),
+    );
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: runId as any,
+      flowId: flowId as any,
+      status: "queued",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      attempt: 0,
+      maxAttempts: 1,
+      nextSeq: 0,
+    } as RunRecordV3);
+    await storage.queue.enqueue({ id: runId as any, flowId: flowId as any, priority: 1 });
+
+    const result = await runCancelTool.execute({
+      runId,
+      reason: "No longer needed",
+    });
+    const payload = parseToolPayload(result);
+    const run = await storage.runs.get(runId as any);
+    const queueItem = await storage.queue.get(runId as any);
+    const events = await storage.events.list(runId as any);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: true,
+      canceled: true,
+      terminal: true,
+      previousStatus: "queued",
+      status: "canceled",
+      cleanup: "queued",
+    });
+    expect(run?.status).toBe("canceled");
+    expect(run?.finishedAt).toEqual(expect.any(Number));
+    expect(queueItem).toBeNull();
+    expect(events.at(-1)).toMatchObject({
+      type: "run.canceled",
+      reason: "No longer needed",
+    });
+  });
+
+  it("runCancelTool force-cancels orphaned active runs without leaving queue entries", async () => {
+    const flowId = `run-cancel-active-flow-${Date.now()}`;
+    const runId = `run-cancel-active-${Date.now()}`;
+    const now = Date.now();
+    const storage = createStoragePort();
+    await storage.flows.save(
+      createFlow(flowId, [
+        {
+          id: "start" as any,
+          kind: "wait",
+          config: { ms: 1 },
+        },
+      ]),
+    );
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: runId as any,
+      flowId: flowId as any,
+      status: "running",
+      createdAt: now - 2_000,
+      updatedAt: now - 1_000,
+      startedAt: now - 1_000,
+      attempt: 1,
+      maxAttempts: 1,
+      nextSeq: 0,
+    } as RunRecordV3);
+    await storage.queue.enqueue({ id: runId as any, flowId: flowId as any, priority: 1 });
+    await storage.queue.markRunning(runId as any, "old-owner", now - 1_000);
+
+    const result = await runCancelTool.execute({
+      runId,
+      reason: "Orphan cleanup",
+    });
+    const payload = parseToolPayload(result);
+    const run = await storage.runs.get(runId as any);
+    const queueItem = await storage.queue.get(runId as any);
+    const events = await storage.events.list(runId as any);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: true,
+      canceled: true,
+      terminal: true,
+      previousStatus: "running",
+      status: "canceled",
+      cleanup: "orphaned_active",
+    });
+    expect(run?.status).toBe("canceled");
+    expect(run?.tookMs).toEqual(expect.any(Number));
+    expect(queueItem).toBeNull();
+    expect(events.at(-1)).toMatchObject({
+      type: "run.canceled",
+      reason: "Orphan cleanup",
+    });
   });
 
   it("flowRunTool forwards supported tab-binding options into the V3 runner path", async () => {

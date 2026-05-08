@@ -1,7 +1,9 @@
 import { createErrorResponse, ToolResult } from "@/common/tool-handler";
 import { TOOL_NAMES } from "webpage-mcp-shared";
 import { createStoragePort } from "../record-replay-v3";
-import type { FlowId } from "../record-replay-v3/domain/ids";
+import { enqueueRunAndWait, ensureV3Runtime } from "../record-replay-v3/compat";
+import { isTerminalStatus, type RunRecordV3 } from "../record-replay-v3/domain/events";
+import type { FlowId, RunId } from "../record-replay-v3/domain/ids";
 import type { JsonObject } from "../record-replay-v3/domain/json";
 import type { FlowV3 } from "../record-replay-v3/domain/flow";
 import {
@@ -19,7 +21,6 @@ import {
   projectAndValidateWorkflowOutputs,
   type WorkflowOutputProjectionResult,
 } from "../record-replay-v3/flows/output-validation";
-import { enqueueRunAndWait } from "../record-replay-v3/compat";
 import { withFlowWriteLock } from "../record-replay-v3/flows/write-lock";
 import {
   WorkflowSecretRefError,
@@ -36,6 +37,10 @@ function hasDisallowedPublicUrlScheme(url: string): boolean {
 
   const protocol = match[1]?.toLowerCase();
   return protocol !== "http" && protocol !== "https";
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 interface FlowRunArgValidationError {
@@ -681,6 +686,165 @@ class WorkflowUnpublishTool {
   }
 }
 
+function createRunCancelError(code: string, message: string): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          success: false,
+          error: {
+            code,
+            category: "runtime",
+            retryable: false,
+            message,
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
+}
+
+function clampRunCancelTimeout(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 5_000;
+  }
+  return Math.max(100, Math.min(30_000, Math.floor(value)));
+}
+
+async function waitForTerminalRun(
+  runId: RunId,
+  timeoutMs: number,
+): Promise<RunRecordV3 | null> {
+  const runtime = await ensureV3Runtime();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const run = await runtime.storage.runs.get(runId);
+    if (run && isTerminalStatus(run.status)) {
+      return run;
+    }
+    await sleep(100);
+  }
+  return runtime.storage.runs.get(runId);
+}
+
+async function forceCancelRunRecord(
+  run: RunRecordV3,
+  reason: string | undefined,
+): Promise<RunRecordV3> {
+  const runtime = await ensureV3Runtime();
+  const now = Date.now();
+  const tookMs =
+    typeof run.startedAt === "number" ? Math.max(0, now - run.startedAt) : undefined;
+  await runtime.storage.queue.cancel(run.id, now, reason);
+  await runtime.storage.runs.patch(run.id, {
+    status: "canceled",
+    finishedAt: now,
+    ...(tookMs !== undefined ? { tookMs } : {}),
+  });
+  await runtime.events.append({
+    runId: run.id,
+    type: "run.canceled",
+    ...(reason ? { reason } : {}),
+  });
+  return (await runtime.storage.runs.get(run.id)) ?? {
+    ...run,
+    status: "canceled",
+    finishedAt: now,
+    updatedAt: now,
+    ...(tookMs !== undefined ? { tookMs } : {}),
+  };
+}
+
+class RunCancelTool {
+  name = TOOL_NAMES.RECORD_REPLAY.RUN_CANCEL;
+
+  async execute(args: any): Promise<ToolResult> {
+    const runId = typeof args?.runId === "string" ? args.runId.trim() : "";
+    if (!runId) {
+      return createRunCancelError("RUN_ID_REQUIRED", "runId is required");
+    }
+
+    const runtime = await ensureV3Runtime();
+    const run = await runtime.storage.runs.get(runId as RunId);
+    if (!run) {
+      return createRunCancelError("RUN_NOT_FOUND", `Run not found: ${runId}`);
+    }
+
+    const previousStatus = run.status;
+    const reason =
+      typeof args?.reason === "string" && args.reason.trim()
+        ? args.reason.trim()
+        : "Canceled by MCP request";
+    const waitForTerminal = args?.waitForTerminal !== false;
+    const timeoutMs = clampRunCancelTimeout(args?.timeoutMs);
+
+    if (isTerminalStatus(run.status)) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              canceled: false,
+              terminal: true,
+              runId: run.id,
+              previousStatus,
+              status: run.status,
+              reason: "run is already terminal",
+            }),
+          },
+        ],
+        isError: false,
+      };
+    }
+
+    const queueItem = await runtime.storage.queue.get(run.id);
+    let current: RunRecordV3 | null = null;
+    let cleanup: "queued" | "active" | "orphaned_active" | "missing_queue" = "active";
+
+    if (!queueItem) {
+      cleanup = "missing_queue";
+      current = await forceCancelRunRecord(run, reason);
+    } else if (queueItem.status === "queued") {
+      cleanup = "queued";
+      current = await forceCancelRunRecord(run, reason);
+    } else {
+      const runner = runtime.runners.get(run.id);
+      if (runner) {
+        runner.cancel(reason);
+        current = waitForTerminal
+          ? await waitForTerminalRun(run.id, timeoutMs)
+          : await runtime.storage.runs.get(run.id);
+      } else {
+        cleanup = "orphaned_active";
+        current = await forceCancelRunRecord(run, reason);
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            canceled: current?.status === "canceled",
+            terminal: current ? isTerminalStatus(current.status) : false,
+            runId: run.id,
+            previousStatus,
+            status: current?.status ?? "unknown",
+            cleanup,
+            waitForTerminal,
+            ...(current?.finishedAt ? { finishedAt: current.finishedAt } : {}),
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+}
+
 class FlowRunTool {
   name = TOOL_NAMES.RECORD_REPLAY.FLOW_RUN;
   async execute(args: any): Promise<ToolResult> {
@@ -883,6 +1047,7 @@ class ListPublishedTool {
 }
 
 export const flowRunTool = new FlowRunTool();
+export const runCancelTool = new RunCancelTool();
 export const listPublishedFlowsTool = new ListPublishedTool();
 export const workflowPublishTool = new WorkflowPublishTool();
 export const workflowUnpublishTool = new WorkflowUnpublishTool();

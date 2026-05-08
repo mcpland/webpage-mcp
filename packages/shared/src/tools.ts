@@ -42,6 +42,7 @@ export const TOOL_NAMES = {
   },
   RECORD_REPLAY: {
     FLOW_RUN: 'record_replay_flow_run',
+    RUN_CANCEL: 'record_replay_run_cancel',
     LIST_PUBLISHED: 'record_replay_list_published',
     RECORDING_START: 'recording_start',
     RECORDING_STOP: 'recording_stop',
@@ -129,6 +130,38 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
       },
       required: ['flowId'],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.RUN_CANCEL,
+    description:
+      'Cancel a queued, running, or paused record/replay run by runId. Queued runs are canceled immediately; active runs receive a cancel request and can optionally be waited to terminal state.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        runId: {
+          type: 'string',
+          description: 'Run ID to cancel.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Optional cancellation reason recorded in the run.canceled event.',
+        },
+        waitForTerminal: {
+          type: 'boolean',
+          default: true,
+          description: 'Wait briefly for a running/paused run to reach canceled terminal state.',
+        },
+        timeoutMs: {
+          type: 'number',
+          minimum: 100,
+          maximum: 30000,
+          default: 5000,
+          description: 'Maximum wait time when waitForTerminal is true.',
+        },
+      },
+      required: ['runId'],
     },
   },
   {

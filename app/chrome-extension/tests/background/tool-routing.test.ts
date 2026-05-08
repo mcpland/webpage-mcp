@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   screenshotExecute: vi.fn(),
   switchExecute: vi.fn(),
   flowRunExecute: vi.fn(),
+  runCancelExecute: vi.fn(),
   listPublishedExecute: vi.fn(),
   workflowPublishExecute: vi.fn(),
   workflowUnpublishExecute: vi.fn(),
@@ -25,6 +26,10 @@ vi.mock('@/entrypoints/background/tools/browser', () => ({
 
 vi.mock('@/entrypoints/background/tools/record-replay', () => ({
   flowRunTool: { name: 'record_replay_flow_run', execute: mocks.flowRunExecute },
+  runCancelTool: {
+    name: 'record_replay_run_cancel',
+    execute: mocks.runCancelExecute,
+  },
   listPublishedFlowsTool: {
     name: 'record_replay_list_published',
     execute: mocks.listPublishedExecute,

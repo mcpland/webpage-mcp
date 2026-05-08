@@ -331,6 +331,34 @@ describe('dynamic published flow tools', () => {
     });
   });
 
+  it('exposes record_replay_run_cancel with terminal wait controls', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [],
+    });
+    const ctx = createContext('record-replay-run-cancel-schema', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const cancelTool = tools.find((tool) => tool.name === 'record_replay_run_cancel');
+    const input = cancelTool?.inputSchema as {
+      additionalProperties?: boolean;
+      required?: string[];
+      properties?: Record<string, any>;
+    };
+
+    expect(input.additionalProperties).toBe(false);
+    expect(input.required).toEqual(['runId']);
+    expect(input.properties?.waitForTerminal).toMatchObject({
+      type: 'boolean',
+      default: true,
+    });
+    expect(input.properties?.timeoutMs).toMatchObject({
+      type: 'number',
+      minimum: 100,
+      maximum: 30000,
+    });
+  });
+
   it('exposes workflow publish and unpublish MCP tools', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
       status: 'success',
