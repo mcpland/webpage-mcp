@@ -1,9 +1,15 @@
 import {
   DEFAULT_MCP_INSTANCE_ID,
+  TOOL_SCHEMAS,
+  WEBPAGE_MCP_CAPABILITY_VERSION,
+  WEBPAGE_MCP_PROTOCOL_VERSION,
+  WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS,
   isAgentRpcRequestPayload,
   NativeMessageType,
   type AgentRpcRequestPayload,
   type AgentRpcResponsePayload,
+  type WebpageMcpCapabilityHandshakeRequest,
+  type WebpageMcpExtensionCapabilities,
   type McpServerInstanceConfig,
   type McpServerInstanceStatus,
   type NativeInstanceListPayload,
@@ -30,6 +36,15 @@ import { clearTabQueue } from "./tab-queue";
 
 const LOG_PREFIX = "[NativeHost]";
 const INSTANCE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
+const WORKFLOW_RUNTIME_FEATURE_FLAGS = [
+  "workflow_run",
+  "published_workflow_descriptors",
+  "workflow_descriptor_revision",
+  "workflow_stabilize_analyze_only",
+  "segmented_workflow_run",
+  "per_flow_write_lock",
+  "locator_metadata_v1",
+] as const;
 
 let nativePort: chrome.runtime.Port | null = null;
 export const HOST_NAME = NATIVE_HOST.NAME;
@@ -78,6 +93,70 @@ let currentServerStatus: ServerStatus = {
   isRunning: false,
   lastUpdated: Date.now(),
 };
+
+function getExtensionVersion(): string {
+  try {
+    const version = chrome.runtime.getManifest?.().version;
+    return typeof version === "string" && version.trim() ? version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function normalizeCapabilityHandshakeRequest(
+  value: unknown,
+): WebpageMcpCapabilityHandshakeRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const payload = value as Record<string, unknown>;
+  const rawHandshake =
+    payload.handshake && typeof payload.handshake === "object" && !Array.isArray(payload.handshake)
+      ? (payload.handshake as Record<string, unknown>)
+      : payload;
+  return {
+    protocolVersion:
+      typeof rawHandshake.protocolVersion === "string"
+        ? rawHandshake.protocolVersion
+        : undefined,
+    mcpServerVersion:
+      typeof rawHandshake.mcpServerVersion === "string"
+        ? rawHandshake.mcpServerVersion
+        : undefined,
+    clientCapabilities: Array.isArray(rawHandshake.clientCapabilities)
+      ? rawHandshake.clientCapabilities.filter(
+          (capability): capability is string => typeof capability === "string",
+        )
+      : undefined,
+  };
+}
+
+function buildExtensionCapabilities(
+  requestPayload?: unknown,
+): WebpageMcpExtensionCapabilities {
+  const request = normalizeCapabilityHandshakeRequest(requestPayload);
+  const warnings: string[] = [];
+  if (
+    request.protocolVersion &&
+    request.protocolVersion !== WEBPAGE_MCP_PROTOCOL_VERSION
+  ) {
+    warnings.push(
+      `MCP server requested protocol ${request.protocolVersion}; extension supports ${WEBPAGE_MCP_PROTOCOL_VERSION}.`,
+    );
+  }
+
+  return {
+    protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
+    capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
+    extensionVersion: getExtensionVersion(),
+    ...(request.mcpServerVersion ? { mcpServerVersion: request.mcpServerVersion } : {}),
+    supportedTools: TOOL_SCHEMAS.map((tool) => tool.name),
+    supportedRunOptions: [...WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS],
+    featureFlags: [...WORKFLOW_RUNTIME_FEATURE_FLAGS],
+    ...(warnings.length > 0 ? { warnings } : {}),
+    generatedAt: new Date().toISOString(),
+  };
+}
 
 let currentServerStatuses: ServerStatusMap = {
   [DEFAULT_MCP_INSTANCE_ID]: currentServerStatus,
@@ -1089,7 +1168,11 @@ export function connectNativeHost(): boolean {
           );
           nativePort?.postMessage({
             responseToRequestId: requestId,
-            payload: { status: "success", items },
+            payload: {
+              status: "success",
+              items,
+              capabilities: buildExtensionCapabilities(message.payload),
+            },
           });
         } catch (error: any) {
           nativePort?.postMessage({
@@ -1100,6 +1183,17 @@ export function connectNativeHost(): boolean {
             },
           });
         }
+      } else if (
+        message.type === NativeMessageType.GET_CAPABILITIES &&
+        message.requestId
+      ) {
+        nativePort?.postMessage({
+          responseToRequestId: message.requestId,
+          payload: {
+            status: "success",
+            capabilities: buildExtensionCapabilities(message.payload),
+          },
+        });
       } else if (message.type === NativeMessageType.AGENT_STREAM_EVENT) {
         chrome.runtime
           .sendMessage({

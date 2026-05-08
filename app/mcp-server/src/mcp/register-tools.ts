@@ -4,7 +4,15 @@ import {
   CallToolResult,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { NativeMessageType, TOOL_SCHEMAS } from 'webpage-mcp-shared';
+import {
+  NativeMessageType,
+  TOOL_SCHEMAS,
+  WEBPAGE_MCP_CAPABILITY_VERSION,
+  WEBPAGE_MCP_PROTOCOL_VERSION,
+  WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS,
+  type WebpageMcpExtensionCapabilities,
+  type WebpageMcpWorkflowRunOption,
+} from 'webpage-mcp-shared';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { NativeMessagingHost } from '../native-messaging-host';
 
@@ -59,6 +67,7 @@ interface PublishedFlowSideEffects {
 interface PublishedFlow {
   id: string;
   slug: string;
+  revision?: string;
   description?: string;
   variables?: PublishedFlowVariable[];
   parameters?: PublishedFlowParameterSchema;
@@ -86,12 +95,31 @@ const SESSION_RUN_OPTION_KEYS = [
   'startUrl',
   'tabId',
 ] as const;
-const RUN_OPTION_KEY_SET = new Set<string>(SESSION_RUN_OPTION_KEYS);
+type SessionRunOptionKey = (typeof SESSION_RUN_OPTION_KEYS)[number];
+const DEFAULT_SUPPORTED_RUN_OPTION_KEYS = [
+  ...WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS,
+] as const satisfies ReadonlyArray<SessionRunOptionKey>;
 const WORKFLOW_RUN_TOOL_NAME = 'workflow_run';
 const EXPOSE_LEGACY_FLOW_TOOLS_ENV = 'WEBPAGE_MCP_EXPOSE_LEGACY_FLOW_TOOLS';
 const PUBLIC_TOOL_NAME_SET = new Set<string>(TOOL_SCHEMAS.map((tool) => tool.name));
 const publishedFlowsCache = new Map<string, { fetchedAt: number; items: PublishedFlow[] }>();
 const publishedFlowsInflight = new Map<string, Promise<PublishedFlow[]>>();
+const extensionCapabilitiesCache = new Map<
+  string,
+  { fetchedAt: number; capabilities: WebpageMcpExtensionCapabilities }
+>();
+
+const MCP_SERVER_VERSION = (() => {
+  try {
+    const pkg = require('../../package.json') as { version?: string };
+    if (typeof pkg.version === 'string' && pkg.version.trim()) {
+      return pkg.version;
+    }
+  } catch {
+    // Fall through to the environment fallback.
+  }
+  return process.env.npm_package_version || 'unknown';
+})();
 
 export function clearDynamicFlowCacheForSession(sessionId: string): void {
   if (!sessionId) {
@@ -99,6 +127,7 @@ export function clearDynamicFlowCacheForSession(sessionId: string): void {
   }
   publishedFlowsCache.delete(sessionId);
   publishedFlowsInflight.delete(sessionId);
+  extensionCapabilitiesCache.delete(sessionId);
 }
 
 function pruneDynamicFlowCaches(now = Date.now()): void {
@@ -106,6 +135,7 @@ function pruneDynamicFlowCaches(now = Date.now()): void {
     if (now - cache.fetchedAt > FLOW_TOOL_CACHE_STALE_MS) {
       publishedFlowsCache.delete(sessionId);
       publishedFlowsInflight.delete(sessionId);
+      extensionCapabilitiesCache.delete(sessionId);
     }
   }
 
@@ -121,11 +151,109 @@ function pruneDynamicFlowCaches(now = Date.now()): void {
     if (!target) break;
     publishedFlowsCache.delete(target[0]);
     publishedFlowsInflight.delete(target[0]);
+    extensionCapabilitiesCache.delete(target[0]);
   }
 }
 
 function shouldExposeLegacyDynamicFlowTools(): boolean {
   return process.env[EXPOSE_LEGACY_FLOW_TOOLS_ENV] === '1';
+}
+
+function createFallbackExtensionCapabilities(
+  warning = 'Extension capability handshake unavailable; using conservative workflow schema.',
+): WebpageMcpExtensionCapabilities {
+  return {
+    protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
+    capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
+    extensionVersion: 'unknown',
+    mcpServerVersion: MCP_SERVER_VERSION,
+    supportedTools: TOOL_SCHEMAS.map((tool) => tool.name),
+    supportedRunOptions: [...DEFAULT_SUPPORTED_RUN_OPTION_KEYS],
+    featureFlags: ['capability_handshake_fallback'],
+    warnings: [warning],
+  };
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
+    : [];
+}
+
+function normalizeExtensionCapabilities(value: unknown): WebpageMcpExtensionCapabilities {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return createFallbackExtensionCapabilities();
+  }
+
+  const raw = value as Record<string, unknown>;
+  const supportedRunOptions = normalizeStringArray(raw.supportedRunOptions).filter(
+    (option): option is WebpageMcpWorkflowRunOption =>
+      (SESSION_RUN_OPTION_KEYS as readonly string[]).includes(option),
+  );
+  const supportedTools = normalizeStringArray(raw.supportedTools);
+  const warnings = normalizeStringArray(raw.warnings);
+
+  return {
+    protocolVersion:
+      typeof raw.protocolVersion === 'string' && raw.protocolVersion.trim()
+        ? raw.protocolVersion
+        : WEBPAGE_MCP_PROTOCOL_VERSION,
+    capabilityVersion:
+      typeof raw.capabilityVersion === 'string' && raw.capabilityVersion.trim()
+        ? raw.capabilityVersion
+        : WEBPAGE_MCP_CAPABILITY_VERSION,
+    extensionVersion:
+      typeof raw.extensionVersion === 'string' && raw.extensionVersion.trim()
+        ? raw.extensionVersion
+        : 'unknown',
+    mcpServerVersion:
+      typeof raw.mcpServerVersion === 'string' && raw.mcpServerVersion.trim()
+        ? raw.mcpServerVersion
+        : MCP_SERVER_VERSION,
+    supportedTools: supportedTools.length > 0 ? supportedTools : TOOL_SCHEMAS.map((tool) => tool.name),
+    supportedRunOptions:
+      supportedRunOptions.length > 0
+        ? supportedRunOptions
+        : [...DEFAULT_SUPPORTED_RUN_OPTION_KEYS],
+    featureFlags: normalizeStringArray(raw.featureFlags),
+    ...(warnings.length > 0 ? { warnings } : {}),
+    ...(typeof raw.generatedAt === 'string' ? { generatedAt: raw.generatedAt } : {}),
+  };
+}
+
+function rememberExtensionCapabilities(
+  sessionId: string,
+  capabilities: WebpageMcpExtensionCapabilities,
+): void {
+  extensionCapabilitiesCache.set(sessionId, {
+    fetchedAt: Date.now(),
+    capabilities,
+  });
+}
+
+function getExtensionCapabilitiesForSession(sessionId: string): WebpageMcpExtensionCapabilities {
+  const cached = extensionCapabilitiesCache.get(sessionId);
+  if (cached && Date.now() - cached.fetchedAt < FLOW_TOOL_CACHE_STALE_MS) {
+    return cached.capabilities;
+  }
+  return createFallbackExtensionCapabilities();
+}
+
+function getRunOptionKeySet(
+  capabilities: WebpageMcpExtensionCapabilities,
+): ReadonlySet<SessionRunOptionKey> {
+  const supported = new Set<SessionRunOptionKey>();
+  for (const option of capabilities.supportedRunOptions) {
+    if ((SESSION_RUN_OPTION_KEYS as readonly string[]).includes(option)) {
+      supported.add(option as SessionRunOptionKey);
+    }
+  }
+  if (supported.size === 0) {
+    for (const option of DEFAULT_SUPPORTED_RUN_OPTION_KEYS) {
+      supported.add(option);
+    }
+  }
+  return supported;
 }
 
 function normalizePublishedFlows(response: any): PublishedFlow[] {
@@ -145,6 +273,7 @@ function normalizePublishedFlows(response: any): PublishedFlow[] {
     .map((item: any) => ({
       id: item.id,
       slug: item.slug,
+      revision: typeof item.revision === 'string' ? item.revision : undefined,
       description: item.description,
       variables: Array.isArray(item.variables) ? item.variables : [],
       parameters:
@@ -189,6 +318,7 @@ function isPublishedVariableRequired(variable: PublishedFlowVariable): boolean {
 
 function getReservedDynamicToolVariableNames(
   variables: ReadonlyArray<PublishedFlowVariable> | null | undefined,
+  runOptionKeys: ReadonlySet<SessionRunOptionKey>,
 ): string[] {
   if (!Array.isArray(variables)) {
     return [];
@@ -196,11 +326,15 @@ function getReservedDynamicToolVariableNames(
 
   return variables
     .map((variable) => getPublishedVariableName(variable))
-    .filter((name): name is string => typeof name === 'string' && RUN_OPTION_KEY_SET.has(name));
+    .filter(
+      (name): name is string =>
+        typeof name === 'string' && runOptionKeys.has(name as SessionRunOptionKey),
+    );
 }
 
 function getDynamicToolVariables(
   variables: ReadonlyArray<PublishedFlowVariable> | null | undefined,
+  runOptionKeys: ReadonlySet<SessionRunOptionKey>,
 ): PublishedFlowVariable[] {
   if (!Array.isArray(variables)) {
     return [];
@@ -211,7 +345,11 @@ function getDynamicToolVariables(
       return false;
     }
     const variableName = getPublishedVariableName(variable);
-    return typeof variableName === 'string' && variableName.length > 0 && !RUN_OPTION_KEY_SET.has(variableName);
+    return (
+      typeof variableName === 'string' &&
+      variableName.length > 0 &&
+      !runOptionKeys.has(variableName as SessionRunOptionKey)
+    );
   });
 }
 
@@ -222,10 +360,13 @@ function getSchemaParameterNames(parameters: PublishedFlowParameterSchema | unde
   return Object.keys(parameters.properties).filter((name) => name.length > 0);
 }
 
-function getReservedDynamicToolParameterNames(item: PublishedFlow): string[] {
-  const names = new Set<string>(getReservedDynamicToolVariableNames(item.variables));
+function getReservedDynamicToolParameterNames(
+  item: PublishedFlow,
+  runOptionKeys: ReadonlySet<SessionRunOptionKey>,
+): string[] {
+  const names = new Set<string>(getReservedDynamicToolVariableNames(item.variables, runOptionKeys));
   for (const name of getSchemaParameterNames(item.parameters)) {
-    if (RUN_OPTION_KEY_SET.has(name)) {
+    if (runOptionKeys.has(name as SessionRunOptionKey)) {
       names.add(name);
     }
   }
@@ -234,6 +375,7 @@ function getReservedDynamicToolParameterNames(item: PublishedFlow): string[] {
 
 function buildDynamicToolParameterSchemaFromDescriptor(
   item: PublishedFlow,
+  runOptionKeys: ReadonlySet<SessionRunOptionKey>,
 ): { properties: Record<string, any>; required: string[] } | null {
   const schema = item.parameters;
   if (!schema?.properties || typeof schema.properties !== 'object') {
@@ -242,7 +384,7 @@ function buildDynamicToolParameterSchemaFromDescriptor(
 
   const properties: Record<string, any> = {};
   for (const [name, value] of Object.entries(schema.properties)) {
-    if (!name || RUN_OPTION_KEY_SET.has(name)) {
+    if (!name || runOptionKeys.has(name as SessionRunOptionKey)) {
       continue;
     }
     if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -376,9 +518,20 @@ async function fetchPublishedFlows(
 
   const requestPromise = (async () => {
     const response = await ctx.nativeHost.sendRequestToExtensionAndWait(
-      { meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId } },
+      {
+        meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId },
+        handshake: {
+          protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
+          mcpServerVersion: MCP_SERVER_VERSION,
+          clientCapabilities: [],
+        },
+      },
       'rr_list_published_flows',
       20000,
+    );
+    rememberExtensionCapabilities(
+      ctx.sessionId,
+      normalizeExtensionCapabilities(response?.capabilities),
     );
     const items = normalizePublishedFlows(response);
     publishedFlowsCache.set(ctx.sessionId, {
@@ -389,6 +542,10 @@ async function fetchPublishedFlows(
     return items;
   })()
     .catch(() => {
+      rememberExtensionCapabilities(
+        ctx.sessionId,
+        createFallbackExtensionCapabilities('Extension capability handshake failed; using conservative workflow schema.'),
+      );
       return [];
     })
     .finally(() => {
@@ -402,6 +559,7 @@ async function fetchPublishedFlows(
 function splitDynamicFlowArgs(
   args: any,
   flowVariableKeys?: ReadonlySet<string>,
+  runOptionKeys: ReadonlySet<SessionRunOptionKey> = new Set(DEFAULT_SUPPORTED_RUN_OPTION_KEYS),
 ): {
   variables: Record<string, unknown>;
   runOptions: Record<string, unknown>;
@@ -414,12 +572,12 @@ function splitDynamicFlowArgs(
   const runOptions: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(args)) {
-    if (RUN_OPTION_KEY_SET.has(key)) {
+    if (runOptionKeys.has(key as SessionRunOptionKey)) {
       runOptions[key] = value;
       continue;
     }
     const isDeclaredVariable = flowVariableKeys?.has(key) === true;
-    if (isDeclaredVariable || !RUN_OPTION_KEY_SET.has(key)) {
+    if (isDeclaredVariable || !runOptionKeys.has(key as SessionRunOptionKey)) {
       variables[key] = value;
     }
   }
@@ -450,7 +608,55 @@ function getWorkflowSummary(items: PublishedFlow[]): string {
   return workflows || 'No published workflows were discovered for this browser session.';
 }
 
-function buildWorkflowRunTool(items: PublishedFlow[]): Tool {
+function addWorkflowRunOptionProperties(
+  properties: Record<string, any>,
+  runOptionKeys: ReadonlySet<SessionRunOptionKey>,
+): void {
+  if (runOptionKeys.has('tabId')) {
+    properties.tabId = {
+      type: 'number',
+      description: 'Explicit tab to bind the run to. Overrides `tabTarget`.',
+    };
+  }
+  if (runOptionKeys.has('tabTarget')) {
+    properties.tabTarget = {
+      type: 'string',
+      enum: ['current', 'new'],
+      default: 'current',
+      description: "Target tab: 'current' or 'new'.",
+    };
+  }
+  if (runOptionKeys.has('background')) {
+    properties.background = {
+      type: 'boolean',
+      default: false,
+      description: 'Run without activating/focusing target tabs or windows where Chrome APIs allow it.',
+    };
+  }
+  if (runOptionKeys.has('refresh')) {
+    properties.refresh = { type: 'boolean', default: false };
+  }
+  if (runOptionKeys.has('captureNetwork')) {
+    properties.captureNetwork = { type: 'boolean', default: false };
+  }
+  if (runOptionKeys.has('returnLogs')) {
+    properties.returnLogs = { type: 'boolean', default: false };
+  }
+  if (runOptionKeys.has('timeoutMs')) {
+    properties.timeoutMs = { type: 'number', minimum: 0 };
+  }
+  if (runOptionKeys.has('startUrl')) {
+    properties.startUrl = {
+      type: 'string',
+      description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
+    };
+  }
+}
+
+function buildWorkflowRunTool(
+  items: PublishedFlow[],
+  capabilities: WebpageMcpExtensionCapabilities,
+): Tool {
   const workflowSlugs = items.map((item) => item.slug).filter((slug) => slug.length > 0);
   const workflowProperty: Record<string, unknown> = {
     type: 'string',
@@ -460,54 +666,111 @@ function buildWorkflowRunTool(items: PublishedFlow[]): Tool {
   if (workflowSlugs.length > 0) {
     workflowProperty.enum = workflowSlugs;
   }
+  const runOptionKeys = getRunOptionKeySet(capabilities);
+  const properties: Record<string, any> = {
+    workflow: workflowProperty,
+    args: {
+      type: 'object',
+      description: 'Workflow variable values keyed by variable name.',
+      additionalProperties: true,
+    },
+  };
+  addWorkflowRunOptionProperties(properties, runOptionKeys);
 
   return {
     name: WORKFLOW_RUN_TOOL_NAME,
     description: `Run a published workflow by slug using a compact schema. Use workflow_describe before running when you need exact args or side-effect/background details. Available workflows:\n${getWorkflowSummary(items)}`,
     inputSchema: {
       type: 'object',
-      properties: {
-        workflow: workflowProperty,
-        args: {
-          type: 'object',
-          description: 'Workflow variable values keyed by variable name.',
-          additionalProperties: true,
-        },
-        tabId: {
-          type: 'number',
-          description: 'Explicit tab to bind the run to. Overrides `tabTarget`.',
-        },
-        tabTarget: {
-          type: 'string',
-          enum: ['current', 'new'],
-          default: 'current',
-          description: "Target tab: 'current' or 'new'.",
-        },
-        background: {
-          type: 'boolean',
-          default: false,
-          description: 'Run without activating/focusing target tabs or windows where Chrome APIs allow it.',
-        },
-        refresh: { type: 'boolean', default: false },
-        captureNetwork: { type: 'boolean', default: false },
-        returnLogs: { type: 'boolean', default: false },
-        timeoutMs: { type: 'number', minimum: 0 },
-        startUrl: {
-          type: 'string',
-          description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
-        },
-      },
+      properties,
       required: ['workflow'],
     },
   };
 }
 
-async function listDynamicFlowTools(ctx: McpToolContext, publishedFlows?: PublishedFlow[]): Promise<Tool[]> {
+function filterFlowRunToolForCapabilities(
+  tool: Tool,
+  capabilities: WebpageMcpExtensionCapabilities,
+): Tool {
+  if (tool.name !== 'record_replay_flow_run') {
+    return tool;
+  }
+  const inputSchema = tool.inputSchema as { properties?: Record<string, any>; required?: string[] };
+  const baseProperties = inputSchema?.properties || {};
+  const runOptionKeys = getRunOptionKeySet(capabilities);
+  const properties: Record<string, any> = {};
+  for (const key of ['flowId', 'args']) {
+    if (baseProperties[key]) {
+      properties[key] = baseProperties[key];
+    }
+  }
+  for (const key of SESSION_RUN_OPTION_KEYS) {
+    if (runOptionKeys.has(key) && baseProperties[key]) {
+      properties[key] = baseProperties[key];
+    }
+  }
+  return {
+    ...tool,
+    inputSchema: {
+      ...inputSchema,
+      properties,
+    },
+  };
+}
+
+function filterPublicToolsForCapabilities(
+  capabilities: WebpageMcpExtensionCapabilities,
+): Tool[] {
+  const supportedTools = new Set(capabilities.supportedTools);
+  return TOOL_SCHEMAS.filter((tool) => supportedTools.has(tool.name)).map((tool) =>
+    filterFlowRunToolForCapabilities(tool, capabilities),
+  );
+}
+
+function supportsWorkflowRun(capabilities: WebpageMcpExtensionCapabilities): boolean {
+  return capabilities.supportedTools.includes('record_replay_flow_run');
+}
+
+async function ensureCapabilitiesForContext(
+  ctx: McpToolContext,
+): Promise<WebpageMcpExtensionCapabilities> {
+  await fetchPublishedFlows(ctx);
+  return getExtensionCapabilitiesForSession(ctx.sessionId);
+}
+
+function filterFlowRunArgsForCapabilities(
+  args: any,
+  capabilities: WebpageMcpExtensionCapabilities,
+): any {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return args;
+  }
+  const runOptionKeys = getRunOptionKeySet(capabilities);
+  const filtered: Record<string, unknown> = {};
+  for (const key of ['flowId', 'args']) {
+    if (Object.prototype.hasOwnProperty.call(args, key)) {
+      filtered[key] = args[key];
+    }
+  }
+  for (const key of SESSION_RUN_OPTION_KEYS) {
+    if (runOptionKeys.has(key) && Object.prototype.hasOwnProperty.call(args, key)) {
+      filtered[key] = args[key];
+    }
+  }
+  return filtered;
+}
+
+async function listDynamicFlowTools(
+  ctx: McpToolContext,
+  capabilities: WebpageMcpExtensionCapabilities,
+  publishedFlows?: PublishedFlow[],
+): Promise<Tool[]> {
   const items = publishedFlows || (await fetchPublishedFlows(ctx));
+  const runOptionKeys = getRunOptionKeySet(capabilities);
   const tools: Tool[] = [];
   for (const item of items) {
     const name = `flow.${item.slug}`;
-    const reservedVariableNames = getReservedDynamicToolParameterNames(item);
+    const reservedVariableNames = getReservedDynamicToolParameterNames(item, runOptionKeys);
     const descriptionBase =
       (item.meta && item.meta.tool && item.meta.tool.description) ||
       item.description ||
@@ -527,11 +790,11 @@ async function listDynamicFlowTools(ctx: McpToolContext, publishedFlows?: Publis
       reservedVariableNames.length > 0
         ? `${descriptionParts.join(' ')} Reserved dynamic tool parameter names are ignored as flow variables: ${reservedVariableNames.join(', ')}. Use record_replay_flow_run with args for those values.`
         : descriptionParts.join(' ');
-    const descriptorSchema = buildDynamicToolParameterSchemaFromDescriptor(item);
+    const descriptorSchema = buildDynamicToolParameterSchemaFromDescriptor(item, runOptionKeys);
     const properties: Record<string, any> = descriptorSchema?.properties ?? {};
     const required: string[] = descriptorSchema?.required ?? [];
     if (!descriptorSchema) {
-      for (const v of getDynamicToolVariables(item.variables)) {
+      for (const v of getDynamicToolVariables(item.variables, runOptionKeys)) {
         const variableName = getPublishedVariableName(v);
         if (!variableName) {
           continue;
@@ -541,27 +804,7 @@ async function listDynamicFlowTools(ctx: McpToolContext, publishedFlows?: Publis
         properties[variableName] = prop;
       }
     }
-    // Run options
-    if (!properties['tabTarget'])
-      properties['tabTarget'] = { type: 'string', enum: ['current', 'new'], default: 'current' };
-    if (!properties['background'])
-      properties['background'] = {
-        type: 'boolean',
-        default: false,
-        description: 'Run without activating/focusing target tabs or windows where Chrome APIs allow it.',
-      };
-    if (!properties['refresh']) properties['refresh'] = { type: 'boolean', default: false };
-    if (!properties['captureNetwork'])
-      properties['captureNetwork'] = { type: 'boolean', default: false };
-    if (!properties['returnLogs']) properties['returnLogs'] = { type: 'boolean', default: false };
-    if (!properties['timeoutMs']) properties['timeoutMs'] = { type: 'number', minimum: 0 };
-    if (!properties['startUrl']) {
-      properties['startUrl'] = {
-        type: 'string',
-        description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
-      };
-    }
-    if (!properties['tabId']) properties['tabId'] = { type: 'number' };
+    addWorkflowRunOptionProperties(properties, runOptionKeys);
     const tool: Tool = {
       name,
       description,
@@ -586,9 +829,13 @@ export const setupTools = (server: Server, ctx: McpToolContext) => {
 
 export async function listToolsForContext(ctx: McpToolContext): Promise<Tool[]> {
   const items = await fetchPublishedFlows(ctx);
-  const tools = [...TOOL_SCHEMAS, buildWorkflowRunTool(items)];
-  if (shouldExposeLegacyDynamicFlowTools()) {
-    tools.push(...(await listDynamicFlowTools(ctx, items)));
+  const capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
+  const tools = [...filterPublicToolsForCapabilities(capabilities)];
+  if (supportsWorkflowRun(capabilities)) {
+    tools.push(buildWorkflowRunTool(items, capabilities));
+  }
+  if (shouldExposeLegacyDynamicFlowTools() && supportsWorkflowRun(capabilities)) {
+    tools.push(...(await listDynamicFlowTools(ctx, capabilities, items)));
   }
   return tools;
 }
@@ -622,9 +869,17 @@ export const callToolForContext = async (
         }
 
         let items = await fetchPublishedFlows(ctx);
+        let capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
+        if (!supportsWorkflowRun(capabilities)) {
+          throw new Error('workflow_run is not supported by the connected extension capability set.');
+        }
         let match = items.find((it) => it.slug === workflow);
         if (!match) {
           items = await fetchPublishedFlows(ctx, { forceRefresh: true });
+          capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
+          if (!supportsWorkflowRun(capabilities)) {
+            throw new Error('workflow_run is not supported by the connected extension capability set.');
+          }
           match = items.find((it) => it.slug === workflow);
         }
         if (!match) {
@@ -641,9 +896,10 @@ export const callToolForContext = async (
             ? args.args
             : {};
         const runOptions: Record<string, unknown> = {};
+        const runOptionKeys = getRunOptionKeySet(capabilities);
         if (args && typeof args === 'object' && !Array.isArray(args)) {
           for (const key of SESSION_RUN_OPTION_KEYS) {
-            if (Object.prototype.hasOwnProperty.call(args, key)) {
+            if (runOptionKeys.has(key) && Object.prototype.hasOwnProperty.call(args, key)) {
               runOptions[key] = args[key];
             }
           }
@@ -691,18 +947,27 @@ export const callToolForContext = async (
       try {
         const slug = name.slice('flow.'.length);
         let items = await fetchPublishedFlows(ctx);
+        let capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
+        if (!supportsWorkflowRun(capabilities)) {
+          throw new Error(`Dynamic flow tools are not supported by the connected extension capability set.`);
+        }
         let match = items.find((it) => it.slug === slug);
         if (!match) {
           items = await fetchPublishedFlows(ctx, { forceRefresh: true });
+          capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
+          if (!supportsWorkflowRun(capabilities)) {
+            throw new Error(`Dynamic flow tools are not supported by the connected extension capability set.`);
+          }
           match = items.find((it) => it.slug === slug);
         }
         if (!match) throw new Error(`Flow not found for tool ${name}`);
+        const runOptionKeys = getRunOptionKeySet(capabilities);
         const variableKeys = new Set(
-          getDynamicToolVariables(match.variables)
+          getDynamicToolVariables(match.variables, runOptionKeys)
             .map((variable) => getPublishedVariableName(variable))
             .filter((key): key is string => typeof key === 'string' && key.length > 0),
         );
-        const { variables, runOptions } = splitDynamicFlowArgs(args, variableKeys);
+        const { variables, runOptions } = splitDynamicFlowArgs(args, variableKeys, runOptionKeys);
         const flowArgs = {
           flowId: match.id,
           args: variables,
@@ -735,10 +1000,26 @@ export const callToolForContext = async (
       }
     }
     // Send request to Chrome extension and wait for response
+    const capabilities = await ensureCapabilitiesForContext(ctx);
+    if (!capabilities.supportedTools.includes(name)) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error calling tool: Tool not supported by connected extension capability set: ${name}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    const forwardedArgs =
+      name === 'record_replay_flow_run'
+        ? filterFlowRunArgsForCapabilities(args, capabilities)
+        : args;
     const response = await ctx.nativeHost.sendRequestToExtensionAndWait(
       {
         name,
-        args,
+        args: forwardedArgs,
         meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId },
       },
       NativeMessageType.CALL_TOOL,

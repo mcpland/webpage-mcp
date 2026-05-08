@@ -43,7 +43,11 @@ describe('dynamic published flow tools', () => {
     clearDynamicFlowCacheForSession('dynamic-flow-call');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-run');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-run-list');
+    clearDynamicFlowCacheForSession('dynamic-flow-capability-filter');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-call');
+    clearDynamicFlowCacheForSession('dynamic-flow-workflow-capability-call');
+    clearDynamicFlowCacheForSession('direct-flow-run-capability-call');
+    clearDynamicFlowCacheForSession('unsupported-capability-call');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-missing');
     clearDynamicFlowCacheForSession('dynamic-flow-conflict');
   });
@@ -328,6 +332,61 @@ describe('dynamic published flow tools', () => {
     });
   });
 
+  it('uses extension capability handshake data to filter unsupported run options', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      capabilities: {
+        protocolVersion: '2026-05-09',
+        capabilityVersion: 'cap-test',
+        extensionVersion: 'ext-test',
+        supportedTools: ['record_replay_flow_run', 'record_replay_list_published'],
+        supportedRunOptions: ['tabTarget', 'timeoutMs'],
+        featureFlags: ['workflow_run'],
+      },
+      items: [
+        {
+          id: 'flow-signup',
+          slug: 'signup',
+          description: 'Published signup flow',
+        },
+      ],
+    });
+    const ctx = createContext('dynamic-flow-capability-filter', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const workflowRunTool = tools.find((tool) => tool.name === 'workflow_run');
+    const flowRunTool = tools.find((tool) => tool.name === 'record_replay_flow_run');
+    const workflowInput = workflowRunTool?.inputSchema as {
+      properties?: Record<string, any>;
+    };
+    const flowRunInput = flowRunTool?.inputSchema as {
+      properties?: Record<string, any>;
+    };
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({
+        handshake: expect.objectContaining({
+          protocolVersion: '2026-05-09',
+          mcpServerVersion: expect.any(String),
+        }),
+      }),
+      'rr_list_published_flows',
+      20000,
+    );
+    expect(workflowInput.properties?.tabTarget).toBeTruthy();
+    expect(workflowInput.properties?.timeoutMs).toBeTruthy();
+    expect(workflowInput.properties?.background).toBeUndefined();
+    expect(workflowInput.properties?.refresh).toBeUndefined();
+    expect(workflowInput.properties?.captureNetwork).toBeUndefined();
+    expect(workflowInput.properties?.returnLogs).toBeUndefined();
+    expect(flowRunInput.properties?.flowId).toBeTruthy();
+    expect(flowRunInput.properties?.args).toBeTruthy();
+    expect(flowRunInput.properties?.tabTarget).toBeTruthy();
+    expect(flowRunInput.properties?.timeoutMs).toBeTruthy();
+    expect(flowRunInput.properties?.background).toBeUndefined();
+    expect(flowRunInput.properties?.captureNetwork).toBeUndefined();
+  });
+
   it('runs workflow_run by resolving a published slug to the existing flow runner', async () => {
     const sendRequestToExtensionAndWait = vi
       .fn()
@@ -380,6 +439,102 @@ describe('dynamic published flow tools', () => {
       content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
       isError: false,
     });
+  });
+
+  it('does not forward workflow_run options that the extension capability handshake does not support', async () => {
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'success',
+        capabilities: {
+          supportedRunOptions: ['background'],
+        },
+        items: [
+          {
+            id: 'flow-signup',
+            slug: 'signup',
+            variables: [{ name: 'email', required: true }],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
+          isError: false,
+        },
+      });
+    const ctx = createContext('dynamic-flow-workflow-capability-call', sendRequestToExtensionAndWait);
+
+    await callToolForContext(ctx, 'workflow_run', {
+      workflow: 'signup',
+      args: { email: 'alice@example.com' },
+      background: true,
+      refresh: true,
+      timeoutMs: 5000,
+      startUrl: 'https://example.com/start',
+    });
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenNthCalledWith(
+      2,
+      {
+        name: 'record_replay_flow_run',
+        args: {
+          flowId: 'flow-signup',
+          args: {
+            email: 'alice@example.com',
+          },
+          background: true,
+        },
+        meta: { mcpSessionId: 'dynamic-flow-workflow-capability-call', instanceId: 'unit-test' },
+      },
+      NativeMessageType.CALL_TOOL,
+      120000,
+    );
+  });
+
+  it('filters direct record_replay_flow_run args using extension capabilities', async () => {
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'success',
+        capabilities: {
+          supportedTools: ['record_replay_flow_run'],
+          supportedRunOptions: ['background'],
+        },
+        items: [],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
+          isError: false,
+        },
+      });
+    const ctx = createContext('direct-flow-run-capability-call', sendRequestToExtensionAndWait);
+
+    await callToolForContext(ctx, 'record_replay_flow_run', {
+      flowId: 'flow-signup',
+      args: { email: 'alice@example.com' },
+      background: true,
+      refresh: true,
+      captureNetwork: true,
+    });
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenNthCalledWith(
+      2,
+      {
+        name: 'record_replay_flow_run',
+        args: {
+          flowId: 'flow-signup',
+          args: { email: 'alice@example.com' },
+          background: true,
+        },
+        meta: { mcpSessionId: 'direct-flow-run-capability-call', instanceId: 'unit-test' },
+      },
+      NativeMessageType.CALL_TOOL,
+      120000,
+    );
   });
 
   it('does not forward workflow_run debug options that are not publicly supported', async () => {
@@ -610,6 +765,33 @@ describe('public tool exposure', () => {
     expect(sendRequestToExtensionAndWait).not.toHaveBeenCalled();
     expect(result).toEqual({
       content: [{ type: 'text', text: 'Error calling tool: Tool not found: chrome_inject_script' }],
+      isError: true,
+    });
+  });
+
+  it('rejects public tool calls hidden by extension capabilities', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValueOnce({
+      status: 'success',
+      capabilities: {
+        supportedTools: ['record_replay_list_published'],
+        supportedRunOptions: [],
+      },
+      items: [],
+    });
+    const ctx = createContext('unsupported-capability-call', sendRequestToExtensionAndWait);
+
+    const result = await callToolForContext(ctx, 'record_replay_flow_run', {
+      flowId: 'flow-signup',
+    });
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      content: [
+        {
+          type: 'text',
+          text: 'Error calling tool: Tool not supported by connected extension capability set: record_replay_flow_run',
+        },
+      ],
       isError: true,
     });
   });

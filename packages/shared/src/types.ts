@@ -24,6 +24,51 @@ export enum NativeMessageType {
   AGENT_STREAM_SUBSCRIBE = 'agent_stream_subscribe',
   AGENT_STREAM_UNSUBSCRIBE = 'agent_stream_unsubscribe',
   AGENT_STREAM_EVENT = 'agent_stream_event',
+  GET_CAPABILITIES = 'rr_get_capabilities',
+}
+
+export const WEBPAGE_MCP_PROTOCOL_VERSION = '2026-05-09';
+export const WEBPAGE_MCP_CAPABILITY_VERSION = '2026-05-09.workflow-runtime';
+
+export const WEBPAGE_MCP_WORKFLOW_RUN_OPTION_KEYS = [
+  'tabTarget',
+  'background',
+  'refresh',
+  'captureNetwork',
+  'returnLogs',
+  'timeoutMs',
+  'startUrl',
+  'tabId',
+] as const;
+
+export type WebpageMcpWorkflowRunOption =
+  (typeof WEBPAGE_MCP_WORKFLOW_RUN_OPTION_KEYS)[number];
+
+export const WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS = [
+  'tabTarget',
+  'background',
+  'refresh',
+  'timeoutMs',
+  'startUrl',
+  'tabId',
+] as const satisfies ReadonlyArray<WebpageMcpWorkflowRunOption>;
+
+export interface WebpageMcpCapabilityHandshakeRequest {
+  protocolVersion?: string;
+  mcpServerVersion?: string;
+  clientCapabilities?: string[];
+}
+
+export interface WebpageMcpExtensionCapabilities {
+  protocolVersion: string;
+  capabilityVersion: string;
+  extensionVersion: string;
+  mcpServerVersion?: string;
+  supportedTools: string[];
+  supportedRunOptions: WebpageMcpWorkflowRunOption[];
+  featureFlags: string[];
+  warnings?: string[];
+  generatedAt?: string;
 }
 
 export interface NativeMessage<P = any, E = any> {
