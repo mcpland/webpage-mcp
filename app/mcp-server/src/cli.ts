@@ -86,8 +86,7 @@ program
 
       // If --system option is specified or running with root/administrator privileges
       if (options.system || hasElevatedPermissions) {
-        // TODO: Update registerWithElevatedPermissions to support multiple browsers
-        await registerWithElevatedPermissions();
+        await registerWithElevatedPermissions(targetBrowsers);
         console.log(
           colorText('System-level Native Messaging host registered successfully!', 'green'),
         );
