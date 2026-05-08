@@ -1370,7 +1370,7 @@ describe("recording/editing/flow toolchain integration", () => {
     expect((updated?.nodes[0].config as { value?: string }).value).toBe("bob@example.com");
   });
 
-  it("workflowStabilizeTool validates safe workflows without mutating when apply is false", async () => {
+  it("workflowStabilizeTool validates safe workflows and records quality when apply is false", async () => {
     const flowId = `workflow-stabilize-safe-${Date.now()}`;
     await createStoragePort().flows.save(
       createFlow(flowId, [
@@ -1430,10 +1430,39 @@ describe("recording/editing/flow toolchain integration", () => {
     });
     expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(3);
     expect(payload.baselineRuns).toHaveLength(3);
+    expect(payload.quality).toMatchObject({
+      level: "stable",
+      current: true,
+      passRate: 1,
+      countedValidationRuns: 3,
+      verification: {
+        oracle: "none",
+        oracleStrength: "weak",
+      },
+    });
+    expect(updated?.meta?.quality).toMatchObject({
+      level: "stable",
+      revision: expect.stringMatching(/^rev-fnv1a32-/),
+      passRate: 1,
+      validationRuns: 3,
+      countedValidationRuns: 3,
+      validationContext: {
+        argsHash: expect.stringMatching(/^hmac-sha256:/),
+        argsHashAlgorithm: "hmac-sha256",
+        executionMode: "auto",
+      },
+      validationRecords: [
+        expect.objectContaining({
+          tool: "workflow_stabilize",
+          countedRuns: 3,
+          passedRuns: 3,
+        }),
+      ],
+    });
     expect(payload.recommendations.map((item: { code: string }) => item.code)).toContain(
       "missing_default_timeout_policy",
     );
-    expect(payload.capabilities.unsupportedReasons[0]).toContain("analyze-only safety core");
+    expect(payload.capabilities.unsupportedReasons[0]).toContain("stabilize MVP");
     expect(payload.capabilities).toMatchObject({
       domSnapshot: "none",
       accessibilitySnapshot: "none",
@@ -1446,7 +1475,7 @@ describe("recording/editing/flow toolchain integration", () => {
       mfa: "unknown",
       captcha: "unknown",
     });
-    expect(updated?.updatedAt).toBe(new Date(0).toISOString());
+    expect(updated?.updatedAt).not.toBe(new Date(0).toISOString());
   });
 
   it("workflowStabilizeTool defaults dangerous workflows to analyze-only", async () => {
@@ -1611,13 +1640,25 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.policy?.defaultNodePolicy?.artifacts).toEqual({
       screenshot: "onFailure",
     });
-    expect((updated?.meta as any)?.repairHistory?.[0]).toMatchObject({
-      tool: "workflow_stabilize",
-      beforeRevision: expect.stringMatching(/^rev-fnv1a32-/),
+    expect(updated?.meta?.repairs?.history?.[0]).toMatchObject({
+      repairRevision: expect.stringMatching(/^repair-/),
+      baseRevision: expect.stringMatching(/^rev-fnv1a32-/),
       provenance: {
         source: "workflow_stabilize",
         pageContentUsed: false,
       },
+    });
+    expect(updated?.meta?.quality).toMatchObject({
+      level: "stable",
+      passRate: 1,
+      validationRuns: 2,
+      countedValidationRuns: 2,
+      validationRecords: [
+        expect.objectContaining({
+          phase: "postRepair",
+          passedRuns: 2,
+        }),
+      ],
     });
   });
 

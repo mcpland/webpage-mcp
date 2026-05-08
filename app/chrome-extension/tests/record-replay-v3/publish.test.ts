@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildWorkflowBackgroundSupport,
   calculateWorkflowRevision,
+  evaluateWorkflowPublishGate,
   listPublishedFlowDetails,
 } from '@/entrypoints/background/record-replay-v3/flows/publish';
 import type { FlowV3 } from '@/entrypoints/background/record-replay-v3/domain/flow';
@@ -173,6 +174,100 @@ describe('listPublishedFlowDetails', () => {
         ],
       }),
     ).not.toBe(baseline);
+  });
+
+  it('reports compact current quality in published descriptors', () => {
+    const flow = createPublishedFlow();
+    const revision = calculateWorkflowRevision(flow);
+    flow.meta = {
+      ...flow.meta,
+      quality: {
+        revision,
+        level: 'stable',
+        status: 'stable',
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        lastValidatedAt: '2026-05-08T00:00:00.000Z' as any,
+        freshnessExpiresAt: '2999-01-01T00:00:00.000Z' as any,
+        verification: {
+          oracle: 'none',
+          oracleStrength: 'weak',
+          missingReason: 'No business oracle configured.',
+        },
+        capabilities: {
+          replayValidation: 'partial',
+          screenshots: 'partial',
+          unsupportedReasons: ['domSnapshot unavailable'],
+        },
+      },
+    };
+
+    expect(listPublishedFlowDetails([flow])[0].quality).toMatchObject({
+      level: 'stable',
+      status: 'stable',
+      current: true,
+      passRate: 1,
+      countedValidationRuns: 3,
+      staleReason: null,
+      verification: {
+        oracle: 'none',
+        oracleStrength: 'weak',
+      },
+      capabilities: {
+        replayValidation: 'partial',
+      },
+    });
+  });
+
+  it('evaluates publish quality gates for stable and verified requirements', () => {
+    const flow = createPublishedFlow();
+    const missing = evaluateWorkflowPublishGate(flow, { requireStable: true });
+    expect(missing.allowed).toBe(false);
+    expect(missing.errors.map((error) => error.code)).toContain('PUBLISH_QUALITY_STALE');
+
+    flow.meta = {
+      ...flow.meta,
+      quality: {
+        revision: calculateWorkflowRevision(flow),
+        level: 'stable',
+        status: 'stable',
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: '2999-01-01T00:00:00.000Z' as any,
+        verification: {
+          oracle: 'declaredOutput',
+          oracleStrength: 'weak',
+        },
+      },
+    };
+
+    expect(evaluateWorkflowPublishGate(flow, { requireStable: true }).allowed).toBe(true);
+    const verified = evaluateWorkflowPublishGate(flow, { requireVerified: true });
+    expect(verified.allowed).toBe(false);
+    expect(verified.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining(['PUBLISH_QUALITY_NOT_VERIFIED', 'PUBLISH_WEAK_ORACLE']),
+    );
+
+    flow.meta.quality = {
+      ...flow.meta.quality,
+      level: 'verified',
+      status: 'verified',
+      verification: {
+        oracle: 'assertion',
+        oracleStrength: 'normal',
+      },
+    };
+    expect(evaluateWorkflowPublishGate(flow, { requireVerified: true }).allowed).toBe(true);
   });
 
   it('omits builder trigger nodes from side-effect metadata', () => {

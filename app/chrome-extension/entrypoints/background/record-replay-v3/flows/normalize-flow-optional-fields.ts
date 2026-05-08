@@ -4,7 +4,20 @@ import type {
   FlowBinding,
   FlowExposedOutput,
   FlowMeta,
+  FlowQualityCapabilityStatus,
+  FlowQualityCapabilities,
+  FlowQualityExcludedRuns,
+  FlowQualityMeta,
+  FlowQualityOracle,
+  FlowQualityOracleStrength,
+  FlowQualityRisk,
+  FlowQualityStatus,
+  FlowQualityValidationContext,
+  FlowQualityValidationRecord,
+  FlowRepairsMeta,
   FlowRecordingMeta,
+  FlowRepairHistoryEntry,
+  FlowRuntimeMeta,
   FlowStopBarrierMeta,
   FlowToolMetadata,
   FlowV3,
@@ -14,6 +27,47 @@ import { normalizeToolSlug } from "./publish";
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function isRecord(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function trimmedString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return isFiniteNumber(value) ? value : undefined;
+}
+
+function optionalIsoString(value: unknown): ISODateTimeString | undefined {
+  const text = trimmedString(value);
+  return text as ISODateTimeString | undefined;
+}
+
+function normalizeStringArray(value: unknown, maxItems = 20): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const strings = value
+    .map((entry) => trimmedString(entry))
+    .filter((entry): entry is string => Boolean(entry))
+    .slice(0, maxItems);
+  return strings.length > 0 ? strings : undefined;
+}
+
+function enumValue<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T | undefined {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : undefined;
 }
 
 interface FlowToolMetadataNormalizationOptions {
@@ -209,7 +263,425 @@ function normalizeFlowMeta(
     meta.stopBarrier = normalizeFlowStopBarrier(value.stopBarrier as JsonObject);
   }
 
+  if (value.quality !== undefined && value.quality !== null) {
+    if (!isRecord(value.quality)) {
+      throw new Error("flow.meta.quality must be an object");
+    }
+    const quality = normalizeFlowQualityMeta(value.quality);
+    if (quality) {
+      meta.quality = quality;
+    }
+  }
+
+  if (value.runtime !== undefined && value.runtime !== null) {
+    if (!isRecord(value.runtime)) {
+      throw new Error("flow.meta.runtime must be an object");
+    }
+    const runtime = normalizeFlowRuntimeMeta(value.runtime);
+    if (runtime) {
+      meta.runtime = runtime;
+    }
+  }
+
+  if (value.repairs !== undefined && value.repairs !== null) {
+    if (!isRecord(value.repairs)) {
+      throw new Error("flow.meta.repairs must be an object");
+    }
+    const repairs = normalizeFlowRepairsMeta(value.repairs);
+    if (repairs) {
+      meta.repairs = repairs;
+    }
+  }
+
   return Object.keys(meta).length > 0 ? meta : undefined;
+}
+
+const QUALITY_STATUS_VALUES = ["draft", "stable", "verified", "stale", "paused", "blocked"] as const;
+const QUALITY_LEVEL_VALUES = ["unverified", "stable", "verified"] as const;
+const QUALITY_RISK_VALUES = ["safe", "idempotent", "dangerous", "unknown"] as const;
+const QUALITY_CAPABILITY_VALUES = ["full", "partial", "none", "unknown"] as const;
+const QUALITY_ORACLE_VALUES = ["none", "assertion", "declaredOutput", "expectedOutcome"] as const;
+const QUALITY_ORACLE_STRENGTH_VALUES = ["weak", "normal", "strong"] as const;
+const REVALIDATION_POLICY_VALUES = ["manual", "onFailure", "scheduled", "siteChange"] as const;
+
+function normalizeFlowQualityExcludedRuns(value: unknown): FlowQualityExcludedRuns | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const count = optionalNumber(value.count);
+  const reasons = normalizeStringArray(value.reasons, 10);
+  if (count === undefined && !reasons) {
+    return undefined;
+  }
+  return {
+    count: count !== undefined ? Math.max(0, Math.floor(count)) : 0,
+    ...(reasons ? { reasons } : { reasons: [] }),
+  };
+}
+
+function normalizeFlowQualityValidationContext(
+  value: unknown,
+): FlowQualityValidationContext | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const context: FlowQualityValidationContext = {};
+  const stringFields = [
+    "argsHash",
+    "argsHashAlgorithm",
+    "startUrl",
+    "tabTarget",
+    "executionMode",
+    "testEnvironment",
+    "siteFingerprint",
+    "runGroupId",
+    "locale",
+    "timezone",
+    "userAgentHash",
+    "browserVersion",
+    "extensionVersion",
+    "mcpServerVersion",
+    "protocolVersion",
+    "capabilityVersion",
+    "profileHash",
+    "accountLabel",
+    "permissionSetHash",
+    "cookieStateHash",
+  ] as const;
+  for (const field of stringFields) {
+    const text = trimmedString(value[field]);
+    if (text) {
+      (context as Record<string, unknown>)[field] = text;
+    }
+  }
+  if (context.argsHashAlgorithm !== "hmac-sha256") {
+    delete context.argsHashAlgorithm;
+  }
+  const tabOwnership = enumValue(value.tabOwnership, ["owned", "current"] as const);
+  if (tabOwnership) {
+    context.tabOwnership = tabOwnership;
+  }
+  const background = optionalBoolean(value.background);
+  if (background !== undefined) {
+    context.background = background;
+  }
+  if (isRecord(value.viewport)) {
+    const width = optionalNumber(value.viewport.width);
+    const height = optionalNumber(value.viewport.height);
+    if (width !== undefined && height !== undefined) {
+      const deviceScaleFactor = optionalNumber(value.viewport.deviceScaleFactor);
+      context.viewport = {
+        width: Math.max(0, Math.floor(width)),
+        height: Math.max(0, Math.floor(height)),
+        ...(deviceScaleFactor !== undefined ? { deviceScaleFactor } : {}),
+      };
+    }
+  }
+  return Object.keys(context).length > 0 ? context : undefined;
+}
+
+function normalizeFlowQualityVerification(value: unknown): FlowQualityMeta["verification"] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const oracle = enumValue<FlowQualityOracle>(value.oracle, QUALITY_ORACLE_VALUES);
+  const oracleStrength = enumValue<FlowQualityOracleStrength>(
+    value.oracleStrength,
+    QUALITY_ORACLE_STRENGTH_VALUES,
+  );
+  const required = optionalBoolean(value.required);
+  const missingReason = trimmedString(value.missingReason);
+  const verifiedAt = optionalIsoString(value.verifiedAt);
+  const verification = {
+    ...(oracle ? { oracle } : {}),
+    ...(oracleStrength ? { oracleStrength } : {}),
+    ...(required !== undefined ? { required } : {}),
+    ...(missingReason ? { missingReason } : {}),
+    ...(verifiedAt ? { verifiedAt } : {}),
+  };
+  return Object.keys(verification).length > 0 ? verification : undefined;
+}
+
+function normalizeFlowQualityCapabilities(value: unknown): FlowQualityCapabilities | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const capabilities: FlowQualityCapabilities = {};
+  const fields = [
+    "replayValidation",
+    "domSnapshot",
+    "accessibilitySnapshot",
+    "navigationEvents",
+    "networkEvents",
+    "mutationEvents",
+    "selectorResolution",
+    "screenshots",
+    "crossOriginFrames",
+    "closedShadowDom",
+    "downloads",
+    "mfa",
+    "captcha",
+  ] as const;
+  for (const field of fields) {
+    const status = enumValue<FlowQualityCapabilityStatus>(
+      value[field],
+      QUALITY_CAPABILITY_VALUES,
+    );
+    if (status) {
+      capabilities[field] = status;
+    }
+  }
+  const unsupportedReasons = normalizeStringArray(value.unsupportedReasons, 20);
+  if (unsupportedReasons) {
+    capabilities.unsupportedReasons = unsupportedReasons;
+  }
+  return Object.keys(capabilities).length > 0 ? capabilities : undefined;
+}
+
+function normalizeFlowQualityValidationRecord(
+  value: unknown,
+): FlowQualityValidationRecord | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const id = trimmedString(value.id);
+  const tool = trimmedString(value.tool);
+  const revision = trimmedString(value.revision);
+  const completedAt = optionalIsoString(value.completedAt);
+  if (!id || !tool || !revision || !completedAt) {
+    return undefined;
+  }
+  const phase = enumValue(value.phase, ["baseline", "postRepair"] as const);
+  const risk = enumValue<FlowQualityRisk>(value.risk, QUALITY_RISK_VALUES);
+  const countedRuns = optionalNumber(value.countedRuns);
+  const passedRuns = optionalNumber(value.passedRuns);
+  const failedRuns = optionalNumber(value.failedRuns);
+  const passRate = optionalNumber(value.passRate);
+  const stabilityScore = optionalNumber(value.stabilityScore);
+  const segmentOnly = optionalBoolean(value.segmentOnly);
+  return {
+    id,
+    tool,
+    revision,
+    completedAt,
+    ...(trimmedString(value.runGroupId) ? { runGroupId: trimmedString(value.runGroupId) } : {}),
+    ...(phase ? { phase } : {}),
+    passRate: passRate !== undefined ? passRate : 0,
+    stabilityScore: stabilityScore !== undefined ? stabilityScore : 0,
+    countedRuns: countedRuns !== undefined ? Math.max(0, Math.floor(countedRuns)) : 0,
+    passedRuns: passedRuns !== undefined ? Math.max(0, Math.floor(passedRuns)) : 0,
+    failedRuns: failedRuns !== undefined ? Math.max(0, Math.floor(failedRuns)) : 0,
+    ...(normalizeFlowQualityExcludedRuns(value.excludedRuns)
+      ? { excludedRuns: normalizeFlowQualityExcludedRuns(value.excludedRuns) }
+      : {}),
+    ...(normalizeStringArray(value.runIds, 50) ? { runIds: normalizeStringArray(value.runIds, 50) } : {}),
+    ...(normalizeFlowQualityValidationContext(value.validationContext)
+      ? { validationContext: normalizeFlowQualityValidationContext(value.validationContext) }
+      : {}),
+    ...(risk ? { risk } : {}),
+    ...(segmentOnly !== undefined ? { segmentOnly } : {}),
+  };
+}
+
+function normalizeFlowQualityMeta(value: JsonObject): FlowQualityMeta | undefined {
+  const quality: FlowQualityMeta = {};
+  const isoFields = [
+    "lastAnalyzedAt",
+    "lastStabilizedAt",
+    "lastValidatedAt",
+    "freshnessExpiresAt",
+  ] as const;
+  for (const field of isoFields) {
+    const text = optionalIsoString(value[field]);
+    if (text) {
+      quality[field] = text;
+    }
+  }
+  const revision = trimmedString(value.revision);
+  if (revision) quality.revision = revision;
+  const status = enumValue<FlowQualityStatus>(value.status, QUALITY_STATUS_VALUES);
+  if (status) quality.status = status;
+  const level = enumValue(value.level, QUALITY_LEVEL_VALUES);
+  if (level) quality.level = level;
+  const risk = enumValue<FlowQualityRisk>(value.risk, QUALITY_RISK_VALUES);
+  if (risk) quality.risk = risk;
+
+  const numberFields = [
+    "stabilityScore",
+    "passRate",
+    "validationRuns",
+    "countedValidationRuns",
+    "passedRuns",
+    "failedRuns",
+    "minValidationRuns",
+    "consecutiveFailureCount",
+  ] as const;
+  for (const field of numberFields) {
+    const number = optionalNumber(value[field]);
+    if (number !== undefined) {
+      (quality as Record<string, unknown>)[field] =
+        field === "stabilityScore" || field === "passRate"
+          ? Math.max(0, Math.min(1, number))
+          : Math.max(0, Math.floor(number));
+    }
+  }
+
+  const lastFailureNodeId = trimmedString(value.lastFailureNodeId);
+  if (lastFailureNodeId) quality.lastFailureNodeId = lastFailureNodeId as NodeId;
+  const lastFailureCode = trimmedString(value.lastFailureCode);
+  if (lastFailureCode) quality.lastFailureCode = lastFailureCode;
+  const staleReason = trimmedString(value.staleReason);
+  if (staleReason) quality.staleReason = staleReason;
+
+  const excludedRuns = normalizeFlowQualityExcludedRuns(value.excludedRuns);
+  if (excludedRuns) quality.excludedRuns = excludedRuns;
+  const validationContext = normalizeFlowQualityValidationContext(value.validationContext);
+  if (validationContext) quality.validationContext = validationContext;
+  const verification = normalizeFlowQualityVerification(value.verification);
+  if (verification) quality.verification = verification;
+  const capabilities = normalizeFlowQualityCapabilities(value.capabilities);
+  if (capabilities) quality.capabilities = capabilities;
+
+  if (isRecord(value.revalidation)) {
+    const policy = enumValue(value.revalidation.policy, REVALIDATION_POLICY_VALUES);
+    const nextRevalidateAt = optionalIsoString(value.revalidation.nextRevalidateAt);
+    const lastRevalidateReason = trimmedString(value.revalidation.lastRevalidateReason);
+    const autoDowngrade = optionalBoolean(value.revalidation.autoDowngrade);
+    quality.revalidation = {
+      ...(policy ? { policy } : {}),
+      ...(nextRevalidateAt ? { nextRevalidateAt } : {}),
+      ...(lastRevalidateReason ? { lastRevalidateReason } : {}),
+      ...(autoDowngrade !== undefined ? { autoDowngrade } : {}),
+    };
+  }
+
+  if (isRecord(value.slo)) {
+    const targetPassRate = optionalNumber(value.slo.targetPassRate);
+    const minValidationRuns = optionalNumber(value.slo.minValidationRuns);
+    const maxP95RunMs = optionalNumber(value.slo.maxP95RunMs);
+    const maxFalseRepairRate = optionalNumber(value.slo.maxFalseRepairRate);
+    quality.slo = {
+      ...(targetPassRate !== undefined ? { targetPassRate } : {}),
+      ...(minValidationRuns !== undefined ? { minValidationRuns: Math.floor(minValidationRuns) } : {}),
+      ...(maxP95RunMs !== undefined ? { maxP95RunMs: Math.floor(maxP95RunMs) } : {}),
+      ...(maxFalseRepairRate !== undefined ? { maxFalseRepairRate } : {}),
+    };
+  }
+
+  const artifactRunIds = normalizeStringArray(value.artifactRunIds, 50);
+  if (artifactRunIds) quality.artifactRunIds = artifactRunIds;
+  const warnings = normalizeStringArray(value.warnings, 30);
+  if (warnings) quality.warnings = warnings;
+  if (Array.isArray(value.validationRecords)) {
+    const records = value.validationRecords
+      .map((entry) => normalizeFlowQualityValidationRecord(entry))
+      .filter((entry): entry is FlowQualityValidationRecord => Boolean(entry))
+      .slice(-20);
+    if (records.length > 0) {
+      quality.validationRecords = records;
+    }
+  }
+
+  return Object.keys(quality).length > 0 ? quality : undefined;
+}
+
+function normalizeFlowRuntimeMeta(value: JsonObject): FlowRuntimeMeta | undefined {
+  const runtime: FlowRuntimeMeta = {};
+  const stringFields = [
+    "protocolVersion",
+    "capabilityVersion",
+    "dslVersion",
+    "nodeSemanticsVersion",
+    "minExtensionVersion",
+    "minMcpServerVersion",
+  ] as const;
+  for (const field of stringFields) {
+    const text = trimmedString(value[field]);
+    if (text) {
+      runtime[field] = text;
+    }
+  }
+  const clientCapabilities = normalizeStringArray(value.clientCapabilities, 30);
+  if (clientCapabilities) runtime.clientCapabilities = clientCapabilities;
+  const featureFlags = normalizeStringArray(value.featureFlags, 30);
+  if (featureFlags) runtime.featureFlags = featureFlags;
+  return Object.keys(runtime).length > 0 ? runtime : undefined;
+}
+
+function normalizeRepairHistoryEntry(value: unknown): FlowRepairHistoryEntry | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const appliedAt = optionalIsoString(value.appliedAt);
+  if (!appliedAt) {
+    return undefined;
+  }
+  const entry: FlowRepairHistoryEntry = { appliedAt };
+  const stringFields = [
+    "repairRevision",
+    "baseRevision",
+    "resultingRevision",
+    "patchSummary",
+    "rollbackRevision",
+  ] as const;
+  for (const field of stringFields) {
+    const text = trimmedString(value[field]);
+    if (text) {
+      entry[field] = text;
+    }
+  }
+  const beforeQuality = optionalNumber(value.beforeQuality);
+  if (beforeQuality !== undefined) entry.beforeQuality = beforeQuality;
+  const afterQuality = optionalNumber(value.afterQuality);
+  if (afterQuality !== undefined) entry.afterQuality = afterQuality;
+  if (Array.isArray(value.changes)) {
+    const changes = value.changes
+      .filter(isRecord)
+      .map((change) => ({
+        ...(trimmedString(change.code) ? { code: trimmedString(change.code) } : {}),
+        ...(trimmedString(change.message) ? { message: trimmedString(change.message) } : {}),
+        ...(trimmedString(change.nodeId) ? { nodeId: trimmedString(change.nodeId) } : {}),
+      }))
+      .filter((change) => Object.keys(change).length > 0)
+      .slice(0, 50);
+    if (changes.length > 0) entry.changes = changes;
+  }
+  if (isRecord(value.provenance)) {
+    entry.provenance = {
+      ...(trimmedString(value.provenance.source) ? { source: trimmedString(value.provenance.source) } : {}),
+      ...(optionalBoolean(value.provenance.pageContentUsed) !== undefined
+        ? { pageContentUsed: optionalBoolean(value.provenance.pageContentUsed) }
+        : {}),
+    };
+  }
+  if (isRecord(value.rollback)) {
+    entry.rollback = {
+      ...(trimmedString(value.rollback.beforeRevision)
+        ? { beforeRevision: trimmedString(value.rollback.beforeRevision) }
+        : {}),
+      ...(optionalBoolean(value.rollback.available) !== undefined
+        ? { available: optionalBoolean(value.rollback.available) }
+        : {}),
+      ...(trimmedString(value.rollback.reason) ? { reason: trimmedString(value.rollback.reason) } : {}),
+    };
+  }
+  return entry;
+}
+
+function normalizeFlowRepairsMeta(value: JsonObject): FlowRepairsMeta | undefined {
+  const repairs: FlowRepairsMeta = {};
+  const currentRepairRevision = trimmedString(value.currentRepairRevision);
+  if (currentRepairRevision) repairs.currentRepairRevision = currentRepairRevision;
+  if (Array.isArray(value.history)) {
+    const history = value.history
+      .map((entry) => normalizeRepairHistoryEntry(entry))
+      .filter((entry): entry is FlowRepairHistoryEntry => Boolean(entry))
+      .slice(-20);
+    if (history.length > 0) {
+      repairs.history = history;
+    }
+  }
+  return Object.keys(repairs).length > 0 ? repairs : undefined;
 }
 
 function normalizeFlowBindings(

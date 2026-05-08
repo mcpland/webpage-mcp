@@ -47,6 +47,7 @@ import { enqueueRun } from "../queue/enqueue-run";
 import type { TriggerManager } from "../triggers/trigger-manager";
 import {
   ensurePublishedSlugAvailable,
+  evaluateWorkflowPublishGate,
   getPublishedFlowInfo,
   listPublishedFlowInfos,
   mergeFlowToolMetadata,
@@ -708,6 +709,25 @@ export class RpcServer {
         updated.id,
         normalizeToolSlug(updated.meta?.tool?.slug, updated.name),
       );
+      const gate = evaluateWorkflowPublishGate(updated, {
+        requireStable: params?.requireStable === true,
+        requireVerified: params?.requireVerified === true,
+        minStabilityScore:
+          typeof params?.minStabilityScore === "number"
+            ? params.minStabilityScore
+            : undefined,
+        minValidationRuns:
+          typeof params?.minValidationRuns === "number"
+            ? params.minValidationRuns
+            : undefined,
+        minPassRate:
+          typeof params?.minPassRate === "number" ? params.minPassRate : undefined,
+        allowWeakOracle: params?.allowWeakOracle === true,
+      });
+      if (!gate.allowed) {
+        const firstError = gate.errors[0];
+        throw new Error(firstError?.message ?? "Workflow does not satisfy publish quality gate");
+      }
 
       await this.storage.flows.save(updated);
 

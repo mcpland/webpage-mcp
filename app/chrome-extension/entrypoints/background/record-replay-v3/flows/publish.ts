@@ -1,6 +1,17 @@
 import type { FlowId } from "../domain/ids";
-import type { FlowMeta, FlowToolMetadata, FlowV3 } from "../domain/flow";
-import { FLOW_SCHEMA_VERSION } from "../domain/flow";
+import type {
+  FlowMeta,
+  FlowQualityMeta,
+  FlowQualityOracleStrength,
+  FlowQualityStatus,
+  FlowToolMetadata,
+  FlowV3,
+} from "../domain/flow";
+import {
+  FLOW_DSL_VERSION,
+  FLOW_NODE_SEMANTICS_VERSION,
+  FLOW_SCHEMA_VERSION,
+} from "../domain/flow";
 import { isSensitiveVariableLike } from "./sensitive";
 import {
   createEmptyWorkflowSideEffectSummary,
@@ -27,6 +38,7 @@ export interface PublishedFlowDetailsV3 extends PublishedFlowInfoV3 {
   exampleArgs: Record<string, unknown>;
   backgroundSupport: WorkflowBackgroundSupport;
   sideEffects: WorkflowSideEffectDescriptor;
+  quality: WorkflowQualitySummary;
   outputs?: NonNullable<FlowV3["meta"]>["exposedOutputs"];
 }
 
@@ -59,7 +71,55 @@ export interface WorkflowToolDescriptor {
   exampleArgs: Record<string, unknown>;
   backgroundSupport: WorkflowBackgroundSupport;
   sideEffects: WorkflowSideEffectDescriptor;
+  quality: WorkflowQualitySummary;
   outputs?: NonNullable<FlowV3["meta"]>["exposedOutputs"];
+}
+
+export interface WorkflowQualitySummary {
+  level: NonNullable<FlowQualityMeta["level"]>;
+  status: FlowQualityStatus;
+  stabilityScore: number;
+  passRate: number;
+  validatedRunCount: number;
+  countedValidationRuns: number;
+  passedRuns: number;
+  failedRuns: number;
+  minValidationRuns: number;
+  revision?: string;
+  current: boolean;
+  staleReason: string | null;
+  unverified: boolean;
+  lastValidatedAt?: string;
+  lastStabilizedAt?: string;
+  freshnessExpiresAt?: string;
+  nextRevalidateAt?: string;
+  revalidationStatus: "current" | "stale" | "overdue" | "not_configured";
+  revalidationReason?: string;
+  verification: {
+    oracle: NonNullable<NonNullable<FlowQualityMeta["verification"]>["oracle"]>;
+    oracleStrength: NonNullable<FlowQualityMeta["verification"]>["oracleStrength"];
+    required?: boolean;
+    missingReason?: string;
+    verifiedAt?: string;
+  };
+  capabilities?: NonNullable<FlowQualityMeta["capabilities"]>;
+  warnings: string[];
+}
+
+export interface WorkflowPublishGateOptions {
+  requireStable?: boolean;
+  requireVerified?: boolean;
+  minStabilityScore?: number;
+  minValidationRuns?: number;
+  minPassRate?: number;
+  allowWeakOracle?: boolean;
+}
+
+export interface WorkflowPublishGateResult {
+  allowed: boolean;
+  errors: Array<{ code: string; message: string }>;
+  warnings: Array<{ code: string; message: string }>;
+  quality: WorkflowQualitySummary;
 }
 
 export const TOOL_SLUG_MAX_LENGTH = 64;
@@ -150,6 +210,253 @@ export function calculateWorkflowSchemaHash(flow: FlowV3): string {
     outputs: flow.meta?.exposedOutputs || [],
   };
   return `fnv1a32:${fnv1a32(canonicalStringify(schemaInput))}`;
+}
+
+function clampScore(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(1, value))
+    : 0;
+}
+
+function getQualityStaleReason(
+  flow: FlowV3,
+  quality: FlowQualityMeta | undefined,
+  currentRevision: string,
+  nowMs: number,
+): string | null {
+  if (!quality) {
+    return "missing_quality";
+  }
+  if (!quality.revision) {
+    return "missing_quality_revision";
+  }
+  if (quality.revision !== currentRevision) {
+    return "revision_mismatch";
+  }
+  if (
+    quality.freshnessExpiresAt &&
+    Number.isFinite(Date.parse(quality.freshnessExpiresAt)) &&
+    Date.parse(quality.freshnessExpiresAt) <= nowMs
+  ) {
+    return "freshness_expired";
+  }
+  if (
+    quality.revalidation?.nextRevalidateAt &&
+    Number.isFinite(Date.parse(quality.revalidation.nextRevalidateAt)) &&
+    Date.parse(quality.revalidation.nextRevalidateAt) <= nowMs
+  ) {
+    return "revalidation_overdue";
+  }
+  if ((quality.consecutiveFailureCount ?? 0) >= 3) {
+    return "consecutive_failures";
+  }
+  if (
+    flow.meta?.runtime?.dslVersion &&
+    flow.meta.runtime.dslVersion !== FLOW_DSL_VERSION
+  ) {
+    return "dsl_version_mismatch";
+  }
+  if (
+    flow.meta?.runtime?.nodeSemanticsVersion &&
+    flow.meta.runtime.nodeSemanticsVersion !== FLOW_NODE_SEMANTICS_VERSION
+  ) {
+    return "node_semantics_mismatch";
+  }
+  return quality.staleReason ?? null;
+}
+
+function getRevalidationStatus(
+  quality: FlowQualityMeta | undefined,
+  staleReason: string | null,
+  nowMs: number,
+): WorkflowQualitySummary["revalidationStatus"] {
+  if (!quality?.revalidation?.policy) {
+    return "not_configured";
+  }
+  if (staleReason) {
+    return staleReason === "revalidation_overdue" ? "overdue" : "stale";
+  }
+  const nextRevalidateAt = quality.revalidation.nextRevalidateAt;
+  if (
+    nextRevalidateAt &&
+    Number.isFinite(Date.parse(nextRevalidateAt)) &&
+    Date.parse(nextRevalidateAt) <= nowMs
+  ) {
+    return "overdue";
+  }
+  return "current";
+}
+
+export function buildWorkflowQualitySummary(
+  flow: FlowV3,
+  options: { nowMs?: number } = {},
+): WorkflowQualitySummary {
+  const currentRevision = calculateWorkflowRevision(flow);
+  const quality = flow.meta?.quality;
+  const nowMs = options.nowMs ?? Date.now();
+  const staleReason = getQualityStaleReason(flow, quality, currentRevision, nowMs);
+  const current = Boolean(quality) && !staleReason;
+  const level = quality?.level ?? "unverified";
+  const status =
+    !quality
+      ? "draft"
+      : staleReason
+        ? "stale"
+        : quality.status ?? (level === "verified" ? "verified" : level === "stable" ? "stable" : "draft");
+  const warnings = new Set<string>(quality?.warnings ?? []);
+  if (!quality) warnings.add("missing_quality");
+  if (staleReason) warnings.add(staleReason);
+  if ((quality?.verification?.oracle ?? "none") === "none") {
+    warnings.add("missing_business_oracle");
+  }
+
+  return {
+    level,
+    status,
+    stabilityScore: clampScore(quality?.stabilityScore),
+    passRate: clampScore(quality?.passRate),
+    validatedRunCount: Math.max(0, Math.floor(quality?.validationRuns ?? 0)),
+    countedValidationRuns: Math.max(
+      0,
+      Math.floor(quality?.countedValidationRuns ?? quality?.validationRuns ?? 0),
+    ),
+    passedRuns: Math.max(0, Math.floor(quality?.passedRuns ?? 0)),
+    failedRuns: Math.max(0, Math.floor(quality?.failedRuns ?? 0)),
+    minValidationRuns: Math.max(
+      1,
+      Math.floor(quality?.minValidationRuns ?? quality?.slo?.minValidationRuns ?? 3),
+    ),
+    ...(quality?.revision ? { revision: quality.revision } : {}),
+    current,
+    staleReason,
+    unverified: level === "unverified" || !quality,
+    ...(quality?.lastValidatedAt ? { lastValidatedAt: quality.lastValidatedAt } : {}),
+    ...(quality?.lastStabilizedAt ? { lastStabilizedAt: quality.lastStabilizedAt } : {}),
+    ...(quality?.freshnessExpiresAt ? { freshnessExpiresAt: quality.freshnessExpiresAt } : {}),
+    ...(quality?.revalidation?.nextRevalidateAt
+      ? { nextRevalidateAt: quality.revalidation.nextRevalidateAt }
+      : {}),
+    revalidationStatus: getRevalidationStatus(quality, staleReason, nowMs),
+    ...(quality?.revalidation?.lastRevalidateReason
+      ? { revalidationReason: quality.revalidation.lastRevalidateReason }
+      : {}),
+    verification: {
+      oracle: quality?.verification?.oracle ?? "none",
+      oracleStrength: quality?.verification?.oracleStrength ?? "weak",
+      ...(quality?.verification?.required !== undefined
+        ? { required: quality.verification.required }
+        : {}),
+      ...(quality?.verification?.missingReason
+        ? { missingReason: quality.verification.missingReason }
+        : {}),
+      ...(quality?.verification?.verifiedAt ? { verifiedAt: quality.verification.verifiedAt } : {}),
+    },
+    ...(quality?.capabilities ? { capabilities: quality.capabilities } : {}),
+    warnings: Array.from(warnings).sort(),
+  };
+}
+
+function oracleStrengthRank(strength: FlowQualityOracleStrength | undefined): number {
+  return strength === "strong" ? 3 : strength === "normal" ? 2 : strength === "weak" ? 1 : 0;
+}
+
+export function evaluateWorkflowPublishGate(
+  flow: FlowV3,
+  options: WorkflowPublishGateOptions = {},
+): WorkflowPublishGateResult {
+  const quality = buildWorkflowQualitySummary(flow);
+  const errors: WorkflowPublishGateResult["errors"] = [];
+  const warnings: WorkflowPublishGateResult["warnings"] = [];
+  const descriptor = buildWorkflowToolDescriptor(flow);
+  const minValidationRuns = Math.max(
+    1,
+    Math.floor(options.minValidationRuns ?? quality.minValidationRuns),
+  );
+  const minPassRate = clampScore(options.minPassRate ?? flow.meta?.quality?.slo?.targetPassRate ?? 1);
+  const minStabilityScore = clampScore(options.minStabilityScore ?? 0);
+  const requireStable = options.requireStable === true || options.requireVerified === true;
+
+  if (descriptor.sideEffects.summary.dangerous > 0 || descriptor.sideEffects.summary.unknown > 0) {
+    warnings.push({
+      code: "PUBLISH_SIDE_EFFECTS_REQUIRE_REVIEW",
+      message: "Workflow has dangerous or unknown side effects and should be run only in an approved environment.",
+    });
+  }
+  if (quality.verification.oracle === "none") {
+    warnings.push({
+      code: "PUBLISH_MISSING_BUSINESS_ORACLE",
+      message: "Workflow has no business oracle; it can be stable but not verified.",
+    });
+  }
+
+  if (requireStable) {
+    if (!quality.current) {
+      errors.push({
+        code: "PUBLISH_QUALITY_STALE",
+        message: `Workflow quality is not current: ${quality.staleReason ?? "unknown"}`,
+      });
+    }
+    if (quality.countedValidationRuns < minValidationRuns) {
+      errors.push({
+        code: "PUBLISH_INSUFFICIENT_VALIDATION_RUNS",
+        message: `Workflow needs at least ${minValidationRuns} counted validation run(s); found ${quality.countedValidationRuns}.`,
+      });
+    }
+    if (quality.passRate < minPassRate) {
+      errors.push({
+        code: "PUBLISH_PASS_RATE_BELOW_THRESHOLD",
+        message: `Workflow passRate ${quality.passRate} is below required ${minPassRate}.`,
+      });
+    }
+    if (quality.stabilityScore < minStabilityScore) {
+      errors.push({
+        code: "PUBLISH_STABILITY_SCORE_BELOW_THRESHOLD",
+        message: `Workflow stabilityScore ${quality.stabilityScore} is below required ${minStabilityScore}.`,
+      });
+    }
+    if (quality.level !== "stable" && quality.level !== "verified") {
+      errors.push({
+        code: "PUBLISH_QUALITY_NOT_STABLE",
+        message: `Workflow quality level must be stable or verified; found ${quality.level}.`,
+      });
+    }
+  } else if (!quality.current || quality.unverified) {
+    warnings.push({
+      code: "PUBLISH_UNVERIFIED_WARNING",
+      message: "Workflow is being published without a current stable quality record.",
+    });
+  }
+
+  if (options.requireVerified === true) {
+    if (quality.level !== "verified") {
+      errors.push({
+        code: "PUBLISH_QUALITY_NOT_VERIFIED",
+        message: `Workflow quality level must be verified; found ${quality.level}.`,
+      });
+    }
+    if (quality.verification.oracle === "none") {
+      errors.push({
+        code: "PUBLISH_MISSING_VERIFICATION_ORACLE",
+        message: "requireVerified needs an assertion, declared output, expected outcome, or equivalent business oracle.",
+      });
+    }
+    if (
+      oracleStrengthRank(quality.verification.oracleStrength) < 2 &&
+      options.allowWeakOracle !== true
+    ) {
+      errors.push({
+        code: "PUBLISH_WEAK_ORACLE",
+        message: "Weak verification oracles do not satisfy requireVerified unless explicitly allowed.",
+      });
+    }
+  }
+
+  return {
+    allowed: errors.length === 0,
+    errors,
+    warnings,
+    quality,
+  };
 }
 
 export function toToolSlug(name: string): string {
@@ -377,6 +684,7 @@ export function buildWorkflowToolDescriptor(flow: FlowV3): WorkflowToolDescripto
     exampleArgs: buildWorkflowExampleArgs(flow),
     backgroundSupport: buildWorkflowBackgroundSupport(flow),
     sideEffects: buildWorkflowSideEffectDescriptor(flow),
+    quality: buildWorkflowQualitySummary(flow),
     ...(Array.isArray(flow.meta?.exposedOutputs) && flow.meta.exposedOutputs.length > 0
       ? { outputs: flow.meta.exposedOutputs.map((output) => ({ ...output })) }
       : {}),

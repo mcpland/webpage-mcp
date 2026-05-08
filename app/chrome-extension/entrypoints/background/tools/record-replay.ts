@@ -5,6 +5,7 @@ import type { FlowId } from "../record-replay-v3/domain/ids";
 import type { JsonObject } from "../record-replay-v3/domain/json";
 import type { FlowV3 } from "../record-replay-v3/domain/flow";
 import {
+  buildWorkflowQualitySummary,
   calculateWorkflowRevision,
   getPublishedFlowInfo,
   listPublishedFlowDetails,
@@ -142,6 +143,41 @@ function createFlowRunValidationError(flowId: string, errors: FlowRunArgValidati
   };
 }
 
+async function recordQualityRunOutcome(flow: FlowV3, success: boolean): Promise<FlowV3> {
+  if (!flow.meta?.quality) {
+    return flow;
+  }
+  const previousFailures = flow.meta.quality.consecutiveFailureCount ?? 0;
+  const consecutiveFailureCount = success ? 0 : previousFailures + 1;
+  const staleReason =
+    !success && consecutiveFailureCount >= 3
+      ? "consecutive_failures"
+      : success && flow.meta.quality.staleReason === "consecutive_failures"
+        ? undefined
+        : flow.meta.quality.staleReason;
+  const next: FlowV3 = {
+    ...flow,
+    updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
+    meta: {
+      ...(flow.meta ?? {}),
+      quality: {
+        ...flow.meta.quality,
+        consecutiveFailureCount,
+        ...(staleReason ? { staleReason } : {}),
+        revalidation: {
+          ...(flow.meta.quality.revalidation ?? {}),
+          lastRevalidateReason: success ? "workflow_run_success" : "workflow_run_failure",
+        },
+      },
+    },
+  };
+  if (!staleReason) {
+    delete next.meta?.quality?.staleReason;
+  }
+  await createStoragePort().flows.save(next);
+  return next;
+}
+
 class FlowRunTool {
   name = TOOL_NAMES.RECORD_REPLAY.FLOW_RUN;
   async execute(args: any): Promise<ToolResult> {
@@ -178,7 +214,7 @@ class FlowRunTool {
       screenshotDiffThreshold,
     } = args || {};
     if (!flowId) return createErrorResponse("flowId is required");
-    const flow = await createStoragePort().flows.get(flowId as FlowId);
+    let flow = await createStoragePort().flows.get(flowId as FlowId);
     if (!flow) return createErrorResponse(`Flow not found: ${flowId}`);
     const normalizedStartUrl =
       typeof startUrl === "string" && startUrl.trim() ? startUrl.trim() : undefined;
@@ -236,13 +272,36 @@ class FlowRunTool {
       );
     }
 
+    flow = await recordQualityRunOutcome(flow, result.success === true);
     const revision = calculateWorkflowRevision(flow);
     const publishedInfo = getPublishedFlowInfo(flow);
+    const quality = buildWorkflowQualitySummary(flow);
+    const qualityWarning = quality.current
+      ? null
+      : {
+          code: "WORKFLOW_QUALITY_STALE",
+          message: `Workflow quality is not current: ${quality.staleReason ?? "unknown"}`,
+          revalidation: {
+            recommended: true,
+            policy: flow.meta?.quality?.revalidation?.policy ?? "manual",
+          },
+        };
     const response = {
       ...result,
       flowId: flow.id,
       ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : {}),
       revision,
+      quality: {
+        level: quality.level,
+        status: quality.status,
+        current: quality.current,
+        verifiedThisRun:
+          result.success === true &&
+          quality.level === "verified" &&
+          quality.verification.oracle !== "none",
+        verification: quality.verification,
+      },
+      qualityWarning,
       ...(result.success !== true
         ? {
             debug: {

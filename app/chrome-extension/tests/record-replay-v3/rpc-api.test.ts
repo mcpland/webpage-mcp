@@ -25,6 +25,7 @@ import type { TriggerManager } from "@/entrypoints/background/record-replay-v3/e
 import type { TriggerSpec } from "@/entrypoints/background/record-replay-v3/domain/triggers";
 import type { ArtifactRecord } from "@/entrypoints/background/record-replay-v3/storage/artifacts";
 import { tryAcquireFlowWriteLock } from "@/entrypoints/background/record-replay-v3/flows/write-lock";
+import { calculateWorkflowRevision } from "@/entrypoints/background/record-replay-v3/flows/publish";
 
 // ==================== Test Utilities ====================
 
@@ -1943,6 +1944,73 @@ describe("V3 RPC Flow CRUD APIs", () => {
       } finally {
         release();
       }
+    });
+
+    it("enforces requireStable publish quality gate when requested", async () => {
+      const flow = createTestFlow("flow-require-stable");
+      getInternal(storage).flowsMap.set(flow.id, flow);
+
+      await expect(
+        (server as unknown as { handleRequest: Function }).handleRequest(
+          {
+            method: "rr_v3.publishFlow",
+            params: {
+              flowId: flow.id,
+              slug: "Require Stable",
+              requireStable: true,
+            },
+            requestId: "req-require-stable-missing",
+          },
+          { subscriptions: new Set() },
+        ),
+      ).rejects.toThrow("Workflow quality is not current: missing_quality");
+
+      flow.meta = {
+        tool: {
+          published: true,
+          slug: "require-stable",
+        },
+      };
+      flow.meta = {
+        ...flow.meta,
+        quality: {
+          revision: calculateWorkflowRevision(flow),
+          level: "stable",
+          status: "stable",
+          stabilityScore: 1,
+          passRate: 1,
+          validationRuns: 3,
+          countedValidationRuns: 3,
+          passedRuns: 3,
+          failedRuns: 0,
+          minValidationRuns: 3,
+          freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+          verification: {
+            oracle: "none",
+            oracleStrength: "weak",
+          },
+        },
+      };
+
+      const published = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.publishFlow",
+          params: {
+            flowId: flow.id,
+            slug: "Require Stable",
+            requireStable: true,
+          },
+          requestId: "req-require-stable-ok",
+        },
+        { subscriptions: new Set() },
+      );
+
+      expect(published).toMatchObject({
+        id: flow.id,
+        slug: "require-stable",
+      });
     });
 
     it("preserves an existing custom slug when republishing without a slug override", async () => {

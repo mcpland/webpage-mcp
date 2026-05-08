@@ -1,6 +1,8 @@
 import { createErrorResponse, type ToolResult } from '@/common/tool-handler';
 import {
   TOOL_NAMES,
+  WEBPAGE_MCP_CAPABILITY_VERSION,
+  WEBPAGE_MCP_PROTOCOL_VERSION,
   createEmptyWorkflowSideEffectSummary,
   isKnownWorkflowSideEffectKind,
   normalizeWorkflowNodeSideEffectProfile,
@@ -8,7 +10,12 @@ import {
   type WorkflowSideEffectProfile,
   type WorkflowSideEffectSummary,
 } from 'webpage-mcp-shared';
-import type { FlowV3 } from '../record-replay-v3/domain/flow';
+import {
+  FLOW_DSL_VERSION,
+  FLOW_NODE_SEMANTICS_VERSION,
+  type FlowQualityMeta,
+  type FlowV3,
+} from '../record-replay-v3/domain/flow';
 import type { RunEvent, RunRecordV3 } from '../record-replay-v3/domain/events';
 import type { FlowId, RunId } from '../record-replay-v3/domain/ids';
 import type { ArtifactRecord } from '../record-replay-v3/storage/artifacts';
@@ -62,7 +69,7 @@ interface PublicAnalyzedFlow {
   variables?: FlowV3['variables'];
   meta?: Pick<
     NonNullable<FlowV3['meta']>,
-    'domain' | 'tags' | 'bindings' | 'tool' | 'exposedOutputs'
+    'domain' | 'tags' | 'bindings' | 'tool' | 'exposedOutputs' | 'quality'
   >;
 }
 
@@ -216,6 +223,7 @@ const DEFAULT_SAFE_RETRY_POLICY: RetryPolicy = {
   jitter: 'full',
   retryOn: RETRYABLE_STABILITY_ERROR_CODES,
 };
+let fallbackQualityHmacSalt: string | undefined;
 
 function flowDisablesFailureScreenshots(flow: FlowV3): boolean {
   const defaultScreenshot = flow.policy?.defaultNodePolicy?.artifacts?.screenshot;
@@ -235,7 +243,7 @@ function buildWorkflowCapabilityMatrix(
   const unsupportedReasons: string[] = [];
   if (mode === 'stabilize') {
     unsupportedReasons.push(
-      'workflow_stabilize validation replay is not enabled in the analyze-only safety core',
+      'Reset workflow execution and automatic stopBeforeDangerous segmentation are not enabled in the stabilize MVP',
     );
   } else {
     unsupportedReasons.push(
@@ -250,7 +258,7 @@ function buildWorkflowCapabilityMatrix(
   );
 
   return {
-    replayValidation: mode === 'stabilize' ? 'none' : 'unknown',
+    replayValidation: mode === 'stabilize' ? 'partial' : 'unknown',
     domSnapshot: 'none',
     accessibilitySnapshot: 'none',
     navigationEvents: 'partial',
@@ -479,7 +487,8 @@ function sanitizeAnalyzedFlow(flow: FlowV3): PublicAnalyzedFlow {
       flow.meta.tags ||
       flow.meta.bindings ||
       flow.meta.tool ||
-      flow.meta.exposedOutputs)
+      flow.meta.exposedOutputs ||
+      flow.meta.quality)
       ? {
           ...(flow.meta.domain ? { domain: flow.meta.domain } : {}),
           ...(Array.isArray(flow.meta.tags) ? { tags: [...flow.meta.tags] } : {}),
@@ -492,6 +501,22 @@ function sanitizeAnalyzedFlow(flow: FlowV3): PublicAnalyzedFlow {
           ...(Array.isArray(flow.meta.exposedOutputs)
             ? {
                 exposedOutputs: flow.meta.exposedOutputs.map((output) => ({ ...output })),
+              }
+            : {}),
+          ...(flow.meta.quality
+            ? {
+                quality: {
+                  level: flow.meta.quality.level,
+                  status: flow.meta.quality.status,
+                  revision: flow.meta.quality.revision,
+                  stabilityScore: flow.meta.quality.stabilityScore,
+                  passRate: flow.meta.quality.passRate,
+                  validationRuns: flow.meta.quality.validationRuns,
+                  countedValidationRuns: flow.meta.quality.countedValidationRuns,
+                  lastValidatedAt: flow.meta.quality.lastValidatedAt,
+                  freshnessExpiresAt: flow.meta.quality.freshnessExpiresAt,
+                  staleReason: flow.meta.quality.staleReason,
+                },
               }
             : {}),
         }
@@ -1444,6 +1469,288 @@ function scoreStabilizeRuns(runs: WorkflowStabilizeRunSummary[]): WorkflowStabil
   };
 }
 
+function stableSerialize(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableSerialize(entry)).join(',')}]`;
+  }
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([, nested]) => nested !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, nested]) => `${JSON.stringify(key)}:${stableSerialize(nested)}`)
+    .join(',')}}`;
+}
+
+function bytesToHex(bytes: ArrayBuffer): string {
+  return Array.from(new Uint8Array(bytes))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function getWorkflowQualityHmacSalt(): Promise<string> {
+  const storageKey = 'workflowQualityHmacSalt';
+  try {
+    const stored = await chrome.storage.local.get(storageKey);
+    const existing = stored?.[storageKey];
+    if (typeof existing === 'string' && existing.length >= 16) {
+      return existing;
+    }
+    const random = new Uint8Array(32);
+    globalThis.crypto.getRandomValues(random);
+    const salt = bytesToHex(random.buffer);
+    await chrome.storage.local.set({ [storageKey]: salt });
+    return salt;
+  } catch {
+    if (!fallbackQualityHmacSalt) {
+      const random = new Uint8Array(32);
+      if (globalThis.crypto?.getRandomValues) {
+        globalThis.crypto.getRandomValues(random);
+        fallbackQualityHmacSalt = bytesToHex(random.buffer);
+      } else {
+        fallbackQualityHmacSalt = `${Date.now().toString(36)}-${Math.random()
+          .toString(36)
+          .slice(2)}`;
+      }
+    }
+    return fallbackQualityHmacSalt;
+  }
+}
+
+async function createWorkflowArgsHash(args: unknown): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    throw new Error('WebCrypto HMAC is unavailable for workflow quality argsHash');
+  }
+  const encoder = new TextEncoder();
+  const salt = await getWorkflowQualityHmacSalt();
+  const key = await subtle.importKey(
+    'raw',
+    encoder.encode(salt),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await subtle.sign('HMAC', key, encoder.encode(stableSerialize(args ?? {})));
+  return `hmac-sha256:${bytesToHex(signature)}`;
+}
+
+function fnv1aForPublicFingerprint(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function createPublicStringHash(value: string | undefined): string | undefined {
+  return value ? `fnv1a32:${fnv1aForPublicFingerprint(value)}` : undefined;
+}
+
+function getExtensionVersion(): string | undefined {
+  try {
+    return chrome.runtime.getManifest?.().version;
+  } catch {
+    return undefined;
+  }
+}
+
+function inferValidationSiteFingerprint(flow: FlowV3, args: any): string | undefined {
+  const candidate =
+    typeof args?.startUrl === 'string' && args.startUrl.trim()
+      ? args.startUrl.trim()
+      : flow.meta?.recording?.originUrl;
+  if (!candidate) {
+    return undefined;
+  }
+  try {
+    const url = new URL(candidate);
+    return `url:${url.origin}${url.pathname}`;
+  } catch {
+    return createPublicStringHash(candidate);
+  }
+}
+
+function inferWorkflowVerification(flow: FlowV3, stable: boolean): NonNullable<FlowQualityMeta['verification']> {
+  const hasAssertNode = (flow.nodes || []).some((node) =>
+    ['assert', 'expect', 'assertion'].includes(node.kind),
+  );
+  if (hasAssertNode) {
+    return {
+      oracle: 'assertion',
+      oracleStrength: 'normal',
+      ...(stable ? { verifiedAt: new Date().toISOString() } : {}),
+    };
+  }
+  if (Array.isArray(flow.meta?.exposedOutputs) && flow.meta.exposedOutputs.length > 0) {
+    return {
+      oracle: 'declaredOutput',
+      oracleStrength: 'weak',
+      missingReason: 'Declared outputs are exposed but output validation is not enabled yet.',
+    };
+  }
+  return {
+    oracle: 'none',
+    oracleStrength: 'weak',
+    missingReason: 'No assert node, declared output validation, or expected outcome is configured.',
+  };
+}
+
+function calculateStabilityScore(
+  score: WorkflowStabilizeScore,
+  minValidationRuns: number,
+  capabilities: WorkflowCapabilityMatrix,
+  current: boolean,
+): number {
+  const sampleFactor = Math.min(1, score.iterations / Math.max(1, minValidationRuns));
+  const unsupportedCount = capabilities.unsupportedReasons.length;
+  const capabilityFactor = Math.max(0.7, 1 - unsupportedCount * 0.03);
+  const freshnessFactor = current ? 1 : 0.5;
+  return Number((score.passRate * sampleFactor * capabilityFactor * freshnessFactor).toFixed(4));
+}
+
+function getLastFailure(runs: WorkflowStabilizeRunSummary[]):
+  | { nodeId?: string; code?: string; runId?: string }
+  | undefined {
+  const failed = [...runs].reverse().find((run) => !run.success);
+  if (!failed) return undefined;
+  return {
+    ...(failed.failedNodeId ?? failed.currentNodeId
+      ? { nodeId: failed.failedNodeId ?? failed.currentNodeId }
+      : {}),
+    ...(failed.errorCode ? { code: failed.errorCode } : {}),
+    ...(failed.runId ? { runId: failed.runId } : {}),
+  };
+}
+
+async function buildStabilizeQualityRecord(options: {
+  flow: FlowV3;
+  args: any;
+  risk: WorkflowRiskProfile;
+  executionMode: string;
+  runs: WorkflowStabilizeRunSummary[];
+  revision: string;
+  minPassRate: number;
+  minValidationRuns: number;
+  capabilities: WorkflowCapabilityMatrix;
+  warnings: WorkflowStabilizeWarning[];
+}): Promise<FlowQualityMeta> {
+  const now = new Date();
+  const freshnessExpiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const segmentOnly =
+    options.args?.safety?.segments?.mode === 'explicit' ||
+    options.runs.some((run) => run.status === 'stopped');
+  const countedRuns = segmentOnly ? [] : options.runs;
+  const countedScore = scoreStabilizeRuns(countedRuns);
+  const stable =
+    countedScore.iterations >= options.minValidationRuns &&
+    countedScore.passRate >= options.minPassRate;
+  const verification = inferWorkflowVerification(options.flow, stable);
+  const level = stable && verification.oracle === 'assertion' ? 'verified' : stable ? 'stable' : 'unverified';
+  const stabilityScore = calculateStabilityScore(
+    countedScore,
+    options.minValidationRuns,
+    options.capabilities,
+    true,
+  );
+  const runIds = options.runs
+    .map((run) => run.runId)
+    .filter((runId): runId is string => Boolean(runId));
+  const lastFailure = getLastFailure(options.runs);
+  const siteFingerprint = inferValidationSiteFingerprint(options.flow, options.args);
+  const locale = globalThis.navigator?.language;
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const userAgentHash = createPublicStringHash(globalThis.navigator?.userAgent);
+  const extensionVersion = getExtensionVersion();
+  const validationContext: NonNullable<FlowQualityMeta['validationContext']> = {
+    argsHash: await createWorkflowArgsHash(options.args?.args ?? {}),
+    argsHashAlgorithm: 'hmac-sha256',
+    ...(typeof options.args?.startUrl === 'string' && options.args.startUrl.trim()
+      ? { startUrl: options.args.startUrl.trim() }
+      : {}),
+    tabTarget: options.args?.tabTarget === 'new' ? 'new' : 'current',
+    background: options.args?.background === true,
+    executionMode: options.executionMode,
+    ...(typeof options.args?.safety?.testEnvironment === 'string' &&
+    options.args.safety.testEnvironment.trim()
+      ? { testEnvironment: options.args.safety.testEnvironment.trim() }
+      : {}),
+    ...(siteFingerprint ? { siteFingerprint } : {}),
+    runGroupId: `stabilize-${Date.now().toString(36)}`,
+    tabOwnership: options.args?.tabTarget === 'new' ? 'owned' : 'current',
+    ...(locale ? { locale } : {}),
+    ...(timezone ? { timezone } : {}),
+    ...(userAgentHash ? { userAgentHash } : {}),
+    ...(extensionVersion ? { extensionVersion } : {}),
+    protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
+    capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
+  };
+  const excludedRuns = segmentOnly
+    ? { count: options.runs.length, reasons: ['segment_only'] }
+    : { count: 0, reasons: [] };
+  const validationRecord: NonNullable<FlowQualityMeta['validationRecords']>[number] = {
+    id: `validation-${Date.now().toString(36)}`,
+    tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
+    revision: options.revision,
+    runGroupId: validationContext.runGroupId,
+    completedAt: now.toISOString(),
+    phase: options.runs.some((run) => run.phase === 'postRepair') ? 'postRepair' : 'baseline',
+    passRate: countedScore.passRate,
+    stabilityScore,
+    countedRuns: countedScore.iterations,
+    passedRuns: countedScore.passedRuns,
+    failedRuns: countedScore.failedRuns,
+    excludedRuns,
+    runIds,
+    validationContext,
+    risk: options.risk,
+    segmentOnly,
+  };
+  const previousRecords = Array.isArray(options.flow.meta?.quality?.validationRecords)
+    ? options.flow.meta.quality.validationRecords
+    : [];
+
+  return {
+    ...(options.flow.meta?.quality ?? {}),
+    lastStabilizedAt: now.toISOString(),
+    lastValidatedAt: now.toISOString(),
+    freshnessExpiresAt,
+    revision: options.revision,
+    status: level === 'verified' ? 'verified' : level === 'stable' ? 'stable' : 'draft',
+    level,
+    stabilityScore,
+    passRate: countedScore.passRate,
+    validationRuns: options.runs.length,
+    countedValidationRuns: countedScore.iterations,
+    passedRuns: countedScore.passedRuns,
+    failedRuns: countedScore.failedRuns,
+    excludedRuns,
+    minValidationRuns: options.minValidationRuns,
+    ...(lastFailure?.nodeId ? { lastFailureNodeId: lastFailure.nodeId as FlowV3['entryNodeId'] } : {}),
+    ...(lastFailure?.code ? { lastFailureCode: lastFailure.code } : {}),
+    risk: options.risk,
+    validationContext,
+    verification,
+    capabilities: options.capabilities,
+    consecutiveFailureCount: countedScore.failedRuns > 0 ? countedScore.failedRuns : 0,
+    ...(stable ? { staleReason: undefined } : { staleReason: 'validation_failed' }),
+    revalidation: {
+      policy: 'onFailure',
+      nextRevalidateAt: freshnessExpiresAt,
+      autoDowngrade: true,
+      lastRevalidateReason: 'workflow_stabilize',
+    },
+    slo: {
+      targetPassRate: options.minPassRate,
+      minValidationRuns: options.minValidationRuns,
+    },
+    artifactRunIds: lastFailure?.runId ? [lastFailure.runId] : [],
+    warnings: options.warnings.map((warning) => warning.code).slice(0, 30),
+    validationRecords: [...previousRecords, validationRecord].slice(-20),
+  };
+}
+
 function summarizeStabilizeRunResult(
   phase: WorkflowStabilizeRunSummary['phase'],
   iteration: number,
@@ -1561,28 +1868,33 @@ function recordStabilizeRepairHistory(
   changes: WorkflowRepairChange[],
 ): void {
   if (changes.length === 0) return;
-  const meta = { ...(flow.meta ?? {}) } as Record<string, unknown>;
-  const existing = Array.isArray(meta.repairHistory) ? meta.repairHistory : [];
-  meta.repairHistory = [
-    ...existing.slice(-19),
-    {
-      id: `repair-${Date.now().toString(36)}`,
-      tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
-      appliedAt: new Date().toISOString(),
-      beforeRevision,
-      changes: changes.map((change) => ({ ...change })),
-      provenance: {
-        source: 'workflow_stabilize',
-        pageContentUsed: false,
+  const meta = { ...(flow.meta ?? {}) };
+  const existing = Array.isArray(meta.repairs?.history) ? meta.repairs.history : [];
+  const repairRevision = `repair-${Date.now().toString(36)}`;
+  meta.repairs = {
+    ...(meta.repairs ?? {}),
+    currentRepairRevision: repairRevision,
+    history: [
+      ...existing.slice(-19),
+      {
+        repairRevision,
+        baseRevision: beforeRevision,
+        appliedAt: new Date().toISOString(),
+        patchSummary: changes.map((change) => change.code).join(', '),
+        changes: changes.map((change) => ({ ...change })),
+        provenance: {
+          source: 'workflow_stabilize',
+          pageContentUsed: false,
+        },
+        rollback: {
+          beforeRevision,
+          available: false,
+          reason: 'Workflow rollback metadata is recorded; external side effects are not reversible.',
+        },
       },
-      rollback: {
-        beforeRevision,
-        available: false,
-        reason: 'Workflow rollback metadata is recorded; external side effects are not reversible.',
-      },
-    },
-  ];
-  flow.meta = meta as FlowV3['meta'];
+    ],
+  };
+  flow.meta = meta;
 }
 
 class FlowAnalyzeTool {
@@ -2095,6 +2407,50 @@ class WorkflowStabilizeTool {
             automaticRollbackAvailable: false,
           }
         : undefined;
+    const validationRunsForQuality = postRepairRuns.length > 0 ? postRepairRuns : baselineRuns;
+    const segmentOnlyValidation =
+      args?.safety?.segments?.mode === 'explicit' ||
+      validationRunsForQuality.some((run) => run.status === 'stopped');
+    const minValidationRuns = Math.max(1, requestedValidationIterations);
+    let quality: ReturnType<typeof buildWorkflowToolDescriptor>['quality'] | undefined;
+    if (validationRunsForQuality.length > 0) {
+      const qualityRevision = postRepairRevision ?? calculateWorkflowRevision(workingFlow);
+      const qualityRecord = await buildStabilizeQualityRecord({
+        flow: workingFlow,
+        args,
+        risk,
+        executionMode: blockedReason ? 'analyzeOnly' : executionMode,
+        runs: validationRunsForQuality,
+        revision: qualityRevision,
+        minPassRate,
+        minValidationRuns,
+        capabilities,
+        warnings,
+      });
+      if (args?.dryRun !== true) {
+        workingFlow.meta = {
+          ...(workingFlow.meta ?? {}),
+          quality: qualityRecord,
+          runtime: {
+            ...(workingFlow.meta?.runtime ?? {}),
+            protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
+            capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
+            dslVersion: FLOW_DSL_VERSION,
+            nodeSemanticsVersion: FLOW_NODE_SEMANTICS_VERSION,
+          },
+        };
+        workingFlow = await saveFlowToV3(workingFlow);
+      }
+      quality = buildWorkflowToolDescriptor({
+        ...workingFlow,
+        meta: {
+          ...(workingFlow.meta ?? {}),
+          quality: qualityRecord,
+        },
+      }).quality;
+    } else {
+      quality = buildWorkflowToolDescriptor(workingFlow).quality;
+    }
 
     return {
       content: [
@@ -2105,12 +2461,16 @@ class WorkflowStabilizeTool {
             flowId: workingFlow.id,
             workflow: publishedInfo?.slug,
             applied,
-            stable: finalScore.iterations > 0 && finalScore.passRate >= minPassRate,
+            stable:
+              !segmentOnlyValidation &&
+              finalScore.iterations > 0 &&
+              finalScore.passRate >= minPassRate,
             score: {
               ...finalScore,
               inspectedPassedRuns: passedRuns,
               inspectedFailedRuns: failedRuns,
             },
+            quality,
             baselineScore,
             ...(postRepairRuns.length > 0 ? { postRepairScore } : {}),
             summary: {
