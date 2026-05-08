@@ -864,7 +864,22 @@ class StorageBackedRunRunner implements RunRunner {
     const merged1 = mergeNodePolicy(flowDefault, pluginDefault);
     const merged = mergeNodePolicy(merged1, node.policy);
     const retrySource = this.resolveRetrySource(flowDefault, pluginDefault, node.policy);
-    return this.applySideEffectRetryGuard(node, merged, retrySource);
+    return this.applyDefaultArtifactPolicy(
+      this.applySideEffectRetryGuard(node, merged, retrySource),
+    );
+  }
+
+  private applyDefaultArtifactPolicy(policy: NodePolicy): NodePolicy {
+    if (policy.artifacts?.screenshot) {
+      return policy;
+    }
+    return {
+      ...policy,
+      artifacts: {
+        ...(policy.artifacts ?? {}),
+        screenshot: 'onFailure',
+      },
+    };
   }
 
   private resolveRetrySource(

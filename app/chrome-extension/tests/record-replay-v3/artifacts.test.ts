@@ -100,6 +100,14 @@ describe('createChromeArtifactService', () => {
       expect.objectContaining({
         savedAs: 'failure.png',
         sizeBytes: 10,
+        originalSizeBytes: 10,
+        ttlMs: 7 * 24 * 60 * 60 * 1000,
+        truncated: false,
+        provenance: { source: 'runtimeCapture', trust: 'untrusted' },
+        redaction: expect.objectContaining({
+          status: 'lowConfidence',
+          confidence: 'low',
+        }),
       }),
     ]);
   });
@@ -120,6 +128,14 @@ describe('createChromeArtifactService', () => {
     expect(artifacts?.[0]?.savedAs).not.toContain('password');
     expect(artifacts?.[0]?.savedAs).not.toContain('secret');
     expect(artifacts?.[0]?.savedAs).not.toContain('token');
+    expect(artifacts?.[0]?.provenance).toEqual({
+      source: 'runtimeCapture',
+      trust: 'untrusted',
+    });
+    expect(artifacts?.[0]?.redaction).toMatchObject({
+      status: 'lowConfidence',
+      confidence: 'low',
+    });
   });
 
   it('applies TTL and run-scoped cleanup', async () => {
@@ -153,7 +169,7 @@ describe('createChromeArtifactService', () => {
     expect(artifacts?.[0]?.savedAs).toContain('node-b');
   });
 
-  it('rejects artifacts that cannot fit within the normalized total size budget', async () => {
+  it('stores a truncated summary when artifacts exceed the normalized size budget', async () => {
     const store = createIndexedDbArtifactStore(
       { maxTotalBytes: 3, maxArtifactBytes: 10 },
       () => 10,
@@ -166,8 +182,18 @@ describe('createChromeArtifactService', () => {
       'YWJjZA==', // 4 bytes
     );
 
-    expect(saveResult).toHaveProperty('error');
-    expect(await service.listArtifacts?.('run-too-large' as never)).toEqual([]);
+    expect(saveResult).toMatchObject({ savedAs: expect.stringContaining('node-a') });
+    expect(await service.listArtifacts?.('run-too-large' as never)).toEqual([
+      expect.objectContaining({
+        sizeBytes: 0,
+        originalSizeBytes: 4,
+        truncated: true,
+        redaction: expect.objectContaining({
+          status: 'lowConfidence',
+          confidence: 'low',
+        }),
+      }),
+    ]);
   });
 
   it('keeps the just-saved artifact when same-timestamp records exceed retention', async () => {

@@ -710,6 +710,11 @@ describe("recording/editing/flow toolchain integration", () => {
     );
 
     expect(payload.summary.runCount).toBe(1);
+    expect(payload.artifactPolicy).toMatchObject({
+      contentTrust: "untrusted",
+      dataInline: "explicit_request_only_and_blocked_when_redaction_is_low_confidence",
+      cleanup: { requested: false },
+    });
     expect(payload.runs[0]).toMatchObject({
       id: runId,
       status: "failed",
@@ -735,7 +740,20 @@ describe("recording/editing/flow toolchain integration", () => {
           id: artifact.id,
           nodeId: "fill-1",
           savedAs: "[REDACTED].png",
-          dataBase64: "ZmFpbHVyZS1zaG90",
+          dataBase64Omitted: "redaction_low_confidence",
+          ttlMs: 7 * 24 * 60 * 60 * 1000,
+          untrusted: true,
+          provenance: {
+            source: "runtimeCapture",
+            trust: "untrusted",
+          },
+          redaction: {
+            status: "lowConfidence",
+            confidence: "low",
+            warnings: [
+              "Screenshot pixel content has low-confidence redaction; binary data is not inlined in MCP debug responses.",
+            ],
+          },
           metadata: {
             note: "failure screenshot",
             "[REDACTED]": "[REDACTED]-[REDACTED]",
@@ -767,6 +785,110 @@ describe("recording/editing/flow toolchain integration", () => {
       savedAs: "[REDACTED].png",
     });
     expect(artifactEvent).not.toHaveProperty("data");
+    expect(payload.runs[0].artifacts[0]).not.toHaveProperty("dataBase64");
+  });
+
+  it("workflowDebugViewTool filters debug output and cleans run artifacts", async () => {
+    const flowId = `workflow-debug-filter-${Date.now()}`;
+    const runId = `${flowId}-run`;
+    const storage = createStoragePort();
+    await storage.flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: { target: { selector: "#email" }, value: "{email}" },
+        },
+        {
+          id: "click-1" as any,
+          kind: "click",
+          config: { target: { selector: "#submit" } },
+        },
+      ]),
+    );
+    await storage.runs.save({
+      id: runId as any,
+      flowId: flowId as any,
+      schemaVersion: RUN_SCHEMA_VERSION,
+      status: "failed",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      attempt: 1,
+      maxAttempts: 1,
+      currentNodeId: "click-1" as any,
+      nextSeq: 10,
+    } as RunRecordV3);
+    await storage.events.append({
+      runId: runId as any,
+      type: "node.failed",
+      nodeId: "fill-1" as any,
+      attempt: 1,
+      error: { code: "TARGET_NOT_FOUND", message: "Missing input" },
+      decision: "stop",
+    });
+    const fillArtifact = await storage.artifacts.saveScreenshot({
+      runId: runId as any,
+      nodeId: "fill-1" as any,
+      base64: "ZmlsbA==",
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "artifact.screenshot",
+      nodeId: "fill-1" as any,
+      artifactId: fillArtifact.id,
+      savedAs: fillArtifact.filename,
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "node.failed",
+      nodeId: "click-1" as any,
+      attempt: 1,
+      error: { code: "TARGET_NOT_FOUND", message: "Missing button" },
+      decision: "stop",
+    });
+    const clickArtifact = await storage.artifacts.saveScreenshot({
+      runId: runId as any,
+      nodeId: "click-1" as any,
+      base64: "Y2xpY2s=",
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "artifact.screenshot",
+      nodeId: "click-1" as any,
+      artifactId: clickArtifact.id,
+      savedAs: clickArtifact.filename,
+    });
+
+    const result = await workflowDebugViewTool.execute({
+      flowId,
+      runId,
+      nodeId: "click-1",
+      maxEvents: 10,
+      cleanupArtifacts: true,
+    });
+    const payload = parseToolPayload(result);
+
+    expect(payload.artifactPolicy.cleanup).toEqual({
+      requested: true,
+      scope: "run",
+      runId,
+      deleted: 2,
+    });
+    expect(payload.runs[0].events.map((event: { nodeId?: string }) => event.nodeId)).toEqual([
+      "click-1",
+      "click-1",
+    ]);
+    expect(payload.runs[0].artifacts).toEqual([
+      expect.objectContaining({
+        id: clickArtifact.id,
+        nodeId: "click-1",
+        missing: true,
+        unavailableReason: "expired_or_cleaned",
+        dataBase64Omitted: "artifact_missing",
+        untrusted: true,
+      }),
+    ]);
+    expect(await storage.artifacts.listByRun(runId as any)).toEqual([]);
   });
 
   it("workflowRepairTool returns recommendations without mutating by default", async () => {

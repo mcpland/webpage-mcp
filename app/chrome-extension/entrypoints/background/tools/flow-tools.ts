@@ -90,14 +90,27 @@ interface WorkflowDebugArtifact {
   id: string;
   nodeId: string;
   kind: ArtifactRecord['kind'];
-  savedAs: string;
-  mimeType: ArtifactRecord['mimeType'];
-  sizeBytes: number;
-  createdAt: number;
-  expiresAt: number;
+  savedAs?: string;
+  mimeType?: ArtifactRecord['mimeType'];
+  sizeBytes?: number;
+  originalSizeBytes?: number;
+  createdAt?: number;
+  expiresAt?: number;
+  ttlMs?: number;
+  truncated?: boolean;
+  missing?: boolean;
+  unavailableReason?: 'expired_or_cleaned';
+  untrusted: true;
+  provenance: NonNullable<ArtifactRecord['provenance']>;
+  redaction: NonNullable<ArtifactRecord['redaction']>;
   metadata?: ArtifactRecord['metadata'];
   dataBase64?: string;
-  dataBase64Omitted?: 'not_requested' | 'too_large';
+  dataBase64Omitted?:
+    | 'not_requested'
+    | 'too_large'
+    | 'redaction_low_confidence'
+    | 'truncated'
+    | 'artifact_missing';
 }
 
 interface WorkflowRepairRecommendation {
@@ -615,6 +628,44 @@ function shouldIncludeArtifactData(args: any, runId: string): boolean {
   return runId.length > 0;
 }
 
+function getDebugNodeIdFilter(args: any): string {
+  return typeof args?.nodeId === 'string' ? args.nodeId.trim() : '';
+}
+
+function getDebugMaxEventsPerRun(args: any): number {
+  return clampNumber(
+    args?.maxEvents ?? args?.maxEventsPerRun,
+    40,
+    0,
+    100,
+  );
+}
+
+function getArtifactProvenance(
+  artifact?: ArtifactRecord,
+): NonNullable<ArtifactRecord['provenance']> {
+  return artifact?.provenance ?? { source: 'runtimeCapture', trust: 'untrusted' };
+}
+
+function getArtifactRedaction(
+  artifact?: ArtifactRecord,
+): NonNullable<ArtifactRecord['redaction']> {
+  return (
+    artifact?.redaction ?? {
+      status: 'lowConfidence',
+      confidence: 'low',
+      warnings: [
+        'Artifact predates redaction metadata; binary data is not inlined by default.',
+      ],
+    }
+  );
+}
+
+function artifactHasLowConfidenceRedaction(artifact: ArtifactRecord): boolean {
+  const redaction = getArtifactRedaction(artifact);
+  return redaction.status === 'lowConfidence' || redaction.confidence === 'low';
+}
+
 function sanitizeDebugArtifact(
   artifact: ArtifactRecord,
   includeData: boolean,
@@ -627,18 +678,81 @@ function sanitizeDebugArtifact(
     savedAs: artifact.filename,
     mimeType: artifact.mimeType,
     sizeBytes: artifact.sizeBytes,
+    originalSizeBytes: artifact.originalSizeBytes ?? artifact.sizeBytes,
     createdAt: artifact.createdAt,
     expiresAt: artifact.expiresAt,
+    ttlMs: artifact.ttlMs ?? Math.max(0, artifact.expiresAt - artifact.createdAt),
+    truncated: artifact.truncated === true,
+    untrusted: true,
+    provenance: getArtifactProvenance(artifact),
+    redaction: getArtifactRedaction(artifact),
     ...(artifact.metadata ? { metadata: artifact.metadata } : {}),
   };
   if (!includeData) {
     safe.dataBase64Omitted = 'not_requested';
+  } else if (artifact.truncated === true) {
+    safe.dataBase64Omitted = 'truncated';
+  } else if (artifactHasLowConfidenceRedaction(artifact)) {
+    safe.dataBase64Omitted = 'redaction_low_confidence';
   } else if (artifact.sizeBytes > maxArtifactDataBytes) {
     safe.dataBase64Omitted = 'too_large';
   } else {
     safe.dataBase64 = artifact.dataBase64;
   }
   return safe;
+}
+
+function buildMissingDebugArtifact(
+  event: Extract<RunEvent, { type: 'artifact.screenshot' }>,
+): WorkflowDebugArtifact | null {
+  if (!event.artifactId) {
+    return null;
+  }
+  return {
+    id: event.artifactId,
+    nodeId: event.nodeId,
+    kind: 'screenshot',
+    ...(event.savedAs ? { savedAs: event.savedAs } : {}),
+    missing: true,
+    unavailableReason: 'expired_or_cleaned',
+    untrusted: true,
+    provenance: { source: 'runtimeCapture', trust: 'untrusted' },
+    redaction: {
+      status: 'lowConfidence',
+      confidence: 'low',
+      warnings: [
+        'Artifact payload is unavailable because it expired, was cleaned up, or was removed by retention.',
+      ],
+    },
+    dataBase64Omitted: 'artifact_missing',
+  };
+}
+
+function buildDebugArtifacts(
+  records: ArtifactRecord[],
+  events: RunEvent[],
+  includeData: boolean,
+  maxArtifactDataBytes: number,
+): WorkflowDebugArtifact[] {
+  const artifacts = records.map((artifact) =>
+    sanitizeDebugArtifact(artifact, includeData, maxArtifactDataBytes),
+  );
+  const presentIds = new Set(records.map((artifact) => artifact.id));
+  for (const event of events) {
+    if (
+      event.type !== 'artifact.screenshot' ||
+      !event.artifactId ||
+      presentIds.has(event.artifactId)
+    ) {
+      continue;
+    }
+    const missing = buildMissingDebugArtifact(event);
+    if (missing) {
+      artifacts.push(missing);
+      presentIds.add(event.artifactId);
+    }
+  }
+  return artifacts;
 }
 
 async function resolveFlowForWorkflowTool(args: any): Promise<FlowV3 | null> {
@@ -657,6 +771,33 @@ async function resolveFlowForWorkflowTool(args: any): Promise<FlowV3 | null> {
   return flows.find((flow) => getPublishedFlowInfo(flow)?.slug === workflow) || null;
 }
 
+async function cleanupDebugArtifactsForRun(
+  flow: FlowV3,
+  args: any,
+): Promise<
+  { requested: boolean; scope: 'run'; runId: string; deleted: number } | null | { error: string }
+> {
+  if (args?.cleanupArtifacts !== true) {
+    return null;
+  }
+  const runId = typeof args?.runId === 'string' ? args.runId.trim() : '';
+  if (!runId) {
+    return { error: 'runId is required when cleanupArtifacts is true' };
+  }
+
+  const storage = createStoragePort();
+  const run = await storage.runs.get(runId as RunId);
+  if (!run || run.flowId !== flow.id) {
+    return { error: `Run not found for workflow: ${runId}` };
+  }
+  return {
+    requested: true,
+    scope: 'run',
+    runId,
+    deleted: await storage.artifacts.deleteByRun(run.id),
+  };
+}
+
 async function collectDebugRuns(flow: FlowV3, args: any): Promise<WorkflowDebugRun[]> {
   const includeRuns = args?.includeRuns !== false;
   const runId = typeof args?.runId === 'string' ? args.runId.trim() : '';
@@ -666,7 +807,8 @@ async function collectDebugRuns(flow: FlowV3, args: any): Promise<WorkflowDebugR
 
   const storage = createStoragePort();
   const maxRuns = runId ? 1 : clampNumber(args?.maxRuns, 3, 0, 10);
-  const maxEventsPerRun = clampNumber(args?.maxEventsPerRun, 40, 0, 100);
+  const maxEventsPerRun = getDebugMaxEventsPerRun(args);
+  const nodeIdFilter = getDebugNodeIdFilter(args);
   const includeArtifacts = args?.includeArtifacts !== false;
   const includeArtifactData = shouldIncludeArtifactData(args, runId);
   const maxArtifactDataBytes = clampNumber(
@@ -701,9 +843,17 @@ async function collectDebugRuns(flow: FlowV3, args: any): Promise<WorkflowDebugR
       maxEventsPerRun > 0
         ? await storage.events.list(run.id, { fromSeq, limit: maxEventsPerRun })
         : [];
+    const filteredEvents = nodeIdFilter
+      ? events.filter((event) => 'nodeId' in event && event.nodeId === nodeIdFilter)
+      : events;
     const artifacts = includeArtifacts
-      ? (await storage.artifacts.listByRun(run.id)).map((artifact) =>
-          sanitizeDebugArtifact(artifact, includeArtifactData, maxArtifactDataBytes),
+      ? buildDebugArtifacts(
+          (await storage.artifacts.listByRun(run.id)).filter((artifact) =>
+            nodeIdFilter ? artifact.nodeId === nodeIdFilter : true,
+          ),
+          filteredEvents,
+          includeArtifactData,
+          maxArtifactDataBytes,
         )
       : undefined;
     debugRuns.push({
@@ -722,7 +872,7 @@ async function collectDebugRuns(flow: FlowV3, args: any): Promise<WorkflowDebugR
       ...(run.execution ? { execution: run.execution } : {}),
       ...(run.error ? { error: sanitizeError(run.error, sensitiveVariableNames) } : {}),
       ...(run.outputs ? { outputs: sanitizeRunObject(run.outputs, sensitiveVariableNames) } : {}),
-      events: events.map((event) => sanitizeEvent(event, sensitiveVariableNames)),
+      events: filteredEvents.map((event) => sanitizeEvent(event, sensitiveVariableNames)),
       ...(artifacts ? { artifacts } : {}),
     });
   }
@@ -1196,6 +1346,14 @@ class WorkflowDebugViewTool {
 
     const publishedInfo = getPublishedFlowInfo(flow);
     const hints = collectFlowHints(flow);
+    const includeArtifacts = args?.includeArtifacts !== false;
+    const expiredArtifactCleanupCount = includeArtifacts
+      ? await createStoragePort().artifacts.cleanupExpired(Date.now())
+      : 0;
+    const artifactCleanup = await cleanupDebugArtifactsForRun(flow, args);
+    if (artifactCleanup && 'error' in artifactCleanup) {
+      return createErrorResponse(artifactCleanup.error);
+    }
     const runs = await collectDebugRuns(flow, args);
     const descriptor = buildWorkflowToolDescriptor(flow);
 
@@ -1214,7 +1372,14 @@ class WorkflowDebugViewTool {
               variableCount: Array.isArray(flow.variables) ? flow.variables.length : 0,
               hintCount: hints.length,
               runCount: runs.length,
+              artifactCount: runs.reduce((sum, run) => sum + (run.artifacts?.length ?? 0), 0),
+              expiredArtifactCleanupCount,
               sideEffects: descriptor.sideEffects.summary,
+            },
+            artifactPolicy: {
+              contentTrust: 'untrusted',
+              dataInline: 'explicit_request_only_and_blocked_when_redaction_is_low_confidence',
+              cleanup: artifactCleanup ?? { requested: false },
             },
             hints,
             descriptor,

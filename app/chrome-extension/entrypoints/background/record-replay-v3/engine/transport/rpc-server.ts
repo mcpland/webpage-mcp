@@ -438,8 +438,15 @@ export class RpcServer {
           savedAs: artifact.filename,
           mimeType: artifact.mimeType,
           sizeBytes: artifact.sizeBytes,
+          ...(artifact.originalSizeBytes !== undefined
+            ? { originalSizeBytes: artifact.originalSizeBytes }
+            : {}),
+          ...(artifact.truncated !== undefined ? { truncated: artifact.truncated } : {}),
           createdAt: artifact.createdAt,
           expiresAt: artifact.expiresAt,
+          ...(artifact.ttlMs !== undefined ? { ttlMs: artifact.ttlMs } : {}),
+          ...(artifact.provenance ? { provenance: artifact.provenance } : {}),
+          ...(artifact.redaction ? { redaction: artifact.redaction } : {}),
           ...(artifact.metadata ? { metadata: artifact.metadata } : {}),
         })) as unknown as JsonValue;
       }
@@ -457,8 +464,15 @@ export class RpcServer {
           savedAs: artifact.filename,
           mimeType: artifact.mimeType,
           sizeBytes: artifact.sizeBytes,
+          ...(artifact.originalSizeBytes !== undefined
+            ? { originalSizeBytes: artifact.originalSizeBytes }
+            : {}),
+          ...(artifact.truncated !== undefined ? { truncated: artifact.truncated } : {}),
           createdAt: artifact.createdAt,
           expiresAt: artifact.expiresAt,
+          ...(artifact.ttlMs !== undefined ? { ttlMs: artifact.ttlMs } : {}),
+          ...(artifact.provenance ? { provenance: artifact.provenance } : {}),
+          ...(artifact.redaction ? { redaction: artifact.redaction } : {}),
           dataBase64: artifact.dataBase64,
           ...(artifact.metadata ? { metadata: artifact.metadata } : {}),
         } as unknown as JsonValue;

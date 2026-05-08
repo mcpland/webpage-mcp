@@ -8,6 +8,8 @@ import type { RRError } from '../../domain/errors';
 import { RR_ERROR_CODES, createRRError } from '../../domain/errors';
 import {
   createIndexedDbArtifactStore,
+  type ArtifactProvenance,
+  type ArtifactRedaction,
   type ArtifactRetentionPolicy,
   type ArtifactStore,
 } from '../../storage/artifacts';
@@ -53,7 +55,17 @@ export interface ArtifactService {
   /**
    * List persisted artifacts for a run.
    */
-  listArtifacts?(runId: RunId): Promise<Array<{ id: string; savedAs: string; sizeBytes: number }>>;
+  listArtifacts?(runId: RunId): Promise<Array<{
+    id: string;
+    savedAs: string;
+    sizeBytes: number;
+    originalSizeBytes?: number;
+    expiresAt?: number;
+    ttlMs?: number;
+    truncated?: boolean;
+    provenance?: ArtifactProvenance;
+    redaction?: ArtifactRedaction;
+  }>>;
 
   /**
    * Delete all artifacts for a run.
@@ -183,6 +195,14 @@ export function createChromeArtifactService(options: {
         id: record.id,
         savedAs: record.filename,
         sizeBytes: record.sizeBytes,
+        ...(record.originalSizeBytes !== undefined
+          ? { originalSizeBytes: record.originalSizeBytes }
+          : {}),
+        expiresAt: record.expiresAt,
+        ...(record.ttlMs !== undefined ? { ttlMs: record.ttlMs } : {}),
+        ...(record.truncated !== undefined ? { truncated: record.truncated } : {}),
+        ...(record.provenance ? { provenance: record.provenance } : {}),
+        ...(record.redaction ? { redaction: record.redaction } : {}),
       }));
     },
 

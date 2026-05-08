@@ -589,6 +589,105 @@ describe('V3 RunRunner onError contracts', () => {
     expect(screenshots[0]).not.toHaveProperty('data');
   });
 
+  it('artifacts: captures failure screenshots by default', async () => {
+    const runId = 'run-artifact-default-on-failure';
+    const artifactService: ArtifactService = {
+      screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'default-failure-shot' }),
+      saveScreenshot: vi.fn().mockResolvedValue({
+        savedAs: 'run-artifact-default-on-failure_A_1.png',
+        artifactId: 'run-artifact-default-on-failure/A/1',
+      }),
+    };
+    const flow = createFlow(
+      'A',
+      [{ id: 'A', kind: 'test', config: { action: 'fail' } }],
+      [],
+    );
+
+    const { runner, bus } = createRunnerContext(runId, flow, { artifactService });
+    const result = await runner.start();
+    expect(result.status).toBe('failed');
+
+    expect(artifactService.screenshot).toHaveBeenCalledWith(1, { background: false });
+    expect(artifactService.saveScreenshot).toHaveBeenCalledWith(
+      runId,
+      'A',
+      'default-failure-shot',
+      undefined,
+    );
+    const events = await listEvents(bus, runId);
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'artifact.screenshot' &&
+          event.artifactId === 'run-artifact-default-on-failure/A/1',
+      ),
+    ).toBe(true);
+  });
+
+  it('artifacts: captures successful nodes when policy is always', async () => {
+    const runId = 'run-artifact-always';
+    const artifactService: ArtifactService = {
+      screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'success-shot' }),
+      saveScreenshot: vi.fn().mockResolvedValue({
+        savedAs: 'run-artifact-always_A_1.png',
+        artifactId: 'run-artifact-always/A/1',
+      }),
+    };
+    const flow = createFlow(
+      'A',
+      [
+        {
+          id: 'A',
+          kind: 'test',
+          config: { action: 'succeed' },
+          policy: { artifacts: { screenshot: 'always' } },
+        },
+      ],
+      [],
+    );
+
+    const { runner } = createRunnerContext(runId, flow, { artifactService });
+    const result = await runner.start();
+    expect(result.status).toBe('succeeded');
+    expect(artifactService.screenshot).toHaveBeenCalledWith(1, { background: false });
+    expect(artifactService.saveScreenshot).toHaveBeenCalledWith(
+      runId,
+      'A',
+      'success-shot',
+      undefined,
+    );
+  });
+
+  it('artifacts: respects explicit never screenshot policy', async () => {
+    const runId = 'run-artifact-never';
+    const artifactService: ArtifactService = {
+      screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'should-not-capture' }),
+      saveScreenshot: vi.fn().mockResolvedValue({
+        savedAs: 'run-artifact-never_A_1.png',
+        artifactId: 'run-artifact-never/A/1',
+      }),
+    };
+    const flow = createFlow(
+      'A',
+      [
+        {
+          id: 'A',
+          kind: 'test',
+          config: { action: 'fail' },
+          policy: { artifacts: { screenshot: 'never' } },
+        },
+      ],
+      [],
+    );
+
+    const { runner } = createRunnerContext(runId, flow, { artifactService });
+    const result = await runner.start();
+    expect(result.status).toBe('failed');
+    expect(artifactService.screenshot).not.toHaveBeenCalled();
+    expect(artifactService.saveScreenshot).not.toHaveBeenCalled();
+  });
+
   it('artifacts: captures screenshots from the current runtime tab', async () => {
     const runId = 'run-artifact-current-tab';
     const artifactService: ArtifactService = {

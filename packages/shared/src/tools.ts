@@ -251,6 +251,10 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'string',
           description: 'Optional specific run ID to include in the debug view.',
         },
+        nodeId: {
+          type: 'string',
+          description: 'Optional node ID filter for returned events and artifacts.',
+        },
         includeRuns: {
           type: 'boolean',
           default: true,
@@ -268,6 +272,12 @@ export const TOOL_SCHEMAS: Tool[] = [
           maximum: 100,
           description: 'Maximum recent events to include per run. Default: 40.',
         },
+        maxEvents: {
+          type: 'number',
+          minimum: 0,
+          maximum: 100,
+          description: 'Alias for maxEventsPerRun. Default: 40.',
+        },
         includeArtifacts: {
           type: 'boolean',
           default: true,
@@ -276,7 +286,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         includeArtifactData: {
           type: 'boolean',
           description:
-            'Include screenshot base64 data for returned artifacts. Defaults to true when runId is provided and false otherwise.',
+            'Explicitly request screenshot base64 data for returned artifacts. Low-confidence or truncated artifacts are never inlined.',
         },
         maxArtifactDataBytes: {
           type: 'number',
@@ -284,6 +294,12 @@ export const TOOL_SCHEMAS: Tool[] = [
           maximum: 8388608,
           description:
             'Maximum artifact payload size to inline when includeArtifactData is true. Default: 2097152.',
+        },
+        cleanupArtifacts: {
+          type: 'boolean',
+          default: false,
+          description:
+            'Delete persisted artifacts for the specified runId before returning the debug view. Requires runId.',
         },
       },
       required: [],

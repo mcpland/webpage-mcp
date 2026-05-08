@@ -8,6 +8,21 @@ import { isSensitiveKeyName } from "../flows/sensitive";
 import { RR_V3_STORES, withTransaction } from "./db";
 
 export type ArtifactKind = "screenshot";
+export type ArtifactProvenanceSource = "runtimeCapture" | "pageContent";
+export type ArtifactTrust = "untrusted";
+export type ArtifactRedactionStatus = "redacted" | "notRequired" | "lowConfidence";
+export type ArtifactRedactionConfidence = "high" | "medium" | "low";
+
+export interface ArtifactProvenance {
+  source: ArtifactProvenanceSource;
+  trust: ArtifactTrust;
+}
+
+export interface ArtifactRedaction {
+  status: ArtifactRedactionStatus;
+  confidence: ArtifactRedactionConfidence;
+  warnings?: string[];
+}
 
 export interface ArtifactRecord {
   id: string;
@@ -18,8 +33,13 @@ export interface ArtifactRecord {
   mimeType: "image/png" | "image/jpeg";
   dataBase64: string;
   sizeBytes: number;
+  originalSizeBytes?: number;
+  truncated?: boolean;
   createdAt: number;
   expiresAt: number;
+  ttlMs?: number;
+  provenance?: ArtifactProvenance;
+  redaction?: ArtifactRedaction;
   metadata?: Record<string, string | number | boolean | null>;
 }
 
@@ -37,6 +57,8 @@ export interface SaveScreenshotArtifactInput {
   filename?: string;
   mimeType?: "image/png" | "image/jpeg";
   metadata?: Record<string, unknown>;
+  provenance?: ArtifactProvenance;
+  redaction?: ArtifactRedaction;
 }
 
 export interface ArtifactStore {
@@ -54,6 +76,9 @@ export const DEFAULT_ARTIFACT_RETENTION: ArtifactRetentionPolicy = {
   maxArtifactBytes: 8 * 1024 * 1024,
   maxArtifactsPerRun: 100,
 };
+
+const DEFAULT_SCREENSHOT_REDACTION_WARNING =
+  "Screenshot pixel content has low-confidence redaction; binary data is not inlined in MCP debug responses.";
 
 function positiveInteger(value: number, fallback: number): number {
   return Number.isFinite(value) ? Math.max(1, Math.floor(value)) : fallback;
@@ -167,6 +192,55 @@ function sanitizeMetadata(
   return Object.keys(out).length ? out : undefined;
 }
 
+function sanitizeWarning(value: string): string {
+  return redactSensitiveText(value).slice(0, 300);
+}
+
+function normalizeArtifactProvenance(
+  provenance?: ArtifactProvenance,
+): ArtifactProvenance {
+  return {
+    source:
+      provenance?.source === "pageContent" ? "pageContent" : "runtimeCapture",
+    trust: "untrusted",
+  };
+}
+
+function normalizeArtifactRedaction(
+  redaction: ArtifactRedaction | undefined,
+  warnings: string[] = [],
+): ArtifactRedaction {
+  const status =
+    redaction?.status === "redacted" ||
+    redaction?.status === "notRequired" ||
+    redaction?.status === "lowConfidence"
+      ? redaction.status
+      : "lowConfidence";
+  const confidence =
+    redaction?.confidence === "high" ||
+    redaction?.confidence === "medium" ||
+    redaction?.confidence === "low"
+      ? redaction.confidence
+      : status === "lowConfidence"
+        ? "low"
+        : "medium";
+  const safeWarnings = [
+    ...(Array.isArray(redaction?.warnings) ? redaction.warnings : []),
+    ...warnings,
+  ]
+    .filter(
+      (warning): warning is string =>
+        typeof warning === "string" && warning.trim().length > 0,
+    )
+    .map((warning) => sanitizeWarning(warning.trim()));
+
+  return {
+    status,
+    confidence,
+    ...(safeWarnings.length > 0 ? { warnings: safeWarnings.slice(0, 5) } : {}),
+  };
+}
+
 function newestFirstKeepingProtected(
   protectedIds: ReadonlySet<string>,
 ): (a: ArtifactRecord, b: ArtifactRecord) => number {
@@ -248,19 +322,25 @@ export function createIndexedDbArtifactStore(
     async saveScreenshot(input) {
       const createdAt = now();
       const safeBase64 = input.base64.trim();
-      const sizeBytes = estimateBase64Bytes(safeBase64);
-      if (sizeBytes <= 0) {
+      const originalSizeBytes = estimateBase64Bytes(safeBase64);
+      if (originalSizeBytes <= 0) {
         throw new Error("Artifact screenshot is empty");
       }
-      if (sizeBytes > policy.maxArtifactBytes) {
-        throw new Error(
-          `Artifact screenshot exceeds maxArtifactBytes (${sizeBytes} > ${policy.maxArtifactBytes})`,
-        );
-      }
+      const truncated = originalSizeBytes > policy.maxArtifactBytes;
+      const sizeBytes = truncated ? 0 : originalSizeBytes;
+      const ttlMs = Math.max(1, policy.ttlMs);
 
       const fallbackName = `${input.runId}_${input.nodeId}_${createdAt}.png`;
       const filename = sanitizeArtifactFilename(input.filename, fallbackName);
       const id = `${input.runId}/${input.nodeId}/${createdAt}_${Math.random().toString(36).slice(2, 8)}`;
+      const redactionWarnings = [
+        DEFAULT_SCREENSHOT_REDACTION_WARNING,
+        ...(truncated
+          ? [
+              `Artifact payload omitted because original size ${originalSizeBytes} exceeds maxArtifactBytes ${policy.maxArtifactBytes}.`,
+            ]
+          : []),
+      ];
       const record: ArtifactRecord = {
         id,
         runId: input.runId,
@@ -268,10 +348,15 @@ export function createIndexedDbArtifactStore(
         kind: "screenshot",
         filename,
         mimeType: input.mimeType ?? "image/png",
-        dataBase64: safeBase64,
+        dataBase64: truncated ? "" : safeBase64,
         sizeBytes,
+        originalSizeBytes,
+        truncated,
         createdAt,
-        expiresAt: createdAt + Math.max(1, policy.ttlMs),
+        expiresAt: createdAt + ttlMs,
+        ttlMs,
+        provenance: normalizeArtifactProvenance(input.provenance),
+        redaction: normalizeArtifactRedaction(input.redaction, redactionWarnings),
         metadata: sanitizeMetadata(input.metadata),
       };
 
