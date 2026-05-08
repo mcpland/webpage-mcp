@@ -1834,7 +1834,17 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(parseToolPayload(result)).toMatchObject({
       runId: "run-toolchain-failed",
       success: false,
+      flowId,
+      revision: expect.stringMatching(/^rev-fnv1a32-/),
       summary: { total: 1, success: 0, failed: 1, tookMs: 4 },
+      debug: {
+        debugTool: "workflow_debug_view",
+        debugArgs: {
+          runId: "run-toolchain-failed",
+          flowId,
+          includeArtifacts: true,
+        },
+      },
     });
   });
 

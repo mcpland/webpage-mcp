@@ -7,6 +7,7 @@ import type { FlowV3 } from "./domain/flow";
 import { FLOW_SCHEMA_VERSION, type FlowMeta } from "./domain/flow";
 import type { RunEvent, RunRecordV3 } from "./domain/events";
 import { isTerminalStatus } from "./domain/events";
+import { RR_ERROR_CODES, type RRError } from "./domain/errors";
 import type { FlowId, RunId } from "./domain/ids";
 import type { JsonObject } from "./domain/json";
 import { bootstrapV3, type V3Runtime } from "./bootstrap";
@@ -266,6 +267,121 @@ function toRunLogEntries(events: RunEvent[]): RunLogEntry[] {
   return entries;
 }
 
+type StandardRunErrorCategory =
+  | "validation"
+  | "safety"
+  | "capability"
+  | "runtime"
+  | "resource"
+  | "storage"
+  | "stale_revision";
+
+function classifyRunErrorCategory(code: string): StandardRunErrorCategory {
+  switch (code) {
+    case RR_ERROR_CODES.VALIDATION_ERROR:
+    case RR_ERROR_CODES.UNSUPPORTED_NODE:
+    case RR_ERROR_CODES.DAG_INVALID:
+    case RR_ERROR_CODES.DAG_CYCLE:
+      return "validation";
+    case RR_ERROR_CODES.PERMISSION_DENIED:
+      return "safety";
+    case RR_ERROR_CODES.TAB_NOT_FOUND:
+    case RR_ERROR_CODES.FRAME_NOT_FOUND:
+      return "capability";
+    case RR_ERROR_CODES.TIMEOUT:
+    case RR_ERROR_CODES.TARGET_NOT_FOUND:
+    case RR_ERROR_CODES.ELEMENT_NOT_VISIBLE:
+    case RR_ERROR_CODES.NAVIGATION_FAILED:
+    case RR_ERROR_CODES.NETWORK_REQUEST_FAILED:
+    case RR_ERROR_CODES.TOOL_ERROR:
+    case RR_ERROR_CODES.SCRIPT_FAILED:
+    case RR_ERROR_CODES.RUN_CANCELED:
+    case RR_ERROR_CODES.RUN_PAUSED:
+    case RR_ERROR_CODES.INTERNAL:
+    case RR_ERROR_CODES.INVARIANT_VIOLATION:
+    default:
+      return "runtime";
+  }
+}
+
+function inferRetryable(code: string, error: RRError | undefined): boolean {
+  if (typeof error?.retryable === "boolean") {
+    return error.retryable;
+  }
+  return (
+    code === RR_ERROR_CODES.TIMEOUT ||
+    code === RR_ERROR_CODES.TAB_NOT_FOUND ||
+    code === RR_ERROR_CODES.FRAME_NOT_FOUND ||
+    code === RR_ERROR_CODES.TARGET_NOT_FOUND ||
+    code === RR_ERROR_CODES.ELEMENT_NOT_VISIBLE ||
+    code === RR_ERROR_CODES.NAVIGATION_FAILED ||
+    code === RR_ERROR_CODES.NETWORK_REQUEST_FAILED
+  );
+}
+
+function findFailureEvent(events: RunEvent[]):
+  | Extract<RunEvent, { type: "node.failed" | "run.failed" }>
+  | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type === "node.failed" || event?.type === "run.failed") {
+      return event;
+    }
+  }
+  return undefined;
+}
+
+function buildStandardRunError(
+  run: RunRecordV3,
+  events: RunEvent[],
+):
+  | {
+      code: string;
+      category: StandardRunErrorCategory;
+      retryable: boolean;
+      message: string;
+      nodeId?: string;
+      data?: unknown;
+    }
+  | undefined {
+  const failureEvent = findFailureEvent(events);
+  const error = run.error ?? failureEvent?.error;
+  const nodeId =
+    run.currentNodeId ??
+    (failureEvent && "nodeId" in failureEvent ? failureEvent.nodeId : undefined);
+
+  if (!error && run.status === "canceled") {
+    return {
+      code: RR_ERROR_CODES.RUN_CANCELED,
+      category: "runtime",
+      retryable: false,
+      message: "Run was canceled",
+      ...(nodeId ? { nodeId } : {}),
+    };
+  }
+  if (!error || run.status !== "failed") {
+    return undefined;
+  }
+
+  return {
+    code: error.code,
+    category: classifyRunErrorCategory(error.code),
+    retryable: inferRetryable(error.code, error),
+    message: error.message,
+    ...(nodeId ? { nodeId } : {}),
+    ...(error.data !== undefined ? { data: error.data } : {}),
+  };
+}
+
+function summarizeEvents(events: RunEvent[]): RunResult["eventSummary"] {
+  return {
+    totalEvents: events.length,
+    nodeEvents: events.filter((event) => event.type.startsWith("node.")).length,
+    artifactEvents: events.filter((event) => event.type.startsWith("artifact.")).length,
+    ...(events.length > 0 ? { lastSeq: events[events.length - 1].seq } : {}),
+  };
+}
+
 export function buildCompatRunResult(
   run: RunRecordV3,
   events: RunEvent[],
@@ -281,11 +397,19 @@ export function buildCompatRunResult(
     (entry) => entry.status === "failed",
   ).length;
   const total = nodeEntries.length;
+  const error = buildStandardRunError(run, events);
+  const currentNodeId = run.currentNodeId ?? error?.nodeId;
+  const isSuccessfulTerminal =
+    run.status === "succeeded" || run.status === "stopped_at_boundary";
 
   return {
     runId: run.id,
-    success: run.status === "succeeded",
+    flowId: run.flowId,
+    success: isSuccessfulTerminal,
     status: run.status,
+    ...(currentNodeId ? { currentNodeId } : {}),
+    ...(error?.nodeId ? { failedNodeId: error.nodeId } : {}),
+    ...(error ? { errorCode: error.code, error } : {}),
     ...(typeof run.tabId === "number" ? { tabId: run.tabId } : {}),
     summary: {
       total,
@@ -293,9 +417,24 @@ export function buildCompatRunResult(
       failed: failedCount,
       tookMs: run.tookMs ?? 0,
     },
+    eventSummary: summarizeEvents(events),
     outputs: run.outputs ?? null,
     logs,
     paused: run.status === "paused",
+    ...(error
+      ? {
+          debug: {
+            debugTool: "workflow_debug_view",
+            debugArgs: {
+              runId: run.id,
+              flowId: run.flowId,
+              ...(error.nodeId ? { nodeId: error.nodeId } : {}),
+              maxEvents: 200,
+              includeArtifacts: true,
+            },
+          },
+        }
+      : {}),
   };
 }
 

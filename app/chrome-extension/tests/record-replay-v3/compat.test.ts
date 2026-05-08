@@ -17,10 +17,12 @@ vi.mock(
 );
 
 import {
+  buildCompatRunResult,
   enqueueRunAndWait,
   importFlowsToV3,
   saveFlowToV3,
 } from "@/entrypoints/background/record-replay-v3/compat";
+import { RR_ERROR_CODES } from "@/entrypoints/background/record-replay-v3/domain/errors";
 
 function asMock(fn: unknown): ReturnType<typeof vi.fn> {
   return fn as ReturnType<typeof vi.fn>;
@@ -432,6 +434,97 @@ describe("record-replay-v3 compat", () => {
 
     expect(chrome.tabs.create).not.toHaveBeenCalled();
     expect(mocks.enqueueRun).not.toHaveBeenCalled();
+  });
+
+  it("standardizes failed V3 run results with error taxonomy and debug args", () => {
+    const result = buildCompatRunResult(
+      {
+        schemaVersion: 3,
+        id: "run-failed" as any,
+        flowId: "flow-failed" as any,
+        status: "failed",
+        createdAt: 1,
+        updatedAt: 12,
+        startedAt: 2,
+        finishedAt: 12,
+        tookMs: 10,
+        tabId: 7,
+        currentNodeId: "fill-email" as any,
+        attempt: 1,
+        maxAttempts: 1,
+        error: {
+          code: RR_ERROR_CODES.TARGET_NOT_FOUND,
+          message: "Could not locate target",
+        },
+        nextSeq: 4,
+      },
+      [
+        {
+          type: "node.started",
+          runId: "run-failed" as any,
+          nodeId: "fill-email" as any,
+          attempt: 1,
+          ts: 3,
+          seq: 0,
+        },
+        {
+          type: "node.failed",
+          runId: "run-failed" as any,
+          nodeId: "fill-email" as any,
+          attempt: 1,
+          error: {
+            code: RR_ERROR_CODES.TARGET_NOT_FOUND,
+            message: "Could not locate target",
+          },
+          decision: "stop",
+          ts: 10,
+          seq: 1,
+        },
+        {
+          type: "run.failed",
+          runId: "run-failed" as any,
+          nodeId: "fill-email" as any,
+          error: {
+            code: RR_ERROR_CODES.TARGET_NOT_FOUND,
+            message: "Could not locate target",
+          },
+          ts: 12,
+          seq: 2,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      runId: "run-failed",
+      flowId: "flow-failed",
+      success: false,
+      status: "failed",
+      currentNodeId: "fill-email",
+      failedNodeId: "fill-email",
+      errorCode: RR_ERROR_CODES.TARGET_NOT_FOUND,
+      error: {
+        code: RR_ERROR_CODES.TARGET_NOT_FOUND,
+        category: "runtime",
+        retryable: true,
+        message: "Could not locate target",
+        nodeId: "fill-email",
+      },
+      debug: {
+        debugTool: "workflow_debug_view",
+        debugArgs: {
+          runId: "run-failed",
+          flowId: "flow-failed",
+          nodeId: "fill-email",
+          includeArtifacts: true,
+        },
+      },
+      eventSummary: {
+        totalEvents: 3,
+        nodeEvents: 2,
+        artifactEvents: 0,
+        lastSeq: 2,
+      },
+    });
   });
 
   it("uses about:blank for public new-tab runs when the active tab is a local file page", async () => {

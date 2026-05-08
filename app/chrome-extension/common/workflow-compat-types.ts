@@ -100,15 +100,37 @@ export interface RunResult {
   runId: string;
   success: boolean;
   status?: string;
+  flowId?: string;
+  workflow?: string;
+  revision?: string;
+  currentNodeId?: string;
+  failedNodeId?: string;
+  errorCode?: string;
+  error?: {
+    code: string;
+    category: 'validation' | 'safety' | 'capability' | 'runtime' | 'resource' | 'storage' | 'stale_revision';
+    retryable: boolean;
+    message: string;
+    nodeId?: string;
+    data?: unknown;
+  };
   tabId?: number;
   summary: { total: number; success: number; failed: number; tookMs: number };
+  eventSummary?: {
+    totalEvents: number;
+    nodeEvents: number;
+    artifactEvents: number;
+    lastSeq?: number;
+  };
   url?: string | null;
   outputs?: Record<string, any> | null;
   logs?: RunLogEntry[];
   screenshots?: { onFailure?: string | null };
   paused?: boolean;
   debug?: {
-    steps: Array<{
+    debugTool?: string;
+    debugArgs?: Record<string, unknown>;
+    steps?: Array<{
       stepId: string;
       type: string;
       status: 'success' | 'failed' | 'paused';

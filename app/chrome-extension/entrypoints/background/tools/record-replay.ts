@@ -6,6 +6,7 @@ import type { JsonObject } from "../record-replay-v3/domain/json";
 import type { FlowV3 } from "../record-replay-v3/domain/flow";
 import {
   calculateWorkflowRevision,
+  getPublishedFlowInfo,
   listPublishedFlowDetails,
 } from "../record-replay-v3/flows/publish";
 import { enqueueRunAndWait } from "../record-replay-v3/compat";
@@ -235,10 +236,29 @@ class FlowRunTool {
       );
     }
 
+    const revision = calculateWorkflowRevision(flow);
+    const publishedInfo = getPublishedFlowInfo(flow);
     const response = {
       ...result,
       flowId: flow.id,
-      revision: calculateWorkflowRevision(flow),
+      ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : {}),
+      revision,
+      ...(result.success !== true
+        ? {
+            debug: {
+              ...(result.debug ?? {}),
+              debugTool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
+              debugArgs: {
+                runId: result.runId,
+                flowId: flow.id,
+                ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : {}),
+                ...(result.currentNodeId ? { nodeId: result.currentNodeId } : {}),
+                maxEvents: 200,
+                includeArtifacts: true,
+              },
+            },
+          }
+        : {}),
       ...(ignoredOptions.length > 0
         ? { warning: `Ignored legacy run options: ${ignoredOptions.join(", ")}` }
         : {}),
