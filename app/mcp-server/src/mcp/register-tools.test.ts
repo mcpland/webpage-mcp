@@ -4,12 +4,15 @@ import {
   callToolForContext,
   clearDynamicFlowCacheForSession,
   listToolsForContext,
+  resolveMcpClientCapabilities,
+  type McpClientCapabilityFallback,
   type McpToolContext,
 } from './register-tools';
 
 function createContext(
   sessionId: string,
   sendRequestToExtensionAndWait: ReturnType<typeof vi.fn>,
+  clientCapabilities?: Partial<McpClientCapabilityFallback>,
 ): McpToolContext {
   return {
     sessionId,
@@ -17,6 +20,12 @@ function createContext(
     nativeHost: {
       sendRequestToExtensionAndWait,
     } as unknown as McpToolContext['nativeHost'],
+    clientCapabilities: clientCapabilities
+      ? {
+          ...resolveMcpClientCapabilities(),
+          ...clientCapabilities,
+        }
+      : undefined,
   };
 }
 
@@ -42,6 +51,7 @@ describe('dynamic published flow tools', () => {
     clearDynamicFlowCacheForSession('dynamic-flow-tools-descriptor');
     clearDynamicFlowCacheForSession('dynamic-flow-call');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-run');
+    clearDynamicFlowCacheForSession('dynamic-flow-workflow-run-enum');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-run-list');
     clearDynamicFlowCacheForSession('dynamic-flow-capability-filter');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-call');
@@ -290,7 +300,7 @@ describe('dynamic published flow tools', () => {
     });
   });
 
-  it('exposes a compact workflow_run tool with workflow slugs as an enum', async () => {
+  it('uses a plain workflow string when client tool-list refresh support is unknown', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
       status: 'success',
       items: [
@@ -317,11 +327,12 @@ describe('dynamic published flow tools', () => {
 
     expect(workflowRunTool?.description).toContain('signup: Published signup flow');
     expect(workflowRunTool?.description).toContain('checkout: Complete checkout');
+    expect(workflowRunTool?.description).toContain('validated at runtime');
     expect(input.required).toEqual(['workflow']);
     expect(input.properties?.workflow).toMatchObject({
       type: 'string',
-      enum: ['signup', 'checkout'],
     });
+    expect(input.properties?.workflow.enum).toBeUndefined();
     expect(input.properties?.args).toMatchObject({
       type: 'object',
       additionalProperties: true,
@@ -329,6 +340,41 @@ describe('dynamic published flow tools', () => {
     expect(input.properties?.background).toMatchObject({
       type: 'boolean',
       default: false,
+    });
+  });
+
+  it('adds workflow slug enum when the client declares tool-list refresh support', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [
+        {
+          id: 'flow-signup',
+          slug: 'signup',
+          description: 'Published signup flow',
+        },
+        {
+          id: 'flow-checkout',
+          slug: 'checkout',
+          description: 'Published checkout flow',
+        },
+      ],
+    });
+    const ctx = createContext('dynamic-flow-workflow-run-enum', sendRequestToExtensionAndWait, {
+      toolListChanged: true,
+      source: 'initialize',
+      warnings: [],
+    });
+
+    const tools = await listToolsForContext(ctx);
+    const workflowRunTool = tools.find((tool) => tool.name === 'workflow_run');
+    const input = workflowRunTool?.inputSchema as {
+      properties?: Record<string, any>;
+    };
+
+    expect(workflowRunTool?.description).toContain('currently published slugs');
+    expect(input.properties?.workflow).toMatchObject({
+      type: 'string',
+      enum: ['signup', 'checkout'],
     });
   });
 

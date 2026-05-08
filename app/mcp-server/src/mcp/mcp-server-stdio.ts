@@ -15,6 +15,7 @@ import { TOOL_SCHEMAS } from 'webpage-mcp-shared';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { getLegacyNativeSocketPath, getNativeSocketPath } from '../ipc/socket-path';
 import { autoBootstrapNativeMessagingForStdio } from '../scripts/utils';
+import { resolveMcpClientCapabilities } from './register-tools';
 
 function parsePositiveInt(input: string | undefined, fallback: number): number {
   if (!input) {
@@ -318,6 +319,7 @@ function getStdioMcpServer(): Server {
 async function listToolsFromBridge(): Promise<Tool[]> {
   const result = await bridgeClient.request<{ tools?: Tool[] }>('mcp_list_tools', {
     sessionId: mcpSessionId,
+    clientCapabilities: resolveMcpClientCapabilities(stdioMcpServer?.getClientCapabilities()),
   });
   if (!result || !Array.isArray(result.tools)) {
     return TOOL_SCHEMAS;
@@ -330,6 +332,7 @@ async function callToolFromBridge(name: string, args: Record<string, unknown>): 
     sessionId: mcpSessionId,
     name,
     args,
+    clientCapabilities: resolveMcpClientCapabilities(stdioMcpServer?.getClientCapabilities()),
   }, 120_000);
   if (!result?.result) {
     throw new Error('Missing result from native bridge');

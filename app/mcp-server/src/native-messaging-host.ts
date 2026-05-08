@@ -20,7 +20,11 @@ import {
   getLegacyNativeSocketPath,
   getNativeSocketPath,
 } from './ipc/socket-path';
-import { callToolForContext, listToolsForContext } from './mcp/register-tools';
+import {
+  callToolForContext,
+  listToolsForContext,
+  type McpClientCapabilityFallback,
+} from './mcp/register-tools';
 
 interface PendingRequest {
   resolve: (value: any) => void;
@@ -224,6 +228,8 @@ export class NativeMessagingHost {
           sessionId,
           instanceId,
           nativeHost: this,
+          clientCapabilities: (params as Record<string, unknown>)
+            .clientCapabilities as McpClientCapabilityFallback | undefined,
         });
         return { tools };
       }
@@ -239,6 +245,7 @@ export class NativeMessagingHost {
             sessionId,
             instanceId,
             nativeHost: this,
+            clientCapabilities: paramsRecord.clientCapabilities as McpClientCapabilityFallback | undefined,
           },
           name,
           args,

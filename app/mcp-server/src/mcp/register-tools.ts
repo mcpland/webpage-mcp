@@ -20,6 +20,17 @@ export interface McpToolContext {
   sessionId: string;
   instanceId: string;
   nativeHost: NativeMessagingHost;
+  clientCapabilities?: McpClientCapabilityFallback;
+}
+
+export interface McpClientCapabilityFallback {
+  toolListChanged: boolean;
+  resourceReferences: boolean;
+  cancellation: boolean;
+  structuredErrors: boolean;
+  largeResults: boolean;
+  source: 'initialize' | 'env' | 'default';
+  warnings: string[];
 }
 
 interface PublishedFlowVariable {
@@ -120,6 +131,147 @@ const MCP_SERVER_VERSION = (() => {
   }
   return process.env.npm_package_version || 'unknown';
 })();
+
+function getNestedBoolean(value: unknown, paths: string[][]): boolean | undefined {
+  for (const path of paths) {
+    let current = value;
+    for (const key of path) {
+      if (!current || typeof current !== 'object' || Array.isArray(current)) {
+        current = undefined;
+        break;
+      }
+      current = (current as Record<string, unknown>)[key];
+    }
+    if (typeof current === 'boolean') {
+      return current;
+    }
+  }
+  return undefined;
+}
+
+function readEnvBoolean(name: string): boolean | undefined {
+  const raw = process.env[name];
+  if (raw === undefined) {
+    return undefined;
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+}
+
+function resolveClientCapabilityBoolean(
+  initializeCapabilities: unknown,
+  envName: string,
+  paths: string[][],
+): { value: boolean; source: 'initialize' | 'env' | 'default' } {
+  const fromInitialize = getNestedBoolean(initializeCapabilities, paths);
+  if (fromInitialize !== undefined) {
+    return { value: fromInitialize, source: 'initialize' };
+  }
+  const fromEnv = readEnvBoolean(envName);
+  if (fromEnv !== undefined) {
+    return { value: fromEnv, source: 'env' };
+  }
+  return { value: false, source: 'default' };
+}
+
+function strongestClientCapabilitySource(
+  sources: Array<'initialize' | 'env' | 'default'>,
+): 'initialize' | 'env' | 'default' {
+  if (sources.includes('initialize')) return 'initialize';
+  if (sources.includes('env')) return 'env';
+  return 'default';
+}
+
+export function resolveMcpClientCapabilities(
+  initializeCapabilities?: unknown,
+): McpClientCapabilityFallback {
+  const toolListChanged = resolveClientCapabilityBoolean(
+    initializeCapabilities,
+    'WEBPAGE_MCP_CLIENT_TOOL_LIST_CHANGED',
+    [
+      ['tools', 'listChanged'],
+      ['notifications', 'toolsListChanged'],
+      ['experimental', 'toolsListChanged'],
+      ['experimental', 'toolListChanged'],
+    ],
+  );
+  const resourceReferences = resolveClientCapabilityBoolean(
+    initializeCapabilities,
+    'WEBPAGE_MCP_CLIENT_RESOURCE_REFERENCES',
+    [
+      ['resources', 'references'],
+      ['experimental', 'resourceReferences'],
+    ],
+  );
+  const cancellation = resolveClientCapabilityBoolean(
+    initializeCapabilities,
+    'WEBPAGE_MCP_CLIENT_CANCELLATION',
+    [
+      ['cancellation'],
+      ['notifications', 'cancelled'],
+      ['experimental', 'cancellation'],
+    ],
+  );
+  const structuredErrors = resolveClientCapabilityBoolean(
+    initializeCapabilities,
+    'WEBPAGE_MCP_CLIENT_STRUCTURED_ERRORS',
+    [
+      ['errors', 'structured'],
+      ['experimental', 'structuredErrors'],
+    ],
+  );
+  const largeResults = resolveClientCapabilityBoolean(
+    initializeCapabilities,
+    'WEBPAGE_MCP_CLIENT_LARGE_RESULTS',
+    [
+      ['results', 'large'],
+      ['experimental', 'largeResults'],
+    ],
+  );
+  const source = strongestClientCapabilitySource([
+    toolListChanged.source,
+    resourceReferences.source,
+    cancellation.source,
+    structuredErrors.source,
+    largeResults.source,
+  ]);
+  const warnings: string[] = [];
+  if (!toolListChanged.value) {
+    warnings.push(
+      'MCP client tool-list change support is not confirmed; workflow_run.workflow uses plain string runtime validation.',
+    );
+  }
+  if (!resourceReferences.value) {
+    warnings.push(
+      'MCP client resource references are not confirmed; debug artifacts should be returned as compact summaries.',
+    );
+  }
+  if (!cancellation.value) {
+    warnings.push(
+      'MCP client cancellation support is not confirmed; long-running workflow operations should use bounded timeouts.',
+    );
+  }
+
+  return {
+    toolListChanged: toolListChanged.value,
+    resourceReferences: resourceReferences.value,
+    cancellation: cancellation.value,
+    structuredErrors: structuredErrors.value,
+    largeResults: largeResults.value,
+    source,
+    warnings,
+  };
+}
+
+function getClientCapabilitiesForContext(ctx: McpToolContext): McpClientCapabilityFallback {
+  return ctx.clientCapabilities ?? resolveMcpClientCapabilities();
+}
 
 export function clearDynamicFlowCacheForSession(sessionId: string): void {
   if (!sessionId) {
@@ -523,7 +675,9 @@ async function fetchPublishedFlows(
         handshake: {
           protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
           mcpServerVersion: MCP_SERVER_VERSION,
-          clientCapabilities: [],
+          clientCapabilities: Object.entries(getClientCapabilitiesForContext(ctx))
+            .filter(([, value]) => value === true)
+            .map(([key]) => key),
         },
       },
       'rr_list_published_flows',
@@ -656,6 +810,7 @@ function addWorkflowRunOptionProperties(
 function buildWorkflowRunTool(
   items: PublishedFlow[],
   capabilities: WebpageMcpExtensionCapabilities,
+  clientCapabilities: McpClientCapabilityFallback,
 ): Tool {
   const workflowSlugs = items.map((item) => item.slug).filter((slug) => slug.length > 0);
   const workflowProperty: Record<string, unknown> = {
@@ -663,7 +818,7 @@ function buildWorkflowRunTool(
     description:
       'Published workflow slug to run. Use workflow_describe or record_replay_list_published for parameter schema, examples, background support, and side-effect metadata.',
   };
-  if (workflowSlugs.length > 0) {
+  if (workflowSlugs.length > 0 && clientCapabilities.toolListChanged) {
     workflowProperty.enum = workflowSlugs;
   }
   const runOptionKeys = getRunOptionKeySet(capabilities);
@@ -679,7 +834,11 @@ function buildWorkflowRunTool(
 
   return {
     name: WORKFLOW_RUN_TOOL_NAME,
-    description: `Run a published workflow by slug using a compact schema. Use workflow_describe before running when you need exact args or side-effect/background details. Available workflows:\n${getWorkflowSummary(items)}`,
+    description: `Run a published workflow by slug using a compact schema. Use workflow_describe before running when you need exact args or side-effect/background details. ${
+      clientCapabilities.toolListChanged
+        ? 'The workflow field includes the currently published slugs.'
+        : 'Client tool-list refresh support is not confirmed, so workflow is validated at runtime.'
+    } Available workflows:\n${getWorkflowSummary(items)}`,
     inputSchema: {
       type: 'object',
       properties,
@@ -818,21 +977,34 @@ async function listDynamicFlowTools(
 export const setupTools = (server: Server, ctx: McpToolContext) => {
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: await listToolsForContext(ctx) };
+    return {
+      tools: await listToolsForContext({
+        ...ctx,
+        clientCapabilities: resolveMcpClientCapabilities(server.getClientCapabilities()),
+      }),
+    };
   });
 
   // Call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    callToolForContext(ctx, request.params.name, request.params.arguments || {}),
+    callToolForContext(
+      {
+        ...ctx,
+        clientCapabilities: resolveMcpClientCapabilities(server.getClientCapabilities()),
+      },
+      request.params.name,
+      request.params.arguments || {},
+    ),
   );
 };
 
 export async function listToolsForContext(ctx: McpToolContext): Promise<Tool[]> {
   const items = await fetchPublishedFlows(ctx);
   const capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
+  const clientCapabilities = getClientCapabilitiesForContext(ctx);
   const tools = [...filterPublicToolsForCapabilities(capabilities)];
   if (supportsWorkflowRun(capabilities)) {
-    tools.push(buildWorkflowRunTool(items, capabilities));
+    tools.push(buildWorkflowRunTool(items, capabilities, clientCapabilities));
   }
   if (shouldExposeLegacyDynamicFlowTools() && supportsWorkflowRun(capabilities)) {
     tools.push(...(await listDynamicFlowTools(ctx, capabilities, items)));
