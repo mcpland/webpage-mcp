@@ -5494,41 +5494,234 @@ function buildTargetRuntimeMeta(flow: FlowV3): NonNullable<FlowV3['meta']>['runt
   };
 }
 
-function inferMigrationQualityStaleReason(flow: FlowV3): string | undefined {
-  if (
-    flow.meta?.runtime?.dslVersion &&
-    flow.meta.runtime.dslVersion !== FLOW_DSL_VERSION
-  ) {
-    return 'dsl_version_mismatch';
+type WorkflowRuntimeVersionChange = 'same' | 'patch' | 'minor' | 'major' | 'legacy_unknown' | 'future';
+type WorkflowCompatibilityDecision =
+  | 'current'
+  | 'metadata_only_compatible'
+  | 'compatible_patch'
+  | 'compatible_minor_unaffected'
+  | 'requires_revalidation'
+  | 'blocked_breaking_change';
+
+interface ParsedWorkflowRuntimeVersion {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+interface WorkflowRuntimeCompatibility {
+  decision: WorkflowCompatibilityDecision;
+  staleReason?: string;
+  qualityStatus?: 'stale' | 'blocked';
+  dslChange: WorkflowRuntimeVersionChange;
+  nodeSemanticsChange: WorkflowRuntimeVersionChange;
+  affectedNodeKinds: string[];
+  affectedFields: string[];
+  compatibilityNotes: string[];
+}
+
+const DSL_MINOR_AFFECTED_FIELDS = ['/variables', '/meta/exposedOutputs', '/edges'];
+const NODE_SEMANTICS_MINOR_AFFECTED_NODE_KINDS = new Set([
+  'assert',
+  'click',
+  'extract',
+  'fill',
+  'navigate',
+  'wait',
+]);
+const NODE_SEMANTICS_MINOR_AFFECTED_FIELDS = [
+  '/nodes/*/config',
+  '/nodes/*/policy',
+  '/nodes/*/sideEffect',
+];
+
+function parseWorkflowRuntimeVersion(value: string | undefined): ParsedWorkflowRuntimeVersion | null {
+  if (!value) {
+    return null;
   }
-  if (
-    flow.meta?.runtime?.nodeSemanticsVersion &&
-    flow.meta.runtime.nodeSemanticsVersion !== FLOW_NODE_SEMANTICS_VERSION
-  ) {
-    return 'node_semantics_mismatch';
+  const match = value.trim().match(/^(\d+)(?:[.-](\d+))?(?:[.-](\d+))?/);
+  if (!match) {
+    return null;
   }
-  return undefined;
+  const major = Number(match[1]);
+  const minor = Number(match[2] ?? 0);
+  const patch = Number(match[3] ?? 0);
+  if (![major, minor, patch].every((part) => Number.isFinite(part) && part >= 0)) {
+    return null;
+  }
+  return { major, minor, patch };
+}
+
+function compareParsedWorkflowRuntimeVersion(
+  before: ParsedWorkflowRuntimeVersion,
+  target: ParsedWorkflowRuntimeVersion,
+): number {
+  if (before.major !== target.major) return before.major - target.major;
+  if (before.minor !== target.minor) return before.minor - target.minor;
+  return before.patch - target.patch;
+}
+
+function classifyWorkflowRuntimeVersionChange(
+  beforeValue: string | undefined,
+  targetValue: string,
+): WorkflowRuntimeVersionChange {
+  if (!beforeValue || beforeValue === targetValue) {
+    return 'same';
+  }
+  const before = parseWorkflowRuntimeVersion(beforeValue);
+  const target = parseWorkflowRuntimeVersion(targetValue);
+  if (!before || !target) {
+    return 'legacy_unknown';
+  }
+  if (compareParsedWorkflowRuntimeVersion(before, target) > 0) {
+    return 'future';
+  }
+  if (before.major !== target.major) return 'major';
+  if (before.minor !== target.minor) return 'minor';
+  if (before.patch !== target.patch) return 'patch';
+  return 'same';
+}
+
+function getWorkflowNodeKinds(flow: FlowV3): string[] {
+  return Array.from(new Set((Array.isArray(flow.nodes) ? flow.nodes : []).map((node) => node.kind))).sort();
+}
+
+function flowUsesDslMinorAffectedFields(flow: FlowV3): boolean {
+  return (
+    (Array.isArray(flow.variables) && flow.variables.length > 0) ||
+    (Array.isArray(flow.edges) && flow.edges.length > 0) ||
+    (Array.isArray(flow.meta?.exposedOutputs) && flow.meta.exposedOutputs.length > 0)
+  );
+}
+
+function getNodeSemanticsMinorAffectedNodeKinds(flow: FlowV3): string[] {
+  return getWorkflowNodeKinds(flow).filter((kind) => NODE_SEMANTICS_MINOR_AFFECTED_NODE_KINDS.has(kind));
+}
+
+function evaluateWorkflowRuntimeCompatibility(flow: FlowV3): WorkflowRuntimeCompatibility {
+  const runtime = flow.meta?.runtime;
+  const dslChange = classifyWorkflowRuntimeVersionChange(runtime?.dslVersion, FLOW_DSL_VERSION);
+  const nodeSemanticsChange = classifyWorkflowRuntimeVersionChange(
+    runtime?.nodeSemanticsVersion,
+    FLOW_NODE_SEMANTICS_VERSION,
+  );
+  const affectedNodeKinds = new Set<string>();
+  const affectedFields = new Set<string>();
+  const compatibilityNotes: string[] = [];
+  let decision: WorkflowCompatibilityDecision = 'current';
+  let staleReason: string | undefined;
+  let qualityStatus: 'stale' | 'blocked' | undefined;
+
+  const markCompatible = (nextDecision: WorkflowCompatibilityDecision, note: string) => {
+    if (decision === 'current' || decision === 'metadata_only_compatible') {
+      decision = nextDecision;
+    }
+    compatibilityNotes.push(note);
+  };
+  const markRevalidation = (reason: string, fields: string[], nodeKinds: string[] = []) => {
+    if (decision !== 'blocked_breaking_change') {
+      decision = 'requires_revalidation';
+      staleReason = staleReason ?? reason;
+      qualityStatus = qualityStatus ?? 'stale';
+    }
+    fields.forEach((field) => affectedFields.add(field));
+    nodeKinds.forEach((kind) => affectedNodeKinds.add(kind));
+  };
+  const markBlocked = (reason: string, fields: string[], nodeKinds: string[] = getWorkflowNodeKinds(flow)) => {
+    decision = 'blocked_breaking_change';
+    staleReason = staleReason ?? reason;
+    qualityStatus = 'blocked';
+    fields.forEach((field) => affectedFields.add(field));
+    nodeKinds.forEach((kind) => affectedNodeKinds.add(kind));
+  };
+
+  if (!runtime?.dslVersion && !runtime?.nodeSemanticsVersion) {
+    decision = 'metadata_only_compatible';
+    compatibilityNotes.push('missing runtime metadata can be backfilled without changing quality');
+  }
+
+  if (dslChange === 'patch') {
+    markCompatible('compatible_patch', 'DSL patch change is metadata-compatible.');
+  } else if (dslChange === 'minor') {
+    if (flowUsesDslMinorAffectedFields(flow)) {
+      markRevalidation('dsl_minor_affected_fields', DSL_MINOR_AFFECTED_FIELDS);
+    } else {
+      markCompatible('compatible_minor_unaffected', 'DSL minor change does not affect fields used by this workflow.');
+    }
+  } else if (dslChange === 'major') {
+    markBlocked('dsl_major_mismatch', ['/nodes', '/edges', '/variables', '/meta/exposedOutputs']);
+  } else if (dslChange === 'future') {
+    markBlocked('dsl_future_version', ['/meta/runtime/dslVersion']);
+  } else if (dslChange === 'legacy_unknown') {
+    markRevalidation('dsl_version_mismatch', ['/meta/runtime/dslVersion']);
+  }
+
+  if (nodeSemanticsChange === 'patch') {
+    markCompatible('compatible_patch', 'Node semantics patch change is metadata-compatible.');
+  } else if (nodeSemanticsChange === 'minor') {
+    const nodeKinds = getNodeSemanticsMinorAffectedNodeKinds(flow);
+    if (nodeKinds.length > 0) {
+      markRevalidation(
+        'node_semantics_minor_affected_nodes',
+        NODE_SEMANTICS_MINOR_AFFECTED_FIELDS,
+        nodeKinds,
+      );
+    } else {
+      markCompatible(
+        'compatible_minor_unaffected',
+        'Node semantics minor change does not affect node kinds used by this workflow.',
+      );
+    }
+  } else if (nodeSemanticsChange === 'major') {
+    markBlocked(
+      'node_semantics_major_mismatch',
+      ['/nodes/*/kind', '/nodes/*/config', '/nodes/*/policy', '/nodes/*/sideEffect'],
+    );
+  } else if (nodeSemanticsChange === 'future') {
+    markBlocked('node_semantics_future_version', ['/meta/runtime/nodeSemanticsVersion']);
+  } else if (nodeSemanticsChange === 'legacy_unknown') {
+    markRevalidation('node_semantics_mismatch', ['/meta/runtime/nodeSemanticsVersion']);
+  }
+
+  if (decision === 'current' && runtime && (
+    runtime.protocolVersion !== WEBPAGE_MCP_PROTOCOL_VERSION ||
+    runtime.capabilityVersion !== WEBPAGE_MCP_CAPABILITY_VERSION
+  )) {
+    decision = 'metadata_only_compatible';
+    compatibilityNotes.push('protocol or capability metadata can be updated without changing workflow quality');
+  }
+
+  return {
+    decision,
+    ...(staleReason ? { staleReason } : {}),
+    ...(qualityStatus ? { qualityStatus } : {}),
+    dslChange,
+    nodeSemanticsChange,
+    affectedNodeKinds: Array.from(affectedNodeKinds).sort(),
+    affectedFields: Array.from(affectedFields).sort(),
+    compatibilityNotes,
+  };
 }
 
 function normalizeMigrationQuality(
   quality: FlowQualityMeta | undefined,
-  staleReason: string | undefined,
+  compatibility: WorkflowRuntimeCompatibility,
 ): FlowQualityMeta | undefined {
   if (!quality) {
     return undefined;
   }
-  if (!staleReason) {
+  if (!compatibility.staleReason || !compatibility.qualityStatus) {
     return cloneJson(quality);
   }
-  const warning = `Quality marked stale by workflow_migrate: ${staleReason}`;
+  const warning = `Quality marked ${compatibility.qualityStatus} by workflow_migrate: ${compatibility.staleReason}`;
   return {
     ...cloneJson(quality),
-    status: 'stale',
-    staleReason,
+    status: compatibility.qualityStatus,
+    staleReason: compatibility.staleReason,
     revalidation: {
       ...(quality.revalidation ?? {}),
       ...(quality.revalidation?.policy ? { status: 'deferred' as const } : {}),
-      lastDeferredReason: staleReason,
+      lastDeferredReason: compatibility.staleReason,
     },
     warnings: Array.from(new Set([...(quality.warnings ?? []), warning])),
   };
@@ -5593,21 +5786,17 @@ function buildWorkflowMigrationPlan(flow: FlowV3, migrationId: string): Record<s
   compareRuntimeField('dslVersion');
   compareRuntimeField('nodeSemanticsVersion');
 
-  const staleReason = inferMigrationQualityStaleReason(flow);
-  if (staleReason && flow.meta?.quality) {
+  const compatibility = evaluateWorkflowRuntimeCompatibility(flow);
+  if (compatibility.staleReason && compatibility.qualityStatus && flow.meta?.quality) {
     changes.push({
-      code: 'quality_marked_stale',
+      code: compatibility.qualityStatus === 'blocked' ? 'quality_marked_blocked' : 'quality_marked_stale',
       path: '/meta/quality',
-      reason: staleReason,
+      reason: compatibility.staleReason,
       before: buildWorkflowQualitySummary(flow).status,
-      after: 'stale',
+      after: compatibility.qualityStatus,
     });
   }
 
-  const affectedNodeKinds =
-    staleReason === 'node_semantics_mismatch'
-      ? Array.from(new Set(flow.nodes.map((node) => node.kind))).sort()
-      : [];
   return {
     migrationId,
     flowId: flow.id,
@@ -5626,12 +5815,18 @@ function buildWorkflowMigrationPlan(flow: FlowV3, migrationId: string): Record<s
       decision:
         changes.length === 0
           ? 'current'
-          : staleReason
-            ? 'requires_revalidation'
-            : 'metadata_only_compatible',
-      staleReason: staleReason ?? null,
-      affectedNodeKinds,
-      affectedFields: changes.map((change) => change.path),
+          : compatibility.decision === 'current'
+            ? 'metadata_only_compatible'
+            : compatibility.decision,
+      staleReason: compatibility.staleReason ?? null,
+      qualityStatus: compatibility.qualityStatus ?? null,
+      dslChange: compatibility.dslChange,
+      nodeSemanticsChange: compatibility.nodeSemanticsChange,
+      affectedNodeKinds: compatibility.affectedNodeKinds,
+      affectedFields: Array.from(
+        new Set([...compatibility.affectedFields, ...changes.map((change) => String(change.path))]),
+      ).sort(),
+      notes: compatibility.compatibilityNotes,
     },
     rollback: {
       available: true,
@@ -5644,7 +5839,7 @@ function buildWorkflowMigrationPlan(flow: FlowV3, migrationId: string): Record<s
 }
 
 function applyWorkflowMigration(flow: FlowV3, migrationId: string): FlowV3 {
-  const staleReason = inferMigrationQualityStaleReason(flow);
+  const compatibility = evaluateWorkflowRuntimeCompatibility(flow);
   const beforeQuality = buildWorkflowQualitySummary(flow);
   let nextFlow: FlowV3 = {
     ...cloneJson(flow),
@@ -5654,7 +5849,7 @@ function applyWorkflowMigration(flow: FlowV3, migrationId: string): FlowV3 {
       ...(flow.meta ? cloneJson(flow.meta) : {}),
       runtime: buildTargetRuntimeMeta(flow),
       ...(flow.meta?.quality
-        ? { quality: normalizeMigrationQuality(flow.meta.quality, staleReason) }
+        ? { quality: normalizeMigrationQuality(flow.meta.quality, compatibility) }
         : {}),
     },
   };
@@ -5670,8 +5865,14 @@ function applyWorkflowMigration(flow: FlowV3, migrationId: string): FlowV3 {
       migrationId,
       schemaVersionBefore: flow.schemaVersion,
       schemaVersionAfter: FLOW_SCHEMA_VERSION,
-      compatibilityDecision: staleReason ? 'requires_revalidation' : 'metadata_only_compatible',
-      staleReason: staleReason ?? null,
+      compatibilityDecision:
+        compatibility.decision === 'current' ? 'metadata_only_compatible' : compatibility.decision,
+      staleReason: compatibility.staleReason ?? null,
+      qualityStatus: compatibility.qualityStatus ?? null,
+      dslChange: compatibility.dslChange,
+      nodeSemanticsChange: compatibility.nodeSemanticsChange,
+      affectedNodeKinds: compatibility.affectedNodeKinds,
+      affectedFields: compatibility.affectedFields,
       rollbackSnapshot: buildMigrationRollbackSnapshot(flow),
       externalSideEffectsReversible: false,
     },

@@ -5,7 +5,11 @@ import {
   RUN_SCHEMA_VERSION,
   type RunRecordV3,
 } from "@/entrypoints/background/record-replay-v3/domain/events";
-import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
+import {
+  FLOW_DSL_VERSION,
+  FLOW_NODE_SEMANTICS_VERSION,
+  type FlowV3,
+} from "@/entrypoints/background/record-replay-v3/domain/flow";
 import { calculateWorkflowRevision } from "@/entrypoints/background/record-replay-v3/flows/publish";
 import { WORKFLOW_SECRET_STORE_KEY } from "@/entrypoints/background/record-replay-v3/secrets";
 import { deleteRrV3Db } from "@/entrypoints/background/record-replay-v3/storage/db";
@@ -89,6 +93,26 @@ function createFlow(
     updatedAt: iso as any,
     ...overrides,
   };
+}
+
+function previousRuntimeVersion(version: string, level: "patch" | "minor" | "major"): string {
+  const match = version.match(/^(\d+)([-.])(\d+)([-.])(\d+)(.*)$/);
+  if (!match) {
+    throw new Error(`Unsupported test runtime version: ${version}`);
+  }
+  const firstSeparator = match[2];
+  const secondSeparator = match[4];
+  const suffix = match[6] ?? "";
+  const major = Number(match[1]);
+  const minor = Number(match[3]);
+  const patch = Number(match[5]);
+  if (level === "major") {
+    return `${Math.max(0, major - 1)}${firstSeparator}${minor}${secondSeparator}${patch}${suffix}`;
+  }
+  if (level === "minor") {
+    return `${major}${firstSeparator}${Math.max(0, minor - 1)}${secondSeparator}${patch}${suffix}`;
+  }
+  return `${major}${firstSeparator}${minor}${secondSeparator}${Math.max(0, patch - 1)}${suffix}`;
 }
 
 function parseToolPayload(result: {
@@ -1459,6 +1483,128 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(rolledBack?.meta?.audit?.events?.map((event) => event.reason)).toEqual(
       expect.arrayContaining(["workflow_migrate_apply", "workflow_migrate_rollback"]),
     );
+  });
+
+  it("workflowMigrateTool applies DSL compatibility policy for patch, minor, and major upgrades", async () => {
+    const storage = createStoragePort();
+    const baseQuality = (flow: FlowV3) => ({
+      revision: calculateWorkflowRevision(flow),
+      status: "stable" as const,
+      level: "stable" as const,
+      passRate: 1,
+      validationRuns: 3,
+      countedValidationRuns: 3,
+      passedRuns: 3,
+      failedRuns: 0,
+      lastValidatedAt: new Date(0).toISOString() as any,
+      freshnessExpiresAt: new Date(Date.now() + 60_000).toISOString() as any,
+    });
+
+    const patchFlowId = `workflow-migrate-patch-${Date.now()}`;
+    const patchFlow = createFlow(patchFlowId, [
+      {
+        id: "wait-1" as any,
+        kind: "wait",
+        config: { ms: 1 },
+      },
+    ]);
+    patchFlow.meta = {
+      runtime: {
+        dslVersion: previousRuntimeVersion(FLOW_DSL_VERSION, "patch"),
+        nodeSemanticsVersion: previousRuntimeVersion(FLOW_NODE_SEMANTICS_VERSION, "patch"),
+      },
+      quality: baseQuality(patchFlow),
+    };
+    await storage.flows.save(patchFlow);
+
+    const patchDryRun = parseToolPayload(await workflowMigrateTool.execute({ flowId: patchFlowId }));
+    expect(patchDryRun.flows[0].compatibility).toMatchObject({
+      decision: "compatible_patch",
+      staleReason: null,
+      dslChange: "patch",
+      nodeSemanticsChange: "patch",
+      affectedNodeKinds: [],
+    });
+    await workflowMigrateTool.execute({ flowId: patchFlowId, apply: true, dryRun: false });
+    const patchedFlow = await storage.flows.get(patchFlowId as any);
+    expect(patchedFlow?.meta?.quality).toMatchObject({
+      status: "stable",
+    });
+    expect(patchedFlow?.meta?.quality?.staleReason).toBeUndefined();
+    expect(
+      patchedFlow?.meta?.audit?.events?.find((event) => event.kind === "schema_migration")
+        ?.metadata,
+    ).toMatchObject({
+      compatibilityDecision: "compatible_patch",
+      staleReason: null,
+      affectedNodeKinds: [],
+    });
+
+    const minorFlowId = `workflow-migrate-minor-${Date.now()}`;
+    const minorFlow = createFlow(minorFlowId, [
+      {
+        id: "wait-1" as any,
+        kind: "wait",
+        config: { condition: { kind: "selector", selector: "#ready" } },
+      },
+    ]);
+    minorFlow.meta = {
+      runtime: {
+        dslVersion: FLOW_DSL_VERSION,
+        nodeSemanticsVersion: previousRuntimeVersion(FLOW_NODE_SEMANTICS_VERSION, "minor"),
+      },
+      quality: baseQuality(minorFlow),
+    };
+    await storage.flows.save(minorFlow);
+
+    const minorDryRun = parseToolPayload(await workflowMigrateTool.execute({ flowId: minorFlowId }));
+    expect(minorDryRun.flows[0].compatibility).toMatchObject({
+      decision: "requires_revalidation",
+      staleReason: "node_semantics_minor_affected_nodes",
+      qualityStatus: "stale",
+      nodeSemanticsChange: "minor",
+      affectedNodeKinds: ["wait"],
+      affectedFields: expect.arrayContaining(["/nodes/*/config"]),
+    });
+    await workflowMigrateTool.execute({ flowId: minorFlowId, apply: true, dryRun: false });
+    const migratedMinorFlow = await storage.flows.get(minorFlowId as any);
+    expect(migratedMinorFlow?.meta?.quality).toMatchObject({
+      status: "stale",
+      staleReason: "node_semantics_minor_affected_nodes",
+    });
+
+    const majorFlowId = `workflow-migrate-major-${Date.now()}`;
+    const majorFlow = createFlow(majorFlowId, [
+      {
+        id: "click-1" as any,
+        kind: "click",
+        config: { target: { selector: "#submit" } },
+      },
+    ]);
+    majorFlow.meta = {
+      runtime: {
+        dslVersion: previousRuntimeVersion(FLOW_DSL_VERSION, "major"),
+        nodeSemanticsVersion: FLOW_NODE_SEMANTICS_VERSION,
+      },
+      quality: baseQuality(majorFlow),
+    };
+    await storage.flows.save(majorFlow);
+
+    const majorDryRun = parseToolPayload(await workflowMigrateTool.execute({ flowId: majorFlowId }));
+    expect(majorDryRun.flows[0].compatibility).toMatchObject({
+      decision: "blocked_breaking_change",
+      staleReason: "dsl_major_mismatch",
+      qualityStatus: "blocked",
+      dslChange: "major",
+      affectedNodeKinds: ["click"],
+      affectedFields: expect.arrayContaining(["/nodes"]),
+    });
+    await workflowMigrateTool.execute({ flowId: majorFlowId, apply: true, dryRun: false });
+    const migratedMajorFlow = await storage.flows.get(majorFlowId as any);
+    expect(migratedMajorFlow?.meta?.quality).toMatchObject({
+      status: "blocked",
+      staleReason: "dsl_major_mismatch",
+    });
   });
 
   it("workflowReleaseReadinessTool writes a SLO release checklist and blocks default-on for insufficient samples", async () => {
