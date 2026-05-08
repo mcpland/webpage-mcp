@@ -4,17 +4,9 @@ import * as fs from 'fs';
 // We intentionally use deep imports to match the package structure.
 // These modules are ESM and require NodeNext module resolution.
 // Types are loosely typed to minimize coupling with DevTools internals.
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
 import * as TraceEngine from 'chrome-devtools-frontend/front_end/models/trace/trace.js';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
 import { PerformanceTraceFormatter } from 'chrome-devtools-frontend/front_end/models/ai_assistance/data_formatters/PerformanceTraceFormatter.js';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
 import { PerformanceInsightFormatter } from 'chrome-devtools-frontend/front_end/models/ai_assistance/data_formatters/PerformanceInsightFormatter.js';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
 import { AgentFocus } from 'chrome-devtools-frontend/front_end/models/ai_assistance/performance/AIContext.js';
 
 const engine = TraceEngine.TraceModel.Model.createWithAllHandlers();
