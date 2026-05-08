@@ -57,6 +57,7 @@ import {
   sanitizeFlowToolMetadata,
   normalizeFlowToolMetadata,
 } from "../../flows/normalize-flow-optional-fields";
+import { withFlowWriteLock } from "../../flows/write-lock";
 import { validateReachableRuntimeNodes } from "../../flows/runtime-validation";
 import { resolveRunTargetTab } from "../../run-target";
 import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
@@ -593,29 +594,37 @@ export class RpcServer {
       throw new Error("flow is required");
     }
 
-    // Check whether the existing flow is being updated (use the trimmed ID query)
     const rawId = (rawFlow as JsonObject).id;
-    let existingFlow: FlowV3 | null = null;
+    const save = async (): Promise<JsonValue> => {
+      // Check whether the existing flow is being updated (use the trimmed ID query)
+      let existingFlow: FlowV3 | null = null;
+      if (typeof rawId === "string" && rawId.trim()) {
+        existingFlow = await this.storage.flows.get(rawId.trim() as FlowId);
+      }
+
+      // Normalize flow, pass in existingFlow to inherit createdAt
+      const flow = this.normalizeFlowSpec(rawFlow, existingFlow);
+
+      if (flow.meta?.tool?.published) {
+        const allFlows = await this.storage.flows.list();
+        ensurePublishedSlugAvailable(
+          allFlows,
+          flow.id,
+          normalizeToolSlug(flow.meta.tool.slug, flow.name),
+        );
+      }
+
+      // Save to storage (the storage layer will perform two-step verification)
+      await this.storage.flows.save(flow);
+
+      return flow as unknown as JsonValue;
+    };
+
     if (typeof rawId === "string" && rawId.trim()) {
-      existingFlow = await this.storage.flows.get(rawId.trim() as FlowId);
+      return withFlowWriteLock(rawId.trim() as FlowId, save);
     }
 
-    // Normalize flow, pass in existingFlow to inherit createdAt
-    const flow = this.normalizeFlowSpec(rawFlow, existingFlow);
-
-    if (flow.meta?.tool?.published) {
-      const allFlows = await this.storage.flows.list();
-      ensurePublishedSlugAvailable(
-        allFlows,
-        flow.id,
-        normalizeToolSlug(flow.meta.tool.slug, flow.name),
-      );
-    }
-
-    // Save to storage (the storage layer will perform two-step verification)
-    await this.storage.flows.save(flow);
-
-    return flow as unknown as JsonValue;
+    return save();
   }
 
   private async handleListPublishedFlows(): Promise<JsonValue> {
@@ -631,68 +640,70 @@ export class RpcServer {
       throw new Error("flowId is required");
     }
 
-    const existing = await this.storage.flows.get(flowId);
-    if (!existing) {
-      throw new Error(`Flow "${flowId}" not found`);
-    }
+    return withFlowWriteLock(flowId, async () => {
+      const existing = await this.storage.flows.get(flowId);
+      if (!existing) {
+        throw new Error(`Flow "${flowId}" not found`);
+      }
 
-    const toolPatchInput: JsonObject = {
-      published: true,
-    };
-    if (params?.slug !== undefined && params?.slug !== null) {
-      toolPatchInput.slug = String(params.slug);
-    }
-    if (params?.category !== undefined && params?.category !== null) {
-      toolPatchInput.category = String(params.category);
-    }
-    if (params?.description !== undefined && params?.description !== null) {
-      toolPatchInput.description = String(params.description);
-    }
-    if (
-      toolPatchInput.slug === undefined &&
-      typeof existing.meta?.tool?.slug === "string" &&
-      existing.meta.tool.slug.trim()
-    ) {
-      toolPatchInput.slug = existing.meta.tool.slug;
-    }
-    const toolPatch =
-      normalizeFlowToolMetadata(toolPatchInput, existing.name) ?? ({ published: true } satisfies FlowToolMetadata);
-    const sanitizedExistingMeta = {
-      ...(existing.meta ?? {}),
-    };
-    const sanitizedExistingTool = sanitizeFlowToolMetadata(existing.meta?.tool, existing.name, {
-      generateSlugWhenPublished: false,
+      const toolPatchInput: JsonObject = {
+        published: true,
+      };
+      if (params?.slug !== undefined && params?.slug !== null) {
+        toolPatchInput.slug = String(params.slug);
+      }
+      if (params?.category !== undefined && params?.category !== null) {
+        toolPatchInput.category = String(params.category);
+      }
+      if (params?.description !== undefined && params?.description !== null) {
+        toolPatchInput.description = String(params.description);
+      }
+      if (
+        toolPatchInput.slug === undefined &&
+        typeof existing.meta?.tool?.slug === "string" &&
+        existing.meta.tool.slug.trim()
+      ) {
+        toolPatchInput.slug = existing.meta.tool.slug;
+      }
+      const toolPatch =
+        normalizeFlowToolMetadata(toolPatchInput, existing.name) ?? ({ published: true } satisfies FlowToolMetadata);
+      const sanitizedExistingMeta = {
+        ...(existing.meta ?? {}),
+      };
+      const sanitizedExistingTool = sanitizeFlowToolMetadata(existing.meta?.tool, existing.name, {
+        generateSlugWhenPublished: false,
+      });
+      if (sanitizedExistingTool) {
+        sanitizedExistingMeta.tool = sanitizedExistingTool;
+      } else {
+        delete sanitizedExistingMeta.tool;
+      }
+
+      const updated: FlowV3 = {
+        ...existing,
+        updatedAt: new Date(this.now()).toISOString() as ISODateTimeString,
+        meta: mergeFlowToolMetadata(
+          Object.keys(sanitizedExistingMeta).length > 0 ? sanitizedExistingMeta : undefined,
+          toolPatch,
+        ),
+      };
+
+      const allFlows = await this.storage.flows.list();
+      ensurePublishedSlugAvailable(
+        allFlows,
+        updated.id,
+        normalizeToolSlug(updated.meta?.tool?.slug, updated.name),
+      );
+
+      await this.storage.flows.save(updated);
+
+      const publishedInfo = getPublishedFlowInfo(updated);
+      if (!publishedInfo) {
+        throw new Error(`Flow "${flowId}" could not be published`);
+      }
+
+      return publishedInfo as unknown as JsonValue;
     });
-    if (sanitizedExistingTool) {
-      sanitizedExistingMeta.tool = sanitizedExistingTool;
-    } else {
-      delete sanitizedExistingMeta.tool;
-    }
-
-    const updated: FlowV3 = {
-      ...existing,
-      updatedAt: new Date(this.now()).toISOString() as ISODateTimeString,
-      meta: mergeFlowToolMetadata(
-        Object.keys(sanitizedExistingMeta).length > 0 ? sanitizedExistingMeta : undefined,
-        toolPatch,
-      ),
-    };
-
-    const allFlows = await this.storage.flows.list();
-    ensurePublishedSlugAvailable(
-      allFlows,
-      updated.id,
-      normalizeToolSlug(updated.meta?.tool?.slug, updated.name),
-    );
-
-    await this.storage.flows.save(updated);
-
-    const publishedInfo = getPublishedFlowInfo(updated);
-    if (!publishedInfo) {
-      throw new Error(`Flow "${flowId}" could not be published`);
-    }
-
-    return publishedInfo as unknown as JsonValue;
   }
 
   private async handleUnpublishFlow(
@@ -703,37 +714,39 @@ export class RpcServer {
       throw new Error("flowId is required");
     }
 
-    const existing = await this.storage.flows.get(flowId);
-    if (!existing) {
-      throw new Error(`Flow "${flowId}" not found`);
-    }
+    return withFlowWriteLock(flowId, async () => {
+      const existing = await this.storage.flows.get(flowId);
+      if (!existing) {
+        throw new Error(`Flow "${flowId}" not found`);
+      }
 
-    const toolPatch =
-      normalizeFlowToolMetadata({ published: false }, existing.name) ??
-      ({ published: false } satisfies FlowToolMetadata);
-    const sanitizedExistingMeta = {
-      ...(existing.meta ?? {}),
-    };
-    const sanitizedExistingTool = sanitizeFlowToolMetadata(existing.meta?.tool, existing.name, {
-      generateSlugWhenPublished: false,
+      const toolPatch =
+        normalizeFlowToolMetadata({ published: false }, existing.name) ??
+        ({ published: false } satisfies FlowToolMetadata);
+      const sanitizedExistingMeta = {
+        ...(existing.meta ?? {}),
+      };
+      const sanitizedExistingTool = sanitizeFlowToolMetadata(existing.meta?.tool, existing.name, {
+        generateSlugWhenPublished: false,
+      });
+      if (sanitizedExistingTool) {
+        sanitizedExistingMeta.tool = sanitizedExistingTool;
+      } else {
+        delete sanitizedExistingMeta.tool;
+      }
+      const updated: FlowV3 = {
+        ...existing,
+        updatedAt: new Date(this.now()).toISOString() as ISODateTimeString,
+        meta: mergeFlowToolMetadata(
+          Object.keys(sanitizedExistingMeta).length > 0 ? sanitizedExistingMeta : undefined,
+          toolPatch,
+        ),
+      };
+
+      await this.storage.flows.save(updated);
+
+      return { ok: true, flowId } as unknown as JsonValue;
     });
-    if (sanitizedExistingTool) {
-      sanitizedExistingMeta.tool = sanitizedExistingTool;
-    } else {
-      delete sanitizedExistingMeta.tool;
-    }
-    const updated: FlowV3 = {
-      ...existing,
-      updatedAt: new Date(this.now()).toISOString() as ISODateTimeString,
-      meta: mergeFlowToolMetadata(
-        Object.keys(sanitizedExistingMeta).length > 0 ? sanitizedExistingMeta : undefined,
-        toolPatch,
-      ),
-    };
-
-    await this.storage.flows.save(updated);
-
-    return { ok: true, flowId } as unknown as JsonValue;
   }
 
   /**
@@ -746,40 +759,42 @@ export class RpcServer {
     const flowId = params?.flowId as FlowId | undefined;
     if (!flowId) throw new Error("flowId is required");
 
-    // Check if Flow exists
-    const existing = await this.storage.flows.get(flowId);
-    if (!existing) {
-      throw new Error(`Flow "${flowId}" not found`);
-    }
+    return withFlowWriteLock(flowId, async () => {
+      // Check if Flow exists
+      const existing = await this.storage.flows.get(flowId);
+      if (!existing) {
+        throw new Error(`Flow "${flowId}" not found`);
+      }
 
-    // Check if there is an associated Trigger
-    const triggers = await this.storage.triggers.list();
-    const linkedTriggers = triggers.filter((t) => t.flowId === flowId);
-    if (linkedTriggers.length > 0) {
-      const triggerIds = linkedTriggers.map((t) => t.id).join(", ");
-      throw new Error(
-        `Cannot delete flow "${flowId}": it has ${linkedTriggers.length} linked trigger(s): ${triggerIds}. ` +
-          `Delete the trigger(s) first.`,
+      // Check if there is an associated Trigger
+      const triggers = await this.storage.triggers.list();
+      const linkedTriggers = triggers.filter((t) => t.flowId === flowId);
+      if (linkedTriggers.length > 0) {
+        const triggerIds = linkedTriggers.map((t) => t.id).join(", ");
+        throw new Error(
+          `Cannot delete flow "${flowId}": it has ${linkedTriggers.length} linked trigger(s): ${triggerIds}. ` +
+            `Delete the trigger(s) first.`,
+        );
+      }
+
+      // Check if there are queued runs (unexecuted runs will fail after deletion)
+      const queuedItems = await this.storage.queue.list("queued");
+      const linkedQueuedRuns = queuedItems.filter(
+        (item) => item.flowId === flowId,
       );
-    }
+      if (linkedQueuedRuns.length > 0) {
+        const runIds = linkedQueuedRuns.map((r) => r.id).join(", ");
+        throw new Error(
+          `Cannot delete flow "${flowId}": it has ${linkedQueuedRuns.length} queued run(s): ${runIds}. ` +
+            `Cancel the run(s) first or wait for them to complete.`,
+        );
+      }
 
-    // Check if there are queued runs (unexecuted runs will fail after deletion)
-    const queuedItems = await this.storage.queue.list("queued");
-    const linkedQueuedRuns = queuedItems.filter(
-      (item) => item.flowId === flowId,
-    );
-    if (linkedQueuedRuns.length > 0) {
-      const runIds = linkedQueuedRuns.map((r) => r.id).join(", ");
-      throw new Error(
-        `Cannot delete flow "${flowId}": it has ${linkedQueuedRuns.length} queued run(s): ${runIds}. ` +
-          `Cancel the run(s) first or wait for them to complete.`,
-      );
-    }
+      // Delete Flow
+      await this.storage.flows.delete(flowId);
 
-    // Delete Flow
-    await this.storage.flows.delete(flowId);
-
-    return { ok: true, flowId };
+      return { ok: true, flowId };
+    });
   }
 
   /**

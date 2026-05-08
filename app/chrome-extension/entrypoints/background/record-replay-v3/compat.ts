@@ -16,6 +16,7 @@ import {
   ensurePublishedSlugAvailable,
   normalizeToolSlug,
 } from "./flows/publish";
+import { withFlowWriteLock } from "./flows/write-lock";
 import { normalizeFlowOptionalFields } from "./flows/normalize-flow-optional-fields";
 import { validateReachableRuntimeNodes } from "./flows/runtime-validation";
 import { convertCompatFlowToV3 as convertCompatFlowDocumentToV3 } from "./storage/import/flow-convert";
@@ -142,52 +143,56 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
     throw new Error("Invalid flow payload");
   }
 
-  const existing = await runtime.storage.flows.get(flow.id as FlowId);
-  flow = {
-    ...flow,
-    schemaVersion: FLOW_SCHEMA_VERSION,
-    createdAt: existing?.createdAt ?? flow.createdAt ?? nowIso,
-    updatedAt: nowIso,
-  };
-  const nodeIdSet = new Set(flow.nodes.map((node) => node.id));
-  const flowForOptionalNormalization = { ...(flow as unknown as JsonObject) };
-  const clonedMeta = cloneMeta(flow.meta);
-  const existingPublishedSlug = getExistingPublishedSlug(existing);
-  if (clonedMeta) {
-    if (
-      flow.meta?.tool?.published === true &&
-      existingPublishedSlug &&
-      !rawFlowExplicitlyProvidesToolSlug(rawFlow)
-    ) {
-      clonedMeta.tool = {
-        ...(clonedMeta.tool ?? {}),
-        slug: existingPublishedSlug,
-      };
+  const parsedFlow = flow;
+  return withFlowWriteLock(parsedFlow.id as FlowId, async () => {
+    let flow: FlowV3 = parsedFlow;
+    const existing = await runtime.storage.flows.get(flow.id as FlowId);
+    flow = {
+      ...flow,
+      schemaVersion: FLOW_SCHEMA_VERSION,
+      createdAt: existing?.createdAt ?? flow.createdAt ?? nowIso,
+      updatedAt: nowIso,
+    };
+    const nodeIdSet = new Set(flow.nodes.map((node) => node.id));
+    const flowForOptionalNormalization = { ...(flow as unknown as JsonObject) };
+    const clonedMeta = cloneMeta(flow.meta);
+    const existingPublishedSlug = getExistingPublishedSlug(existing);
+    if (clonedMeta) {
+      if (
+        flow.meta?.tool?.published === true &&
+        existingPublishedSlug &&
+        !rawFlowExplicitlyProvidesToolSlug(rawFlow)
+      ) {
+        clonedMeta.tool = {
+          ...(clonedMeta.tool ?? {}),
+          slug: existingPublishedSlug,
+        };
+      }
+      flowForOptionalNormalization.meta = clonedMeta as unknown as JsonObject;
     }
-    flowForOptionalNormalization.meta = clonedMeta as unknown as JsonObject;
-  }
-  flow = {
-    ...flow,
-    ...normalizeFlowOptionalFields(
-      flowForOptionalNormalization,
-      flow.name,
-      nodeIdSet,
-    ),
-  };
-  flow = normalizePublishedToolMetadata(flow);
+    flow = {
+      ...flow,
+      ...normalizeFlowOptionalFields(
+        flowForOptionalNormalization,
+        flow.name,
+        nodeIdSet,
+      ),
+    };
+    flow = normalizePublishedToolMetadata(flow);
 
-  validateFlow(flow);
-  validateRuntimeNodeKinds(flow);
-  validateReachableRuntimeNodes(flow);
-  if (flow.meta?.tool?.published) {
-    ensurePublishedSlugAvailable(
-      await runtime.storage.flows.list(),
-      flow.id as FlowId,
-      normalizeToolSlug(flow.meta.tool.slug, flow.name),
-    );
-  }
-  await runtime.storage.flows.save(flow);
-  return flow;
+    validateFlow(flow);
+    validateRuntimeNodeKinds(flow);
+    validateReachableRuntimeNodes(flow);
+    if (flow.meta?.tool?.published) {
+      ensurePublishedSlugAvailable(
+        await runtime.storage.flows.list(),
+        flow.id as FlowId,
+        normalizeToolSlug(flow.meta.tool.slug, flow.name),
+      );
+    }
+    await runtime.storage.flows.save(flow);
+    return flow;
+  });
 }
 
 export function extractFlowCandidates(parsed: unknown): unknown[] {

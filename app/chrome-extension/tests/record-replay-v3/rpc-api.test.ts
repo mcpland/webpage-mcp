@@ -24,6 +24,7 @@ import { RpcServer } from "@/entrypoints/background/record-replay-v3/engine/tran
 import type { TriggerManager } from "@/entrypoints/background/record-replay-v3/engine/triggers/trigger-manager";
 import type { TriggerSpec } from "@/entrypoints/background/record-replay-v3/domain/triggers";
 import type { ArtifactRecord } from "@/entrypoints/background/record-replay-v3/storage/artifacts";
+import { tryAcquireFlowWriteLock } from "@/entrypoints/background/record-replay-v3/flows/write-lock";
 
 // ==================== Test Utilities ====================
 
@@ -1914,6 +1915,32 @@ describe("V3 RPC Flow CRUD APIs", () => {
         published: true,
         slug: "legacy-broken-flow",
       });
+    });
+
+    it("rejects publish while the flow write lock is held", async () => {
+      const flow = createTestFlow("flow-locked-publish");
+      getInternal(storage).flowsMap.set(flow.id, flow);
+      const release = tryAcquireFlowWriteLock(flow.id);
+
+      try {
+        await expect(
+          (server as unknown as { handleRequest: Function }).handleRequest(
+            {
+              method: "rr_v3.publishFlow",
+              params: { flowId: flow.id, slug: "Locked Publish" },
+              requestId: "req-locked-publish",
+            },
+            { subscriptions: new Set() },
+          ),
+        ).rejects.toMatchObject({
+          code: "FLOW_WRITE_CONFLICT",
+          retryable: true,
+          flowId: flow.id,
+        });
+        expect(storage.flows.save).not.toHaveBeenCalled();
+      } finally {
+        release();
+      }
     });
 
     it("preserves an existing custom slug when republishing without a slug override", async () => {
