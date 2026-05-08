@@ -3325,7 +3325,15 @@ describe("recording/editing/flow toolchain integration", () => {
       success: true,
       flowId,
       revision: expect.stringMatching(/^rev-fnv1a32-/),
-      summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+      summary: {
+        total: 1,
+        success: 1,
+        failed: 0,
+        tookMs: 5,
+        tabTarget: "new",
+        tabOwnership: "owned",
+        background: false,
+      },
       warning: expect.stringContaining("stepDelayMs"),
     });
     expect(payload.warning).not.toContain("tabTarget");
@@ -3369,11 +3377,12 @@ describe("recording/editing/flow toolchain integration", () => {
       },
     });
 
-    await flowRunTool.execute({
+    const result = await flowRunTool.execute({
       flowId,
       args: { email: "alice@example.com" },
       tabId: 21,
     });
+    const payload = parseToolPayload(result);
 
     expect(mocks.enqueueRunAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3387,6 +3396,11 @@ describe("recording/editing/flow toolchain integration", () => {
         },
       }),
     );
+    expect(payload.summary).toMatchObject({
+      tabTarget: "current",
+      tabOwnership: "current",
+      background: false,
+    });
   });
 
   it("flowRunTool rejects non-http startUrl values", async () => {

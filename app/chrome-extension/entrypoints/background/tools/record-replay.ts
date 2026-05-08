@@ -1000,6 +1000,18 @@ class FlowRunTool {
     const revision = calculateWorkflowRevision(flow);
     const publishedInfo = getPublishedFlowInfo(flow);
     const quality = buildWorkflowQualitySummary(flow);
+    const tabOwnership =
+      typeof tabId === "number" && Number.isFinite(tabId)
+        ? "current"
+        : tabTarget === "new"
+          ? "owned"
+          : "current";
+    const resultSummary =
+      contractedResult.summary &&
+      typeof contractedResult.summary === "object" &&
+      !Array.isArray(contractedResult.summary)
+        ? contractedResult.summary
+        : {};
     const qualityWarning = quality.current
       ? null
       : {
@@ -1015,6 +1027,12 @@ class FlowRunTool {
       flowId: flow.id,
       ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : {}),
       revision,
+      summary: {
+        ...resultSummary,
+        tabTarget: tabTarget === "new" ? "new" : "current",
+        tabOwnership,
+        background: background === true,
+      },
       quality: {
         level: quality.level,
         status: quality.status,
