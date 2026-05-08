@@ -406,6 +406,46 @@ describe('dynamic published flow tools', () => {
     });
   });
 
+  it('exposes workflow_release_readiness with default-on SLO checklist controls', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [],
+    });
+    const ctx = createContext('workflow-release-readiness-schema', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const readinessTool = tools.find((tool) => tool.name === 'workflow_release_readiness');
+    const input = readinessTool?.inputSchema as {
+      additionalProperties?: boolean;
+      allOf?: unknown[];
+      properties?: Record<string, any>;
+    };
+
+    expect(input.additionalProperties).toBe(false);
+    expect(input.allOf).toHaveLength(1);
+    expect(input.properties?.defaultOn).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
+    expect(input.properties?.minSafeWorkflowCount).toMatchObject({
+      type: 'number',
+      default: 30,
+    });
+    expect(input.properties?.minValidationRuns).toMatchObject({
+      type: 'number',
+      default: 100,
+    });
+    expect(input.properties?.evidence?.additionalProperties).toBe(false);
+    expect(input.properties?.evidence?.properties?.pairedTokenBaselineCount).toMatchObject({
+      type: 'number',
+      minimum: 0,
+    });
+    expect(input.properties?.evidence?.properties?.safetyReviewCompleted).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
+  });
+
   it('exposes record_replay_run_cancel with terminal wait controls', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
       status: 'success',

@@ -51,6 +51,7 @@ const WORKFLOW_RUNTIME_FEATURE_FLAGS = [
   "workflow_selector_repair",
   "workflow_wait_assert_repair",
   "workflow_metrics_audit",
+  "workflow_release_readiness",
 ] as const;
 
 let nativePort: chrome.runtime.Port | null = null;

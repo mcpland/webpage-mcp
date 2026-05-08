@@ -49,6 +49,7 @@ import {
   workflowDescribeTool,
   workflowDebugViewTool,
   workflowMigrateTool,
+  workflowReleaseReadinessTool,
   workflowRepairRollbackTool,
   workflowRepairTool,
   workflowStabilizeTool,
@@ -1458,6 +1459,143 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(rolledBack?.meta?.audit?.events?.map((event) => event.reason)).toEqual(
       expect.arrayContaining(["workflow_migrate_apply", "workflow_migrate_rollback"]),
     );
+  });
+
+  it("workflowReleaseReadinessTool writes a SLO release checklist and blocks default-on for insufficient samples", async () => {
+    const flowId = `workflow-release-readiness-${Date.now()}`;
+    const storage = createStoragePort();
+    const flow = createFlow(flowId, [
+      {
+        id: "wait-1" as any,
+        kind: "wait",
+        config: { ms: 100 },
+      },
+    ]);
+    const revision = calculateWorkflowRevision(flow);
+    flow.meta = {
+      quality: {
+        revision,
+        status: "stable",
+        level: "stable",
+        risk: "safe",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        lastValidatedAt: "2026-01-01T00:00:00.000Z" as any,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        verification: {
+          oracle: "assertion",
+          oracleStrength: "normal",
+        },
+        slo: {
+          targetPassRate: 1,
+          minValidationRuns: 3,
+        },
+      },
+      audit: {
+        events: [
+          {
+            id: "audit-release-publish",
+            kind: "workflow_publish",
+            actor: "mcp",
+            ts: "2026-01-01T00:00:00.000Z" as any,
+            flowId: flowId as any,
+            revision,
+            previousStatus: "draft",
+            nextStatus: "stable",
+            reason: "quality_gate_passed",
+          },
+        ],
+      },
+    };
+    await storage.flows.save(flow);
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: `${flowId}-run-1` as any,
+      flowId: flowId as any,
+      status: "succeeded",
+      createdAt: Date.now() - 1_000,
+      updatedAt: Date.now(),
+      startedAt: Date.now() - 900,
+      finishedAt: Date.now(),
+      tookMs: 900,
+      attempt: 1,
+      maxAttempts: 1,
+      nextSeq: 1,
+    });
+
+    const result = await workflowReleaseReadinessTool.execute({
+      flowId,
+      releaseId: "release-readiness-test",
+      defaultOn: true,
+      minSafeWorkflowCount: 2,
+      minValidationRuns: 10,
+      evidence: {
+        pairedTokenBaselineCount: 1,
+        averageTokenReduction: 0.8,
+      },
+    });
+    const payload = parseToolPayload(result);
+    const sloItem = payload.releaseChecklist.checklist.find(
+      (item: { id: string }) => item.id === "runtime_metrics_and_slo",
+    );
+
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({
+      success: true,
+      releaseId: "release-readiness-test",
+      status: "blocked",
+      defaultOnAllowed: false,
+      persisted: true,
+      releaseChecklist: {
+        status: "blocked",
+        defaultOnAllowed: false,
+        slo: {
+          conclusion: "blocked",
+          sample: {
+            safeIdempotentWorkflowCount: 1,
+            countedValidationRuns: 3,
+            insufficientSample: true,
+            reasons: expect.arrayContaining([
+              "insufficient_safe_idempotent_workflow_sample",
+              "insufficient_validation_run_sample",
+            ]),
+          },
+        },
+        metrics: {
+          workflowRun: {
+            perRelease: {
+              reliabilityDenominator: 1,
+              successCount: 1,
+              successRate: 1,
+              successfulP95Ms: 900,
+            },
+          },
+        },
+      },
+    });
+    expect(sloItem).toMatchObject({
+      status: "blocked",
+      evidence: {
+        conclusion: "blocked",
+        reasons: expect.arrayContaining([
+          "insufficient_safe_idempotent_workflow_sample",
+          "insufficient_validation_run_sample",
+        ]),
+      },
+    });
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({
+      webpageMcpWorkflowReleaseChecklists: {
+        "release-readiness-test": expect.objectContaining({
+          status: "blocked",
+          defaultOnAllowed: false,
+        }),
+      },
+    });
   });
 
   it("workflowRepairTool suggests selector replacement without applying when failure artifacts are missing", async () => {

@@ -56,6 +56,7 @@ export const TOOL_NAMES = {
     WORKFLOW_STABILIZE: 'workflow_stabilize',
     WORKFLOW_MIGRATE: 'workflow_migrate',
     WORKFLOW_APPROVAL_STORE: 'workflow_approval_store',
+    WORKFLOW_RELEASE_READINESS: 'workflow_release_readiness',
     WORKFLOW_PUBLISH: 'workflow_publish',
     WORKFLOW_UNPUBLISH: 'workflow_unpublish',
   },
@@ -753,6 +754,120 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
       ],
       additionalProperties: false,
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_RELEASE_READINESS,
+    description:
+      'Build and persist a local release readiness checklist for workflow features, including SLO conclusions, sample-size warnings, runtime metrics, audit evidence, rollback evidence, and default-on gating.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Optional single flow ID to assess. Mutually exclusive with workflow and all=true.',
+        },
+        workflow: {
+          type: 'string',
+          description: 'Optional published workflow slug to assess. Mutually exclusive with flowId and all=true.',
+        },
+        all: {
+          type: 'boolean',
+          default: true,
+          description: 'Assess all stored workflows when no flowId or workflow is provided.',
+        },
+        publishedOnly: {
+          type: 'boolean',
+          default: false,
+          description: 'When true, only published workflows are included in all-scope reports.',
+        },
+        releaseId: {
+          type: 'string',
+          description: 'Optional release/checklist identifier. Generated when omitted.',
+        },
+        defaultOn: {
+          type: 'boolean',
+          default: false,
+          description: 'Evaluate the stricter default-on gate. Unmet checklist items become blocked.',
+        },
+        persist: {
+          type: 'boolean',
+          default: true,
+          description: 'Persist the generated checklist snapshot to the local release checklist store.',
+        },
+        minSafeWorkflowCount: {
+          type: 'number',
+          minimum: 1,
+          maximum: 10000,
+          default: 30,
+          description: 'Minimum safe/idempotent workflow sample count required before default-on SLO claims.',
+        },
+        minValidationRuns: {
+          type: 'number',
+          minimum: 1,
+          maximum: 100000,
+          default: 100,
+          description: 'Minimum counted validation run sample required before default-on SLO claims.',
+        },
+        minReliability: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          default: 0.99,
+          description: 'Minimum published workflow reliability threshold.',
+        },
+        minTokenReduction: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          default: 0.7,
+          description: 'Minimum paired transcript token reduction required for the token SLO.',
+        },
+        maxFalseRepairRate: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          default: 0.01,
+          description: 'Maximum allowed false repair rate.',
+        },
+        evidence: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            pairedTokenBaselineCount: { type: 'number', minimum: 0 },
+            averageTokenReduction: { type: 'number', minimum: 0, maximum: 1 },
+            safetyReviewCompleted: { type: 'boolean', default: false },
+            browserE2eCompleted: { type: 'boolean', default: false },
+            chaosUpgradeCompleted: { type: 'boolean', default: false },
+            docsUpdated: { type: 'boolean', default: false },
+            killSwitchVerified: { type: 'boolean', default: false },
+            links: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional local file paths, run IDs, or issue links supporting the checklist.',
+            },
+          },
+        },
+      },
+      allOf: [
+        {
+          not: {
+            anyOf: [
+              { required: ['flowId', 'workflow'] },
+              {
+                required: ['flowId', 'all'],
+                properties: { all: { const: true } },
+              },
+              {
+                required: ['workflow', 'all'],
+                properties: { all: { const: true } },
+              },
+            ],
+          },
+        },
+      ],
+      required: [],
     },
   },
   {

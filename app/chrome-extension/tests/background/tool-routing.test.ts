@@ -54,6 +54,7 @@ vi.mock('@/entrypoints/background/tools/flow-tools', () => ({
   workflowRepairRollbackTool: { name: 'workflow_repair_rollback', execute: vi.fn() },
   workflowStabilizeTool: { name: 'workflow_stabilize', execute: vi.fn() },
   workflowMigrateTool: { name: 'workflow_migrate', execute: vi.fn() },
+  workflowReleaseReadinessTool: { name: 'workflow_release_readiness', execute: vi.fn() },
 }));
 
 vi.mock('@/entrypoints/background/tools/recording', () => ({
