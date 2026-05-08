@@ -241,8 +241,10 @@ interface AssertionRepairSuggestion {
   evidence?: Record<string, unknown>;
 }
 
+type WorkflowStabilizeRunPhase = 'baseline' | 'postRepair' | 'reset';
+
 interface WorkflowStabilizeRunSummary {
-  phase: 'baseline' | 'postRepair';
+  phase: WorkflowStabilizeRunPhase;
   iteration: number;
   runId?: string;
   status: string;
@@ -254,6 +256,24 @@ interface WorkflowStabilizeRunSummary {
   tookMs?: number;
   revision: string;
   debugArgs?: Record<string, unknown>;
+}
+
+interface WorkflowResetPlan {
+  flow: FlowV3;
+  workflow?: string;
+  args?: Record<string, unknown>;
+  maxRuns: number;
+  requireStable: boolean;
+  revision: string;
+  risk: WorkflowRiskProfile;
+  quality: ReturnType<typeof buildWorkflowQualitySummary>;
+}
+
+interface WorkflowResetValidation {
+  requested: boolean;
+  plan?: WorkflowResetPlan;
+  blockedReason?: string;
+  errors: WorkflowStabilizeValidationError[];
 }
 
 interface WorkflowStabilizeScore {
@@ -606,6 +626,93 @@ function getVariableName(variable: FlowVariable | null | undefined): string | un
 
 function isSensitiveVariableDefinition(variable: FlowVariable | null | undefined): boolean {
   return isSensitiveVariableLike(variable);
+}
+
+function inferFlowVariableKind(variable: FlowVariable): string {
+  if (variable.kind) return variable.kind;
+  if (typeof variable.default === 'number') return 'number';
+  if (typeof variable.default === 'boolean') return 'boolean';
+  if (Array.isArray(variable.default)) return 'array';
+  if (variable.default && typeof variable.default === 'object') return 'json';
+  return 'string';
+}
+
+function validateWorkflowArgsForStabilize(
+  flow: FlowV3,
+  value: unknown,
+  pathPrefix: string,
+): { args?: Record<string, unknown>; errors: WorkflowStabilizeValidationError[] } {
+  const errors: WorkflowStabilizeValidationError[] = [];
+  if (value === undefined || value === null) {
+    value = {};
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      errors: [
+        {
+          code: 'INVALID_WORKFLOW_ARGS',
+          path: pathPrefix,
+          message: 'workflow args must be an object',
+        },
+      ],
+    };
+  }
+
+  const input = value as Record<string, unknown>;
+  const variables = Array.isArray(flow.variables) ? flow.variables : [];
+  const knownVariables = new Map(variables.map((variable) => [variable.name, variable]));
+  for (const key of Object.keys(input)) {
+    if (!knownVariables.has(key)) {
+      errors.push({
+        code: 'UNKNOWN_WORKFLOW_ARG',
+        path: `${pathPrefix}/${key}`,
+        message: `Unknown workflow argument: ${key}`,
+      });
+    }
+  }
+
+  for (const variable of variables) {
+    if (!variable?.name) continue;
+    const hasValue = Object.prototype.hasOwnProperty.call(input, variable.name);
+    const argValue = input[variable.name];
+    if (variable.required === true && variable.default === undefined && !hasValue) {
+      errors.push({
+        code: 'MISSING_REQUIRED_WORKFLOW_ARG',
+        path: `${pathPrefix}/${variable.name}`,
+        message: `Missing required workflow argument: ${variable.name}`,
+      });
+      continue;
+    }
+    if (!hasValue || argValue === undefined || argValue === null) {
+      continue;
+    }
+
+    const kind = inferFlowVariableKind(variable);
+    const valid =
+      kind === 'number'
+        ? typeof argValue === 'number' && Number.isFinite(argValue)
+        : kind === 'boolean'
+          ? typeof argValue === 'boolean'
+          : kind === 'array'
+            ? Array.isArray(argValue)
+            : kind === 'json'
+              ? true
+              : kind === 'enum'
+                ? Array.isArray(variable.options) && variable.options.includes(argValue as never)
+                : typeof argValue === 'string';
+    if (!valid) {
+      errors.push({
+        code: 'INVALID_WORKFLOW_ARG_TYPE',
+        path: `${pathPrefix}/${variable.name}`,
+        message: `Invalid value for workflow argument "${variable.name}"`,
+      });
+    }
+  }
+
+  return {
+    ...(Object.keys(input).length > 0 ? { args: input } : {}),
+    errors,
+  };
 }
 
 function countFlowNodes(flow: FlowV3): number {
@@ -1769,6 +1876,134 @@ async function resolveFlowForWorkflowTool(args: any): Promise<FlowV3 | null> {
 
   const flows = await storage.flows.list();
   return flows.find((flow) => getPublishedFlowInfo(flow)?.slug === workflow) || null;
+}
+
+function getWorkflowResetSpec(args: any):
+  | { workflow: string; args?: Record<string, unknown>; maxRuns: number; requireStable: boolean }
+  | null {
+  const reset =
+    args?.safety?.reset && typeof args.safety.reset === 'object' && !Array.isArray(args.safety.reset)
+      ? args.safety.reset
+      : {};
+  const workflow =
+    typeof reset.workflow === 'string' && reset.workflow.trim()
+      ? reset.workflow.trim()
+      : typeof args?.safety?.resetWorkflow === 'string' && args.safety.resetWorkflow.trim()
+        ? args.safety.resetWorkflow.trim()
+        : '';
+  if (!workflow) {
+    return null;
+  }
+  const resetArgs =
+    reset.args && typeof reset.args === 'object' && !Array.isArray(reset.args)
+      ? (reset.args as Record<string, unknown>)
+      : undefined;
+  return {
+    workflow,
+    ...(resetArgs ? { args: resetArgs } : {}),
+    maxRuns: clampNumber(reset.maxRuns, 1, 0, 3),
+    requireStable: reset.requireStable !== false,
+  };
+}
+
+async function buildWorkflowResetValidation(options: {
+  args: any;
+  targetFlow: FlowV3;
+  hasApprovalReference: boolean;
+}): Promise<WorkflowResetValidation> {
+  const spec = getWorkflowResetSpec(options.args);
+  if (!spec) {
+    return { requested: false, errors: [] };
+  }
+
+  const errors: WorkflowStabilizeValidationError[] = [];
+  const storage = createStoragePort();
+  const flows = await storage.flows.list();
+  const resetFlow = flows.find((flow) => getPublishedFlowInfo(flow)?.slug === spec.workflow);
+  if (!resetFlow) {
+    errors.push({
+      code: 'RESET_WORKFLOW_NOT_FOUND',
+      path: '/safety/reset/workflow',
+      message: `Reset workflow not found: ${spec.workflow}`,
+    });
+    return {
+      requested: true,
+      blockedReason: `reset workflow not found: ${spec.workflow}`,
+      errors,
+    };
+  }
+  if (resetFlow.id === options.targetFlow.id) {
+    errors.push({
+      code: 'RESET_WORKFLOW_SELF_REFERENCE',
+      path: '/safety/reset/workflow',
+      message: 'reset workflow cannot reference the target workflow',
+    });
+    return {
+      requested: true,
+      blockedReason: 'reset workflow cannot reference the target workflow',
+      errors,
+    };
+  }
+
+  const argsValidation = validateWorkflowArgsForStabilize(
+    resetFlow,
+    spec.args ?? {},
+    '/safety/reset/args',
+  );
+  if (argsValidation.errors.length > 0) {
+    return {
+      requested: true,
+      blockedReason: 'reset workflow args failed validation',
+      errors: argsValidation.errors,
+    };
+  }
+
+  const descriptor = buildWorkflowToolDescriptor(resetFlow);
+  const risk = classifyWorkflowRisk(descriptor.sideEffects.summary);
+  if ((risk === 'dangerous' || risk === 'unknown') && !options.hasApprovalReference) {
+    errors.push({
+      code: 'RESET_WORKFLOW_REQUIRES_APPROVAL',
+      path: '/safety/reset/workflow',
+      message: 'dangerous or unknown reset workflow requires a trusted approval reference',
+    });
+    return {
+      requested: true,
+      blockedReason: 'reset workflow requires trusted approval',
+      errors,
+    };
+  }
+
+  const quality = buildWorkflowQualitySummary(resetFlow);
+  if (
+    spec.requireStable &&
+    (!quality.current || (quality.level !== 'stable' && quality.level !== 'verified'))
+  ) {
+    errors.push({
+      code: 'RESET_WORKFLOW_QUALITY_STALE',
+      path: '/safety/reset/workflow',
+      message: `reset workflow quality is not current stable: ${quality.staleReason ?? quality.level}`,
+    });
+    return {
+      requested: true,
+      blockedReason: 'reset workflow quality gate failed',
+      errors,
+    };
+  }
+
+  return {
+    requested: true,
+    plan: {
+      flow: resetFlow,
+      workflow: spec.workflow,
+      args: argsValidation.args,
+      maxRuns: spec.maxRuns,
+      requireStable: spec.requireStable,
+      revision: calculateWorkflowRevision(resetFlow),
+      risk,
+      quality,
+    },
+    errors: [],
+  };
 }
 
 async function cleanupDebugArtifactsForRun(
@@ -3179,8 +3414,10 @@ async function executeStabilizeValidationRuns(
   iterations: number,
   revision: string,
   warnings: WorkflowStabilizeWarning[],
-): Promise<WorkflowStabilizeRunSummary[]> {
+  resetPlan?: WorkflowResetPlan,
+): Promise<{ targetRuns: WorkflowStabilizeRunSummary[]; resetRuns: WorkflowStabilizeRunSummary[] }> {
   const runs: WorkflowStabilizeRunSummary[] = [];
+  const resetRuns: WorkflowStabilizeRunSummary[] = [];
   const normalizedStartUrl =
     typeof args?.startUrl === 'string' && args.startUrl.trim() ? args.startUrl.trim() : undefined;
   const execution = {
@@ -3202,6 +3439,48 @@ async function executeStabilizeValidationRuns(
       : undefined;
 
   for (let index = 0; index < iterations; index += 1) {
+    if (resetPlan && resetPlan.maxRuns > 0) {
+      let resetSucceeded = false;
+      for (let resetAttempt = 0; resetAttempt < resetPlan.maxRuns; resetAttempt += 1) {
+        try {
+          const resetResult = await enqueueRunAndWait({
+            flowId: resetPlan.flow.id as FlowId,
+            tabId:
+              typeof args?.tabId === 'number' && Number.isFinite(args.tabId)
+                ? Math.floor(args.tabId)
+                : undefined,
+            tabTarget: args?.tabTarget === 'new' ? 'new' : 'current',
+            args: resetPlan.args as any,
+            execution,
+            refresh: resetAttempt > 0,
+          });
+          const resetSummary = summarizeStabilizeRunResult(
+            'reset',
+            index + 1,
+            resetPlan.revision,
+            resetResult,
+          );
+          resetRuns.push(resetSummary);
+          if (resetSummary.success) {
+            resetSucceeded = true;
+            break;
+          }
+        } catch (error) {
+          resetRuns.push(summarizeStabilizeRunError('reset', index + 1, resetPlan.revision, error));
+          break;
+        }
+      }
+      if (!resetSucceeded) {
+        warnings.push({
+          code: 'STABILIZE_RESET_FAILED',
+          category: 'safety',
+          message:
+            'Reset workflow failed before target validation; target workflow passRate was not updated from this iteration.',
+        });
+        break;
+      }
+    }
+
     try {
       const result = await enqueueRunAndWait({
         flowId: flow.id as FlowId,
@@ -3229,7 +3508,7 @@ async function executeStabilizeValidationRuns(
     }
   }
 
-  return runs;
+  return { targetRuns: runs, resetRuns };
 }
 
 function recordStabilizeRepairHistory(
@@ -3766,6 +4045,11 @@ class WorkflowStabilizeTool {
       typeof args?.safety?.maxDangerousRuns === 'number' && Number.isFinite(args.safety.maxDangerousRuns)
         ? Math.max(0, Math.min(3, Math.floor(args.safety.maxDangerousRuns)))
         : 0;
+    const resetValidation = await buildWorkflowResetValidation({
+      args,
+      targetFlow: workingFlow,
+      hasApprovalReference,
+    });
     let blockedReason: string | undefined;
     if ((risk === 'dangerous' || risk === 'unknown') && executionMode === 'auto') {
       blockedReason = `${risk} workflow defaults to analyze-only`;
@@ -3786,12 +4070,11 @@ class WorkflowStabilizeTool {
         message: blockedReason,
       });
     }
-    if (args?.safety?.reset || args?.safety?.resetWorkflow) {
+    if (resetValidation.blockedReason) {
       warnings.push({
-        code: 'STABILIZE_RESET_NOT_AVAILABLE',
-        category: 'capability',
-        message:
-          'Reset workflow execution is not enabled in this MVP; target validation runs proceed without reset.',
+        code: 'STABILIZE_RESET_BLOCKED',
+        category: 'safety',
+        message: resetValidation.blockedReason,
       });
     }
     if (args?.safety?.segments?.mode === 'stopBeforeDangerous') {
@@ -3803,7 +4086,8 @@ class WorkflowStabilizeTool {
       });
     }
 
-    const canRunValidation = !blockedReason && executionMode !== 'analyzeOnly';
+    const validationBlockedReason = blockedReason ?? resetValidation.blockedReason;
+    const canRunValidation = !validationBlockedReason && executionMode !== 'analyzeOnly';
     const requestedValidationIterations =
       risk === 'dangerous' || risk === 'unknown'
         ? Math.min(iterations, maxDangerousRuns)
@@ -3817,7 +4101,7 @@ class WorkflowStabilizeTool {
       });
     }
 
-    const baselineRuns =
+    const baselineValidation =
       canRunValidation && requestedValidationIterations > 0
         ? await executeStabilizeValidationRuns(
             workingFlow,
@@ -3826,10 +4110,13 @@ class WorkflowStabilizeTool {
             requestedValidationIterations,
             initialRevision,
             warnings,
+            resetValidation.plan,
           )
-        : [];
+        : { targetRuns: [], resetRuns: [] };
+    const baselineRuns = baselineValidation.targetRuns;
+    const resetRuns = [...baselineValidation.resetRuns];
     const baselineScore = scoreStabilizeRuns(baselineRuns);
-    const shouldApply = args?.apply === true && args?.dryRun !== true && !blockedReason;
+    const shouldApply = args?.apply === true && args?.dryRun !== true && !validationBlockedReason;
     const changes: WorkflowRepairChange[] = [];
     let parameterization: ReturnType<typeof applyFlowParameterSuggestions> | undefined;
 
@@ -3851,7 +4138,7 @@ class WorkflowStabilizeTool {
     if (shouldApply && args?.repair?.waits !== false) {
       changes.push(...applyWaitRepairPlans(workingFlow, waitRepairPlansBeforeApply));
     }
-    if (args?.apply === true && blockedReason) {
+    if (args?.apply === true && validationBlockedReason) {
       warnings.push({
         code: 'STABILIZE_APPLY_SKIPPED',
         category: 'safety',
@@ -3874,7 +4161,7 @@ class WorkflowStabilizeTool {
             authorization.approvedBy === 'policy'
               ? authorization.approvedBy
               : 'unknown',
-          executionMode: blockedReason ? 'analyzeOnly' : executionMode,
+          executionMode: validationBlockedReason ? 'analyzeOnly' : executionMode,
           allowExternalSideEffects: requestsExternalSideEffects,
           maxDangerousRuns,
         },
@@ -3900,7 +4187,7 @@ class WorkflowStabilizeTool {
       postRepairRevision = calculateWorkflowRevision(workingFlow);
     }
 
-    const postRepairRuns =
+    const postRepairValidation =
       applied && canRunValidation && requestedValidationIterations > 0
         ? await executeStabilizeValidationRuns(
             workingFlow,
@@ -3909,8 +4196,11 @@ class WorkflowStabilizeTool {
             requestedValidationIterations,
             postRepairRevision ?? calculateWorkflowRevision(workingFlow),
             warnings,
+            resetValidation.plan,
           )
-        : [];
+        : { targetRuns: [], resetRuns: [] };
+    resetRuns.push(...postRepairValidation.resetRuns);
+    const postRepairRuns = postRepairValidation.targetRuns;
     const postRepairScore = scoreStabilizeRuns(postRepairRuns);
     const finalScore = postRepairRuns.length > 0 ? postRepairScore : baselineScore;
     const finalHints = applied ? collectFlowHints(workingFlow) : hints;
@@ -3953,7 +4243,7 @@ class WorkflowStabilizeTool {
         flow: workingFlow,
         args,
         risk,
-        executionMode: blockedReason ? 'analyzeOnly' : executionMode,
+        executionMode: validationBlockedReason ? 'analyzeOnly' : executionMode,
         runs: validationRunsForQuality,
         revision: qualityRevision,
         minPassRate,
@@ -4050,18 +4340,42 @@ class WorkflowStabilizeTool {
               recommendationCount: recommendations.length,
               changeCount: changes.length,
               inspectedRunCount: recentRuns.length,
+              resetRunCount: resetRuns.length,
               baselineRunCount: baselineRuns.length,
               postRepairRunCount: postRepairRuns.length,
             },
             safety: {
               risk,
-              executionMode: blockedReason ? 'analyzeOnly' : executionMode,
+              executionMode: validationBlockedReason ? 'analyzeOnly' : executionMode,
               requestedIterations: iterations,
               minPassRate,
               executedIterations: baselineRuns.length + postRepairRuns.length,
-              ...(blockedReason ? { blockedReason } : {}),
+              ...(validationBlockedReason ? { blockedReason: validationBlockedReason } : {}),
               sideEffects,
               approvalReferenceAccepted: hasApprovalReference,
+            },
+            reset: {
+              requested: resetValidation.requested,
+              ...(resetValidation.plan
+                ? {
+                    workflow: resetValidation.plan.workflow,
+                    flowId: resetValidation.plan.flow.id,
+                    revision: resetValidation.plan.revision,
+                    requireStable: resetValidation.plan.requireStable,
+                    maxRuns: resetValidation.plan.maxRuns,
+                    risk: resetValidation.plan.risk,
+                    quality: {
+                      level: resetValidation.plan.quality.level,
+                      status: resetValidation.plan.quality.status,
+                      current: resetValidation.plan.quality.current,
+                      staleReason: resetValidation.plan.quality.staleReason,
+                    },
+                  }
+                : {}),
+              ...(resetValidation.blockedReason ? { blockedReason: resetValidation.blockedReason } : {}),
+              ...(resetValidation.errors.length > 0 ? { errors: resetValidation.errors } : {}),
+              runCount: resetRuns.length,
+              failed: resetRuns.some((run) => !run.success),
             },
             capabilities,
             metrics: runtimeMetrics,
@@ -4084,6 +4398,7 @@ class WorkflowStabilizeTool {
             runs: postRepairRuns.length > 0 ? postRepairRuns : baselineRuns,
             baselineRuns,
             ...(postRepairRuns.length > 0 ? { postRepairRuns } : {}),
+            ...(resetRuns.length > 0 ? { resetRuns } : {}),
             artifacts: {
               policy: args?.debug?.captureArtifacts ?? 'failureOnly',
               debugArgs: {

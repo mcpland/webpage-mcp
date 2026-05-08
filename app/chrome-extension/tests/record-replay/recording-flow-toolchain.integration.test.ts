@@ -1638,6 +1638,265 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.updatedAt).not.toBe(new Date(0).toISOString());
   });
 
+  it("workflowStabilizeTool runs reset workflow before validation without scoring reset runs", async () => {
+    const flowId = `workflow-stabilize-reset-${Date.now()}`;
+    const resetFlowId = `workflow-reset-${Date.now()}`;
+    const resetFlow = createFlow(
+      resetFlowId,
+      [
+        {
+          id: "reset-wait" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#reset-ready" } },
+        },
+      ],
+      {
+        variables: [{ name: "session", kind: "string", required: true }],
+        meta: {
+          tool: {
+            published: true,
+            slug: "reset-session",
+          },
+        },
+      },
+    );
+    resetFlow.meta = {
+      ...(resetFlow.meta ?? {}),
+      quality: {
+        revision: calculateWorkflowRevision(resetFlow),
+        level: "stable",
+        status: "stable",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        verification: {
+          oracle: "none",
+          oracleStrength: "weak",
+        },
+      },
+    };
+    await createStoragePort().flows.save(resetFlow);
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "target-wait" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+
+    const flowIds: string[] = [];
+    mocks.enqueueRunAndWait.mockImplementation(async (input: { flowId: string; args?: unknown }) => {
+      flowIds.push(input.flowId);
+      const runId = `${input.flowId === resetFlowId ? "reset" : "target"}-${flowIds.length}`;
+      return {
+        run: {
+          id: runId,
+          flowId: input.flowId,
+          status: "succeeded",
+          tookMs: 5,
+        } as any,
+        events: [],
+        result: {
+          runId,
+          success: true,
+          status: "succeeded",
+          summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+          outputs: null,
+          eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+        },
+      };
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 2,
+      minPassRate: 1,
+      apply: false,
+      safety: {
+        reset: {
+          workflow: "reset-session",
+          args: { session: "fresh" },
+          requireStable: true,
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(flowIds).toEqual([resetFlowId, flowId, resetFlowId, flowId]);
+    expect(mocks.enqueueRunAndWait).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        flowId: resetFlowId,
+        args: { session: "fresh" },
+      }),
+    );
+    expect(payload).toMatchObject({
+      stable: true,
+      reset: {
+        requested: true,
+        workflow: "reset-session",
+        flowId: resetFlowId,
+        requireStable: true,
+        runCount: 2,
+        failed: false,
+      },
+      summary: {
+        resetRunCount: 2,
+        baselineRunCount: 2,
+      },
+      score: {
+        passRate: 1,
+        iterations: 2,
+      },
+    });
+    expect(payload.resetRuns).toHaveLength(2);
+    expect(payload.baselineRuns).toHaveLength(2);
+    expect(updated?.meta?.quality).toMatchObject({
+      validationRuns: 2,
+      countedValidationRuns: 2,
+      passedRuns: 2,
+      failedRuns: 0,
+    });
+  });
+
+  it("workflowStabilizeTool reports reset failures separately from target passRate", async () => {
+    const flowId = `workflow-stabilize-reset-fail-${Date.now()}`;
+    const resetFlowId = `workflow-reset-fail-${Date.now()}`;
+    const resetFlow = createFlow(
+      resetFlowId,
+      [
+        {
+          id: "reset-wait" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#reset-ready" } },
+        },
+      ],
+      {
+        meta: {
+          tool: {
+            published: true,
+            slug: "reset-failing-session",
+          },
+        },
+      },
+    );
+    resetFlow.meta = {
+      ...(resetFlow.meta ?? {}),
+      quality: {
+        revision: calculateWorkflowRevision(resetFlow),
+        level: "stable",
+        status: "stable",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        verification: {
+          oracle: "none",
+          oracleStrength: "weak",
+        },
+      },
+    };
+    await createStoragePort().flows.save(resetFlow);
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "target-wait" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+
+    mocks.enqueueRunAndWait.mockImplementation(async (input: { flowId: string }) => {
+      expect(input.flowId).toBe(resetFlowId);
+      return {
+        run: {
+          id: "reset-failed-run",
+          flowId: resetFlowId,
+          status: "failed",
+          currentNodeId: "reset-wait",
+          tookMs: 5,
+        } as any,
+        events: [],
+        result: {
+          runId: "reset-failed-run",
+          success: false,
+          status: "failed",
+          currentNodeId: "reset-wait",
+          failedNodeId: "reset-wait",
+          errorCode: "TIMEOUT",
+          error: {
+            code: "TIMEOUT",
+            category: "runtime",
+            retryable: true,
+            message: "Reset timed out",
+            nodeId: "reset-wait",
+          },
+          summary: { total: 1, success: 0, failed: 1, tookMs: 5 },
+          outputs: null,
+          eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+        },
+      };
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 2,
+      apply: false,
+      safety: {
+        resetWorkflow: "reset-failing-session",
+      },
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(1);
+    expect(payload).toMatchObject({
+      stable: false,
+      reset: {
+        requested: true,
+        workflow: "reset-failing-session",
+        flowId: resetFlowId,
+        runCount: 1,
+        failed: true,
+      },
+      summary: {
+        resetRunCount: 1,
+        baselineRunCount: 0,
+      },
+      score: {
+        iterations: 0,
+        passedRuns: 0,
+        failedRuns: 0,
+      },
+    });
+    expect(payload.resetRuns).toEqual([
+      expect.objectContaining({
+        phase: "reset",
+        success: false,
+        errorCode: "TIMEOUT",
+      }),
+    ]);
+    expect(payload.warnings.map((warning: { code: string }) => warning.code)).toContain(
+      "STABILIZE_RESET_FAILED",
+    );
+    expect(updated?.meta?.quality).toBeUndefined();
+  });
+
   it("workflowStabilizeTool defaults dangerous workflows to analyze-only", async () => {
     const flowId = `workflow-stabilize-dangerous-${Date.now()}`;
     await createStoragePort().flows.save(
