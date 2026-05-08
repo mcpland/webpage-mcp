@@ -6,6 +6,7 @@ import {
   evaluateWorkflowPublishGate,
   listPublishedFlowDetails,
 } from '@/entrypoints/background/record-replay-v3/flows/publish';
+import { markScheduledRevalidationCatchUp } from '@/entrypoints/background/record-replay-v3/flows/revalidation';
 import type { FlowV3 } from '@/entrypoints/background/record-replay-v3/domain/flow';
 
 function createPublishedFlow(): FlowV3 {
@@ -271,6 +272,127 @@ describe('listPublishedFlowDetails', () => {
       passedRuns: 3,
       failedRuns: 0,
       warnings: expect.arrayContaining(['revalidation_overdue', 'revalidation_deferred']),
+    });
+  });
+
+  it('marks overdue safe scheduled revalidation as missed without changing pass counts', () => {
+    const flow = createPublishedFlow();
+    const revision = calculateWorkflowRevision(flow);
+    flow.meta = {
+      ...flow.meta,
+      quality: {
+        revision,
+        level: 'stable',
+        status: 'stable',
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: '2999-01-01T00:00:00.000Z' as any,
+        verification: {
+          oracle: 'assertion',
+          oracleStrength: 'normal',
+        },
+        revalidation: {
+          policy: 'scheduled',
+          nextRevalidateAt: '2026-05-09T00:00:00.000Z' as any,
+        },
+      },
+    };
+
+    const catchUp = markScheduledRevalidationCatchUp(flow, {
+      nowMs: Date.parse('2026-05-09T01:00:00.000Z'),
+    });
+    const quality = buildWorkflowQualitySummary(catchUp.flow, {
+      nowMs: Date.parse('2026-05-09T01:00:00.000Z'),
+    });
+
+    expect(catchUp).toMatchObject({
+      changed: true,
+      status: 'missed',
+      reason: 'scheduled_revalidation_missed_catchup',
+    });
+    expect(quality).toMatchObject({
+      current: false,
+      staleReason: 'revalidation_overdue',
+      revalidationStatus: 'missed',
+      countedValidationRuns: 3,
+      passedRuns: 3,
+      failedRuns: 0,
+      warnings: expect.arrayContaining(['revalidation_overdue', 'revalidation_missed']),
+    });
+    expect(catchUp.flow.meta?.audit?.events?.at(-1)).toMatchObject({
+      kind: 'quality_downgrade',
+      reason: 'scheduled_revalidation_missed_catchup',
+      metadata: {
+        countedAsValidationFailure: false,
+        revalidationStatus: 'missed',
+      },
+    });
+  });
+
+  it('defers overdue dangerous scheduled revalidation instead of running it silently', () => {
+    const flow = {
+      ...createPublishedFlow(),
+      nodes: [
+        {
+          id: 'node-1' as any,
+          kind: 'click',
+          config: { target: { selector: '#submit' } },
+        },
+      ],
+    };
+    const revision = calculateWorkflowRevision(flow);
+    flow.meta = {
+      ...flow.meta,
+      quality: {
+        revision,
+        level: 'stable',
+        status: 'stable',
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: '2999-01-01T00:00:00.000Z' as any,
+        verification: {
+          oracle: 'assertion',
+          oracleStrength: 'normal',
+        },
+        revalidation: {
+          policy: 'scheduled',
+          nextRevalidateAt: '2026-05-09T00:00:00.000Z' as any,
+        },
+      },
+    };
+
+    const catchUp = markScheduledRevalidationCatchUp(flow, {
+      nowMs: Date.parse('2026-05-09T01:00:00.000Z'),
+    });
+    const quality = buildWorkflowQualitySummary(catchUp.flow, {
+      nowMs: Date.parse('2026-05-09T01:00:00.000Z'),
+    });
+
+    expect(catchUp).toMatchObject({
+      changed: true,
+      status: 'deferred',
+      reason: 'scheduled_revalidation_deferred_requires_safe_or_idempotent_workflow',
+    });
+    expect(quality).toMatchObject({
+      revalidationStatus: 'deferred',
+      revalidationReason: 'scheduled_revalidation_deferred_requires_safe_or_idempotent_workflow',
+      countedValidationRuns: 3,
+      failedRuns: 0,
+      warnings: expect.arrayContaining(['revalidation_overdue', 'revalidation_deferred']),
+    });
+    expect(catchUp.flow.meta?.quality?.revalidation).toMatchObject({
+      status: 'deferred',
+      lastDeferredReason: 'scheduled_revalidation_deferred_requires_safe_or_idempotent_workflow',
     });
   });
 

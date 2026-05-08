@@ -36,6 +36,7 @@ import {
   calculateWorkflowRevision,
   getPublishedFlowInfo,
 } from '../record-replay-v3/flows/publish';
+import { markScheduledRevalidationCatchUp } from '../record-replay-v3/flows/revalidation';
 import {
   containsSensitiveValue,
   getVariableLikeName,
@@ -3971,13 +3972,18 @@ class WorkflowDescribeTool {
       return createErrorResponse('flowId or workflow is required');
     }
 
-    const flow = await resolveFlowForWorkflowTool(args);
+    let flow = await resolveFlowForWorkflowTool(args);
     if (!flow) {
       return createErrorResponse(
         requestedFlowId
           ? `Flow not found: ${requestedFlowId}`
           : `Published workflow not found: ${requestedWorkflow}`,
       );
+    }
+    const catchUp = markScheduledRevalidationCatchUp(flow);
+    if (catchUp.changed) {
+      await createStoragePort().flows.save(catchUp.flow);
+      flow = catchUp.flow;
     }
 
     const publishedInfo = getPublishedFlowInfo(flow);

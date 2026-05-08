@@ -4175,6 +4175,128 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("listPublishedFlowsTool marks overdue scheduled revalidation during list refresh", async () => {
+    const flowId = `published-revalidation-catchup-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "node-1" as any,
+        kind: "navigate",
+        config: { url: "https://example.com" },
+      },
+    ]);
+    flow.meta = {
+      tool: {
+        published: true,
+        slug: "published-revalidation-catchup",
+      },
+    };
+    flow.meta.quality = {
+      revision: calculateWorkflowRevision(flow),
+      level: "stable",
+      status: "stable",
+      stabilityScore: 1,
+      passRate: 1,
+      validationRuns: 3,
+      countedValidationRuns: 3,
+      passedRuns: 3,
+      failedRuns: 0,
+      minValidationRuns: 3,
+      freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+      verification: {
+        oracle: "assertion",
+        oracleStrength: "normal",
+      },
+      revalidation: {
+        policy: "scheduled",
+        nextRevalidateAt: "2000-01-01T00:00:00.000Z" as any,
+      },
+    };
+    await createStoragePort().flows.save(flow);
+
+    const result = await listPublishedFlowsTool.execute();
+    const payload = parseToolPayload(result);
+    const persisted = await createStoragePort().flows.get(flowId as any);
+
+    expect(payload.published).toEqual([
+      expect.objectContaining({
+        id: flowId,
+        quality: expect.objectContaining({
+          current: false,
+          staleReason: "revalidation_overdue",
+          revalidationStatus: "missed",
+          revalidationReason: "scheduled_revalidation_missed_catchup",
+          countedValidationRuns: 3,
+          passedRuns: 3,
+          failedRuns: 0,
+        }),
+      }),
+    ]);
+    expect(persisted?.meta?.quality?.revalidation).toMatchObject({
+      status: "missed",
+      lastRevalidateReason: "scheduled_revalidation_missed_catchup",
+    });
+    expect(persisted?.meta?.audit?.events?.at(-1)).toMatchObject({
+      kind: "quality_downgrade",
+      reason: "scheduled_revalidation_missed_catchup",
+    });
+  });
+
+  it("workflowDescribeTool defers overdue scheduled revalidation for dangerous workflows", async () => {
+    const flowId = `describe-dangerous-revalidation-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "click-1" as any,
+        kind: "click",
+        config: { target: { selector: "#submit" } },
+      },
+    ]);
+    flow.meta = {
+      tool: {
+        published: true,
+        slug: "dangerous-revalidation",
+      },
+    };
+    flow.meta.quality = {
+      revision: calculateWorkflowRevision(flow),
+      level: "stable",
+      status: "stable",
+      stabilityScore: 1,
+      passRate: 1,
+      validationRuns: 3,
+      countedValidationRuns: 3,
+      passedRuns: 3,
+      failedRuns: 0,
+      minValidationRuns: 3,
+      freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+      verification: {
+        oracle: "assertion",
+        oracleStrength: "normal",
+      },
+      revalidation: {
+        policy: "scheduled",
+        nextRevalidateAt: "2000-01-01T00:00:00.000Z" as any,
+      },
+    };
+    await createStoragePort().flows.save(flow);
+
+    const result = await workflowDescribeTool.execute({ workflow: "dangerous-revalidation" });
+    const payload = parseToolPayload(result);
+    const persisted = await createStoragePort().flows.get(flowId as any);
+
+    expect(payload.descriptor.quality).toMatchObject({
+      revalidationStatus: "deferred",
+      revalidationReason:
+        "scheduled_revalidation_deferred_requires_safe_or_idempotent_workflow",
+      countedValidationRuns: 3,
+      failedRuns: 0,
+    });
+    expect(persisted?.meta?.quality?.revalidation).toMatchObject({
+      status: "deferred",
+      lastDeferredReason:
+        "scheduled_revalidation_deferred_requires_safe_or_idempotent_workflow",
+    });
+  });
+
   it("workflowPublishTool publishes stabilized drafts and workflowUnpublishTool removes the slug", async () => {
     const flowId = `workflow-publish-${Date.now()}`;
     const flow = createFlow(flowId, [

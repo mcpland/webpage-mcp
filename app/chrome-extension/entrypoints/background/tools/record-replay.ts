@@ -21,6 +21,7 @@ import {
   projectAndValidateWorkflowOutputs,
   type WorkflowOutputProjectionResult,
 } from "../record-replay-v3/flows/output-validation";
+import { markScheduledRevalidationCatchUp } from "../record-replay-v3/flows/revalidation";
 import { withFlowWriteLock } from "../record-replay-v3/flows/write-lock";
 import {
   WorkflowSecretRefError,
@@ -1087,9 +1088,16 @@ class FlowRunTool {
 class ListPublishedTool {
   name = TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED;
   async execute(): Promise<ToolResult> {
-    const list = listPublishedFlowDetails(
-      await createStoragePort().flows.list(),
-    );
+    const storage = createStoragePort();
+    const flows: FlowV3[] = [];
+    for (const flow of await storage.flows.list()) {
+      const catchUp = markScheduledRevalidationCatchUp(flow);
+      if (catchUp.changed) {
+        await storage.flows.save(catchUp.flow);
+      }
+      flows.push(catchUp.flow);
+    }
+    const list = listPublishedFlowDetails(flows);
     return {
       content: [
         {
