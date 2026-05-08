@@ -1157,6 +1157,98 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("workflowRepairTool suggests selector replacement without applying when failure artifacts are missing", async () => {
+    const flowId = `workflow-repair-selector-suggest-${Date.now()}`;
+    const runId = `${flowId}-run`;
+    const oldSelector = "body > main > form:nth-of-type(1) input:nth-of-type(1)";
+    const stableSelector = '[data-testid="email-input"]';
+    const storage = createStoragePort();
+    await storage.flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: {
+              selector: oldSelector,
+              fingerprint: "input|id=email|name=email",
+              domPath: [0, 1, 0],
+              shadowHostChain: [],
+              candidates: [
+                { type: "css", selector: oldSelector, value: oldSelector },
+                {
+                  type: "attr",
+                  selector: stableSelector,
+                  value: stableSelector,
+                  unique: true,
+                  stability: {
+                    score: 0.96,
+                    signals: { usesTestId: true, usesAttributes: true },
+                  },
+                },
+              ],
+            },
+            value: "{email}",
+          },
+        },
+      ]),
+    );
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: runId as any,
+      flowId: flowId as any,
+      status: "failed",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      currentNodeId: "fill-1" as any,
+      attempt: 1,
+      maxAttempts: 1,
+      error: { code: "TARGET_NOT_FOUND", message: "Missing input" },
+      nextSeq: 1,
+    } as RunRecordV3);
+    await storage.events.append({
+      runId: runId as any,
+      type: "node.failed",
+      nodeId: "fill-1" as any,
+      attempt: 1,
+      error: { code: "TARGET_NOT_FOUND", message: "Missing input" },
+      decision: "stop",
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "selector.resolution",
+      nodeId: "fill-1" as any,
+      primarySelector: oldSelector,
+      resolvedBy: "candidate",
+      candidateIndex: 1,
+      matchCount: 1,
+      fingerprint: { status: "matched", score: 0.94 },
+    });
+
+    const result = await workflowRepairTool.execute({
+      flowId,
+      apply: true,
+      applyDefaultStabilityPolicy: false,
+      applyParameterSuggestions: false,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await storage.flows.get(flowId as any);
+
+    expect(payload.updated).toBe(false);
+    expect(payload.selectorRepairsBeforeApply).toEqual([
+      expect.objectContaining({
+        op: "replaceTarget",
+        nodeId: "fill-1",
+        status: "suggestion",
+        beforeSelector: oldSelector,
+        afterSelector: stableSelector,
+        selectorUnique: true,
+        reason: expect.stringContaining("no failure artifact"),
+      }),
+    ]);
+    expect((updated?.nodes[0].config as any).target.selector).toBe(oldSelector);
+  });
+
   it("workflowRepairTool scopes flow-level onError retry to safe nodes", async () => {
     const flowId = `workflow-repair-onerror-retry-${Date.now()}`;
     await createStoragePort().flows.save(
@@ -1663,6 +1755,174 @@ describe("recording/editing/flow toolchain integration", () => {
           passedRuns: 2,
         }),
       ],
+    });
+  });
+
+  it("workflowStabilizeTool applies high-confidence selector replacement and validates after patch", async () => {
+    const flowId = `workflow-stabilize-selector-${Date.now()}`;
+    const runId = `${flowId}-failed-run`;
+    const oldSelector = "body > main > form:nth-of-type(1) input:nth-of-type(1)";
+    const stableSelector = '[data-testid="email-input"]';
+    const storage = createStoragePort();
+    await storage.flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: {
+              selector: oldSelector,
+              fingerprint: "input|id=email|name=email",
+              domPath: [0, 1, 0],
+              shadowHostChain: [],
+              candidates: [
+                { type: "css", selector: oldSelector, value: oldSelector },
+                {
+                  type: "attr",
+                  selector: stableSelector,
+                  value: stableSelector,
+                  unique: true,
+                  stability: {
+                    score: 0.97,
+                    signals: { usesTestId: true, usesAttributes: true },
+                  },
+                },
+              ],
+            },
+            value: "{email}",
+          },
+        },
+      ]),
+    );
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: runId as any,
+      flowId: flowId as any,
+      status: "failed",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      currentNodeId: "fill-1" as any,
+      attempt: 1,
+      maxAttempts: 1,
+      error: { code: "TARGET_NOT_FOUND", message: "Missing input" },
+      nextSeq: 1,
+    } as RunRecordV3);
+    await storage.events.append({
+      runId: runId as any,
+      type: "node.failed",
+      nodeId: "fill-1" as any,
+      attempt: 1,
+      error: { code: "TARGET_NOT_FOUND", message: "Missing input" },
+      decision: "stop",
+    });
+    const artifact = await storage.artifacts.saveScreenshot({
+      runId: runId as any,
+      nodeId: "fill-1" as any,
+      base64: "ZmFpbHVyZS1zaG90",
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "artifact.screenshot",
+      nodeId: "fill-1" as any,
+      artifactId: artifact.id,
+      savedAs: artifact.filename,
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "selector.resolution",
+      nodeId: "fill-1" as any,
+      primarySelector: oldSelector,
+      resolvedBy: "candidate",
+      candidateIndex: 1,
+      matchCount: 1,
+      fingerprint: { status: "matched", score: 0.95 },
+    });
+    let runCall = 0;
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      runCall += 1;
+      const validationRunId = `${flowId}-validation-${runCall}`;
+      return {
+        run: {
+          id: validationRunId,
+          flowId,
+          status: "succeeded",
+          tookMs: 5,
+        } as any,
+        events: [],
+        result: {
+          runId: validationRunId,
+          success: true,
+          status: "succeeded",
+          summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+          outputs: null,
+          eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+        },
+      };
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      minPassRate: 1,
+      apply: true,
+      repair: {
+        parameterize: false,
+        defaultStabilityPolicy: false,
+        selectors: true,
+      },
+    });
+    const payload = parseToolPayload(result);
+    const updated = await storage.flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(2);
+    expect(payload).toMatchObject({
+      applied: true,
+      stable: true,
+      summary: {
+        changeCount: 1,
+        baselineRunCount: 1,
+        postRepairRunCount: 1,
+      },
+    });
+    expect(payload.selectorRepairsBeforeApply).toEqual([
+      expect.objectContaining({
+        op: "replaceTarget",
+        nodeId: "fill-1",
+        status: "autoPatch",
+        beforeSelector: oldSelector,
+        afterSelector: stableSelector,
+        confidence: expect.any(Number),
+        beforeQuality: expect.objectContaining({ usesNthOfType: true }),
+        afterQuality: expect.objectContaining({ usesDataOrTestId: true }),
+      }),
+    ]);
+    expect(payload.changes).toEqual([
+      expect.objectContaining({
+        code: "selector_target_replaced",
+        nodeId: "fill-1",
+        confidence: expect.any(Number),
+        beforeQuality: expect.objectContaining({ primarySelector: oldSelector }),
+        afterQuality: expect.objectContaining({ primarySelector: stableSelector }),
+        patch: expect.objectContaining({
+          op: "replaceTarget",
+          selectorUnique: true,
+        }),
+      }),
+    ]);
+    expect((updated?.nodes[0].config as any).target.selector).toBe(stableSelector);
+    expect((updated?.nodes[0].config as any).target.candidates[0]).toMatchObject({
+      type: "attr",
+      selector: stableSelector,
+      value: stableSelector,
+    });
+    expect(updated?.meta?.repairs?.history?.[0]).toMatchObject({
+      provenance: {
+        source: "workflow_stabilize",
+        pageContentUsed: true,
+      },
+      beforeQuality: expect.any(Number),
+      afterQuality: expect.any(Number),
     });
   });
 
