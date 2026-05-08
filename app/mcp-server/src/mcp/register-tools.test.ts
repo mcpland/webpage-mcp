@@ -223,6 +223,9 @@ describe('dynamic published flow tools', () => {
       type: 'boolean',
       default: false,
     });
+    expect(input.properties?.debugStepByStep).toBeUndefined();
+    expect(input.properties?.captureStepScreenshots).toBeUndefined();
+    expect(input.properties?.screenshotBaselines).toBeUndefined();
   });
 
   it('hides per-workflow dynamic tools by default while exposing workflow_run', async () => {
@@ -338,6 +341,56 @@ describe('dynamic published flow tools', () => {
       content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
       isError: false,
     });
+  });
+
+  it('does not forward workflow_run debug options that are not publicly supported', async () => {
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [
+          {
+            id: 'flow-signup',
+            slug: 'signup',
+            variables: [{ name: 'email', required: true }],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
+          isError: false,
+        },
+      });
+    const ctx = createContext('dynamic-flow-workflow-debug-options', sendRequestToExtensionAndWait);
+
+    await callToolForContext(ctx, 'workflow_run', {
+      workflow: 'signup',
+      args: { email: 'alice@example.com' },
+      debugStepByStep: true,
+      captureStepScreenshots: true,
+      screenshotBaselines: { 'fill-email': 'base64' },
+    });
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenNthCalledWith(
+      2,
+      {
+        name: 'record_replay_flow_run',
+        args: {
+          flowId: 'flow-signup',
+          args: {
+            email: 'alice@example.com',
+          },
+        },
+        meta: {
+          mcpSessionId: 'dynamic-flow-workflow-debug-options',
+          instanceId: 'unit-test',
+        },
+      },
+      NativeMessageType.CALL_TOOL,
+      120000,
+    );
   });
 
   it('returns available workflow slugs when workflow_run cannot resolve a slug', async () => {

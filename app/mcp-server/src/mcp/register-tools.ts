@@ -85,12 +85,6 @@ const SESSION_RUN_OPTION_KEYS = [
   'timeoutMs',
   'startUrl',
   'tabId',
-  'debugStepByStep',
-  'stepDelayMs',
-  'captureStepScreenshots',
-  'recordStepScreenshotBaselines',
-  'screenshotBaselines',
-  'screenshotDiffThreshold',
 ] as const;
 const RUN_OPTION_KEY_SET = new Set<string>(SESSION_RUN_OPTION_KEYS);
 const WORKFLOW_RUN_TOOL_NAME = 'workflow_run';
@@ -502,36 +496,6 @@ function buildWorkflowRunTool(items: PublishedFlow[]): Tool {
           type: 'string',
           description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
         },
-        debugStepByStep: {
-          type: 'boolean',
-          default: false,
-          description: 'Include per-step debug trace in run result.',
-        },
-        stepDelayMs: {
-          type: 'number',
-          minimum: 0,
-          description: 'Optional delay between steps for visual debugging.',
-        },
-        captureStepScreenshots: {
-          type: 'boolean',
-          default: false,
-          description: 'Capture screenshot after each step and include in debug output.',
-        },
-        recordStepScreenshotBaselines: {
-          type: 'boolean',
-          default: false,
-          description: 'Capture screenshots keyed by stepId for future baseline comparison.',
-        },
-        screenshotBaselines: {
-          type: 'object',
-          description: 'Baseline screenshots keyed by stepId.',
-        },
-        screenshotDiffThreshold: {
-          type: 'number',
-          minimum: 0,
-          maximum: 1,
-          description: 'Similarity threshold for screenshot comparison (0-1).',
-        },
       },
       required: ['workflow'],
     },
@@ -598,42 +562,6 @@ async function listDynamicFlowTools(ctx: McpToolContext, publishedFlows?: Publis
       };
     }
     if (!properties['tabId']) properties['tabId'] = { type: 'number' };
-    if (!properties['debugStepByStep'])
-      properties['debugStepByStep'] = {
-        type: 'boolean',
-        default: false,
-        description: 'Include per-step debug trace in run result.',
-      };
-    if (!properties['stepDelayMs'])
-      properties['stepDelayMs'] = {
-        type: 'number',
-        minimum: 0,
-        description: 'Optional delay between steps for visual debugging.',
-      };
-    if (!properties['captureStepScreenshots'])
-      properties['captureStepScreenshots'] = {
-        type: 'boolean',
-        default: false,
-        description: 'Capture screenshot after each step and include in debug output.',
-      };
-    if (!properties['recordStepScreenshotBaselines'])
-      properties['recordStepScreenshotBaselines'] = {
-        type: 'boolean',
-        default: false,
-        description: 'Capture screenshots keyed by stepId for future baseline comparison.',
-      };
-    if (!properties['screenshotBaselines'])
-      properties['screenshotBaselines'] = {
-        type: 'object',
-        description: 'Baseline screenshots keyed by stepId.',
-      };
-    if (!properties['screenshotDiffThreshold'])
-      properties['screenshotDiffThreshold'] = {
-        type: 'number',
-        minimum: 0,
-        maximum: 1,
-        description: 'Similarity threshold for screenshot comparison (0-1).',
-      };
     const tool: Tool = {
       name,
       description,
