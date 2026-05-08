@@ -50,6 +50,64 @@ describe('adapter policy flags contract', () => {
       expect(action.type).toBe(type);
       expect(action.params.target.candidates[0].selector).toBe('#input');
     });
+
+    it('preserves extended locator metadata when converting legacy targets', async () => {
+      const executor = createStepExecutor(mockRegistry);
+
+      await executor(
+        createMockExecCtx(),
+        createMockStep('click', {
+          target: {
+            selector: '#submit',
+            candidates: [
+              {
+                type: 'css',
+                value: '#submit',
+                source: 'recorded',
+                strategy: 'testid',
+                stability: {
+                  score: 0.98,
+                  signals: { usesId: true },
+                },
+              },
+            ],
+            fingerprint: 'button|id=submit|text=Save',
+            domPath: [1, 2, 0],
+            shadowHostChain: ['app-shell', '#inner-host'],
+            frameContext: {
+              kind: 'iframe',
+              url: 'https://example.com/frame',
+              frameSelector: 'iframe#checkout',
+            },
+          },
+        }),
+        1,
+        {},
+      );
+
+      const [, action] = registryExecute.mock.calls[0];
+      expect(action.params.target).toMatchObject({
+        selector: '#submit',
+        fingerprint: 'button|id=submit|text=Save',
+        domPath: [1, 2, 0],
+        shadowHostChain: ['app-shell', '#inner-host'],
+        frameContext: {
+          kind: 'iframe',
+          url: 'https://example.com/frame',
+          frameSelector: 'iframe#checkout',
+        },
+      });
+      expect(action.params.target.candidates[0]).toMatchObject({
+        type: 'css',
+        selector: '#submit',
+        source: 'recorded',
+        strategy: 'testid',
+        stability: {
+          score: 0.98,
+          signals: { usesId: true },
+        },
+      });
+    });
   });
 
   describe('skipRetry flag', () => {

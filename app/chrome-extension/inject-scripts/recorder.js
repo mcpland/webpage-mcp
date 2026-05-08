@@ -2054,6 +2054,12 @@
               step.target.candidates.unshift({ type: 'css', value: composite });
             }
           }
+          step.target.frameContext = {
+            ...(step.target.frameContext || {}),
+            kind: 'iframe',
+            url: String(href || step.target.frameContext?.url || ''),
+            frameSelector: frameSel || step.target.frameContext?.frameSelector || '',
+          };
         }
         this._pushStep(step);
       } catch {}

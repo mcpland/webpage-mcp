@@ -62,6 +62,7 @@ async function executeClick<T extends 'click' | 'dblclick'>(
   const located = await selectorLocator.locate(tabId, selectorTarget, {
     frameId: ctx.frameId,
     preferRef: false,
+    verifyFingerprint: true,
   });
 
   const frameId = located?.frameId ?? ctx.frameId;

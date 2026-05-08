@@ -103,7 +103,15 @@
 
       const ranked = this._rankCandidates(el, candidates);
       const selector = this._choosePrimary(el, ranked);
-      return { selector, candidates: ranked.slice(0, 3), tag };
+      return {
+        selector,
+        candidates: ranked,
+        tag,
+        fingerprint: this._computeFingerprint(el),
+        domPath: this._computeDomPath(el),
+        shadowHostChain: this._computeShadowHostChain(el),
+        frameContext: this._buildFrameContext(),
+      };
     },
 
     _pushCandidate(candidates, candidate) {
@@ -144,7 +152,12 @@
         const normalized = {
           type: c.type,
           value: String(c.value),
-          stability: Number(score.toFixed(3)),
+          source: 'recorded',
+          strategy: this._candidateStrategy(c),
+          stability: {
+            score: Number(score.toFixed(3)),
+            signals: this._candidateStabilitySignals(c),
+          },
           weight: Number(score.toFixed(3)),
         };
         const key = `${normalized.type}:${normalized.value}`;
@@ -157,6 +170,127 @@
         if (b.weight !== a.weight) return b.weight - a.weight;
         return a.value.length - b.value.length;
       });
+    },
+
+    _candidateStrategy(candidate) {
+      const type = String(candidate && candidate.type ? candidate.type : '');
+      const value = String(candidate && candidate.value ? candidate.value : '');
+      if (type === 'attr' && /\[data-(testid|test|qa|cy)=/i.test(value)) return 'testid';
+      if (type === 'attr' && /\[aria-label=|\[aria-labelledby=/i.test(value)) return 'aria';
+      if (type === 'attr' && /\[name=/i.test(value)) return 'name';
+      if (type === 'aria') return 'aria';
+      if (type === 'text') return 'text';
+      if (type === 'xpath') return 'xpath';
+      if (value.includes(':nth-of-type(')) return 'css-path';
+      return type || 'unknown';
+    },
+
+    _candidateStabilitySignals(candidate) {
+      const type = String(candidate && candidate.type ? candidate.type : '');
+      const value = String(candidate && candidate.value ? candidate.value : '');
+      return {
+        usesId: type === 'css' && value.startsWith('#'),
+        usesTestId: /\[data-(testid|test|qa|cy)=/i.test(value),
+        usesAria: type === 'aria' || /\[aria-label=|\[aria-labelledby=/i.test(value),
+        usesText: type === 'text',
+        usesNthOfType: value.includes(':nth-of-type('),
+        usesAttributes: type === 'attr' || /\[[^\]]+=/.test(value),
+        usesClass: /(^|\s|>)\.[a-zA-Z0-9_-]+/.test(value),
+      };
+    },
+
+    _normalizeFingerprintText(text) {
+      return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 32);
+    },
+
+    _computeFingerprint(el) {
+      try {
+        const parts = [];
+        const tag = el.tagName?.toLowerCase?.() || 'unknown';
+        parts.push(tag);
+        const id = el.getAttribute && el.getAttribute('id');
+        if (id) parts.push(`id=${id}`);
+        const classes = Array.from(el.classList || []).slice(0, 8);
+        if (classes.length) parts.push(`class=${classes.join('.')}`);
+        const text = this._normalizeFingerprintText(el.textContent || '');
+        if (text) parts.push(`text=${text}`);
+        return parts.join('|');
+      } catch {
+        return 'unknown';
+      }
+    },
+
+    _computeDomPath(el) {
+      const path = [];
+      try {
+        let current = el;
+        while (current) {
+          const parent = current.parentElement;
+          if (parent) {
+            const siblings = Array.from(parent.children || []);
+            const index = siblings.indexOf(current);
+            if (index >= 0) path.unshift(index);
+            current = parent;
+            continue;
+          }
+          const parentNode = current.parentNode;
+          if (
+            (typeof ShadowRoot !== 'undefined' && parentNode instanceof ShadowRoot) ||
+            (typeof Document !== 'undefined' && parentNode instanceof Document)
+          ) {
+            const children = Array.from(parentNode.children || []);
+            const index = children.indexOf(current);
+            if (index >= 0) path.unshift(index);
+          }
+          break;
+        }
+      } catch {}
+      return path;
+    },
+
+    _hostSelector(host) {
+      try {
+        const id = host.getAttribute && host.getAttribute('id');
+        if (id && this._isStableId(id)) {
+          const selector = `#${CSS.escape(id)}`;
+          if (document.querySelectorAll(selector).length === 1) return selector;
+        }
+        for (const attr of ['data-testid', 'data-test', 'data-qa', 'data-cy', 'name']) {
+          const value = host.getAttribute && host.getAttribute(attr);
+          if (!value) continue;
+          const selector = `[${attr}="${CSS.escape(value)}"]`;
+          if (document.querySelectorAll(selector).length === 1) return selector;
+        }
+        return this._generateSelector(host);
+      } catch {
+        return '';
+      }
+    },
+
+    _computeShadowHostChain(el) {
+      const chain = [];
+      try {
+        let root = el && el.getRootNode ? el.getRootNode() : null;
+        let guard = 0;
+        while (root && typeof ShadowRoot !== 'undefined' && root instanceof ShadowRoot && guard++ < 10) {
+          const host = root.host;
+          const selector = this._hostSelector(host);
+          if (selector) chain.unshift(selector);
+          root = host && host.getRootNode ? host.getRootNode() : null;
+        }
+      } catch {}
+      return chain;
+    },
+
+    _buildFrameContext() {
+      try {
+        return {
+          kind: window === window.top ? 'top' : 'iframe',
+          url: String(location && location.href ? location.href : ''),
+        };
+      } catch {
+        return { kind: 'top' };
+      }
     },
 
     scoreSelector(candidate, el) {

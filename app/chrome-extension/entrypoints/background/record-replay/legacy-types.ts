@@ -27,11 +27,39 @@ export interface SelectorCandidate {
   type: SelectorType;
   value: string; // literal selector or text/aria expression
   weight?: number; // user-adjustable priority; higher first
+  source?: 'recorded' | 'user' | 'generated';
+  strategy?: string;
+  stability?:
+    | number
+    | {
+        score: number;
+        signals?: {
+          usesId?: boolean;
+          usesTestId?: boolean;
+          usesAria?: boolean;
+          usesText?: boolean;
+          usesNthOfType?: boolean;
+          usesAttributes?: boolean;
+          usesClass?: boolean;
+        };
+        note?: string;
+      };
 }
 
 export interface TargetLocator {
   ref?: string; // ephemeral ref from read_page
   candidates: SelectorCandidate[]; // ordered by priority
+  selector?: string;
+  tag?: string;
+  fingerprint?: string;
+  domPath?: number[];
+  shadowHostChain?: string[];
+  frameContext?: {
+    kind?: 'top' | 'iframe';
+    url?: string;
+    frameSelector?: string;
+    framePath?: string[];
+  };
 }
 
 // =============================================================================

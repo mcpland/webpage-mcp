@@ -157,10 +157,12 @@ export function toSelectorTarget(
     // Type-safely extract optional source and stability fields
     const rawSource = (c as { source?: SelectorCandidateSource }).source;
     const rawStability = (c as { stability?: SelectorStability }).stability;
-    const meta: Pick<SharedSelectorCandidate, 'weight' | 'source' | 'stability'> = {
+    const rawStrategy = (c as { strategy?: string }).strategy;
+    const meta: Pick<SharedSelectorCandidate, 'weight' | 'source' | 'stability' | 'strategy'> = {
       weight,
       ...(rawSource && { source: rawSource }),
       ...(rawStability && { stability: rawStability }),
+      ...(rawStrategy && { strategy: rawStrategy }),
     };
 
     switch (c.type) {
@@ -224,6 +226,16 @@ export function toSelectorTarget(
         typeof (target as { ref?: string }).ref === 'string'
           ? String((target as { ref?: string }).ref)
           : undefined,
+      fingerprint:
+        typeof target.fingerprint === 'string' && target.fingerprint.trim()
+          ? target.fingerprint.trim()
+          : undefined,
+      domPath: Array.isArray(target.domPath)
+        ? target.domPath.filter((item): item is number => Number.isInteger(item))
+        : undefined,
+      shadowHostChain: Array.isArray(target.shadowHostChain)
+        ? target.shadowHostChain.filter((item): item is string => typeof item === 'string')
+        : undefined,
     },
     firstCandidateType,
     firstCssOrAttr,

@@ -273,6 +273,7 @@ export interface SelectorStability {
   score: number;
   signals?: {
     usesId?: boolean;
+    usesTestId?: boolean;
     usesAria?: boolean;
     usesText?: boolean;
     usesNthOfType?: boolean;
@@ -286,6 +287,7 @@ export interface SelectorCandidateBase {
   weight?: number;
   stability?: SelectorStability;
   source?: SelectorCandidateSource;
+  strategy?: string;
 }
 
 export type SelectorCandidate =
@@ -317,8 +319,18 @@ export interface TargetHint {
 }
 
 export interface ElementTargetBase {
+  selector?: Resolvable<string>;
   frame?: FrameTarget;
   hint?: TargetHint;
+  fingerprint?: string;
+  domPath?: number[];
+  shadowHostChain?: string[];
+  frameContext?: {
+    kind?: 'top' | 'iframe';
+    url?: string;
+    frameSelector?: string;
+    framePath?: string[];
+  };
 }
 
 export type ElementTarget =

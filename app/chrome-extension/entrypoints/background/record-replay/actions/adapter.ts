@@ -170,6 +170,15 @@ interface LegacySelectorCandidate {
   type: string;
   value: string;
   weight?: number;
+  source?: 'recorded' | 'user' | 'generated';
+  strategy?: string;
+  stability?:
+    | number
+    | {
+        score: number;
+        signals?: Record<string, boolean | undefined>;
+        note?: string;
+      };
 }
 
 interface LegacyTargetLocator {
@@ -178,6 +187,15 @@ interface LegacyTargetLocator {
   // Additional fields from recorder
   selector?: string;
   tag?: string;
+  fingerprint?: string;
+  domPath?: number[];
+  shadowHostChain?: string[];
+  frameContext?: {
+    kind?: 'top' | 'iframe';
+    url?: string;
+    frameSelector?: string;
+    framePath?: string[];
+  };
 }
 
 /**
@@ -210,6 +228,21 @@ function convertSelectorCandidate(legacy: LegacySelectorCandidate): Record<strin
   const base: Record<string, unknown> = { type: legacy.type };
   if (typeof legacy.weight === 'number') {
     base.weight = legacy.weight;
+  }
+  if (legacy.source) {
+    base.source = legacy.source;
+  }
+  if (legacy.strategy) {
+    base.strategy = legacy.strategy;
+  }
+  if (typeof legacy.stability === 'number' && Number.isFinite(legacy.stability)) {
+    base.stability = { score: legacy.stability };
+  } else if (
+    legacy.stability &&
+    typeof legacy.stability === 'object' &&
+    typeof legacy.stability.score === 'number'
+  ) {
+    base.stability = legacy.stability;
   }
 
   switch (legacy.type) {
@@ -262,6 +295,30 @@ function convertTargetLocator(target: LegacyTargetLocator): Record<string, unkno
   // Preserve tag hint for text/aria matching
   if (typeof target.tag === 'string' && target.tag.trim()) {
     result.hint = { tagName: target.tag };
+  }
+
+  if (typeof target.fingerprint === 'string' && target.fingerprint.trim()) {
+    result.fingerprint = target.fingerprint;
+  }
+
+  if (Array.isArray(target.domPath) && target.domPath.every((item) => Number.isInteger(item))) {
+    result.domPath = [...target.domPath];
+  }
+
+  if (
+    Array.isArray(target.shadowHostChain) &&
+    target.shadowHostChain.every((item) => typeof item === 'string')
+  ) {
+    result.shadowHostChain = [...target.shadowHostChain];
+  }
+
+  if (target.frameContext && typeof target.frameContext === 'object') {
+    result.frameContext = {
+      ...target.frameContext,
+      ...(Array.isArray(target.frameContext.framePath)
+        ? { framePath: [...target.frameContext.framePath] }
+        : {}),
+    };
   }
 
   if (Array.isArray(target.candidates) && target.candidates.length > 0) {

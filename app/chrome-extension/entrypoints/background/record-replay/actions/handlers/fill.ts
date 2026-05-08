@@ -73,6 +73,7 @@ export const fillHandler: ActionHandler<'fill'> = {
     const located = await selectorLocator.locate(tabId, selectorTarget, {
       frameId: ctx.frameId,
       preferRef: false,
+      verifyFingerprint: true,
     });
 
     const frameId = located?.frameId ?? ctx.frameId;

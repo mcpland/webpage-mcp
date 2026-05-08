@@ -247,7 +247,13 @@ describe('hybrid mode actions integration (M3-full batch 1)', () => {
       const step: TestStep = {
         id: 'fill_test',
         type: 'fill',
-        target: { candidates: [{ type: 'css', value: '#name' }] },
+        target: {
+          selector: '#name',
+          candidates: [{ type: 'css', value: '#name', strategy: 'testid' }],
+          fingerprint: 'input|id=name',
+          domPath: [0, 1, 2],
+          shadowHostChain: ['app-shell'],
+        },
         value: 'test input',
       };
 
@@ -259,6 +265,23 @@ describe('hybrid mode actions integration (M3-full batch 1)', () => {
       const toolCalls = mocks.handleCallTool.mock.calls.map(([arg]) => arg.name);
       expect(toolCalls).toContain(TOOL_NAMES.BROWSER.READ_PAGE);
       expect(toolCalls).toContain(TOOL_NAMES.BROWSER.FILL);
+      expect(mocks.locate).toHaveBeenCalledWith(
+        TAB_ID,
+        expect.objectContaining({
+          selector: '#name',
+          fingerprint: 'input|id=name',
+          domPath: [0, 1, 2],
+          shadowHostChain: ['app-shell'],
+          candidates: expect.arrayContaining([
+            expect.objectContaining({ type: 'css', value: '#name', strategy: 'testid' }),
+          ]),
+        }),
+        expect.objectContaining({
+          frameId: FRAME_ID,
+          preferRef: false,
+          verifyFingerprint: true,
+        }),
+      );
 
       // Verify FILL was called with correct parameters
       expect(mocks.handleCallTool).toHaveBeenCalledWith(

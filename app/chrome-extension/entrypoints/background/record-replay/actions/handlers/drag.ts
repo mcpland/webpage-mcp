@@ -85,6 +85,7 @@ async function locateTarget(
   const located = await selectorLocator.locate(tabId, selectorTarget, {
     frameId,
     preferRef: false,
+    verifyFingerprint: true,
   });
 
   const locatedFrameId = located?.frameId ?? frameId;
