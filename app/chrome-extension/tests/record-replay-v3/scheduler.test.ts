@@ -10,8 +10,10 @@
 import { describe, expect, it } from 'vitest';
 
 import type {
+  RunQueueClaimConstraints,
   RunQueueConfig,
   RunQueueItem,
+  RunQueueProfile,
 } from '@/entrypoints/background/record-replay-v3/engine/queue/queue';
 import type { LeaseManager } from '@/entrypoints/background/record-replay-v3/engine/queue/leasing';
 import {
@@ -37,10 +39,14 @@ function createDeferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function makeClaimedItem(id: string): RunQueueItem {
+function makeClaimedItem(
+  id: string,
+  options: { flowId?: string; profile?: RunQueueProfile } = {},
+): RunQueueItem {
   return {
     id,
-    flowId: 'flow-1',
+    flowId: options.flowId ?? 'flow-1',
+    ...(options.profile ? { profile: options.profile } : {}),
     status: 'running',
     createdAt: 1,
     updatedAt: 1,
@@ -298,6 +304,142 @@ describe('V3 RunScheduler', () => {
 
       runDeferreds.get('run-1')!.resolve(undefined);
       runDeferreds.get('run-2')!.resolve(undefined);
+      scheduler.stop();
+    });
+
+    it('respects maxParallelRunsPerFlow by claiming another eligible flow', async () => {
+      const config: RunQueueConfig = {
+        maxParallelRuns: 3,
+        maxParallelRunsPerFlow: 1,
+        leaseTtlMs: 15_000,
+        heartbeatIntervalMs: 5_000,
+      };
+
+      const items: RunQueueItem[] = [
+        makeClaimedItem('flow-a-1', { flowId: 'flow-a' }),
+        makeClaimedItem('flow-a-2', { flowId: 'flow-a' }),
+        makeClaimedItem('flow-b-1', { flowId: 'flow-b' }),
+      ];
+
+      const queue = {
+        claimNext: async (
+          _ownerId: string,
+          _now: number,
+          constraints?: RunQueueClaimConstraints,
+        ) => {
+          const index = items.findIndex(
+            (item) => !constraints?.blockedFlowIds?.includes(item.flowId),
+          );
+          return index === -1 ? null : items.splice(index, 1)[0];
+        },
+        markDone: async () => {},
+      };
+
+      const leaseManager: Pick<
+        LeaseManager,
+        'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'
+      > = {
+        startHeartbeat: () => {},
+        stopHeartbeat: () => {},
+        reclaimExpiredLeases: async () => [],
+      };
+
+      const started: string[] = [];
+      const runDeferreds = new Map<string, Deferred<void>>();
+      const execute: RunExecutor = async (item) => {
+        started.push(item.id);
+        const deferred = createDeferred<void>();
+        runDeferreds.set(item.id, deferred);
+        return deferred.promise;
+      };
+
+      const scheduler = createRunScheduler({
+        queue,
+        leaseManager,
+        keepalive: noopKeepalive,
+        config,
+        ownerId: 'owner-1',
+        execute,
+        tuning: { pollIntervalMs: 0, reclaimIntervalMs: 0 },
+        logger: createSilentLogger(),
+      });
+
+      scheduler.start();
+      await scheduler.kick();
+
+      expect(started).toEqual(['flow-a-1', 'flow-b-1']);
+      expect(scheduler.getState().activeRunIds.sort()).toEqual(['flow-a-1', 'flow-b-1']);
+
+      runDeferreds.get('flow-a-1')!.resolve(undefined);
+      runDeferreds.get('flow-b-1')!.resolve(undefined);
+      scheduler.stop();
+    });
+
+    it('respects maxParallelRunsPerProfile by claiming another eligible profile', async () => {
+      const config: RunQueueConfig = {
+        maxParallelRuns: 3,
+        maxParallelRunsPerProfile: { dangerous: 1 },
+        leaseTtlMs: 15_000,
+        heartbeatIntervalMs: 5_000,
+      };
+
+      const items: RunQueueItem[] = [
+        makeClaimedItem('dangerous-1', { flowId: 'flow-a', profile: 'dangerous' }),
+        makeClaimedItem('dangerous-2', { flowId: 'flow-b', profile: 'dangerous' }),
+        makeClaimedItem('safe-1', { flowId: 'flow-c', profile: 'safe' }),
+      ];
+
+      const queue = {
+        claimNext: async (
+          _ownerId: string,
+          _now: number,
+          constraints?: RunQueueClaimConstraints,
+        ) => {
+          const index = items.findIndex(
+            (item) => !constraints?.blockedProfiles?.includes(item.profile ?? 'unknown'),
+          );
+          return index === -1 ? null : items.splice(index, 1)[0];
+        },
+        markDone: async () => {},
+      };
+
+      const leaseManager: Pick<
+        LeaseManager,
+        'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'
+      > = {
+        startHeartbeat: () => {},
+        stopHeartbeat: () => {},
+        reclaimExpiredLeases: async () => [],
+      };
+
+      const started: string[] = [];
+      const runDeferreds = new Map<string, Deferred<void>>();
+      const execute: RunExecutor = async (item) => {
+        started.push(item.id);
+        const deferred = createDeferred<void>();
+        runDeferreds.set(item.id, deferred);
+        return deferred.promise;
+      };
+
+      const scheduler = createRunScheduler({
+        queue,
+        leaseManager,
+        keepalive: noopKeepalive,
+        config,
+        ownerId: 'owner-1',
+        execute,
+        tuning: { pollIntervalMs: 0, reclaimIntervalMs: 0 },
+        logger: createSilentLogger(),
+      });
+
+      scheduler.start();
+      await scheduler.kick();
+
+      expect(started).toEqual(['dangerous-1', 'safe-1']);
+      expect(scheduler.getState().activeRunIds.sort()).toEqual(['dangerous-1', 'safe-1']);
+
+      runDeferreds.get('dangerous-1')!.resolve(undefined);
+      runDeferreds.get('safe-1')!.resolve(undefined);
       scheduler.stop();
     });
   });

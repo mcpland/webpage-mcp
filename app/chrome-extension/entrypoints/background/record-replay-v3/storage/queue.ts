@@ -10,25 +10,27 @@ import {
   type EnqueueInput,
   type QueueItemStatus,
   type RunQueue,
+  type RunQueueClaimConstraints,
   type RunQueueConfig,
   type RunQueueItem,
+  type RunQueueProfile,
 } from '../engine/queue/queue';
 import { RR_V3_STORES, withTransaction } from './db';
 
 /** Default lease TTL in milliseconds (from shared config to avoid drift) */
 const DEFAULT_LEASE_TTL_MS = DEFAULT_QUEUE_CONFIG.leaseTtlMs;
 
-/**
- * IDB key range bounds for numeric fields.
- * Use MAX_VALUE to cover the full range of finite numbers (not just safe integers).
- */
-const IDB_NUMBER_MIN = -Number.MAX_VALUE;
-const IDB_NUMBER_MAX = Number.MAX_VALUE;
-
 interface ResolvedQueueAdmissionConfig {
   maxQueuedRuns: number;
   maxQueuedRunsPerFlow: number;
 }
+
+const RUN_QUEUE_PROFILES: readonly RunQueueProfile[] = [
+  'safe',
+  'idempotent',
+  'dangerous',
+  'unknown',
+];
 
 function resolveQueueAdmissionConfig(config: Partial<RunQueueConfig> = {}): ResolvedQueueAdmissionConfig {
   const maxQueuedRuns =
@@ -69,6 +71,65 @@ async function countQueuedForFlow(statusIndex: IDBIndex, flowId: string): Promis
       cursor.continue();
     };
   });
+}
+
+function normalizeProfile(value: unknown): RunQueueProfile {
+  return RUN_QUEUE_PROFILES.includes(value as RunQueueProfile)
+    ? (value as RunQueueProfile)
+    : 'unknown';
+}
+
+function toBlockedSet<T extends string>(values?: readonly T[]): Set<T> {
+  return new Set((values ?? []).filter(Boolean));
+}
+
+function isClaimableWithConstraints(
+  item: RunQueueItem,
+  constraints: RunQueueClaimConstraints | undefined,
+): boolean {
+  if (item.status !== 'queued') {
+    return false;
+  }
+
+  const blockedFlowIds = toBlockedSet(constraints?.blockedFlowIds);
+  if (blockedFlowIds.has(item.flowId)) {
+    return false;
+  }
+
+  const blockedProfiles = toBlockedSet(constraints?.blockedProfiles);
+  if (blockedProfiles.has(normalizeProfile(item.profile))) {
+    return false;
+  }
+
+  return true;
+}
+
+async function findClaimCandidate(
+  store: IDBObjectStore,
+  constraints: RunQueueClaimConstraints | undefined,
+): Promise<RunQueueItem | null> {
+  const statusIndex = store.index('status');
+  const queuedItems = await new Promise<RunQueueItem[]>((resolve, reject) => {
+    const items: RunQueueItem[] = [];
+    const request = statusIndex.openCursor(IDBKeyRange.only('queued'));
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(items);
+        return;
+      }
+      items.push(cursor.value as RunQueueItem);
+      cursor.continue();
+    };
+  });
+
+  queuedItems.sort((a, b) => {
+    if (a.priority !== b.priority) return b.priority - a.priority;
+    return a.createdAt - b.createdAt;
+  });
+
+  return queuedItems.find((item) => isClaimableWithConstraints(item, constraints)) ?? null;
 }
 
 async function enforceQueuedBackpressure(
@@ -130,7 +191,11 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
       return item;
     },
 
-    async claimNext(ownerId: string, now: number): Promise<RunQueueItem | null> {
+    async claimNext(
+      ownerId: string,
+      now: number,
+      constraints?: RunQueueClaimConstraints,
+    ): Promise<RunQueueItem | null> {
       // Validate inputs
       if (!ownerId) {
         throw new Error('ownerId is required');
@@ -141,90 +206,28 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
 
       return withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
-        const index = store.index('status_priority_createdAt');
-
-        /**
-         * Atomic claim implementation using two-step cursor approach:
-         *
-         * Desired ordering: priority DESC, createdAt ASC (FIFO within same priority)
-         *
-         * IndexedDB compound indexes only support single sort direction for the entire tuple.
-         * The index ['status', 'priority', 'createdAt'] is stored ASC.
-         *
-         * Strategy:
-         * 1. Use 'prev' cursor to find the highest priority (overall DESC)
-         * 2. Use 'next' cursor within that priority to find earliest createdAt (FIFO)
-         *
-         * Both operations are within the same readwrite transaction, ensuring atomicity
-         * since IndexedDB serializes readwrite transactions on the same store.
-         */
-
-        // Step 1: Find the highest priority among queued items
-        const queuedRange = IDBKeyRange.bound(
-          ['queued', IDB_NUMBER_MIN, IDB_NUMBER_MIN],
-          ['queued', IDB_NUMBER_MAX, IDB_NUMBER_MAX],
-        );
-
-        const highestPriority = await new Promise<number | null>((resolve, reject) => {
-          const request = index.openCursor(queuedRange, 'prev');
-          request.onerror = () => reject(request.error);
-          request.onsuccess = () => {
-            const cursor = request.result;
-            if (!cursor) {
-              resolve(null);
-              return;
-            }
-            const item = cursor.value as RunQueueItem;
-            resolve(item.priority);
-          };
-        });
-
-        // No queued items available
-        if (highestPriority === null) {
+        const existing = await findClaimCandidate(store, constraints);
+        if (!existing) {
           return null;
         }
 
-        // Step 2: Find the earliest createdAt within the highest priority (FIFO)
-        const fifoRange = IDBKeyRange.bound(
-          ['queued', highestPriority, IDB_NUMBER_MIN],
-          ['queued', highestPriority, IDB_NUMBER_MAX],
-        );
+        // The transaction is readwrite and IndexedDB serializes queue writes, so the
+        // selected queued candidate can be promoted atomically inside this transaction.
+        const updated: RunQueueItem = {
+          ...existing,
+          status: 'running',
+          updatedAt: now,
+          attempt: existing.attempt + 1,
+          lease: {
+            ownerId,
+            expiresAt: now + DEFAULT_LEASE_TTL_MS,
+          },
+        };
 
-        return new Promise<RunQueueItem | null>((resolve, reject) => {
-          const request = index.openCursor(fifoRange, 'next');
+        return new Promise<RunQueueItem>((resolve, reject) => {
+          const request = store.put(updated);
+          request.onsuccess = () => resolve(updated);
           request.onerror = () => reject(request.error);
-          request.onsuccess = () => {
-            const cursor = request.result;
-            if (!cursor) {
-              // No items found (should not happen given step 1 succeeded)
-              resolve(null);
-              return;
-            }
-
-            const existing = cursor.value as RunQueueItem;
-
-            // Defensive check: ensure status is still queued
-            if (existing.status !== 'queued') {
-              resolve(null);
-              return;
-            }
-
-            // Atomically update to running with lease
-            const updated: RunQueueItem = {
-              ...existing,
-              status: 'running',
-              updatedAt: now,
-              attempt: existing.attempt + 1,
-              lease: {
-                ownerId,
-                expiresAt: now + DEFAULT_LEASE_TTL_MS,
-              },
-            };
-
-            const updateRequest = cursor.update(updated);
-            updateRequest.onerror = () => reject(updateRequest.error);
-            updateRequest.onsuccess = () => resolve(updated);
-          };
         });
       });
     },

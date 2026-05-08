@@ -193,6 +193,60 @@ describe('V3 Queue contracts', () => {
       expect(claimed!.priority).toBe(10);
     });
 
+    it('skips active-limited flows while preserving priority among eligible items', async () => {
+      const queue = createQueueStore();
+      const now = Date.now();
+
+      await queue.enqueue({ id: 'blocked-high', flowId: 'flow-1', priority: 10 });
+      await queue.enqueue({ id: 'eligible-low', flowId: 'flow-2', priority: 1 });
+
+      const claimed = await queue.claimNext('owner-1', now, {
+        blockedFlowIds: ['flow-1'],
+      });
+
+      expect(claimed).toMatchObject({
+        id: 'eligible-low',
+        flowId: 'flow-2',
+        status: 'running',
+      });
+      expect(await queue.get('blocked-high')).toMatchObject({
+        id: 'blocked-high',
+        status: 'queued',
+      });
+    });
+
+    it('skips active-limited profiles while preserving priority among eligible items', async () => {
+      const queue = createQueueStore();
+      const now = Date.now();
+
+      await queue.enqueue({
+        id: 'dangerous-high',
+        flowId: 'flow-1',
+        profile: 'dangerous',
+        priority: 10,
+      });
+      await queue.enqueue({
+        id: 'safe-low',
+        flowId: 'flow-2',
+        profile: 'safe',
+        priority: 1,
+      });
+
+      const claimed = await queue.claimNext('owner-1', now, {
+        blockedProfiles: ['dangerous'],
+      });
+
+      expect(claimed).toMatchObject({
+        id: 'safe-low',
+        profile: 'safe',
+        status: 'running',
+      });
+      expect(await queue.get('dangerous-high')).toMatchObject({
+        id: 'dangerous-high',
+        status: 'queued',
+      });
+    });
+
     it('claims FIFO within same priority (earlier createdAt first)', async () => {
       const queue = createQueueStore();
       const now = Date.now();

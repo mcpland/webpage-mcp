@@ -14,6 +14,10 @@ import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
 export interface RunQueueConfig {
   /** Maximum number of parallel runs */
   maxParallelRuns: number;
+  /** Maximum active runs for a single flow. Undefined disables the flow-level cap. */
+  maxParallelRunsPerFlow?: number;
+  /** Maximum active runs per workflow risk/profile. Undefined profiles are uncapped. */
+  maxParallelRunsPerProfile?: Partial<Record<RunQueueProfile, number>>;
   /** Maximum queued runs accepted before callers receive backpressure */
   maxQueuedRuns?: number;
   /** Maximum queued runs accepted for a single flow before callers receive backpressure */
@@ -29,6 +33,11 @@ export interface RunQueueConfig {
  */
 export const DEFAULT_QUEUE_CONFIG: RunQueueConfig = {
   maxParallelRuns: 3,
+  maxParallelRunsPerFlow: 1,
+  maxParallelRunsPerProfile: {
+    dangerous: 1,
+    unknown: 1,
+  },
   maxQueuedRuns: 200,
   maxQueuedRunsPerFlow: 25,
   leaseTtlMs: 15_000,
@@ -69,6 +78,13 @@ export class RunQueueBackpressureError extends Error {
  */
 export type QueueItemStatus = 'queued' | 'running' | 'paused';
 
+export type RunQueueProfile = 'safe' | 'idempotent' | 'dangerous' | 'unknown';
+
+export interface RunQueueClaimConstraints {
+  blockedFlowIds?: readonly FlowId[];
+  blockedProfiles?: readonly RunQueueProfile[];
+}
+
 /**
  * Lease information
  */
@@ -87,6 +103,8 @@ export interface RunQueueItem {
   id: RunId;
   /** Flow ID */
   flowId: FlowId;
+  /** Scheduling risk/profile used for profile-level concurrency limits */
+  profile?: RunQueueProfile;
   /** Status */
   status: QueueItemStatus;
   /** creation time */
@@ -145,9 +163,14 @@ export interface RunQueue {
    * Get the next executable Run
    * @param ownerId Recipient ID
    * @param now current time
+   * @param constraints active flow/profile limits that should be skipped for this claim
    * @returns queue item or null
    */
-  claimNext(ownerId: string, now: UnixMillis): Promise<RunQueueItem | null>;
+  claimNext(
+    ownerId: string,
+    now: UnixMillis,
+    constraints?: RunQueueClaimConstraints,
+  ): Promise<RunQueueItem | null>;
 
   /**
    * contract renewal heartbeat

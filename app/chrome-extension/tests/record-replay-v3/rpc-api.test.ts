@@ -456,6 +456,12 @@ describe("V3 RPC Queue Management APIs", () => {
 
       // Assert: enqueued
       expect(storage.queue.enqueue).toHaveBeenCalledTimes(1);
+      expect(storage.queue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flowId: "flow-1",
+          profile: "idempotent",
+        }),
+      );
 
       // Assert: event emitted via EventsBus
       expect(events.append).toHaveBeenCalledWith(

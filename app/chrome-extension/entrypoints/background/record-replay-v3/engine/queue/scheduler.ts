@@ -17,7 +17,13 @@
 import type { UnixMillis } from '../../domain/json';
 import type { RunId } from '../../domain/ids';
 import type { LeaseManager } from './leasing';
-import type { RunQueue, RunQueueConfig, RunQueueItem } from './queue';
+import type {
+  RunQueue,
+  RunQueueClaimConstraints,
+  RunQueueConfig,
+  RunQueueItem,
+  RunQueueProfile,
+} from './queue';
 import type { KeepaliveController } from '../keepalive/offscreen-keepalive';
 
 // ==================== Types ====================
@@ -68,6 +74,8 @@ export interface RunSchedulerState {
   started: boolean;
   ownerId: string;
   maxParallelRuns: number;
+  maxParallelRunsPerFlow?: number;
+  maxParallelRunsPerProfile?: Partial<Record<RunQueueProfile, number>>;
   activeRunIds: RunId[];
 }
 
@@ -93,12 +101,93 @@ export interface RunScheduler {
 // ==================== Constants ====================
 
 const DEFAULT_POLL_INTERVAL_MS = 500;
+const RUN_QUEUE_PROFILES: readonly RunQueueProfile[] = [
+  'safe',
+  'idempotent',
+  'dangerous',
+  'unknown',
+];
 
 // ==================== Helpers ====================
 
 function clampNonNegativeInt(value: unknown, fallback: number): number {
   const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
   return Math.max(0, n);
+}
+
+function normalizeOptionalPositiveInt(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(1, Math.floor(value));
+}
+
+function normalizeProfileLimits(
+  value: RunQueueConfig['maxParallelRunsPerProfile'],
+): Partial<Record<RunQueueProfile, number>> | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const limits: Partial<Record<RunQueueProfile, number>> = {};
+  for (const profile of RUN_QUEUE_PROFILES) {
+    const limit = normalizeOptionalPositiveInt(value[profile]);
+    if (limit !== undefined) {
+      limits[profile] = limit;
+    }
+  }
+  return Object.keys(limits).length > 0 ? limits : undefined;
+}
+
+function getQueueProfile(item: RunQueueItem): RunQueueProfile {
+  return RUN_QUEUE_PROFILES.includes(item.profile as RunQueueProfile)
+    ? (item.profile as RunQueueProfile)
+    : 'unknown';
+}
+
+function buildClaimConstraints(
+  activeRunItems: Map<RunId, RunQueueItem>,
+  maxParallelRunsPerFlow: number | undefined,
+  maxParallelRunsPerProfile: Partial<Record<RunQueueProfile, number>> | undefined,
+): RunQueueClaimConstraints | undefined {
+  const blockedFlowIds = new Set<RunQueueItem['flowId']>();
+  const blockedProfiles = new Set<RunQueueProfile>();
+
+  if (maxParallelRunsPerFlow !== undefined) {
+    const flowCounts = new Map<RunQueueItem['flowId'], number>();
+    for (const item of activeRunItems.values()) {
+      const count = (flowCounts.get(item.flowId) ?? 0) + 1;
+      flowCounts.set(item.flowId, count);
+      if (count >= maxParallelRunsPerFlow) {
+        blockedFlowIds.add(item.flowId);
+      }
+    }
+  }
+
+  if (maxParallelRunsPerProfile) {
+    const profileCounts = new Map<RunQueueProfile, number>();
+    for (const item of activeRunItems.values()) {
+      const profile = getQueueProfile(item);
+      const count = (profileCounts.get(profile) ?? 0) + 1;
+      profileCounts.set(profile, count);
+    }
+
+    for (const profile of RUN_QUEUE_PROFILES) {
+      const limit = maxParallelRunsPerProfile[profile];
+      if (limit !== undefined && (profileCounts.get(profile) ?? 0) >= limit) {
+        blockedProfiles.add(profile);
+      }
+    }
+  }
+
+  if (blockedFlowIds.size === 0 && blockedProfiles.size === 0) {
+    return undefined;
+  }
+
+  return {
+    ...(blockedFlowIds.size ? { blockedFlowIds: Array.from(blockedFlowIds) } : {}),
+    ...(blockedProfiles.size ? { blockedProfiles: Array.from(blockedProfiles) } : {}),
+  };
 }
 
 function defaultReclaimIntervalMs(leaseTtlMs: number): number {
@@ -129,6 +218,10 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
 
   const now = deps.now ?? (() => Date.now());
   const maxParallelRuns = clampNonNegativeInt(deps.config.maxParallelRuns, 0);
+  const maxParallelRunsPerFlow = normalizeOptionalPositiveInt(
+    deps.config.maxParallelRunsPerFlow,
+  );
+  const maxParallelRunsPerProfile = normalizeProfileLimits(deps.config.maxParallelRunsPerProfile);
   const pollIntervalMs = clampNonNegativeInt(
     deps.tuning?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     DEFAULT_POLL_INTERVAL_MS,
@@ -142,7 +235,7 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let releaseKeepalive: (() => void) | null = null;
 
-  const activeRunIds = new Set<RunId>();
+  const activeRunItems = new Map<RunId, RunQueueItem>();
 
   // Coalesced re-entrancy control for tick()
   let pendingKick = false;
@@ -175,10 +268,18 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
     //
     // Note: `stop()` can be called while an async claim is in-flight. Guard the loop
     // with `started` to prevent claiming additional items after stop is requested.
-    while (started && activeRunIds.size < maxParallelRuns) {
+    while (started && activeRunItems.size < maxParallelRuns) {
       let claimed: RunQueueItem | null = null;
       try {
-        claimed = await deps.queue.claimNext(deps.ownerId, t);
+        claimed = await deps.queue.claimNext(
+          deps.ownerId,
+          t,
+          buildClaimConstraints(
+            activeRunItems,
+            maxParallelRunsPerFlow,
+            maxParallelRunsPerProfile,
+          ),
+        );
       } catch (e) {
         logger.error('[RunScheduler] claimNext failed:', e);
         return;
@@ -187,7 +288,7 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
       if (!claimed) return;
 
       // Guard against double-launch within the same scheduler instance
-      if (activeRunIds.has(claimed.id)) {
+      if (activeRunItems.has(claimed.id)) {
         logger.error(
           `[RunScheduler] Invariant violation: run "${claimed.id}" was claimed twice in the same scheduler instance`,
         );
@@ -200,7 +301,7 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
         continue;
       }
 
-      activeRunIds.add(claimed.id);
+      activeRunItems.set(claimed.id, claimed);
 
       // Capture claimed item for the closure
       const claimedItem = claimed;
@@ -212,7 +313,7 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
           logger.error(`[RunScheduler] execute failed for run "${claimedItem.id}":`, e);
         })
         .finally(async () => {
-          activeRunIds.delete(claimedItem.id);
+          activeRunItems.delete(claimedItem.id);
           try {
             await deps.queue.markDone(claimedItem.id, now());
           } catch (e) {
@@ -278,9 +379,9 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
   function stop(): void {
     if (!started) return;
 
-    if (activeRunIds.size > 0) {
+    if (activeRunItems.size > 0) {
       logger.warn(
-        `[RunScheduler] stop() called with ${activeRunIds.size} active runs; heartbeats will stop and leases may expire/reclaim concurrently`,
+        `[RunScheduler] stop() called with ${activeRunItems.size} active runs; heartbeats will stop and leases may expire/reclaim concurrently`,
       );
     }
 
@@ -323,13 +424,15 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
       started,
       ownerId: deps.ownerId,
       maxParallelRuns,
-      activeRunIds: Array.from(activeRunIds),
+      ...(maxParallelRunsPerFlow !== undefined ? { maxParallelRunsPerFlow } : {}),
+      ...(maxParallelRunsPerProfile ? { maxParallelRunsPerProfile } : {}),
+      activeRunIds: Array.from(activeRunItems.keys()),
     };
   }
 
   function dispose(): void {
     stop();
-    activeRunIds.clear();
+    activeRunItems.clear();
   }
 
   return { start, stop, kick, getState, dispose };

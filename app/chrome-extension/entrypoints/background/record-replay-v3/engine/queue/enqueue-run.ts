@@ -13,10 +13,16 @@ import type { JsonObject, UnixMillis } from '../../domain/json';
 import type { FlowId, NodeId, RunId } from '../../domain/ids';
 import type { TriggerFireContext } from '../../domain/triggers';
 import { RUN_SCHEMA_VERSION, type RunRecordV3 } from '../../domain/events';
+import type { FlowV3 } from '../../domain/flow';
 import type { StoragePort } from '../storage/storage-port';
 import type { EventsBus } from '../transport/events-bus';
 import type { RunScheduler } from './scheduler';
+import type { RunQueueProfile } from './queue';
 import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
+import {
+  isKnownWorkflowSideEffectKind,
+  normalizeWorkflowNodeSideEffectProfile,
+} from 'webpage-mcp-shared';
 
 // ==================== Types ====================
 
@@ -84,6 +90,36 @@ export interface EnqueueRunResult {
  */
 function defaultGenerateRunId(): RunId {
   return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function deriveRunQueueProfile(flow: Pick<FlowV3, 'nodes'>): RunQueueProfile {
+  let sawExecutableNode = false;
+  let profile: RunQueueProfile = 'safe';
+
+  for (const node of flow.nodes) {
+    if (node.disabled) {
+      continue;
+    }
+
+    sawExecutableNode = true;
+    if (!isKnownWorkflowSideEffectKind(node.kind)) {
+      return 'unknown';
+    }
+
+    const sideEffect = normalizeWorkflowNodeSideEffectProfile(
+      node.kind,
+      node.config,
+      node.sideEffect,
+    );
+    if (sideEffect.category === 'dangerous') {
+      return 'dangerous';
+    }
+    if (sideEffect.category === 'idempotent') {
+      profile = 'idempotent';
+    }
+  }
+
+  return sawExecutableNode ? profile : 'unknown';
 }
 
 /**
@@ -168,6 +204,7 @@ export async function enqueueRun(
   if (!flow) {
     throw new Error(`Flow "${flowId}" not found`);
   }
+  const profile = deriveRunQueueProfile(flow);
 
   const nodeExists = (nodeId: NodeId): boolean => flow.nodes.some((n) => n.id === nodeId);
 
@@ -220,6 +257,7 @@ export async function enqueueRun(
   await deps.storage.queue.enqueue({
     id: runId,
     flowId,
+    profile,
     tabId: input.tabId,
     priority,
     maxAttempts,
