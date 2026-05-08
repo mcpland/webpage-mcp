@@ -6,9 +6,11 @@
 import type { RunId } from '../domain/ids';
 import {
   DEFAULT_QUEUE_CONFIG,
+  RunQueueBackpressureError,
   type EnqueueInput,
   type QueueItemStatus,
   type RunQueue,
+  type RunQueueConfig,
   type RunQueueItem,
 } from '../engine/queue/queue';
 import { RR_V3_STORES, withTransaction } from './db';
@@ -23,11 +25,85 @@ const DEFAULT_LEASE_TTL_MS = DEFAULT_QUEUE_CONFIG.leaseTtlMs;
 const IDB_NUMBER_MIN = -Number.MAX_VALUE;
 const IDB_NUMBER_MAX = Number.MAX_VALUE;
 
+interface ResolvedQueueAdmissionConfig {
+  maxQueuedRuns: number;
+  maxQueuedRunsPerFlow: number;
+}
+
+function resolveQueueAdmissionConfig(config: Partial<RunQueueConfig> = {}): ResolvedQueueAdmissionConfig {
+  const maxQueuedRuns =
+    typeof config.maxQueuedRuns === 'number' && Number.isFinite(config.maxQueuedRuns)
+      ? Math.max(0, Math.floor(config.maxQueuedRuns))
+      : DEFAULT_QUEUE_CONFIG.maxQueuedRuns ?? 200;
+  const maxQueuedRunsPerFlow =
+    typeof config.maxQueuedRunsPerFlow === 'number' && Number.isFinite(config.maxQueuedRunsPerFlow)
+      ? Math.max(0, Math.floor(config.maxQueuedRunsPerFlow))
+      : DEFAULT_QUEUE_CONFIG.maxQueuedRunsPerFlow ?? 25;
+
+  return { maxQueuedRuns, maxQueuedRunsPerFlow };
+}
+
+async function countIndex(index: IDBIndex, query?: IDBValidKey | IDBKeyRange): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const request = index.count(query);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function countQueuedForFlow(statusIndex: IDBIndex, flowId: string): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    let count = 0;
+    const request = statusIndex.openCursor(IDBKeyRange.only('queued'));
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(count);
+        return;
+      }
+      const item = cursor.value as RunQueueItem;
+      if (item.flowId === flowId) {
+        count += 1;
+      }
+      cursor.continue();
+    };
+  });
+}
+
+async function enforceQueuedBackpressure(
+  store: IDBObjectStore,
+  config: ResolvedQueueAdmissionConfig,
+  input: EnqueueInput,
+): Promise<void> {
+  const statusIndex = store.index('status');
+  const queuedCount = await countIndex(statusIndex, IDBKeyRange.only('queued'));
+  if (queuedCount >= config.maxQueuedRuns) {
+    throw new RunQueueBackpressureError({
+      scope: 'global',
+      limit: config.maxQueuedRuns,
+      queuedCount,
+    });
+  }
+
+  const queuedForFlow = await countQueuedForFlow(statusIndex, String(input.flowId));
+  if (queuedForFlow >= config.maxQueuedRunsPerFlow) {
+    throw new RunQueueBackpressureError({
+      scope: 'flow',
+      limit: config.maxQueuedRunsPerFlow,
+      queuedCount: queuedForFlow,
+      flowId: input.flowId,
+    });
+  }
+}
+
 /**
  * Create a RunQueue persistence implementation
  * @description Implement queue persistence, including Phase 3 atomic claims
  */
-export function createQueueStore(): RunQueue {
+export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue {
+  const admissionConfig = resolveQueueAdmissionConfig(config);
+
   return {
     async enqueue(input: EnqueueInput): Promise<RunQueueItem> {
       const now = Date.now();
@@ -43,6 +119,7 @@ export function createQueueStore(): RunQueue {
 
       await withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
+        await enforceQueuedBackpressure(store, admissionConfig, input);
         return new Promise<void>((resolve, reject) => {
           const request = store.add(item);
           request.onsuccess = () => resolve();

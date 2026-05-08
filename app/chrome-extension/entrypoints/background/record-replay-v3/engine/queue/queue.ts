@@ -14,6 +14,10 @@ import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
 export interface RunQueueConfig {
   /** Maximum number of parallel runs */
   maxParallelRuns: number;
+  /** Maximum queued runs accepted before callers receive backpressure */
+  maxQueuedRuns?: number;
+  /** Maximum queued runs accepted for a single flow before callers receive backpressure */
+  maxQueuedRunsPerFlow?: number;
   /** Lease TTL (milliseconds) */
   leaseTtlMs: number;
   /** Heartbeat interval (milliseconds) */
@@ -25,9 +29,40 @@ export interface RunQueueConfig {
  */
 export const DEFAULT_QUEUE_CONFIG: RunQueueConfig = {
   maxParallelRuns: 3,
+  maxQueuedRuns: 200,
+  maxQueuedRunsPerFlow: 25,
   leaseTtlMs: 15_000,
   heartbeatIntervalMs: 5_000,
 };
+
+export const RUN_QUEUE_BACKPRESSURE_CODE = 'RUN_QUEUE_BACKPRESSURE' as const;
+
+export class RunQueueBackpressureError extends Error {
+  readonly code = RUN_QUEUE_BACKPRESSURE_CODE;
+  readonly retryable = true;
+  readonly scope: 'global' | 'flow';
+  readonly limit: number;
+  readonly queuedCount: number;
+  readonly flowId?: FlowId;
+
+  constructor(input: {
+    scope: 'global' | 'flow';
+    limit: number;
+    queuedCount: number;
+    flowId?: FlowId;
+  }) {
+    const target =
+      input.scope === 'flow' && input.flowId ? `flow "${input.flowId}"` : 'run queue';
+    super(
+      `${target} is at queued backpressure limit ${input.limit}; retry after queued runs drain`,
+    );
+    this.name = 'RunQueueBackpressureError';
+    this.scope = input.scope;
+    this.limit = input.limit;
+    this.queuedCount = input.queuedCount;
+    if (input.flowId) this.flowId = input.flowId;
+  }
+}
 
 /**
  * Queue item status

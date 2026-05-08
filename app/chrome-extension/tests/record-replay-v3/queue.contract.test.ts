@@ -12,6 +12,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_QUEUE_CONFIG,
+  RUN_QUEUE_BACKPRESSURE_CODE,
+  RunQueueBackpressureError,
   type RunQueueItem,
 } from '@/entrypoints/background/record-replay-v3/engine/queue/queue';
 
@@ -89,6 +91,80 @@ describe('V3 Queue contracts', () => {
       expect(queued[0].id).toBe('run-2');
       expect(running).toHaveLength(1);
       expect(running[0].id).toBe('run-1');
+    });
+
+    it('rejects enqueue when global queued backpressure limit is reached', async () => {
+      const queue = createQueueStore({ maxQueuedRuns: 1 });
+
+      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
+      await expect(
+        queue.enqueue({ id: 'run-2', flowId: 'flow-2', priority: 1 }),
+      ).rejects.toMatchObject({
+        name: 'RunQueueBackpressureError',
+        code: RUN_QUEUE_BACKPRESSURE_CODE,
+        retryable: true,
+        scope: 'global',
+        limit: 1,
+        queuedCount: 1,
+      });
+    });
+
+    it('rejects enqueue when per-flow queued backpressure limit is reached', async () => {
+      const queue = createQueueStore({ maxQueuedRuns: 5, maxQueuedRunsPerFlow: 1 });
+
+      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: 'run-2', flowId: 'flow-2', priority: 1 });
+
+      let error: unknown;
+      try {
+        await queue.enqueue({ id: 'run-3', flowId: 'flow-1', priority: 1 });
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(RunQueueBackpressureError);
+      expect(error).toMatchObject({
+        code: RUN_QUEUE_BACKPRESSURE_CODE,
+        retryable: true,
+        scope: 'flow',
+        limit: 1,
+        queuedCount: 1,
+        flowId: 'flow-1',
+      });
+    });
+
+    it('does not count running items against queued backpressure limits', async () => {
+      const queue = createQueueStore({ maxQueuedRuns: 1, maxQueuedRunsPerFlow: 1 });
+      const now = Date.now();
+
+      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
+      await queue.markRunning('run-1', 'owner-1', now);
+      const next = await queue.enqueue({ id: 'run-2', flowId: 'flow-1', priority: 1 });
+
+      expect(next).toMatchObject({
+        id: 'run-2',
+        flowId: 'flow-1',
+        status: 'queued',
+      });
+      const queued = await queue.list('queued');
+      expect(queued).toHaveLength(1);
+    });
+
+    it('keeps flow and global backpressure scopes independent', async () => {
+      const queue = createQueueStore({ maxQueuedRuns: 3, maxQueuedRunsPerFlow: 1 });
+
+      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: 'run-2', flowId: 'flow-2', priority: 1 });
+      await expect(
+        queue.enqueue({ id: 'run-3', flowId: 'flow-1', priority: 1 }),
+      ).rejects.toMatchObject({
+        code: RUN_QUEUE_BACKPRESSURE_CODE,
+        retryable: true,
+        scope: 'flow',
+        limit: 1,
+        queuedCount: 1,
+        flowId: 'flow-1',
+      });
     });
   });
 
