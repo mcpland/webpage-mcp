@@ -276,6 +276,24 @@ interface WorkflowResetValidation {
   errors: WorkflowStabilizeValidationError[];
 }
 
+interface TrustedWorkflowApproval {
+  approvalId: string;
+  approvedBy: 'user' | 'ui' | 'policy';
+  approvedAt: string;
+  expiresAt: string;
+  scope: {
+    flowId: string;
+    revision: string;
+    testEnvironment?: string;
+  };
+}
+
+interface WorkflowApprovalCheck {
+  accepted: boolean;
+  approval?: TrustedWorkflowApproval;
+  reason?: string;
+}
+
 interface WorkflowStabilizeScore {
   passRate: number;
   passedRuns: number;
@@ -353,6 +371,7 @@ interface WorkflowRuntimeMetrics {
 }
 
 const REDACTED = '<redacted>';
+const WORKFLOW_APPROVAL_STORE_KEY = 'webpageMcpWorkflowApprovals';
 const SENSITIVE_DEBUG_CONFIG_KEYS = new Set([
   'body',
   'data',
@@ -485,16 +504,102 @@ function normalizeExecutionMode(value: unknown): 'auto' | 'analyzeOnly' | 'sandb
     : 'auto';
 }
 
-function hasTrustedApprovalReference(args: any): boolean {
+function getApprovalIdReference(args: any): string {
   const authorization = args?.safety?.authorization;
   if (!authorization || typeof authorization !== 'object') {
-    return false;
+    return '';
   }
-  const approvalId = typeof authorization.approvalId === 'string' ? authorization.approvalId.trim() : '';
-  const approvedBy = authorization.approvedBy;
-  const approvedAt = typeof authorization.approvedAt === 'string' ? authorization.approvedAt.trim() : '';
-  // Milestone 3A only accepts a reference shape; the trust root/store lookup is intentionally not implemented here.
-  return Boolean(approvalId && approvedAt && (approvedBy === 'user' || approvedBy === 'ui' || approvedBy === 'policy'));
+  return typeof authorization.approvalId === 'string' ? authorization.approvalId.trim() : '';
+}
+
+function normalizeApprovalRecord(approvalId: string, value: unknown): TrustedWorkflowApproval | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const approvedBy = value.approvedBy;
+  if (approvedBy !== 'user' && approvedBy !== 'ui' && approvedBy !== 'policy') {
+    return undefined;
+  }
+  const approvedAt = typeof value.approvedAt === 'string' ? value.approvedAt.trim() : '';
+  const expiresAt = typeof value.expiresAt === 'string' ? value.expiresAt.trim() : '';
+  const scope = isRecord(value.scope) ? value.scope : undefined;
+  const flowId = typeof scope?.flowId === 'string' ? scope.flowId.trim() : '';
+  const revision = typeof scope?.revision === 'string' ? scope.revision.trim() : '';
+  if (!approvedAt || !expiresAt || !flowId || !revision) {
+    return undefined;
+  }
+  const testEnvironment =
+    typeof scope?.testEnvironment === 'string' && scope.testEnvironment.trim()
+      ? scope.testEnvironment.trim()
+      : undefined;
+  return {
+    approvalId,
+    approvedBy,
+    approvedAt,
+    expiresAt,
+    scope: {
+      flowId,
+      revision,
+      ...(testEnvironment ? { testEnvironment } : {}),
+    },
+  };
+}
+
+function getStoredApprovalRecord(store: unknown, approvalId: string): unknown {
+  if (Array.isArray(store)) {
+    return store.find(
+      (item) => isRecord(item) && typeof item.approvalId === 'string' && item.approvalId === approvalId,
+    );
+  }
+  if (isRecord(store)) {
+    return store[approvalId];
+  }
+  return undefined;
+}
+
+async function resolveTrustedWorkflowApproval(options: {
+  args: any;
+  flow: FlowV3;
+  revision: string;
+}): Promise<WorkflowApprovalCheck> {
+  const approvalId = getApprovalIdReference(options.args);
+  if (!approvalId) {
+    return { accepted: false };
+  }
+  let rawStore: unknown;
+  try {
+    const result = (await chrome.storage.local.get(WORKFLOW_APPROVAL_STORE_KEY)) as Record<string, unknown>;
+    rawStore = result?.[WORKFLOW_APPROVAL_STORE_KEY];
+  } catch {
+    return { accepted: false, reason: 'approval store unavailable' };
+  }
+
+  const rawApproval = getStoredApprovalRecord(rawStore, approvalId);
+  if (isRecord(rawApproval) && rawApproval.revoked === true) {
+    return { accepted: false, reason: 'approval has been revoked' };
+  }
+  const approval = normalizeApprovalRecord(approvalId, rawApproval);
+  if (!approval) {
+    return { accepted: false, reason: 'approval record not found or invalid' };
+  }
+  const expiresAtMs = Date.parse(approval.expiresAt);
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+    return { accepted: false, reason: 'approval has expired' };
+  }
+  if (approval.scope.flowId !== options.flow.id || approval.scope.revision !== options.revision) {
+    return { accepted: false, reason: 'approval scope does not match workflow revision' };
+  }
+  const requestedEnvironment =
+    typeof options.args?.safety?.testEnvironment?.name === 'string'
+      ? options.args.safety.testEnvironment.name.trim()
+      : '';
+  if (
+    approval.scope.testEnvironment &&
+    approval.scope.testEnvironment !== requestedEnvironment
+  ) {
+    return { accepted: false, reason: 'approval testEnvironment scope does not match request' };
+  }
+  return { accepted: true, approval };
 }
 
 function normalizeBoundaryStrings(value: unknown): string[] {
@@ -4061,8 +4166,20 @@ class WorkflowStabilizeTool {
       typeof args?.minPassRate === 'number' && Number.isFinite(args.minPassRate)
         ? Math.max(0, Math.min(1, args.minPassRate))
         : 1;
-    const hasApprovalReference = hasTrustedApprovalReference(args);
+    const approvalCheck = await resolveTrustedWorkflowApproval({
+      args,
+      flow: workingFlow,
+      revision: initialRevision,
+    });
+    const hasApprovalReference = approvalCheck.accepted;
     const warnings: WorkflowStabilizeWarning[] = [];
+    if (getApprovalIdReference(args) && !approvalCheck.accepted) {
+      warnings.push({
+        code: 'STABILIZE_APPROVAL_REJECTED',
+        category: 'safety',
+        message: approvalCheck.reason ?? 'approval reference was not accepted',
+      });
+    }
 
     const nodeRiskOverrides =
       args?.safety?.nodeRiskOverrides &&
@@ -4217,22 +4334,20 @@ class WorkflowStabilizeTool {
 
     const applied = shouldApply && changes.length > 0;
     if (args?.dryRun !== true && hasApprovalReference) {
-      const authorization = args?.safety?.authorization ?? {};
       workingFlow = appendWorkflowAuditEvent(workingFlow, {
         kind: 'approval_use',
         actor: 'mcp',
         revision: calculateWorkflowRevision(workingFlow),
         reason: 'workflow_stabilize_authorization',
         metadata: {
-          approvedBy:
-            authorization.approvedBy === 'user' ||
-            authorization.approvedBy === 'ui' ||
-            authorization.approvedBy === 'policy'
-              ? authorization.approvedBy
-              : 'unknown',
+          approvalId: approvalCheck.approval?.approvalId ?? getApprovalIdReference(args),
+          approvedBy: approvalCheck.approval?.approvedBy ?? 'unknown',
+          approvedAt: approvalCheck.approval?.approvedAt ?? '',
+          expiresAt: approvalCheck.approval?.expiresAt ?? '',
           executionMode: validationBlockedReason ? 'analyzeOnly' : executionMode,
           allowExternalSideEffects: requestsExternalSideEffects,
           maxDangerousRuns,
+          scope: approvalCheck.approval?.scope ?? {},
         },
       });
     }
@@ -4422,6 +4537,17 @@ class WorkflowStabilizeTool {
               ...(validationBlockedReason ? { blockedReason: validationBlockedReason } : {}),
               sideEffects,
               approvalReferenceAccepted: hasApprovalReference,
+              ...(approvalCheck.approval
+                ? {
+                    approval: {
+                      approvalId: approvalCheck.approval.approvalId,
+                      approvedBy: approvalCheck.approval.approvedBy,
+                      approvedAt: approvalCheck.approval.approvedAt,
+                      expiresAt: approvalCheck.approval.expiresAt,
+                      scope: approvalCheck.approval.scope,
+                    },
+                  }
+                : {}),
             },
             reset: {
               requested: resetValidation.requested,

@@ -1991,6 +1991,170 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("workflowStabilizeTool accepts trusted approval records from the local approval store", async () => {
+    const flowId = `workflow-stabilize-approved-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "click-1" as any,
+        kind: "click",
+        config: { target: { selector: "#submit" } },
+      },
+    ]);
+    const revision = calculateWorkflowRevision(flow);
+    await createStoragePort().flows.save(flow);
+    asMock(chrome.storage.local.get).mockResolvedValue({
+      webpageMcpWorkflowApprovals: {
+        "approval-1": {
+          approvedBy: "user",
+          approvedAt: "2026-01-01T00:00:00.000Z",
+          expiresAt: "2999-01-01T00:00:00.000Z",
+          scope: {
+            flowId,
+            revision,
+          },
+        },
+      },
+    });
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: {
+        id: "approved-dangerous-run",
+        flowId,
+        status: "succeeded",
+        tookMs: 5,
+      } as any,
+      events: [],
+      result: {
+        runId: "approved-dangerous-run",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+        outputs: null,
+        eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+      },
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 2,
+      apply: false,
+      safety: {
+        executionMode: "userApprovedReplay",
+        allowExternalSideEffects: true,
+        maxDangerousRuns: 1,
+        authorization: {
+          approvalId: "approval-1",
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(1);
+    expect(payload).toMatchObject({
+      stable: true,
+      safety: {
+        risk: "dangerous",
+        executionMode: "userApprovedReplay",
+        approvalReferenceAccepted: true,
+        executedIterations: 1,
+        approval: {
+          approvalId: "approval-1",
+          approvedBy: "user",
+          scope: {
+            flowId,
+            revision,
+          },
+        },
+      },
+      metrics: {
+        approval: {
+          useCount: 1,
+        },
+      },
+    });
+    expect(updated?.meta?.audit?.events).toEqual([
+      expect.objectContaining({
+        kind: "approval_use",
+        actor: "mcp",
+        metadata: expect.objectContaining({
+          approvalId: "approval-1",
+          approvedBy: "user",
+          scope: {
+            flowId,
+            revision,
+          },
+        }),
+      }),
+    ]);
+  });
+
+  it("workflowStabilizeTool rejects expired approval records before dangerous replay", async () => {
+    const flowId = `workflow-stabilize-expired-approval-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "click-1" as any,
+        kind: "click",
+        config: { target: { selector: "#submit" } },
+      },
+    ]);
+    const revision = calculateWorkflowRevision(flow);
+    await createStoragePort().flows.save(flow);
+    asMock(chrome.storage.local.get).mockResolvedValue({
+      webpageMcpWorkflowApprovals: {
+        "approval-expired": {
+          approvedBy: "user",
+          approvedAt: "2026-01-01T00:00:00.000Z",
+          expiresAt: "2000-01-01T00:00:00.000Z",
+          scope: {
+            flowId,
+            revision,
+          },
+        },
+      },
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      apply: true,
+      safety: {
+        executionMode: "userApprovedReplay",
+        allowExternalSideEffects: true,
+        maxDangerousRuns: 1,
+        authorization: {
+          approvalId: "approval-expired",
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+    expect(payload).toMatchObject({
+      applied: false,
+      safety: {
+        executionMode: "analyzeOnly",
+        approvalReferenceAccepted: false,
+        blockedReason: "external side effects require a trusted approval reference",
+      },
+    });
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "STABILIZE_APPROVAL_REJECTED",
+          message: "approval has expired",
+        }),
+        expect.objectContaining({
+          code: "STABILIZE_REPLAY_BLOCKED",
+        }),
+      ]),
+    );
+    expect(updated?.meta?.audit?.events).toBeUndefined();
+    expect(updated?.meta?.quality).toBeUndefined();
+  });
+
   it("workflowStabilizeTool applies safe repairs and reruns validation", async () => {
     const flowId = `workflow-stabilize-apply-${Date.now()}`;
     const flow = createFlow(
