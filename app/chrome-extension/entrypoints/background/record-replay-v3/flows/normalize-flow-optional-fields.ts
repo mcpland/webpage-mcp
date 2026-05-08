@@ -349,6 +349,7 @@ const AUDIT_EVENT_KIND_VALUES = [
   "repair_rollback",
   "schema_migration",
   "quality_downgrade",
+  "quality_status_change",
   "secret_ref_use",
   "policy_change",
 ] as const;

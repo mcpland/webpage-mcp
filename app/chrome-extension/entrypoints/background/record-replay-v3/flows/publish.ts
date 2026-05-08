@@ -413,11 +413,15 @@ export function buildWorkflowQualitySummary(
   const quality = flow.meta?.quality;
   const nowMs = options.nowMs ?? Date.now();
   const staleReason = getQualityStaleReason(flow, quality, currentRevision, nowMs);
-  const current = Boolean(quality) && !staleReason;
+  const explicitStatus = quality?.status;
+  const suspendedOrBlocked = explicitStatus === "paused" || explicitStatus === "blocked";
+  const current = Boolean(quality) && !staleReason && !suspendedOrBlocked;
   const level = quality?.level ?? "unverified";
   const status =
     !quality
       ? "draft"
+      : suspendedOrBlocked
+        ? explicitStatus
       : staleReason
         ? "stale"
         : quality.status ?? (level === "verified" ? "verified" : level === "stable" ? "stable" : "draft");

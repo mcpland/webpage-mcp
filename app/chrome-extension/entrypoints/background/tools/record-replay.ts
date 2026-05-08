@@ -227,6 +227,43 @@ function createFlowRunStaleDescriptorError(
   };
 }
 
+function createFlowRunQualityStatusError(
+  flow: FlowV3,
+  quality: ReturnType<typeof buildWorkflowQualitySummary>,
+): ToolResult {
+  const publishedInfo = getPublishedFlowInfo(flow);
+  const paused = quality.status === "paused";
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          success: false,
+          flowId: flow.id,
+          ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : {}),
+          revision: calculateWorkflowRevision(flow),
+          status: quality.status,
+          quality,
+          error: {
+            code: paused ? "WORKFLOW_PAUSED" : "WORKFLOW_BLOCKED",
+            category: paused ? "safety" : "capability",
+            retryable: false,
+            message: paused
+              ? "Workflow quality status is paused; explicit user or policy resume plus revalidation is required before running."
+              : "Workflow quality status is blocked; the blocking dependency must be fixed and re-evaluated before running.",
+            nextActions: [
+              paused
+                ? "Resume through trusted UI/policy approval and rerun workflow_stabilize for revalidation."
+                : "Resolve the blocking schema, capability, safety, secret, or migration issue and rerun workflow_stabilize or workflow_migrate.",
+            ],
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
+}
+
 function countSecretRefs(value: unknown): number {
   if (isWorkflowSecretRefValue(value)) return 1;
   if (Array.isArray(value)) {
@@ -921,6 +958,10 @@ class FlowRunTool {
         : "";
     if (requiredRevision && requiredRevision !== currentRevision) {
       return createFlowRunStaleDescriptorError(flow.id, requiredRevision, currentRevision);
+    }
+    const qualityBeforeRun = buildWorkflowQualitySummary(flow);
+    if (qualityBeforeRun.status === "paused" || qualityBeforeRun.status === "blocked") {
+      return createFlowRunQualityStatusError(flow, qualityBeforeRun);
     }
     const normalizedStartUrl =
       typeof startUrl === "string" && startUrl.trim() ? startUrl.trim() : undefined;

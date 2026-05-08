@@ -4798,6 +4798,9 @@ class WorkflowStabilizeTool {
       revision: initialRevision,
     });
     const hasApprovalReference = approvalCheck.accepted;
+    const initialQuality = buildWorkflowQualitySummary(workingFlow);
+    const workflowStatusRequiresResume =
+      initialQuality.status === 'paused' || initialQuality.status === 'blocked';
     const warnings: WorkflowStabilizeWarning[] = [];
     warnings.push(
       ...buildClientCapabilityWarnings(clientCapabilities, {
@@ -4862,7 +4865,9 @@ class WorkflowStabilizeTool {
     });
     const boundaryError = validateStabilizeStartUrlBoundary(args);
     let blockedReason: string | undefined;
-    if ((risk === 'dangerous' || risk === 'unknown') && executionMode === 'auto') {
+    if (workflowStatusRequiresResume && !hasApprovalReference) {
+      blockedReason = `workflow quality status ${initialQuality.status} requires trusted resume approval and revalidation`;
+    } else if ((risk === 'dangerous' || risk === 'unknown') && executionMode === 'auto') {
       blockedReason = `${risk} workflow defaults to analyze-only`;
     } else if (
       (risk === 'dangerous' || risk === 'unknown') &&
@@ -5103,23 +5108,33 @@ class WorkflowStabilizeTool {
           },
         };
         const nextQuality = buildWorkflowQualitySummary(nextWorkingFlow);
-        if (
+        const statusChanged = previousQuality.status !== nextQuality.status;
+        const downgrade =
           previousQuality.current &&
-          (!nextQuality.current || nextQuality.slo.status === 'breached')
-        ) {
+          (!nextQuality.current || nextQuality.slo.status === 'breached');
+        if (statusChanged || downgrade) {
           nextWorkingFlow = appendWorkflowAuditEvent(nextWorkingFlow, {
-            kind: 'quality_downgrade',
+            kind: downgrade ? 'quality_downgrade' : 'quality_status_change',
             actor: 'mcp',
             revision: calculateWorkflowRevision(nextWorkingFlow),
             previousStatus: previousQuality.status,
             nextStatus: nextQuality.status,
-            reason: nextQuality.staleReason ?? 'slo_breach',
+            reason:
+              workflowStatusRequiresResume && hasApprovalReference
+                ? 'workflow_stabilize_resume_revalidation'
+                : nextQuality.staleReason ?? (downgrade ? 'slo_breach' : 'workflow_stabilize_status_change'),
             metadata: {
               tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
               passRate: nextQuality.passRate,
               minPassRate,
               sloStatus: nextQuality.slo.status,
               sloBreaches: nextQuality.slo.breaches,
+              ...(approvalCheck.approval
+                ? {
+                    approvalId: approvalCheck.approval.approvalId,
+                    approvedBy: approvalCheck.approval.approvedBy,
+                  }
+                : {}),
             },
           });
         }
@@ -5187,6 +5202,7 @@ class WorkflowStabilizeTool {
               requestedIterations: iterations,
               minPassRate,
               executedIterations: baselineRuns.length + postRepairRuns.length,
+              blocked: Boolean(validationBlockedReason),
               ...(validationBlockedReason ? { blockedReason: validationBlockedReason } : {}),
               sideEffects,
               approvalReferenceAccepted: hasApprovalReference,

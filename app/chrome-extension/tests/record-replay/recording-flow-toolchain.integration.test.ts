@@ -1744,6 +1744,177 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("flowRunTool refuses paused and blocked workflow quality states before replay", async () => {
+    const storage = createStoragePort();
+    for (const status of ["paused", "blocked"] as const) {
+      const flowId = `workflow-run-${status}-${Date.now()}`;
+      const flow = createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { ms: 1 },
+        },
+      ]);
+      const revision = calculateWorkflowRevision(flow);
+      flow.meta = {
+        quality: {
+          revision,
+          status,
+          level: "stable",
+          passRate: 1,
+          validationRuns: 3,
+          countedValidationRuns: 3,
+          passedRuns: 3,
+          failedRuns: 0,
+          lastValidatedAt: new Date(0).toISOString() as any,
+          freshnessExpiresAt: new Date(Date.now() + 60_000).toISOString() as any,
+          ...(status === "blocked" ? { staleReason: "dsl_major_mismatch" } : {}),
+        },
+      };
+      await storage.flows.save(flow);
+
+      const result = await flowRunTool.execute({ flowId });
+      const payload = parseToolPayload(result);
+
+      expect(result.isError).toBe(true);
+      expect(payload).toMatchObject({
+        success: false,
+        flowId,
+        status,
+        quality: {
+          status,
+          current: false,
+        },
+        error: {
+          code: status === "paused" ? "WORKFLOW_PAUSED" : "WORKFLOW_BLOCKED",
+          retryable: false,
+        },
+      });
+    }
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+  });
+
+  it("workflowStabilizeTool requires trusted resume approval for paused quality recovery and audits the transition", async () => {
+    const flowId = `workflow-stabilize-paused-${Date.now()}`;
+    const storage = createStoragePort();
+    const flow = createFlow(flowId, [
+      {
+        id: "wait-1" as any,
+        kind: "wait",
+        config: { ms: 1 },
+      },
+    ]);
+    const revision = calculateWorkflowRevision(flow);
+    flow.meta = {
+      quality: {
+        revision,
+        status: "paused",
+        level: "stable",
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        lastValidatedAt: new Date(0).toISOString() as any,
+        freshnessExpiresAt: new Date(Date.now() + 60_000).toISOString() as any,
+      },
+    };
+    await storage.flows.save(flow);
+
+    const blocked = parseToolPayload(
+      await workflowStabilizeTool.execute({
+        flowId,
+        iterations: 1,
+        safety: { executionMode: "userApprovedReplay" },
+      }),
+    );
+    expect(blocked.safety).toMatchObject({
+      blocked: true,
+      blockedReason:
+        "workflow quality status paused requires trusted resume approval and revalidation",
+    });
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+
+    const approvalId = "approval-resume";
+    asMock(chrome.storage.local.get).mockImplementation(async (key: string) => {
+      if (key === "webpageMcpWorkflowApprovals") {
+        return {
+          webpageMcpWorkflowApprovals: {
+            [approvalId]: {
+              approvalId,
+              approvedBy: "user",
+              approvedAt: "2026-01-01T00:00:00.000Z",
+              expiresAt: "2999-01-01T00:00:00.000Z",
+              scope: {
+                flowId,
+                revision,
+              },
+            },
+          },
+        };
+      }
+      return {};
+    });
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: {
+        id: `${flowId}-run-1`,
+        flowId,
+        status: "succeeded",
+        currentNodeId: "wait-1",
+        tookMs: 1,
+      } as any,
+      events: [],
+      result: {
+        runId: `${flowId}-run-1`,
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 1 },
+        outputs: {},
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const resumed = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      safety: {
+        executionMode: "userApprovedReplay",
+        authorization: {
+          approvalId,
+          approvedBy: "user",
+          approvedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    });
+    const resumedPayload = parseToolPayload(resumed);
+    const updated = await storage.flows.get(flowId as any);
+
+    expect(resumed.isError).toBe(false);
+    expect(resumedPayload.safety).toMatchObject({
+      blocked: false,
+      executedIterations: 1,
+    });
+    expect(updated?.meta?.quality).toMatchObject({
+      status: "stable",
+      level: "stable",
+    });
+    expect(updated?.meta?.audit?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "quality_status_change",
+          previousStatus: "paused",
+          nextStatus: "stable",
+          reason: "workflow_stabilize_resume_revalidation",
+          metadata: expect.objectContaining({
+            approvalId,
+            approvedBy: "user",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("workflowRepairTool suggests selector replacement without applying when failure artifacts are missing", async () => {
     const flowId = `workflow-repair-selector-suggest-${Date.now()}`;
     const runId = `${flowId}-run`;
@@ -2677,20 +2848,22 @@ describe("recording/editing/flow toolchain integration", () => {
         },
       },
     });
-    expect(updated?.meta?.audit?.events).toEqual([
-      expect.objectContaining({
-        kind: "approval_use",
-        actor: "mcp",
-        metadata: expect.objectContaining({
-          approvalId: "approval-1",
-          approvedBy: "user",
-          scope: {
-            flowId,
-            revision,
-          },
+    expect(updated?.meta?.audit?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "approval_use",
+          actor: "mcp",
+          metadata: expect.objectContaining({
+            approvalId: "approval-1",
+            approvedBy: "user",
+            scope: {
+              flowId,
+              revision,
+            },
+          }),
         }),
-      }),
-    ]);
+      ]),
+    );
   });
 
   it("workflowStabilizeTool rejects expired approval records before dangerous replay", async () => {
