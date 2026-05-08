@@ -18,9 +18,38 @@ describe('adapter policy flags contract', () => {
   beforeEach(() => {
     registryExecute = vi.fn(async () => ({ status: 'success' }));
     mockRegistry = {
-      get: vi.fn(() => ({ type: 'fill' })), // Returns truthy = handler exists
+      get: vi.fn((type: string) => ({ type })), // Returns truthy = handler exists
       execute: registryExecute,
     };
+  });
+
+  describe('step to action routing', () => {
+    it.each([
+      [
+        'triggerEvent',
+        {
+          target: { candidates: [{ type: 'css', value: '#input' }] },
+          event: 'change',
+        },
+      ],
+      [
+        'setAttribute',
+        {
+          target: { candidates: [{ type: 'css', value: '#input' }] },
+          name: 'aria-expanded',
+          value: 'true',
+        },
+      ],
+    ])('routes %s steps through ActionRegistry', async (type, stepConfig) => {
+      const executor = createStepExecutor(mockRegistry);
+
+      await executor(createMockExecCtx(), createMockStep(type, stepConfig), 1, {});
+
+      expect(registryExecute).toHaveBeenCalledTimes(1);
+      const [, action] = registryExecute.mock.calls[0];
+      expect(action.type).toBe(type);
+      expect(action.params.target.candidates[0].selector).toBe('#input');
+    });
   });
 
   describe('skipRetry flag', () => {

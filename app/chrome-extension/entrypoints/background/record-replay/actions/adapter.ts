@@ -67,9 +67,11 @@ const STEP_TYPE_TO_ACTION_TYPE: Record<string, ExecutableActionType> = {
   while: 'while',
   switchFrame: 'switchFrame',
 
+  // DOM Tools
+  triggerEvent: 'triggerEvent',
+  setAttribute: 'setAttribute',
+
   // TODO: Add when handlers are implemented
-  // triggerEvent: 'triggerEvent',
-  // setAttribute: 'setAttribute',
   // loopElements: 'loopElements',
   // executeFlow: 'executeFlow',
 };
