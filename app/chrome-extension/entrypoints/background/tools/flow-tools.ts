@@ -139,7 +139,7 @@ interface WorkflowRepairRecommendation {
   code: string;
   message: string;
   nodeId?: string;
-  autoFix?: 'parameterize_recorded_values' | 'default_stability_policy' | 'selector_repair';
+  autoFix?: 'parameterize_recorded_values' | 'default_stability_policy' | 'selector_repair' | 'wait_repair';
 }
 
 interface WorkflowRepairChange {
@@ -199,6 +199,44 @@ interface SelectorRepairPlan {
   beforeQuality: SelectorQualityDiagnostic;
   afterQuality?: SelectorQualityDiagnostic;
   evidence: SelectorRepairEvidence;
+}
+
+type WorkflowWaitConditionPatch =
+  | { kind: 'navigation' }
+  | { kind: 'networkIdle'; idleMs?: number }
+  | { kind: 'selector'; selector: string; visible?: boolean };
+
+interface WaitRepairEvidence {
+  runId?: string;
+  observedNodeId?: string;
+  eventType?: 'navigation.observed' | 'network.observed' | 'dom.visibility';
+  status?: string;
+  selector?: string;
+  beforeUrl?: string;
+  afterUrl?: string;
+  resourceType?: string;
+  currentFrame?: boolean;
+  matchCount?: number;
+}
+
+interface WaitRepairPlan {
+  op: 'addWaitBefore';
+  nodeId: string;
+  status: 'autoPatch' | 'suggestion';
+  reason: string;
+  confidence: number;
+  condition: WorkflowWaitConditionPatch;
+  evidence: WaitRepairEvidence;
+}
+
+interface AssertionRepairSuggestion {
+  op: 'addAssertAfter';
+  nodeId?: string;
+  status: 'suggestion';
+  reason: string;
+  confidence: number;
+  assertion?: Record<string, unknown>;
+  evidence?: Record<string, unknown>;
 }
 
 interface WorkflowStabilizeRunSummary {
@@ -2134,6 +2172,8 @@ function buildRepairRecommendations(
   return [
     ...recommendations,
     ...buildSelectorRepairRecommendations(planSelectorRepairs(flow, runs)),
+    ...buildWaitRepairRecommendations(planWaitRepairs(flow, runs)),
+    ...buildAssertionRepairRecommendations(buildAssertionRepairSuggestions(flow, runs)),
     ...buildRuntimeFailureRecommendations(runs),
     ...buildWaitDiagnosticRecommendations(runs),
   ];
@@ -2200,6 +2240,383 @@ function applyDefaultStabilityPolicy(flow: FlowV3): WorkflowRepairChange[] {
   }
 
   return changes;
+}
+
+function getIncomingEdges(flow: FlowV3, nodeId: string): FlowV3['edges'] {
+  return (Array.isArray(flow.edges) ? flow.edges : []).filter((edge) => edge.to === nodeId);
+}
+
+function getOutgoingEdges(flow: FlowV3, nodeId: string): FlowV3['edges'] {
+  return (Array.isArray(flow.edges) ? flow.edges : []).filter((edge) => edge.from === nodeId);
+}
+
+function createUniqueFlowId(flow: FlowV3, prefix: string): string {
+  const usedNodeIds = new Set((Array.isArray(flow.nodes) ? flow.nodes : []).map((node) => node.id));
+  const usedEdgeIds = new Set((Array.isArray(flow.edges) ? flow.edges : []).map((edge) => edge.id));
+  const normalized = prefix.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'repair';
+  let candidate = normalized;
+  let counter = 1;
+  while (usedNodeIds.has(candidate as FlowV3['entryNodeId']) || usedEdgeIds.has(candidate as FlowV3['edges'][number]['id'])) {
+    counter += 1;
+    candidate = `${normalized}-${counter}`;
+  }
+  return candidate;
+}
+
+function waitConditionsEqual(
+  left: WorkflowWaitConditionPatch | undefined,
+  right: WorkflowWaitConditionPatch | undefined,
+): boolean {
+  if (!left || !right || left.kind !== right.kind) return false;
+  if (left.kind === 'selector' && right.kind === 'selector') {
+    return left.selector === right.selector && (left.visible !== false) === (right.visible !== false);
+  }
+  if (left.kind === 'networkIdle' && right.kind === 'networkIdle') {
+    return (left.idleMs ?? 750) === (right.idleMs ?? 750);
+  }
+  return true;
+}
+
+function getWaitConditionFromNode(node: FlowV3['nodes'][number] | undefined): WorkflowWaitConditionPatch | undefined {
+  if (!node || node.kind !== 'wait' || !isRecord(node.config)) return undefined;
+  const condition = node.config.condition;
+  if (!isRecord(condition) || typeof condition.kind !== 'string') return undefined;
+  if (condition.kind === 'navigation') return { kind: 'navigation' };
+  if (condition.kind === 'networkIdle') {
+    return {
+      kind: 'networkIdle',
+      ...(typeof condition.idleMs === 'number' ? { idleMs: condition.idleMs } : {}),
+    };
+  }
+  if (condition.kind === 'selector' && typeof condition.selector === 'string') {
+    return {
+      kind: 'selector',
+      selector: condition.selector,
+      ...(condition.visible === false ? { visible: false } : {}),
+    };
+  }
+  return undefined;
+}
+
+function hasEquivalentWaitBefore(
+  flow: FlowV3,
+  nodeId: string,
+  condition: WorkflowWaitConditionPatch,
+): boolean {
+  const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
+  const incomingWaits = getIncomingEdges(flow, nodeId)
+    .map((edge) => nodes.find((node) => node.id === edge.from))
+    .filter((node): node is FlowV3['nodes'][number] => Boolean(node));
+  if (flow.entryNodeId === nodeId) {
+    const entryWait = nodes.find((node) => node.id === flow.entryNodeId && node.kind === 'wait');
+    if (entryWait && getOutgoingEdges(flow, entryWait.id).some((edge) => edge.to === nodeId)) {
+      incomingWaits.push(entryWait);
+    }
+  }
+  return incomingWaits.some((waitNode) => waitConditionsEqual(getWaitConditionFromNode(waitNode), condition));
+}
+
+function canInsertWaitBefore(flow: FlowV3, nodeId: string): boolean {
+  return flow.entryNodeId === nodeId || getIncomingEdges(flow, nodeId).length > 0;
+}
+
+function isWaitRepairFailureCode(code: string | undefined): boolean {
+  return (
+    code === RR_ERROR_CODES.TARGET_NOT_FOUND ||
+    code === RR_ERROR_CODES.ELEMENT_NOT_VISIBLE ||
+    code === RR_ERROR_CODES.TIMEOUT ||
+    code === RR_ERROR_CODES.NAVIGATION_FAILED
+  );
+}
+
+function failedNodeIdsForWaitRepair(runs: WorkflowDebugRun[]): Set<string> {
+  const nodeIds = new Set<string>();
+  for (const run of runs) {
+    const runErrorCode = getSanitizedErrorCode(run.error);
+    if (run.status === 'failed' && run.currentNodeId && isWaitRepairFailureCode(runErrorCode)) {
+      nodeIds.add(run.currentNodeId);
+    }
+    for (const event of run.events) {
+      if (getEventNodeId(event) && isWaitRepairFailureCode(getEventErrorCode(event))) {
+        nodeIds.add(getEventNodeId(event)!);
+      }
+    }
+  }
+  return nodeIds;
+}
+
+function buildSelectorWaitPlanFromEvent(
+  run: WorkflowDebugRun,
+  event: Record<string, unknown>,
+  nodeId: string,
+): WaitRepairPlan | undefined {
+  if (event.type !== 'dom.visibility' || getEventNodeId(event) !== nodeId) return undefined;
+  if (typeof event.selector !== 'string' || !event.selector.trim()) return undefined;
+  if (event.status !== 'appeared' && event.status !== 'stable') return undefined;
+  if (typeof event.matchCount === 'number' && event.matchCount < 1) return undefined;
+  return {
+    op: 'addWaitBefore',
+    nodeId,
+    status: 'suggestion',
+    reason: 'The failed target was later observed as visible; add a bounded selector wait before retrying the action.',
+    confidence: 0.92,
+    condition: { kind: 'selector', selector: event.selector.trim(), visible: true },
+    evidence: {
+      runId: run.id,
+      observedNodeId: nodeId,
+      eventType: 'dom.visibility',
+      status: typeof event.status === 'string' ? event.status : undefined,
+      selector: event.selector.trim(),
+      ...(typeof event.matchCount === 'number' ? { matchCount: event.matchCount } : {}),
+    },
+  };
+}
+
+function buildNavigationWaitPlanFromEvent(
+  run: WorkflowDebugRun,
+  event: Record<string, unknown>,
+  nodeId: string,
+  observedNodeIds: ReadonlySet<string>,
+): WaitRepairPlan | undefined {
+  if (event.type !== 'navigation.observed') return undefined;
+  const observedNodeId = getEventNodeId(event);
+  if (!observedNodeId || !observedNodeIds.has(observedNodeId)) return undefined;
+  if (event.status !== 'completed') return undefined;
+  const beforeUrl = typeof event.beforeUrl === 'string' ? event.beforeUrl : undefined;
+  const afterUrl = typeof event.afterUrl === 'string' ? event.afterUrl : undefined;
+  if (!beforeUrl || !afterUrl || beforeUrl === afterUrl) return undefined;
+  return {
+    op: 'addWaitBefore',
+    nodeId,
+    status: 'suggestion',
+    reason: 'A preceding step changed the page URL before this failure; add a bounded navigation wait.',
+    confidence: 0.88,
+    condition: { kind: 'navigation' },
+    evidence: {
+      runId: run.id,
+      observedNodeId,
+      eventType: 'navigation.observed',
+      status: 'completed',
+      beforeUrl,
+      afterUrl,
+    },
+  };
+}
+
+function buildNetworkIdleWaitPlanFromEvent(
+  run: WorkflowDebugRun,
+  event: Record<string, unknown>,
+  nodeId: string,
+  observedNodeIds: ReadonlySet<string>,
+): WaitRepairPlan | undefined {
+  if (event.type !== 'network.observed') return undefined;
+  const observedNodeId = getEventNodeId(event);
+  if (!observedNodeId || !observedNodeIds.has(observedNodeId)) return undefined;
+  if (event.currentFrame !== true || typeof event.endedAt !== 'number') return undefined;
+  return {
+    op: 'addWaitBefore',
+    nodeId,
+    status: 'suggestion',
+    reason: 'A preceding step produced current-frame network activity before this failure; add a bounded network-idle wait.',
+    confidence: 0.86,
+    condition: { kind: 'networkIdle', idleMs: 750 },
+    evidence: {
+      runId: run.id,
+      observedNodeId,
+      eventType: 'network.observed',
+      resourceType: typeof event.resourceType === 'string' ? event.resourceType : undefined,
+      currentFrame: true,
+    },
+  };
+}
+
+function chooseWaitRepairObservation(
+  flow: FlowV3,
+  runs: WorkflowDebugRun[],
+  nodeId: string,
+): WaitRepairPlan | undefined {
+  const predecessorIds = new Set(getIncomingEdges(flow, nodeId).map((edge) => edge.from));
+  const observedNodeIds = new Set<string>([nodeId, ...predecessorIds]);
+  const candidates: WaitRepairPlan[] = [];
+  for (const run of runs) {
+    for (const event of run.events) {
+      const selectorPlan = buildSelectorWaitPlanFromEvent(run, event, nodeId);
+      if (selectorPlan) candidates.push(selectorPlan);
+      const navigationPlan = buildNavigationWaitPlanFromEvent(run, event, nodeId, observedNodeIds);
+      if (navigationPlan) candidates.push(navigationPlan);
+      const networkPlan = buildNetworkIdleWaitPlanFromEvent(run, event, nodeId, observedNodeIds);
+      if (networkPlan) candidates.push(networkPlan);
+    }
+  }
+  return candidates.sort((left, right) => right.confidence - left.confidence)[0];
+}
+
+function planWaitRepairs(flow: FlowV3, runs: WorkflowDebugRun[]): WaitRepairPlan[] {
+  const plans: WaitRepairPlan[] = [];
+  const failedNodeIds = failedNodeIdsForWaitRepair(runs);
+  for (const nodeId of failedNodeIds) {
+    const node = flow.nodes.find((candidate) => candidate.id === nodeId);
+    if (!node || node.kind === 'wait') continue;
+    const observationPlan = chooseWaitRepairObservation(flow, runs, nodeId);
+    if (!observationPlan) {
+      plans.push({
+        op: 'addWaitBefore',
+        nodeId,
+        status: 'suggestion',
+        reason: 'Recent failures look timing-related, but no navigation, network, or DOM visibility observation is available for a safe automatic wait patch.',
+        confidence: 0.35,
+        condition: { kind: 'selector', selector: getPrimarySelectorFromTarget(getNodeTarget(node)) ?? '', visible: true },
+        evidence: {},
+      });
+      continue;
+    }
+    if (
+      observationPlan.confidence >= 0.85 &&
+      canInsertWaitBefore(flow, nodeId) &&
+      !hasEquivalentWaitBefore(flow, nodeId, observationPlan.condition)
+    ) {
+      observationPlan.status = 'autoPatch';
+    }
+    plans.push(observationPlan);
+  }
+  return plans;
+}
+
+function buildWaitRepairRecommendations(plans: WaitRepairPlan[]): WorkflowRepairRecommendation[] {
+  return plans.map((plan) => ({
+    severity: plan.status === 'autoPatch' ? 'info' : 'warning',
+    code: plan.status === 'autoPatch' ? 'bounded_wait_patch_available' : 'bounded_wait_suggestion',
+    message:
+      plan.status === 'autoPatch'
+        ? `Observed timing evidence supports adding a bounded wait before ${plan.nodeId}; workflow_stabilize can apply and validate it.`
+        : `A bounded wait before ${plan.nodeId} is suggested, but stronger observations or graph context are required before automatic patching.`,
+    nodeId: plan.nodeId,
+    ...(plan.status === 'autoPatch' ? { autoFix: 'wait_repair' as const } : {}),
+  }));
+}
+
+function insertWaitBeforeNode(flow: FlowV3, plan: WaitRepairPlan): WorkflowRepairChange | undefined {
+  if (plan.status !== 'autoPatch') return undefined;
+  const targetNode = flow.nodes.find((node) => node.id === plan.nodeId);
+  if (!targetNode || !canInsertWaitBefore(flow, plan.nodeId)) return undefined;
+  if (hasEquivalentWaitBefore(flow, plan.nodeId, plan.condition)) return undefined;
+
+  const waitNodeId = createUniqueFlowId(flow, `wait-before-${plan.nodeId}`);
+  const waitEdgeId = createUniqueFlowId(flow, `edge-${waitNodeId}-${plan.nodeId}`);
+  const waitNode: FlowV3['nodes'][number] = {
+    id: waitNodeId as FlowV3['entryNodeId'],
+    kind: 'wait',
+    name: `Wait before ${targetNode.name || targetNode.kind}`,
+    config: { condition: plan.condition },
+  };
+  const targetIndex = flow.nodes.findIndex((node) => node.id === plan.nodeId);
+  flow.nodes.splice(targetIndex >= 0 ? targetIndex : flow.nodes.length, 0, waitNode);
+
+  const incoming = getIncomingEdges(flow, plan.nodeId);
+  if (incoming.length > 0) {
+    for (const edge of flow.edges) {
+      if (edge.to === plan.nodeId) {
+        edge.to = waitNodeId as FlowV3['entryNodeId'];
+      }
+    }
+  }
+  if (flow.entryNodeId === plan.nodeId) {
+    flow.entryNodeId = waitNodeId as FlowV3['entryNodeId'];
+  }
+  flow.edges.push({
+    id: waitEdgeId as FlowV3['edges'][number]['id'],
+    from: waitNodeId as FlowV3['entryNodeId'],
+    to: plan.nodeId as FlowV3['entryNodeId'],
+  });
+
+  return {
+    code: 'bounded_wait_added',
+    message: `Added a bounded ${plan.condition.kind} wait before ${plan.nodeId}.`,
+    nodeId: plan.nodeId,
+    reason: plan.reason,
+    confidence: plan.confidence,
+    patch: {
+      op: 'addWaitBefore',
+      nodeId: plan.nodeId,
+      waitNodeId,
+      condition: plan.condition,
+      confidence: plan.confidence,
+      evidence: plan.evidence,
+    },
+  };
+}
+
+function applyWaitRepairPlans(flow: FlowV3, plans: WaitRepairPlan[]): WorkflowRepairChange[] {
+  const changes: WorkflowRepairChange[] = [];
+  for (const plan of plans) {
+    const change = insertWaitBeforeNode(flow, plan);
+    if (change) changes.push(change);
+  }
+  return changes;
+}
+
+function buildAssertionRepairSuggestions(flow: FlowV3, runs: WorkflowDebugRun[]): AssertionRepairSuggestion[] {
+  if ((Array.isArray(flow.nodes) ? flow.nodes : []).some((node) => node.kind === 'assert')) {
+    return [];
+  }
+  const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
+  const terminalNode =
+    nodes.find((node) => getOutgoingEdges(flow, node.id).length === 0) ?? nodes[nodes.length - 1];
+  const latestVisibleEvent = runs
+    .flatMap((run) => run.events.map((event) => ({ run, event })))
+    .reverse()
+    .find(({ run, event }) => {
+      return (
+        run.status === 'succeeded' &&
+        event.type === 'dom.visibility' &&
+        typeof event.selector === 'string' &&
+        (event.status === 'appeared' || event.status === 'stable') &&
+        (typeof event.matchCount !== 'number' || event.matchCount > 0)
+      );
+    });
+
+  if (latestVisibleEvent && typeof latestVisibleEvent.event.selector === 'string') {
+    return [
+      {
+        op: 'addAssertAfter',
+        nodeId: getEventNodeId(latestVisibleEvent.event) ?? terminalNode?.id,
+        status: 'suggestion',
+        reason:
+          'A successful run observed a stable visible element. Add an assertion only if this element represents the business outcome.',
+        confidence: 0.62,
+        assertion: { kind: 'visible', selector: latestVisibleEvent.event.selector },
+        evidence: {
+          runId: latestVisibleEvent.run.id,
+          eventType: 'dom.visibility',
+          selector: latestVisibleEvent.event.selector,
+        },
+      },
+    ];
+  }
+
+  return [
+    {
+      op: 'addAssertAfter',
+      ...(terminalNode ? { nodeId: terminalNode.id } : {}),
+      status: 'suggestion',
+      reason:
+        'No assertion checkpoint exists. Add a structured assertion for the expected business outcome before marking the workflow verified.',
+      confidence: 0.4,
+    },
+  ];
+}
+
+function buildAssertionRepairRecommendations(
+  suggestions: AssertionRepairSuggestion[],
+): WorkflowRepairRecommendation[] {
+  return suggestions.map((suggestion) => ({
+    severity: 'warning',
+    code: 'assertion_checkpoint_suggestion',
+    message: suggestion.assertion
+      ? 'A candidate assertion checkpoint is available from successful-run observations, but it requires user confirmation before writing.'
+      : 'No assertion checkpoint exists; add a structured business outcome assertion before requiring verified quality.',
+    ...(suggestion.nodeId ? { nodeId: suggestion.nodeId } : {}),
+  }));
 }
 
 function scoreStabilizeRuns(runs: WorkflowStabilizeRunSummary[]): WorkflowStabilizeScore {
@@ -2617,6 +3034,9 @@ function recordStabilizeRepairHistory(
   const existing = Array.isArray(meta.repairs?.history) ? meta.repairs.history : [];
   const repairRevision = `repair-${Date.now().toString(36)}`;
   const selectorChange = changes.find((change) => change.code === 'selector_target_replaced');
+  const pageContentUsed = changes.some(
+    (change) => change.code === 'selector_target_replaced' || change.code === 'bounded_wait_added',
+  );
   meta.repairs = {
     ...(meta.repairs ?? {}),
     currentRepairRevision: repairRevision,
@@ -2630,7 +3050,7 @@ function recordStabilizeRepairHistory(
         changes: changes.map((change) => ({ ...change })),
         provenance: {
           source: 'workflow_stabilize',
-          pageContentUsed: Boolean(selectorChange),
+          pageContentUsed,
         },
         ...(selectorChange?.beforeQuality ? { beforeQuality: selectorChange.beforeQuality.score } : {}),
         ...(selectorChange?.afterQuality ? { afterQuality: selectorChange.afterQuality.score } : {}),
@@ -2847,6 +3267,8 @@ class WorkflowRepairTool {
     const initialHints = collectFlowHints(flow);
     const runs = await collectDebugRuns(flow, args);
     const selectorRepairPlansBeforeApply = planSelectorRepairs(flow, runs);
+    const waitRepairPlansBeforeApply = planWaitRepairs(flow, runs);
+    const assertionRepairSuggestionsBeforeApply = buildAssertionRepairSuggestions(flow, runs);
     const recommendationsBeforeApply = buildRepairRecommendations(flow, initialHints, runs);
     const shouldApply = args?.apply === true && args?.dryRun !== true;
     const changes: WorkflowRepairChange[] = [];
@@ -2876,6 +3298,12 @@ class WorkflowRepairTool {
     const selectorRepairPlans = shouldApply
       ? planSelectorRepairs(flow, runs)
       : selectorRepairPlansBeforeApply;
+    const waitRepairPlans = shouldApply
+      ? planWaitRepairs(flow, runs)
+      : waitRepairPlansBeforeApply;
+    const assertionRepairSuggestions = shouldApply
+      ? buildAssertionRepairSuggestions(flow, runs)
+      : assertionRepairSuggestionsBeforeApply;
     const recommendations = shouldApply
       ? buildRepairRecommendations(flow, finalHints, runs)
       : recommendationsBeforeApply;
@@ -2905,11 +3333,15 @@ class WorkflowRepairTool {
             recommendations,
             selectorDiagnostics: buildSelectorDiagnostics(flow, runs),
             selectorRepairs: selectorRepairPlans,
+            waitRepairs: waitRepairPlans,
+            assertionRepairs: assertionRepairSuggestions,
             plannedAutoFixes,
             ...(shouldApply
               ? {
                   recommendationsBeforeApply,
                   selectorRepairsBeforeApply: selectorRepairPlansBeforeApply,
+                  waitRepairsBeforeApply: waitRepairPlansBeforeApply,
+                  assertionRepairsBeforeApply: assertionRepairSuggestionsBeforeApply,
                   plannedAutoFixesBeforeApply: recommendationsBeforeApply
                     .filter((recommendation) => recommendation.autoFix)
                     .map((recommendation) => recommendation.autoFix),
@@ -2987,6 +3419,8 @@ class WorkflowStabilizeTool {
       maxEventsPerRun: args?.debug?.maxEventsPerRun,
     });
     const selectorRepairPlansBeforeApply = planSelectorRepairs(workingFlow, recentRuns);
+    const waitRepairPlansBeforeApply = planWaitRepairs(workingFlow, recentRuns);
+    const assertionRepairSuggestionsBeforeApply = buildAssertionRepairSuggestions(workingFlow, recentRuns);
     const recommendationsBeforeApply = buildRepairRecommendations(workingFlow, hints, recentRuns);
     const descriptor = buildWorkflowToolDescriptor(workingFlow);
     const sideEffects = descriptor.sideEffects.summary;
@@ -3118,6 +3552,9 @@ class WorkflowStabilizeTool {
     if (shouldApply && args?.repair?.selectors !== false) {
       changes.push(...applySelectorRepairPlans(workingFlow, selectorRepairPlansBeforeApply));
     }
+    if (shouldApply && args?.repair?.waits !== false) {
+      changes.push(...applyWaitRepairPlans(workingFlow, waitRepairPlansBeforeApply));
+    }
     if (args?.apply === true && blockedReason) {
       warnings.push({
         code: 'STABILIZE_APPLY_SKIPPED',
@@ -3152,6 +3589,12 @@ class WorkflowStabilizeTool {
     const selectorRepairPlans = applied
       ? planSelectorRepairs(workingFlow, recentRuns)
       : selectorRepairPlansBeforeApply;
+    const waitRepairPlans = applied
+      ? planWaitRepairs(workingFlow, recentRuns)
+      : waitRepairPlansBeforeApply;
+    const assertionRepairSuggestions = applied
+      ? buildAssertionRepairSuggestions(workingFlow, recentRuns)
+      : assertionRepairSuggestionsBeforeApply;
     const recommendations = applied
       ? buildRepairRecommendations(workingFlow, finalHints, recentRuns)
       : recommendationsBeforeApply;
@@ -3262,6 +3705,10 @@ class WorkflowStabilizeTool {
             selectorDiagnostics: buildSelectorDiagnostics(workingFlow, recentRuns),
             selectorRepairs: selectorRepairPlans,
             ...(applied ? { selectorRepairsBeforeApply: selectorRepairPlansBeforeApply } : {}),
+            waitRepairs: waitRepairPlans,
+            assertionRepairs: assertionRepairSuggestions,
+            ...(applied ? { waitRepairsBeforeApply: waitRepairPlansBeforeApply } : {}),
+            ...(applied ? { assertionRepairsBeforeApply: assertionRepairSuggestionsBeforeApply } : {}),
             changes,
             ...(parameterization ? { parameterization } : {}),
             ...(rollbackSuggestion ? { rollbackSuggestion } : {}),

@@ -1249,6 +1249,56 @@ describe("recording/editing/flow toolchain integration", () => {
     expect((updated?.nodes[0].config as any).target.selector).toBe(oldSelector);
   });
 
+  it("workflowRepairTool suggests assertion checkpoints from successful visibility observations", async () => {
+    const flowId = `workflow-repair-assert-suggest-${Date.now()}`;
+    const runId = `${flowId}-run`;
+    const storage = createStoragePort();
+    await storage.flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#done" } },
+        },
+      ]),
+    );
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: runId as any,
+      flowId: flowId as any,
+      status: "succeeded",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      attempt: 1,
+      maxAttempts: 1,
+      nextSeq: 1,
+    } as RunRecordV3);
+    await storage.events.append({
+      runId: runId as any,
+      type: "dom.visibility",
+      nodeId: "wait-1" as any,
+      selector: "#done",
+      matchCount: 1,
+      status: "stable",
+      stableForMs: 800,
+    });
+
+    const result = await workflowRepairTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(payload.assertionRepairs).toEqual([
+      expect.objectContaining({
+        op: "addAssertAfter",
+        status: "suggestion",
+        nodeId: "wait-1",
+        assertion: { kind: "visible", selector: "#done" },
+      }),
+    ]);
+    expect(payload.recommendations.map((item: { code: string }) => item.code)).toContain(
+      "assertion_checkpoint_suggestion",
+    );
+  });
+
   it("workflowRepairTool scopes flow-level onError retry to safe nodes", async () => {
     const flowId = `workflow-repair-onerror-retry-${Date.now()}`;
     await createStoragePort().flows.save(
@@ -1923,6 +1973,141 @@ describe("recording/editing/flow toolchain integration", () => {
       },
       beforeQuality: expect.any(Number),
       afterQuality: expect.any(Number),
+    });
+  });
+
+  it("workflowStabilizeTool inserts bounded wait repairs from DOM visibility observations", async () => {
+    const flowId = `workflow-stabilize-wait-${Date.now()}`;
+    const runId = `${flowId}-failed-run`;
+    const storage = createStoragePort();
+    await storage.flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: { selector: "#email" },
+            value: "{email}",
+          },
+        },
+      ]),
+    );
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: runId as any,
+      flowId: flowId as any,
+      status: "failed",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      currentNodeId: "fill-1" as any,
+      attempt: 1,
+      maxAttempts: 1,
+      error: { code: "TARGET_NOT_FOUND", message: "Missing input" },
+      nextSeq: 1,
+    } as RunRecordV3);
+    await storage.events.append({
+      runId: runId as any,
+      type: "node.failed",
+      nodeId: "fill-1" as any,
+      attempt: 1,
+      error: { code: "TARGET_NOT_FOUND", message: "Missing input" },
+      decision: "stop",
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "dom.visibility",
+      nodeId: "fill-1" as any,
+      selector: "#email",
+      matchCount: 1,
+      appearedAt: Date.now(),
+      status: "appeared",
+    });
+    let runCall = 0;
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      runCall += 1;
+      const validationRunId = `${flowId}-validation-${runCall}`;
+      return {
+        run: {
+          id: validationRunId,
+          flowId,
+          status: "succeeded",
+          tookMs: 5,
+        } as any,
+        events: [],
+        result: {
+          runId: validationRunId,
+          success: true,
+          status: "succeeded",
+          summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+          outputs: null,
+          eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+        },
+      };
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      minPassRate: 1,
+      apply: true,
+      repair: {
+        parameterize: false,
+        defaultStabilityPolicy: false,
+        selectors: false,
+        waits: true,
+        assertions: false,
+      },
+    });
+    const payload = parseToolPayload(result);
+    const updated = await storage.flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(2);
+    expect(payload).toMatchObject({
+      applied: true,
+      stable: true,
+      summary: {
+        changeCount: 1,
+        baselineRunCount: 1,
+        postRepairRunCount: 1,
+      },
+    });
+    expect(payload.waitRepairsBeforeApply).toEqual([
+      expect.objectContaining({
+        op: "addWaitBefore",
+        nodeId: "fill-1",
+        status: "autoPatch",
+        condition: { kind: "selector", selector: "#email", visible: true },
+        confidence: expect.any(Number),
+      }),
+    ]);
+    expect(payload.changes).toEqual([
+      expect.objectContaining({
+        code: "bounded_wait_added",
+        nodeId: "fill-1",
+        patch: expect.objectContaining({
+          op: "addWaitBefore",
+          condition: { kind: "selector", selector: "#email", visible: true },
+        }),
+      }),
+    ]);
+    const waitNode = updated?.nodes.find((node) => node.kind === "wait");
+    expect(updated?.entryNodeId).toBe("wait-before-fill-1");
+    expect(waitNode).toMatchObject({
+      id: "wait-before-fill-1",
+      config: { condition: { kind: "selector", selector: "#email", visible: true } },
+    });
+    expect(updated?.edges).toEqual([
+      expect.objectContaining({
+        from: "wait-before-fill-1",
+        to: "fill-1",
+      }),
+    ]);
+    expect(updated?.meta?.repairs?.history?.[0]).toMatchObject({
+      provenance: {
+        source: "workflow_stabilize",
+        pageContentUsed: true,
+      },
     });
   });
 
