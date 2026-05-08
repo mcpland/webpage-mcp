@@ -20,6 +20,8 @@ export const RR_ERROR_CODES = {
   SECRET_REF_INVALID: 'SECRET_REF_INVALID',
   /** Workflow output contract validation failed */
   OUTPUT_VALIDATION_FAILED: 'OUTPUT_VALIDATION_FAILED',
+  /** Workflow descriptor revision is stale */
+  STALE_WORKFLOW_DESCRIPTOR: 'STALE_WORKFLOW_DESCRIPTOR',
   /** Unsupported node type */
   UNSUPPORTED_NODE: 'UNSUPPORTED_NODE',
   /** DAG Invalid structure */

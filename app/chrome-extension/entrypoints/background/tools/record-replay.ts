@@ -197,6 +197,35 @@ function createFlowRunSecretRefError(flowId: string, error: WorkflowSecretRefErr
   };
 }
 
+function createFlowRunStaleDescriptorError(
+  flowId: string,
+  requiredRevision: string,
+  currentRevision: string,
+): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          success: false,
+          flowId,
+          revision: currentRevision,
+          status: "stale_descriptor",
+          error: {
+            code: RR_ERROR_CODES.STALE_WORKFLOW_DESCRIPTOR,
+            category: "stale_revision",
+            retryable: true,
+            message: `Workflow descriptor revision is stale: expected ${requiredRevision}, current ${currentRevision}`,
+            expectedRevision: requiredRevision,
+            currentRevision,
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
+}
+
 function countSecretRefs(value: unknown): number {
   if (isWorkflowSecretRefValue(value)) return 1;
   if (Array.isArray(value)) {
@@ -864,6 +893,7 @@ class FlowRunTool {
 
     const {
       flowId,
+      requireRevision,
       args: vars,
       tabTarget,
       background,
@@ -883,6 +913,14 @@ class FlowRunTool {
     if (!flowId) return createErrorResponse("flowId is required");
     let flow = await createStoragePort().flows.get(flowId as FlowId);
     if (!flow) return createErrorResponse(`Flow not found: ${flowId}`);
+    const currentRevision = calculateWorkflowRevision(flow);
+    const requiredRevision =
+      typeof requireRevision === "string" && requireRevision.trim()
+        ? requireRevision.trim()
+        : "";
+    if (requiredRevision && requiredRevision !== currentRevision) {
+      return createFlowRunStaleDescriptorError(flow.id, requiredRevision, currentRevision);
+    }
     const normalizedStartUrl =
       typeof startUrl === "string" && startUrl.trim() ? startUrl.trim() : undefined;
     if (normalizedStartUrl && hasDisallowedPublicUrlScheme(normalizedStartUrl)) {

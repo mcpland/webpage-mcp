@@ -657,6 +657,7 @@ describe('dynamic published flow tools', () => {
 
     await callToolForContext(ctx, 'record_replay_flow_run', {
       flowId: 'flow-signup',
+      requireRevision: 'rev-signup',
       args: { email: 'alice@example.com' },
       background: true,
       refresh: true,
@@ -669,6 +670,7 @@ describe('dynamic published flow tools', () => {
         name: 'record_replay_flow_run',
         args: {
           flowId: 'flow-signup',
+          requireRevision: 'rev-signup',
           args: { email: 'alice@example.com' },
           background: true,
         },
@@ -823,6 +825,7 @@ describe('dynamic published flow tools', () => {
         name: 'record_replay_flow_run',
         args: {
           flowId: 'flow-new',
+          requireRevision: 'rev-new',
           args: {
             email: 'alice@example.com',
           },

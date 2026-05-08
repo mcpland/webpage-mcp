@@ -652,6 +652,11 @@ export const TOOL_SCHEMAS: Tool[] = [
       type: 'object',
       properties: {
         flowId: { type: 'string', description: 'ID of the flow to run' },
+        requireRevision: {
+          type: 'string',
+          description:
+            'Optional descriptor revision guard. If provided, the run is rejected before replay when the current workflow revision differs.',
+        },
         args: {
           type: 'object',
           description:

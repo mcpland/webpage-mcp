@@ -3825,6 +3825,40 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("flowRunTool rejects stale descriptor revision guards before replay", async () => {
+    const flowId = `flow-run-stale-revision-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "wait-1" as any,
+        kind: "wait",
+        config: { condition: { kind: "selector", selector: "#ready" } },
+      },
+    ]);
+    await createStoragePort().flows.save(flow);
+
+    const result = await flowRunTool.execute({
+      flowId,
+      requireRevision: "rev-fnv1a32-stale",
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(true);
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+    expect(payload).toMatchObject({
+      success: false,
+      flowId,
+      revision: calculateWorkflowRevision(flow),
+      status: "stale_descriptor",
+      error: {
+        code: "STALE_WORKFLOW_DESCRIPTOR",
+        category: "stale_revision",
+        retryable: true,
+        expectedRevision: "rev-fnv1a32-stale",
+        currentRevision: calculateWorkflowRevision(flow),
+      },
+    });
+  });
+
   it("flowRunTool downgrades stale quality after consecutive failures", async () => {
     const flowId = `flow-run-quality-downgrade-${Date.now()}`;
     const flow = createFlow(flowId, [

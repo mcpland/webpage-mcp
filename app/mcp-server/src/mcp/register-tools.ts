@@ -911,7 +911,7 @@ function filterFlowRunArgsForCapabilities(
   }
   const runOptionKeys = getRunOptionKeySet(capabilities);
   const filtered: Record<string, unknown> = {};
-  for (const key of ['flowId', 'args']) {
+  for (const key of ['flowId', 'args', 'requireRevision']) {
     if (Object.prototype.hasOwnProperty.call(args, key)) {
       filtered[key] = args[key];
     }
@@ -1079,6 +1079,7 @@ export const callToolForContext = async (
             name: 'record_replay_flow_run',
             args: {
               flowId: match.id,
+              ...(match.revision ? { requireRevision: match.revision } : {}),
               args: variables,
               ...runOptions,
             },
@@ -1131,6 +1132,7 @@ export const callToolForContext = async (
         const { variables, runOptions } = splitDynamicFlowArgs(args, variableKeys, runOptionKeys);
         const flowArgs = {
           flowId: match.id,
+          ...(match.revision ? { requireRevision: match.revision } : {}),
           args: variables,
           ...runOptions,
         };
