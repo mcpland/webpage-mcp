@@ -15,7 +15,7 @@ const IS_DEV =
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
-  runner: {
+  webExt: {
     // Option 1: Disable auto-start (recommended)
     disabled: true,
 
