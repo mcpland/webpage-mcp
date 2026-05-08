@@ -1370,7 +1370,7 @@ describe("recording/editing/flow toolchain integration", () => {
     expect((updated?.nodes[0].config as { value?: string }).value).toBe("bob@example.com");
   });
 
-  it("workflowStabilizeTool returns analyze-only recommendations without mutating", async () => {
+  it("workflowStabilizeTool validates safe workflows without mutating when apply is false", async () => {
     const flowId = `workflow-stabilize-safe-${Date.now()}`;
     await createStoragePort().flows.save(
       createFlow(flowId, [
@@ -1381,6 +1381,27 @@ describe("recording/editing/flow toolchain integration", () => {
         },
       ]),
     );
+    let runCall = 0;
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      runCall += 1;
+      return {
+        run: {
+          id: `run-stabilize-safe-${runCall}`,
+          flowId,
+          status: "succeeded",
+          tookMs: 5,
+        } as any,
+        events: [],
+        result: {
+          runId: `run-stabilize-safe-${runCall}`,
+          success: true,
+          status: "succeeded",
+          summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+          outputs: null,
+          eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+        },
+      };
+    });
 
     const result = await workflowStabilizeTool.execute({
       flowId,
@@ -1396,17 +1417,19 @@ describe("recording/editing/flow toolchain integration", () => {
       success: true,
       flowId,
       applied: false,
-      stable: false,
+      stable: true,
       score: {
-        passRate: 0,
+        passRate: 1,
         iterations: 3,
       },
       safety: {
         risk: "safe",
-        executionMode: "analyzeOnly",
-        executedIterations: 0,
+        executionMode: "auto",
+        executedIterations: 3,
       },
     });
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(3);
+    expect(payload.baselineRuns).toHaveLength(3);
     expect(payload.recommendations.map((item: { code: string }) => item.code)).toContain(
       "missing_default_timeout_policy",
     );
@@ -1462,8 +1485,211 @@ describe("recording/editing/flow toolchain integration", () => {
       },
     });
     expect(payload.warnings.map((warning: { code: string }) => warning.code)).toEqual(
-      expect.arrayContaining(["STABILIZE_REPLAY_BLOCKED", "STABILIZE_APPLY_NOT_AVAILABLE"]),
+      expect.arrayContaining(["STABILIZE_REPLAY_BLOCKED", "STABILIZE_APPLY_SKIPPED"]),
     );
+  });
+
+  it("workflowStabilizeTool applies safe repairs and reruns validation", async () => {
+    const flowId = `workflow-stabilize-apply-${Date.now()}`;
+    const flow = createFlow(
+      flowId,
+      [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: { target: { selector: "#email" }, value: "alice@example.com" },
+        },
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ],
+      {
+        meta: {
+          recording: {
+            parameterSuggestions: [
+              {
+                nodeId: "fill-1" as any,
+                kind: "fill",
+                suggestedKey: "email",
+                currentValue: "alice@example.com",
+              },
+            ],
+          },
+        },
+      },
+    );
+    await createStoragePort().flows.save(flow);
+
+    let runCall = 0;
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      runCall += 1;
+      const success = runCall > 2;
+      const runId = `run-stabilize-apply-${runCall}`;
+      return {
+        run: {
+          id: runId,
+          flowId,
+          status: success ? "succeeded" : "failed",
+          currentNodeId: "wait-1",
+          tookMs: 5,
+        } as any,
+        events: [],
+        result: {
+          runId,
+          success,
+          status: success ? "succeeded" : "failed",
+          currentNodeId: "wait-1",
+          failedNodeId: success ? undefined : "wait-1",
+          errorCode: success ? undefined : "TIMEOUT",
+          error: success
+            ? undefined
+            : {
+                code: "TIMEOUT",
+                category: "runtime",
+                retryable: true,
+                message: "Timed out waiting for #ready",
+                nodeId: "wait-1",
+              },
+          summary: { total: 2, success: success ? 2 : 1, failed: success ? 0 : 1, tookMs: 5 },
+          outputs: null,
+          eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+          debug: success
+            ? undefined
+            : {
+                debugArgs: {
+                  runId,
+                  flowId,
+                  nodeId: "wait-1",
+                  includeArtifacts: true,
+                },
+              },
+        },
+      };
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 2,
+      minPassRate: 1,
+      apply: true,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(4);
+    expect(payload).toMatchObject({
+      success: true,
+      applied: true,
+      stable: true,
+      baselineScore: { passRate: 0, passedRuns: 0, failedRuns: 2, iterations: 2 },
+      postRepairScore: { passRate: 1, passedRuns: 2, failedRuns: 0, iterations: 2 },
+      score: { passRate: 1, passedRuns: 2, failedRuns: 0, iterations: 2 },
+      summary: {
+        changeCount: 4,
+        baselineRunCount: 2,
+        postRepairRunCount: 2,
+      },
+    });
+    expect(payload.changes.map((change: { code: string }) => change.code)).toEqual(
+      expect.arrayContaining([
+        "parameter_suggestions_applied",
+        "default_timeout_added",
+        "default_retry_added",
+        "failure_screenshot_added",
+      ]),
+    );
+    expect(payload.baselineRuns.every((run: { phase: string }) => run.phase === "baseline")).toBe(true);
+    expect(payload.postRepairRuns.every((run: { phase: string }) => run.phase === "postRepair")).toBe(true);
+    expect((updated?.nodes[0].config as { value?: string }).value).toBe("{email}");
+    expect(updated?.policy?.defaultNodePolicy?.timeout).toEqual({
+      ms: 15000,
+      scope: "attempt",
+    });
+    expect(updated?.policy?.defaultNodePolicy?.artifacts).toEqual({
+      screenshot: "onFailure",
+    });
+    expect((updated?.meta as any)?.repairHistory?.[0]).toMatchObject({
+      tool: "workflow_stabilize",
+      beforeRevision: expect.stringMatching(/^rev-fnv1a32-/),
+      provenance: {
+        source: "workflow_stabilize",
+        pageContentUsed: false,
+      },
+    });
+  });
+
+  it("workflowStabilizeTool returns rollback suggestion when validation regresses", async () => {
+    const flowId = `workflow-stabilize-regress-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+
+    let runCall = 0;
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      runCall += 1;
+      const success = runCall === 1;
+      const runId = `run-stabilize-regress-${runCall}`;
+      return {
+        run: {
+          id: runId,
+          flowId,
+          status: success ? "succeeded" : "failed",
+          currentNodeId: "wait-1",
+          tookMs: 5,
+        } as any,
+        events: [],
+        result: {
+          runId,
+          success,
+          status: success ? "succeeded" : "failed",
+          currentNodeId: "wait-1",
+          failedNodeId: success ? undefined : "wait-1",
+          errorCode: success ? undefined : "TIMEOUT",
+          error: success
+            ? undefined
+            : {
+                code: "TIMEOUT",
+                category: "runtime",
+                retryable: true,
+                message: "Timed out waiting for #ready",
+                nodeId: "wait-1",
+              },
+          summary: { total: 1, success: success ? 1 : 0, failed: success ? 0 : 1, tookMs: 5 },
+          outputs: null,
+          eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+        },
+      };
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      minPassRate: 1,
+      apply: true,
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      applied: true,
+      stable: false,
+      baselineScore: { passRate: 1, passedRuns: 1, failedRuns: 0, iterations: 1 },
+      postRepairScore: { passRate: 0, passedRuns: 0, failedRuns: 1, iterations: 1 },
+      rollbackSuggestion: {
+        beforeRevision: expect.stringMatching(/^rev-fnv1a32-/),
+        reason: "post-repair validation passRate is lower than baseline",
+        automaticRollbackAvailable: false,
+      },
+    });
   });
 
   it("workflowStabilizeTool returns structured validation errors", async () => {

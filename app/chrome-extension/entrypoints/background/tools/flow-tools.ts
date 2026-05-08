@@ -15,8 +15,12 @@ import type { ArtifactRecord } from '../record-replay-v3/storage/artifacts';
 import { RR_ERROR_CODES } from '../record-replay-v3/domain/errors';
 import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variables';
 import { createStoragePort } from '../record-replay-v3';
-import { saveFlowToV3 } from '../record-replay-v3/compat';
-import { buildWorkflowToolDescriptor, getPublishedFlowInfo } from '../record-replay-v3/flows/publish';
+import { enqueueRunAndWait, saveFlowToV3 } from '../record-replay-v3/compat';
+import {
+  buildWorkflowToolDescriptor,
+  calculateWorkflowRevision,
+  getPublishedFlowInfo,
+} from '../record-replay-v3/flows/publish';
 import {
   containsSensitiveValue,
   getVariableLikeName,
@@ -25,6 +29,7 @@ import {
 } from '../record-replay-v3/flows/sensitive';
 import { findEntryNodeId } from '../record-replay-v3/storage/import/flow-convert';
 import { applyFlowParameterSuggestions } from './flow-parameterization';
+import { hasDisallowedPublicUrlScheme } from './browser/common';
 import type { NodePolicy, RetryPolicy } from '../record-replay-v3/domain/policy';
 
 type FlowHintLevel = 'info' | 'warning';
@@ -124,6 +129,28 @@ interface WorkflowRepairRecommendation {
 interface WorkflowRepairChange {
   code: string;
   message: string;
+}
+
+interface WorkflowStabilizeRunSummary {
+  phase: 'baseline' | 'postRepair';
+  iteration: number;
+  runId?: string;
+  status: string;
+  success: boolean;
+  currentNodeId?: string;
+  failedNodeId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  tookMs?: number;
+  revision: string;
+  debugArgs?: Record<string, unknown>;
+}
+
+interface WorkflowStabilizeScore {
+  passRate: number;
+  passedRuns: number;
+  failedRuns: number;
+  iterations: number;
 }
 
 type WorkflowRiskProfile = 'safe' | 'idempotent' | 'dangerous' | 'unknown';
@@ -333,6 +360,14 @@ function validateWorkflowStabilizeArgs(args: any): WorkflowStabilizeValidationEr
       code: 'MUTUALLY_EXCLUSIVE_OPTIONS',
       path: '/tabId',
       message: 'tabId cannot be combined with tabTarget="new"',
+    });
+  }
+  const startUrl = typeof args?.startUrl === 'string' ? args.startUrl.trim() : '';
+  if (startUrl && hasDisallowedPublicUrlScheme(startUrl)) {
+    errors.push({
+      code: 'INVALID_START_URL',
+      path: '/startUrl',
+      message: 'Only http:// and https:// URLs are allowed for startUrl',
     });
   }
   if (
@@ -1172,6 +1207,52 @@ function buildRuntimeFailureRecommendations(
   return recommendations;
 }
 
+function buildWaitDiagnosticRecommendations(
+  runs: WorkflowDebugRun[],
+): WorkflowRepairRecommendation[] {
+  const timeoutNodes = new Set<string>();
+  let hasObservationEvents = false;
+  for (const run of runs) {
+    for (const event of run.events) {
+      if (
+        event.type === 'navigation.observed' ||
+        event.type === 'network.observed' ||
+        event.type === 'dom.visibility'
+      ) {
+        hasObservationEvents = true;
+      }
+      const code = getSanitizedErrorCode(event.error);
+      if (
+        (code === RR_ERROR_CODES.TIMEOUT || code === RR_ERROR_CODES.NAVIGATION_FAILED) &&
+        typeof event.nodeId === 'string'
+      ) {
+        timeoutNodes.add(event.nodeId);
+      }
+    }
+  }
+
+  if (timeoutNodes.size === 0) {
+    return [];
+  }
+  if (!hasObservationEvents) {
+    return [
+      {
+        severity: 'warning',
+        code: 'wait_repair_requires_observation_events',
+        message:
+          'Recent timeout/navigation failures lack navigation, network, or DOM visibility observations. Only manual bounded wait suggestions are safe.',
+      },
+    ];
+  }
+  return Array.from(timeoutNodes).map((nodeId) => ({
+    severity: 'warning' as const,
+    code: 'bounded_wait_candidate',
+    message:
+      'Recent observations can support a bounded wait before this node. Automatic wait patching remains gated until confidence is high.',
+    nodeId,
+  }));
+}
+
 function safeRetryNodesMissingPolicy(flow: FlowV3): FlowV3['nodes'] {
   return sideEffectRetryEligibleNodes(flow).filter(
     (node) => !policyHasRetryDirective(node.policy),
@@ -1281,7 +1362,11 @@ function buildRepairRecommendations(
     }
   }
 
-  return [...recommendations, ...buildRuntimeFailureRecommendations(runs)];
+  return [
+    ...recommendations,
+    ...buildRuntimeFailureRecommendations(runs),
+    ...buildWaitDiagnosticRecommendations(runs),
+  ];
 }
 
 function applyDefaultStabilityPolicy(flow: FlowV3): WorkflowRepairChange[] {
@@ -1345,6 +1430,159 @@ function applyDefaultStabilityPolicy(flow: FlowV3): WorkflowRepairChange[] {
   }
 
   return changes;
+}
+
+function scoreStabilizeRuns(runs: WorkflowStabilizeRunSummary[]): WorkflowStabilizeScore {
+  const passedRuns = runs.filter((run) => run.success).length;
+  const failedRuns = runs.filter((run) => !run.success).length;
+  const total = passedRuns + failedRuns;
+  return {
+    passRate: total > 0 ? passedRuns / total : 0,
+    passedRuns,
+    failedRuns,
+    iterations: runs.length,
+  };
+}
+
+function summarizeStabilizeRunResult(
+  phase: WorkflowStabilizeRunSummary['phase'],
+  iteration: number,
+  revision: string,
+  result: Awaited<ReturnType<typeof enqueueRunAndWait>>,
+): WorkflowStabilizeRunSummary {
+  const { run, result: runResult } = result;
+  const debugArgs = runResult.debug?.debugArgs
+    ? { ...runResult.debug.debugArgs }
+    : runResult.success === false
+      ? {
+          runId: runResult.runId,
+          flowId: run.flowId,
+          ...(runResult.currentNodeId ? { nodeId: runResult.currentNodeId } : {}),
+          maxEvents: 100,
+          includeArtifacts: true,
+        }
+      : undefined;
+  return {
+    phase,
+    iteration,
+    runId: runResult.runId || run.id,
+    status: run.status ?? runResult.status ?? (runResult.success ? 'succeeded' : 'failed'),
+    success: runResult.success === true,
+    ...(runResult.currentNodeId ? { currentNodeId: runResult.currentNodeId } : {}),
+    ...(runResult.failedNodeId ? { failedNodeId: runResult.failedNodeId } : {}),
+    ...(runResult.errorCode ? { errorCode: runResult.errorCode } : {}),
+    ...(runResult.error?.message ? { errorMessage: runResult.error.message } : {}),
+    tookMs: runResult.summary?.tookMs ?? run.tookMs,
+    revision,
+    ...(debugArgs ? { debugArgs } : {}),
+  };
+}
+
+function summarizeStabilizeRunError(
+  phase: WorkflowStabilizeRunSummary['phase'],
+  iteration: number,
+  revision: string,
+  error: unknown,
+): WorkflowStabilizeRunSummary {
+  return {
+    phase,
+    iteration,
+    status: 'failed',
+    success: false,
+    errorCode: 'STABILIZE_RUN_FAILED',
+    errorMessage: error instanceof Error ? error.message : String(error),
+    revision,
+  };
+}
+
+async function executeStabilizeValidationRuns(
+  flow: FlowV3,
+  args: any,
+  phase: WorkflowStabilizeRunSummary['phase'],
+  iterations: number,
+  revision: string,
+  warnings: WorkflowStabilizeWarning[],
+): Promise<WorkflowStabilizeRunSummary[]> {
+  const runs: WorkflowStabilizeRunSummary[] = [];
+  const normalizedStartUrl =
+    typeof args?.startUrl === 'string' && args.startUrl.trim() ? args.startUrl.trim() : undefined;
+  const execution = {
+    disallowLocalFileUploads: true,
+    disallowLocalFilePages: true,
+    redactDownloadPaths: true,
+    ...(args?.background === true ? { backgroundTabs: true } : {}),
+  };
+  const segments = args?.safety?.segments && typeof args.safety.segments === 'object'
+    ? args.safety.segments
+    : {};
+  const stopBeforeNodeId =
+    segments.mode === 'explicit' && typeof segments.stopBeforeNodeId === 'string'
+      ? segments.stopBeforeNodeId.trim()
+      : undefined;
+  const endNodeId =
+    segments.mode === 'explicit' && typeof segments.endNodeId === 'string'
+      ? segments.endNodeId.trim()
+      : undefined;
+
+  for (let index = 0; index < iterations; index += 1) {
+    try {
+      const result = await enqueueRunAndWait({
+        flowId: flow.id as FlowId,
+        tabId:
+          typeof args?.tabId === 'number' && Number.isFinite(args.tabId)
+            ? Math.floor(args.tabId)
+            : undefined,
+        tabTarget: args?.tabTarget === 'new' ? 'new' : 'current',
+        args: args?.args && typeof args.args === 'object' ? args.args : undefined,
+        execution,
+        startUrl: normalizedStartUrl,
+        refresh: index > 0 || args?.refresh === true,
+        ...(stopBeforeNodeId ? { stopBeforeNodeId } : {}),
+        ...(endNodeId ? { endNodeId } : {}),
+      });
+      runs.push(summarizeStabilizeRunResult(phase, index + 1, revision, result));
+    } catch (error) {
+      warnings.push({
+        code: 'STABILIZE_RUN_FAILED',
+        category: 'capability',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      runs.push(summarizeStabilizeRunError(phase, index + 1, revision, error));
+      break;
+    }
+  }
+
+  return runs;
+}
+
+function recordStabilizeRepairHistory(
+  flow: FlowV3,
+  beforeRevision: string,
+  changes: WorkflowRepairChange[],
+): void {
+  if (changes.length === 0) return;
+  const meta = { ...(flow.meta ?? {}) } as Record<string, unknown>;
+  const existing = Array.isArray(meta.repairHistory) ? meta.repairHistory : [];
+  meta.repairHistory = [
+    ...existing.slice(-19),
+    {
+      id: `repair-${Date.now().toString(36)}`,
+      tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
+      appliedAt: new Date().toISOString(),
+      beforeRevision,
+      changes: changes.map((change) => ({ ...change })),
+      provenance: {
+        source: 'workflow_stabilize',
+        pageContentUsed: false,
+      },
+      rollback: {
+        beforeRevision,
+        available: false,
+        reason: 'Workflow rollback metadata is recorded; external side effects are not reversible.',
+      },
+    },
+  ];
+  flow.meta = meta as FlowV3['meta'];
 }
 
 class FlowAnalyzeTool {
@@ -1653,17 +1891,35 @@ class WorkflowStabilizeTool {
       );
     }
 
-    const publishedInfo = getPublishedFlowInfo(flow);
-    const hints = collectFlowHints(flow);
-    const runs = await collectDebugRuns(flow, {
+    let workingFlow = flow;
+    const publishedInfo = getPublishedFlowInfo(workingFlow);
+    const initialRevision = calculateWorkflowRevision(workingFlow);
+    const requiredRevision =
+      typeof args?.safety?.requireRevision === 'string' ? args.safety.requireRevision.trim() : '';
+    if (requiredRevision && requiredRevision !== initialRevision) {
+      return createStructuredToolError(
+        'STALE_WORKFLOW_REVISION',
+        'workflow_stabilize requireRevision does not match the current workflow revision',
+        [
+          {
+            code: 'STALE_WORKFLOW_REVISION',
+            path: '/safety/requireRevision',
+            message: `Expected ${requiredRevision}, current revision is ${initialRevision}`,
+          },
+        ],
+      );
+    }
+
+    const hints = collectFlowHints(workingFlow);
+    const recentRuns = await collectDebugRuns(workingFlow, {
       ...args,
       includeRuns: true,
       includeArtifacts: args?.debug?.captureArtifacts !== 'none',
       maxRuns: 3,
       maxEventsPerRun: args?.debug?.maxEventsPerRun,
     });
-    const recommendations = buildRepairRecommendations(flow, hints, runs);
-    const descriptor = buildWorkflowToolDescriptor(flow);
+    const recommendationsBeforeApply = buildRepairRecommendations(workingFlow, hints, recentRuns);
+    const descriptor = buildWorkflowToolDescriptor(workingFlow);
     const sideEffects = descriptor.sideEffects.summary;
     const risk = classifyWorkflowRisk(sideEffects);
     const executionMode = normalizeExecutionMode(args?.safety?.executionMode);
@@ -1692,7 +1948,7 @@ class WorkflowStabilizeTool {
         });
         continue;
       }
-      const node = flow.nodes.find((candidate) => candidate.id === nodeId);
+      const node = workingFlow.nodes.find((candidate) => candidate.id === nodeId);
       const actualRisk = node ? getNodeSideEffectProfile(node).category : 'unknown';
       if (riskRank(override) < riskRank(actualRisk) && !hasApprovalReference) {
         warnings.push({
@@ -1731,18 +1987,114 @@ class WorkflowStabilizeTool {
         message: blockedReason,
       });
     }
-    if (args?.apply === true) {
+    if (args?.safety?.reset || args?.safety?.resetWorkflow) {
       warnings.push({
-        code: 'STABILIZE_APPLY_NOT_AVAILABLE',
+        code: 'STABILIZE_RESET_NOT_AVAILABLE',
         category: 'capability',
         message:
-          'workflow_stabilize currently runs the safety/analyze core only. Use workflow_repair for low-risk apply repairs until validation replay is enabled.',
+          'Reset workflow execution is not enabled in this MVP; target validation runs proceed without reset.',
+      });
+    }
+    if (args?.safety?.segments?.mode === 'stopBeforeDangerous') {
+      warnings.push({
+        code: 'STABILIZE_AUTO_SEGMENT_NOT_AVAILABLE',
+        category: 'capability',
+        message:
+          'Automatic stopBeforeDangerous segmentation is not enabled; use safety.segments.mode="explicit" with a boundary node.',
       });
     }
 
-    const failedRuns = runs.filter((run) => run.status === 'failed').length;
-    const passedRuns = runs.filter((run) => run.status === 'succeeded').length;
-    const capabilities = buildWorkflowCapabilityMatrix(flow, 'stabilize');
+    const canRunValidation = !blockedReason && executionMode !== 'analyzeOnly';
+    const requestedValidationIterations =
+      risk === 'dangerous' || risk === 'unknown'
+        ? Math.min(iterations, maxDangerousRuns)
+        : iterations;
+    if (canRunValidation && requestedValidationIterations === 0) {
+      warnings.push({
+        code: 'STABILIZE_NO_AUTHORIZED_RUNS',
+        category: 'safety',
+        message:
+          'No validation runs are authorized for this risk profile. Increase safety.maxDangerousRuns with trusted approval or use a safe/idempotent workflow.',
+      });
+    }
+
+    const baselineRuns =
+      canRunValidation && requestedValidationIterations > 0
+        ? await executeStabilizeValidationRuns(
+            workingFlow,
+            args,
+            'baseline',
+            requestedValidationIterations,
+            initialRevision,
+            warnings,
+          )
+        : [];
+    const baselineScore = scoreStabilizeRuns(baselineRuns);
+    const shouldApply = args?.apply === true && args?.dryRun !== true && !blockedReason;
+    const changes: WorkflowRepairChange[] = [];
+    let parameterization: ReturnType<typeof applyFlowParameterSuggestions> | undefined;
+
+    if (shouldApply && args?.repair?.parameterize !== false && hasRecordingParameterSuggestions(workingFlow)) {
+      parameterization = applyFlowParameterSuggestions(workingFlow);
+      if (parameterization.changed) {
+        changes.push({
+          code: 'parameter_suggestions_applied',
+          message: `Applied ${parameterization.applied} recorded parameter suggestion(s).`,
+        });
+      }
+    }
+    if (shouldApply && args?.repair?.defaultStabilityPolicy !== false) {
+      changes.push(...applyDefaultStabilityPolicy(workingFlow));
+    }
+    if (args?.apply === true && blockedReason) {
+      warnings.push({
+        code: 'STABILIZE_APPLY_SKIPPED',
+        category: 'safety',
+        message: 'Automatic repair apply was skipped because validation replay is blocked by safety policy.',
+      });
+    }
+
+    const applied = shouldApply && changes.length > 0;
+    let postRepairRevision: string | undefined;
+    if (applied) {
+      recordStabilizeRepairHistory(workingFlow, initialRevision, changes);
+      workingFlow.updatedAt = new Date().toISOString();
+      workingFlow = await saveFlowToV3(workingFlow);
+      postRepairRevision = calculateWorkflowRevision(workingFlow);
+    }
+
+    const postRepairRuns =
+      applied && canRunValidation && requestedValidationIterations > 0
+        ? await executeStabilizeValidationRuns(
+            workingFlow,
+            args,
+            'postRepair',
+            requestedValidationIterations,
+            postRepairRevision ?? calculateWorkflowRevision(workingFlow),
+            warnings,
+          )
+        : [];
+    const postRepairScore = scoreStabilizeRuns(postRepairRuns);
+    const finalScore = postRepairRuns.length > 0 ? postRepairScore : baselineScore;
+    const finalHints = applied ? collectFlowHints(workingFlow) : hints;
+    const recommendations = applied
+      ? buildRepairRecommendations(workingFlow, finalHints, recentRuns)
+      : recommendationsBeforeApply;
+    const failedRuns = recentRuns.filter((run) => run.status === 'failed').length;
+    const passedRuns = recentRuns.filter((run) => run.status === 'succeeded').length;
+    const capabilities = buildWorkflowCapabilityMatrix(workingFlow, 'stabilize');
+    const failedValidationRun =
+      [...postRepairRuns, ...baselineRuns].find((run) => !run.success && run.debugArgs) ??
+      [...postRepairRuns, ...baselineRuns].find((run) => !run.success);
+    const rollbackSuggestion =
+      postRepairRuns.length > 0 && postRepairScore.passRate < baselineScore.passRate
+        ? {
+            beforeRevision: initialRevision,
+            afterRevision: postRepairRevision,
+            reason: 'post-repair validation passRate is lower than baseline',
+            automaticRollbackAvailable: false,
+          }
+        : undefined;
 
     return {
       content: [
@@ -1750,57 +2102,71 @@ class WorkflowStabilizeTool {
           type: 'text',
           text: JSON.stringify({
             success: true,
-            flowId: flow.id,
+            flowId: workingFlow.id,
             workflow: publishedInfo?.slug,
-            applied: false,
-            stable: false,
+            applied,
+            stable: finalScore.iterations > 0 && finalScore.passRate >= minPassRate,
             score: {
-              passRate: 0,
-              passedRuns: 0,
-              failedRuns: 0,
-              iterations,
+              ...finalScore,
               inspectedPassedRuns: passedRuns,
               inspectedFailedRuns: failedRuns,
             },
+            baselineScore,
+            ...(postRepairRuns.length > 0 ? { postRepairScore } : {}),
             summary: {
-              nodeCount: countFlowNodes(flow),
-              hintCount: hints.length,
+              nodeCount: countFlowNodes(workingFlow),
+              hintCount: finalHints.length,
               recommendationCount: recommendations.length,
-              changeCount: 0,
-              inspectedRunCount: runs.length,
+              changeCount: changes.length,
+              inspectedRunCount: recentRuns.length,
+              baselineRunCount: baselineRuns.length,
+              postRepairRunCount: postRepairRuns.length,
             },
             safety: {
               risk,
-              executionMode: blockedReason ? 'analyzeOnly' : executionMode === 'auto' ? 'analyzeOnly' : executionMode,
+              executionMode: blockedReason ? 'analyzeOnly' : executionMode,
               requestedIterations: iterations,
               minPassRate,
-              executedIterations: 0,
+              executedIterations: baselineRuns.length + postRepairRuns.length,
               ...(blockedReason ? { blockedReason } : {}),
               sideEffects,
-              approvalReferenceAccepted: false,
+              approvalReferenceAccepted: hasApprovalReference,
             },
             capabilities,
-            hints,
+            hints: finalHints,
             recommendations,
-            changes: [],
+            recommendationsBeforeApply,
+            changes,
+            ...(parameterization ? { parameterization } : {}),
+            ...(rollbackSuggestion ? { rollbackSuggestion } : {}),
+            runs: postRepairRuns.length > 0 ? postRepairRuns : baselineRuns,
+            baselineRuns,
+            ...(postRepairRuns.length > 0 ? { postRepairRuns } : {}),
             artifacts: {
               policy: args?.debug?.captureArtifacts ?? 'failureOnly',
               debugArgs: {
                 tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
-                ...(runs[0]?.id ? { runId: runs[0].id } : {}),
-                ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : { flowId: flow.id }),
+                ...(failedValidationRun?.runId ? { runId: failedValidationRun.runId } : {}),
+                ...(failedValidationRun?.currentNodeId ? { nodeId: failedValidationRun.currentNodeId } : {}),
+                ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : { flowId: workingFlow.id }),
+                includeArtifacts: true,
+                maxEvents: 100,
               },
             },
             warnings,
             nextActions: [
               {
                 tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
-                args: publishedInfo?.slug ? { workflow: publishedInfo.slug } : { flowId: flow.id },
+                args: {
+                  ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : { flowId: workingFlow.id }),
+                  ...(failedValidationRun?.runId ? { runId: failedValidationRun.runId } : {}),
+                  includeArtifacts: true,
+                },
               },
               {
                 tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR,
                 args: {
-                  ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : { flowId: flow.id }),
+                  ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : { flowId: workingFlow.id }),
                   apply: false,
                 },
               },
