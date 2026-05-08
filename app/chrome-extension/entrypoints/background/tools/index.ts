@@ -14,6 +14,7 @@ import {
   flowUpdateTool,
   workflowDescribeTool,
   workflowDebugViewTool,
+  workflowRepairRollbackTool,
   workflowRepairTool,
   workflowStabilizeTool,
 } from './flow-tools';
@@ -32,6 +33,7 @@ const tools = {
   workflowDescribeTool,
   workflowDebugViewTool,
   workflowRepairTool,
+  workflowRepairRollbackTool,
   workflowStabilizeTool,
   recordingStartTool,
   recordingStopTool,

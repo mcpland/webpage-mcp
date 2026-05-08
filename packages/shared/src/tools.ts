@@ -51,6 +51,7 @@ export const TOOL_NAMES = {
     WORKFLOW_DESCRIBE: 'workflow_describe',
     WORKFLOW_DEBUG_VIEW: 'workflow_debug_view',
     WORKFLOW_REPAIR: 'workflow_repair',
+    WORKFLOW_REPAIR_ROLLBACK: 'workflow_repair_rollback',
     WORKFLOW_STABILIZE: 'workflow_stabilize',
     WORKFLOW_PUBLISH: 'workflow_publish',
     WORKFLOW_UNPUBLISH: 'workflow_unpublish',
@@ -362,6 +363,55 @@ export const TOOL_SCHEMAS: Tool[] = [
           description: 'Maximum recent events to inspect per run. Default: 40.',
         },
       },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR_ROLLBACK,
+    description:
+      'Rollback a previously applied workflow repair using the stored pre-repair workflow snapshot. Rollback restores the workflow definition only; external side effects are not reversed.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Flow ID to rollback. Exactly one of flowId or workflow is required.',
+        },
+        workflow: {
+          type: 'string',
+          description: 'Published workflow slug to rollback. Exactly one of workflow or flowId is required.',
+        },
+        repairRevision: {
+          type: 'string',
+          description:
+            'Optional repair revision to rollback. Defaults to the latest repair history entry with a rollback snapshot.',
+        },
+        requireCurrentRevision: {
+          type: 'string',
+          description:
+            'Optional guard revision. If provided, rollback is rejected unless the current workflow revision matches.',
+        },
+        dryRun: {
+          type: 'boolean',
+          default: false,
+          description: 'Inspect the selected rollback snapshot without writing changes.',
+        },
+        force: {
+          type: 'boolean',
+          default: false,
+          description:
+            'Allow rollback even when the workflow revision has changed since the selected repair was applied.',
+        },
+      },
+      oneOf: [{ required: ['flowId'] }, { required: ['workflow'] }],
+      allOf: [
+        {
+          not: {
+            required: ['flowId', 'workflow'],
+          },
+        },
+      ],
       required: [],
     },
   },

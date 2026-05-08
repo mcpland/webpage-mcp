@@ -300,6 +300,37 @@ describe('dynamic published flow tools', () => {
     });
   });
 
+  it('exposes workflow_repair_rollback with guarded rollback schema', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [],
+    });
+    const ctx = createContext('workflow-repair-rollback-schema', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const rollbackTool = tools.find((tool) => tool.name === 'workflow_repair_rollback');
+    const input = rollbackTool?.inputSchema as {
+      additionalProperties?: boolean;
+      oneOf?: unknown[];
+      allOf?: unknown[];
+      properties?: Record<string, any>;
+    };
+
+    expect(input.additionalProperties).toBe(false);
+    expect(input.oneOf).toHaveLength(2);
+    expect(input.allOf).toHaveLength(1);
+    expect(input.properties?.repairRevision).toMatchObject({
+      type: 'string',
+    });
+    expect(input.properties?.requireCurrentRevision).toMatchObject({
+      type: 'string',
+    });
+    expect(input.properties?.dryRun).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
+  });
+
   it('exposes workflow publish and unpublish MCP tools', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
       status: 'success',

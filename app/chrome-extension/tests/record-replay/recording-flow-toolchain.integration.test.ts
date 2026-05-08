@@ -45,6 +45,7 @@ import {
   flowUpdateTool,
   workflowDescribeTool,
   workflowDebugViewTool,
+  workflowRepairRollbackTool,
   workflowRepairTool,
   workflowStabilizeTool,
 } from "@/entrypoints/background/tools/flow-tools";
@@ -1169,6 +1170,111 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.policy?.defaultNodePolicy?.artifacts).toEqual({
       screenshot: "onFailure",
     });
+    expect(updated?.meta?.repairs?.history?.[0]).toMatchObject({
+      repairRevision: expect.stringMatching(/^repair-/),
+      baseRevision: expect.stringMatching(/^rev-fnv1a32-/),
+      resultingRevision: expect.stringMatching(/^rev-fnv1a32-/),
+      provenance: {
+        source: "workflow_repair",
+        pageContentUsed: false,
+      },
+      rollback: {
+        available: true,
+        beforeRevision: expect.stringMatching(/^rev-fnv1a32-/),
+        snapshot: expect.objectContaining({
+          entryNodeId: "nav-1",
+          nodes: expect.any(Array),
+          edges: expect.any(Array),
+        }),
+      },
+    });
+  });
+
+  it("workflowRepairRollbackTool restores a pre-repair workflow snapshot", async () => {
+    const flowId = `workflow-repair-rollback-${Date.now()}`;
+    const storage = createStoragePort();
+    const original = createFlow(
+      flowId,
+      [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: { selector: "#email" },
+            value: "alice@example.com",
+          },
+        },
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#results" } },
+        },
+      ],
+      {
+        meta: {
+          recording: {
+            parameterSuggestions: [
+              {
+                nodeId: "fill-1" as any,
+                kind: "fill",
+                suggestedKey: "email",
+                currentValue: "alice@example.com",
+              },
+            ],
+          },
+        },
+      },
+    );
+    const originalRevision = calculateWorkflowRevision(original);
+    await storage.flows.save(original);
+
+    const repairResult = await workflowRepairTool.execute({
+      flowId,
+      apply: true,
+    });
+    expect(repairResult.isError).toBe(false);
+    const repaired = await storage.flows.get(flowId as any);
+    const repairRevision = repaired?.meta?.repairs?.history?.[0]?.repairRevision;
+    expect(repairRevision).toEqual(expect.stringMatching(/^repair-/));
+    expect((repaired?.nodes[0].config as { value?: string }).value).toBe("{email}");
+    expect(repaired?.policy?.defaultNodePolicy?.timeout).toMatchObject({
+      ms: 15000,
+      scope: "attempt",
+    });
+
+    const repairedRevision = calculateWorkflowRevision(repaired as FlowV3);
+    const rollbackResult = await workflowRepairRollbackTool.execute({
+      flowId,
+      repairRevision,
+      requireCurrentRevision: repairedRevision,
+    });
+    const payload = parseToolPayload(rollbackResult);
+    const restored = await storage.flows.get(flowId as any);
+
+    expect(rollbackResult.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: true,
+      applied: true,
+      currentRevision: repairedRevision,
+      restoredRevision: originalRevision,
+      rollback: {
+        repairRevision,
+        beforeRevision: originalRevision,
+      },
+    });
+    expect(calculateWorkflowRevision(restored as FlowV3)).toBe(originalRevision);
+    expect((restored?.nodes[0].config as { value?: string }).value).toBe("alice@example.com");
+    expect(restored?.policy).toBeUndefined();
+    expect(restored?.meta?.repairs?.history?.[0]).toMatchObject({
+      repairRevision,
+      rollbackRevision: originalRevision,
+      rollback: {
+        available: false,
+      },
+    });
+    expect(restored?.meta?.audit?.events?.map((event) => event.kind)).toEqual(
+      expect.arrayContaining(["repair_apply", "policy_change", "repair_rollback"]),
+    );
   });
 
   it("workflowRepairTool suggests selector replacement without applying when failure artifacts are missing", async () => {
@@ -2694,8 +2800,15 @@ describe("recording/editing/flow toolchain integration", () => {
       postRepairScore: { passRate: 0, passedRuns: 0, failedRuns: 1, iterations: 1 },
       rollbackSuggestion: {
         beforeRevision: expect.stringMatching(/^rev-fnv1a32-/),
+        repairRevision: expect.stringMatching(/^repair-/),
         reason: "post-repair validation passRate is lower than baseline",
-        automaticRollbackAvailable: false,
+        automaticRollbackAvailable: true,
+        tool: "workflow_repair_rollback",
+        args: {
+          flowId,
+          repairRevision: expect.stringMatching(/^repair-/),
+          requireCurrentRevision: expect.stringMatching(/^rev-fnv1a32-/),
+        },
       },
     });
   });

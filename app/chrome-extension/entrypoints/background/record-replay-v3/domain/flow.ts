@@ -269,6 +269,7 @@ export interface FlowRepairHistoryEntry {
     beforeRevision?: string;
     available?: boolean;
     reason?: string;
+    snapshot?: JsonObject;
   };
 }
 

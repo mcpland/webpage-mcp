@@ -705,6 +705,9 @@ function normalizeRepairHistoryEntry(value: unknown): FlowRepairHistoryEntry | u
         ? { available: optionalBoolean(value.rollback.available) }
         : {}),
       ...(trimmedString(value.rollback.reason) ? { reason: trimmedString(value.rollback.reason) } : {}),
+      ...(isRecord(value.rollback.snapshot) && isJsonValue(value.rollback.snapshot)
+        ? { snapshot: value.rollback.snapshot }
+        : {}),
     };
   }
   return entry;

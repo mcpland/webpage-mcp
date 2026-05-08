@@ -45,6 +45,7 @@ vi.mock('@/entrypoints/background/tools/flow-tools', () => ({
   workflowDescribeTool: { name: 'workflow_describe', execute: vi.fn() },
   workflowDebugViewTool: { name: 'workflow_debug_view', execute: vi.fn() },
   workflowRepairTool: { name: 'workflow_repair', execute: vi.fn() },
+  workflowRepairRollbackTool: { name: 'workflow_repair_rollback', execute: vi.fn() },
   workflowStabilizeTool: { name: 'workflow_stabilize', execute: vi.fn() },
 }));
 

@@ -13,9 +13,11 @@ import {
 import {
   FLOW_DSL_VERSION,
   FLOW_NODE_SEMANTICS_VERSION,
+  type FlowRepairHistoryEntry,
   type FlowQualityMeta,
   type FlowV3,
 } from '../record-replay-v3/domain/flow';
+import type { JsonObject } from '../record-replay-v3/domain/json';
 import type { RunEvent, RunRecordV3 } from '../record-replay-v3/domain/events';
 import type { FlowId, RunId } from '../record-replay-v3/domain/ids';
 import type { ArtifactRecord } from '../record-replay-v3/storage/artifacts';
@@ -23,6 +25,10 @@ import { RR_ERROR_CODES } from '../record-replay-v3/domain/errors';
 import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variables';
 import { createStoragePort } from '../record-replay-v3';
 import { enqueueRunAndWait, saveFlowToV3 } from '../record-replay-v3/compat';
+import {
+  FlowWriteConflictError,
+  withFlowWriteLock,
+} from '../record-replay-v3/flows/write-lock';
 import {
   appendWorkflowAuditEvent,
   buildWorkflowQualitySummary,
@@ -3676,12 +3682,158 @@ async function executeStabilizeValidationRuns(
   return { targetRuns: runs, resetRuns };
 }
 
-function recordStabilizeRepairHistory(
+type WorkflowRepairSource = 'workflow_repair' | 'workflow_stabilize';
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function createWorkflowRepairRollbackSnapshot(flow: FlowV3): JsonObject {
+  const snapshot: Record<string, unknown> = {
+    entryNodeId: flow.entryNodeId,
+    nodes: cloneJson(flow.nodes ?? []),
+    edges: cloneJson(flow.edges ?? []),
+    variables: cloneJson(flow.variables ?? []),
+  };
+
+  if (flow.policy) {
+    snapshot.policy = cloneJson(flow.policy);
+  }
+
+  const metaSnapshot: Record<string, unknown> = {};
+  for (const field of [
+    'domain',
+    'tags',
+    'bindings',
+    'tool',
+    'exposedOutputs',
+    'recording',
+    'stopBarrier',
+    'quality',
+    'runtime',
+  ] as const) {
+    const value = flow.meta?.[field];
+    if (value !== undefined) {
+      metaSnapshot[field] = cloneJson(value);
+    }
+  }
+  if (Object.keys(metaSnapshot).length > 0) {
+    snapshot.meta = metaSnapshot;
+  }
+
+  return cloneJson(snapshot) as JsonObject;
+}
+
+function isWorkflowRepairRollbackSnapshot(value: unknown): value is JsonObject {
+  return (
+    isRecord(value) &&
+    typeof value.entryNodeId === 'string' &&
+    Array.isArray(value.nodes) &&
+    Array.isArray(value.edges)
+  );
+}
+
+function summarizeWorkflowRepairRollbackSnapshot(snapshot: JsonObject): Record<string, unknown> {
+  return {
+    entryNodeId: snapshot.entryNodeId,
+    nodeCount: Array.isArray(snapshot.nodes) ? snapshot.nodes.length : 0,
+    edgeCount: Array.isArray(snapshot.edges) ? snapshot.edges.length : 0,
+    variableCount: Array.isArray(snapshot.variables) ? snapshot.variables.length : 0,
+    hasPolicy: Boolean(snapshot.policy),
+    metaFields: isRecord(snapshot.meta) ? Object.keys(snapshot.meta).sort() : [],
+  };
+}
+
+function restoreWorkflowGraphFromRepairSnapshot(flow: FlowV3, snapshot: JsonObject): FlowV3 {
+  const restored: FlowV3 = {
+    ...flow,
+    entryNodeId: snapshot.entryNodeId as FlowV3['entryNodeId'],
+    nodes: cloneJson(snapshot.nodes) as unknown as FlowV3['nodes'],
+    edges: cloneJson(snapshot.edges) as unknown as FlowV3['edges'],
+    variables: Array.isArray(snapshot.variables)
+      ? (cloneJson(snapshot.variables) as unknown as FlowV3['variables'])
+      : [],
+    updatedAt: new Date().toISOString() as FlowV3['updatedAt'],
+    meta: {
+      ...(isRecord(snapshot.meta) ? (cloneJson(snapshot.meta) as FlowV3['meta']) : {}),
+      ...(flow.meta?.repairs ? { repairs: flow.meta.repairs } : {}),
+      ...(flow.meta?.audit ? { audit: flow.meta.audit } : {}),
+    },
+  };
+
+  if (isRecord(snapshot.policy)) {
+    restored.policy = cloneJson(snapshot.policy) as FlowV3['policy'];
+  } else {
+    delete restored.policy;
+  }
+
+  return restored;
+}
+
+function markWorkflowRepairRolledBack(
+  flow: FlowV3,
+  repairRevision: string,
+  rollbackRevision: string,
+): FlowV3 {
+  const repairs = flow.meta?.repairs;
+  if (!repairs?.history?.length) {
+    return flow;
+  }
+
+  const history = repairs.history.map((entry) => {
+    if (entry.repairRevision !== repairRevision) {
+      return entry;
+    }
+    return {
+      ...entry,
+      rollbackRevision,
+      rollback: {
+        ...(entry.rollback ?? {}),
+        available: false,
+        reason: 'Rollback applied; workflow definition was restored to the pre-repair snapshot.',
+      },
+    };
+  });
+  const nextRepairs = {
+    ...repairs,
+    history,
+  };
+  if (nextRepairs.currentRepairRevision === repairRevision) {
+    delete nextRepairs.currentRepairRevision;
+  }
+
+  return {
+    ...flow,
+    meta: {
+      ...(flow.meta ?? {}),
+      repairs: nextRepairs,
+    },
+  };
+}
+
+function findWorkflowRepairRollbackEntry(
+  flow: FlowV3,
+  repairRevision?: string,
+): FlowRepairHistoryEntry | undefined {
+  const history = Array.isArray(flow.meta?.repairs?.history) ? flow.meta.repairs.history : [];
+  const candidates = repairRevision
+    ? history.filter((entry) => entry.repairRevision === repairRevision)
+    : [...history].reverse();
+  return candidates.find(
+    (entry) =>
+      entry.rollback?.available === true &&
+      isWorkflowRepairRollbackSnapshot(entry.rollback.snapshot),
+  );
+}
+
+function recordWorkflowRepairHistory(
   flow: FlowV3,
   beforeRevision: string,
   changes: WorkflowRepairChange[],
-): void {
-  if (changes.length === 0) return;
+  source: WorkflowRepairSource,
+  rollbackSnapshot?: JsonObject,
+): string | undefined {
+  if (changes.length === 0) return undefined;
   const meta = { ...(flow.meta ?? {}) };
   const existing = Array.isArray(meta.repairs?.history) ? meta.repairs.history : [];
   const repairRevision = `repair-${Date.now().toString(36)}`;
@@ -3689,6 +3841,11 @@ function recordStabilizeRepairHistory(
   const pageContentUsed = changes.some(
     (change) => change.code === 'selector_target_replaced' || change.code === 'bounded_wait_added',
   );
+  const tool =
+    source === 'workflow_repair'
+      ? TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR
+      : TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE;
+  const resultingRevision = calculateWorkflowRevision(flow);
   meta.repairs = {
     ...(meta.repairs ?? {}),
     currentRepairRevision: repairRevision,
@@ -3697,19 +3854,23 @@ function recordStabilizeRepairHistory(
       {
         repairRevision,
         baseRevision: beforeRevision,
+        resultingRevision,
         appliedAt: new Date().toISOString(),
         patchSummary: changes.map((change) => change.code).join(', '),
         changes: changes.map((change) => ({ ...change })),
         provenance: {
-          source: 'workflow_stabilize',
+          source,
           pageContentUsed,
         },
         ...(selectorChange?.beforeQuality ? { beforeQuality: selectorChange.beforeQuality.score } : {}),
         ...(selectorChange?.afterQuality ? { afterQuality: selectorChange.afterQuality.score } : {}),
         rollback: {
           beforeRevision,
-          available: false,
-          reason: 'Workflow rollback metadata is recorded; external side effects are not reversible.',
+          available: Boolean(rollbackSnapshot),
+          reason: rollbackSnapshot
+            ? 'Rollback restores the workflow definition only; external side effects are not reversible.'
+            : 'Workflow rollback metadata is recorded; external side effects are not reversible.',
+          ...(rollbackSnapshot ? { snapshot: rollbackSnapshot } : {}),
         },
       },
     ],
@@ -3719,10 +3880,11 @@ function recordStabilizeRepairHistory(
     kind: 'repair_apply',
     actor: 'mcp',
     revision: calculateWorkflowRevision(flow),
-    reason: 'workflow_stabilize_apply',
+    reason: `${source}_apply`,
     metadata: {
-      tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
+      tool,
       baseRevision: beforeRevision,
+      resultingRevision,
       repairRevision,
       changeCount: changes.length,
       changeCodes: changes.map((change) => change.code).slice(0, 30),
@@ -3742,9 +3904,9 @@ function recordStabilizeRepairHistory(
       kind: 'policy_change',
       actor: 'mcp',
       revision: calculateWorkflowRevision(audited),
-      reason: 'workflow_stabilize_default_policy',
+      reason: `${source}_default_policy`,
       metadata: {
-        tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
+        tool,
         changeCodes: changes
           .map((change) => change.code)
           .filter((code) =>
@@ -3755,6 +3917,7 @@ function recordStabilizeRepairHistory(
     });
   }
   flow.meta = audited.meta;
+  return repairRevision;
 }
 
 class FlowAnalyzeTool {
@@ -3968,6 +4131,8 @@ class WorkflowRepairTool {
     const assertionRepairSuggestionsBeforeApply = buildAssertionRepairSuggestions(flow, runs);
     const recommendationsBeforeApply = buildRepairRecommendations(flow, initialHints, runs);
     const shouldApply = args?.apply === true && args?.dryRun !== true;
+    const initialRevision = calculateWorkflowRevision(flow);
+    const rollbackSnapshot = shouldApply ? createWorkflowRepairRollbackSnapshot(flow) : undefined;
     const changes: WorkflowRepairChange[] = [];
     let parameterization: ReturnType<typeof applyFlowParameterSuggestions> | undefined;
 
@@ -3987,43 +4152,7 @@ class WorkflowRepairTool {
 
     const updated = shouldApply && changes.length > 0;
     if (updated) {
-      let audited = appendWorkflowAuditEvent(flow, {
-        kind: 'repair_apply',
-        actor: 'mcp',
-        revision: calculateWorkflowRevision(flow),
-        reason: 'workflow_repair_apply',
-        metadata: {
-          tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR,
-          changeCount: changes.length,
-          changeCodes: changes.map((change) => change.code).slice(0, 30),
-          nodeIds: changes
-            .map((change) => change.nodeId)
-            .filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0)
-            .slice(0, 30),
-        },
-      });
-      if (
-        changes.some((change) =>
-          ['default_timeout_added', 'default_retry_added', 'failure_screenshot_added'].includes(change.code),
-        )
-      ) {
-        audited = appendWorkflowAuditEvent(audited, {
-          kind: 'policy_change',
-          actor: 'mcp',
-          revision: calculateWorkflowRevision(audited),
-          reason: 'workflow_repair_default_policy',
-          metadata: {
-            tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR,
-            changeCodes: changes
-              .map((change) => change.code)
-              .filter((code) =>
-                ['default_timeout_added', 'default_retry_added', 'failure_screenshot_added'].includes(code),
-              )
-              .slice(0, 30),
-          },
-        });
-      }
-      flow.meta = audited.meta;
+      recordWorkflowRepairHistory(flow, initialRevision, changes, 'workflow_repair', rollbackSnapshot);
       flow.updatedAt = new Date().toISOString();
       await saveFlowToV3(flow);
     }
@@ -4089,6 +4218,213 @@ class WorkflowRepairTool {
       ],
       isError: false,
     };
+  }
+}
+
+function createWorkflowRepairRollbackError(
+  code: string,
+  message: string,
+  metadata: Record<string, unknown> = {},
+  retryable = false,
+): ToolResult {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          success: false,
+          error: {
+            code,
+            category: retryable ? 'conflict' : 'validation',
+            retryable,
+            message,
+            ...metadata,
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
+}
+
+class WorkflowRepairRollbackTool {
+  name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR_ROLLBACK;
+
+  async execute(args: any): Promise<ToolResult> {
+    const requestedFlowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+    const requestedWorkflow = typeof args?.workflow === 'string' ? args.workflow.trim() : '';
+    if (!requestedFlowId && !requestedWorkflow) {
+      return createWorkflowRepairRollbackError(
+        'WORKFLOW_ROLLBACK_TARGET_REQUIRED',
+        'flowId or workflow is required',
+      );
+    }
+    if (requestedFlowId && requestedWorkflow) {
+      return createWorkflowRepairRollbackError(
+        'WORKFLOW_ROLLBACK_TARGET_CONFLICT',
+        'Provide either flowId or workflow, not both',
+      );
+    }
+
+    const resolved = await resolveFlowForWorkflowTool(args);
+    if (!resolved) {
+      return createWorkflowRepairRollbackError(
+        'WORKFLOW_NOT_FOUND',
+        requestedFlowId
+          ? `Flow not found: ${requestedFlowId}`
+          : `Published workflow not found: ${requestedWorkflow}`,
+      );
+    }
+
+    try {
+      return await withFlowWriteLock(resolved.id as FlowId, async () => {
+        const flow = await resolveFlowForWorkflowTool(args);
+        if (!flow) {
+          return createWorkflowRepairRollbackError(
+            'WORKFLOW_NOT_FOUND',
+            requestedFlowId
+              ? `Flow not found: ${requestedFlowId}`
+              : `Published workflow not found: ${requestedWorkflow}`,
+          );
+        }
+
+        const currentRevision = calculateWorkflowRevision(flow);
+        const requiredRevision =
+          typeof args?.requireCurrentRevision === 'string' ? args.requireCurrentRevision.trim() : '';
+        if (requiredRevision && requiredRevision !== currentRevision) {
+          return createWorkflowRepairRollbackError(
+            'STALE_WORKFLOW_REVISION',
+            'workflow_repair_rollback requireCurrentRevision does not match the current workflow revision',
+            {
+              requiredRevision,
+              currentRevision,
+            },
+          );
+        }
+
+        const requestedRepairRevision =
+          typeof args?.repairRevision === 'string' ? args.repairRevision.trim() : undefined;
+        const entry = findWorkflowRepairRollbackEntry(flow, requestedRepairRevision);
+        if (!entry || !isWorkflowRepairRollbackSnapshot(entry.rollback?.snapshot)) {
+          return createWorkflowRepairRollbackError(
+            'ROLLBACK_SNAPSHOT_NOT_FOUND',
+            requestedRepairRevision
+              ? `No rollback snapshot is available for repair revision ${requestedRepairRevision}`
+              : 'No rollback snapshot is available for this workflow',
+            {
+              repairRevision: requestedRepairRevision,
+            },
+          );
+        }
+
+        const expectedCurrentRevision = entry.resultingRevision;
+        if (
+          expectedCurrentRevision &&
+          expectedCurrentRevision !== currentRevision &&
+          args?.force !== true
+        ) {
+          return createWorkflowRepairRollbackError(
+            'STALE_REPAIR_ROLLBACK_REVISION',
+            'Workflow has changed since the selected repair was applied; pass force true to rollback anyway.',
+            {
+              repairRevision: entry.repairRevision,
+              expectedCurrentRevision,
+              currentRevision,
+            },
+          );
+        }
+
+        const snapshot = entry.rollback.snapshot;
+        const publishedInfo = getPublishedFlowInfo(flow);
+        const selectedRepairRevision = entry.repairRevision ?? requestedRepairRevision ?? '';
+        const snapshotSummary = summarizeWorkflowRepairRollbackSnapshot(snapshot);
+        if (args?.dryRun === true) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  applied: false,
+                  dryRun: true,
+                  flowId: flow.id,
+                  workflow: publishedInfo?.slug,
+                  currentRevision,
+                  rollback: {
+                    repairRevision: selectedRepairRevision,
+                    beforeRevision: entry.rollback.beforeRevision ?? entry.baseRevision,
+                    expectedCurrentRevision,
+                    snapshot: snapshotSummary,
+                  },
+                }),
+              },
+            ],
+            isError: false,
+          };
+        }
+
+        let restored = restoreWorkflowGraphFromRepairSnapshot(flow, snapshot);
+        const restoredRevision = calculateWorkflowRevision(restored);
+        restored = markWorkflowRepairRolledBack(
+          restored,
+          selectedRepairRevision,
+          restoredRevision,
+        );
+        restored = appendWorkflowAuditEvent(restored, {
+          kind: 'repair_rollback',
+          actor: 'mcp',
+          revision: restoredRevision,
+          reason: 'workflow_repair_rollback',
+          metadata: {
+            tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR_ROLLBACK,
+            repairRevision: selectedRepairRevision,
+            ...((entry.rollback.beforeRevision ?? entry.baseRevision)
+              ? { beforeRevision: entry.rollback.beforeRevision ?? entry.baseRevision }
+              : {}),
+            fromRevision: currentRevision,
+            restoredRevision,
+            forced: args?.force === true,
+          },
+        });
+        restored.updatedAt = new Date().toISOString() as FlowV3['updatedAt'];
+        const saved = await saveFlowToV3(restored);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                applied: true,
+                dryRun: false,
+                flowId: saved.id,
+                workflow: getPublishedFlowInfo(saved)?.slug,
+                currentRevision,
+                restoredRevision,
+                rollback: {
+                  repairRevision: selectedRepairRevision,
+                  beforeRevision: entry.rollback.beforeRevision ?? entry.baseRevision,
+                  expectedCurrentRevision,
+                  snapshot: snapshotSummary,
+                },
+                audit: saved.meta?.audit?.events?.slice(-1) ?? [],
+              }),
+            },
+          ],
+          isError: false,
+        };
+      });
+    } catch (error) {
+      if (error instanceof FlowWriteConflictError) {
+        return createWorkflowRepairRollbackError(
+          error.code,
+          error.message,
+          { flowId: error.flowId },
+          true,
+        );
+      }
+      throw error;
+    }
   }
 }
 
@@ -4303,6 +4639,9 @@ class WorkflowStabilizeTool {
     const resetRuns = [...baselineValidation.resetRuns];
     const baselineScore = scoreStabilizeRuns(baselineRuns);
     const shouldApply = args?.apply === true && args?.dryRun !== true && !validationBlockedReason;
+    const rollbackSnapshot = shouldApply
+      ? createWorkflowRepairRollbackSnapshot(workingFlow)
+      : undefined;
     const changes: WorkflowRepairChange[] = [];
     let parameterization: ReturnType<typeof applyFlowParameterSuggestions> | undefined;
 
@@ -4364,8 +4703,15 @@ class WorkflowStabilizeTool {
       });
     }
     let postRepairRevision: string | undefined;
+    let appliedRepairRevision: string | undefined;
     if (applied) {
-      recordStabilizeRepairHistory(workingFlow, initialRevision, changes);
+      appliedRepairRevision = recordWorkflowRepairHistory(
+        workingFlow,
+        initialRevision,
+        changes,
+        'workflow_stabilize',
+        rollbackSnapshot,
+      );
       workingFlow.updatedAt = new Date().toISOString();
       workingFlow = await saveFlowToV3(workingFlow);
       postRepairRevision = calculateWorkflowRevision(workingFlow);
@@ -4411,8 +4757,15 @@ class WorkflowStabilizeTool {
         ? {
             beforeRevision: initialRevision,
             afterRevision: postRepairRevision,
+            repairRevision: appliedRepairRevision,
             reason: 'post-repair validation passRate is lower than baseline',
-            automaticRollbackAvailable: false,
+            automaticRollbackAvailable: Boolean(appliedRepairRevision),
+            tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR_ROLLBACK,
+            args: {
+              ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : { flowId: workingFlow.id }),
+              ...(appliedRepairRevision ? { repairRevision: appliedRepairRevision } : {}),
+              requireCurrentRevision: postRepairRevision,
+            },
           }
         : undefined;
     const validationRunsForQuality = postRepairRuns.length > 0 ? postRepairRuns : baselineRuns;
@@ -4622,6 +4975,14 @@ class WorkflowStabilizeTool {
                   apply: false,
                 },
               },
+              ...(rollbackSuggestion
+                ? [
+                    {
+                      tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR_ROLLBACK,
+                      args: rollbackSuggestion.args,
+                    },
+                  ]
+                : []),
             ],
           }),
         },
@@ -4740,4 +5101,5 @@ export const flowUpdateTool = new FlowUpdateTool();
 export const workflowDescribeTool = new WorkflowDescribeTool();
 export const workflowDebugViewTool = new WorkflowDebugViewTool();
 export const workflowRepairTool = new WorkflowRepairTool();
+export const workflowRepairRollbackTool = new WorkflowRepairRollbackTool();
 export const workflowStabilizeTool = new WorkflowStabilizeTool();
