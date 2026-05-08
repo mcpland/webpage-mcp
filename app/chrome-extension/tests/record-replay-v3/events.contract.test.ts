@@ -263,6 +263,74 @@ describe('V3 Events contracts', () => {
       expect(empty).toEqual([]);
     });
 
+    it('prunes oldest events beyond the per-run retention limit without resetting nextSeq', async () => {
+      const runs = createRunsStore();
+      const events = createEventsStore({
+        maxEventsPerRun: 3,
+        maxEventsPerFlow: 10,
+        maxTotalEvents: 10,
+      });
+
+      await runs.save(createRunRecord('run-1', { nextSeq: 1 }));
+      for (let i = 0; i < 5; i++) {
+        await events.append(createEventInput('run-1', { ts: 1_000 + i }));
+      }
+
+      const list = await events.list('run-1');
+      const runAfter = await runs.get('run-1');
+
+      expect(list.map((e) => e.seq)).toEqual([3, 4, 5]);
+      expect(runAfter?.nextSeq).toBe(6);
+    });
+
+    it('prunes oldest events beyond the per-flow retention limit', async () => {
+      const runs = createRunsStore();
+      const events = createEventsStore({
+        maxEventsPerRun: 10,
+        maxEventsPerFlow: 3,
+        maxTotalEvents: 10,
+      });
+
+      await runs.save(
+        createRunRecord('run-1', { flowId: 'flow-1' as RunRecordV3['flowId'], nextSeq: 1 }),
+      );
+      await runs.save(
+        createRunRecord('run-2', { flowId: 'flow-1' as RunRecordV3['flowId'], nextSeq: 1 }),
+      );
+
+      await events.append(createEventInput('run-1', { ts: 1_000 }));
+      await events.append(createEventInput('run-1', { ts: 1_001 }));
+      await events.append(createEventInput('run-2', { ts: 1_002 }));
+      await events.append(createEventInput('run-2', { ts: 1_003 }));
+
+      expect((await events.list('run-1')).map((event) => event.seq)).toEqual([2]);
+      expect((await events.list('run-2')).map((event) => event.seq)).toEqual([1, 2]);
+    });
+
+    it('prunes oldest events beyond the global retention limit', async () => {
+      const runs = createRunsStore();
+      const events = createEventsStore({
+        maxEventsPerRun: 10,
+        maxEventsPerFlow: 10,
+        maxTotalEvents: 3,
+      });
+
+      await runs.save(
+        createRunRecord('run-1', { flowId: 'flow-1' as RunRecordV3['flowId'], nextSeq: 1 }),
+      );
+      await runs.save(
+        createRunRecord('run-2', { flowId: 'flow-2' as RunRecordV3['flowId'], nextSeq: 1 }),
+      );
+
+      await events.append(createEventInput('run-1', { ts: 1_000 }));
+      await events.append(createEventInput('run-1', { ts: 1_001 }));
+      await events.append(createEventInput('run-2', { ts: 1_002 }));
+      await events.append(createEventInput('run-2', { ts: 1_003 }));
+
+      expect((await events.list('run-1')).map((event) => event.seq)).toEqual([2]);
+      expect((await events.list('run-2')).map((event) => event.seq)).toEqual([1, 2]);
+    });
+
     it('seq allocation remains correct under concurrent appends', async () => {
       const runs = createRunsStore();
       const events = createEventsStore();

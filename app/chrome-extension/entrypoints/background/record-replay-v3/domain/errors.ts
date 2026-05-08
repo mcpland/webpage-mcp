@@ -42,6 +42,8 @@ export const RR_ERROR_CODES = {
   NAVIGATION_FAILED: 'NAVIGATION_FAILED',
   /** Network request failed */
   NETWORK_REQUEST_FAILED: 'NETWORK_REQUEST_FAILED',
+  /** Runtime storage or artifact quota was exceeded */
+  RESOURCE_LIMIT_EXCEEDED: 'RESOURCE_LIMIT_EXCEEDED',
 
   // ===== Script/Tool Error =====
   /** Script execution failed */
