@@ -277,6 +277,30 @@ function getClientCapabilitiesForContext(ctx: McpToolContext): McpClientCapabili
   return ctx.clientCapabilities ?? resolveMcpClientCapabilities();
 }
 
+function listSupportedClientCapabilities(
+  clientCapabilities: McpClientCapabilityFallback,
+): string[] {
+  return [
+    clientCapabilities.toolListChanged ? 'toolListChanged' : undefined,
+    clientCapabilities.resourceReferences ? 'resourceReferences' : undefined,
+    clientCapabilities.cancellation ? 'cancellation' : undefined,
+    clientCapabilities.structuredErrors ? 'structuredErrors' : undefined,
+    clientCapabilities.largeResults ? 'largeResults' : undefined,
+  ].filter((capability): capability is string => typeof capability === 'string');
+}
+
+function buildExtensionToolMeta(ctx: McpToolContext): {
+  mcpSessionId: string;
+  instanceId: string;
+  clientCapabilities: McpClientCapabilityFallback;
+} {
+  return {
+    mcpSessionId: ctx.sessionId,
+    instanceId: ctx.instanceId,
+    clientCapabilities: getClientCapabilitiesForContext(ctx),
+  };
+}
+
 export function clearDynamicFlowCacheForSession(sessionId: string): void {
   if (!sessionId) {
     return;
@@ -675,13 +699,13 @@ async function fetchPublishedFlows(
   const requestPromise = (async () => {
     const response = await ctx.nativeHost.sendRequestToExtensionAndWait(
       {
-        meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId },
+        meta: buildExtensionToolMeta(ctx),
         handshake: {
           protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
           mcpServerVersion: MCP_SERVER_VERSION,
-          clientCapabilities: Object.entries(getClientCapabilitiesForContext(ctx))
-            .filter(([, value]) => value === true)
-            .map(([key]) => key),
+          clientCapabilities: listSupportedClientCapabilities(
+            getClientCapabilitiesForContext(ctx),
+          ),
         },
       },
       'rr_list_published_flows',
@@ -1083,7 +1107,7 @@ export const callToolForContext = async (
               args: variables,
               ...runOptions,
             },
-            meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId },
+            meta: buildExtensionToolMeta(ctx),
           },
           NativeMessageType.CALL_TOOL,
           120000,
@@ -1140,7 +1164,7 @@ export const callToolForContext = async (
           {
             name: 'record_replay_flow_run',
             args: flowArgs,
-            meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId },
+            meta: buildExtensionToolMeta(ctx),
           },
           NativeMessageType.CALL_TOOL,
           120000,
@@ -1183,7 +1207,7 @@ export const callToolForContext = async (
       {
         name,
         args: forwardedArgs,
-        meta: { mcpSessionId: ctx.sessionId, instanceId: ctx.instanceId },
+        meta: buildExtensionToolMeta(ctx),
       },
       NativeMessageType.CALL_TOOL,
       120000, // Extended to 120 seconds to avoid timeout for long tasks such as performance analysis

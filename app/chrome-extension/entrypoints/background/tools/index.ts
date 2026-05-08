@@ -91,6 +91,17 @@ export interface ToolCallParam {
     mcpSessionId?: string;
     instanceId?: string;
     source?: 'mcp' | 'ui';
+    clientCapabilities?:
+      | string[]
+      | {
+          toolListChanged?: boolean;
+          resourceReferences?: boolean;
+          cancellation?: boolean;
+          structuredErrors?: boolean;
+          largeResults?: boolean;
+          source?: string;
+          warnings?: string[];
+        };
   };
 }
 
@@ -359,7 +370,10 @@ export const handleCallTool = async (param: ToolCallParam) => {
     : targetMergedArgs;
 
   try {
-    const execute = async () => await tool.execute(mergedArgs);
+    const executionContext =
+      param.meta?.clientCapabilities !== undefined ? { meta: param.meta } : undefined;
+    const execute = async () =>
+      executionContext ? await tool.execute(mergedArgs, executionContext) : await tool.execute(mergedArgs);
     const result =
       typeof resolvedTarget.tabId === 'number'
         ? await runInTabQueue(resolvedTarget.tabId, execute)

@@ -96,6 +96,37 @@ interface WorkflowDebugNode extends PublicAnalyzedNode {
   selectorQuality?: SelectorQualityDiagnostic;
 }
 
+interface ToolExecutionContext {
+  meta?: {
+    mcpSessionId?: string;
+    instanceId?: string;
+    source?: 'mcp' | 'ui';
+    clientCapabilities?:
+      | string[]
+      | {
+          toolListChanged?: boolean;
+          resourceReferences?: boolean;
+          cancellation?: boolean;
+          structuredErrors?: boolean;
+          largeResults?: boolean;
+          source?: string;
+          warnings?: string[];
+        };
+  };
+}
+
+interface NormalizedMcpClientCapabilities {
+  mcp: boolean;
+  source: string;
+  toolListChanged: boolean;
+  resourceReferences: boolean;
+  cancellation: boolean;
+  structuredErrors: boolean;
+  largeResults: boolean;
+  supported: string[];
+  warnings: string[];
+}
+
 interface WorkflowDebugRun {
   id: RunRecordV3['id'];
   status: RunRecordV3['status'];
@@ -980,6 +1011,145 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
     return fallback;
   }
   return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+const MCP_CLIENT_CAPABILITY_KEYS = [
+  'toolListChanged',
+  'resourceReferences',
+  'cancellation',
+  'structuredErrors',
+  'largeResults',
+] as const;
+
+function normalizeMcpClientCapabilities(
+  context?: ToolExecutionContext,
+): NormalizedMcpClientCapabilities {
+  const isMcp = context?.meta?.source === 'mcp' || Boolean(context?.meta?.mcpSessionId);
+  const raw = context?.meta?.clientCapabilities;
+  const supported = new Set<string>();
+  const warnings: string[] = [];
+  let source = isMcp ? 'default' : 'direct';
+
+  if (Array.isArray(raw)) {
+    source = 'list';
+    for (const capability of raw) {
+      if (typeof capability === 'string' && capability.trim()) {
+        supported.add(capability.trim());
+      }
+    }
+  } else if (raw && typeof raw === 'object') {
+    const capabilityRecord = raw as Record<string, unknown>;
+    source =
+      typeof capabilityRecord.source === 'string' && capabilityRecord.source.trim()
+        ? capabilityRecord.source.trim()
+        : source;
+    for (const key of MCP_CLIENT_CAPABILITY_KEYS) {
+      if (capabilityRecord[key] === true) {
+        supported.add(key);
+      }
+    }
+    if (Array.isArray(capabilityRecord.warnings)) {
+      for (const warning of capabilityRecord.warnings) {
+        if (typeof warning === 'string' && warning.trim()) {
+          warnings.push(warning.trim());
+        }
+      }
+    }
+  }
+
+  const normalized: NormalizedMcpClientCapabilities = {
+    mcp: isMcp,
+    source,
+    toolListChanged: supported.has('toolListChanged'),
+    resourceReferences: supported.has('resourceReferences'),
+    cancellation: supported.has('cancellation'),
+    structuredErrors: supported.has('structuredErrors'),
+    largeResults: supported.has('largeResults'),
+    supported: MCP_CLIENT_CAPABILITY_KEYS.filter((key) => supported.has(key)),
+    warnings,
+  };
+
+  if (isMcp && !normalized.toolListChanged) {
+    normalized.warnings.push(
+      'MCP client tool-list change support is not confirmed; workflow slugs are validated at runtime.',
+    );
+  }
+  if (isMcp && !normalized.resourceReferences) {
+    normalized.warnings.push(
+      'MCP client resource references are not confirmed; debug artifacts are summarized rather than returned as artifact references.',
+    );
+  }
+  if (isMcp && !normalized.cancellation) {
+    normalized.warnings.push(
+      'MCP client cancellation support is not confirmed; long-running workflow operations use bounded resumable validation groups.',
+    );
+  }
+
+  normalized.warnings = Array.from(new Set(normalized.warnings));
+  return normalized;
+}
+
+function buildClientCapabilitySummary(
+  capabilities: NormalizedMcpClientCapabilities,
+): Record<string, unknown> {
+  const summary: Record<string, unknown> = {
+    mcp: capabilities.mcp,
+    source: capabilities.source,
+    supported: capabilities.supported,
+    warnings: capabilities.warnings,
+  };
+  if (capabilities.mcp) {
+    summary.toolListChanged = capabilities.toolListChanged;
+    summary.resourceReferences = capabilities.resourceReferences;
+    summary.cancellation = capabilities.cancellation;
+    summary.structuredErrors = capabilities.structuredErrors;
+    summary.largeResults = capabilities.largeResults;
+  }
+  return summary;
+}
+
+function buildClientCapabilityWarnings(
+  capabilities: NormalizedMcpClientCapabilities,
+  options: { includeArtifacts?: boolean; longRunning?: boolean; runGroupId?: string } = {},
+): WorkflowStabilizeWarning[] {
+  if (!capabilities.mcp) {
+    return [];
+  }
+  const warnings: WorkflowStabilizeWarning[] = [];
+  if (!capabilities.resourceReferences && options.includeArtifacts !== false) {
+    warnings.push({
+      code: 'CLIENT_RESOURCE_REFERENCES_UNCONFIRMED',
+      category: 'capability',
+      message:
+        'MCP client resource reference support is not confirmed; artifact payloads and references are unavailable in this response.',
+    });
+  }
+  if (!capabilities.cancellation && options.longRunning) {
+    warnings.push({
+      code: 'CLIENT_CANCELLATION_UNCONFIRMED',
+      category: 'capability',
+      message: options.runGroupId
+        ? `MCP client cancellation support is not confirmed; workflow_stabilize uses bounded validation and resumable runGroupId ${options.runGroupId}.`
+        : 'MCP client cancellation support is not confirmed; workflow_stabilize uses bounded validation instead of relying on client cancellation.',
+    });
+  }
+  if (!capabilities.structuredErrors) {
+    warnings.push({
+      code: 'CLIENT_STRUCTURED_ERRORS_UNCONFIRMED',
+      category: 'capability',
+      message:
+        'MCP client structured error support is not confirmed; workflow tools include machine-readable error details inside text JSON payloads.',
+    });
+  }
+  if (!capabilities.largeResults) {
+    warnings.push({
+      code: 'CLIENT_LARGE_RESULTS_UNCONFIRMED',
+      category: 'capability',
+      message:
+        'MCP client large-result handling is not confirmed; debug output remains compact and filtered by maxRuns/maxEventsPerRun.',
+    });
+  }
+  return warnings;
 }
 
 function truncateString(value: string, maxLength = 1000): string {
@@ -3412,6 +3582,7 @@ async function buildStabilizeQualityRecord(options: {
   minValidationRuns: number;
   capabilities: WorkflowCapabilityMatrix;
   warnings: WorkflowStabilizeWarning[];
+  runGroupId?: string;
 }): Promise<FlowQualityMeta> {
   const now = new Date();
   const freshnessExpiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -3454,7 +3625,7 @@ async function buildStabilizeQualityRecord(options: {
       ? { testEnvironment: options.args.safety.testEnvironment.trim() }
       : {}),
     ...(siteFingerprint ? { siteFingerprint } : {}),
-    runGroupId: `stabilize-${Date.now().toString(36)}`,
+    runGroupId: options.runGroupId ?? `stabilize-${Date.now().toString(36)}`,
     tabOwnership: options.args?.tabTarget === 'new' ? 'owned' : 'current',
     ...(locale ? { locale } : {}),
     ...(timezone ? { timezone } : {}),
@@ -4019,7 +4190,7 @@ class WorkflowDescribeTool {
 class WorkflowDebugViewTool {
   name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW;
 
-  async execute(args: any): Promise<ToolResult> {
+  async execute(args: any, context?: ToolExecutionContext): Promise<ToolResult> {
     const requestedFlowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
     const requestedWorkflow = typeof args?.workflow === 'string' ? args.workflow.trim() : '';
     if (!requestedFlowId && !requestedWorkflow) {
@@ -4037,7 +4208,14 @@ class WorkflowDebugViewTool {
 
     const publishedInfo = getPublishedFlowInfo(flow);
     const hints = collectFlowHints(flow);
-    const includeArtifacts = args?.includeArtifacts !== false;
+    const clientCapabilities = normalizeMcpClientCapabilities(context);
+    const requestedIncludeArtifacts = args?.includeArtifacts !== false;
+    const includeArtifacts =
+      requestedIncludeArtifacts &&
+      !(clientCapabilities.mcp && !clientCapabilities.resourceReferences);
+    const clientCapabilityWarnings = buildClientCapabilityWarnings(clientCapabilities, {
+      includeArtifacts: requestedIncludeArtifacts,
+    });
     const expiredArtifactCleanupCount = includeArtifacts
       ? await createStoragePort().artifacts.cleanupExpired(Date.now())
       : 0;
@@ -4045,7 +4223,11 @@ class WorkflowDebugViewTool {
     if (artifactCleanup && 'error' in artifactCleanup) {
       return createErrorResponse(artifactCleanup.error);
     }
-    const runs = await collectDebugRuns(flow, args);
+    const runs = await collectDebugRuns(flow, {
+      ...args,
+      includeArtifacts,
+      ...(includeArtifacts ? {} : { includeArtifactData: false }),
+    });
     const descriptor = buildWorkflowToolDescriptor(flow);
     const capabilities = buildWorkflowCapabilityMatrix(flow, 'debug');
     const metrics = buildWorkflowRuntimeMetrics(flow, runs, capabilities);
@@ -4074,6 +4256,7 @@ class WorkflowDebugViewTool {
                 mutationEvents: capabilities.mutationEvents,
                 selectorResolution: capabilities.selectorResolution,
               },
+              clientCapabilities: buildClientCapabilitySummary(clientCapabilities),
               sideEffects: descriptor.sideEffects.summary,
             },
             capabilities,
@@ -4085,7 +4268,12 @@ class WorkflowDebugViewTool {
               contentTrust: 'untrusted',
               dataInline: 'explicit_request_only_and_blocked_when_redaction_is_low_confidence',
               cleanup: artifactCleanup ?? { requested: false },
+              resourceReferences:
+                clientCapabilities.mcp && !clientCapabilities.resourceReferences
+                  ? 'unavailable_client_capability_unconfirmed'
+                  : 'available_or_not_required',
             },
+            warnings: clientCapabilityWarnings,
             hints,
             selectorDiagnostics: buildSelectorDiagnostics(flow, runs),
             descriptor,
@@ -4437,7 +4625,7 @@ class WorkflowRepairRollbackTool {
 class WorkflowStabilizeTool {
   name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE;
 
-  async execute(args: any): Promise<ToolResult> {
+  async execute(args: any, context?: ToolExecutionContext): Promise<ToolResult> {
     const validationErrors = validateWorkflowStabilizeArgs(args);
     if (validationErrors.length > 0) {
       return createStructuredToolError(
@@ -4508,6 +4696,8 @@ class WorkflowStabilizeTool {
       typeof args?.minPassRate === 'number' && Number.isFinite(args.minPassRate)
         ? Math.max(0, Math.min(1, args.minPassRate))
         : 1;
+    const stabilizeRunGroupId = `stabilize-${Date.now().toString(36)}`;
+    const clientCapabilities = normalizeMcpClientCapabilities(context);
     const approvalCheck = await resolveTrustedWorkflowApproval({
       args,
       flow: workingFlow,
@@ -4515,6 +4705,13 @@ class WorkflowStabilizeTool {
     });
     const hasApprovalReference = approvalCheck.accepted;
     const warnings: WorkflowStabilizeWarning[] = [];
+    warnings.push(
+      ...buildClientCapabilityWarnings(clientCapabilities, {
+        includeArtifacts: args?.debug?.captureArtifacts !== 'none',
+        longRunning: executionMode !== 'analyzeOnly' && iterations > 1,
+        runGroupId: stabilizeRunGroupId,
+      }),
+    );
     if (getApprovalIdReference(args) && !approvalCheck.accepted) {
       warnings.push({
         code: 'STABILIZE_APPROVAL_REJECTED',
@@ -4793,6 +4990,7 @@ class WorkflowStabilizeTool {
         minValidationRuns,
         capabilities,
         warnings,
+        runGroupId: stabilizeRunGroupId,
       });
       if (args?.dryRun !== true) {
         const previousQuality = buildWorkflowQualitySummary(workingFlow);
@@ -4886,6 +5084,8 @@ class WorkflowStabilizeTool {
               resetRunCount: resetRuns.length,
               baselineRunCount: baselineRuns.length,
               postRepairRunCount: postRepairRuns.length,
+              runGroupId: stabilizeRunGroupId,
+              clientCapabilities: buildClientCapabilitySummary(clientCapabilities),
             },
             safety: {
               risk,
@@ -4930,6 +5130,15 @@ class WorkflowStabilizeTool {
               ...(resetValidation.errors.length > 0 ? { errors: resetValidation.errors } : {}),
               runCount: resetRuns.length,
               failed: resetRuns.some((run) => !run.success),
+            },
+            resumable: {
+              runGroupId: stabilizeRunGroupId,
+              boundedTimeoutMs: 120000,
+              cancellationCapability: clientCapabilities.mcp
+                ? clientCapabilities.cancellation
+                  ? 'supported'
+                  : 'unconfirmed'
+                : 'not_applicable',
             },
             capabilities,
             metrics: runtimeMetrics,

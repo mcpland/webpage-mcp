@@ -1139,7 +1139,21 @@ export function connectNativeHost(): boolean {
           const payload = (message.payload || {}) as {
             name?: string;
             args?: any;
-            meta?: { mcpSessionId?: string; instanceId?: string };
+            meta?: {
+              mcpSessionId?: string;
+              instanceId?: string;
+              clientCapabilities?:
+                | string[]
+                | {
+                    toolListChanged?: boolean;
+                    resourceReferences?: boolean;
+                    cancellation?: boolean;
+                    structuredErrors?: boolean;
+                    largeResults?: boolean;
+                    source?: string;
+                    warnings?: string[];
+                  };
+            };
           };
           const result = await handleCallTool({
             name: String(payload.name || ""),

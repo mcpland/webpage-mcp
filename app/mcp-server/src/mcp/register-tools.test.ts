@@ -29,6 +29,22 @@ function createContext(
   };
 }
 
+function expectedForwardedMeta(sessionId: string) {
+  return expect.objectContaining({
+    mcpSessionId: sessionId,
+    instanceId: 'unit-test',
+    clientCapabilities: expect.objectContaining({
+      toolListChanged: expect.any(Boolean),
+      resourceReferences: expect.any(Boolean),
+      cancellation: expect.any(Boolean),
+      structuredErrors: expect.any(Boolean),
+      largeResults: expect.any(Boolean),
+      source: expect.any(String),
+      warnings: expect.any(Array),
+    }),
+  });
+}
+
 const LEGACY_FLOW_TOOLS_ENV = 'WEBPAGE_MCP_EXPOSE_LEGACY_FLOW_TOOLS';
 const originalLegacyFlowToolsEnv = process.env[LEGACY_FLOW_TOOLS_ENV];
 
@@ -572,7 +588,7 @@ describe('dynamic published flow tools', () => {
           refresh: true,
           timeoutMs: 5000,
         },
-        meta: { mcpSessionId: 'dynamic-flow-workflow-call', instanceId: 'unit-test' },
+        meta: expectedForwardedMeta('dynamic-flow-workflow-call'),
       },
       NativeMessageType.CALL_TOOL,
       120000,
@@ -628,7 +644,7 @@ describe('dynamic published flow tools', () => {
           },
           background: true,
         },
-        meta: { mcpSessionId: 'dynamic-flow-workflow-capability-call', instanceId: 'unit-test' },
+        meta: expectedForwardedMeta('dynamic-flow-workflow-capability-call'),
       },
       NativeMessageType.CALL_TOOL,
       120000,
@@ -674,7 +690,7 @@ describe('dynamic published flow tools', () => {
           args: { email: 'alice@example.com' },
           background: true,
         },
-        meta: { mcpSessionId: 'direct-flow-run-capability-call', instanceId: 'unit-test' },
+        meta: expectedForwardedMeta('direct-flow-run-capability-call'),
       },
       NativeMessageType.CALL_TOOL,
       120000,
@@ -759,10 +775,7 @@ describe('dynamic published flow tools', () => {
             email: 'alice@example.com',
           },
         },
-        meta: {
-          mcpSessionId: 'dynamic-flow-workflow-debug-options',
-          instanceId: 'unit-test',
-        },
+        meta: expectedForwardedMeta('dynamic-flow-workflow-debug-options'),
       },
       NativeMessageType.CALL_TOOL,
       120000,
@@ -830,7 +843,7 @@ describe('dynamic published flow tools', () => {
             email: 'alice@example.com',
           },
         },
-        meta: { mcpSessionId: 'dynamic-flow-workflow-refresh', instanceId: 'unit-test' },
+        meta: expectedForwardedMeta('dynamic-flow-workflow-refresh'),
       },
       NativeMessageType.CALL_TOOL,
       120000,
@@ -882,7 +895,7 @@ describe('dynamic published flow tools', () => {
           refresh: true,
           timeoutMs: 5000,
         },
-        meta: { mcpSessionId: 'dynamic-flow-call', instanceId: 'unit-test' },
+        meta: expectedForwardedMeta('dynamic-flow-call'),
       },
       NativeMessageType.CALL_TOOL,
       120000,
@@ -975,7 +988,7 @@ describe('dynamic published flow tools', () => {
           startUrl: 'https://example.com/start',
           refresh: true,
         },
-        meta: { mcpSessionId: 'dynamic-flow-conflict', instanceId: 'unit-test' },
+        meta: expectedForwardedMeta('dynamic-flow-conflict'),
       },
       NativeMessageType.CALL_TOOL,
       120000,

@@ -901,6 +901,55 @@ describe("recording/editing/flow toolchain integration", () => {
       matchCount: 0,
       fingerprint: { status: "missing" },
     });
+
+    const fallbackResult = await workflowDebugViewTool.execute(
+      {
+        flowId,
+        runId,
+        maxEventsPerRun: 10,
+      },
+      {
+        meta: {
+          source: "mcp",
+          mcpSessionId: "debug-fallback",
+          clientCapabilities: {
+            toolListChanged: false,
+            resourceReferences: false,
+            cancellation: false,
+            structuredErrors: false,
+            largeResults: false,
+            source: "default",
+            warnings: ["resource references unavailable in test client"],
+          },
+        },
+      },
+    );
+    const fallbackPayload = parseToolPayload(fallbackResult);
+    expect(fallbackPayload.summary.clientCapabilities).toMatchObject({
+      mcp: true,
+      source: "default",
+      resourceReferences: false,
+      cancellation: false,
+      structuredErrors: false,
+      largeResults: false,
+    });
+    expect(fallbackPayload.summary.artifactCount).toBe(0);
+    expect(fallbackPayload.artifactPolicy.resourceReferences).toBe(
+      "unavailable_client_capability_unconfirmed",
+    );
+    expect(fallbackPayload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "CLIENT_RESOURCE_REFERENCES_UNCONFIRMED",
+          category: "capability",
+        }),
+        expect.objectContaining({
+          code: "CLIENT_LARGE_RESULTS_UNCONFIRMED",
+          category: "capability",
+        }),
+      ]),
+    );
+    expect(fallbackPayload.runs[0].artifacts).toBeUndefined();
   });
 
   it("workflowDebugViewTool filters debug output and cleans run artifacts", async () => {
@@ -1698,6 +1747,20 @@ describe("recording/editing/flow toolchain integration", () => {
       iterations: 3,
       minPassRate: 1,
       apply: false,
+    }, {
+      meta: {
+        source: "mcp",
+        mcpSessionId: "stabilize-fallback",
+        clientCapabilities: {
+          toolListChanged: false,
+          resourceReferences: false,
+          cancellation: false,
+          structuredErrors: false,
+          largeResults: false,
+          source: "default",
+          warnings: [],
+        },
+      },
     });
     const payload = parseToolPayload(result);
     const updated = await createStoragePort().flows.get(flowId as any);
@@ -1765,6 +1828,23 @@ describe("recording/editing/flow toolchain integration", () => {
       mfa: "unknown",
       captcha: "unknown",
     });
+    expect(payload.summary.clientCapabilities).toMatchObject({
+      mcp: true,
+      source: "default",
+      cancellation: false,
+      resourceReferences: false,
+    });
+    expect(payload.resumable).toMatchObject({
+      runGroupId: expect.stringMatching(/^stabilize-/),
+      boundedTimeoutMs: 120000,
+      cancellationCapability: "unconfirmed",
+    });
+    expect(payload.warnings.map((warning: { code: string }) => warning.code)).toContain(
+      "CLIENT_CANCELLATION_UNCONFIRMED",
+    );
+    expect(updated?.meta?.quality?.validationContext?.runGroupId).toBe(
+      payload.summary.runGroupId,
+    );
     expect(updated?.updatedAt).not.toBe(new Date(0).toISOString());
   });
 
