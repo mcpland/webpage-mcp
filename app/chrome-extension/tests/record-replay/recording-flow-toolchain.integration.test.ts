@@ -1571,19 +1571,25 @@ describe("recording/editing/flow toolchain integration", () => {
   it("flowRunTool forwards supported tab-binding options into the V3 runner path", async () => {
     const flowId = `flow-run-${Date.now()}`;
     await createStoragePort().flows.save(
-      createFlow(flowId, [
-        {
-          id: "fill-1" as any,
-          kind: "fill",
-          config: {
-            target: {
-              selector: "#email",
-              candidates: [{ type: "css", value: "#email" }],
+      createFlow(
+        flowId,
+        [
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: {
+              target: {
+                selector: "#email",
+                candidates: [{ type: "css", value: "#email" }],
+              },
+              value: "{email}",
             },
-            value: "{email}",
           },
+        ],
+        {
+          variables: [{ name: "email", kind: "string", required: true }],
         },
-      ]),
+      ),
     );
     mocks.enqueueRunAndWait.mockResolvedValue({
       run: { id: "run-toolchain" } as any,
@@ -1642,19 +1648,25 @@ describe("recording/editing/flow toolchain integration", () => {
   it("flowRunTool binds to an explicit tabId when one is provided", async () => {
     const flowId = `flow-run-tab-${Date.now()}`;
     await createStoragePort().flows.save(
-      createFlow(flowId, [
-        {
-          id: "fill-1" as any,
-          kind: "fill",
-          config: {
-            target: {
-              selector: "#email",
-              candidates: [{ type: "css", value: "#email" }],
+      createFlow(
+        flowId,
+        [
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: {
+              target: {
+                selector: "#email",
+                candidates: [{ type: "css", value: "#email" }],
+              },
+              value: "{email}",
             },
-            value: "{email}",
           },
+        ],
+        {
+          variables: [{ name: "email", kind: "string", required: true }],
         },
-      ]),
+      ),
     );
     mocks.enqueueRunAndWait.mockResolvedValue({
       run: { id: "run-toolchain-tab" } as any,
@@ -1692,19 +1704,25 @@ describe("recording/editing/flow toolchain integration", () => {
   it("flowRunTool rejects non-http startUrl values", async () => {
     const flowId = `flow-run-file-start-${Date.now()}`;
     await createStoragePort().flows.save(
-      createFlow(flowId, [
-        {
-          id: "fill-1" as any,
-          kind: "fill",
-          config: {
-            target: {
-              selector: "#email",
-              candidates: [{ type: "css", value: "#email" }],
+      createFlow(
+        flowId,
+        [
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: {
+              target: {
+                selector: "#email",
+                candidates: [{ type: "css", value: "#email" }],
+              },
+              value: "{email}",
             },
-            value: "{email}",
           },
+        ],
+        {
+          variables: [{ name: "email", kind: "string", required: true }],
         },
-      ]),
+      ),
     );
 
     const result = await flowRunTool.execute({
@@ -1719,8 +1737,8 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
   });
 
-  it("flowRunTool marks failed runs as MCP errors", async () => {
-    const flowId = `flow-run-failed-${Date.now()}`;
+  it("flowRunTool validates args before enqueueing replay", async () => {
+    const flowId = `flow-run-invalid-args-${Date.now()}`;
     await createStoragePort().flows.save(
       createFlow(flowId, [
         {
@@ -1734,7 +1752,63 @@ describe("recording/editing/flow toolchain integration", () => {
             value: "{email}",
           },
         },
+      ], {
+        variables: [
+          { name: "email", kind: "string", required: true },
+          { name: "attempts", kind: "number" },
+        ],
+      }),
+    );
+
+    const result = await flowRunTool.execute({
+      flowId,
+      args: {
+        attempts: "three",
+        extra: true,
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({
+      success: false,
+      flowId,
+      status: "validation_failed",
+      error: {
+        code: "INVALID_WORKFLOW_ARGS",
+        category: "validation",
+      },
+    });
+    expect(payload.error.errors.map((error: { code: string }) => error.code)).toEqual(
+      expect.arrayContaining([
+        "MISSING_REQUIRED_WORKFLOW_ARG",
+        "INVALID_WORKFLOW_ARG_TYPE",
+        "UNKNOWN_WORKFLOW_ARG",
       ]),
+    );
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+  });
+
+  it("flowRunTool marks failed runs as MCP errors", async () => {
+    const flowId = `flow-run-failed-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: {
+              target: {
+                selector: "#email",
+                candidates: [{ type: "css", value: "#email" }],
+              },
+              value: "{email}",
+            },
+          },
+        ],
+        { variables: [{ name: "email", kind: "string", required: true }] },
+      ),
     );
     mocks.enqueueRunAndWait.mockResolvedValue({
       run: { id: "run-toolchain-failed" } as any,

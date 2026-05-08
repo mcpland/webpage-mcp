@@ -3,6 +3,7 @@ import { TOOL_NAMES } from "webpage-mcp-shared";
 import { createStoragePort } from "../record-replay-v3";
 import type { FlowId } from "../record-replay-v3/domain/ids";
 import type { JsonObject } from "../record-replay-v3/domain/json";
+import type { FlowV3 } from "../record-replay-v3/domain/flow";
 import { listPublishedFlowDetails } from "../record-replay-v3/flows/publish";
 import { enqueueRunAndWait } from "../record-replay-v3/compat";
 
@@ -14,6 +15,127 @@ function hasDisallowedPublicUrlScheme(url: string): boolean {
 
   const protocol = match[1]?.toLowerCase();
   return protocol !== "http" && protocol !== "https";
+}
+
+interface FlowRunArgValidationError {
+  code: string;
+  path: string;
+  message: string;
+}
+
+function inferVariableKind(variable: NonNullable<FlowV3["variables"]>[number]): string {
+  if (variable.kind) return variable.kind;
+  if (typeof variable.default === "number") return "number";
+  if (typeof variable.default === "boolean") return "boolean";
+  if (Array.isArray(variable.default)) return "array";
+  if (variable.default && typeof variable.default === "object") return "json";
+  return "string";
+}
+
+function validateFlowRunArgs(
+  flow: FlowV3,
+  args: unknown,
+): { ok: true; args: JsonObject | undefined } | { ok: false; errors: FlowRunArgValidationError[] } {
+  if (args === undefined || args === null) {
+    args = {};
+  }
+  if (typeof args !== "object" || Array.isArray(args)) {
+    return {
+      ok: false,
+      errors: [
+        {
+          code: "INVALID_WORKFLOW_ARGS",
+          path: "/args",
+          message: "args must be an object",
+        },
+      ],
+    };
+  }
+
+  const variables = Array.isArray(flow.variables) ? flow.variables : [];
+  const input = args as Record<string, unknown>;
+  const knownVariables = new Map(variables.map((variable) => [variable.name, variable]));
+  const errors: FlowRunArgValidationError[] = [];
+
+  for (const key of Object.keys(input)) {
+    if (!knownVariables.has(key)) {
+      errors.push({
+        code: "UNKNOWN_WORKFLOW_ARG",
+        path: `/args/${key}`,
+        message: `Unknown workflow argument: ${key}`,
+      });
+    }
+  }
+
+  for (const variable of variables) {
+    if (!variable?.name) continue;
+    const hasValue = Object.prototype.hasOwnProperty.call(input, variable.name);
+    const value = input[variable.name];
+    if (variable.required === true && variable.default === undefined && !hasValue) {
+      errors.push({
+        code: "MISSING_REQUIRED_WORKFLOW_ARG",
+        path: `/args/${variable.name}`,
+        message: `Missing required workflow argument: ${variable.name}`,
+      });
+      continue;
+    }
+    if (!hasValue || value === undefined || value === null) {
+      continue;
+    }
+
+    const kind = inferVariableKind(variable);
+    const valid =
+      kind === "number"
+        ? typeof value === "number" && Number.isFinite(value)
+        : kind === "boolean"
+          ? typeof value === "boolean"
+          : kind === "array"
+            ? Array.isArray(value)
+            : kind === "json"
+              ? true
+              : kind === "enum"
+                ? Array.isArray(variable.options) && variable.options.includes(value as never)
+                : typeof value === "string";
+    if (!valid) {
+      errors.push({
+        code: "INVALID_WORKFLOW_ARG_TYPE",
+        path: `/args/${variable.name}`,
+        message: `Invalid value for workflow argument "${variable.name}"`,
+      });
+    }
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+
+  return {
+    ok: true,
+    args: Object.keys(input).length > 0 ? (input as JsonObject) : undefined,
+  };
+}
+
+function createFlowRunValidationError(flowId: string, errors: FlowRunArgValidationError[]): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          success: false,
+          flowId,
+          status: "validation_failed",
+          error: {
+            code: "INVALID_WORKFLOW_ARGS",
+            category: "validation",
+            retryable: false,
+            message: errors[0]?.message ?? "Invalid workflow arguments",
+            errors,
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
 }
 
 class FlowRunTool {
@@ -61,6 +183,10 @@ class FlowRunTool {
         "Only http:// and https:// URLs are allowed for startUrl",
       );
     }
+    const validatedArgs = validateFlowRunArgs(flow, vars);
+    if (!validatedArgs.ok) {
+      return createFlowRunValidationError(flow.id, validatedArgs.errors);
+    }
     const normalizedBaselines =
       normalizeScreenshotBaselines(screenshotBaselines);
     const unsupportedOptions = {
@@ -86,9 +212,7 @@ class FlowRunTool {
             : undefined,
         tabTarget: tabTarget === "new" ? "new" : "current",
         args:
-          vars && typeof vars === "object" && !Array.isArray(vars)
-            ? (vars as JsonObject)
-            : undefined,
+          validatedArgs.args,
         execution: {
           disallowLocalFileUploads: true,
           disallowLocalFilePages: true,
