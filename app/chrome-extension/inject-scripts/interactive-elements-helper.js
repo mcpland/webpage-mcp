@@ -1,4 +1,3 @@
-/* eslint-disable */
 // interactive-elements-helper.js
 // This script is injected into the page to find interactive elements.
 // Final version by Calvin, featuring a multi-layered fallback strategy

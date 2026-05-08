@@ -1,4 +1,3 @@
-/* eslint-disable */
 // keyboard-helper.js
 // This script is injected into the page to handle keyboard event simulation
 

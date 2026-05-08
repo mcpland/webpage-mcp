@@ -1,4 +1,3 @@
-/* eslint-disable */
 // Shared constants + selector engine for recorder.js
 
 (function () {

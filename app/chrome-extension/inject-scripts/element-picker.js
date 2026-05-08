@@ -1,4 +1,3 @@
-/* eslint-disable */
 /**
  * Element Picker Inject Script
  *

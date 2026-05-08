@@ -1,4 +1,3 @@
-/* eslint-disable */
 // dom-observer.js - observe DOM for triggers and notify background
 (function () {
   if (window.__RR_DOM_OBSERVER__) return;
