@@ -247,6 +247,45 @@ describe('dynamic published flow tools', () => {
     expect(tools.find((tool) => tool.name === 'flow.signup')).toBeUndefined();
   });
 
+  it('exposes workflow_stabilize with strict safety schema', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [],
+    });
+    const ctx = createContext('workflow-stabilize-schema', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const stabilizeTool = tools.find((tool) => tool.name === 'workflow_stabilize');
+    const input = stabilizeTool?.inputSchema as {
+      additionalProperties?: boolean;
+      oneOf?: unknown[];
+      allOf?: unknown[];
+      properties?: Record<string, any>;
+    };
+
+    expect(input.additionalProperties).toBe(false);
+    expect(input.oneOf).toHaveLength(2);
+    expect(input.allOf).toHaveLength(2);
+    expect(input.properties?.tabTarget).toMatchObject({
+      type: 'string',
+      enum: ['current', 'new'],
+    });
+    expect(input.properties?.safety?.additionalProperties).toBe(false);
+    expect(input.properties?.safety?.properties?.executionMode).toMatchObject({
+      enum: ['auto', 'analyzeOnly', 'sandboxReplay', 'userApprovedReplay'],
+    });
+    expect(input.properties?.safety?.properties?.nodeRiskOverrides).toMatchObject({
+      additionalProperties: false,
+    });
+    expect(
+      input.properties?.safety?.properties?.nodeRiskOverrides?.patternProperties?.[
+        '^[A-Za-z0-9_.:-]+$'
+      ],
+    ).toMatchObject({
+      enum: ['safe', 'idempotent', 'dangerous'],
+    });
+  });
+
   it('exposes a compact workflow_run tool with workflow slugs as an enum', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
       status: 'success',

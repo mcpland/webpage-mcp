@@ -113,6 +113,22 @@ interface WorkflowRepairChange {
   message: string;
 }
 
+type WorkflowRiskProfile = 'safe' | 'idempotent' | 'dangerous' | 'unknown';
+
+interface WorkflowStabilizeValidationError {
+  code: string;
+  path: string;
+  message: string;
+}
+
+interface WorkflowStabilizeWarning {
+  code: string;
+  category: 'validation' | 'safety' | 'capability';
+  message: string;
+  path?: string;
+  nodeId?: string;
+}
+
 const REDACTED = '<redacted>';
 const SENSITIVE_DEBUG_CONFIG_KEYS = new Set([
   'body',
@@ -167,6 +183,130 @@ function summarizeWorkflowSideEffects(flow: FlowV3): WorkflowSideEffectSummary {
     }
   }
   return summary;
+}
+
+function classifyWorkflowRisk(summary: WorkflowSideEffectSummary): WorkflowRiskProfile {
+  if ((summary.dangerous ?? 0) > 0) return 'dangerous';
+  if ((summary.unknown ?? 0) > 0) return 'unknown';
+  if ((summary.idempotent ?? 0) > 0) return 'idempotent';
+  return 'safe';
+}
+
+function riskRank(risk: WorkflowRiskProfile): number {
+  switch (risk) {
+    case 'safe':
+      return 0;
+    case 'idempotent':
+      return 1;
+    case 'dangerous':
+      return 2;
+    case 'unknown':
+      return 3;
+  }
+}
+
+function normalizeExecutionMode(value: unknown): 'auto' | 'analyzeOnly' | 'sandboxReplay' | 'userApprovedReplay' {
+  return value === 'analyzeOnly' || value === 'sandboxReplay' || value === 'userApprovedReplay'
+    ? value
+    : 'auto';
+}
+
+function hasTrustedApprovalReference(args: any): boolean {
+  const authorization = args?.safety?.authorization;
+  if (!authorization || typeof authorization !== 'object') {
+    return false;
+  }
+  const approvalId = typeof authorization.approvalId === 'string' ? authorization.approvalId.trim() : '';
+  const approvedBy = authorization.approvedBy;
+  const approvedAt = typeof authorization.approvedAt === 'string' ? authorization.approvedAt.trim() : '';
+  // Milestone 3A only accepts a reference shape; the trust root/store lookup is intentionally not implemented here.
+  return Boolean(approvalId && approvedAt && (approvedBy === 'user' || approvedBy === 'ui' || approvedBy === 'policy'));
+}
+
+function validateWorkflowStabilizeArgs(args: any): WorkflowStabilizeValidationError[] {
+  const errors: WorkflowStabilizeValidationError[] = [];
+  const flowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+  const workflow = typeof args?.workflow === 'string' ? args.workflow.trim() : '';
+
+  if ((flowId && workflow) || (!flowId && !workflow)) {
+    errors.push({
+      code: 'INVALID_WORKFLOW_IDENTIFIER',
+      path: '',
+      message: 'Exactly one of flowId or workflow is required',
+    });
+  }
+  if (args?.apply === true && args?.dryRun === true) {
+    errors.push({
+      code: 'MUTUALLY_EXCLUSIVE_OPTIONS',
+      path: '/apply',
+      message: 'apply=true cannot be combined with dryRun=true',
+    });
+  }
+  if (
+    typeof args?.tabId === 'number' &&
+    Number.isFinite(args.tabId) &&
+    args?.tabTarget === 'new'
+  ) {
+    errors.push({
+      code: 'MUTUALLY_EXCLUSIVE_OPTIONS',
+      path: '/tabId',
+      message: 'tabId cannot be combined with tabTarget="new"',
+    });
+  }
+  if (
+    args?.iterations !== undefined &&
+    (typeof args.iterations !== 'number' ||
+      !Number.isFinite(args.iterations) ||
+      args.iterations < 1 ||
+      args.iterations > 10)
+  ) {
+    errors.push({
+      code: 'INVALID_ITERATIONS',
+      path: '/iterations',
+      message: 'iterations must be a number from 1 to 10',
+    });
+  }
+  if (
+    args?.minPassRate !== undefined &&
+    (typeof args.minPassRate !== 'number' ||
+      !Number.isFinite(args.minPassRate) ||
+      args.minPassRate < 0 ||
+      args.minPassRate > 1)
+  ) {
+    errors.push({
+      code: 'INVALID_MIN_PASS_RATE',
+      path: '/minPassRate',
+      message: 'minPassRate must be a number from 0 to 1',
+    });
+  }
+
+  return errors;
+}
+
+function createStructuredToolError(
+  code: string,
+  message: string,
+  errors: WorkflowStabilizeValidationError[],
+): ToolResult {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          success: false,
+          status: 'validation_failed',
+          error: {
+            code,
+            category: 'validation',
+            retryable: false,
+            message,
+            errors,
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
 }
 
 function isSafeForFlowDefaultRetry(node: FlowV3['nodes'][number]): boolean {
@@ -1193,6 +1333,210 @@ class WorkflowRepairTool {
   }
 }
 
+class WorkflowStabilizeTool {
+  name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE;
+
+  async execute(args: any): Promise<ToolResult> {
+    const validationErrors = validateWorkflowStabilizeArgs(args);
+    if (validationErrors.length > 0) {
+      return createStructuredToolError(
+        'INVALID_WORKFLOW_STABILIZE_ARGS',
+        'Invalid workflow_stabilize arguments',
+        validationErrors,
+      );
+    }
+
+    const requestedFlowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
+    const requestedWorkflow = typeof args?.workflow === 'string' ? args.workflow.trim() : '';
+    const flow = await resolveFlowForWorkflowTool(args);
+    if (!flow) {
+      return createStructuredToolError(
+        'WORKFLOW_NOT_FOUND',
+        requestedFlowId
+          ? `Flow not found: ${requestedFlowId}`
+          : `Published workflow not found: ${requestedWorkflow}`,
+        [
+          {
+            code: 'WORKFLOW_NOT_FOUND',
+            path: requestedFlowId ? '/flowId' : '/workflow',
+            message: requestedFlowId
+              ? `Flow not found: ${requestedFlowId}`
+              : `Published workflow not found: ${requestedWorkflow}`,
+          },
+        ],
+      );
+    }
+
+    const publishedInfo = getPublishedFlowInfo(flow);
+    const hints = collectFlowHints(flow);
+    const runs = await collectDebugRuns(flow, {
+      ...args,
+      includeRuns: true,
+      includeArtifacts: args?.debug?.captureArtifacts !== 'none',
+      maxRuns: 3,
+      maxEventsPerRun: args?.debug?.maxEventsPerRun,
+    });
+    const recommendations = buildRepairRecommendations(flow, hints, runs);
+    const descriptor = buildWorkflowToolDescriptor(flow);
+    const sideEffects = descriptor.sideEffects.summary;
+    const risk = classifyWorkflowRisk(sideEffects);
+    const executionMode = normalizeExecutionMode(args?.safety?.executionMode);
+    const iterations = clampNumber(args?.iterations, 3, 1, 10);
+    const minPassRate =
+      typeof args?.minPassRate === 'number' && Number.isFinite(args.minPassRate)
+        ? Math.max(0, Math.min(1, args.minPassRate))
+        : 1;
+    const hasApprovalReference = hasTrustedApprovalReference(args);
+    const warnings: WorkflowStabilizeWarning[] = [];
+
+    const nodeRiskOverrides =
+      args?.safety?.nodeRiskOverrides &&
+      typeof args.safety.nodeRiskOverrides === 'object' &&
+      !Array.isArray(args.safety.nodeRiskOverrides)
+        ? (args.safety.nodeRiskOverrides as Record<string, WorkflowRiskProfile>)
+        : {};
+    for (const [nodeId, override] of Object.entries(nodeRiskOverrides)) {
+      if (override !== 'safe' && override !== 'idempotent' && override !== 'dangerous') {
+        warnings.push({
+          code: 'INVALID_NODE_RISK_OVERRIDE',
+          category: 'validation',
+          path: `/safety/nodeRiskOverrides/${nodeId}`,
+          nodeId,
+          message: 'nodeRiskOverrides values must be safe, idempotent, or dangerous',
+        });
+        continue;
+      }
+      const node = flow.nodes.find((candidate) => candidate.id === nodeId);
+      const actualRisk = node ? getNodeSideEffectProfile(node).category : 'unknown';
+      if (riskRank(override) < riskRank(actualRisk) && !hasApprovalReference) {
+        warnings.push({
+          code: 'UNTRUSTED_RISK_DOWNGRADE_IGNORED',
+          category: 'safety',
+          path: `/safety/nodeRiskOverrides/${nodeId}`,
+          nodeId,
+          message:
+            'Risk downgrade overrides require a trusted approval reference and are ignored in analyze-only mode.',
+        });
+      }
+    }
+
+    const requestsExternalSideEffects = args?.safety?.allowExternalSideEffects === true;
+    const maxDangerousRuns =
+      typeof args?.safety?.maxDangerousRuns === 'number' && Number.isFinite(args.safety.maxDangerousRuns)
+        ? Math.max(0, Math.min(3, Math.floor(args.safety.maxDangerousRuns)))
+        : 0;
+    let blockedReason: string | undefined;
+    if ((risk === 'dangerous' || risk === 'unknown') && executionMode === 'auto') {
+      blockedReason = `${risk} workflow defaults to analyze-only`;
+    } else if (
+      (risk === 'dangerous' || risk === 'unknown') &&
+      (requestsExternalSideEffects || maxDangerousRuns > 0 || executionMode === 'userApprovedReplay') &&
+      !hasApprovalReference
+    ) {
+      blockedReason = 'external side effects require a trusted approval reference';
+    } else if (executionMode === 'sandboxReplay' && !args?.safety?.testEnvironment) {
+      blockedReason = 'sandboxReplay requires safety.testEnvironment';
+    }
+
+    if (blockedReason) {
+      warnings.push({
+        code: 'STABILIZE_REPLAY_BLOCKED',
+        category: 'safety',
+        message: blockedReason,
+      });
+    }
+    if (args?.apply === true) {
+      warnings.push({
+        code: 'STABILIZE_APPLY_NOT_AVAILABLE',
+        category: 'capability',
+        message:
+          'workflow_stabilize currently runs the safety/analyze core only. Use workflow_repair for low-risk apply repairs until validation replay is enabled.',
+      });
+    }
+
+    const failedRuns = runs.filter((run) => run.status === 'failed').length;
+    const passedRuns = runs.filter((run) => run.status === 'succeeded').length;
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            flowId: flow.id,
+            workflow: publishedInfo?.slug,
+            applied: false,
+            stable: false,
+            score: {
+              passRate: 0,
+              passedRuns: 0,
+              failedRuns: 0,
+              iterations,
+              inspectedPassedRuns: passedRuns,
+              inspectedFailedRuns: failedRuns,
+            },
+            summary: {
+              nodeCount: countFlowNodes(flow),
+              hintCount: hints.length,
+              recommendationCount: recommendations.length,
+              changeCount: 0,
+              inspectedRunCount: runs.length,
+            },
+            safety: {
+              risk,
+              executionMode: blockedReason ? 'analyzeOnly' : executionMode === 'auto' ? 'analyzeOnly' : executionMode,
+              requestedIterations: iterations,
+              minPassRate,
+              executedIterations: 0,
+              ...(blockedReason ? { blockedReason } : {}),
+              sideEffects,
+              approvalReferenceAccepted: false,
+            },
+            capabilities: {
+              replayValidation: 'none',
+              domSnapshot: 'unknown',
+              accessibilitySnapshot: 'unknown',
+              networkEvents: 'unknown',
+              screenshots: 'partial',
+              crossOriginFrames: 'unknown',
+              closedShadowDom: 'unknown',
+              unsupportedReasons: [
+                'workflow_stabilize validation replay is not enabled in the analyze-only safety core',
+              ],
+            },
+            hints,
+            recommendations,
+            changes: [],
+            artifacts: {
+              policy: args?.debug?.captureArtifacts ?? 'failureOnly',
+              debugArgs: {
+                tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
+                ...(runs[0]?.id ? { runId: runs[0].id } : {}),
+                ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : { flowId: flow.id }),
+              },
+            },
+            warnings,
+            nextActions: [
+              {
+                tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
+                args: publishedInfo?.slug ? { workflow: publishedInfo.slug } : { flowId: flow.id },
+              },
+              {
+                tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR,
+                args: {
+                  ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : { flowId: flow.id }),
+                  apply: false,
+                },
+              },
+            ],
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+}
+
 class FlowUpdateTool {
   name = TOOL_NAMES.RECORD_REPLAY.FLOW_UPDATE;
 
@@ -1302,3 +1646,4 @@ export const flowUpdateTool = new FlowUpdateTool();
 export const workflowDescribeTool = new WorkflowDescribeTool();
 export const workflowDebugViewTool = new WorkflowDebugViewTool();
 export const workflowRepairTool = new WorkflowRepairTool();
+export const workflowStabilizeTool = new WorkflowStabilizeTool();

@@ -44,6 +44,7 @@ import {
   workflowDescribeTool,
   workflowDebugViewTool,
   workflowRepairTool,
+  workflowStabilizeTool,
 } from "@/entrypoints/background/tools/flow-tools";
 import {
   flowRunTool,
@@ -1173,6 +1174,121 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(payload.plannedAutoFixes).not.toContain("parameterize_recorded_values");
     expect(updated?.variables).toEqual([]);
     expect((updated?.nodes[0].config as { value?: string }).value).toBe("bob@example.com");
+  });
+
+  it("workflowStabilizeTool returns analyze-only recommendations without mutating", async () => {
+    const flowId = `workflow-stabilize-safe-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 3,
+      minPassRate: 1,
+      apply: false,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: true,
+      flowId,
+      applied: false,
+      stable: false,
+      score: {
+        passRate: 0,
+        iterations: 3,
+      },
+      safety: {
+        risk: "safe",
+        executionMode: "analyzeOnly",
+        executedIterations: 0,
+      },
+    });
+    expect(payload.recommendations.map((item: { code: string }) => item.code)).toContain(
+      "missing_default_timeout_policy",
+    );
+    expect(payload.capabilities.unsupportedReasons[0]).toContain("analyze-only safety core");
+    expect(updated?.updatedAt).toBe(new Date(0).toISOString());
+  });
+
+  it("workflowStabilizeTool defaults dangerous workflows to analyze-only", async () => {
+    const flowId = `workflow-stabilize-dangerous-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "click-1" as any,
+          kind: "click",
+          config: { target: { candidates: [{ type: "css", value: "#buy" }] } },
+        },
+      ]),
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 5,
+      apply: true,
+      safety: {
+        executionMode: "auto",
+        allowExternalSideEffects: true,
+        maxDangerousRuns: 2,
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: true,
+      applied: false,
+      safety: {
+        risk: "dangerous",
+        executionMode: "analyzeOnly",
+        executedIterations: 0,
+        blockedReason: "dangerous workflow defaults to analyze-only",
+      },
+    });
+    expect(payload.warnings.map((warning: { code: string }) => warning.code)).toEqual(
+      expect.arrayContaining(["STABILIZE_REPLAY_BLOCKED", "STABILIZE_APPLY_NOT_AVAILABLE"]),
+    );
+  });
+
+  it("workflowStabilizeTool returns structured validation errors", async () => {
+    const result = await workflowStabilizeTool.execute({
+      flowId: "flow-a",
+      workflow: "slug-a",
+      apply: true,
+      dryRun: true,
+      tabId: 1,
+      tabTarget: "new",
+      iterations: 99,
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({
+      success: false,
+      status: "validation_failed",
+      error: {
+        code: "INVALID_WORKFLOW_STABILIZE_ARGS",
+        category: "validation",
+        retryable: false,
+      },
+    });
+    expect(payload.error.errors.map((error: { code: string }) => error.code)).toEqual(
+      expect.arrayContaining([
+        "INVALID_WORKFLOW_IDENTIFIER",
+        "MUTUALLY_EXCLUSIVE_OPTIONS",
+        "INVALID_ITERATIONS",
+      ]),
+    );
   });
 
   it("flowUpdateTool applies parameter suggestions and persists the edited flow", async () => {

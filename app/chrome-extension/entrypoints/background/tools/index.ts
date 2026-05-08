@@ -10,6 +10,7 @@ import {
   workflowDescribeTool,
   workflowDebugViewTool,
   workflowRepairTool,
+  workflowStabilizeTool,
 } from './flow-tools';
 import { recordingStartTool, recordingStatusTool, recordingStopTool } from './recording';
 import { getSessionContext, patchSessionContext } from '../session-context';
@@ -24,6 +25,7 @@ const tools = {
   workflowDescribeTool,
   workflowDebugViewTool,
   workflowRepairTool,
+  workflowStabilizeTool,
   recordingStartTool,
   recordingStopTool,
   recordingStatusTool,

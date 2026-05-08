@@ -51,6 +51,7 @@ export const TOOL_NAMES = {
     WORKFLOW_DESCRIBE: 'workflow_describe',
     WORKFLOW_DEBUG_VIEW: 'workflow_debug_view',
     WORKFLOW_REPAIR: 'workflow_repair',
+    WORKFLOW_STABILIZE: 'workflow_stabilize',
   },
 };
 
@@ -344,6 +345,202 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
       },
       required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
+    description:
+      'Analyze workflow stability, risk, debug capability, and repair recommendations. Dangerous or unknown workflows default to analyze-only unless a trusted approval policy exists.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Draft or recorded flow ID to stabilize. Exactly one of flowId or workflow is required.',
+        },
+        workflow: {
+          type: 'string',
+          description: 'Published workflow slug to stabilize. Exactly one of workflow or flowId is required.',
+        },
+        args: {
+          type: 'object',
+          description: 'Workflow variable values keyed by variable name.',
+          additionalProperties: true,
+        },
+        startUrl: {
+          type: 'string',
+          description: 'Optional http(s) URL used as the validation start point.',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Explicit tab to bind diagnostic runs to. Cannot be combined with tabTarget=new.',
+        },
+        tabTarget: {
+          type: 'string',
+          enum: ['current', 'new'],
+          default: 'current',
+        },
+        background: {
+          type: 'boolean',
+          default: false,
+        },
+        iterations: {
+          type: 'number',
+          minimum: 1,
+          maximum: 10,
+          default: 3,
+        },
+        minPassRate: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          default: 1,
+        },
+        apply: {
+          type: 'boolean',
+          default: false,
+        },
+        dryRun: {
+          type: 'boolean',
+          default: false,
+        },
+        stopOnDangerousSideEffects: {
+          type: 'boolean',
+          description: 'Compatibility alias. Prefer safety.executionMode and safety.maxDangerousRuns.',
+        },
+        repair: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            parameterize: { type: 'boolean', default: true },
+            defaultStabilityPolicy: { type: 'boolean', default: true },
+            selectors: { type: 'boolean', default: true },
+            waits: { type: 'boolean', default: true },
+            assertions: { type: 'boolean', default: true },
+          },
+        },
+        safety: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            executionMode: {
+              type: 'string',
+              enum: ['auto', 'analyzeOnly', 'sandboxReplay', 'userApprovedReplay'],
+              default: 'auto',
+            },
+            allowExternalSideEffects: { type: 'boolean', default: false },
+            maxDangerousRuns: { type: 'number', minimum: 0, maximum: 3, default: 0 },
+            requireRevision: { type: 'string' },
+            allowedHosts: { type: 'array', items: { type: 'string' } },
+            testEnvironment: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                name: { type: 'string' },
+                origins: { type: 'array', items: { type: 'string' } },
+                pathPrefixes: { type: 'array', items: { type: 'string' } },
+                accountLabel: { type: 'string' },
+                allowedExternalDestinations: { type: 'array', items: { type: 'string' } },
+              },
+            },
+            authorization: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                approvalId: { type: 'string' },
+                approvedBy: { type: 'string', enum: ['user', 'ui', 'policy'] },
+                approvedAt: { type: 'string' },
+              },
+            },
+            resetWorkflow: {
+              type: 'string',
+              description: 'Compatibility alias for safety.reset.workflow.',
+            },
+            reset: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                workflow: { type: 'string' },
+                args: { type: 'object', additionalProperties: true },
+                maxRuns: { type: 'number', minimum: 0, maximum: 3, default: 1 },
+                requireStable: { type: 'boolean', default: true },
+              },
+            },
+            segments: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                mode: { type: 'string', enum: ['none', 'stopBeforeDangerous', 'explicit'], default: 'none' },
+                stopBeforeNodeId: { type: 'string' },
+                endNodeId: { type: 'string' },
+              },
+            },
+            nodeRiskOverrides: {
+              type: 'object',
+              patternProperties: {
+                '^[A-Za-z0-9_.:-]+$': {
+                  type: 'string',
+                  enum: ['safe', 'idempotent', 'dangerous'],
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        debug: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            captureArtifacts: {
+              type: 'string',
+              enum: ['none', 'failureOnly', 'all'],
+              default: 'failureOnly',
+            },
+            keepTabOpenOnFailure: { type: 'boolean', default: false },
+            domSnapshot: {
+              type: 'string',
+              enum: ['none', 'failureTargetSlice', 'accessibilitySlice'],
+              default: 'none',
+            },
+            maxEventsPerRun: { type: 'number', minimum: 0, maximum: 100, default: 40 },
+            artifactTtlMs: { type: 'number', minimum: 1000 },
+            maxArtifactBytes: { type: 'number', minimum: 0 },
+          },
+        },
+        tab: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ownership: { type: 'string', enum: ['owned', 'current'], default: 'owned' },
+            allowFocusChange: { type: 'boolean', default: false },
+            cleanup: { type: 'string', enum: ['always', 'onSuccess', 'manual'], default: 'always' },
+          },
+        },
+      },
+      oneOf: [
+        { required: ['flowId'], not: { required: ['workflow'] } },
+        { required: ['workflow'], not: { required: ['flowId'] } },
+      ],
+      allOf: [
+        {
+          not: {
+            required: ['apply', 'dryRun'],
+            properties: {
+              apply: { const: true },
+              dryRun: { const: true },
+            },
+          },
+        },
+        {
+          not: {
+            required: ['tabId', 'tabTarget'],
+            properties: {
+              tabTarget: { const: 'new' },
+            },
+          },
+        },
+      ],
     },
   },
   {
