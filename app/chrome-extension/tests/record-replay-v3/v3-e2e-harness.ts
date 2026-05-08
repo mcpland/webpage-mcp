@@ -418,7 +418,11 @@ export function createV3E2EHarness(options: V3E2EHarnessOptions = {}): V3E2EHarn
     // Wait for final event
     await waitForEvent(
       runId,
-      (e) => e.type === 'run.succeeded' || e.type === 'run.failed' || e.type === 'run.canceled',
+      (e) =>
+        e.type === 'run.succeeded' ||
+        e.type === 'run.failed' ||
+        e.type === 'run.canceled' ||
+        e.type === 'run.stopped_at_boundary',
       { timeoutMs },
     );
 
@@ -547,6 +551,8 @@ function createE2EExecutor(deps: {
       tabId,
       args: item.args ?? run.args,
       startNodeId: run.startNodeId,
+      stopBeforeNodeId: run.stopBeforeNodeId,
+      endNodeId: run.endNodeId,
       debug: item.debug ?? run.debug,
     });
 

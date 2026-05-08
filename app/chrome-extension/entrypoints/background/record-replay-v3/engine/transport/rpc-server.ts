@@ -294,6 +294,8 @@ export class RpcServer {
         flowId: params?.flowId as FlowId,
         tabId: resolvedTabId,
         startNodeId: params?.startNodeId as NodeId | undefined,
+        stopBeforeNodeId: params?.stopBeforeNodeId as NodeId | undefined,
+        endNodeId: params?.endNodeId as NodeId | undefined,
         priority: params?.priority as number | undefined,
         maxAttempts: params?.maxAttempts as number | undefined,
         args: params?.args as JsonObject | undefined,

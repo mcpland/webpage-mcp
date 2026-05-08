@@ -276,6 +276,8 @@ function createDefaultRunExecutor(deps: {
         args: item.args,
         execution: run.execution ?? item.execution,
         startNodeId: run.startNodeId,
+        stopBeforeNodeId: run.stopBeforeNodeId,
+        endNodeId: run.endNodeId,
         debug: item.debug,
       });
 

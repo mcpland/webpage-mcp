@@ -44,6 +44,27 @@ function createTestFlow(
   };
 }
 
+function createThreeNodeFlow(id: string): FlowV3 {
+  const iso = new Date(0).toISOString();
+  return {
+    schemaVersion: FLOW_SCHEMA_VERSION,
+    id,
+    name: `Segment Flow ${id}`,
+    createdAt: iso,
+    updatedAt: iso,
+    entryNodeId: 'node-1',
+    nodes: [
+      { id: 'node-1', kind: 'test', config: { action: 'succeed', outputs: { one: true } } },
+      { id: 'node-2', kind: 'test', config: { action: 'succeed', outputs: { two: true } } },
+      { id: 'node-3', kind: 'test', config: { action: 'succeed', outputs: { three: true } } },
+    ],
+    edges: [
+      { id: 'edge-1', from: 'node-1', to: 'node-2' },
+      { id: 'edge-2', from: 'node-2', to: 'node-3' },
+    ],
+  };
+}
+
 /**
  * Create a RunRecord for testing
  */
@@ -148,6 +169,68 @@ describe('V3 service-level E2E', () => {
 
       expect(types).toContain('run.failed');
       expect(types).toContain('node.failed');
+    });
+
+    it('stopBeforeNodeId stops a segment before executing the boundary node', async () => {
+      const flow = createThreeNodeFlow('flow-stop-before');
+      await h.storage.flows.save(flow);
+
+      const result = await client.call<{ runId: string }>('rr_v3.enqueueRun', {
+        flowId: flow.id,
+        stopBeforeNodeId: 'node-2',
+      });
+
+      const run = await h.waitForTerminal(result.runId);
+      expect(run.status).toBe('stopped_at_boundary');
+      expect(run.currentNodeId).toBe('node-2');
+      expect(run.outputs).toEqual({ one: true });
+
+      await h.waitForQueueItemGone(result.runId);
+
+      const events = await h.listEvents(result.runId);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'run.stopped_at_boundary',
+          boundary: { kind: 'stopBeforeNode', nodeId: 'node-2' },
+        }),
+      );
+      expect(events).toContainEqual(expect.objectContaining({ type: 'node.started', nodeId: 'node-1' }));
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ type: 'node.started', nodeId: 'node-2' }),
+      );
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ type: 'node.started', nodeId: 'node-3' }),
+      );
+    });
+
+    it('endNodeId stops a segment after the boundary node succeeds', async () => {
+      const flow = createThreeNodeFlow('flow-end-node');
+      await h.storage.flows.save(flow);
+
+      const result = await client.call<{ runId: string }>('rr_v3.enqueueRun', {
+        flowId: flow.id,
+        endNodeId: 'node-2',
+      });
+
+      const run = await h.waitForTerminal(result.runId);
+      expect(run.status).toBe('stopped_at_boundary');
+      expect(run.currentNodeId).toBe('node-2');
+      expect(run.outputs).toEqual({ one: true, two: true });
+
+      await h.waitForQueueItemGone(result.runId);
+
+      const events = await h.listEvents(result.runId);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'run.stopped_at_boundary',
+          boundary: { kind: 'endNode', nodeId: 'node-2' },
+        }),
+      );
+      expect(events).toContainEqual(expect.objectContaining({ type: 'node.started', nodeId: 'node-1' }));
+      expect(events).toContainEqual(expect.objectContaining({ type: 'node.started', nodeId: 'node-2' }));
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ type: 'node.started', nodeId: 'node-3' }),
+      );
     });
   });
 

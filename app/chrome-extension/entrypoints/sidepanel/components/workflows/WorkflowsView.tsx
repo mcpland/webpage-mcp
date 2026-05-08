@@ -42,7 +42,8 @@ export interface RunLite {
     | "paused"
     | "succeeded"
     | "failed"
-    | "canceled";
+    | "canceled"
+    | "stopped_at_boundary";
   entries: Array<{
     status?: string;
     stepId?: string;
@@ -517,6 +518,8 @@ export default function WorkflowsView({
       if (run.status === "succeeded") return "var(--ac-success, #22c55e)";
       if (run.status === "failed" || run.status === "canceled")
         return "var(--ac-danger, #ef4444)";
+      if (run.status === "stopped_at_boundary")
+        return "var(--ac-warning, #f59e0b)";
       return "var(--ac-primary, #3b82f6)";
     }
 
@@ -534,6 +537,10 @@ export default function WorkflowsView({
         succeeded: t("workflowsRunSucceeded", "Succeeded"),
         failed: t("workflowsRunFailed", "Failed"),
         canceled: t("workflowsRunCanceled", "Canceled"),
+        stopped_at_boundary: t(
+          "workflowsRunStoppedAtBoundary",
+          "Stopped at boundary",
+        ),
       };
       return statusMap[run.status] || run.status;
     }

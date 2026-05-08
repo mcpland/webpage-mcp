@@ -24,6 +24,10 @@ export interface RunStartRequest {
   args?: JsonObject;
   /** Starting node ID (default is Flow's entryNodeId) */
   startNodeId?: NodeId;
+  /** Stop before this node is executed, used for segment validation. */
+  stopBeforeNodeId?: NodeId;
+  /** Stop after this node succeeds or is skipped, used for segment validation. */
+  endNodeId?: NodeId;
   /** Tab ID（Must be allocated by the caller, exclusive per Run) */
   tabId: number;
   /** Debug configuration */
@@ -37,13 +41,15 @@ export interface RunResult {
   /** Run ID */
   runId: RunId;
   /** final state */
-  status: Extract<RunStatus, 'succeeded' | 'failed' | 'canceled'>;
+  status: Extract<RunStatus, 'succeeded' | 'failed' | 'canceled' | 'stopped_at_boundary'>;
   /** Total time spent (milliseconds) */
   tookMs: number;
   /** Error message (if failure) */
   error?: RRError;
   /** Output results */
   outputs?: JsonObject;
+  /** Segment boundary reached by a stopped_at_boundary run. */
+  boundary?: { kind: 'stopBeforeNode'; nodeId: NodeId } | { kind: 'endNode'; nodeId: NodeId };
 }
 
 /**

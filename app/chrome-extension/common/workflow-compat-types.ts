@@ -99,6 +99,7 @@ export interface RunLogEntry {
 export interface RunResult {
   runId: string;
   success: boolean;
+  status?: string;
   tabId?: number;
   summary: { total: number; success: number; failed: number; tookMs: number };
   url?: string | null;

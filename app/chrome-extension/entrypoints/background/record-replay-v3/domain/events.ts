@@ -13,7 +13,14 @@ import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
 export type Unsubscribe = () => void;
 
 /** Run Status */
-export type RunStatus = 'queued' | 'running' | 'paused' | 'succeeded' | 'failed' | 'canceled';
+export type RunStatus =
+  | 'queued'
+  | 'running'
+  | 'paused'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled'
+  | 'stopped_at_boundary';
 
 /**
  * Event basic interface
@@ -64,6 +71,14 @@ export type RunEvent =
     })
   | (EventBase & { type: 'run.canceled'; reason?: string })
   | (EventBase & { type: 'run.succeeded'; tookMs: number; outputs?: JsonObject })
+  | (EventBase & {
+      type: 'run.stopped_at_boundary';
+      tookMs: number;
+      boundary:
+        | { kind: 'stopBeforeNode'; nodeId: NodeId }
+        | { kind: 'endNode'; nodeId: NodeId };
+      outputs?: JsonObject;
+    })
   | (EventBase & { type: 'run.failed'; error: RRError; nodeId?: NodeId })
 
   // ===== Node Execution event =====
@@ -157,6 +172,10 @@ export interface RunRecordV3 {
   tabId?: number;
   /** Starting node ID (if not the default entry) */
   startNodeId?: NodeId;
+  /** Stop before this node is executed, used for segment validation. */
+  stopBeforeNodeId?: NodeId;
+  /** Stop after this node succeeds or is skipped, used for segment validation. */
+  endNodeId?: NodeId;
   /** Current execution node ID */
   currentNodeId?: NodeId;
 
@@ -187,7 +206,12 @@ export interface RunRecordV3 {
  * Determine whether Run has terminated
  */
 export function isTerminalStatus(status: RunStatus): boolean {
-  return status === 'succeeded' || status === 'failed' || status === 'canceled';
+  return (
+    status === 'succeeded' ||
+    status === 'failed' ||
+    status === 'canceled' ||
+    status === 'stopped_at_boundary'
+  );
 }
 
 /**

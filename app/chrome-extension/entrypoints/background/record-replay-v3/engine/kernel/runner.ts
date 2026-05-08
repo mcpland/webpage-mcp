@@ -73,6 +73,10 @@ export interface RunnerConfig {
   execution?: RunRecordV3['execution'];
   /** Start node ID */
   startNodeId?: NodeId;
+  /** Stop before this node is executed, used for segment validation. */
+  stopBeforeNodeId?: NodeId;
+  /** Stop after this node succeeds or is skipped, used for segment validation. */
+  endNodeId?: NodeId;
   /** Debug configuration */
   debug?: { breakpoints?: NodeId[]; pauseOnStart?: boolean };
 }
@@ -291,6 +295,12 @@ type OnErrorDecision =
 type NodeRunResult =
   | { nextNodeId: NodeId | null }
   | { terminal: 'failed'; error: RRError }
+  | {
+      terminal: 'stopped_at_boundary';
+      boundary:
+        | { kind: 'stopBeforeNode'; nodeId: NodeId }
+        | { kind: 'endNode'; nodeId: NodeId };
+    }
   | { terminal: 'canceled' };
 
 /**
@@ -452,6 +462,8 @@ class StorageBackedRunRunner implements RunRunner {
           startedAt,
           tabId: this.config.tabId,
           startNodeId: this.config.startNodeId,
+          stopBeforeNodeId: this.config.stopBeforeNodeId,
+          endNodeId: this.config.endNodeId,
           currentNodeId: startNodeId,
           attempt: 0,
           maxAttempts: 1,
@@ -478,6 +490,9 @@ class StorageBackedRunRunner implements RunRunner {
       };
       if (existing.startedAt === undefined) patch.startedAt = startedAt;
       if (this.config.startNodeId !== undefined) patch.startNodeId = this.config.startNodeId;
+      if (this.config.stopBeforeNodeId !== undefined)
+        patch.stopBeforeNodeId = this.config.stopBeforeNodeId;
+      if (this.config.endNodeId !== undefined) patch.endNodeId = this.config.endNodeId;
       if (this.config.args !== undefined) patch.args = this.config.args;
       if (this.config.debug !== undefined) patch.debug = this.config.debug;
       if (this.config.execution !== undefined) patch.execution = this.config.execution;
@@ -537,6 +552,13 @@ class StorageBackedRunRunner implements RunRunner {
       await this.waitIfPaused();
       if (this.state.canceled) break;
 
+      if (this.config.stopBeforeNodeId === currentNodeId) {
+        return this.finishStoppedAtBoundary(startedAt, {
+          kind: 'stopBeforeNode',
+          nodeId: currentNodeId,
+        });
+      }
+
       const node = findNodeById(flow, currentNodeId);
       if (!node) {
         const error = createRRError(
@@ -556,6 +578,12 @@ class StorageBackedRunRunner implements RunRunner {
             reason: 'disabled',
           } as RunEventInput),
         );
+        if (this.config.endNodeId === node.id) {
+          return this.finishStoppedAtBoundary(startedAt, {
+            kind: 'endNode',
+            nodeId: node.id,
+          });
+        }
         currentNodeId = findNextNode(flow, node.id);
         continue;
       }
@@ -591,6 +619,9 @@ class StorageBackedRunRunner implements RunRunner {
       const next = await this.runNode(flow, node, nodeStartAt);
       if ('terminal' in next) {
         if (next.terminal === 'canceled') break;
+        if (next.terminal === 'stopped_at_boundary') {
+          return this.finishStoppedAtBoundary(startedAt, next.boundary);
+        }
         if (next.terminal === 'failed') {
           return this.finishFailed(startedAt, next.error, node.id);
         }
@@ -661,6 +692,13 @@ class StorageBackedRunRunner implements RunRunner {
             ...(exec.next ? { next: exec.next } : {}),
           } as RunEventInput),
         );
+
+        if (this.config.endNodeId === node.id) {
+          return {
+            terminal: 'stopped_at_boundary',
+            boundary: { kind: 'endNode', nodeId: node.id },
+          };
+        }
 
         if (exec.next?.kind === 'end') {
           return { nextNodeId: null };
@@ -1030,6 +1068,37 @@ class StorageBackedRunRunner implements RunRunner {
     });
 
     return { runId: this.runId, status: 'failed', tookMs, error };
+  }
+
+  private async finishStoppedAtBoundary(
+    startedAt: number,
+    boundary: { kind: 'stopBeforeNode'; nodeId: NodeId } | { kind: 'endNode'; nodeId: NodeId },
+  ): Promise<RunResult> {
+    const tookMs = this.env.now() - startedAt;
+    await this.queue.run(async () => {
+      await this.env.storage.runs.patch(this.runId, {
+        status: 'stopped_at_boundary',
+        finishedAt: this.env.now(),
+        tookMs,
+        currentNodeId: boundary.nodeId,
+        outputs: this.outputs,
+      });
+      await this.env.events.append({
+        runId: this.runId,
+        type: 'run.stopped_at_boundary',
+        tookMs,
+        boundary,
+        outputs: this.outputs,
+      } as RunEventInput);
+    });
+
+    return {
+      runId: this.runId,
+      status: 'stopped_at_boundary',
+      tookMs,
+      outputs: this.outputs,
+      boundary,
+    };
   }
 
   private async finishCanceled(startedAt: number): Promise<RunResult> {

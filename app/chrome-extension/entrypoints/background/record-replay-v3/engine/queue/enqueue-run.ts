@@ -46,6 +46,10 @@ export interface EnqueueRunInput {
   tabId?: number;
   /** Starting node ID (optional, Flow’s entryNodeId is used by default) */
   startNodeId?: NodeId;
+  /** Stop before this node is executed, used for segment validation. */
+  stopBeforeNodeId?: NodeId;
+  /** Stop after this node succeeds or is skipped, used for segment validation. */
+  endNodeId?: NodeId;
   /** priority (default 0) */
   priority?: number;
   /** Maximum number of attempts (default 1) */
@@ -165,11 +169,25 @@ export async function enqueueRun(
     throw new Error(`Flow "${flowId}" not found`);
   }
 
-  // Verify startNodeId exists in Flow
+  const nodeExists = (nodeId: NodeId): boolean => flow.nodes.some((n) => n.id === nodeId);
+
+  // Verify segment boundary nodes exist in Flow
   if (input.startNodeId) {
-    const nodeExists = flow.nodes.some((n) => n.id === input.startNodeId);
-    if (!nodeExists) {
+    const exists = nodeExists(input.startNodeId);
+    if (!exists) {
       throw new Error(`startNodeId "${input.startNodeId}" not found in flow "${flowId}"`);
+    }
+  }
+  if (input.stopBeforeNodeId) {
+    const exists = nodeExists(input.stopBeforeNodeId);
+    if (!exists) {
+      throw new Error(`stopBeforeNodeId "${input.stopBeforeNodeId}" not found in flow "${flowId}"`);
+    }
+  }
+  if (input.endNodeId) {
+    const exists = nodeExists(input.endNodeId);
+    if (!exists) {
+      throw new Error(`endNodeId "${input.endNodeId}" not found in flow "${flowId}"`);
     }
   }
 
@@ -191,6 +209,8 @@ export async function enqueueRun(
     debug: input.debug,
     execution: input.execution,
     startNodeId: input.startNodeId,
+    stopBeforeNodeId: input.stopBeforeNodeId,
+    endNodeId: input.endNodeId,
     tabId: input.tabId,
     nextSeq: 0,
   };

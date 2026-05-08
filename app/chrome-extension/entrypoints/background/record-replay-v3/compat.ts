@@ -280,6 +280,7 @@ export function buildCompatRunResult(
   return {
     runId: run.id,
     success: run.status === "succeeded",
+    status: run.status,
     ...(typeof run.tabId === "number" ? { tabId: run.tabId } : {}),
     summary: {
       total,
@@ -302,6 +303,8 @@ export async function enqueueRunAndWait(input: {
   startUrl?: string;
   refresh?: boolean;
   startNodeId?: string;
+  stopBeforeNodeId?: string;
+  endNodeId?: string;
   timeoutMs?: number;
 }): Promise<{ run: RunRecordV3; events: RunEvent[]; result: RunResult }> {
   const runtime = await ensureV3Runtime();
@@ -324,6 +327,8 @@ export async function enqueueRunAndWait(input: {
       args: input.args,
       execution: input.execution,
       startNodeId: input.startNodeId as FlowV3["entryNodeId"] | undefined,
+      stopBeforeNodeId: input.stopBeforeNodeId as FlowV3["entryNodeId"] | undefined,
+      endNodeId: input.endNodeId as FlowV3["entryNodeId"] | undefined,
     },
   );
 
