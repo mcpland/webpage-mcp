@@ -653,6 +653,48 @@ describe('V3 RunRunner onError contracts', () => {
     ).toBe(true);
   });
 
+  it('artifacts: emits resource warning metadata when screenshot persistence hits quota', async () => {
+    const runId = 'run-artifact-quota-warning';
+    const artifactService: ArtifactService = {
+      screenshot: vi.fn().mockResolvedValue({ ok: true, base64: 'quota-shot' }),
+      saveScreenshot: vi.fn().mockResolvedValue({
+        error: createRRError(
+          RR_ERROR_CODES.RESOURCE_LIMIT_EXCEEDED,
+          'Save screenshot failed: quota exceeded',
+          { retryable: false },
+        ),
+      }),
+    };
+    const flow = createFlow(
+      'A',
+      [{ id: 'A', kind: 'test', config: { action: 'fail' } }],
+      [],
+    );
+
+    const { runner, bus } = createRunnerContext(runId, flow, { artifactService });
+    const result = await runner.start();
+    expect(result.status).toBe('failed');
+
+    const events = await listEvents(bus, runId);
+    expect(
+      events.some((event) => event.type === 'artifact.screenshot'),
+    ).toBe(false);
+    expect(
+      events.find(
+        (event): event is Extract<RunEvent, { type: 'log' }> =>
+          event.type === 'log' &&
+          event.level === 'warn' &&
+          event.message.includes('Failed to save screenshot artifact'),
+      ),
+    ).toMatchObject({
+      data: {
+        code: RR_ERROR_CODES.RESOURCE_LIMIT_EXCEEDED,
+        category: 'resource',
+        retryable: false,
+      },
+    });
+  });
+
   it('artifacts: captures successful nodes when policy is always', async () => {
     const runId = 'run-artifact-always';
     const artifactService: ArtifactService = {

@@ -226,6 +226,14 @@ function toRRError(err: unknown, fallback: { code: string; message: string }): R
   );
 }
 
+function buildArtifactWarningData(error: RRError): JsonObject {
+  return {
+    code: error.code,
+    category: error.code === RR_ERROR_CODES.RESOURCE_LIMIT_EXCEEDED ? 'resource' : 'runtime',
+    retryable: error.retryable === true,
+  };
+}
+
 /**
  * Serial queue for write operations
  * Ensures event ordering and reduces write races
@@ -787,6 +795,7 @@ class StorageBackedRunRunner implements RunRunner {
           type: 'log',
           level: 'warn',
           message: `Failed to capture screenshot artifact for node "${node.id}": ${result.error.message}`,
+          data: buildArtifactWarningData(result.error),
         } as RunEventInput),
       );
       return;
@@ -809,6 +818,14 @@ class StorageBackedRunRunner implements RunRunner {
           type: 'log',
           level: 'warn',
           message: `Failed to save screenshot artifact for node "${node.id}": ${message}`,
+          data:
+            saveResult && 'error' in saveResult
+              ? buildArtifactWarningData(saveResult.error)
+              : {
+                  code: RR_ERROR_CODES.INTERNAL,
+                  category: 'runtime',
+                  retryable: false,
+                },
         } as RunEventInput),
       );
       return;

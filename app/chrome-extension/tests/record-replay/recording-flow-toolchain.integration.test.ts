@@ -770,6 +770,17 @@ describe("recording/editing/flow toolchain integration", () => {
     });
     await storage.events.append({
       runId: runId as any,
+      type: "log",
+      level: "warn",
+      message: "Failed to save screenshot artifact for node \"fill-1\": quota exceeded",
+      data: {
+        code: "RESOURCE_LIMIT_EXCEEDED",
+        category: "resource",
+        retryable: false,
+      },
+    });
+    await storage.events.append({
+      runId: runId as any,
       type: "network.observed",
       nodeId: "fill-1" as any,
       requestId: "req-1",
@@ -826,6 +837,9 @@ describe("recording/editing/flow toolchain integration", () => {
       },
       artifactRedaction: {
         lowConfidenceCount: 1,
+      },
+      quota: {
+        hitCount: 1,
       },
       quality: {
         staleQualityCount: 1,
@@ -2866,6 +2880,56 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("workflowStabilizeTool surfaces queue backpressure as resource metrics", async () => {
+    const flowId = `workflow-stabilize-resource-limit-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { ms: 1 },
+        },
+      ]),
+    );
+    mocks.enqueueRunAndWait.mockRejectedValueOnce(
+      Object.assign(new Error("run queue is at queued backpressure limit 1"), {
+        code: "RUN_QUEUE_BACKPRESSURE",
+        retryable: true,
+        scope: "flow",
+        limit: 1,
+        queuedCount: 1,
+        flowId,
+      }),
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      apply: false,
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(payload.baselineRuns).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        errorCode: "RESOURCE_LIMIT_EXCEEDED",
+        errorCategory: "resource",
+      }),
+    ]);
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "RESOURCE_LIMIT_EXCEEDED",
+          category: "resource",
+        }),
+      ]),
+    );
+    expect(payload.metrics.quota).toMatchObject({
+      hitCount: 1,
+    });
+  });
+
   it("workflowStabilizeTool rejects expired approval records before dangerous replay", async () => {
     const flowId = `workflow-stabilize-expired-approval-${Date.now()}`;
     const flow = createFlow(flowId, [
@@ -4582,6 +4646,52 @@ describe("recording/editing/flow toolchain integration", () => {
           runId: "run-toolchain-failed",
           flowId,
           includeArtifacts: true,
+        },
+      },
+    });
+  });
+
+  it("flowRunTool returns structured resource errors when queue backpressure blocks replay", async () => {
+    const flowId = `flow-run-resource-limit-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { ms: 1 },
+        },
+      ]),
+    );
+    const backpressure = Object.assign(
+      new Error("run queue is at queued backpressure limit 1; retry after queued runs drain"),
+      {
+        code: "RUN_QUEUE_BACKPRESSURE",
+        retryable: true,
+        scope: "global",
+        limit: 1,
+        queuedCount: 1,
+      },
+    );
+    mocks.enqueueRunAndWait.mockRejectedValueOnce(backpressure);
+
+    const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({
+      success: false,
+      flowId,
+      status: "resource_limited",
+      error: {
+        code: "RESOURCE_LIMIT_EXCEEDED",
+        category: "resource",
+        retryable: true,
+        data: {
+          source: "workflow_run",
+          originalCode: "RUN_QUEUE_BACKPRESSURE",
+          scope: "global",
+          limit: 1,
+          queuedCount: 1,
         },
       },
     });

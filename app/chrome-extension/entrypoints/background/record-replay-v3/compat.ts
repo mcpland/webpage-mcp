@@ -293,6 +293,8 @@ function classifyRunErrorCategory(code: string): StandardRunErrorCategory {
     case RR_ERROR_CODES.TAB_NOT_FOUND:
     case RR_ERROR_CODES.FRAME_NOT_FOUND:
       return "capability";
+    case RR_ERROR_CODES.RESOURCE_LIMIT_EXCEEDED:
+      return "resource";
     case RR_ERROR_CODES.TIMEOUT:
     case RR_ERROR_CODES.TARGET_NOT_FOUND:
     case RR_ERROR_CODES.ELEMENT_NOT_VISIBLE:

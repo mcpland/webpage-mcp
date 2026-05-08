@@ -28,7 +28,11 @@ import {
   assertWorkflowSecretRefsResolvable,
   isWorkflowSecretRefValue,
 } from "../record-replay-v3/secrets";
-import { RR_ERROR_CODES } from "../record-replay-v3/domain/errors";
+import {
+  RR_ERROR_CODES,
+  createResourceLimitExceededError,
+  isResourceLimitError,
+} from "../record-replay-v3/domain/errors";
 
 function hasDisallowedPublicUrlScheme(url: string): boolean {
   const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
@@ -255,6 +259,43 @@ function createFlowRunQualityStatusError(
               paused
                 ? "Resume through trusted UI/policy approval and rerun workflow_stabilize for revalidation."
                 : "Resolve the blocking schema, capability, safety, secret, or migration issue and rerun workflow_stabilize or workflow_migrate.",
+            ],
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
+}
+
+function createFlowRunResourceLimitError(
+  flow: FlowV3,
+  error: unknown,
+): ToolResult {
+  const publishedInfo = getPublishedFlowInfo(flow);
+  const resourceError = createResourceLimitExceededError(
+    "Workflow run could not start because runtime resource limits were reached",
+    error,
+    { source: "workflow_run" },
+  );
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          success: false,
+          flowId: flow.id,
+          ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : {}),
+          revision: calculateWorkflowRevision(flow),
+          status: "resource_limited",
+          error: {
+            code: resourceError.code,
+            category: "resource",
+            retryable: resourceError.retryable === true,
+            message: resourceError.message,
+            ...(resourceError.data !== undefined ? { data: resourceError.data } : {}),
+            nextActions: [
+              "Wait for queued workflow runs to drain, reduce concurrent workflow_run calls, or clean debug artifacts before retrying.",
             ],
           },
         }),
@@ -1024,6 +1065,9 @@ class FlowRunTool {
             : undefined,
       }));
     } catch (error) {
+      if (isResourceLimitError(error)) {
+        return createFlowRunResourceLimitError(flow, error);
+      }
       return createErrorResponse(
         error instanceof Error ? error.message : String(error),
       );

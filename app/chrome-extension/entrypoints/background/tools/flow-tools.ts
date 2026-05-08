@@ -22,7 +22,11 @@ import type { JsonObject } from '../record-replay-v3/domain/json';
 import type { RunEvent, RunRecordV3 } from '../record-replay-v3/domain/events';
 import type { FlowId, RunId } from '../record-replay-v3/domain/ids';
 import type { ArtifactRecord } from '../record-replay-v3/storage/artifacts';
-import { RR_ERROR_CODES } from '../record-replay-v3/domain/errors';
+import {
+  RR_ERROR_CODES,
+  createResourceLimitExceededError,
+  isResourceLimitError,
+} from '../record-replay-v3/domain/errors';
 import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variables';
 import { createStoragePort } from '../record-replay-v3';
 import { enqueueRunAndWait, saveFlowToV3 } from '../record-replay-v3/compat';
@@ -291,6 +295,7 @@ interface WorkflowStabilizeRunSummary {
   currentNodeId?: string;
   failedNodeId?: string;
   errorCode?: string;
+  errorCategory?: string;
   errorMessage?: string;
   tookMs?: number;
   revision: string;
@@ -356,7 +361,7 @@ interface WorkflowStabilizeValidationError {
 
 interface WorkflowStabilizeWarning {
   code: string;
-  category: 'validation' | 'safety' | 'capability';
+  category: 'validation' | 'safety' | 'capability' | 'resource';
   message: string;
   path?: string;
   nodeId?: string;
@@ -2573,6 +2578,39 @@ function isQuotaLikeErrorCode(code: string | undefined): boolean {
   return Boolean(code && /(quota|rate.?limit|resource.?exhausted|storage.?limit|limit.?exceeded)/i.test(code));
 }
 
+function countQuotaSignalEvents(run: WorkflowDebugRun): number {
+  return run.events.filter((event) => {
+    const data = isRecord(event.data) ? event.data : undefined;
+    const code = typeof data?.code === 'string' ? data.code : undefined;
+    const category = typeof data?.category === 'string' ? data.category : undefined;
+    const message = typeof event.message === 'string' ? event.message : undefined;
+    return (
+      category === 'resource' ||
+      isQuotaLikeErrorCode(code) ||
+      isQuotaLikeErrorCode(message)
+    );
+  }).length;
+}
+
+function countQuotaSignalArtifacts(run: WorkflowDebugRun): number {
+  return (run.artifacts ?? []).filter(
+    (artifact) =>
+      artifact.truncated === true ||
+      artifact.dataBase64Omitted === 'truncated',
+  ).length;
+}
+
+function countQuotaSignalsInDebugRuns(runs: WorkflowDebugRun[]): number {
+  return runs.reduce(
+    (sum, run) =>
+      sum +
+      (isQuotaLikeErrorCode(extractDebugRunErrorCode(run)) ? 1 : 0) +
+      countQuotaSignalEvents(run) +
+      countQuotaSignalArtifacts(run),
+    0,
+  );
+}
+
 function countUnsupportedCapabilities(capabilities?: WorkflowCapabilityMatrix): number {
   if (!capabilities) {
     return 0;
@@ -2639,7 +2677,7 @@ function buildWorkflowRuntimeMetrics(
       lowConfidenceCount: countLowConfidenceArtifacts(runs),
     },
     quota: {
-      hitCount: runs.filter((run) => isQuotaLikeErrorCode(extractDebugRunErrorCode(run))).length,
+      hitCount: countQuotaSignalsInDebugRuns(runs),
     },
     capability: {
       unsupportedCount: countUnsupportedCapabilities(capabilities),
@@ -2695,7 +2733,9 @@ function buildStabilizeRuntimeMetrics(options: {
       lowConfidenceCount: countLowConfidenceArtifacts(options.inspectedRuns),
     },
     quota: {
-      hitCount: options.validationRuns.filter((run) => isQuotaLikeErrorCode(run.errorCode)).length,
+      hitCount:
+        options.validationRuns.filter((run) => isQuotaLikeErrorCode(run.errorCode)).length +
+        countQuotaSignalsInDebugRuns(options.inspectedRuns),
     },
     capability: {
       unsupportedCount: countUnsupportedCapabilities(options.capabilities),
@@ -3833,6 +3873,23 @@ function summarizeStabilizeRunError(
   revision: string,
   error: unknown,
 ): WorkflowStabilizeRunSummary {
+  if (isResourceLimitError(error)) {
+    const resourceError = createResourceLimitExceededError(
+      'Stabilize validation run hit a runtime resource limit',
+      error,
+      { source: 'workflow_stabilize' },
+    );
+    return {
+      phase,
+      iteration,
+      status: 'failed',
+      success: false,
+      errorCode: resourceError.code,
+      errorCategory: 'resource',
+      errorMessage: resourceError.message,
+      revision,
+    };
+  }
   return {
     phase,
     iteration,
@@ -3903,7 +3960,15 @@ async function executeStabilizeValidationRuns(
             break;
           }
         } catch (error) {
-          resetRuns.push(summarizeStabilizeRunError('reset', index + 1, resetPlan.revision, error));
+          const resetError = summarizeStabilizeRunError('reset', index + 1, resetPlan.revision, error);
+          resetRuns.push(resetError);
+          if (resetError.errorCategory === 'resource') {
+            warnings.push({
+              code: RR_ERROR_CODES.RESOURCE_LIMIT_EXCEEDED,
+              category: 'resource',
+              message: resetError.errorMessage ?? 'Reset workflow hit a runtime resource limit.',
+            });
+          }
           break;
         }
       }
@@ -3935,12 +4000,15 @@ async function executeStabilizeValidationRuns(
       });
       runs.push(summarizeStabilizeRunResult(phase, index + 1, revision, result));
     } catch (error) {
+      const runError = summarizeStabilizeRunError(phase, index + 1, revision, error);
       warnings.push({
-        code: 'STABILIZE_RUN_FAILED',
-        category: 'capability',
-        message: error instanceof Error ? error.message : String(error),
+        code: runError.errorCode === RR_ERROR_CODES.RESOURCE_LIMIT_EXCEEDED
+          ? RR_ERROR_CODES.RESOURCE_LIMIT_EXCEEDED
+          : 'STABILIZE_RUN_FAILED',
+        category: runError.errorCategory === 'resource' ? 'resource' : 'capability',
+        message: runError.errorMessage ?? (error instanceof Error ? error.message : String(error)),
       });
-      runs.push(summarizeStabilizeRunError(phase, index + 1, revision, error));
+      runs.push(runError);
       break;
     }
   }

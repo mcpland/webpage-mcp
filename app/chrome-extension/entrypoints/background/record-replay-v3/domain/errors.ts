@@ -106,3 +106,97 @@ export function createRRError(
     ...(options?.cause !== undefined && { cause: options.cause }),
   };
 }
+
+function readErrorString(error: unknown, key: string): string | undefined {
+  if (!error || typeof error !== 'object' || !(key in error)) {
+    return undefined;
+  }
+  const value = (error as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readErrorBoolean(error: unknown, key: 'retryable'): boolean | undefined {
+  if (!error || typeof error !== 'object' || !(key in error)) {
+    return undefined;
+  }
+  const value = (error as Record<string, unknown>)[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function readErrorNumber(error: unknown, key: string): number | undefined {
+  if (!error || typeof error !== 'object' || !(key in error)) {
+    return undefined;
+  }
+  const value = (error as Record<string, unknown>)[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+export function getErrorCode(error: unknown): string | undefined {
+  return readErrorString(error, 'code') ?? readErrorString(error, 'name');
+}
+
+export function getErrorMessage(error: unknown): string {
+  return readErrorString(error, 'message') ?? String(error);
+}
+
+export function getErrorRetryable(error: unknown): boolean | undefined {
+  return readErrorBoolean(error, 'retryable');
+}
+
+export function isResourceLimitError(error: unknown): boolean {
+  const code = getErrorCode(error);
+  if (
+    code === RR_ERROR_CODES.RESOURCE_LIMIT_EXCEEDED ||
+    code === 'RUN_QUEUE_BACKPRESSURE' ||
+    code === 'QuotaExceededError' ||
+    code === 'NS_ERROR_DOM_QUOTA_REACHED'
+  ) {
+    return true;
+  }
+
+  const message = getErrorMessage(error);
+  return /\b(backpressure|quota|rate.?limit|resource.?exhausted|storage.?limit|limit.?exceeded)\b/i.test(
+    message,
+  );
+}
+
+export function createResourceLimitExceededError(
+  action: string,
+  error: unknown,
+  options: {
+    retryable?: boolean;
+    source?: string;
+    data?: Record<string, JsonValue>;
+  } = {},
+): RRError {
+  const originalCode = getErrorCode(error);
+  const originalName = readErrorString(error, 'name');
+  const originalErrorCode = readErrorString(error, 'code');
+  const originalMessage = readErrorString(error, 'message');
+  const scope = readErrorString(error, 'scope');
+  const flowId = readErrorString(error, 'flowId');
+  const limit = readErrorNumber(error, 'limit');
+  const queuedCount = readErrorNumber(error, 'queuedCount');
+  const retryable = options.retryable ?? getErrorRetryable(error) ?? false;
+  const data: Record<string, JsonValue> = {
+    ...(options.source ? { source: options.source } : {}),
+    ...(originalCode ? { originalCode } : {}),
+    ...(originalName ? { originalName } : {}),
+    ...(originalErrorCode ? { originalErrorCode } : {}),
+    ...(originalMessage ? { originalMessage } : {}),
+    ...(scope ? { scope } : {}),
+    ...(flowId ? { flowId } : {}),
+    ...(limit !== undefined ? { limit } : {}),
+    ...(queuedCount !== undefined ? { queuedCount } : {}),
+    ...(options.data ?? {}),
+  };
+
+  return createRRError(
+    RR_ERROR_CODES.RESOURCE_LIMIT_EXCEEDED,
+    `${action}: ${getErrorMessage(error)}`,
+    {
+      retryable,
+      ...(Object.keys(data).length > 0 ? { data } : {}),
+    },
+  );
+}

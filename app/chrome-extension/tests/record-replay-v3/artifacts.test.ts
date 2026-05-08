@@ -13,7 +13,10 @@ vi.mock('@/utils/cdp-session-manager', () => ({
 }));
 
 import { createChromeArtifactService } from '@/entrypoints/background/record-replay-v3/engine/kernel/artifacts';
-import { createIndexedDbArtifactStore } from '@/entrypoints/background/record-replay-v3/storage/artifacts';
+import {
+  createIndexedDbArtifactStore,
+  type ArtifactStore,
+} from '@/entrypoints/background/record-replay-v3/storage/artifacts';
 import {
   closeRrV3Db,
   deleteRrV3Db,
@@ -135,6 +138,38 @@ describe('createChromeArtifactService', () => {
     expect(artifacts?.[0]?.redaction).toMatchObject({
       status: 'lowConfidence',
       confidence: 'low',
+    });
+  });
+
+  it('maps artifact storage quota failures to RESOURCE_LIMIT_EXCEEDED', async () => {
+    const quotaError = Object.assign(new Error('quota exceeded while writing artifact'), {
+      name: 'QuotaExceededError',
+    });
+    const store: ArtifactStore = {
+      saveScreenshot: vi.fn().mockRejectedValue(quotaError),
+      get: vi.fn(),
+      listByRun: vi.fn(),
+      deleteByRun: vi.fn(),
+      cleanupExpired: vi.fn(),
+      enforceRetention: vi.fn(),
+    };
+    const service = createChromeArtifactService({ store });
+
+    const saveResult = await service.saveScreenshot(
+      'run-quota' as never,
+      'node-a' as never,
+      'c2NyZWVuc2hvdA==',
+    );
+
+    expect(saveResult).toMatchObject({
+      error: {
+        code: 'RESOURCE_LIMIT_EXCEEDED',
+        retryable: false,
+        data: {
+          source: 'artifact_store',
+          originalCode: 'QuotaExceededError',
+        },
+      },
     });
   });
 

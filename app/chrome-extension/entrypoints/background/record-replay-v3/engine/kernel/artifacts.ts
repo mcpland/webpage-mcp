@@ -5,7 +5,12 @@
 
 import type { NodeId, RunId } from '../../domain/ids';
 import type { RRError } from '../../domain/errors';
-import { RR_ERROR_CODES, createRRError } from '../../domain/errors';
+import {
+  RR_ERROR_CODES,
+  createResourceLimitExceededError,
+  createRRError,
+  isResourceLimitError,
+} from '../../domain/errors';
 import {
   createIndexedDbArtifactStore,
   type ArtifactProvenance,
@@ -76,6 +81,17 @@ export interface ArtifactService {
    * Apply artifact TTL and size retention.
    */
   cleanupArtifacts?(): Promise<{ deleted: number } | { error: RRError }>;
+}
+
+function createArtifactServiceError(action: string, error: unknown): RRError {
+  if (isResourceLimitError(error)) {
+    return createResourceLimitExceededError(action, error, {
+      source: 'artifact_store',
+      retryable: false,
+    });
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return createRRError(RR_ERROR_CODES.INTERNAL, `${action}: ${message}`);
 }
 
 /**
@@ -161,10 +177,9 @@ export function createChromeArtifactService(options: {
 
         return { ok: true, base64: base64Match[1] };
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
         return {
           ok: false,
-          error: createRRError(RR_ERROR_CODES.INTERNAL, `Screenshot failed: ${message}`),
+          error: createArtifactServiceError('Screenshot failed', e),
         };
       }
     },
@@ -182,9 +197,8 @@ export function createChromeArtifactService(options: {
 
         return { savedAs: record.filename, artifactId: record.id };
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
         return {
-          error: createRRError(RR_ERROR_CODES.INTERNAL, `Save screenshot failed: ${message}`),
+          error: createArtifactServiceError('Save screenshot failed', e),
         };
       }
     },
@@ -210,9 +224,8 @@ export function createChromeArtifactService(options: {
       try {
         return { deleted: await artifactStore.deleteByRun(runId) };
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
         return {
-          error: createRRError(RR_ERROR_CODES.INTERNAL, `Delete artifacts failed: ${message}`),
+          error: createArtifactServiceError('Delete artifacts failed', e),
         };
       }
     },
@@ -223,9 +236,8 @@ export function createChromeArtifactService(options: {
         const overLimit = await artifactStore.enforceRetention();
         return { deleted: expired + overLimit };
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
         return {
-          error: createRRError(RR_ERROR_CODES.INTERNAL, `Cleanup artifacts failed: ${message}`),
+          error: createArtifactServiceError('Cleanup artifacts failed', e),
         };
       }
     },
