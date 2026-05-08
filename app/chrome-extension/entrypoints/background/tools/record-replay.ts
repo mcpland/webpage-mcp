@@ -4,7 +4,10 @@ import { createStoragePort } from "../record-replay-v3";
 import type { FlowId } from "../record-replay-v3/domain/ids";
 import type { JsonObject } from "../record-replay-v3/domain/json";
 import type { FlowV3 } from "../record-replay-v3/domain/flow";
-import { listPublishedFlowDetails } from "../record-replay-v3/flows/publish";
+import {
+  calculateWorkflowRevision,
+  listPublishedFlowDetails,
+} from "../record-replay-v3/flows/publish";
 import { enqueueRunAndWait } from "../record-replay-v3/compat";
 
 function hasDisallowedPublicUrlScheme(url: string): boolean {
@@ -232,13 +235,14 @@ class FlowRunTool {
       );
     }
 
-    const response =
-      ignoredOptions.length > 0
-        ? {
-            ...result,
-            warning: `Ignored legacy run options: ${ignoredOptions.join(", ")}`,
-          }
-        : result;
+    const response = {
+      ...result,
+      flowId: flow.id,
+      revision: calculateWorkflowRevision(flow),
+      ...(ignoredOptions.length > 0
+        ? { warning: `Ignored legacy run options: ${ignoredOptions.join(", ")}` }
+        : {}),
+    };
 
     return {
       content: [

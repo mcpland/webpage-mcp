@@ -1828,6 +1828,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
       expect(published).toEqual({
         id: "flow-1",
         slug: "checkout-flow",
+        revision: expect.stringMatching(/^rev-fnv1a32-/),
         version: 3,
         name: "Test Flow flow-1",
         description: "Checkout automation",
@@ -1906,6 +1907,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
       expect(published).toEqual({
         id: "flow-invalid-publish",
         slug: "legacy-broken-flow",
+        revision: expect.stringMatching(/^rev-fnv1a32-/),
         version: 3,
         name: "Test Flow flow-invalid-publish",
       });
@@ -1967,6 +1969,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
       expect(published).toEqual({
         id: "flow-custom-slug",
         slug: "existing-custom-slug",
+        revision: expect.stringMatching(/^rev-fnv1a32-/),
         version: 3,
         name: "Test Flow flow-custom-slug",
       });
@@ -2004,6 +2007,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
       expect(published).toEqual({
         id: "flow-dirty-tool",
         slug: "legacy-tool-slug",
+        revision: expect.stringMatching(/^rev-fnv1a32-/),
         version: 3,
         name: "Test Flow flow-dirty-tool",
       });
@@ -2076,6 +2080,7 @@ describe("V3 RPC Flow CRUD APIs", () => {
         {
           id: "flow-dirty-listed",
           slug: "listed-legacy-slug",
+          revision: expect.stringMatching(/^rev-fnv1a32-/),
           version: 3,
           name: "Test Flow flow-dirty-listed",
         },

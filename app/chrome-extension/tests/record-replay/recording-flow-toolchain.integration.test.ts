@@ -1637,6 +1637,8 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(payload).toMatchObject({
       runId: "run-toolchain",
       success: true,
+      flowId,
+      revision: expect.stringMatching(/^rev-fnv1a32-/),
       summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
       warning: expect.stringContaining("stepDelayMs"),
     });

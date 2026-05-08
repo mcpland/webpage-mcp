@@ -13,6 +13,7 @@ import {
 export interface PublishedFlowInfoV3 {
   id: FlowId;
   slug: string;
+  revision: string;
   version: typeof FLOW_SCHEMA_VERSION;
   name: string;
   description?: string;
@@ -21,6 +22,7 @@ export interface PublishedFlowInfoV3 {
 
 export interface PublishedFlowDetailsV3 extends PublishedFlowInfoV3 {
   variables?: FlowV3["variables"];
+  schemaHash: string;
   parameters: WorkflowParameterSchema;
   exampleArgs: Record<string, unknown>;
   backgroundSupport: WorkflowBackgroundSupport;
@@ -51,6 +53,8 @@ export interface WorkflowSideEffectDescriptor {
 }
 
 export interface WorkflowToolDescriptor {
+  revision: string;
+  schemaHash: string;
   parameters: WorkflowParameterSchema;
   exampleArgs: Record<string, unknown>;
   backgroundSupport: WorkflowBackgroundSupport;
@@ -67,6 +71,85 @@ function trimIfString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function canonicalize(value: unknown): unknown {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalize(item));
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    if (nested !== undefined) {
+      result[key] = canonicalize(nested);
+    }
+  }
+  return result;
+}
+
+function canonicalStringify(value: unknown): string {
+  return JSON.stringify(canonicalize(value));
+}
+
+function fnv1a32(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function normalizeToolMetadataForRevision(tool: FlowToolMetadata | undefined) {
+  if (!tool) {
+    return undefined;
+  }
+  return {
+    published: tool.published === true,
+    ...(tool.slug ? { slug: tool.slug } : {}),
+    ...(tool.category ? { category: tool.category } : {}),
+    ...(tool.description ? { description: tool.description } : {}),
+  };
+}
+
+export function calculateWorkflowRevision(flow: FlowV3): string {
+  const revisionInput = {
+    schemaVersion: flow.schemaVersion,
+    entryNodeId: flow.entryNodeId,
+    nodes: (flow.nodes || []).map((node) => ({
+      id: node.id,
+      kind: node.kind,
+      ...(node.name ? { name: node.name } : {}),
+      ...(node.disabled === true ? { disabled: true } : {}),
+      config: node.config,
+      ...(node.policy ? { policy: node.policy } : {}),
+      ...(node.sideEffect ? { sideEffect: node.sideEffect } : {}),
+    })),
+    edges: flow.edges || [],
+    variables: flow.variables || [],
+    ...(flow.policy ? { policy: flow.policy } : {}),
+    meta: {
+      tool: normalizeToolMetadataForRevision(flow.meta?.tool),
+      exposedOutputs: flow.meta?.exposedOutputs || [],
+    },
+  };
+  return `rev-fnv1a32-${fnv1a32(canonicalStringify(revisionInput))}`;
+}
+
+export function calculateWorkflowSchemaHash(flow: FlowV3): string {
+  const schemaInput = {
+    parameters: buildWorkflowParameterSchema(flow),
+    outputs: flow.meta?.exposedOutputs || [],
+  };
+  return `fnv1a32:${fnv1a32(canonicalStringify(schemaInput))}`;
 }
 
 export function toToolSlug(name: string): string {
@@ -114,6 +197,7 @@ export function getPublishedFlowInfo(flow: FlowV3): PublishedFlowInfoV3 | null {
   return {
     id: flow.id,
     slug,
+    revision: calculateWorkflowRevision(flow),
     version: FLOW_SCHEMA_VERSION,
     name: flow.name,
     ...(description ? { description } : {}),
@@ -287,6 +371,8 @@ export function buildWorkflowBackgroundSupport(flow: FlowV3): WorkflowBackground
 
 export function buildWorkflowToolDescriptor(flow: FlowV3): WorkflowToolDescriptor {
   return {
+    revision: calculateWorkflowRevision(flow),
+    schemaHash: calculateWorkflowSchemaHash(flow),
     parameters: buildWorkflowParameterSchema(flow),
     exampleArgs: buildWorkflowExampleArgs(flow),
     backgroundSupport: buildWorkflowBackgroundSupport(flow),
@@ -300,21 +386,20 @@ export function buildWorkflowToolDescriptor(flow: FlowV3): WorkflowToolDescripto
 export function listPublishedFlowDetails(
   flows: FlowV3[],
 ): PublishedFlowDetailsV3[] {
-  return flows
-    .map((flow) => {
-      const info = getPublishedFlowInfo(flow);
-      const publishedVariables = sanitizePublishedVariables(flow.variables);
-      if (!info) {
-        return null;
-      }
-      return {
-        ...info,
-        ...(publishedVariables ? { variables: publishedVariables } : {}),
-        ...buildWorkflowToolDescriptor(flow),
-      };
-    })
-    .filter((info): info is PublishedFlowDetailsV3 => Boolean(info))
-    .sort((a, b) => a.slug.localeCompare(b.slug));
+  const details: PublishedFlowDetailsV3[] = [];
+  for (const flow of flows) {
+    const info = getPublishedFlowInfo(flow);
+    if (!info) {
+      continue;
+    }
+    const publishedVariables = sanitizePublishedVariables(flow.variables);
+    details.push({
+      ...info,
+      ...(publishedVariables ? { variables: publishedVariables } : {}),
+      ...buildWorkflowToolDescriptor(flow),
+    });
+  }
+  return details.sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
 export function ensurePublishedSlugAvailable(

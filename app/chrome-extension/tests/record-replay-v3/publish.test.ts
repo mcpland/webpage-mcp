@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildWorkflowBackgroundSupport,
+  calculateWorkflowRevision,
   listPublishedFlowDetails,
 } from '@/entrypoints/background/record-replay-v3/flows/publish';
 import type { FlowV3 } from '@/entrypoints/background/record-replay-v3/domain/flow';
@@ -72,6 +73,8 @@ describe('listPublishedFlowDetails', () => {
       expect.objectContaining({
         id: 'flow-sensitive',
         slug: 'sensitive-flow',
+        revision: expect.stringMatching(/^rev-fnv1a32-/),
+        schemaHash: expect.stringMatching(/^fnv1a32:/),
         version: 3,
         name: 'Sensitive Flow',
         description: 'Run the sensitive flow',
@@ -139,6 +142,37 @@ describe('listPublishedFlowDetails', () => {
         }),
       }),
     ]);
+  });
+
+  it('calculates canonical revisions from executable workflow fields', () => {
+    const flow = createPublishedFlow();
+    const baseline = calculateWorkflowRevision(flow);
+
+    expect(
+      calculateWorkflowRevision({
+        ...flow,
+        createdAt: new Date(1).toISOString() as any,
+        updatedAt: new Date(2).toISOString() as any,
+        meta: {
+          ...flow.meta,
+          recording: {
+            originUrl: 'https://changed.example.com',
+          },
+        },
+      }),
+    ).toBe(baseline);
+
+    expect(
+      calculateWorkflowRevision({
+        ...flow,
+        nodes: [
+          {
+            ...flow.nodes[0],
+            config: { url: 'https://changed.example.com' },
+          },
+        ],
+      }),
+    ).not.toBe(baseline);
   });
 
   it('omits builder trigger nodes from side-effect metadata', () => {
