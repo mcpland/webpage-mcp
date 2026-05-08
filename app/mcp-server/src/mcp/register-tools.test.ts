@@ -61,6 +61,7 @@ describe('dynamic published flow tools', () => {
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-missing');
     clearDynamicFlowCacheForSession('dynamic-flow-conflict');
     clearDynamicFlowCacheForSession('dynamic-flow-cache-invalidation');
+    clearDynamicFlowCacheForSession('dynamic-flow-workflow-refresh');
   });
 
   afterEach(() => {
@@ -767,16 +768,10 @@ describe('dynamic published flow tools', () => {
   });
 
   it('returns available workflow slugs when workflow_run cannot resolve a slug', async () => {
-    const sendRequestToExtensionAndWait = vi
-      .fn()
-      .mockResolvedValueOnce({
-        status: 'success',
-        items: [{ id: 'flow-signup', slug: 'signup' }],
-      })
-      .mockResolvedValueOnce({
-        status: 'success',
-        items: [{ id: 'flow-signup', slug: 'signup' }],
-      });
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValueOnce({
+      status: 'success',
+      items: [{ id: 'flow-signup', slug: 'signup' }],
+    });
     const ctx = createContext('dynamic-flow-workflow-missing', sendRequestToExtensionAndWait);
 
     const result = await callToolForContext(ctx, 'workflow_run', {
@@ -784,7 +779,7 @@ describe('dynamic published flow tools', () => {
       args: {},
     });
 
-    expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(2);
+    expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       content: [
         {
@@ -794,6 +789,49 @@ describe('dynamic published flow tools', () => {
       ],
       isError: true,
     });
+  });
+
+  it('refreshes the published descriptor before workflow_run execution', async () => {
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [{ id: 'flow-old', slug: 'signup', revision: 'rev-old' }],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [{ id: 'flow-new', slug: 'signup', revision: 'rev-new' }],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
+          isError: false,
+        },
+      });
+    const ctx = createContext('dynamic-flow-workflow-refresh', sendRequestToExtensionAndWait);
+
+    await listToolsForContext(ctx);
+    await callToolForContext(ctx, 'workflow_run', {
+      workflow: 'signup',
+      args: { email: 'alice@example.com' },
+    });
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenNthCalledWith(
+      3,
+      {
+        name: 'record_replay_flow_run',
+        args: {
+          flowId: 'flow-new',
+          args: {
+            email: 'alice@example.com',
+          },
+        },
+        meta: { mcpSessionId: 'dynamic-flow-workflow-refresh', instanceId: 'unit-test' },
+      },
+      NativeMessageType.CALL_TOOL,
+      120000,
+    );
   });
 
   it('splits V3 dynamic tool arguments from run options by variable name', async () => {
@@ -873,6 +911,21 @@ describe('dynamic published flow tools', () => {
       })
       .mockResolvedValueOnce({
         status: 'success',
+        items: [
+          {
+            id: 'flow-conflict',
+            slug: 'conflict',
+            description: 'Conflicting flow',
+            variables: [
+              { name: 'email', required: true },
+              { name: 'startUrl', label: 'Shadowed start url' },
+              { name: 'refresh', required: true },
+            ],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
         data: {
           content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
           isError: false,
@@ -908,7 +961,7 @@ describe('dynamic published flow tools', () => {
     });
 
     expect(sendRequestToExtensionAndWait).toHaveBeenNthCalledWith(
-      2,
+      3,
       {
         name: 'record_replay_flow_run',
         args: {

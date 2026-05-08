@@ -1075,20 +1075,12 @@ export const callToolForContext = async (
           throw new Error('Missing required workflow slug.');
         }
 
-        let items = await fetchPublishedFlows(ctx);
-        let capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
+        const items = await fetchPublishedFlows(ctx, { forceRefresh: true });
+        const capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
         if (!supportsWorkflowRun(capabilities)) {
           throw new Error('workflow_run is not supported by the connected extension capability set.');
         }
-        let match = items.find((it) => it.slug === workflow);
-        if (!match) {
-          items = await fetchPublishedFlows(ctx, { forceRefresh: true });
-          capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
-          if (!supportsWorkflowRun(capabilities)) {
-            throw new Error('workflow_run is not supported by the connected extension capability set.');
-          }
-          match = items.find((it) => it.slug === workflow);
-        }
+        const match = items.find((it) => it.slug === workflow);
         if (!match) {
           const available = items.map((item) => item.slug).join(', ');
           throw new Error(
@@ -1153,20 +1145,12 @@ export const callToolForContext = async (
       // We need to resolve flow by slug to ID
       try {
         const slug = name.slice('flow.'.length);
-        let items = await fetchPublishedFlows(ctx);
-        let capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
+        const items = await fetchPublishedFlows(ctx, { forceRefresh: true });
+        const capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
         if (!supportsWorkflowRun(capabilities)) {
           throw new Error(`Dynamic flow tools are not supported by the connected extension capability set.`);
         }
-        let match = items.find((it) => it.slug === slug);
-        if (!match) {
-          items = await fetchPublishedFlows(ctx, { forceRefresh: true });
-          capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
-          if (!supportsWorkflowRun(capabilities)) {
-            throw new Error(`Dynamic flow tools are not supported by the connected extension capability set.`);
-          }
-          match = items.find((it) => it.slug === slug);
-        }
+        const match = items.find((it) => it.slug === slug);
         if (!match) throw new Error(`Flow not found for tool ${name}`);
         const runOptionKeys = getRunOptionKeySet(capabilities);
         const variableKeys = new Set(
