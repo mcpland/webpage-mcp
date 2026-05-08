@@ -497,6 +497,66 @@ function hasTrustedApprovalReference(args: any): boolean {
   return Boolean(approvalId && approvedAt && (approvedBy === 'user' || approvedBy === 'ui' || approvedBy === 'policy'));
 }
 
+function normalizeBoundaryStrings(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter((item): item is string => item.length > 0);
+}
+
+function hostMatchesBoundary(host: string, allowedHost: string): boolean {
+  const normalizedHost = host.toLowerCase();
+  const normalizedAllowed = allowedHost.toLowerCase();
+  return normalizedHost === normalizedAllowed || normalizedHost.endsWith(`.${normalizedAllowed}`);
+}
+
+function validateStabilizeStartUrlBoundary(args: any): WorkflowStabilizeValidationError | undefined {
+  const startUrl = typeof args?.startUrl === 'string' ? args.startUrl.trim() : '';
+  if (!startUrl) {
+    return undefined;
+  }
+  const allowedHosts = normalizeBoundaryStrings(args?.safety?.allowedHosts);
+  const testEnvironment =
+    args?.safety?.testEnvironment &&
+    typeof args.safety.testEnvironment === 'object' &&
+    !Array.isArray(args.safety.testEnvironment)
+      ? args.safety.testEnvironment
+      : undefined;
+  const origins = normalizeBoundaryStrings(testEnvironment?.origins);
+  const pathPrefixes = normalizeBoundaryStrings(testEnvironment?.pathPrefixes);
+  if (allowedHosts.length === 0 && origins.length === 0 && pathPrefixes.length === 0) {
+    return undefined;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(startUrl);
+  } catch {
+    return {
+      code: 'INVALID_START_URL',
+      path: '/startUrl',
+      message: 'startUrl must be an absolute URL',
+    };
+  }
+
+  const originAllowed =
+    origins.length === 0 || origins.some((origin) => origin.replace(/\/+$/, '') === parsed.origin);
+  const hostAllowed =
+    allowedHosts.length === 0 || allowedHosts.some((host) => hostMatchesBoundary(parsed.hostname, host));
+  const pathAllowed =
+    pathPrefixes.length === 0 || pathPrefixes.some((prefix) => parsed.pathname.startsWith(prefix));
+  if (!originAllowed || !hostAllowed || !pathAllowed) {
+    return {
+      code: 'START_URL_OUTSIDE_TEST_ENVIRONMENT',
+      path: '/startUrl',
+      message: `startUrl is outside the declared safety boundary: ${parsed.origin}${parsed.pathname}`,
+    };
+  }
+  return undefined;
+}
+
 function validateWorkflowStabilizeArgs(args: any): WorkflowStabilizeValidationError[] {
   const errors: WorkflowStabilizeValidationError[] = [];
   const flowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
@@ -4050,6 +4110,7 @@ class WorkflowStabilizeTool {
       targetFlow: workingFlow,
       hasApprovalReference,
     });
+    const boundaryError = validateStabilizeStartUrlBoundary(args);
     let blockedReason: string | undefined;
     if ((risk === 'dangerous' || risk === 'unknown') && executionMode === 'auto') {
       blockedReason = `${risk} workflow defaults to analyze-only`;
@@ -4077,6 +4138,14 @@ class WorkflowStabilizeTool {
         message: resetValidation.blockedReason,
       });
     }
+    if (boundaryError) {
+      warnings.push({
+        code: 'STABILIZE_TEST_ENVIRONMENT_BLOCKED',
+        category: 'safety',
+        path: boundaryError.path,
+        message: boundaryError.message,
+      });
+    }
     if (args?.safety?.segments?.mode === 'stopBeforeDangerous') {
       warnings.push({
         code: 'STABILIZE_AUTO_SEGMENT_NOT_AVAILABLE',
@@ -4086,7 +4155,7 @@ class WorkflowStabilizeTool {
       });
     }
 
-    const validationBlockedReason = blockedReason ?? resetValidation.blockedReason;
+    const validationBlockedReason = blockedReason ?? resetValidation.blockedReason ?? boundaryError?.message;
     const canRunValidation = !validationBlockedReason && executionMode !== 'analyzeOnly';
     const requestedValidationIterations =
       risk === 'dangerous' || risk === 'unknown'

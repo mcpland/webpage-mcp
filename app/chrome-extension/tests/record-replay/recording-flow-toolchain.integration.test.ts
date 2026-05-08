@@ -1897,6 +1897,60 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.meta?.quality).toBeUndefined();
   });
 
+  it("workflowStabilizeTool blocks validation outside the declared test environment", async () => {
+    const flowId = `workflow-stabilize-boundary-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 2,
+      startUrl: "https://prod.example.com/dashboard",
+      safety: {
+        executionMode: "sandboxReplay",
+        allowedHosts: ["staging.example.com"],
+        testEnvironment: {
+          name: "staging",
+          origins: ["https://staging.example.com"],
+          pathPrefixes: ["/app"],
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+    expect(payload).toMatchObject({
+      stable: false,
+      safety: {
+        executionMode: "analyzeOnly",
+        executedIterations: 0,
+        blockedReason: expect.stringContaining("outside the declared safety boundary"),
+      },
+      summary: {
+        baselineRunCount: 0,
+        postRepairRunCount: 0,
+      },
+    });
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "STABILIZE_TEST_ENVIRONMENT_BLOCKED",
+          path: "/startUrl",
+        }),
+      ]),
+    );
+    expect(updated?.meta?.quality).toBeUndefined();
+  });
+
   it("workflowStabilizeTool defaults dangerous workflows to analyze-only", async () => {
     const flowId = `workflow-stabilize-dangerous-${Date.now()}`;
     await createStoragePort().flows.save(
