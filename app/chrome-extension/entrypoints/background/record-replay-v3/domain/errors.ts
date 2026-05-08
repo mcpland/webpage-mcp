@@ -10,6 +10,16 @@ export const RR_ERROR_CODES = {
   // ===== Validation error =====
   /** Generic validation error */
   VALIDATION_ERROR: 'VALIDATION_ERROR',
+  /** Workflow secret reference is missing */
+  SECRET_REF_NOT_FOUND: 'SECRET_REF_NOT_FOUND',
+  /** Workflow secret reference is expired */
+  SECRET_REF_EXPIRED: 'SECRET_REF_EXPIRED',
+  /** Workflow secret reference is revoked */
+  SECRET_REF_REVOKED: 'SECRET_REF_REVOKED',
+  /** Workflow secret reference is invalid */
+  SECRET_REF_INVALID: 'SECRET_REF_INVALID',
+  /** Workflow output contract validation failed */
+  OUTPUT_VALIDATION_FAILED: 'OUTPUT_VALIDATION_FAILED',
   /** Unsupported node type */
   UNSUPPORTED_NODE: 'UNSUPPORTED_NODE',
   /** DAG Invalid structure */

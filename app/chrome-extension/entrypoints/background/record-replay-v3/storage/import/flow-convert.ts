@@ -83,7 +83,15 @@ interface CompatFlowDocument {
       category?: string;
       description?: string;
     };
-    exposedOutputs?: Array<{ nodeId: string; as: string }>;
+    exposedOutputs?: Array<{
+      nodeId: string;
+      as: string;
+      path?: Array<string | number>;
+      schema?: Record<string, unknown>;
+      required?: boolean;
+      sensitive?: boolean;
+      allowPlaintext?: boolean;
+    }>;
     recording?: {
       originUrl?: string;
       originTitle?: string;
@@ -714,6 +722,15 @@ function convertCompatMetaToV3(compatMeta: CompatFlowDocument["meta"]): FlowV3["
         (output): FlowExposedOutput => ({
           nodeId: output.nodeId,
           as: output.as,
+          ...(Array.isArray(output.path) ? { path: output.path } : {}),
+          ...(output.schema && typeof output.schema === "object" && !Array.isArray(output.schema)
+            ? { schema: output.schema as FlowExposedOutput["schema"] }
+            : {}),
+          ...(typeof output.required === "boolean" ? { required: output.required } : {}),
+          ...(typeof output.sensitive === "boolean" ? { sensitive: output.sensitive } : {}),
+          ...(typeof output.allowPlaintext === "boolean"
+            ? { allowPlaintext: output.allowPlaintext }
+            : {}),
         }),
       );
   }
@@ -841,6 +858,13 @@ export function convertFlowV3ToCompat(v3Flow: FlowV3): ConversionResult<CompatFl
     meta.exposedOutputs = v3Flow.meta.exposedOutputs.map((output) => ({
       nodeId: output.nodeId,
       as: output.as,
+      ...(output.path ? { path: [...output.path] } : {}),
+      ...(output.schema ? { schema: output.schema } : {}),
+      ...(typeof output.required === "boolean" ? { required: output.required } : {}),
+      ...(typeof output.sensitive === "boolean" ? { sensitive: output.sensitive } : {}),
+      ...(typeof output.allowPlaintext === "boolean"
+        ? { allowPlaintext: output.allowPlaintext }
+        : {}),
     }));
   }
 

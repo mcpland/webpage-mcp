@@ -7,6 +7,7 @@ import {
 } from "@/entrypoints/background/record-replay-v3/domain/events";
 import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import { calculateWorkflowRevision } from "@/entrypoints/background/record-replay-v3/flows/publish";
+import { WORKFLOW_SECRET_STORE_KEY } from "@/entrypoints/background/record-replay-v3/secrets";
 import { deleteRrV3Db } from "@/entrypoints/background/record-replay-v3/storage/db";
 
 const mocks = vi.hoisted(() => ({
@@ -2265,6 +2266,279 @@ describe("recording/editing/flow toolchain integration", () => {
       ]),
     );
     expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+  });
+
+  it("flowRunTool accepts secretRef args without forwarding plaintext to the run queue", async () => {
+    const flowId = `flow-run-secret-ref-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: {
+              target: { selector: "#password" },
+              value: "{password}",
+            },
+          },
+        ],
+        {
+          variables: [{ name: "password", kind: "string", required: true, sensitive: true }],
+        },
+      ),
+    );
+    asMock(chrome.storage.local.get).mockResolvedValue({
+      [WORKFLOW_SECRET_STORE_KEY]: {
+        "secret://login-password": { value: "plain-secret-password" },
+      },
+    });
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-secret-ref" } as any,
+      events: [],
+      result: {
+        runId: "run-secret-ref",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 2 },
+        outputs: null,
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const result = await flowRunTool.execute({
+      flowId,
+      args: {
+        password: { secretRef: "secret://login-password" },
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: {
+          password: { secretRef: "secret://login-password" },
+        },
+      }),
+    );
+    expect(JSON.stringify(mocks.enqueueRunAndWait.mock.calls[0][0])).not.toContain(
+      "plain-secret-password",
+    );
+  });
+
+  it("flowRunTool blocks missing secretRef args before replay", async () => {
+    const flowId = `flow-run-secret-missing-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: { target: { selector: "#password" }, value: "{password}" },
+          },
+        ],
+        {
+          variables: [{ name: "password", kind: "string", required: true, sensitive: true }],
+        },
+      ),
+    );
+    asMock(chrome.storage.local.get).mockResolvedValue({ [WORKFLOW_SECRET_STORE_KEY]: {} });
+
+    const result = await flowRunTool.execute({
+      flowId,
+      args: {
+        password: { secretRef: "secret://missing" },
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({
+      success: false,
+      flowId,
+      status: "blocked",
+      error: {
+        code: "SECRET_REF_NOT_FOUND",
+        path: "/args/password",
+      },
+    });
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+  });
+
+  it("flowRunTool projects declared outputs and validates their schema", async () => {
+    const flowId = `flow-run-output-valid-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "extract-1" as any,
+            kind: "extract",
+            config: { selector: "#account-id" },
+          },
+        ],
+        {
+          meta: {
+            exposedOutputs: [
+              {
+                nodeId: "extract-1" as any,
+                as: "accountId",
+                path: ["value"],
+                schema: { type: "string", pattern: "^acct_[0-9]+$" },
+              },
+            ],
+          },
+        },
+      ),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-output-valid" } as any,
+      events: [],
+      result: {
+        runId: "run-output-valid",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 2 },
+        outputs: {
+          "extract-1": { value: "acct_123" },
+        },
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(payload.outputs).toEqual({ accountId: "acct_123" });
+    expect(payload.outputValidation).toMatchObject({
+      ok: true,
+      declaredOutputCount: 1,
+      errors: [],
+    });
+  });
+
+  it("flowRunTool fails successful replays when required output validation fails", async () => {
+    const flowId = `flow-run-output-invalid-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "extract-1" as any,
+            kind: "extract",
+            config: { selector: "#account-id" },
+          },
+        ],
+        {
+          meta: {
+            exposedOutputs: [
+              {
+                nodeId: "extract-1" as any,
+                as: "accountId",
+                path: ["value"],
+                schema: { type: "string", pattern: "^acct_[0-9]+$" },
+              },
+            ],
+          },
+        },
+      ),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-output-invalid" } as any,
+      events: [],
+      result: {
+        runId: "run-output-invalid",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 2 },
+        outputs: {
+          "extract-1": { value: "not-an-account-id" },
+        },
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({
+      success: false,
+      status: "output_validation_failed",
+      errorCode: "OUTPUT_VALIDATION_FAILED",
+      error: {
+        code: "OUTPUT_VALIDATION_FAILED",
+        category: "validation",
+      },
+      outputValidation: {
+        ok: false,
+        errors: [
+          expect.objectContaining({
+            code: "OUTPUT_SCHEMA_PATTERN_MISMATCH",
+            alias: "accountId",
+          }),
+        ],
+      },
+    });
+  });
+
+  it("flowRunTool redacts sensitive declared outputs by default", async () => {
+    const flowId = `flow-run-output-sensitive-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "extract-1" as any,
+            kind: "extract",
+            config: { selector: "#api-token" },
+          },
+        ],
+        {
+          meta: {
+            exposedOutputs: [
+              {
+                nodeId: "extract-1" as any,
+                as: "apiToken",
+                path: ["value"],
+                schema: { type: "string" },
+                sensitive: true,
+              },
+            ],
+          },
+        },
+      ),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-output-sensitive" } as any,
+      events: [],
+      result: {
+        runId: "run-output-sensitive",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 2 },
+        outputs: {
+          "extract-1": { value: "opaque-runtime-token" },
+        },
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(payload.outputs).toEqual({ apiToken: "[REDACTED]" });
+    expect(payload.outputValidation).toMatchObject({
+      ok: true,
+      redacted: ["apiToken"],
+    });
   });
 
   it("flowRunTool marks failed runs as MCP errors", async () => {

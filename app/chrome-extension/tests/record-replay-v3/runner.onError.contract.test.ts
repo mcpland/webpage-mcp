@@ -212,6 +212,8 @@ function createRunnerContext(
   options: {
     artifactService?: ArtifactService;
     execution?: RunRecordV3['execution'];
+    args?: RunRecordV3['args'];
+    recordArgs?: RunRecordV3['args'];
   } = {},
 ): {
   runner: RunRunner;
@@ -239,6 +241,8 @@ function createRunnerContext(
   const runner = factory.create(runId, {
     flow,
     tabId: 1,
+    ...(options.args ? { args: options.args } : {}),
+    ...(options.recordArgs ? { recordArgs: options.recordArgs } : {}),
     ...(options.execution ? { execution: options.execution } : {}),
   });
 
@@ -255,6 +259,30 @@ describe('V3 RunRunner onError contracts', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('persists recordArgs instead of runtime args for secret-backed runs', async () => {
+    const runId = 'run-secret-record-args' as RunId;
+    const flow = createFlow(
+      'n1',
+      [{ id: 'n1' as any, kind: 'test', config: { action: 'succeed' } }],
+      [],
+    );
+    const h = createRunnerContext(runId, flow, {
+      args: { password: 'plain-secret-password' },
+      recordArgs: { password: { secretRef: 'secret://login-password' } },
+    });
+
+    expect(h.runner.getVar('password')).toBe('plain-secret-password');
+
+    const result = await h.runner.start();
+    const persisted = h.runsById.get(runId);
+
+    expect(result.status).toBe('succeeded');
+    expect(persisted?.args).toEqual({
+      password: { secretRef: 'secret://login-password' },
+    });
+    expect(JSON.stringify(persisted)).not.toContain('plain-secret-password');
   });
 
   it('stop: node failure ends run as failed', async () => {

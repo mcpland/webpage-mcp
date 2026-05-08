@@ -572,7 +572,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         args: {
           type: 'object',
           description:
-            'Variable values for the flow (flat object of key/value). Use workflow_describe or record_replay_list_published to inspect the parameter schema and example args.',
+            'Variable values for the flow (flat object of key/value). Sensitive values may be passed as { "secretRef": "..." } so plaintext is injected only at runtime. Use workflow_describe or record_replay_list_published to inspect the parameter schema and example args.',
         },
         tabId: {
           type: 'number',

@@ -33,6 +33,21 @@ function isRecord(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isJsonValue(value: unknown): boolean {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every((item) => isJsonValue(item));
+  }
+  return isRecord(value) && Object.values(value).every((item) => isJsonValue(item));
+}
+
 function trimmedString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -771,7 +786,40 @@ function normalizeFlowExposedOutputs(
       throw new Error(`Duplicate exposed output alias: "${alias}"`);
     }
     aliases.add(alias);
-    outputs.push({ nodeId: nodeId as NodeId, as: alias });
+    let path: Array<string | number> | undefined;
+    if (record.path !== undefined && record.path !== null) {
+      if (!Array.isArray(record.path)) {
+        throw new Error(`flow.meta.exposedOutputs[${index}].path must be an array`);
+      }
+      path = record.path.map((segment, pathIndex) => {
+        if (typeof segment !== "string" && typeof segment !== "number") {
+          throw new Error(
+            `flow.meta.exposedOutputs[${index}].path[${pathIndex}] must be a string or number`,
+          );
+        }
+        return segment;
+      });
+    }
+
+    let schema: JsonObject | undefined;
+    if (record.schema !== undefined && record.schema !== null) {
+      if (!isRecord(record.schema) || !isJsonValue(record.schema)) {
+        throw new Error(`flow.meta.exposedOutputs[${index}].schema must be a JSON object`);
+      }
+      schema = record.schema;
+    }
+
+    outputs.push({
+      nodeId: nodeId as NodeId,
+      as: alias,
+      ...(path && path.length > 0 ? { path } : {}),
+      schema: schema ?? {},
+      ...(typeof record.required === "boolean" ? { required: record.required } : {}),
+      ...(typeof record.sensitive === "boolean" ? { sensitive: record.sensitive } : {}),
+      ...(typeof record.allowPlaintext === "boolean"
+        ? { allowPlaintext: record.allowPlaintext }
+        : {}),
+    });
   });
 
   return outputs.length > 0 ? outputs : undefined;

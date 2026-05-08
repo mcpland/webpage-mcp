@@ -826,7 +826,8 @@ function buildWorkflowRunTool(
     workflow: workflowProperty,
     args: {
       type: 'object',
-      description: 'Workflow variable values keyed by variable name.',
+      description:
+        'Workflow variable values keyed by variable name. Sensitive values may be passed as { "secretRef": "..." } so plaintext is injected only in the extension runtime.',
       additionalProperties: true,
     },
   };

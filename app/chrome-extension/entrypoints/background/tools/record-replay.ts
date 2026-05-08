@@ -14,8 +14,18 @@ import {
   mergeFlowToolMetadata,
   normalizeToolSlug,
 } from "../record-replay-v3/flows/publish";
+import {
+  projectAndValidateWorkflowOutputs,
+  type WorkflowOutputProjectionResult,
+} from "../record-replay-v3/flows/output-validation";
 import { enqueueRunAndWait } from "../record-replay-v3/compat";
 import { withFlowWriteLock } from "../record-replay-v3/flows/write-lock";
+import {
+  WorkflowSecretRefError,
+  assertWorkflowSecretRefsResolvable,
+  isWorkflowSecretRefValue,
+} from "../record-replay-v3/secrets";
+import { RR_ERROR_CODES } from "../record-replay-v3/domain/errors";
 
 function hasDisallowedPublicUrlScheme(url: string): boolean {
   const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
@@ -93,6 +103,10 @@ function validateFlowRunArgs(
       continue;
     }
 
+    if (isWorkflowSecretRefValue(value)) {
+      continue;
+    }
+
     const kind = inferVariableKind(variable);
     const valid =
       kind === "number"
@@ -140,6 +154,35 @@ function createFlowRunValidationError(flowId: string, errors: FlowRunArgValidati
             retryable: false,
             message: errors[0]?.message ?? "Invalid workflow arguments",
             errors,
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
+}
+
+function createFlowRunSecretRefError(flowId: string, error: WorkflowSecretRefError): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          success: false,
+          flowId,
+          status: "blocked",
+          error: {
+            code:
+              error.code === RR_ERROR_CODES.SECRET_REF_NOT_FOUND ||
+              error.code === RR_ERROR_CODES.SECRET_REF_EXPIRED ||
+              error.code === RR_ERROR_CODES.SECRET_REF_REVOKED
+                ? error.code
+                : RR_ERROR_CODES.SECRET_REF_INVALID,
+            category: "validation",
+            retryable: false,
+            message: error.message,
+            path: error.path,
+            ...(error.secretRef ? { secretRef: error.secretRef } : {}),
           },
         }),
       },
@@ -214,6 +257,42 @@ function workflowToolError(
     },
     true,
   );
+}
+
+function applyOutputContractToRunResult(
+  result: Record<string, any>,
+  outputContract: WorkflowOutputProjectionResult,
+): Record<string, any> {
+  const outputValidation = {
+    ok: outputContract.ok,
+    declaredOutputCount: outputContract.declaredOutputCount,
+    redacted: outputContract.redacted,
+    errors: outputContract.errors,
+  };
+  if (outputContract.ok) {
+    return {
+      ...result,
+      outputs: outputContract.outputs,
+      outputValidation,
+    };
+  }
+
+  return {
+    ...result,
+    success: false,
+    status: "output_validation_failed",
+    errorCode: RR_ERROR_CODES.OUTPUT_VALIDATION_FAILED,
+    error: {
+      code: RR_ERROR_CODES.OUTPUT_VALIDATION_FAILED,
+      category: "validation",
+      retryable: false,
+      message:
+        outputContract.errors[0]?.message ?? "Workflow output validation failed",
+      errors: outputContract.errors,
+    },
+    outputs: outputContract.outputs,
+    outputValidation,
+  };
 }
 
 async function resolveFlowForUnpublish(args: any): Promise<
@@ -497,6 +576,16 @@ class FlowRunTool {
     if (!validatedArgs.ok) {
       return createFlowRunValidationError(flow.id, validatedArgs.errors);
     }
+    try {
+      await assertWorkflowSecretRefsResolvable(validatedArgs.args);
+    } catch (error) {
+      if (error instanceof WorkflowSecretRefError) {
+        return createFlowRunSecretRefError(flow.id, error);
+      }
+      return createErrorResponse(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     const normalizedBaselines =
       normalizeScreenshotBaselines(screenshotBaselines);
     const unsupportedOptions = {
@@ -542,7 +631,12 @@ class FlowRunTool {
       );
     }
 
-    flow = await recordQualityRunOutcome(flow, result.success === true);
+    const outputContract = projectAndValidateWorkflowOutputs(flow, result.outputs);
+    const contractedResult = applyOutputContractToRunResult(
+      result as unknown as Record<string, any>,
+      outputContract,
+    );
+    flow = await recordQualityRunOutcome(flow, contractedResult.success === true);
     const revision = calculateWorkflowRevision(flow);
     const publishedInfo = getPublishedFlowInfo(flow);
     const quality = buildWorkflowQualitySummary(flow);
@@ -556,8 +650,8 @@ class FlowRunTool {
             policy: flow.meta?.quality?.revalidation?.policy ?? "manual",
           },
         };
-    const response = {
-      ...result,
+    const response: Record<string, any> = {
+      ...contractedResult,
       flowId: flow.id,
       ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : {}),
       revision,
@@ -566,22 +660,22 @@ class FlowRunTool {
         status: quality.status,
         current: quality.current,
         verifiedThisRun:
-          result.success === true &&
+          contractedResult.success === true &&
           quality.level === "verified" &&
           quality.verification.oracle !== "none",
         verification: quality.verification,
       },
       qualityWarning,
-      ...(result.success !== true
+      ...(contractedResult.success !== true
         ? {
             debug: {
-              ...(result.debug ?? {}),
+              ...(contractedResult.debug ?? {}),
               debugTool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
               debugArgs: {
-                runId: result.runId,
+                runId: contractedResult.runId,
                 flowId: flow.id,
                 ...(publishedInfo?.slug ? { workflow: publishedInfo.slug } : {}),
-                ...(result.currentNodeId ? { nodeId: result.currentNodeId } : {}),
+                ...(contractedResult.currentNodeId ? { nodeId: contractedResult.currentNodeId } : {}),
                 maxEvents: 200,
                 includeArtifacts: true,
               },

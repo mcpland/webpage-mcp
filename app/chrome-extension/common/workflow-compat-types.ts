@@ -44,7 +44,15 @@ export interface Flow {
     tags?: string[];
     bindings?: Array<{ type: 'domain' | 'path' | 'url'; value: string }>;
     tool?: { category?: string; description?: string; published?: boolean; slug?: string };
-    exposedOutputs?: Array<{ nodeId: string; as: string }>;
+    exposedOutputs?: Array<{
+      nodeId: string;
+      as: string;
+      path?: Array<string | number>;
+      schema?: Record<string, unknown>;
+      required?: boolean;
+      sensitive?: boolean;
+      allowPlaintext?: boolean;
+    }>;
     recording?: {
       originUrl?: string;
       originTitle?: string;

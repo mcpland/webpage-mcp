@@ -279,6 +279,11 @@ type StandardRunErrorCategory =
 function classifyRunErrorCategory(code: string): StandardRunErrorCategory {
   switch (code) {
     case RR_ERROR_CODES.VALIDATION_ERROR:
+    case RR_ERROR_CODES.SECRET_REF_NOT_FOUND:
+    case RR_ERROR_CODES.SECRET_REF_EXPIRED:
+    case RR_ERROR_CODES.SECRET_REF_REVOKED:
+    case RR_ERROR_CODES.SECRET_REF_INVALID:
+    case RR_ERROR_CODES.OUTPUT_VALIDATION_FAILED:
     case RR_ERROR_CODES.UNSUPPORTED_NODE:
     case RR_ERROR_CODES.DAG_INVALID:
     case RR_ERROR_CODES.DAG_CYCLE:

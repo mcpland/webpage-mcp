@@ -895,7 +895,15 @@ export interface FlowMeta {
   tags?: ReadonlyArray<string>;
   bindings?: ReadonlyArray<FlowBinding>;
   tool?: { category?: string; description?: string };
-  exposedOutputs?: ReadonlyArray<{ nodeId: ActionId; as: VariableName }>;
+  exposedOutputs?: ReadonlyArray<{
+    nodeId: ActionId;
+    as: VariableName;
+    path?: ReadonlyArray<string | number>;
+    schema?: Record<string, unknown>;
+    required?: boolean;
+    sensitive?: boolean;
+    allowPlaintext?: boolean;
+  }>;
 }
 
 export interface Flow {

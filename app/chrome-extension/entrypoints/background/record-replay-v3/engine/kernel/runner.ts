@@ -24,6 +24,7 @@ import {
   workflowSideEffectAllowsRetry,
   type WorkflowRetrySource,
 } from 'webpage-mcp-shared';
+import { projectAndValidateWorkflowOutputs } from '../../flows/output-validation';
 
 import type { EventsBus } from '../transport/events-bus';
 import type { StoragePort } from '../storage/storage-port';
@@ -69,6 +70,8 @@ export interface RunnerConfig {
   tabId: number;
   /** initial parameters */
   args?: JsonObject;
+  /** Parameters safe to persist in run records and debug views. */
+  recordArgs?: JsonObject;
   /** Run-scoped execution restrictions forwarded to handlers */
   execution?: RunRecordV3['execution'];
   /** Start node ID */
@@ -467,7 +470,7 @@ class StorageBackedRunRunner implements RunRunner {
           currentNodeId: startNodeId,
           attempt: 0,
           maxAttempts: 1,
-          args: this.config.args,
+          args: this.config.recordArgs ?? this.config.args,
           debug: this.config.debug,
           execution: this.config.execution,
           nextSeq: 1,
@@ -493,7 +496,7 @@ class StorageBackedRunRunner implements RunRunner {
       if (this.config.stopBeforeNodeId !== undefined)
         patch.stopBeforeNodeId = this.config.stopBeforeNodeId;
       if (this.config.endNodeId !== undefined) patch.endNodeId = this.config.endNodeId;
-      if (this.config.args !== undefined) patch.args = this.config.args;
+      if (this.config.args !== undefined) patch.args = this.config.recordArgs ?? this.config.args;
       if (this.config.debug !== undefined) patch.debug = this.config.debug;
       if (this.config.execution !== undefined) patch.execution = this.config.execution;
       await this.env.storage.runs.patch(this.runId, patch);
@@ -1042,22 +1045,39 @@ class StorageBackedRunRunner implements RunRunner {
 
   private async finishSucceeded(startedAt: number): Promise<RunResult> {
     const tookMs = this.env.now() - startedAt;
+    const outputContract = projectAndValidateWorkflowOutputs(this.config.flow, this.outputs);
+    if (!outputContract.ok) {
+      return this.finishFailed(
+        startedAt,
+        createRRError(
+          RR_ERROR_CODES.OUTPUT_VALIDATION_FAILED,
+          outputContract.errors[0]?.message ?? 'Workflow output validation failed',
+          {
+            retryable: false,
+            data: {
+              errors: outputContract.errors.map((error) => ({ ...error })),
+            },
+          },
+        ),
+        this.state.currentNodeId ?? undefined,
+      );
+    }
     await this.queue.run(async () => {
       await this.env.storage.runs.patch(this.runId, {
         status: 'succeeded',
         finishedAt: this.env.now(),
         tookMs,
-        outputs: this.outputs,
+        outputs: outputContract.outputs,
       });
       await this.env.events.append({
         runId: this.runId,
         type: 'run.succeeded',
         tookMs,
-        outputs: this.outputs,
+        outputs: outputContract.outputs,
       } as RunEventInput);
     });
 
-    return { runId: this.runId, status: 'succeeded', tookMs, outputs: this.outputs };
+    return { runId: this.runId, status: 'succeeded', tookMs, outputs: outputContract.outputs };
   }
 
   private async finishFailed(

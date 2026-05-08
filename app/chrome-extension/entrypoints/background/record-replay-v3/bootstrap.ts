@@ -66,6 +66,7 @@ import {
 
 import { acquireKeepalive } from "../keepalive-manager";
 import { createStoragePort } from "./index";
+import { WorkflowSecretRefError, resolveWorkflowSecretRefs } from "./secrets";
 
 // ==================== Types ====================
 
@@ -99,6 +100,22 @@ function errorMessage(err: unknown): string {
   if (err && typeof err === "object" && "message" in err)
     return String((err as { message: unknown }).message);
   return String(err);
+}
+
+function createSecretRefRunError(error: WorkflowSecretRefError): RRError {
+  const code =
+    error.code === RR_ERROR_CODES.SECRET_REF_NOT_FOUND ||
+    error.code === RR_ERROR_CODES.SECRET_REF_EXPIRED ||
+    error.code === RR_ERROR_CODES.SECRET_REF_REVOKED
+      ? error.code
+      : RR_ERROR_CODES.SECRET_REF_INVALID;
+  return createRRError(code, error.message, {
+    retryable: false,
+    data: {
+      path: error.path,
+      ...(error.secretRef ? { secretRef: error.secretRef } : {}),
+    },
+  });
 }
 
 function isFiniteNumber(v: unknown): v is number {
@@ -270,10 +287,12 @@ function createDefaultRunExecutor(deps: {
     // 5. Execute Run
     let runner;
     try {
+      const runtimeArgs = await resolveWorkflowSecretRefs(item.args);
       runner = deps.runnerFactory.create(runId, {
         flow,
         tabId,
-        args: item.args,
+        args: runtimeArgs,
+        recordArgs: item.args,
         execution: run.execution ?? item.execution,
         startNodeId: run.startNodeId,
         stopBeforeNodeId: run.stopBeforeNodeId,
@@ -289,10 +308,12 @@ function createDefaultRunExecutor(deps: {
       await failRun(
         deps,
         runId,
-        createRRError(
-          RR_ERROR_CODES.INTERNAL,
-          `Executor crashed: ${errorMessage(e)}`,
-        ),
+        e instanceof WorkflowSecretRefError
+          ? createSecretRefRunError(e)
+          : createRRError(
+              RR_ERROR_CODES.INTERNAL,
+              `Executor crashed: ${errorMessage(e)}`,
+            ),
       );
     } finally {
       // 6. Log out Runner

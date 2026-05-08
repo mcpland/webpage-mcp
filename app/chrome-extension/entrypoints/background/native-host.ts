@@ -46,6 +46,8 @@ const WORKFLOW_RUNTIME_FEATURE_FLAGS = [
   "locator_metadata_v1",
   "workflow_publish_tools",
   "workflow_quality_metadata",
+  "workflow_secret_refs",
+  "workflow_output_validation",
 ] as const;
 
 let nativePort: chrome.runtime.Port | null = null;

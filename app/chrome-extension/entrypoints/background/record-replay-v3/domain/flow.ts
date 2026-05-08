@@ -74,6 +74,11 @@ export interface FlowToolMetadata {
 export interface FlowExposedOutput {
   nodeId: NodeId;
   as: string;
+  path?: Array<string | number>;
+  schema?: JsonObject;
+  required?: boolean;
+  sensitive?: boolean;
+  allowPlaintext?: boolean;
 }
 
 export interface FlowRecordingParameterSuggestion {
