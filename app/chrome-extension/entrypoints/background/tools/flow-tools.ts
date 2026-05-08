@@ -24,6 +24,8 @@ import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variabl
 import { createStoragePort } from '../record-replay-v3';
 import { enqueueRunAndWait, saveFlowToV3 } from '../record-replay-v3/compat';
 import {
+  appendWorkflowAuditEvent,
+  buildWorkflowQualitySummary,
   buildWorkflowToolDescriptor,
   calculateWorkflowRevision,
   getPublishedFlowInfo,
@@ -77,7 +79,7 @@ interface PublicAnalyzedFlow {
   variables?: FlowV3['variables'];
   meta?: Pick<
     NonNullable<FlowV3['meta']>,
-    'domain' | 'tags' | 'bindings' | 'tool' | 'exposedOutputs' | 'quality'
+    'domain' | 'tags' | 'bindings' | 'tool' | 'exposedOutputs' | 'quality' | 'audit'
   >;
 }
 
@@ -294,6 +296,40 @@ interface WorkflowCapabilityMatrix {
   mfa: WorkflowCapabilityStatus;
   captcha: WorkflowCapabilityStatus;
   unsupportedReasons: string[];
+}
+
+interface WorkflowRuntimeMetrics {
+  workflowRun: {
+    totalCount: number;
+    successCount: number;
+    failureCount: number;
+    successRate: number | null;
+  };
+  passRateByWorkflow: Record<string, number>;
+  repair: {
+    applyCount: number;
+    applyRate: number | null;
+    falseRepairCount: number;
+    falseRepairRate: number | null;
+  };
+  artifactRedaction: {
+    lowConfidenceCount: number;
+  };
+  quota: {
+    hitCount: number;
+  };
+  capability: {
+    unsupportedCount: number;
+  };
+  approval: {
+    useCount: number;
+  };
+  quality: {
+    staleQualityCount: number;
+  };
+  audit: {
+    eventCount: number;
+  };
 }
 
 const REDACTED = '<redacted>';
@@ -589,7 +625,8 @@ function sanitizeAnalyzedFlow(flow: FlowV3): PublicAnalyzedFlow {
       flow.meta.bindings ||
       flow.meta.tool ||
       flow.meta.exposedOutputs ||
-      flow.meta.quality)
+      flow.meta.quality ||
+      flow.meta.audit)
       ? {
           ...(flow.meta.domain ? { domain: flow.meta.domain } : {}),
           ...(Array.isArray(flow.meta.tags) ? { tags: [...flow.meta.tags] } : {}),
@@ -617,6 +654,16 @@ function sanitizeAnalyzedFlow(flow: FlowV3): PublicAnalyzedFlow {
                   lastValidatedAt: flow.meta.quality.lastValidatedAt,
                   freshnessExpiresAt: flow.meta.quality.freshnessExpiresAt,
                   staleReason: flow.meta.quality.staleReason,
+                },
+              }
+            : {}),
+          ...(flow.meta.audit?.events
+            ? {
+                audit: {
+                  events: flow.meta.audit.events.map((event) => ({
+                    ...event,
+                    ...(event.metadata ? { metadata: { ...event.metadata } } : {}),
+                  })),
                 },
               }
             : {}),
@@ -1831,6 +1878,167 @@ async function collectDebugRuns(flow: FlowV3, args: any): Promise<WorkflowDebugR
   }
 
   return debugRuns;
+}
+
+function roundMetric(value: number): number {
+  return Number(Math.max(0, value).toFixed(4));
+}
+
+function extractDebugRunErrorCode(run: WorkflowDebugRun): string | undefined {
+  const error = run.error;
+  if (isRecord(error)) {
+    const code = error.code ?? error.errorCode;
+    if (typeof code === 'string' && code.trim()) {
+      return code.trim();
+    }
+  }
+  if (typeof error === 'string' && error.trim()) {
+    return error.trim();
+  }
+  return undefined;
+}
+
+function isQuotaLikeErrorCode(code: string | undefined): boolean {
+  return Boolean(code && /(quota|rate.?limit|resource.?exhausted|storage.?limit|limit.?exceeded)/i.test(code));
+}
+
+function countUnsupportedCapabilities(capabilities?: WorkflowCapabilityMatrix): number {
+  if (!capabilities) {
+    return 0;
+  }
+  const statusCount = Object.entries(capabilities).filter(
+    ([key, value]) => key !== 'unsupportedReasons' && (value === 'none' || value === 'unknown'),
+  ).length;
+  return statusCount + capabilities.unsupportedReasons.length;
+}
+
+function countLowConfidenceArtifacts(runs: WorkflowDebugRun[]): number {
+  return runs.reduce(
+    (sum, run) =>
+      sum +
+      (run.artifacts ?? []).filter(
+        (artifact) =>
+          artifact.redaction.status === 'lowConfidence' ||
+          artifact.redaction.confidence === 'low' ||
+          artifact.dataBase64Omitted === 'redaction_low_confidence',
+      ).length,
+    0,
+  );
+}
+
+function buildWorkflowRuntimeMetrics(
+  flow: FlowV3,
+  runs: WorkflowDebugRun[],
+  capabilities?: WorkflowCapabilityMatrix,
+): WorkflowRuntimeMetrics {
+  const successCount = runs.filter((run) => run.status === 'succeeded').length;
+  const totalCount = runs.length;
+  const failureCount = Math.max(0, totalCount - successCount);
+  const repairHistory = Array.isArray(flow.meta?.repairs?.history)
+    ? flow.meta.repairs.history
+    : [];
+  const falseRepairCount = repairHistory.filter(
+    (entry) =>
+      typeof entry.beforeQuality === 'number' &&
+      typeof entry.afterQuality === 'number' &&
+      entry.afterQuality < entry.beforeQuality,
+  ).length;
+  const auditEvents = Array.isArray(flow.meta?.audit?.events) ? flow.meta.audit.events : [];
+  const quality = buildWorkflowQualitySummary(flow);
+  const workflowKey = getPublishedFlowInfo(flow)?.slug ?? flow.id;
+
+  return {
+    workflowRun: {
+      totalCount,
+      successCount,
+      failureCount,
+      successRate: totalCount > 0 ? roundMetric(successCount / totalCount) : null,
+    },
+    passRateByWorkflow: {
+      [workflowKey]: quality.passRate,
+    },
+    repair: {
+      applyCount: repairHistory.length,
+      applyRate: totalCount > 0 ? roundMetric(repairHistory.length / totalCount) : null,
+      falseRepairCount,
+      falseRepairRate:
+        repairHistory.length > 0 ? roundMetric(falseRepairCount / repairHistory.length) : null,
+    },
+    artifactRedaction: {
+      lowConfidenceCount: countLowConfidenceArtifacts(runs),
+    },
+    quota: {
+      hitCount: runs.filter((run) => isQuotaLikeErrorCode(extractDebugRunErrorCode(run))).length,
+    },
+    capability: {
+      unsupportedCount: countUnsupportedCapabilities(capabilities),
+    },
+    approval: {
+      useCount: auditEvents.filter((event) => event.kind === 'approval_use').length,
+    },
+    quality: {
+      staleQualityCount: quality.current ? 0 : 1,
+    },
+    audit: {
+      eventCount: auditEvents.length,
+    },
+  };
+}
+
+function buildStabilizeRuntimeMetrics(options: {
+  flow: FlowV3;
+  validationRuns: WorkflowStabilizeRunSummary[];
+  inspectedRuns: WorkflowDebugRun[];
+  capabilities: WorkflowCapabilityMatrix;
+  applied: boolean;
+  changes: WorkflowRepairChange[];
+  rollbackSuggested: boolean;
+  approvalUsed: boolean;
+  passRate: number;
+  qualityCurrent: boolean;
+}): WorkflowRuntimeMetrics {
+  const totalCount = options.validationRuns.length;
+  const successCount = options.validationRuns.filter((run) => run.success).length;
+  const falseRepairCount = options.rollbackSuggested ? 1 : 0;
+  const workflowKey = getPublishedFlowInfo(options.flow)?.slug ?? options.flow.id;
+  const auditEvents = Array.isArray(options.flow.meta?.audit?.events) ? options.flow.meta.audit.events : [];
+  const persistedApprovalUseCount = auditEvents.filter((event) => event.kind === 'approval_use').length;
+
+  return {
+    workflowRun: {
+      totalCount,
+      successCount,
+      failureCount: Math.max(0, totalCount - successCount),
+      successRate: totalCount > 0 ? roundMetric(successCount / totalCount) : null,
+    },
+    passRateByWorkflow: {
+      [workflowKey]: roundScore(options.passRate),
+    },
+    repair: {
+      applyCount: options.applied ? options.changes.length : 0,
+      applyRate: totalCount > 0 ? roundMetric((options.applied ? 1 : 0) / totalCount) : null,
+      falseRepairCount,
+      falseRepairRate: options.applied ? falseRepairCount : null,
+    },
+    artifactRedaction: {
+      lowConfidenceCount: countLowConfidenceArtifacts(options.inspectedRuns),
+    },
+    quota: {
+      hitCount: options.validationRuns.filter((run) => isQuotaLikeErrorCode(run.errorCode)).length,
+    },
+    capability: {
+      unsupportedCount: countUnsupportedCapabilities(options.capabilities),
+    },
+    approval: {
+      useCount: persistedApprovalUseCount > 0 ? persistedApprovalUseCount : options.approvalUsed ? 1 : 0,
+    },
+    quality: {
+      staleQualityCount: options.qualityCurrent ? 0 : 1,
+    },
+    audit: {
+      eventCount: auditEvents.length,
+    },
+  };
 }
 
 function collectFlowHints(flow: FlowV3): FlowHint[] {
@@ -3063,6 +3271,46 @@ function recordStabilizeRepairHistory(
     ],
   };
   flow.meta = meta;
+  let audited = appendWorkflowAuditEvent(flow, {
+    kind: 'repair_apply',
+    actor: 'mcp',
+    revision: calculateWorkflowRevision(flow),
+    reason: 'workflow_stabilize_apply',
+    metadata: {
+      tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
+      baseRevision: beforeRevision,
+      repairRevision,
+      changeCount: changes.length,
+      changeCodes: changes.map((change) => change.code).slice(0, 30),
+      nodeIds: changes
+        .map((change) => change.nodeId)
+        .filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0)
+        .slice(0, 30),
+      pageContentUsed,
+    },
+  });
+  if (
+    changes.some((change) =>
+      ['default_timeout_added', 'default_retry_added', 'failure_screenshot_added'].includes(change.code),
+    )
+  ) {
+    audited = appendWorkflowAuditEvent(audited, {
+      kind: 'policy_change',
+      actor: 'mcp',
+      revision: calculateWorkflowRevision(audited),
+      reason: 'workflow_stabilize_default_policy',
+      metadata: {
+        tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
+        changeCodes: changes
+          .map((change) => change.code)
+          .filter((code) =>
+            ['default_timeout_added', 'default_retry_added', 'failure_screenshot_added'].includes(code),
+          )
+          .slice(0, 30),
+      },
+    });
+  }
+  flow.meta = audited.meta;
 }
 
 class FlowAnalyzeTool {
@@ -3187,6 +3435,7 @@ class WorkflowDebugViewTool {
     const runs = await collectDebugRuns(flow, args);
     const descriptor = buildWorkflowToolDescriptor(flow);
     const capabilities = buildWorkflowCapabilityMatrix(flow, 'debug');
+    const metrics = buildWorkflowRuntimeMetrics(flow, runs, capabilities);
 
     return {
       content: [
@@ -3215,6 +3464,10 @@ class WorkflowDebugViewTool {
               sideEffects: descriptor.sideEffects.summary,
             },
             capabilities,
+            metrics,
+            audit: {
+              events: flow.meta?.audit?.events ?? [],
+            },
             artifactPolicy: {
               contentTrust: 'untrusted',
               dataInline: 'explicit_request_only_and_blocked_when_redaction_is_low_confidence',
@@ -3290,6 +3543,43 @@ class WorkflowRepairTool {
 
     const updated = shouldApply && changes.length > 0;
     if (updated) {
+      let audited = appendWorkflowAuditEvent(flow, {
+        kind: 'repair_apply',
+        actor: 'mcp',
+        revision: calculateWorkflowRevision(flow),
+        reason: 'workflow_repair_apply',
+        metadata: {
+          tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR,
+          changeCount: changes.length,
+          changeCodes: changes.map((change) => change.code).slice(0, 30),
+          nodeIds: changes
+            .map((change) => change.nodeId)
+            .filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0)
+            .slice(0, 30),
+        },
+      });
+      if (
+        changes.some((change) =>
+          ['default_timeout_added', 'default_retry_added', 'failure_screenshot_added'].includes(change.code),
+        )
+      ) {
+        audited = appendWorkflowAuditEvent(audited, {
+          kind: 'policy_change',
+          actor: 'mcp',
+          revision: calculateWorkflowRevision(audited),
+          reason: 'workflow_repair_default_policy',
+          metadata: {
+            tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_REPAIR,
+            changeCodes: changes
+              .map((change) => change.code)
+              .filter((code) =>
+                ['default_timeout_added', 'default_retry_added', 'failure_screenshot_added'].includes(code),
+              )
+              .slice(0, 30),
+          },
+        });
+      }
+      flow.meta = audited.meta;
       flow.updatedAt = new Date().toISOString();
       await saveFlowToV3(flow);
     }
@@ -3348,6 +3638,7 @@ class WorkflowRepairTool {
                 }
               : {}),
             changes,
+            ...(updated ? { audit: flow.meta?.audit?.events?.slice(-2) } : {}),
             ...(parameterization ? { parameterization } : {}),
           }),
         },
@@ -3440,6 +3731,7 @@ class WorkflowStabilizeTool {
       !Array.isArray(args.safety.nodeRiskOverrides)
         ? (args.safety.nodeRiskOverrides as Record<string, WorkflowRiskProfile>)
         : {};
+    const acceptedRiskOverrideNodeIds: string[] = [];
     for (const [nodeId, override] of Object.entries(nodeRiskOverrides)) {
       if (override !== 'safe' && override !== 'idempotent' && override !== 'dangerous') {
         warnings.push({
@@ -3462,6 +3754,10 @@ class WorkflowStabilizeTool {
           message:
             'Risk downgrade overrides require a trusted approval reference and are ignored in analyze-only mode.',
         });
+        continue;
+      }
+      if (override !== actualRisk) {
+        acceptedRiskOverrideNodeIds.push(nodeId);
       }
     }
 
@@ -3564,6 +3860,38 @@ class WorkflowStabilizeTool {
     }
 
     const applied = shouldApply && changes.length > 0;
+    if (args?.dryRun !== true && hasApprovalReference) {
+      const authorization = args?.safety?.authorization ?? {};
+      workingFlow = appendWorkflowAuditEvent(workingFlow, {
+        kind: 'approval_use',
+        actor: 'mcp',
+        revision: calculateWorkflowRevision(workingFlow),
+        reason: 'workflow_stabilize_authorization',
+        metadata: {
+          approvedBy:
+            authorization.approvedBy === 'user' ||
+            authorization.approvedBy === 'ui' ||
+            authorization.approvedBy === 'policy'
+              ? authorization.approvedBy
+              : 'unknown',
+          executionMode: blockedReason ? 'analyzeOnly' : executionMode,
+          allowExternalSideEffects: requestsExternalSideEffects,
+          maxDangerousRuns,
+        },
+      });
+    }
+    if (args?.dryRun !== true && acceptedRiskOverrideNodeIds.length > 0) {
+      workingFlow = appendWorkflowAuditEvent(workingFlow, {
+        kind: 'risk_override',
+        actor: 'mcp',
+        revision: calculateWorkflowRevision(workingFlow),
+        reason: 'workflow_stabilize_node_risk_override',
+        metadata: {
+          nodeIds: acceptedRiskOverrideNodeIds.slice(0, 30),
+          overrideCount: acceptedRiskOverrideNodeIds.length,
+        },
+      });
+    }
     let postRepairRevision: string | undefined;
     if (applied) {
       recordStabilizeRepairHistory(workingFlow, initialRevision, changes);
@@ -3634,18 +3962,43 @@ class WorkflowStabilizeTool {
         warnings,
       });
       if (args?.dryRun !== true) {
-        workingFlow.meta = {
-          ...(workingFlow.meta ?? {}),
-          quality: qualityRecord,
-          runtime: {
-            ...(workingFlow.meta?.runtime ?? {}),
-            protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
-            capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
-            dslVersion: FLOW_DSL_VERSION,
-            nodeSemanticsVersion: FLOW_NODE_SEMANTICS_VERSION,
+        const previousQuality = buildWorkflowQualitySummary(workingFlow);
+        let nextWorkingFlow: FlowV3 = {
+          ...workingFlow,
+          meta: {
+            ...(workingFlow.meta ?? {}),
+            quality: qualityRecord,
+            runtime: {
+              ...(workingFlow.meta?.runtime ?? {}),
+              protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
+              capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
+              dslVersion: FLOW_DSL_VERSION,
+              nodeSemanticsVersion: FLOW_NODE_SEMANTICS_VERSION,
+            },
           },
         };
-        workingFlow = await saveFlowToV3(workingFlow);
+        const nextQuality = buildWorkflowQualitySummary(nextWorkingFlow);
+        if (
+          previousQuality.current &&
+          (!nextQuality.current || nextQuality.slo.status === 'breached')
+        ) {
+          nextWorkingFlow = appendWorkflowAuditEvent(nextWorkingFlow, {
+            kind: 'quality_downgrade',
+            actor: 'mcp',
+            revision: calculateWorkflowRevision(nextWorkingFlow),
+            previousStatus: previousQuality.status,
+            nextStatus: nextQuality.status,
+            reason: nextQuality.staleReason ?? 'slo_breach',
+            metadata: {
+              tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
+              passRate: nextQuality.passRate,
+              minPassRate,
+              sloStatus: nextQuality.slo.status,
+              sloBreaches: nextQuality.slo.breaches,
+            },
+          });
+        }
+        workingFlow = await saveFlowToV3(nextWorkingFlow);
       }
       quality = buildWorkflowToolDescriptor({
         ...workingFlow,
@@ -3657,6 +4010,18 @@ class WorkflowStabilizeTool {
     } else {
       quality = buildWorkflowToolDescriptor(workingFlow).quality;
     }
+    const runtimeMetrics = buildStabilizeRuntimeMetrics({
+      flow: workingFlow,
+      validationRuns: [...baselineRuns, ...postRepairRuns],
+      inspectedRuns: recentRuns,
+      capabilities,
+      applied,
+      changes,
+      rollbackSuggested: Boolean(rollbackSuggestion),
+      approvalUsed: hasApprovalReference,
+      passRate: finalScore.passRate,
+      qualityCurrent: quality?.current ?? buildWorkflowQualitySummary(workingFlow).current,
+    });
 
     return {
       content: [
@@ -3699,6 +4064,10 @@ class WorkflowStabilizeTool {
               approvalReferenceAccepted: hasApprovalReference,
             },
             capabilities,
+            metrics: runtimeMetrics,
+            audit: {
+              events: workingFlow.meta?.audit?.events ?? [],
+            },
             hints: finalHints,
             recommendations,
             recommendationsBeforeApply,

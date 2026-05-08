@@ -765,6 +765,20 @@ describe("recording/editing/flow toolchain integration", () => {
       networkEvents: "none",
       selectorResolution: "partial",
     });
+    expect(payload.metrics).toMatchObject({
+      workflowRun: {
+        totalCount: 1,
+        successCount: 0,
+        failureCount: 1,
+        successRate: 0,
+      },
+      artifactRedaction: {
+        lowConfidenceCount: 1,
+      },
+      quality: {
+        staleQualityCount: 1,
+      },
+    });
     expect(payload.artifactPolicy).toMatchObject({
       contentTrust: "untrusted",
       dataInline: "explicit_request_only_and_blocked_when_redaction_is_low_confidence",
@@ -1768,6 +1782,21 @@ describe("recording/editing/flow toolchain integration", () => {
         postRepairRunCount: 2,
       },
     });
+    expect(payload.metrics).toMatchObject({
+      workflowRun: {
+        totalCount: 4,
+        successCount: 2,
+        failureCount: 2,
+        successRate: 0.5,
+      },
+      repair: {
+        applyCount: 4,
+        falseRepairCount: 0,
+      },
+      quality: {
+        staleQualityCount: 0,
+      },
+    });
     expect(payload.changes.map((change: { code: string }) => change.code)).toEqual(
       expect.arrayContaining([
         "parameter_suggestions_applied",
@@ -1791,6 +1820,18 @@ describe("recording/editing/flow toolchain integration", () => {
       baseRevision: expect.stringMatching(/^rev-fnv1a32-/),
       provenance: {
         source: "workflow_stabilize",
+        pageContentUsed: false,
+      },
+    });
+    expect(updated?.meta?.audit?.events?.map((event) => event.kind)).toEqual(
+      expect.arrayContaining(["repair_apply", "policy_change"]),
+    );
+    expect(updated?.meta?.audit?.events?.find((event) => event.kind === "repair_apply")).toMatchObject({
+      actor: "mcp",
+      reason: "workflow_stabilize_apply",
+      metadata: {
+        tool: "workflow_stabilize",
+        changeCount: 4,
         pageContentUsed: false,
       },
     });
@@ -2758,6 +2799,8 @@ describe("recording/editing/flow toolchain integration", () => {
         password: { secretRef: "secret://login-password" },
       },
     });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
 
     expect(result.isError).toBe(false);
     expect(mocks.enqueueRunAndWait).toHaveBeenCalledWith(
@@ -2770,6 +2813,22 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(JSON.stringify(mocks.enqueueRunAndWait.mock.calls[0][0])).not.toContain(
       "plain-secret-password",
     );
+    expect(payload.metrics).toMatchObject({
+      audit: { eventCount: 1 },
+      approval: { useCount: 0 },
+    });
+    expect(updated?.meta?.audit?.events).toEqual([
+      expect.objectContaining({
+        kind: "secret_ref_use",
+        actor: "runtime",
+        runId: "run-secret-ref",
+        metadata: {
+          secretRefCount: 1,
+        },
+      }),
+    ]);
+    expect(JSON.stringify(updated?.meta?.audit)).not.toContain("plain-secret-password");
+    expect(JSON.stringify(updated?.meta?.audit)).not.toContain("secret://login-password");
   });
 
   it("flowRunTool blocks missing secretRef args before replay", async () => {
@@ -3043,6 +3102,130 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("flowRunTool downgrades stale quality after consecutive failures", async () => {
+    const flowId = `flow-run-quality-downgrade-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "wait-1" as any,
+        kind: "wait",
+        config: { condition: { kind: "selector", selector: "#ready" } },
+      },
+    ]);
+    flow.meta = {
+      quality: {
+        revision: calculateWorkflowRevision(flow),
+        level: "stable",
+        status: "stable",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        lastValidatedAt: "2026-01-01T00:00:00.000Z" as any,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        verification: {
+          oracle: "none",
+          oracleStrength: "weak",
+        },
+        revalidation: {
+          policy: "onFailure",
+          nextRevalidateAt: "2999-01-01T00:00:00.000Z" as any,
+          autoDowngrade: true,
+        },
+        slo: {
+          targetPassRate: 1,
+          minValidationRuns: 3,
+        },
+      },
+    };
+    await createStoragePort().flows.save(flow);
+
+    let runCall = 0;
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      runCall += 1;
+      const runId = `run-quality-downgrade-${runCall}`;
+      return {
+        run: {
+          id: runId,
+          flowId,
+          status: "failed",
+          currentNodeId: "wait-1",
+          tookMs: 4,
+        } as any,
+        events: [],
+        result: {
+          runId,
+          success: false,
+          status: "failed",
+          currentNodeId: "wait-1",
+          failedNodeId: "wait-1",
+          errorCode: "TIMEOUT",
+          error: {
+            code: "TIMEOUT",
+            category: "runtime",
+            retryable: true,
+            message: "Timed out waiting for #ready",
+            nodeId: "wait-1",
+          },
+          summary: { total: 1, success: 0, failed: 1, tookMs: 4 },
+          outputs: null,
+          logs: [],
+          paused: false,
+        },
+      };
+    });
+
+    await flowRunTool.execute({ flowId });
+    await flowRunTool.execute({ flowId });
+    const third = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(third);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(third.isError).toBe(true);
+    expect(payload.quality).toMatchObject({
+      status: "stale",
+      current: false,
+      staleReason: "consecutive_failures",
+      slo: {
+        status: "breached",
+        breaches: expect.arrayContaining(["consecutive_failures"]),
+      },
+    });
+    expect(payload.metrics.workflowRun).toMatchObject({
+      totalCount: 1,
+      success: false,
+      successCount: 0,
+      failureCount: 1,
+      consecutiveFailureCount: 3,
+      staleQualityCount: 1,
+      revalidationRecommended: true,
+    });
+    expect(payload.metrics.quality).toMatchObject({
+      staleQualityCount: 1,
+    });
+    expect(updated?.meta?.quality).toMatchObject({
+      consecutiveFailureCount: 3,
+      staleReason: "consecutive_failures",
+      revalidation: {
+        lastRevalidateReason: "workflow_run_failure",
+      },
+    });
+    expect(updated?.meta?.audit?.events?.filter((event) => event.kind === "quality_downgrade")).toEqual([
+      expect.objectContaining({
+        actor: "runtime",
+        runId: "run-quality-downgrade-3",
+        previousStatus: "stable",
+        nextStatus: "stale",
+        reason: "consecutive_failures",
+        metadata: {
+          consecutiveFailureCount: 3,
+        },
+      }),
+    ]);
+  });
+
   it("workflowDescribeTool returns schema, example args, background, and side-effect metadata", async () => {
     const flowId = `workflow-describe-${Date.now()}`;
     await createStoragePort().flows.save({
@@ -3264,6 +3447,13 @@ describe("recording/editing/flow toolchain integration", () => {
       success: true,
       workflow: "published-from-tool",
       published: true,
+      audit: {
+        kind: "workflow_publish",
+        actor: "mcp",
+        workflow: "published-from-tool",
+        previousStatus: "stable",
+        nextStatus: "stable",
+      },
       descriptor: {
         slug: "published-from-tool",
         quality: {
@@ -3281,6 +3471,7 @@ describe("recording/editing/flow toolchain integration", () => {
       description: "Published through MCP",
     });
     expect(published?.meta?.quality?.revision).toBe(calculateWorkflowRevision(published as FlowV3));
+    expect(published?.meta?.audit?.events?.map((event) => event.kind)).toContain("workflow_publish");
 
     const unpublish = await workflowUnpublishTool.execute({ workflow: "published-from-tool" });
     const unpublishPayload = parseToolPayload(unpublish);
@@ -3292,11 +3483,22 @@ describe("recording/editing/flow toolchain integration", () => {
       workflow: "published-from-tool",
       published: false,
       status: "draft",
+      audit: {
+        kind: "workflow_unpublish",
+        actor: "mcp",
+        workflow: "published-from-tool",
+        previousStatus: "stable",
+        nextStatus: "draft",
+      },
     });
     expect(unpublished?.meta?.tool).toMatchObject({
       published: false,
       slug: "published-from-tool",
     });
+    expect(unpublished?.meta?.audit?.events?.map((event) => event.kind)).toEqual([
+      "workflow_publish",
+      "workflow_unpublish",
+    ]);
   });
 
   it("workflowPublishTool blocks unstabilized workflows unless warning mode is explicit", async () => {

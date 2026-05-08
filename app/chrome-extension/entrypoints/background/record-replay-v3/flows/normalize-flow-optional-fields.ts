@@ -1,6 +1,9 @@
-import type { ISODateTimeString, JsonObject } from "../domain/json";
+import type { ISODateTimeString, JsonObject, JsonValue } from "../domain/json";
 import type { NodeId } from "../domain/ids";
 import type {
+  FlowAuditEvent,
+  FlowAuditEventKind,
+  FlowAuditMeta,
   FlowBinding,
   FlowExposedOutput,
   FlowMeta,
@@ -33,7 +36,7 @@ function isRecord(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isJsonValue(value: unknown): boolean {
+function isJsonValue(value: unknown): value is JsonValue {
   if (
     value === null ||
     typeof value === "string" ||
@@ -308,6 +311,16 @@ function normalizeFlowMeta(
     }
   }
 
+  if (value.audit !== undefined && value.audit !== null) {
+    if (!isRecord(value.audit)) {
+      throw new Error("flow.meta.audit must be an object");
+    }
+    const audit = normalizeFlowAuditMeta(value.audit);
+    if (audit) {
+      meta.audit = audit;
+    }
+  }
+
   return Object.keys(meta).length > 0 ? meta : undefined;
 }
 
@@ -318,6 +331,20 @@ const QUALITY_CAPABILITY_VALUES = ["full", "partial", "none", "unknown"] as cons
 const QUALITY_ORACLE_VALUES = ["none", "assertion", "declaredOutput", "expectedOutcome"] as const;
 const QUALITY_ORACLE_STRENGTH_VALUES = ["weak", "normal", "strong"] as const;
 const REVALIDATION_POLICY_VALUES = ["manual", "onFailure", "scheduled", "siteChange"] as const;
+const AUDIT_EVENT_KIND_VALUES = [
+  "workflow_publish",
+  "workflow_unpublish",
+  "approval_create",
+  "approval_revoke",
+  "approval_use",
+  "risk_override",
+  "repair_apply",
+  "repair_rollback",
+  "quality_downgrade",
+  "secret_ref_use",
+  "policy_change",
+] as const;
+const AUDIT_ACTOR_VALUES = ["mcp", "runtime", "system"] as const;
 
 function normalizeFlowQualityExcludedRuns(value: unknown): FlowQualityExcludedRuns | undefined {
   if (!isRecord(value)) {
@@ -697,6 +724,59 @@ function normalizeFlowRepairsMeta(value: JsonObject): FlowRepairsMeta | undefine
     }
   }
   return Object.keys(repairs).length > 0 ? repairs : undefined;
+}
+
+function normalizeAuditMetadata(value: unknown): JsonObject | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const metadata: JsonObject = {};
+  for (const [key, nested] of Object.entries(value).slice(0, 50)) {
+    if (!key.trim() || !isJsonValue(nested)) continue;
+    metadata[key] = nested;
+  }
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function normalizeFlowAuditEvent(value: unknown): FlowAuditEvent | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const id = trimmedString(value.id);
+  const ts = optionalIsoString(value.ts);
+  const kind = enumValue<FlowAuditEventKind>(value.kind, AUDIT_EVENT_KIND_VALUES);
+  const actor = enumValue(value.actor, AUDIT_ACTOR_VALUES);
+  if (!id || !ts || !kind || !actor) {
+    return undefined;
+  }
+  const previousStatus = enumValue<FlowQualityStatus>(value.previousStatus, QUALITY_STATUS_VALUES);
+  const nextStatus = enumValue<FlowQualityStatus>(value.nextStatus, QUALITY_STATUS_VALUES);
+  const metadata = normalizeAuditMetadata(value.metadata);
+  return {
+    id,
+    kind,
+    actor,
+    ts: ts as FlowAuditEvent["ts"],
+    ...(trimmedString(value.flowId) ? { flowId: trimmedString(value.flowId) as FlowAuditEvent["flowId"] } : {}),
+    ...(trimmedString(value.workflow) ? { workflow: trimmedString(value.workflow) } : {}),
+    ...(trimmedString(value.revision) ? { revision: trimmedString(value.revision) } : {}),
+    ...(trimmedString(value.runId) ? { runId: trimmedString(value.runId) } : {}),
+    ...(previousStatus ? { previousStatus } : {}),
+    ...(nextStatus ? { nextStatus } : {}),
+    ...(trimmedString(value.reason) ? { reason: trimmedString(value.reason) } : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+}
+
+function normalizeFlowAuditMeta(value: JsonObject): FlowAuditMeta | undefined {
+  if (!Array.isArray(value.events)) {
+    return undefined;
+  }
+  const events = value.events
+    .map((event) => normalizeFlowAuditEvent(event))
+    .filter((event): event is FlowAuditEvent => Boolean(event))
+    .slice(-50);
+  return events.length > 0 ? { events } : undefined;
 }
 
 function normalizeFlowBindings(

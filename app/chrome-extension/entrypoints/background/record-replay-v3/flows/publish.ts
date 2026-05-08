@@ -1,5 +1,7 @@
 import type { FlowId } from "../domain/ids";
 import type {
+  FlowAuditEvent,
+  FlowAuditEventKind,
   FlowMeta,
   FlowQualityMeta,
   FlowQualityOracleStrength,
@@ -20,6 +22,7 @@ import {
   type WorkflowSideEffectProfile,
   type WorkflowSideEffectSummary,
 } from "webpage-mcp-shared";
+import type { JsonObject } from "../domain/json";
 
 export interface PublishedFlowInfoV3 {
   id: FlowId;
@@ -95,6 +98,14 @@ export interface WorkflowQualitySummary {
   nextRevalidateAt?: string;
   revalidationStatus: "current" | "stale" | "overdue" | "not_configured";
   revalidationReason?: string;
+  slo: {
+    targetPassRate: number;
+    minValidationRuns: number;
+    maxP95RunMs?: number;
+    maxFalseRepairRate?: number;
+    status: "met" | "warning" | "breached" | "unknown";
+    breaches: string[];
+  };
   verification: {
     oracle: NonNullable<NonNullable<FlowQualityMeta["verification"]>["oracle"]>;
     oracleStrength: NonNullable<FlowQualityMeta["verification"]>["oracleStrength"];
@@ -104,6 +115,18 @@ export interface WorkflowQualitySummary {
   };
   capabilities?: NonNullable<FlowQualityMeta["capabilities"]>;
   warnings: string[];
+}
+
+export interface WorkflowAuditEventInput {
+  kind: FlowAuditEventKind;
+  actor?: FlowAuditEvent["actor"];
+  workflow?: string;
+  revision?: string;
+  runId?: string;
+  previousStatus?: FlowQualityStatus;
+  nextStatus?: FlowQualityStatus;
+  reason?: string;
+  metadata?: JsonObject;
 }
 
 export interface WorkflowPublishGateOptions {
@@ -166,6 +189,42 @@ function fnv1a32(input: string): string {
     hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function createAuditEventId(kind: FlowAuditEventKind, ts: string): string {
+  return `audit-${kind}-${fnv1a32(`${ts}:${Math.random().toString(36).slice(2)}`)}`;
+}
+
+export function appendWorkflowAuditEvent(
+  flow: FlowV3,
+  input: WorkflowAuditEventInput,
+): FlowV3 {
+  const ts = new Date().toISOString();
+  const event: FlowAuditEvent = {
+    id: createAuditEventId(input.kind, ts),
+    kind: input.kind,
+    actor: input.actor ?? "mcp",
+    ts: ts as FlowAuditEvent["ts"],
+    flowId: flow.id,
+    ...(input.workflow ? { workflow: input.workflow } : {}),
+    ...(input.revision ? { revision: input.revision } : {}),
+    ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.previousStatus ? { previousStatus: input.previousStatus } : {}),
+    ...(input.nextStatus ? { nextStatus: input.nextStatus } : {}),
+    ...(input.reason ? { reason: input.reason } : {}),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
+  };
+  const existing = Array.isArray(flow.meta?.audit?.events) ? flow.meta.audit.events : [];
+  return {
+    ...flow,
+    meta: {
+      ...(flow.meta ?? {}),
+      audit: {
+        ...(flow.meta?.audit ?? {}),
+        events: [...existing, event].slice(-50),
+      },
+    },
+  };
 }
 
 function normalizeToolMetadataForRevision(tool: FlowToolMetadata | undefined) {
@@ -287,6 +346,49 @@ function getRevalidationStatus(
   return "current";
 }
 
+function buildWorkflowSloSummary(
+  quality: FlowQualityMeta | undefined,
+): WorkflowQualitySummary["slo"] {
+  const targetPassRate = clampScore(quality?.slo?.targetPassRate ?? 1);
+  const minValidationRuns = Math.max(
+    1,
+    Math.floor(quality?.slo?.minValidationRuns ?? quality?.minValidationRuns ?? 3),
+  );
+  const maxP95RunMs =
+    typeof quality?.slo?.maxP95RunMs === "number" && Number.isFinite(quality.slo.maxP95RunMs)
+      ? Math.max(1, Math.floor(quality.slo.maxP95RunMs))
+      : undefined;
+  const maxFalseRepairRate =
+    typeof quality?.slo?.maxFalseRepairRate === "number" &&
+    Number.isFinite(quality.slo.maxFalseRepairRate)
+      ? clampScore(quality.slo.maxFalseRepairRate)
+      : undefined;
+  const breaches: string[] = [];
+  if (!quality) {
+    return {
+      targetPassRate,
+      minValidationRuns,
+      ...(maxP95RunMs ? { maxP95RunMs } : {}),
+      ...(maxFalseRepairRate !== undefined ? { maxFalseRepairRate } : {}),
+      status: "unknown",
+      breaches: ["missing_quality"],
+    };
+  }
+  const countedRuns = Math.max(0, Math.floor(quality.countedValidationRuns ?? quality.validationRuns ?? 0));
+  const passRate = clampScore(quality.passRate);
+  if (countedRuns < minValidationRuns) breaches.push("insufficient_validation_runs");
+  if (passRate < targetPassRate) breaches.push("pass_rate_below_target");
+  if ((quality.consecutiveFailureCount ?? 0) >= 3) breaches.push("consecutive_failures");
+  return {
+    targetPassRate,
+    minValidationRuns,
+    ...(maxP95RunMs ? { maxP95RunMs } : {}),
+    ...(maxFalseRepairRate !== undefined ? { maxFalseRepairRate } : {}),
+    status: breaches.length === 0 ? "met" : countedRuns > 0 ? "breached" : "warning",
+    breaches,
+  };
+}
+
 export function buildWorkflowQualitySummary(
   flow: FlowV3,
   options: { nowMs?: number } = {},
@@ -308,6 +410,12 @@ export function buildWorkflowQualitySummary(
   if (staleReason) warnings.add(staleReason);
   if ((quality?.verification?.oracle ?? "none") === "none") {
     warnings.add("missing_business_oracle");
+  }
+  const slo = buildWorkflowSloSummary(quality);
+  if (slo.status === "breached") {
+    warnings.add("slo_breached");
+  } else if (slo.status === "warning") {
+    warnings.add("slo_warning");
   }
 
   return {
@@ -340,6 +448,7 @@ export function buildWorkflowQualitySummary(
     ...(quality?.revalidation?.lastRevalidateReason
       ? { revalidationReason: quality.revalidation.lastRevalidateReason }
       : {}),
+    slo,
     verification: {
       oracle: quality?.verification?.oracle ?? "none",
       oracleStrength: quality?.verification?.oracleStrength ?? "weak",
@@ -388,6 +497,12 @@ export function evaluateWorkflowPublishGate(
       message: "Workflow has no business oracle; it can be stable but not verified.",
     });
   }
+  if (quality.slo.status === "breached") {
+    warnings.push({
+      code: "PUBLISH_SLO_BREACHED",
+      message: `Workflow SLO is breached: ${quality.slo.breaches.join(", ") || "unknown"}.`,
+    });
+  }
 
   if (requireStable) {
     if (!quality.current) {
@@ -412,6 +527,12 @@ export function evaluateWorkflowPublishGate(
       errors.push({
         code: "PUBLISH_STABILITY_SCORE_BELOW_THRESHOLD",
         message: `Workflow stabilityScore ${quality.stabilityScore} is below required ${minStabilityScore}.`,
+      });
+    }
+    if (quality.slo.status === "breached") {
+      errors.push({
+        code: "PUBLISH_SLO_BREACHED",
+        message: `Workflow SLO is breached: ${quality.slo.breaches.join(", ") || "unknown"}.`,
       });
     }
     if (quality.level !== "stable" && quality.level !== "verified") {

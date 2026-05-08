@@ -5,6 +5,7 @@ import type { FlowId } from "../record-replay-v3/domain/ids";
 import type { JsonObject } from "../record-replay-v3/domain/json";
 import type { FlowV3 } from "../record-replay-v3/domain/flow";
 import {
+  appendWorkflowAuditEvent,
   buildWorkflowQualitySummary,
   calculateWorkflowRevision,
   ensurePublishedSlugAvailable,
@@ -191,29 +192,138 @@ function createFlowRunSecretRefError(flowId: string, error: WorkflowSecretRefErr
   };
 }
 
-async function recordQualityRunOutcome(flow: FlowV3, success: boolean): Promise<FlowV3> {
-  if (!flow.meta?.quality) {
-    return flow;
+function countSecretRefs(value: unknown): number {
+  if (isWorkflowSecretRefValue(value)) return 1;
+  if (Array.isArray(value)) {
+    return value.reduce<number>((sum, item) => sum + countSecretRefs(item), 0);
   }
-  const previousFailures = flow.meta.quality.consecutiveFailureCount ?? 0;
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).reduce<number>(
+      (sum, item) => sum + countSecretRefs(item),
+      0,
+    );
+  }
+  return 0;
+}
+
+function roundMetric(value: number): number {
+  return Number(Math.max(0, value).toFixed(4));
+}
+
+function isQuotaLikeErrorCode(code: unknown): boolean {
+  return typeof code === "string" && /(quota|rate.?limit|resource.?exhausted|storage.?limit|limit.?exceeded)/i.test(code);
+}
+
+function buildFlowRunRuntimeMetrics(
+  flow: FlowV3,
+  success: boolean,
+  result: Record<string, any>,
+) {
+  const quality = buildWorkflowQualitySummary(flow);
+  const workflowKey = getPublishedFlowInfo(flow)?.slug ?? flow.id;
+  const repairHistory = Array.isArray(flow.meta?.repairs?.history) ? flow.meta.repairs.history : [];
+  const falseRepairCount = repairHistory.filter(
+    (entry) =>
+      typeof entry.beforeQuality === "number" &&
+      typeof entry.afterQuality === "number" &&
+      entry.afterQuality < entry.beforeQuality,
+  ).length;
+  const auditEvents = Array.isArray(flow.meta?.audit?.events) ? flow.meta.audit.events : [];
+  const unsupportedCount = Array.isArray(quality.capabilities?.unsupportedReasons)
+    ? quality.capabilities.unsupportedReasons.length
+    : 0;
+
+  return {
+    workflowRun: {
+      totalCount: 1,
+      success,
+      successCount: success ? 1 : 0,
+      failureCount: success ? 0 : 1,
+      successRate: success ? 1 : 0,
+      consecutiveFailureCount: flow.meta?.quality?.consecutiveFailureCount ?? 0,
+      staleQualityCount: quality.current ? 0 : 1,
+      revalidationRecommended: !quality.current,
+    },
+    passRateByWorkflow: {
+      [workflowKey]: quality.passRate,
+    },
+    repair: {
+      applyCount: repairHistory.length,
+      applyRate: null,
+      falseRepairCount,
+      falseRepairRate:
+        repairHistory.length > 0 ? roundMetric(falseRepairCount / repairHistory.length) : null,
+    },
+    artifactRedaction: {
+      lowConfidenceCount: 0,
+    },
+    quota: {
+      hitCount: isQuotaLikeErrorCode(result.errorCode ?? result.error?.code) ? 1 : 0,
+    },
+    capability: {
+      unsupportedCount,
+    },
+    approval: {
+      useCount: auditEvents.filter((event) => event.kind === "approval_use").length,
+    },
+    quality: {
+      staleQualityCount: quality.current ? 0 : 1,
+    },
+    audit: {
+      eventCount: auditEvents.length,
+    },
+    slo: quality.slo,
+  };
+}
+
+async function recordQualityRunOutcome(
+  flow: FlowV3,
+  success: boolean,
+  context: { runId?: string; secretRefCount?: number } = {},
+): Promise<FlowV3> {
+  let next = flow;
+  if ((context.secretRefCount ?? 0) > 0) {
+    next = {
+      ...appendWorkflowAuditEvent(next, {
+        kind: "secret_ref_use",
+        actor: "runtime",
+        runId: context.runId,
+        revision: calculateWorkflowRevision(next),
+        reason: "workflow_run_secret_ref_args",
+        metadata: {
+          secretRefCount: context.secretRefCount ?? 0,
+        },
+      }),
+      updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
+    };
+  }
+  if (!next.meta?.quality) {
+    if (next !== flow) {
+      await createStoragePort().flows.save(next);
+    }
+    return next;
+  }
+  const existingQuality = next.meta.quality;
+  const previousQuality = buildWorkflowQualitySummary(next);
+  const previousFailures = existingQuality.consecutiveFailureCount ?? 0;
   const consecutiveFailureCount = success ? 0 : previousFailures + 1;
   const staleReason =
     !success && consecutiveFailureCount >= 3
       ? "consecutive_failures"
-      : success && flow.meta.quality.staleReason === "consecutive_failures"
+      : success && existingQuality.staleReason === "consecutive_failures"
         ? undefined
-        : flow.meta.quality.staleReason;
-  const next: FlowV3 = {
-    ...flow,
+        : existingQuality.staleReason;
+  next = {
+    ...next,
     updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
     meta: {
-      ...(flow.meta ?? {}),
+      ...(next.meta ?? {}),
       quality: {
-        ...flow.meta.quality,
+        ...existingQuality,
         consecutiveFailureCount,
         ...(staleReason ? { staleReason } : {}),
         revalidation: {
-          ...(flow.meta.quality.revalidation ?? {}),
+          ...(next.meta.quality.revalidation ?? {}),
           lastRevalidateReason: success ? "workflow_run_success" : "workflow_run_failure",
         },
       },
@@ -221,6 +331,25 @@ async function recordQualityRunOutcome(flow: FlowV3, success: boolean): Promise<
   };
   if (!staleReason) {
     delete next.meta?.quality?.staleReason;
+  }
+  const nextQuality = buildWorkflowQualitySummary(next);
+  if (
+    previousQuality.status !== "stale" &&
+    nextQuality.status === "stale" &&
+    nextQuality.staleReason
+  ) {
+    next = appendWorkflowAuditEvent(next, {
+      kind: "quality_downgrade",
+      actor: "runtime",
+      runId: context.runId,
+      revision: calculateWorkflowRevision(next),
+      previousStatus: previousQuality.status,
+      nextStatus: nextQuality.status,
+      reason: nextQuality.staleReason,
+      metadata: {
+        consecutiveFailureCount,
+      },
+    });
   }
   await createStoragePort().flows.save(next);
   return next;
@@ -467,16 +596,31 @@ class WorkflowPublishTool {
           );
         }
 
-        await storage.flows.save(updated);
-        const descriptor = listPublishedFlowDetails([updated])[0];
+        const audited = appendWorkflowAuditEvent(updated, {
+          kind: "workflow_publish",
+          actor: "mcp",
+          workflow: slug,
+          revision: calculateWorkflowRevision(updated),
+          previousStatus: buildWorkflowQualitySummary(existing).status,
+          nextStatus: gate.quality.status,
+          reason: requireStable ? "quality_gate_passed" : "unverified_publish_acknowledged",
+          metadata: {
+            requireStable,
+            requireVerified,
+            warningCount: warnings.length,
+          },
+        });
+        await storage.flows.save(audited);
+        const descriptor = listPublishedFlowDetails([audited])[0];
         return jsonToolResult({
           success: true,
-          flowId: updated.id,
+          flowId: audited.id,
           workflow: slug,
           published: true,
           status: gate.quality.level === "verified" ? "verified" : gate.quality.level,
           descriptor,
-          quality: buildWorkflowQualitySummary(updated),
+          quality: buildWorkflowQualitySummary(audited),
+          audit: audited.meta?.audit?.events?.at(-1),
           warnings,
           notifications: publishNotificationSummary(),
         });
@@ -505,7 +649,7 @@ class WorkflowUnpublishTool {
       if (!existing) {
         return workflowToolError("WORKFLOW_NOT_FOUND", `Flow not found: ${resolved.flow.id}`);
       }
-      const updated: FlowV3 = {
+      let updated: FlowV3 = {
         ...existing,
         updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
         meta: mergeFlowToolMetadata(existing.meta, {
@@ -513,6 +657,15 @@ class WorkflowUnpublishTool {
           ...(existing.meta?.tool?.slug ? { slug: existing.meta.tool.slug } : {}),
         }),
       };
+      updated = appendWorkflowAuditEvent(updated, {
+        kind: "workflow_unpublish",
+        actor: "mcp",
+        workflow: previousInfo?.slug ?? updated.meta?.tool?.slug,
+        revision: calculateWorkflowRevision(updated),
+        previousStatus: buildWorkflowQualitySummary(existing).status,
+        nextStatus: "draft",
+        reason: "workflow_unpublish",
+      });
       await storage.flows.save(updated);
       return jsonToolResult({
         success: true,
@@ -521,6 +674,7 @@ class WorkflowUnpublishTool {
         published: false,
         status: "draft",
         quality: buildWorkflowQualitySummary(updated),
+        audit: updated.meta?.audit?.events?.at(-1),
         notifications: publishNotificationSummary(),
       });
     });
@@ -636,7 +790,11 @@ class FlowRunTool {
       result as unknown as Record<string, any>,
       outputContract,
     );
-    flow = await recordQualityRunOutcome(flow, contractedResult.success === true);
+    const secretRefCount = countSecretRefs(validatedArgs.args);
+    flow = await recordQualityRunOutcome(flow, contractedResult.success === true, {
+      runId: contractedResult.runId,
+      secretRefCount,
+    });
     const revision = calculateWorkflowRevision(flow);
     const publishedInfo = getPublishedFlowInfo(flow);
     const quality = buildWorkflowQualitySummary(flow);
@@ -659,12 +817,19 @@ class FlowRunTool {
         level: quality.level,
         status: quality.status,
         current: quality.current,
+        staleReason: quality.staleReason,
+        slo: quality.slo,
         verifiedThisRun:
           contractedResult.success === true &&
           quality.level === "verified" &&
           quality.verification.oracle !== "none",
         verification: quality.verification,
       },
+      metrics: buildFlowRunRuntimeMetrics(
+        flow,
+        contractedResult.success === true,
+        contractedResult,
+      ),
       qualityWarning,
       ...(contractedResult.success !== true
         ? {

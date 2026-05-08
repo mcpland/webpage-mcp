@@ -277,6 +277,38 @@ export interface FlowRepairsMeta {
   history?: FlowRepairHistoryEntry[];
 }
 
+export type FlowAuditEventKind =
+  | "workflow_publish"
+  | "workflow_unpublish"
+  | "approval_create"
+  | "approval_revoke"
+  | "approval_use"
+  | "risk_override"
+  | "repair_apply"
+  | "repair_rollback"
+  | "quality_downgrade"
+  | "secret_ref_use"
+  | "policy_change";
+
+export interface FlowAuditEvent {
+  id: string;
+  kind: FlowAuditEventKind;
+  actor: "mcp" | "runtime" | "system";
+  ts: ISODateTimeString;
+  flowId?: FlowId;
+  workflow?: string;
+  revision?: string;
+  runId?: string;
+  previousStatus?: FlowQualityStatus;
+  nextStatus?: FlowQualityStatus;
+  reason?: string;
+  metadata?: JsonObject;
+}
+
+export interface FlowAuditMeta {
+  events?: FlowAuditEvent[];
+}
+
 export interface FlowMeta {
   domain?: string;
   tags?: string[];
@@ -288,6 +320,7 @@ export interface FlowMeta {
   quality?: FlowQualityMeta;
   runtime?: FlowRuntimeMeta;
   repairs?: FlowRepairsMeta;
+  audit?: FlowAuditMeta;
 }
 
 /**
