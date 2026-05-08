@@ -44,6 +44,8 @@ const WORKFLOW_RUNTIME_FEATURE_FLAGS = [
   "segmented_workflow_run",
   "per_flow_write_lock",
   "locator_metadata_v1",
+  "workflow_publish_tools",
+  "workflow_quality_metadata",
 ] as const;
 
 let nativePort: chrome.runtime.Port | null = null;

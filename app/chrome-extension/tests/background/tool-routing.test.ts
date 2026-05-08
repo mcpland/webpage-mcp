@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   switchExecute: vi.fn(),
   flowRunExecute: vi.fn(),
   listPublishedExecute: vi.fn(),
+  workflowPublishExecute: vi.fn(),
+  workflowUnpublishExecute: vi.fn(),
   getSessionContext: vi.fn(),
   patchSessionContext: vi.fn(),
   runInTabQueue: vi.fn(async (_tabId: number, task: () => Promise<unknown>) => await task()),
@@ -26,6 +28,14 @@ vi.mock('@/entrypoints/background/tools/record-replay', () => ({
   listPublishedFlowsTool: {
     name: 'record_replay_list_published',
     execute: mocks.listPublishedExecute,
+  },
+  workflowPublishTool: {
+    name: 'workflow_publish',
+    execute: mocks.workflowPublishExecute,
+  },
+  workflowUnpublishTool: {
+    name: 'workflow_unpublish',
+    execute: mocks.workflowUnpublishExecute,
   },
 }));
 

@@ -6,6 +6,7 @@ import {
   type RunRecordV3,
 } from "@/entrypoints/background/record-replay-v3/domain/events";
 import type { FlowV3 } from "@/entrypoints/background/record-replay-v3/domain/flow";
+import { calculateWorkflowRevision } from "@/entrypoints/background/record-replay-v3/flows/publish";
 import { deleteRrV3Db } from "@/entrypoints/background/record-replay-v3/storage/db";
 
 const mocks = vi.hoisted(() => ({
@@ -49,6 +50,8 @@ import {
 import {
   flowRunTool,
   listPublishedFlowsTool,
+  workflowPublishTool,
+  workflowUnpublishTool,
 } from "@/entrypoints/background/tools/record-replay";
 import {
   recordingStartTool,
@@ -2496,6 +2499,138 @@ describe("recording/editing/flow toolchain integration", () => {
           }),
         }),
       ],
+    });
+  });
+
+  it("workflowPublishTool publishes stabilized drafts and workflowUnpublishTool removes the slug", async () => {
+    const flowId = `workflow-publish-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "node-1" as any,
+        kind: "navigate",
+        config: { url: "https://example.com" },
+      },
+    ]);
+    flow.meta = {
+      quality: {
+        revision: calculateWorkflowRevision(flow),
+        level: "stable",
+        status: "stable",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        verification: {
+          oracle: "none",
+          oracleStrength: "weak",
+        },
+      },
+    };
+    await createStoragePort().flows.save(flow);
+
+    const publish = await workflowPublishTool.execute({
+      flowId,
+      slug: "Published From Tool",
+      description: "Published through MCP",
+    });
+    const publishPayload = parseToolPayload(publish);
+    const published = await createStoragePort().flows.get(flowId as any);
+
+    expect(publish.isError).toBe(false);
+    expect(publishPayload).toMatchObject({
+      success: true,
+      workflow: "published-from-tool",
+      published: true,
+      descriptor: {
+        slug: "published-from-tool",
+        quality: {
+          current: true,
+          level: "stable",
+        },
+      },
+    });
+    expect(publishPayload.warnings.map((warning: { code: string }) => warning.code)).toContain(
+      "PUBLISH_QUALITY_REBOUND_TO_DESCRIPTOR",
+    );
+    expect(published?.meta?.tool).toMatchObject({
+      published: true,
+      slug: "published-from-tool",
+      description: "Published through MCP",
+    });
+    expect(published?.meta?.quality?.revision).toBe(calculateWorkflowRevision(published as FlowV3));
+
+    const unpublish = await workflowUnpublishTool.execute({ workflow: "published-from-tool" });
+    const unpublishPayload = parseToolPayload(unpublish);
+    const unpublished = await createStoragePort().flows.get(flowId as any);
+
+    expect(unpublish.isError).toBe(false);
+    expect(unpublishPayload).toMatchObject({
+      success: true,
+      workflow: "published-from-tool",
+      published: false,
+      status: "draft",
+    });
+    expect(unpublished?.meta?.tool).toMatchObject({
+      published: false,
+      slug: "published-from-tool",
+    });
+  });
+
+  it("workflowPublishTool blocks unstabilized workflows unless warning mode is explicit", async () => {
+    const flowId = `workflow-publish-blocked-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "node-1" as any,
+          kind: "navigate",
+          config: { url: "https://example.com" },
+        },
+      ]),
+    );
+
+    const blocked = await workflowPublishTool.execute({
+      flowId,
+      slug: "Blocked Publish",
+    });
+    expect(blocked.isError).toBe(true);
+    expect(parseToolPayload(blocked)).toMatchObject({
+      success: false,
+      status: "blocked",
+      error: {
+        code: "PUBLISH_QUALITY_GATE_FAILED",
+      },
+    });
+
+    const missingAck = await workflowPublishTool.execute({
+      flowId,
+      slug: "Blocked Publish",
+      requireStable: false,
+    });
+    expect(missingAck.isError).toBe(true);
+    expect(parseToolPayload(missingAck)).toMatchObject({
+      error: {
+        code: "UNVERIFIED_PUBLISH_REQUIRES_ACK",
+      },
+    });
+
+    const warningMode = await workflowPublishTool.execute({
+      flowId,
+      slug: "Blocked Publish",
+      requireStable: false,
+      allowUnverified: true,
+    });
+    expect(warningMode.isError).toBe(false);
+    expect(parseToolPayload(warningMode)).toMatchObject({
+      success: true,
+      workflow: "blocked-publish",
+      quality: {
+        current: false,
+        staleReason: "missing_quality",
+      },
     });
   });
 });

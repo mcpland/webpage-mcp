@@ -7,10 +7,15 @@ import type { FlowV3 } from "../record-replay-v3/domain/flow";
 import {
   buildWorkflowQualitySummary,
   calculateWorkflowRevision,
+  ensurePublishedSlugAvailable,
+  evaluateWorkflowPublishGate,
   getPublishedFlowInfo,
   listPublishedFlowDetails,
+  mergeFlowToolMetadata,
+  normalizeToolSlug,
 } from "../record-replay-v3/flows/publish";
 import { enqueueRunAndWait } from "../record-replay-v3/compat";
+import { withFlowWriteLock } from "../record-replay-v3/flows/write-lock";
 
 function hasDisallowedPublicUrlScheme(url: string): boolean {
   const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
@@ -176,6 +181,271 @@ async function recordQualityRunOutcome(flow: FlowV3, success: boolean): Promise<
   }
   await createStoragePort().flows.save(next);
   return next;
+}
+
+function jsonToolResult(payload: Record<string, unknown>, isError = false): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(payload),
+      },
+    ],
+    isError,
+  };
+}
+
+function workflowToolError(
+  code: string,
+  message: string,
+  details: Record<string, unknown> = {},
+): ToolResult {
+  return jsonToolResult(
+    {
+      success: false,
+      status: "validation_failed",
+      error: {
+        code,
+        category: "validation",
+        retryable: false,
+        message,
+        ...details,
+      },
+    },
+    true,
+  );
+}
+
+async function resolveFlowForUnpublish(args: any): Promise<
+  | { ok: true; flow: FlowV3 }
+  | { ok: false; result: ToolResult }
+> {
+  const flowId = typeof args?.flowId === "string" ? args.flowId.trim() : "";
+  const workflow = typeof args?.workflow === "string" ? args.workflow.trim() : "";
+  if (!flowId && !workflow) {
+    return {
+      ok: false,
+      result: workflowToolError(
+        "MISSING_WORKFLOW_TARGET",
+        "Exactly one of flowId or workflow is required",
+      ),
+    };
+  }
+  if (flowId && workflow) {
+    return {
+      ok: false,
+      result: workflowToolError(
+        "AMBIGUOUS_WORKFLOW_TARGET",
+        "flowId and workflow cannot be used together",
+      ),
+    };
+  }
+
+  const storage = createStoragePort();
+  if (flowId) {
+    const flow = await storage.flows.get(flowId as FlowId);
+    if (!flow) {
+      return {
+        ok: false,
+        result: workflowToolError("WORKFLOW_NOT_FOUND", `Flow not found: ${flowId}`),
+      };
+    }
+    return { ok: true, flow };
+  }
+
+  const matches = (await storage.flows.list()).filter((flow) => {
+    const info = getPublishedFlowInfo(flow);
+    return info?.slug === workflow;
+  });
+  if (matches.length !== 1) {
+    return {
+      ok: false,
+      result: workflowToolError(
+        matches.length > 1 ? "WORKFLOW_SLUG_AMBIGUOUS" : "WORKFLOW_NOT_FOUND",
+        matches.length > 1
+          ? `Published workflow slug is ambiguous: ${workflow}`
+          : `Published workflow not found: ${workflow}`,
+      ),
+    };
+  }
+  return { ok: true, flow: matches[0] };
+}
+
+function publishNotificationSummary(): Record<string, unknown> {
+  return {
+    toolListChanged: false,
+    fallback:
+      "record_replay_list_published and runtime slug validation are used when MCP tool-list changed notifications are unavailable.",
+  };
+}
+
+class WorkflowPublishTool {
+  name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_PUBLISH;
+
+  async execute(args: any): Promise<ToolResult> {
+    const flowId = typeof args?.flowId === "string" ? args.flowId.trim() : "";
+    if (!flowId) {
+      return workflowToolError("MISSING_FLOW_ID", "flowId is required");
+    }
+
+    const requireVerified = args?.requireVerified === true;
+    const requireStable = requireVerified || args?.requireStable !== false;
+    if (args?.requireStable === false && args?.allowUnverified !== true) {
+      return workflowToolError(
+        "UNVERIFIED_PUBLISH_REQUIRES_ACK",
+        "Publishing without requireStable requires allowUnverified=true",
+      );
+    }
+
+    try {
+      return await withFlowWriteLock(flowId as FlowId, async () => {
+        const storage = createStoragePort();
+        const existing = await storage.flows.get(flowId as FlowId);
+        if (!existing) {
+          return workflowToolError("WORKFLOW_NOT_FOUND", `Flow not found: ${flowId}`);
+        }
+
+        const requestedSlug =
+          typeof args?.slug === "string" && args.slug.trim()
+            ? args.slug.trim()
+            : existing.meta?.tool?.slug;
+        const slug = normalizeToolSlug(requestedSlug, existing.name);
+        const updated: FlowV3 = {
+          ...existing,
+          updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
+          meta: mergeFlowToolMetadata(existing.meta, {
+            published: true,
+            slug,
+            ...(typeof args?.category === "string" && args.category.trim()
+              ? { category: args.category.trim() }
+              : {}),
+            ...(typeof args?.description === "string" && args.description.trim()
+              ? { description: args.description.trim() }
+              : {}),
+          }),
+        };
+
+        ensurePublishedSlugAvailable(await storage.flows.list(), updated.id, slug);
+
+        const gateOptions = {
+          requireStable,
+          requireVerified,
+          minStabilityScore:
+            typeof args?.minStabilityScore === "number" ? args.minStabilityScore : undefined,
+          minValidationRuns:
+            typeof args?.minValidationRuns === "number" ? args.minValidationRuns : undefined,
+          minPassRate: typeof args?.minPassRate === "number" ? args.minPassRate : undefined,
+          allowWeakOracle: args?.allowWeakOracle === true,
+        };
+        let gate = evaluateWorkflowPublishGate(updated, gateOptions);
+        const warnings: Array<{ code: string; message: string }> = [...gate.warnings];
+        if (
+          !gate.allowed &&
+          gate.errors.every((error) => error.code === "PUBLISH_QUALITY_STALE") &&
+          gate.quality.staleReason === "revision_mismatch" &&
+          existing.meta?.quality
+        ) {
+          const prePublishGate = evaluateWorkflowPublishGate(existing, gateOptions);
+          if (prePublishGate.allowed) {
+            updated.meta = {
+              ...(updated.meta ?? {}),
+              quality: {
+                ...existing.meta.quality,
+                revision: calculateWorkflowRevision(updated),
+                warnings: Array.from(
+                  new Set([...(existing.meta.quality.warnings ?? []), "quality_rebound_publish_metadata"]),
+                ),
+              },
+            };
+            gate = evaluateWorkflowPublishGate(updated, gateOptions);
+            warnings.push({
+              code: "PUBLISH_QUALITY_REBOUND_TO_DESCRIPTOR",
+              message:
+                "Quality revision was rebound because publish metadata changed but the executable workflow quality gate passed.",
+            });
+          }
+        }
+
+        if (!gate.allowed) {
+          return jsonToolResult(
+            {
+              success: false,
+              flowId,
+              workflow: slug,
+              status: "blocked",
+              error: {
+                code: "PUBLISH_QUALITY_GATE_FAILED",
+                category: "validation",
+                retryable: false,
+                message:
+                  gate.errors[0]?.message ?? "Workflow does not satisfy publish quality gate",
+                errors: gate.errors,
+              },
+              quality: gate.quality,
+              warnings,
+            },
+            true,
+          );
+        }
+
+        await storage.flows.save(updated);
+        const descriptor = listPublishedFlowDetails([updated])[0];
+        return jsonToolResult({
+          success: true,
+          flowId: updated.id,
+          workflow: slug,
+          published: true,
+          status: gate.quality.level === "verified" ? "verified" : gate.quality.level,
+          descriptor,
+          quality: buildWorkflowQualitySummary(updated),
+          warnings,
+          notifications: publishNotificationSummary(),
+        });
+      });
+    } catch (error) {
+      return workflowToolError(
+        "WORKFLOW_PUBLISH_FAILED",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+}
+
+class WorkflowUnpublishTool {
+  name = TOOL_NAMES.RECORD_REPLAY.WORKFLOW_UNPUBLISH;
+
+  async execute(args: any): Promise<ToolResult> {
+    const resolved = await resolveFlowForUnpublish(args);
+    if (!resolved.ok) {
+      return resolved.result;
+    }
+    const previousInfo = getPublishedFlowInfo(resolved.flow);
+    return withFlowWriteLock(resolved.flow.id as FlowId, async () => {
+      const storage = createStoragePort();
+      const existing = await storage.flows.get(resolved.flow.id as FlowId);
+      if (!existing) {
+        return workflowToolError("WORKFLOW_NOT_FOUND", `Flow not found: ${resolved.flow.id}`);
+      }
+      const updated: FlowV3 = {
+        ...existing,
+        updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
+        meta: mergeFlowToolMetadata(existing.meta, {
+          published: false,
+          ...(existing.meta?.tool?.slug ? { slug: existing.meta.tool.slug } : {}),
+        }),
+      };
+      await storage.flows.save(updated);
+      return jsonToolResult({
+        success: true,
+        flowId: updated.id,
+        workflow: previousInfo?.slug ?? updated.meta?.tool?.slug,
+        published: false,
+        status: "draft",
+        quality: buildWorkflowQualitySummary(updated),
+        notifications: publishNotificationSummary(),
+      });
+    });
+  }
 }
 
 class FlowRunTool {
@@ -355,3 +625,5 @@ class ListPublishedTool {
 
 export const flowRunTool = new FlowRunTool();
 export const listPublishedFlowsTool = new ListPublishedTool();
+export const workflowPublishTool = new WorkflowPublishTool();
+export const workflowUnpublishTool = new WorkflowUnpublishTool();

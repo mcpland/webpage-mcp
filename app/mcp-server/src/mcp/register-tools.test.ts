@@ -300,6 +300,41 @@ describe('dynamic published flow tools', () => {
     });
   });
 
+  it('exposes workflow publish and unpublish MCP tools', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [],
+    });
+    const ctx = createContext('workflow-publish-schema', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const publishTool = tools.find((tool) => tool.name === 'workflow_publish');
+    const unpublishTool = tools.find((tool) => tool.name === 'workflow_unpublish');
+
+    expect(publishTool?.inputSchema).toMatchObject({
+      additionalProperties: false,
+      required: ['flowId'],
+      properties: {
+        requireStable: {
+          default: true,
+        },
+        requireVerified: {
+          default: false,
+        },
+        allowUnverified: {
+          default: false,
+        },
+      },
+    });
+    expect(unpublishTool?.inputSchema).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        flowId: expect.any(Object),
+        workflow: expect.any(Object),
+      },
+    });
+  });
+
   it('uses a plain workflow string when client tool-list refresh support is unknown', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
       status: 'success',

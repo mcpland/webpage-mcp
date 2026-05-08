@@ -52,6 +52,8 @@ export const TOOL_NAMES = {
     WORKFLOW_DEBUG_VIEW: 'workflow_debug_view',
     WORKFLOW_REPAIR: 'workflow_repair',
     WORKFLOW_STABILIZE: 'workflow_stabilize',
+    WORKFLOW_PUBLISH: 'workflow_publish',
+    WORKFLOW_UNPUBLISH: 'workflow_unpublish',
   },
 };
 
@@ -608,6 +610,97 @@ export const TOOL_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {},
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_PUBLISH,
+    description:
+      'Publish a stabilized workflow as a callable MCP workflow slug after validating slug, schema, side effects, revision, background support, and quality gate.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Draft or recorded flow ID to publish.',
+        },
+        slug: {
+          type: 'string',
+          description:
+            'Optional published workflow slug. Defaults to an existing slug or a normalized flow name.',
+        },
+        description: {
+          type: 'string',
+          description: 'Optional public workflow description for descriptors and lists.',
+        },
+        category: {
+          type: 'string',
+          description: 'Optional public category label for workflow discovery.',
+        },
+        requireStable: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Require a current stable quality record for the resulting descriptor revision. Default true.',
+        },
+        requireVerified: {
+          type: 'boolean',
+          default: false,
+          description:
+            'Require verified quality with a normal or strong business oracle. Implies requireStable.',
+        },
+        allowUnverified: {
+          type: 'boolean',
+          default: false,
+          description:
+            'Explicit warning mode for publishing without requireStable. Required when requireStable is false.',
+        },
+        minStabilityScore: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description: 'Optional minimum stability score for the publish quality gate.',
+        },
+        minValidationRuns: {
+          type: 'number',
+          minimum: 1,
+          maximum: 100,
+          description: 'Optional minimum counted validation run count for the publish quality gate.',
+        },
+        minPassRate: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description: 'Optional minimum passRate for the publish quality gate. Default: 1.',
+        },
+        allowWeakOracle: {
+          type: 'boolean',
+          default: false,
+          description:
+            'Allow weak verification oracles to satisfy requireVerified. The response remains marked with warnings.',
+        },
+      },
+      required: ['flowId'],
+    },
+  },
+  {
+    name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_UNPUBLISH,
+    description:
+      'Unpublish a workflow slug or flow ID while preserving quality and repair history. The workflow remains stored as a draft.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        flowId: {
+          type: 'string',
+          description: 'Flow ID to unpublish. Exactly one of flowId or workflow is required.',
+        },
+        workflow: {
+          type: 'string',
+          description: 'Published workflow slug to unpublish. Exactly one of workflow or flowId is required.',
+        },
+      },
       required: [],
     },
   },

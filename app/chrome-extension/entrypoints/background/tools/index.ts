@@ -3,7 +3,12 @@ import { ERROR_MESSAGES } from '@/common/constants';
 import { readMcpBackgroundModeDefault } from '@/common/mcp-background-mode';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import * as browserTools from './browser';
-import { flowRunTool, listPublishedFlowsTool } from './record-replay';
+import {
+  flowRunTool,
+  listPublishedFlowsTool,
+  workflowPublishTool,
+  workflowUnpublishTool,
+} from './record-replay';
 import {
   flowAnalyzeTool,
   flowUpdateTool,
@@ -20,6 +25,8 @@ const tools = {
   ...browserTools,
   flowRunTool,
   listPublishedFlowsTool,
+  workflowPublishTool,
+  workflowUnpublishTool,
   flowAnalyzeTool,
   flowUpdateTool,
   workflowDescribeTool,
