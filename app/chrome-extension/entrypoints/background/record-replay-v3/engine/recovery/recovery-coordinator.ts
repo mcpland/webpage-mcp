@@ -17,6 +17,8 @@
 import type { UnixMillis } from '../../domain/json';
 import type { RunId } from '../../domain/ids';
 import { isTerminalStatus, type RunStatus } from '../../domain/events';
+import type { RunRecordV3 } from '../../domain/events';
+import { RR_ERROR_CODES, createRRError } from '../../domain/errors';
 import type { StoragePort } from '../storage/storage-port';
 import type { EventsBus } from '../transport/events-bus';
 
@@ -32,6 +34,8 @@ export interface RecoveryResult {
   adoptedPaused: RunId[];
   /** Cleaned finalized Run ID */
   cleanedTerminal: RunId[];
+  /** Active runs that could not be recovered and were marked terminal */
+  abortedByRestart: RunId[];
 }
 
 /**
@@ -74,6 +78,51 @@ export async function recoverFromCrash(deps: RecoveryCoordinatorDeps): Promise<R
 
   // Design reason: The recovery process must "clean up first and then take over/recycle", otherwise the finalized Run may be requeued for execution.
   const cleanedTerminalSet = new Set<RunId>();
+  const abortedByRestartSet = new Set<RunId>();
+
+  const abortByRestart = async (
+    run: RunRecordV3,
+    reason: 'attempts_exhausted' | 'missing_queue_item',
+  ): Promise<void> => {
+    const tookMs =
+      typeof run.startedAt === 'number' ? Math.max(0, now - run.startedAt) : undefined;
+    const error = createRRError(
+      RR_ERROR_CODES.ABORTED_BY_RESTART,
+      `Run could not be recovered after service worker restart: ${reason}`,
+      {
+        retryable: false,
+        data: {
+          reason: 'aborted_by_restart',
+          recoveryReason: reason,
+        },
+      },
+    );
+    try {
+      await deps.storage.queue.markDone(run.id, now);
+    } catch (e) {
+      logger.warn('[Recovery] markDone for aborted run failed:', run.id, e);
+    }
+    await deps.storage.runs.patch(run.id, {
+      status: 'failed',
+      finishedAt: now,
+      ...(tookMs !== undefined ? { tookMs } : {}),
+      error,
+      updatedAt: now,
+    });
+    try {
+      await deps.events.append({
+        runId: run.id,
+        type: 'run.failed',
+        error,
+        ...(run.currentNodeId ? { nodeId: run.currentNodeId } : {}),
+        ts: now,
+      });
+    } catch (eventErr) {
+      logger.warn('[Recovery] Failed to emit aborted_by_restart event:', run.id, eventErr);
+    }
+    abortedByRestartSet.add(run.id);
+    logger.info(`[Recovery] Aborted unrecoverable run after restart: ${run.id} (${reason})`);
+  };
 
   // ==================== Step 1: Pre-cleaning ====================
   // Check all items in the queue and clean up the remaining ones that have finalized or have no corresponding RunRecord
@@ -127,7 +176,6 @@ export async function recoverFromCrash(deps: RecoveryCoordinatorDeps): Promise<R
   const requeuedRunningIds: RunId[] = [];
   for (const entry of requeuedRunning) {
     const runId = entry.runId;
-    requeuedRunningIds.push(runId);
 
     // Skip items cleaned in Step 1
     if (cleanedTerminalSet.has(runId)) {
@@ -166,8 +214,19 @@ export async function recoverFromCrash(deps: RecoveryCoordinatorDeps): Promise<R
         continue;
       }
 
+      const queueItem = await deps.storage.queue.get(runId);
+      const runAttempt = Math.max(0, run.attempt ?? 0);
+      const runMaxAttempts = Math.max(1, run.maxAttempts ?? 1);
+      const queueAttempt = Math.max(0, queueItem?.attempt ?? runAttempt);
+      const queueMaxAttempts = Math.max(1, queueItem?.maxAttempts ?? runMaxAttempts);
+      if (runAttempt > runMaxAttempts || queueAttempt > queueMaxAttempts) {
+        await abortByRestart(run, 'attempts_exhausted');
+        continue;
+      }
+
       // Update the RunRecord status to queued
       await deps.storage.runs.patch(runId, { status: 'queued', updatedAt: now });
+      requeuedRunningIds.push(runId);
 
       // Send recovery events (best-effort, failure does not affect the recovery process)
       try {
@@ -244,16 +303,37 @@ export async function recoverFromCrash(deps: RecoveryCoordinatorDeps): Promise<R
     }
   }
 
+  // ==================== Step 5: Terminalize active RunRecords missing queue ownership ====================
+  try {
+    const runs = await deps.storage.runs.list();
+    for (const run of runs) {
+      if (isTerminalStatus(run.status)) {
+        continue;
+      }
+      if (abortedByRestartSet.has(run.id)) {
+        continue;
+      }
+      const item = await deps.storage.queue.get(run.id);
+      if (!item) {
+        await abortByRestart(run, 'missing_queue_item');
+      }
+    }
+  } catch (e) {
+    logger.warn('[Recovery] Active RunRecord queue reconciliation failed:', e);
+  }
+
   const result: RecoveryResult = {
     requeuedRunning: requeuedRunningIds,
     adoptedPaused: adoptedPausedIds,
     cleanedTerminal: Array.from(cleanedTerminalSet),
+    abortedByRestart: Array.from(abortedByRestartSet),
   };
 
   logger.info('[Recovery] Complete:', {
     requeuedRunning: result.requeuedRunning.length,
     adoptedPaused: result.adoptedPaused.length,
     cleanedTerminal: result.cleanedTerminal.length,
+    abortedByRestart: result.abortedByRestart.length,
   });
 
   return result;

@@ -60,6 +60,8 @@ export const RR_ERROR_CODES = {
   RUN_CANCELED: 'RUN_CANCELED',
   /** Run suspended */
   RUN_PAUSED: 'RUN_PAUSED',
+  /** Run could not be safely recovered after a service worker restart */
+  ABORTED_BY_RESTART: 'ABORTED_BY_RESTART',
 
   // ===== Internal error =====
   /** Internal error */
