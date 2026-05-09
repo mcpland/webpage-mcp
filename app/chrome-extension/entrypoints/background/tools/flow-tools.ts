@@ -4492,6 +4492,8 @@ function buildValidationDebugRun(
   const { run, events } = result;
   const sensitiveVariableNames = getSensitiveVariableNames(flow);
   const now = Date.now();
+  const rawEvents = Array.isArray(events) ? (events as RunEvent[]) : [];
+  const artifacts = buildDebugArtifacts([], rawEvents, false, 0);
   return {
     id: run.id,
     status: run.status,
@@ -4508,9 +4510,8 @@ function buildValidationDebugRun(
     ...(run.execution ? { execution: run.execution } : {}),
     ...(run.error ? { error: sanitizeError(run.error, sensitiveVariableNames) } : {}),
     ...(run.outputs ? { outputs: sanitizeRunObject(run.outputs, sensitiveVariableNames) } : {}),
-    events: Array.isArray(events)
-      ? events.map((event) => sanitizeEvent(event as RunEvent, sensitiveVariableNames))
-      : [],
+    events: rawEvents.map((event) => sanitizeEvent(event, sensitiveVariableNames)),
+    ...(artifacts.length > 0 ? { artifacts } : {}),
   };
 }
 
@@ -5509,10 +5510,6 @@ class WorkflowStabilizeTool {
       maxRuns: 3,
       maxEventsPerRun: args?.debug?.maxEventsPerRun,
     });
-    const selectorRepairPlansBeforeApply = planSelectorRepairs(workingFlow, recentRuns);
-    const waitRepairPlansBeforeApply = planWaitRepairs(workingFlow, recentRuns);
-    const assertionRepairSuggestionsBeforeApply = buildAssertionRepairSuggestions(workingFlow, recentRuns);
-    const recommendationsBeforeApply = buildRepairRecommendations(workingFlow, hints, recentRuns);
     const descriptor = buildWorkflowToolDescriptor(workingFlow);
     const disabledNodeIds = getDisabledWorkflowNodeIds(workingFlow);
     let runtimeSideEffectEvidence = collectRuntimeSideEffectEvidence(recentRuns, { disabledNodeIds });
@@ -5808,6 +5805,18 @@ class WorkflowStabilizeTool {
     validationDebugRuns = baselineValidation.targetDebugRuns;
     refreshRuntimeSideEffectEvidence();
     blockFurtherAutomaticStabilizationForRuntimeRisk();
+    const baselineEvidenceRuns = [...recentRuns, ...baselineValidation.targetDebugRuns];
+    const selectorRepairPlansBeforeApply = planSelectorRepairs(workingFlow, baselineEvidenceRuns);
+    const waitRepairPlansBeforeApply = planWaitRepairs(workingFlow, baselineEvidenceRuns);
+    const assertionRepairSuggestionsBeforeApply = buildAssertionRepairSuggestions(
+      workingFlow,
+      baselineEvidenceRuns,
+    );
+    const recommendationsBeforeApply = buildRepairRecommendations(
+      workingFlow,
+      hints,
+      baselineEvidenceRuns,
+    );
     const resetRuns = [...baselineValidation.resetRuns];
     const baselineScore = scoreStabilizeRuns(baselineRuns);
     const shouldApply = args?.apply === true && args?.dryRun !== true && !validationBlockedReason;
@@ -5934,21 +5943,22 @@ class WorkflowStabilizeTool {
     ];
     refreshRuntimeSideEffectEvidence();
     blockFurtherAutomaticStabilizationForRuntimeRisk();
+    const finalEvidenceRuns = [...recentRuns, ...validationDebugRuns];
     const postRepairRuns = postRepairValidation.targetRuns;
     const postRepairScore = scoreStabilizeRuns(postRepairRuns);
     const finalScore = postRepairRuns.length > 0 ? postRepairScore : baselineScore;
     const finalHints = applied ? collectFlowHints(workingFlow) : hints;
     const selectorRepairPlans = applied
-      ? planSelectorRepairs(workingFlow, recentRuns)
+      ? planSelectorRepairs(workingFlow, finalEvidenceRuns)
       : selectorRepairPlansBeforeApply;
     const waitRepairPlans = applied
-      ? planWaitRepairs(workingFlow, recentRuns)
+      ? planWaitRepairs(workingFlow, finalEvidenceRuns)
       : waitRepairPlansBeforeApply;
     const assertionRepairSuggestions = applied
-      ? buildAssertionRepairSuggestions(workingFlow, recentRuns)
+      ? buildAssertionRepairSuggestions(workingFlow, finalEvidenceRuns)
       : assertionRepairSuggestionsBeforeApply;
     const recommendations = applied
-      ? buildRepairRecommendations(workingFlow, finalHints, recentRuns)
+      ? buildRepairRecommendations(workingFlow, finalHints, finalEvidenceRuns)
       : recommendationsBeforeApply;
     const failedRuns = recentRuns.filter((run) => run.status === 'failed').length;
     const passedRuns = recentRuns.filter((run) => run.status === 'succeeded').length;
@@ -6205,7 +6215,7 @@ class WorkflowStabilizeTool {
             hints: finalHints,
             recommendations,
             recommendationsBeforeApply,
-            selectorDiagnostics: buildSelectorDiagnostics(workingFlow, recentRuns),
+            selectorDiagnostics: buildSelectorDiagnostics(workingFlow, finalEvidenceRuns),
             selectorRepairs: selectorRepairPlans,
             ...(applied ? { selectorRepairsBeforeApply: selectorRepairPlansBeforeApply } : {}),
             waitRepairs: waitRepairPlans,

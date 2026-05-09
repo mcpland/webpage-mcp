@@ -4818,6 +4818,164 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("workflowStabilizeTool applies selector repair from baseline validation evidence", async () => {
+    const flowId = `workflow-stabilize-selector-baseline-${Date.now()}`;
+    const oldSelector = "body > main > form:nth-of-type(1) input:nth-of-type(1)";
+    const stableSelector = '[data-testid="email-input"]';
+    const storage = createStoragePort();
+    await storage.flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: {
+              selector: oldSelector,
+              fingerprint: "input|id=email|name=email",
+              domPath: [0, 1, 0],
+              shadowHostChain: [],
+              candidates: [
+                { type: "css", selector: oldSelector, value: oldSelector },
+                {
+                  type: "attr",
+                  selector: stableSelector,
+                  value: stableSelector,
+                  unique: true,
+                  stability: {
+                    score: 0.97,
+                    signals: { usesTestId: true, usesAttributes: true },
+                  },
+                },
+              ],
+            },
+            value: "{email}",
+          },
+        },
+      ]),
+    );
+
+    let runCall = 0;
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      runCall += 1;
+      const success = runCall > 1;
+      const validationRunId = `${flowId}-validation-${runCall}`;
+      const events = success
+        ? []
+        : [
+            {
+              runId: validationRunId as any,
+              type: "node.failed",
+              nodeId: "fill-1" as any,
+              attempt: 1,
+              error: { code: "TARGET_NOT_FOUND", message: "Missing input" },
+              decision: "stop",
+            },
+            {
+              runId: validationRunId as any,
+              type: "artifact.screenshot",
+              nodeId: "fill-1" as any,
+              artifactId: `${validationRunId}-artifact`,
+              savedAs: `${validationRunId}.png`,
+            },
+            {
+              runId: validationRunId as any,
+              type: "selector.resolution",
+              nodeId: "fill-1" as any,
+              primarySelector: oldSelector,
+              resolvedBy: "candidate",
+              candidateIndex: 1,
+              matchCount: 1,
+              fingerprint: { status: "matched", score: 0.95 },
+            },
+          ];
+      return {
+        run: {
+          id: validationRunId,
+          flowId,
+          status: success ? "succeeded" : "failed",
+          currentNodeId: "fill-1",
+          tookMs: 5,
+        } as any,
+        events: events as any,
+        result: {
+          runId: validationRunId,
+          success,
+          status: success ? "succeeded" : "failed",
+          currentNodeId: "fill-1",
+          failedNodeId: success ? undefined : "fill-1",
+          errorCode: success ? undefined : "TARGET_NOT_FOUND",
+          error: success
+            ? undefined
+            : {
+                code: "TARGET_NOT_FOUND",
+                category: "runtime",
+                retryable: true,
+                message: "Missing input",
+                nodeId: "fill-1",
+              },
+          summary: { total: 1, success: success ? 1 : 0, failed: success ? 0 : 1, tookMs: 5 },
+          outputs: null,
+          eventSummary: { totalEvents: events.length, nodeEvents: events.length, artifactEvents: success ? 0 : 1 },
+        },
+      };
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      minPassRate: 1,
+      apply: true,
+      repair: {
+        parameterize: false,
+        defaultStabilityPolicy: false,
+        selectors: true,
+        waits: false,
+        assertions: false,
+      },
+    });
+    const payload = parseToolPayload(result);
+    const updated = await storage.flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(2);
+    expect(payload).toMatchObject({
+      applied: true,
+      stable: true,
+      baselineScore: { passRate: 0, passedRuns: 0, failedRuns: 1, iterations: 1 },
+      postRepairScore: { passRate: 1, passedRuns: 1, failedRuns: 0, iterations: 1 },
+      summary: {
+        changeCount: 1,
+        baselineRunCount: 1,
+        postRepairRunCount: 1,
+      },
+    });
+    expect(payload.selectorRepairsBeforeApply).toEqual([
+      expect.objectContaining({
+        op: "replaceTarget",
+        nodeId: "fill-1",
+        status: "autoPatch",
+        beforeSelector: oldSelector,
+        afterSelector: stableSelector,
+        evidence: expect.objectContaining({
+          hasTargetFailure: true,
+          hasFailureArtifact: true,
+          latestRunId: `${flowId}-validation-1`,
+        }),
+      }),
+    ]);
+    expect(payload.changes).toEqual([
+      expect.objectContaining({
+        code: "selector_target_replaced",
+        nodeId: "fill-1",
+        patch: expect.objectContaining({
+          op: "replaceTarget",
+          afterSelector: stableSelector,
+        }),
+      }),
+    ]);
+    expect((updated?.nodes[0].config as any).target.selector).toBe(stableSelector);
+  });
+
   it("workflowStabilizeTool inserts bounded wait repairs from DOM visibility observations", async () => {
     const flowId = `workflow-stabilize-wait-${Date.now()}`;
     const runId = `${flowId}-failed-run`;
