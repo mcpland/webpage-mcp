@@ -583,6 +583,40 @@ describe("V3 RPC Queue Management APIs", () => {
       });
     });
 
+    it("returns the accepted run when queued-event persistence fails", async () => {
+      const flow = createTestFlow("flow-event-failure");
+      getInternal(storage).flowsMap.set(flow.id, flow);
+      (events.append as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error("event store unavailable"),
+      );
+
+      const result = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.enqueueRun",
+          params: { flowId: "flow-event-failure" },
+          requestId: "req-event-failure",
+        },
+        { subscriptions: new Set() },
+      );
+
+      expect(result).toMatchObject({
+        runId: "run-1",
+        position: 1,
+      });
+      expect(storage.queue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "run-1",
+          flowId: "flow-event-failure",
+        }),
+      );
+      expect(getInternal(storage).runsMap.get("run-1")).toMatchObject({
+        status: "queued",
+      });
+      expect(scheduler.kick).toHaveBeenCalledTimes(1);
+    });
+
     it("throws if flowId is missing", async () => {
       await expect(
         (server as unknown as { handleRequest: Function }).handleRequest(

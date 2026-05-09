@@ -324,19 +324,33 @@ export async function enqueueRun(
     throw error;
   }
 
-  // 3. Post the run.queued event
-  await deps.events.append({
-    runId,
-    type: 'run.queued',
-    flowId,
-  });
+  // 3. Post the run.queued event. After the queue item is committed, observability
+  // failures must not make callers believe the run was not accepted.
+  try {
+    await deps.events.append({
+      runId,
+      type: 'run.queued',
+      flowId,
+    });
+  } catch {
+    // Best-effort only; the queue item is already authoritative.
+  }
 
   // 4. Calculate the queue position (calculated before kick to reduce the probability of position=-1 caused by race conditions)
-  const position = await computeQueuePosition(deps.storage, runId);
+  let position = -1;
+  try {
+    position = await computeQueuePosition(deps.storage, runId);
+  } catch {
+    // Position is advisory; callers already receive the accepted runId.
+  }
 
   // 5. Trigger scheduling (best-effort, non-blocking return)
   if (deps.scheduler) {
-    void deps.scheduler.kick();
+    try {
+      void deps.scheduler.kick();
+    } catch {
+      // Polling/recovery can still pick up the committed queue item.
+    }
   }
 
   return { runId, position };
