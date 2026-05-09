@@ -32,6 +32,32 @@ describe('workflow tool-list change notifications', () => {
     );
   });
 
+  it('marks workflow_migrate only for mutating apply or rollback calls', () => {
+    expect(
+      shouldRefreshWorkflowToolList(TOOL_NAMES.RECORD_REPLAY.WORKFLOW_MIGRATE, {
+        apply: true,
+        dryRun: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRefreshWorkflowToolList(TOOL_NAMES.RECORD_REPLAY.WORKFLOW_MIGRATE, {
+        rollbackMigrationId: 'migration-1',
+        dryRun: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRefreshWorkflowToolList(TOOL_NAMES.RECORD_REPLAY.WORKFLOW_MIGRATE, {
+        apply: true,
+        dryRun: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRefreshWorkflowToolList(TOOL_NAMES.RECORD_REPLAY.WORKFLOW_MIGRATE, {
+        rollbackMigrationId: 'migration-1',
+      }),
+    ).toBe(false);
+  });
+
   it('only notifies after a successful tool result', () => {
     expect(
       shouldNotifyWorkflowToolListChanged(

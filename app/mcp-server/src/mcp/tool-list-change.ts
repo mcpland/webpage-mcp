@@ -19,8 +19,31 @@ function isApplyStabilizeCall(name: string, args: unknown): boolean {
   );
 }
 
+function isMutatingMigrationCall(name: string, args: unknown): boolean {
+  if (
+    name !== TOOL_NAMES.RECORD_REPLAY.WORKFLOW_MIGRATE ||
+    !args ||
+    typeof args !== 'object' ||
+    Array.isArray(args)
+  ) {
+    return false;
+  }
+
+  const record = args as Record<string, unknown>;
+  const rollbackMigrationId =
+    typeof record.rollbackMigrationId === 'string' ? record.rollbackMigrationId.trim() : '';
+  return (
+    (record.apply === true && record.dryRun === false) ||
+    (rollbackMigrationId.length > 0 && record.dryRun === false)
+  );
+}
+
 export function shouldRefreshWorkflowToolList(name: string, args: unknown): boolean {
-  return ALWAYS_REFRESH_WORKFLOW_TOOL_LIST_TOOLS.has(name) || isApplyStabilizeCall(name, args);
+  return (
+    ALWAYS_REFRESH_WORKFLOW_TOOL_LIST_TOOLS.has(name) ||
+    isApplyStabilizeCall(name, args) ||
+    isMutatingMigrationCall(name, args)
+  );
 }
 
 export function isSuccessfulMcpToolResult(result: unknown): boolean {
