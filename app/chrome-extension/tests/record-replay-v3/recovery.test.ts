@@ -375,6 +375,57 @@ describe('RecoveryCoordinator', () => {
     expect(events._events).toHaveLength(0);
   });
 
+  it('marks max-attempt orphan running runs as aborted_by_restart terminal failures', async () => {
+    const storage = createMockStorage();
+    const events = createMockEventsBus();
+    const fixedNow = 1_700_000_000_000;
+
+    storage._queueMap.set('run-1', {
+      ...createQueueItem('run-1', 'running', 'old-owner'),
+      attempt: 1,
+      maxAttempts: 1,
+    });
+    storage._runsMap.set('run-1', {
+      ...createRunRecord('run-1', 'running'),
+      attempt: 1,
+      maxAttempts: 1,
+      currentNodeId: 'node-1' as any,
+    });
+
+    const result = await recoverFromCrash({
+      storage,
+      events,
+      ownerId: 'new-owner',
+      now: () => fixedNow,
+    });
+
+    expect(result.requeuedRunning).toEqual([]);
+    expect(result.abortedByRestart).toEqual(['run-1']);
+    expect(storage._queueMap.has('run-1')).toBe(false);
+    expect(storage._runsMap.get('run-1')).toMatchObject({
+      status: 'failed',
+      finishedAt: fixedNow,
+      error: {
+        code: 'ABORTED_BY_RESTART',
+        retryable: false,
+        data: {
+          reason: 'aborted_by_restart',
+          recoveryReason: 'attempts_exhausted',
+        },
+      },
+    });
+    expect(events._events).toEqual([
+      expect.objectContaining({
+        runId: 'run-1',
+        type: 'run.failed',
+        nodeId: 'node-1',
+        error: expect.objectContaining({
+          code: 'ABORTED_BY_RESTART',
+        }),
+      }),
+    ]);
+  });
+
   it('marks over-attempted orphan running runs as aborted_by_restart terminal failures', async () => {
     const storage = createMockStorage();
     const events = createMockEventsBus();

@@ -365,9 +365,13 @@ describe('V3 Scheduler Integration', () => {
       const events = createMockEventsBus();
 
       // Simulate crash scenario: run was running when SW died
-      await queue.enqueue({ id: 'crashed-run' as any, flowId: 'flow-1' as any });
+      await queue.enqueue({ id: 'crashed-run' as any, flowId: 'flow-1' as any, maxAttempts: 2 });
       await queue.markRunning('crashed-run' as any, 'old-sw-owner', Date.now());
-      await runsStore.save(createRunRecord('crashed-run', 'running'));
+      await runsStore.save({
+        ...createRunRecord('crashed-run', 'running'),
+        attempt: 1,
+        maxAttempts: 2,
+      });
 
       // Simulate restart with new owner
       const newOwnerId = generateOwnerId();
@@ -432,9 +436,13 @@ describe('V3 Scheduler Integration', () => {
       const events = createMockEventsBus();
 
       // Simulate a run that has already been attempted
-      await queue.enqueue({ id: 'retried-run' as any, flowId: 'flow-1' as any });
+      await queue.enqueue({ id: 'retried-run' as any, flowId: 'flow-1' as any, maxAttempts: 2 });
       await queue.claimNext('old-owner', Date.now()); // attempt becomes 1
-      await runsStore.save({ ...createRunRecord('retried-run', 'running'), attempt: 1 });
+      await runsStore.save({
+        ...createRunRecord('retried-run', 'running'),
+        attempt: 1,
+        maxAttempts: 2,
+      });
 
       // Simulate restart
       const newOwnerId = generateOwnerId();
@@ -493,9 +501,13 @@ describe('V3 Scheduler Integration', () => {
       const keepalive = new InMemoryKeepaliveController();
 
       // Simulate crash scenario
-      await queue.enqueue({ id: 'recover-run' as any, flowId: 'flow-1' as any });
+      await queue.enqueue({ id: 'recover-run' as any, flowId: 'flow-1' as any, maxAttempts: 2 });
       await queue.markRunning('recover-run' as any, 'old-owner', Date.now());
-      await runsStore.save(createRunRecord('recover-run', 'running'));
+      await runsStore.save({
+        ...createRunRecord('recover-run', 'running'),
+        attempt: 1,
+        maxAttempts: 2,
+      });
 
       // Recovery
       const newOwnerId = generateOwnerId();

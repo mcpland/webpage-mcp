@@ -219,7 +219,7 @@ export async function recoverFromCrash(deps: RecoveryCoordinatorDeps): Promise<R
       const runMaxAttempts = Math.max(1, run.maxAttempts ?? 1);
       const queueAttempt = Math.max(0, queueItem?.attempt ?? runAttempt);
       const queueMaxAttempts = Math.max(1, queueItem?.maxAttempts ?? runMaxAttempts);
-      if (runAttempt > runMaxAttempts || queueAttempt > queueMaxAttempts) {
+      if (runAttempt >= runMaxAttempts || queueAttempt >= queueMaxAttempts) {
         await abortByRestart(run, 'attempts_exhausted');
         continue;
       }

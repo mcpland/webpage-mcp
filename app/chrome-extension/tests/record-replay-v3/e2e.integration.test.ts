@@ -378,10 +378,14 @@ describe('V3 service-level E2E', () => {
       await h.storage.flows.save(flow);
 
       const runId = 'run-orphan';
-      await h.storage.runs.save(createRunRecord(runId, flow.id, 'running'));
+      await h.storage.runs.save({
+        ...createRunRecord(runId, flow.id, 'running'),
+        attempt: 1,
+        maxAttempts: 2,
+      });
 
       // Create orphan queue item (held by old owner)
-      await h.storage.queue.enqueue({ id: runId, flowId: flow.id, priority: 0 });
+      await h.storage.queue.enqueue({ id: runId, flowId: flow.id, priority: 0, maxAttempts: 2 });
       await h.storage.queue.markRunning(runId, 'owner-old', Date.now());
 
       // Perform recovery
