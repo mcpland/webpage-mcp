@@ -121,7 +121,12 @@ export type FlowQualityLevel = "unverified" | "stable" | "verified";
 export type FlowQualityStatus = "draft" | "stable" | "verified" | "stale" | "paused" | "blocked";
 export type FlowQualityCapabilityStatus = "full" | "partial" | "none" | "unknown";
 export type FlowQualityRisk = "safe" | "idempotent" | "dangerous" | "unknown";
-export type FlowQualityOracle = "none" | "assertion" | "declaredOutput" | "expectedOutcome";
+export type FlowQualityOracle =
+  | "none"
+  | "assertion"
+  | "declaredOutput"
+  | "expectedOutcome"
+  | "externalReadback";
 export type FlowQualityOracleStrength = "weak" | "normal" | "strong";
 
 export interface FlowQualityValidationContext {

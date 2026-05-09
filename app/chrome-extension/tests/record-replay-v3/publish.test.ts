@@ -442,6 +442,49 @@ describe('listPublishedFlowDetails', () => {
     expect(evaluateWorkflowPublishGate(flow, { requireVerified: true }).allowed).toBe(true);
   });
 
+  it('requires a strong oracle when publishing high-risk workflows as verified', () => {
+    const flow = createPublishedFlow();
+    flow.nodes = [
+      {
+        id: 'node-1' as any,
+        kind: 'click',
+        config: { target: { selector: '#purchase' } },
+      },
+    ];
+    flow.meta = {
+      ...flow.meta,
+      quality: {
+        revision: calculateWorkflowRevision(flow),
+        level: 'verified',
+        status: 'verified',
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: '2999-01-01T00:00:00.000Z' as any,
+        verification: {
+          oracle: 'assertion',
+          oracleStrength: 'normal',
+        },
+      },
+    };
+
+    const normalOracle = evaluateWorkflowPublishGate(flow, { requireVerified: true });
+    expect(normalOracle.allowed).toBe(false);
+    expect(normalOracle.errors.map((error) => error.code)).toContain(
+      'PUBLISH_STRONG_ORACLE_REQUIRED',
+    );
+
+    flow.meta!.quality!.verification = {
+      oracle: 'externalReadback',
+      oracleStrength: 'strong',
+    };
+    expect(evaluateWorkflowPublishGate(flow, { requireVerified: true }).allowed).toBe(true);
+  });
+
   it('omits builder trigger nodes from side-effect metadata', () => {
     const flow = createPublishedFlow();
     flow.nodes = [

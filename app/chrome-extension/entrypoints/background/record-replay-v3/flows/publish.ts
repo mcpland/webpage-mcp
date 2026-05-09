@@ -602,8 +602,10 @@ export function evaluateWorkflowPublishGate(
   const minPassRate = clampScore(options.minPassRate ?? flow.meta?.quality?.slo?.targetPassRate ?? 1);
   const minStabilityScore = clampScore(options.minStabilityScore ?? 0);
   const requireStable = options.requireStable === true || options.requireVerified === true;
+  const hasHighRiskSideEffects =
+    descriptor.sideEffects.summary.dangerous > 0 || descriptor.sideEffects.summary.unknown > 0;
 
-  if (descriptor.sideEffects.summary.dangerous > 0 || descriptor.sideEffects.summary.unknown > 0) {
+  if (hasHighRiskSideEffects) {
     warnings.push({
       code: "PUBLISH_SIDE_EFFECTS_REQUIRE_REVIEW",
       message: "Workflow has dangerous or unknown side effects and should be run only in an approved environment.",
@@ -686,6 +688,13 @@ export function evaluateWorkflowPublishGate(
       errors.push({
         code: "PUBLISH_WEAK_ORACLE",
         message: "Weak verification oracles do not satisfy requireVerified unless explicitly allowed.",
+      });
+    }
+    if (hasHighRiskSideEffects && oracleStrengthRank(quality.verification.oracleStrength) < 3) {
+      errors.push({
+        code: "PUBLISH_STRONG_ORACLE_REQUIRED",
+        message:
+          "Dangerous or unknown workflows require a strong verification oracle such as external readback when requireVerified is true.",
       });
     }
   }
