@@ -11,6 +11,7 @@ import {
   type FlowV3,
 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import { calculateWorkflowRevision } from "@/entrypoints/background/record-replay-v3/flows/publish";
+import { tryAcquireWorkflowCatalogWriteLock } from "@/entrypoints/background/record-replay-v3/flows/write-lock";
 import { WORKFLOW_SECRET_STORE_KEY } from "@/entrypoints/background/record-replay-v3/secrets";
 import { deleteRrV3Db } from "@/entrypoints/background/record-replay-v3/storage/db";
 
@@ -6937,6 +6938,40 @@ describe("recording/editing/flow toolchain integration", () => {
       "workflow_publish",
       "workflow_unpublish",
     ]);
+  });
+
+  it("workflowPublishTool rejects while the workflow catalog is locked", async () => {
+    const flowId = `workflow-publish-catalog-lock-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "node-1" as any,
+          kind: "navigate",
+          config: { url: "https://example.com" },
+        },
+      ]),
+    );
+
+    const release = tryAcquireWorkflowCatalogWriteLock();
+    try {
+      const result = await workflowPublishTool.execute({
+        flowId,
+        slug: "catalog lock publish",
+        requireStable: false,
+        allowUnverified: true,
+      });
+      const payload = parseToolPayload(result);
+      const persisted = await createStoragePort().flows.get(flowId as any);
+
+      expect(result.isError).toBe(true);
+      expect(payload.error).toMatchObject({
+        code: "WORKFLOW_CATALOG_WRITE_CONFLICT",
+        retryable: true,
+      });
+      expect(persisted?.meta?.tool?.published).not.toBe(true);
+    } finally {
+      release();
+    }
   });
 
   it("workflowPublishTool preserves runtime high-risk quality evidence during metadata rebound", async () => {

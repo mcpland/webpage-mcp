@@ -23,7 +23,12 @@ import {
   type WorkflowOutputProjectionResult,
 } from "../record-replay-v3/flows/output-validation";
 import { markScheduledRevalidationCatchUp } from "../record-replay-v3/flows/revalidation";
-import { withFlowWriteLock } from "../record-replay-v3/flows/write-lock";
+import {
+  WORKFLOW_CATALOG_WRITE_CONFLICT_CODE,
+  WorkflowCatalogWriteConflictError,
+  withFlowWriteLock,
+  withWorkflowCatalogWriteLock,
+} from "../record-replay-v3/flows/write-lock";
 import {
   WorkflowSecretRefError,
   assertWorkflowSecretRefsResolvable,
@@ -673,7 +678,7 @@ class WorkflowPublishTool {
     }
 
     try {
-      return await withFlowWriteLock(flowId as FlowId, async () => {
+      const publish = async () => {
         const storage = createStoragePort();
         const existing = await storage.flows.get(flowId as FlowId);
         if (!existing) {
@@ -793,8 +798,18 @@ class WorkflowPublishTool {
           warnings,
           notifications: publishNotificationSummary(),
         });
-      });
+      };
+      return await withWorkflowCatalogWriteLock(() =>
+        withFlowWriteLock(flowId as FlowId, publish),
+      );
     } catch (error) {
+      if (error instanceof WorkflowCatalogWriteConflictError) {
+        return workflowToolError(
+          WORKFLOW_CATALOG_WRITE_CONFLICT_CODE,
+          error.message,
+          { retryable: true },
+        );
+      }
       return workflowToolError(
         "WORKFLOW_PUBLISH_FAILED",
         error instanceof Error ? error.message : String(error),
