@@ -1086,7 +1086,7 @@ class StorageBackedRunRunner implements RunRunner {
         tookMs,
         outputs: outputContract.outputs,
       });
-      await this.env.events.append({
+      await this.appendTerminalEvent({
         runId: this.runId,
         type: 'run.succeeded',
         tookMs,
@@ -1111,7 +1111,7 @@ class StorageBackedRunRunner implements RunRunner {
         error,
         ...(nodeId ? { currentNodeId: nodeId } : {}),
       });
-      await this.env.events.append({
+      await this.appendTerminalEvent({
         runId: this.runId,
         type: 'run.failed',
         error,
@@ -1135,7 +1135,7 @@ class StorageBackedRunRunner implements RunRunner {
         currentNodeId: boundary.nodeId,
         outputs: this.outputs,
       });
-      await this.env.events.append({
+      await this.appendTerminalEvent({
         runId: this.runId,
         type: 'run.stopped_at_boundary',
         tookMs,
@@ -1161,7 +1161,7 @@ class StorageBackedRunRunner implements RunRunner {
         finishedAt: this.env.now(),
         tookMs,
       });
-      await this.env.events.append({
+      await this.appendTerminalEvent({
         runId: this.runId,
         type: 'run.canceled',
         ...(this.cancelReason ? { reason: this.cancelReason } : {}),
@@ -1169,5 +1169,13 @@ class StorageBackedRunRunner implements RunRunner {
     });
 
     return { runId: this.runId, status: 'canceled', tookMs };
+  }
+
+  private async appendTerminalEvent(event: RunEventInput): Promise<void> {
+    try {
+      await this.env.events.append(event);
+    } catch {
+      // The RunRecord is already terminal; event persistence is supplementary.
+    }
   }
 }

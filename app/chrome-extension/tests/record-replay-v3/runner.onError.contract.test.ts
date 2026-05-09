@@ -33,6 +33,7 @@ import type {
 import type { RunRunner } from '@/entrypoints/background/record-replay-v3/engine/kernel/runner';
 
 import type {
+  NodeId,
   RunId,
   PersistentVarRecord,
 } from '@/entrypoints/background/record-replay-v3';
@@ -203,6 +204,18 @@ async function listEvents(bus: InMemoryEventsBus, runId: RunId): Promise<RunEven
   return bus.list({ runId });
 }
 
+function failEventType(bus: InMemoryEventsBus, type: RunEvent['type']) {
+  const append = bus.append.bind(bus);
+  const spy = vi.spyOn(bus, 'append');
+  spy.mockImplementation(async (event) => {
+    if (event.type === type) {
+      throw new Error(`${type} persistence unavailable`);
+    }
+    return append(event);
+  });
+  return spy;
+}
+
 /**
  * Create a complete runner context for testing
  */
@@ -214,6 +227,9 @@ function createRunnerContext(
     execution?: RunRecordV3['execution'];
     args?: RunRecordV3['args'];
     recordArgs?: RunRecordV3['args'];
+    startNodeId?: NodeId;
+    stopBeforeNodeId?: NodeId;
+    endNodeId?: NodeId;
   } = {},
 ): {
   runner: RunRunner;
@@ -244,6 +260,9 @@ function createRunnerContext(
     ...(options.args ? { args: options.args } : {}),
     ...(options.recordArgs ? { recordArgs: options.recordArgs } : {}),
     ...(options.execution ? { execution: options.execution } : {}),
+    ...(options.startNodeId ? { startNodeId: options.startNodeId } : {}),
+    ...(options.stopBeforeNodeId ? { stopBeforeNodeId: options.stopBeforeNodeId } : {}),
+    ...(options.endNodeId ? { endNodeId: options.endNodeId } : {}),
   });
 
   return { runner, bus, runsById, calls };
@@ -283,6 +302,104 @@ describe('V3 RunRunner onError contracts', () => {
       password: { secretRef: 'secret://login-password' },
     });
     expect(JSON.stringify(persisted)).not.toContain('plain-secret-password');
+  });
+
+  it('keeps succeeded records terminal when run.succeeded event persistence fails', async () => {
+    const runId = 'run-terminal-event-succeeded';
+    const flow = createFlow(
+      'A',
+      [{ id: 'A', kind: 'test', config: { action: 'succeed' } }],
+      [],
+    );
+    const h = createRunnerContext(runId, flow);
+    const appendSpy = failEventType(h.bus, 'run.succeeded');
+
+    const result = await h.runner.start();
+    const events = await listEvents(h.bus, runId);
+
+    expect(result.status).toBe('succeeded');
+    expect(h.runsById.get(runId)?.status).toBe('succeeded');
+    expect(appendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ runId, type: 'run.succeeded' }),
+    );
+    expect(events.some((event) => event.type === 'run.succeeded')).toBe(false);
+  });
+
+  it('preserves failed records when run.failed event persistence fails', async () => {
+    const runId = 'run-terminal-event-failed';
+    const flow = createFlow(
+      'A',
+      [
+        {
+          id: 'A',
+          kind: 'test',
+          config: { action: 'fail' },
+          policy: { onError: { kind: 'stop' } },
+        },
+      ],
+      [],
+    );
+    const h = createRunnerContext(runId, flow);
+    const appendSpy = failEventType(h.bus, 'run.failed');
+
+    const result = await h.runner.start();
+    const events = await listEvents(h.bus, runId);
+    const persisted = h.runsById.get(runId);
+
+    expect(result.status).toBe('failed');
+    expect(persisted?.status).toBe('failed');
+    expect(persisted?.error?.code).toBe(RR_ERROR_CODES.TOOL_ERROR);
+    expect(appendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ runId, type: 'run.failed' }),
+    );
+    expect(events.some((event) => event.type === 'run.failed')).toBe(false);
+  });
+
+  it('keeps boundary-stopped records terminal when boundary event persistence fails', async () => {
+    const runId = 'run-terminal-event-boundary';
+    const flow = createFlow(
+      'A',
+      [{ id: 'A', kind: 'test', config: { action: 'succeed' } }],
+      [],
+    );
+    const h = createRunnerContext(runId, flow, { stopBeforeNodeId: 'A' as NodeId });
+    const appendSpy = failEventType(h.bus, 'run.stopped_at_boundary');
+
+    const result = await h.runner.start();
+    const events = await listEvents(h.bus, runId);
+
+    expect(result.status).toBe('stopped_at_boundary');
+    expect(h.runsById.get(runId)?.status).toBe('stopped_at_boundary');
+    expect(appendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ runId, type: 'run.stopped_at_boundary' }),
+    );
+    expect(events.some((event) => event.type === 'run.stopped_at_boundary')).toBe(false);
+  });
+
+  it('keeps canceled records terminal when run.canceled event persistence fails', async () => {
+    const runId = 'run-terminal-event-canceled';
+    const flow = createFlow(
+      'A',
+      [{ id: 'A', kind: 'test', config: { action: 'succeed' } }],
+      [],
+    );
+    const h = createRunnerContext(runId, flow);
+    const appendSpy = failEventType(h.bus, 'run.canceled');
+
+    h.runner.cancel('user requested');
+    const result = await h.runner.start();
+    const events = await listEvents(h.bus, runId);
+
+    expect(result.status).toBe('canceled');
+    expect(h.runsById.get(runId)?.status).toBe('canceled');
+    expect(appendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId,
+        type: 'run.canceled',
+        reason: 'user requested',
+      }),
+    );
+    expect(events.some((event) => event.type === 'run.canceled')).toBe(false);
   });
 
   it('stop: node failure ends run as failed', async () => {
