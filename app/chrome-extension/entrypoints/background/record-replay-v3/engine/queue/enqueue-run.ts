@@ -20,6 +20,13 @@ import type { RunScheduler } from './scheduler';
 import type { RunQueueProfile } from './queue';
 import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
 import {
+  RR_ERROR_CODES,
+  createRRError,
+  createResourceLimitExceededError,
+  isResourceLimitError,
+  type RRError,
+} from '../../domain/errors';
+import {
   isKnownWorkflowSideEffectKind,
   normalizeWorkflowNodeSideEffectProfile,
 } from 'webpage-mcp-shared';
@@ -92,6 +99,31 @@ export interface EnqueueRunResult {
  */
 function defaultGenerateRunId(): RunId {
   return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return String(error);
+}
+
+function createEnqueueFailureError(error: unknown): RRError {
+  if (isResourceLimitError(error)) {
+    return createResourceLimitExceededError('Workflow run could not be enqueued', error, {
+      retryable: true,
+      source: 'enqueueRun',
+    });
+  }
+
+  return createRRError(
+    RR_ERROR_CODES.INTERNAL,
+    `Workflow run could not be enqueued: ${errorMessage(error)}`,
+    { retryable: true },
+  );
 }
 
 function deriveRunQueueProfile(flow: Pick<FlowV3, 'nodes'>): RunQueueProfile {
@@ -257,19 +289,40 @@ export async function enqueueRun(
   await deps.storage.runs.save(runRecord);
 
   // 2. Join the team
-  await deps.storage.queue.enqueue({
-    id: runId,
-    flowId,
-    expectedRevision: input.expectedRevision,
-    profile,
-    tabId: input.tabId,
-    priority,
-    maxAttempts,
-    args: input.args,
-    trigger: input.trigger,
-    debug: input.debug,
-    execution: input.execution,
-  });
+  try {
+    await deps.storage.queue.enqueue({
+      id: runId,
+      flowId,
+      expectedRevision: input.expectedRevision,
+      profile,
+      tabId: input.tabId,
+      priority,
+      maxAttempts,
+      args: input.args,
+      trigger: input.trigger,
+      debug: input.debug,
+      execution: input.execution,
+    });
+  } catch (error) {
+    const failedAt = now();
+    const runError = createEnqueueFailureError(error);
+    try {
+      await deps.storage.runs.patch(runId, {
+        status: 'failed',
+        finishedAt: failedAt,
+        tookMs: Math.max(0, failedAt - ts),
+        error: runError,
+      });
+      await deps.events.append({
+        runId,
+        type: 'run.failed',
+        error: runError,
+      });
+    } catch {
+      // Preserve the caller-visible enqueue failure even if best-effort cleanup fails.
+    }
+    throw error;
+  }
 
   // 3. Post the run.queued event
   await deps.events.append({

@@ -518,6 +518,71 @@ describe("V3 RPC Queue Management APIs", () => {
       });
     });
 
+    it("marks the run failed when queue admission rejects after run creation", async () => {
+      const flow = createTestFlow("flow-backpressure");
+      getInternal(storage).flowsMap.set(flow.id, flow);
+      const backpressure = Object.assign(
+        new Error("run queue is at queued backpressure limit 1"),
+        {
+          code: "RUN_QUEUE_BACKPRESSURE",
+          retryable: true,
+          scope: "global",
+          limit: 1,
+          queuedCount: 1,
+        },
+      );
+      (storage.queue.enqueue as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        backpressure,
+      );
+
+      await expect(
+        (server as unknown as { handleRequest: Function }).handleRequest(
+          {
+            method: "rr_v3.enqueueRun",
+            params: { flowId: "flow-backpressure" },
+            requestId: "req-backpressure",
+          },
+          { subscriptions: new Set() },
+        ),
+      ).rejects.toThrow("run queue is at queued backpressure limit 1");
+
+      expect(storage.runs.save).toHaveBeenCalledTimes(1);
+      expect(storage.runs.patch).toHaveBeenCalledWith(
+        "run-1",
+        expect.objectContaining({
+          status: "failed",
+          finishedAt: expect.any(Number),
+          error: expect.objectContaining({
+            code: "RESOURCE_LIMIT_EXCEEDED",
+            retryable: true,
+            data: expect.objectContaining({
+              source: "enqueueRun",
+              originalCode: "RUN_QUEUE_BACKPRESSURE",
+              scope: "global",
+              limit: 1,
+              queuedCount: 1,
+            }),
+          }),
+        }),
+      );
+      expect(events.append).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runId: "run-1",
+          type: "run.failed",
+          error: expect.objectContaining({
+            code: "RESOURCE_LIMIT_EXCEEDED",
+          }),
+        }),
+      );
+      expect(scheduler.kick).not.toHaveBeenCalled();
+      expect(getInternal(storage).runsMap.get("run-1")).toMatchObject({
+        status: "failed",
+        error: expect.objectContaining({
+          code: "RESOURCE_LIMIT_EXCEEDED",
+        }),
+      });
+    });
+
     it("throws if flowId is missing", async () => {
       await expect(
         (server as unknown as { handleRequest: Function }).handleRequest(
