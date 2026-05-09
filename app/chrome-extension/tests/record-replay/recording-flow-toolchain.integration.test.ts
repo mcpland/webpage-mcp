@@ -3022,6 +3022,102 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.meta?.quality).toBeUndefined();
   });
 
+  it("workflowStabilizeTool validates current tab URL for sandboxReplay without startUrl", async () => {
+    const flowId = `workflow-stabilize-current-tab-boundary-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+    asMock(chrome.tabs.query).mockResolvedValue([
+      {
+        id: 7,
+        url: "https://prod.example.com/app/dashboard",
+      },
+    ]);
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      safety: {
+        executionMode: "sandboxReplay",
+        testEnvironment: {
+          name: "staging",
+          accountLabel: "staging-user",
+          origins: ["https://staging.example.com"],
+          pathPrefixes: ["/app"],
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+    expect(chrome.tabs.query).toHaveBeenCalledWith({ active: true, currentWindow: true });
+    expect(payload.safety).toMatchObject({
+      executionMode: "analyzeOnly",
+      blocked: true,
+      blockedReason: expect.stringContaining("outside the declared safety boundary"),
+    });
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "STABILIZE_TEST_ENVIRONMENT_BLOCKED",
+          path: "/tabTarget",
+        }),
+      ]),
+    );
+  });
+
+  it("workflowStabilizeTool requires startUrl for sandboxReplay on a new tab", async () => {
+    const flowId = `workflow-stabilize-new-tab-boundary-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      tabTarget: "new",
+      safety: {
+        executionMode: "sandboxReplay",
+        testEnvironment: {
+          name: "staging",
+          accountLabel: "staging-user",
+          origins: ["https://staging.example.com"],
+          pathPrefixes: ["/app"],
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+    expect(payload.safety).toMatchObject({
+      executionMode: "analyzeOnly",
+      blocked: true,
+      blockedReason: expect.stringContaining("requires startUrl"),
+    });
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "STABILIZE_TEST_ENVIRONMENT_BLOCKED",
+          path: "/startUrl",
+        }),
+      ]),
+    );
+  });
+
   it("workflowStabilizeTool blocks sandboxReplay without a bounded test account reset or segment", async () => {
     const flowId = `workflow-stabilize-sandbox-bounded-${Date.now()}`;
     await createStoragePort().flows.save(

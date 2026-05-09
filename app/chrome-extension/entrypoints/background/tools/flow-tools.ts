@@ -1055,11 +1055,13 @@ function isAllowedPublicStartUrl(url: string): boolean {
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 }
 
-function validateStabilizeStartUrlBoundary(args: any): WorkflowStabilizeValidationError | undefined {
-  const startUrl = typeof args?.startUrl === 'string' ? args.startUrl.trim() : '';
-  if (!startUrl) {
-    return undefined;
-  }
+interface StabilizeSafetyBoundary {
+  allowedHosts: string[];
+  origins: string[];
+  pathPrefixes: string[];
+}
+
+function getStabilizeSafetyBoundary(args: any): StabilizeSafetyBoundary {
   const allowedHosts = normalizeBoundaryStrings(args?.safety?.allowedHosts);
   const testEnvironment =
     args?.safety?.testEnvironment &&
@@ -1069,35 +1071,125 @@ function validateStabilizeStartUrlBoundary(args: any): WorkflowStabilizeValidati
       : undefined;
   const origins = normalizeBoundaryStrings(testEnvironment?.origins);
   const pathPrefixes = normalizeBoundaryStrings(testEnvironment?.pathPrefixes);
-  if (allowedHosts.length === 0 && origins.length === 0 && pathPrefixes.length === 0) {
+  return { allowedHosts, origins, pathPrefixes };
+}
+
+function hasStabilizeUrlBoundary(boundary: StabilizeSafetyBoundary): boolean {
+  return (
+    boundary.allowedHosts.length > 0 ||
+    boundary.origins.length > 0 ||
+    boundary.pathPrefixes.length > 0
+  );
+}
+
+function validateUrlAgainstStabilizeBoundary(
+  url: string,
+  boundary: StabilizeSafetyBoundary,
+  path: string,
+  label: string,
+): WorkflowStabilizeValidationError | undefined {
+  if (!hasStabilizeUrlBoundary(boundary)) {
     return undefined;
   }
 
   let parsed: URL;
   try {
-    parsed = new URL(startUrl);
+    parsed = new URL(url);
   } catch {
     return {
-      code: 'INVALID_START_URL',
-      path: '/startUrl',
-      message: 'startUrl must be an absolute URL',
+      code: path === '/startUrl' ? 'INVALID_START_URL' : 'INVALID_REPLAY_URL',
+      path,
+      message: `${label} must be an absolute URL`,
     };
   }
 
   const originAllowed =
-    origins.length === 0 || origins.some((origin) => origin.replace(/\/+$/, '') === parsed.origin);
+    boundary.origins.length === 0 ||
+    boundary.origins.some((origin) => origin.replace(/\/+$/, '') === parsed.origin);
   const hostAllowed =
-    allowedHosts.length === 0 || allowedHosts.some((host) => hostMatchesBoundary(parsed.hostname, host));
+    boundary.allowedHosts.length === 0 ||
+    boundary.allowedHosts.some((host) => hostMatchesBoundary(parsed.hostname, host));
   const pathAllowed =
-    pathPrefixes.length === 0 || pathPrefixes.some((prefix) => parsed.pathname.startsWith(prefix));
+    boundary.pathPrefixes.length === 0 ||
+    boundary.pathPrefixes.some((prefix) => parsed.pathname.startsWith(prefix));
   if (!originAllowed || !hostAllowed || !pathAllowed) {
     return {
-      code: 'START_URL_OUTSIDE_TEST_ENVIRONMENT',
-      path: '/startUrl',
-      message: `startUrl is outside the declared safety boundary: ${parsed.origin}${parsed.pathname}`,
+      code:
+        path === '/startUrl'
+          ? 'START_URL_OUTSIDE_TEST_ENVIRONMENT'
+          : 'REPLAY_URL_OUTSIDE_TEST_ENVIRONMENT',
+      path,
+      message: `${label} is outside the declared safety boundary: ${parsed.origin}${parsed.pathname}`,
     };
   }
   return undefined;
+}
+
+async function resolveStabilizeTargetTabUrl(args: any): Promise<{ url?: string; path: string; label: string }> {
+  const tabId =
+    typeof args?.tabId === 'number' && Number.isFinite(args.tabId)
+      ? Math.floor(args.tabId)
+      : undefined;
+  if (tabId !== undefined) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      return {
+        url: typeof tab?.url === 'string' ? tab.url : undefined,
+        path: '/tabId',
+        label: 'target tab URL',
+      };
+    } catch {
+      return { path: '/tabId', label: 'target tab URL' };
+    }
+  }
+
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = Array.isArray(tabs) ? tabs[0] : undefined;
+    return {
+      url: typeof tab?.url === 'string' ? tab.url : undefined,
+      path: '/tabTarget',
+      label: 'current tab URL',
+    };
+  } catch {
+    return { path: '/tabTarget', label: 'current tab URL' };
+  }
+}
+
+async function validateStabilizeReplayBoundary(
+  args: any,
+  executionMode: 'auto' | 'analyzeOnly' | 'sandboxReplay' | 'userApprovedReplay',
+): Promise<WorkflowStabilizeValidationError | undefined> {
+  const boundary = getStabilizeSafetyBoundary(args);
+  if (!hasStabilizeUrlBoundary(boundary)) {
+    return undefined;
+  }
+
+  const startUrl = typeof args?.startUrl === 'string' ? args.startUrl.trim() : '';
+  if (startUrl) {
+    return validateUrlAgainstStabilizeBoundary(startUrl, boundary, '/startUrl', 'startUrl');
+  }
+  if (executionMode !== 'sandboxReplay') {
+    return undefined;
+  }
+  if (args?.tabTarget === 'new') {
+    return {
+      code: 'SANDBOX_REPLAY_REQUIRES_START_URL',
+      path: '/startUrl',
+      message:
+        'sandboxReplay with tabTarget="new" requires startUrl so the test environment boundary can be verified',
+    };
+  }
+
+  const target = await resolveStabilizeTargetTabUrl(args);
+  if (!target.url) {
+    return {
+      code: 'SANDBOX_REPLAY_TARGET_URL_UNAVAILABLE',
+      path: target.path,
+      message: `sandboxReplay requires a readable ${target.label} so the test environment boundary can be verified`,
+    };
+  }
+  return validateUrlAgainstStabilizeBoundary(target.url, boundary, target.path, target.label);
 }
 
 function getStabilizeTestEnvironment(args: any): Record<string, unknown> | undefined {
@@ -5395,7 +5487,7 @@ class WorkflowStabilizeTool {
     const segmentPlan = buildWorkflowSegmentPlan(workingFlow, args, runtimeSideEffectEvidence);
     const hasAutoRiskBoundary =
       segmentPlan.mode === 'stopBeforeDangerous' && Boolean(segmentPlan.stopBeforeNodeId);
-    const boundaryError = validateStabilizeStartUrlBoundary(args);
+    const boundaryError = await validateStabilizeReplayBoundary(args, executionMode);
     const sandboxReplayBoundaryError =
       executionMode === 'sandboxReplay'
         ? getSandboxReplayBoundaryError(args, resetValidation, segmentPlan)
