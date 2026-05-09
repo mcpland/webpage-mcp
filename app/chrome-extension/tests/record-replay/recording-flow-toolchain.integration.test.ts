@@ -3164,6 +3164,97 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("workflowStabilizeTool does not count disabled reset plans as sandboxReplay boundaries", async () => {
+    const flowId = `workflow-stabilize-sandbox-disabled-reset-${Date.now()}`;
+    const resetFlowId = `workflow-reset-disabled-${Date.now()}`;
+    const resetFlow = createFlow(
+      resetFlowId,
+      [
+        {
+          id: "reset-wait" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#reset-ready" } },
+        },
+      ],
+      {
+        meta: {
+          tool: {
+            published: true,
+            slug: "reset-disabled-session",
+          },
+        },
+      },
+    );
+    resetFlow.meta = {
+      ...(resetFlow.meta ?? {}),
+      quality: {
+        revision: calculateWorkflowRevision(resetFlow),
+        level: "stable",
+        status: "stable",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        verification: {
+          oracle: "none",
+          oracleStrength: "weak",
+        },
+      },
+    };
+    await createStoragePort().flows.save(resetFlow);
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      startUrl: "https://staging.example.com/app/dashboard",
+      safety: {
+        executionMode: "sandboxReplay",
+        testEnvironment: {
+          name: "staging",
+          origins: ["https://staging.example.com"],
+          pathPrefixes: ["/app"],
+        },
+        reset: {
+          workflow: "reset-disabled-session",
+          maxRuns: 0,
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+    expect(payload.safety).toMatchObject({
+      executionMode: "analyzeOnly",
+      blocked: true,
+      blockedReason: expect.stringContaining("bounded test replay"),
+    });
+    expect(payload.reset).toMatchObject({
+      requested: true,
+      workflow: "reset-disabled-session",
+      flowId: resetFlowId,
+      maxRuns: 0,
+    });
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "SANDBOX_REPLAY_REQUIRES_BOUNDED_ENVIRONMENT" }),
+      ]),
+    );
+  });
+
   it("workflowStabilizeTool elevates risk from mutating runtime network evidence", async () => {
     const flowId = `workflow-stabilize-runtime-side-effect-${Date.now()}`;
     const runId = `${flowId}-run`;

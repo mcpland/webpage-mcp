@@ -1200,6 +1200,10 @@ function getStabilizeTestEnvironment(args: any): Record<string, unknown> | undef
     : undefined;
 }
 
+function hasRunnableResetPlan(resetValidation: WorkflowResetValidation): boolean {
+  return Boolean(resetValidation.plan && resetValidation.plan.maxRuns > 0);
+}
+
 function getSandboxReplayBoundaryError(
   args: any,
   resetValidation: WorkflowResetValidation,
@@ -1228,7 +1232,7 @@ function getSandboxReplayBoundaryError(
     typeof testEnvironment.accountLabel === 'string' && testEnvironment.accountLabel.trim()
       ? testEnvironment.accountLabel.trim()
       : '';
-  if (!accountLabel && !resetValidation.plan && !hasSegmentBoundary(segmentPlan)) {
+  if (!accountLabel && !hasRunnableResetPlan(resetValidation) && !hasSegmentBoundary(segmentPlan)) {
     return {
       code: 'SANDBOX_REPLAY_REQUIRES_BOUNDED_ENVIRONMENT',
       path: '/safety',
