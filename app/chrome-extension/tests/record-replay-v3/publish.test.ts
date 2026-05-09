@@ -568,6 +568,35 @@ describe('listPublishedFlowDetails', () => {
     ]);
   });
 
+  it('omits disabled nodes from side-effect metadata', () => {
+    const flow = createPublishedFlow();
+    flow.nodes = [
+      {
+        id: 'disabled-click' as any,
+        kind: 'click',
+        disabled: true,
+        config: { target: { selector: '#purchase' } },
+      },
+      {
+        id: 'node-1' as any,
+        kind: 'navigate',
+        config: { url: 'https://example.com' },
+      },
+    ];
+
+    const [details] = listPublishedFlowDetails([flow]);
+
+    expect(details.sideEffects.summary).toEqual({
+      safe: 0,
+      idempotent: 1,
+      dangerous: 0,
+      unknown: 0,
+    });
+    expect(details.sideEffects.nodes.map((node) => node.id)).toEqual([
+      'node-1',
+    ]);
+  });
+
   it('classifies JavaScript extract nodes as dangerous in side-effect metadata', () => {
     const flow = createPublishedFlow();
     flow.nodes = [

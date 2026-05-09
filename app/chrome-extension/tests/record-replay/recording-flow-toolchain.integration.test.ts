@@ -3527,6 +3527,215 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("workflowStabilizeTool ignores disabled nodes for safety gating and runtime evidence", async () => {
+    const flowId = `workflow-stabilize-disabled-risk-${Date.now()}`;
+    const runId = `${flowId}-previous-run`;
+    const storage = createStoragePort();
+    await storage.flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "wait-1" as any,
+            kind: "wait",
+            config: { condition: { kind: "selector", selector: "#ready" } },
+          },
+          {
+            id: "disabled-click" as any,
+            kind: "click",
+            disabled: true,
+            config: { target: { selector: "#purchase" } },
+          },
+        ],
+        {
+          edges: [
+            {
+              id: "edge-wait-disabled" as any,
+              from: "wait-1" as any,
+              to: "disabled-click" as any,
+            },
+          ],
+        },
+      ),
+    );
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: runId as any,
+      flowId: flowId as any,
+      status: "succeeded",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      attempt: 1,
+      maxAttempts: 1,
+      nextSeq: 1,
+    } as RunRecordV3);
+    await storage.events.append({
+      runId: runId as any,
+      type: "network.observed",
+      nodeId: "disabled-click" as any,
+      requestId: "disabled-side-effect",
+      url: "https://example.com/api/purchase",
+      resourceType: "fetch",
+      currentFrame: true,
+      startedAt: 1_000,
+      endedAt: 1_100,
+      status: 200,
+      method: "POST",
+    });
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: {
+        id: `${flowId}-validation-1`,
+        flowId,
+        status: "succeeded",
+        createdAt: 1_000,
+        updatedAt: 1_050,
+        attempt: 1,
+        maxAttempts: 1,
+        tookMs: 50,
+      },
+      events: [],
+      result: {
+        runId: `${flowId}-validation-1`,
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 50 },
+        outputs: null,
+        eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+      },
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      minPassRate: 1,
+      apply: false,
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(1);
+    expect(payload.safety).toMatchObject({
+      risk: "safe",
+      executionMode: "auto",
+      executedIterations: 1,
+      sideEffects: {
+        safe: 1,
+        dangerous: 0,
+        unknown: 0,
+      },
+      runtimeEvidence: {
+        risk: "safe",
+        observations: [],
+      },
+    });
+    expect(payload.warnings.map((warning: { code: string }) => warning.code)).not.toContain(
+      "STABILIZE_REPLAY_BLOCKED",
+    );
+    expect(payload.warnings.map((warning: { code: string }) => warning.code)).not.toContain(
+      "STABILIZE_RUNTIME_SIDE_EFFECT_EVIDENCE",
+    );
+  });
+
+  it("workflowStabilizeTool skips disabled nodes when selecting automatic segment boundaries", async () => {
+    const flowId = `workflow-stabilize-disabled-boundary-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "wait-1" as any,
+            kind: "wait",
+            config: { condition: { kind: "selector", selector: "#ready" } },
+          },
+          {
+            id: "disabled-click" as any,
+            kind: "click",
+            disabled: true,
+            config: { target: { selector: "#old-purchase" } },
+          },
+          {
+            id: "click-2" as any,
+            kind: "click",
+            config: { target: { selector: "#purchase" } },
+          },
+        ],
+        {
+          edges: [
+            {
+              id: "edge-wait-disabled" as any,
+              from: "wait-1" as any,
+              to: "disabled-click" as any,
+            },
+            {
+              id: "edge-disabled-click" as any,
+              from: "disabled-click" as any,
+              to: "click-2" as any,
+            },
+          ],
+        },
+      ),
+    );
+    mocks.enqueueRunAndWait.mockImplementation(
+      async (input: { stopBeforeNodeId?: string }) => {
+        expect(input.stopBeforeNodeId).toBe("click-2");
+        return {
+          run: {
+            id: `${flowId}-run`,
+            flowId,
+            status: "stopped_at_boundary",
+            currentNodeId: "click-2",
+            stopBeforeNodeId: "click-2",
+            tookMs: 5,
+          } as any,
+          events: [],
+          result: {
+            runId: `${flowId}-run`,
+            success: true,
+            status: "stopped_at_boundary",
+            currentNodeId: "click-2",
+            summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+            outputs: null,
+            eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+          },
+        };
+      },
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      minPassRate: 1,
+      apply: false,
+      safety: {
+        segments: {
+          mode: "stopBeforeDangerous",
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(1);
+    expect(payload.safety).toMatchObject({
+      risk: "dangerous",
+      executionMode: "auto",
+      executedIterations: 1,
+      segments: {
+        mode: "stopBeforeDangerous",
+        stopBeforeNodeId: "click-2",
+        autoBoundary: true,
+        boundaryNodeId: "click-2",
+        boundaryKind: "click",
+        boundaryRisk: "dangerous",
+        boundarySource: "static",
+      },
+    });
+    expect(payload.safety.segments.stopBeforeNodeId).not.toBe("disabled-click");
+    expect(payload.warnings.map((warning: { code: string }) => warning.code)).not.toContain(
+      "STABILIZE_REPLAY_BLOCKED",
+    );
+  });
+
   it("workflowStabilizeTool applies risk override elevations before automatic replay", async () => {
     const flowId = `workflow-stabilize-risk-override-block-${Date.now()}`;
     await createStoragePort().flows.save(

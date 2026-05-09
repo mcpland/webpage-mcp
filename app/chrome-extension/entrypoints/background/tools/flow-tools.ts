@@ -528,10 +528,18 @@ function getNodeSideEffectProfile(node: FlowV3['nodes'][number]): WorkflowSideEf
   return normalizeWorkflowNodeSideEffectProfile(node.kind, node.config, node.sideEffect);
 }
 
+function getDisabledWorkflowNodeIds(flow: FlowV3): Set<string> {
+  return new Set(
+    (Array.isArray(flow.nodes) ? flow.nodes : [])
+      .filter((node) => node.disabled === true)
+      .map((node) => String(node.id)),
+  );
+}
+
 function getPublicNodeExecutionMetadata(
   node: FlowV3['nodes'][number],
 ): Pick<PublicAnalyzedNode, 'executable' | 'sideEffect'> {
-  if (node.kind === 'trigger') {
+  if (node.kind === 'trigger' || node.disabled === true) {
     return { executable: false };
   }
   return {
@@ -549,6 +557,9 @@ function summarizeWorkflowSideEffects(
 ): WorkflowSideEffectSummary {
   const summary = createEmptyWorkflowSideEffectSummary();
   for (const node of Array.isArray(flow.nodes) ? flow.nodes : []) {
+    if (node.disabled === true) {
+      continue;
+    }
     const override = nodeRiskOverrides.get(String(node.id));
     if (override) {
       summary[sideEffectSummaryKeyForRisk(override)] += 1;
@@ -620,7 +631,10 @@ function normalizedHttpMethod(value: unknown): string {
   return typeof value === 'string' ? value.trim().toUpperCase() : '';
 }
 
-function collectRuntimeSideEffectEvidence(runs: WorkflowDebugRun[]): RuntimeSideEffectEvidence {
+function collectRuntimeSideEffectEvidence(
+  runs: WorkflowDebugRun[],
+  options: { disabledNodeIds?: ReadonlySet<string> } = {},
+): RuntimeSideEffectEvidence {
   const evidence: RuntimeSideEffectEvidence = {
     risk: 'safe',
     summary: createEmptyWorkflowSideEffectSummary(),
@@ -630,6 +644,9 @@ function collectRuntimeSideEffectEvidence(runs: WorkflowDebugRun[]): RuntimeSide
   for (const run of runs) {
     for (const event of run.events) {
       const nodeId = typeof event.nodeId === 'string' && event.nodeId.trim() ? event.nodeId.trim() : undefined;
+      if (nodeId && options.disabledNodeIds?.has(nodeId)) {
+        continue;
+      }
       if (event.type === 'network.observed') {
         const method = normalizedHttpMethod(event.method);
         const resourceType = typeof event.resourceType === 'string' ? event.resourceType : undefined;
@@ -785,7 +802,7 @@ function findUniqueFirstRiskBoundary(
     if (!node) {
       continue;
     }
-    if (isRiskBoundary(node, runtimeNodeRisks, nodeRiskOverrides)) {
+    if (node.disabled !== true && isRiskBoundary(node, runtimeNodeRisks, nodeRiskOverrides)) {
       boundaryNodeIds.add(nodeId);
       continue;
     }
@@ -5497,7 +5514,8 @@ class WorkflowStabilizeTool {
     const assertionRepairSuggestionsBeforeApply = buildAssertionRepairSuggestions(workingFlow, recentRuns);
     const recommendationsBeforeApply = buildRepairRecommendations(workingFlow, hints, recentRuns);
     const descriptor = buildWorkflowToolDescriptor(workingFlow);
-    let runtimeSideEffectEvidence = collectRuntimeSideEffectEvidence(recentRuns);
+    const disabledNodeIds = getDisabledWorkflowNodeIds(workingFlow);
+    let runtimeSideEffectEvidence = collectRuntimeSideEffectEvidence(recentRuns, { disabledNodeIds });
     let staticSideEffects = descriptor.sideEffects.summary;
     let sideEffects = mergeWorkflowSideEffectSummaries(
       staticSideEffects,
@@ -5723,7 +5741,9 @@ class WorkflowStabilizeTool {
     let validationDebugRuns: WorkflowDebugRun[] = [];
     let runtimeSafetyBlockWarningEmitted = false;
     const refreshRuntimeSideEffectEvidence = (): void => {
-      runtimeSideEffectEvidence = collectRuntimeSideEffectEvidence([...recentRuns, ...validationDebugRuns]);
+      runtimeSideEffectEvidence = collectRuntimeSideEffectEvidence([...recentRuns, ...validationDebugRuns], {
+        disabledNodeIds,
+      });
       sideEffects = mergeWorkflowSideEffectSummaries(
         staticSideEffects,
         runtimeSideEffectEvidence.summary,
