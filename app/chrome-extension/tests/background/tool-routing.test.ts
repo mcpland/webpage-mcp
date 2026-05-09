@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listPublishedExecute: vi.fn(),
   workflowPublishExecute: vi.fn(),
   workflowUnpublishExecute: vi.fn(),
+  workflowDebugViewExecute: vi.fn(),
   getSessionContext: vi.fn(),
   patchSessionContext: vi.fn(),
   runInTabQueue: vi.fn(async (_tabId: number, task: () => Promise<unknown>) => await task()),
@@ -49,7 +50,7 @@ vi.mock('@/entrypoints/background/tools/flow-tools', () => ({
   flowUpdateTool: { name: 'flow_update', execute: vi.fn() },
   workflowApprovalStoreTool: { name: 'workflow_approval_store', execute: vi.fn() },
   workflowDescribeTool: { name: 'workflow_describe', execute: vi.fn() },
-  workflowDebugViewTool: { name: 'workflow_debug_view', execute: vi.fn() },
+  workflowDebugViewTool: { name: 'workflow_debug_view', execute: mocks.workflowDebugViewExecute },
   workflowRepairTool: { name: 'workflow_repair', execute: vi.fn() },
   workflowRepairRollbackTool: { name: 'workflow_repair_rollback', execute: vi.fn() },
   workflowStabilizeTool: { name: 'workflow_stabilize', execute: vi.fn() },
@@ -122,6 +123,10 @@ describe('handleCallTool navigation routing', () => {
     });
     mocks.listPublishedExecute.mockResolvedValue({
       content: [{ type: 'text', text: JSON.stringify({ success: true, flows: [] }) }],
+      isError: false,
+    });
+    mocks.workflowDebugViewExecute.mockResolvedValue({
+      content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
       isError: false,
     });
     mocks.tabsGet.mockResolvedValue({ id: 10, windowId: 55, url: 'https://github.com/unadlib' });
@@ -405,5 +410,18 @@ describe('handleCallTool navigation routing', () => {
 
     expect(mocks.storageGet).not.toHaveBeenCalled();
     expect(mocks.listPublishedExecute).toHaveBeenCalledWith({});
+  });
+
+  it('passes MCP context to workflow tools even when client capabilities are absent', async () => {
+    await handleCallTool({
+      name: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
+      args: { flowId: 'flow-1' },
+      meta: { mcpSessionId: 'session-1', source: 'mcp' },
+    });
+
+    expect(mocks.workflowDebugViewExecute).toHaveBeenCalledWith(
+      { flowId: 'flow-1' },
+      { meta: { mcpSessionId: 'session-1', source: 'mcp' } },
+    );
   });
 });

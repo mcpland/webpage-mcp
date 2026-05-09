@@ -72,6 +72,10 @@ const BACKGROUND_DEFAULT_SUPPORTED_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.COMPUTER,
   TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
 ]);
+const MCP_CONTEXT_AWARE_TOOLS = new Set<string>([
+  TOOL_NAMES.RECORD_REPLAY.WORKFLOW_DEBUG_VIEW,
+  TOOL_NAMES.RECORD_REPLAY.WORKFLOW_STABILIZE,
+]);
 
 interface ResolvedExecutionTarget {
   tabId?: number;
@@ -377,7 +381,10 @@ export const handleCallTool = async (param: ToolCallParam) => {
 
   try {
     const executionContext =
-      param.meta?.clientCapabilities !== undefined ? { meta: param.meta } : undefined;
+      param.meta &&
+      (param.meta.clientCapabilities !== undefined || MCP_CONTEXT_AWARE_TOOLS.has(param.name))
+        ? { meta: param.meta }
+        : undefined;
     const execute = async () =>
       executionContext ? await tool.execute(mergedArgs, executionContext) : await tool.execute(mergedArgs);
     const result =
