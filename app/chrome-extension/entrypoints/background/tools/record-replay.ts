@@ -12,6 +12,7 @@ import {
   calculateWorkflowRevision,
   ensurePublishedSlugAvailable,
   evaluateWorkflowPublishGate,
+  getHighRiskQualityEvidenceRisk,
   getPublishedFlowInfo,
   listPublishedFlowDetails,
   mergeFlowToolMetadata,
@@ -721,11 +722,13 @@ class WorkflowPublishTool {
         ) {
           const prePublishGate = evaluateWorkflowPublishGate(existing, gateOptions);
           if (prePublishGate.allowed) {
+            const reboundRisk = getHighRiskQualityEvidenceRisk(existing.meta.quality);
             updated.meta = {
               ...(updated.meta ?? {}),
               quality: {
                 ...existing.meta.quality,
                 revision: calculateWorkflowRevision(updated),
+                ...(reboundRisk ? { risk: reboundRisk } : {}),
                 warnings: Array.from(
                   new Set([...(existing.meta.quality.warnings ?? []), "quality_rebound_publish_metadata"]),
                 ),

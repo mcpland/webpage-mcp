@@ -6728,6 +6728,87 @@ describe("recording/editing/flow toolchain integration", () => {
     ]);
   });
 
+  it("workflowPublishTool preserves runtime high-risk quality evidence during metadata rebound", async () => {
+    const flowId = `workflow-publish-risk-rebound-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "node-1" as any,
+        kind: "navigate",
+        config: { url: "https://example.com" },
+      },
+    ]);
+    const revision = calculateWorkflowRevision(flow);
+    flow.meta = {
+      quality: {
+        revision,
+        level: "verified",
+        status: "verified",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        verification: {
+          oracle: "externalReadback",
+          oracleStrength: "strong",
+        },
+        validationRecords: [
+          {
+            id: "runtime-risk-record",
+            tool: "workflow_stabilize",
+            revision,
+            completedAt: "2026-01-01T00:00:00.000Z" as any,
+            passRate: 1,
+            stabilityScore: 1,
+            countedRuns: 3,
+            passedRuns: 3,
+            failedRuns: 0,
+            risk: "dangerous",
+          },
+        ],
+      },
+    };
+    await createStoragePort().flows.save(flow);
+
+    const publish = await workflowPublishTool.execute({
+      flowId,
+      slug: "Risk Rebound",
+      description: "Publish metadata only",
+      requireVerified: true,
+    });
+    const publishPayload = parseToolPayload(publish);
+    const published = await createStoragePort().flows.get(flowId as any);
+
+    expect(publish.isError).toBe(false);
+    expect(publishPayload).toMatchObject({
+      success: true,
+      workflow: "risk-rebound",
+      quality: {
+        current: true,
+        level: "verified",
+      },
+    });
+    expect(publishPayload.warnings.map((warning: { code: string }) => warning.code)).toEqual(
+      expect.arrayContaining([
+        "PUBLISH_QUALITY_REBOUND_TO_DESCRIPTOR",
+        "PUBLISH_SIDE_EFFECTS_REQUIRE_REVIEW",
+      ]),
+    );
+    expect(published?.meta?.quality).toMatchObject({
+      revision: calculateWorkflowRevision(published as FlowV3),
+      risk: "dangerous",
+      validationRecords: [
+        expect.objectContaining({
+          revision,
+          risk: "dangerous",
+        }),
+      ],
+    });
+  });
+
   it("workflowPublishTool blocks unstabilized workflows unless warning mode is explicit", async () => {
     const flowId = `workflow-publish-blocked-${Date.now()}`;
     await createStoragePort().flows.save(

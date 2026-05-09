@@ -591,16 +591,37 @@ function isHighRiskQualityRisk(risk: FlowQualityMeta["risk"] | undefined): boole
   return risk === "dangerous" || risk === "unknown";
 }
 
-function hasHighRiskQualityEvidence(quality: FlowQualityMeta | undefined): boolean {
-  if (isHighRiskQualityRisk(quality?.risk)) {
-    return true;
+function qualityRiskRank(risk: FlowQualityMeta["risk"] | undefined): number {
+  return risk === "unknown" ? 3 : risk === "dangerous" ? 2 : risk === "idempotent" ? 1 : 0;
+}
+
+export function getHighRiskQualityEvidenceRisk(
+  quality: FlowQualityMeta | undefined,
+): FlowQualityMeta["risk"] | undefined {
+  if (!quality) {
+    return undefined;
   }
-  return Boolean(
-    quality?.validationRecords?.some(
-      (record) =>
-        record.revision === quality.revision && isHighRiskQualityRisk(record.risk),
-    ),
-  );
+  if (isHighRiskQualityRisk(quality.risk)) {
+    return quality.risk;
+  }
+  if (!quality.revision || !Array.isArray(quality.validationRecords)) {
+    return undefined;
+  }
+
+  let selected: FlowQualityMeta["risk"] | undefined;
+  for (const record of quality.validationRecords) {
+    if (record.revision !== quality.revision || !isHighRiskQualityRisk(record.risk)) {
+      continue;
+    }
+    if (!selected || qualityRiskRank(record.risk) > qualityRiskRank(selected)) {
+      selected = record.risk;
+    }
+  }
+  return selected;
+}
+
+function hasHighRiskQualityEvidence(quality: FlowQualityMeta | undefined): boolean {
+  return Boolean(getHighRiskQualityEvidenceRisk(quality));
 }
 
 export function evaluateWorkflowPublishGate(
