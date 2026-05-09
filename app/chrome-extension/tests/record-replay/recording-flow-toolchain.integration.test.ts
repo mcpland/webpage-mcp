@@ -3315,6 +3315,84 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("workflowStabilizeTool does not auto-bound branching dangerous segments", async () => {
+    const flowId = `workflow-stabilize-ambiguous-auto-segment-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "wait-1" as any,
+            kind: "wait",
+            config: { condition: { kind: "selector", selector: "#ready" } },
+          },
+          {
+            id: "click-a" as any,
+            kind: "click",
+            config: { target: { selector: "#buy-a" } },
+          },
+          {
+            id: "click-b" as any,
+            kind: "click",
+            config: { target: { selector: "#buy-b" } },
+          },
+        ],
+        {
+          edges: [
+            {
+              id: "edge-wait-click-a" as any,
+              from: "wait-1" as any,
+              to: "click-a" as any,
+              label: "yes" as any,
+            },
+            {
+              id: "edge-wait-click-b" as any,
+              from: "wait-1" as any,
+              to: "click-b" as any,
+              label: "no" as any,
+            },
+          ],
+        },
+      ),
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 2,
+      minPassRate: 1,
+      apply: false,
+      safety: {
+        segments: {
+          mode: "stopBeforeDangerous",
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+    expect(payload).toMatchObject({
+      success: true,
+      applied: false,
+      safety: {
+        risk: "dangerous",
+        executionMode: "analyzeOnly",
+        executedIterations: 0,
+        blocked: true,
+        segments: {
+          mode: "stopBeforeDangerous",
+          ambiguousBoundaryNodeIds: ["click-a", "click-b"],
+        },
+      },
+    });
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "STABILIZE_AUTO_SEGMENT_BOUNDARY_AMBIGUOUS" }),
+        expect.objectContaining({ code: "STABILIZE_REPLAY_BLOCKED" }),
+      ]),
+    );
+  });
+
   it("workflowStabilizeTool accepts trusted approval records from the local approval store", async () => {
     const flowId = `workflow-stabilize-approved-${Date.now()}`;
     const flow = createFlow(flowId, [

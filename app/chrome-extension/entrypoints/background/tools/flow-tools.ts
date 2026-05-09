@@ -30,7 +30,6 @@ import {
 import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variables';
 import { createStoragePort } from '../record-replay-v3';
 import { enqueueRunAndWait, saveFlowToV3 } from '../record-replay-v3/compat';
-import { findNextNode } from '../record-replay-v3/engine/kernel/traversal';
 import {
   FlowWriteConflictError,
   withFlowWriteLock,
@@ -332,6 +331,7 @@ interface WorkflowSegmentPlan {
   boundaryKind?: string;
   boundaryRisk?: WorkflowRiskProfile;
   boundarySource?: 'static' | 'runtime';
+  ambiguousBoundaryNodeIds?: string[];
 }
 
 interface TrustedWorkflowApproval {
@@ -740,36 +740,15 @@ function findNodeByPublicId(flow: FlowV3, nodeId: string): FlowV3['nodes'][numbe
   return (Array.isArray(flow.nodes) ? flow.nodes : []).find((node) => String(node.id) === nodeId);
 }
 
-function findFirstSequentialRiskBoundary(
+function findUniqueFirstRiskBoundary(
   flow: FlowV3,
   runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
-): FlowV3['nodes'][number] | undefined {
-  const visited = new Set<string>();
-  let currentNodeId: NodeId | null = flow.entryNodeId as NodeId;
-
-  while (currentNodeId && !visited.has(String(currentNodeId))) {
-    visited.add(String(currentNodeId));
-    const node = findNodeByPublicId(flow, currentNodeId);
-    if (!node) {
-      break;
-    }
-    if (isRiskBoundary(node, runtimeNodeRisks)) {
-      return node;
-    }
-    currentNodeId = findNextNode(flow, node.id as NodeId);
-  }
-
-  return undefined;
-}
-
-function findFirstReachableRiskBoundary(
-  flow: FlowV3,
-  runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
-): FlowV3['nodes'][number] | undefined {
+): { node?: FlowV3['nodes'][number]; ambiguousNodeIds?: string[] } {
   const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
   const nodeById = new Map(nodes.map((node) => [String(node.id), node]));
   const queue: string[] = [String(flow.entryNodeId)];
   const visited = new Set<string>();
+  const boundaryNodeIds = new Set<string>();
 
   while (queue.length > 0) {
     const nodeId = queue.shift();
@@ -782,7 +761,8 @@ function findFirstReachableRiskBoundary(
       continue;
     }
     if (isRiskBoundary(node, runtimeNodeRisks)) {
-      return node;
+      boundaryNodeIds.add(nodeId);
+      continue;
     }
     for (const edge of Array.isArray(flow.edges) ? flow.edges : []) {
       if (String(edge.from) === nodeId && !visited.has(String(edge.to))) {
@@ -791,7 +771,14 @@ function findFirstReachableRiskBoundary(
     }
   }
 
-  return undefined;
+  if (boundaryNodeIds.size === 1) {
+    const [nodeId] = boundaryNodeIds;
+    return { node: nodeById.get(nodeId) };
+  }
+  if (boundaryNodeIds.size > 1) {
+    return { ambiguousNodeIds: Array.from(boundaryNodeIds).sort() };
+  }
+  return {};
 }
 
 function buildWorkflowSegmentPlan(
@@ -821,11 +808,15 @@ function buildWorkflowSegmentPlan(
   }
 
   const runtimeNodeRisks = buildRuntimeNodeRiskMap(runtimeEvidence);
-  const boundaryNode =
-    findFirstSequentialRiskBoundary(flow, runtimeNodeRisks) ??
-    findFirstReachableRiskBoundary(flow, runtimeNodeRisks);
+  const boundaryResult = findUniqueFirstRiskBoundary(flow, runtimeNodeRisks);
+  const boundaryNode = boundaryResult.node;
   if (!boundaryNode) {
-    return { mode: 'stopBeforeDangerous' };
+    return {
+      mode: 'stopBeforeDangerous',
+      ...(boundaryResult.ambiguousNodeIds
+        ? { ambiguousBoundaryNodeIds: boundaryResult.ambiguousNodeIds }
+        : {}),
+    };
   }
 
   const boundary = getSegmentBoundaryRisk(boundaryNode, runtimeNodeRisks);
@@ -5469,6 +5460,17 @@ class WorkflowStabilizeTool {
         nodeId: segmentPlan.stopBeforeNodeId,
         message: `Validation will stop before ${segmentPlan.boundaryRisk ?? 'risky'} node ${segmentPlan.stopBeforeNodeId}.`,
       });
+    } else if (
+      segmentPlan.mode === 'stopBeforeDangerous' &&
+      segmentPlan.ambiguousBoundaryNodeIds &&
+      segmentPlan.ambiguousBoundaryNodeIds.length > 0
+    ) {
+      warnings.push({
+        code: 'STABILIZE_AUTO_SEGMENT_BOUNDARY_AMBIGUOUS',
+        category: 'safety',
+        message:
+          'stopBeforeDangerous found multiple first risky nodes across workflow branches; use an explicit segment or trusted approval.',
+      });
     } else if (segmentPlan.mode === 'stopBeforeDangerous') {
       warnings.push({
         code: 'STABILIZE_AUTO_SEGMENT_BOUNDARY_NOT_FOUND',
@@ -5825,6 +5827,9 @@ class WorkflowStabilizeTool {
                       boundaryRisk: segmentPlan.boundaryRisk,
                       boundarySource: segmentPlan.boundarySource,
                     }
+                  : {}),
+                ...(segmentPlan.ambiguousBoundaryNodeIds
+                  ? { ambiguousBoundaryNodeIds: segmentPlan.ambiguousBoundaryNodeIds }
                   : {}),
               },
               ...(executionMode === 'sandboxReplay'
