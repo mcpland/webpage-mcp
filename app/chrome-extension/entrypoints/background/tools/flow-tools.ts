@@ -660,7 +660,7 @@ function collectRuntimeSideEffectEvidence(
             ...(nodeId ? { nodeId } : {}),
             method,
             ...(resourceType ? { resourceType } : {}),
-            ...(url ? { url } : {}),
+            ...(url ? { url: redactUrl(url) } : {}),
           });
           continue;
         }
@@ -673,7 +673,7 @@ function collectRuntimeSideEffectEvidence(
             ...(nodeId ? { nodeId } : {}),
             ...(method ? { method } : {}),
             resourceType,
-            ...(url ? { url } : {}),
+            ...(url ? { url: redactUrl(url) } : {}),
           });
         }
         continue;
@@ -695,8 +695,8 @@ function collectRuntimeSideEffectEvidence(
               category: 'unknown',
               reason: 'Observed cross-origin navigation during workflow replay',
               ...(nodeId ? { nodeId } : {}),
-              beforeUrl,
-              afterUrl,
+              beforeUrl: redactUrl(beforeUrl),
+              afterUrl: redactUrl(afterUrl),
             });
           }
         } catch {
@@ -706,8 +706,8 @@ function collectRuntimeSideEffectEvidence(
             category: 'unknown',
             reason: 'Observed navigation with unparseable URL evidence',
             ...(nodeId ? { nodeId } : {}),
-            beforeUrl,
-            afterUrl,
+            beforeUrl: redactUrl(beforeUrl),
+            afterUrl: redactUrl(afterUrl),
           });
         }
       }
