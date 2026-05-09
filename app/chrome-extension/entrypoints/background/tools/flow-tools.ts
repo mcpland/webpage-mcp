@@ -535,6 +535,139 @@ function classifyWorkflowRisk(summary: WorkflowSideEffectSummary): WorkflowRiskP
   return 'safe';
 }
 
+interface RuntimeSideEffectObservation {
+  runId: string;
+  eventType: string;
+  category: 'dangerous' | 'unknown';
+  reason: string;
+  nodeId?: string;
+  method?: string;
+  resourceType?: string;
+  url?: string;
+  beforeUrl?: string;
+  afterUrl?: string;
+}
+
+interface RuntimeSideEffectEvidence {
+  risk: WorkflowRiskProfile;
+  summary: WorkflowSideEffectSummary;
+  observations: RuntimeSideEffectObservation[];
+}
+
+const HTTP_METHODS_WITHOUT_REQUEST_BODY_SIDE_EFFECTS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
+
+function maxWorkflowRisk(left: WorkflowRiskProfile, right: WorkflowRiskProfile): WorkflowRiskProfile {
+  return riskRank(left) >= riskRank(right) ? left : right;
+}
+
+function mergeWorkflowSideEffectSummaries(
+  base: WorkflowSideEffectSummary,
+  observed: WorkflowSideEffectSummary,
+): WorkflowSideEffectSummary {
+  return {
+    safe: base.safe + observed.safe,
+    idempotent: base.idempotent + observed.idempotent,
+    dangerous: base.dangerous + observed.dangerous,
+    unknown: base.unknown + observed.unknown,
+  };
+}
+
+function addRuntimeSideEffectObservation(
+  evidence: RuntimeSideEffectEvidence,
+  observation: RuntimeSideEffectObservation,
+): void {
+  evidence.observations.push(observation);
+  evidence.summary[observation.category] += 1;
+  evidence.risk = maxWorkflowRisk(evidence.risk, observation.category);
+}
+
+function normalizedHttpMethod(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toUpperCase() : '';
+}
+
+function collectRuntimeSideEffectEvidence(runs: WorkflowDebugRun[]): RuntimeSideEffectEvidence {
+  const evidence: RuntimeSideEffectEvidence = {
+    risk: 'safe',
+    summary: createEmptyWorkflowSideEffectSummary(),
+    observations: [],
+  };
+
+  for (const run of runs) {
+    for (const event of run.events) {
+      const nodeId = typeof event.nodeId === 'string' && event.nodeId.trim() ? event.nodeId.trim() : undefined;
+      if (event.type === 'network.observed') {
+        const method = normalizedHttpMethod(event.method);
+        const resourceType = typeof event.resourceType === 'string' ? event.resourceType : undefined;
+        const url = typeof event.url === 'string' ? event.url : undefined;
+        if (method && !HTTP_METHODS_WITHOUT_REQUEST_BODY_SIDE_EFFECTS.has(method)) {
+          addRuntimeSideEffectObservation(evidence, {
+            runId: run.id,
+            eventType: 'network.observed',
+            category: 'dangerous',
+            reason: `Observed mutating network request method ${method}`,
+            ...(nodeId ? { nodeId } : {}),
+            method,
+            ...(resourceType ? { resourceType } : {}),
+            ...(url ? { url } : {}),
+          });
+          continue;
+        }
+        if (resourceType === 'websocket' || resourceType === 'eventsource') {
+          addRuntimeSideEffectObservation(evidence, {
+            runId: run.id,
+            eventType: 'network.observed',
+            category: 'unknown',
+            reason: `Observed long-lived ${resourceType} network activity`,
+            ...(nodeId ? { nodeId } : {}),
+            ...(method ? { method } : {}),
+            resourceType,
+            ...(url ? { url } : {}),
+          });
+        }
+        continue;
+      }
+
+      if (event.type === 'navigation.observed' && event.status === 'completed') {
+        const beforeUrl = typeof event.beforeUrl === 'string' ? event.beforeUrl : '';
+        const afterUrl = typeof event.afterUrl === 'string' ? event.afterUrl : '';
+        if (!beforeUrl || !afterUrl || beforeUrl === afterUrl) {
+          continue;
+        }
+        try {
+          const before = new URL(beforeUrl);
+          const after = new URL(afterUrl);
+          if (before.origin !== after.origin) {
+            addRuntimeSideEffectObservation(evidence, {
+              runId: run.id,
+              eventType: 'navigation.observed',
+              category: 'unknown',
+              reason: 'Observed cross-origin navigation during workflow replay',
+              ...(nodeId ? { nodeId } : {}),
+              beforeUrl,
+              afterUrl,
+            });
+          }
+        } catch {
+          addRuntimeSideEffectObservation(evidence, {
+            runId: run.id,
+            eventType: 'navigation.observed',
+            category: 'unknown',
+            reason: 'Observed navigation with unparseable URL evidence',
+            ...(nodeId ? { nodeId } : {}),
+            beforeUrl,
+            afterUrl,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    ...evidence,
+    observations: evidence.observations.slice(0, 20),
+  };
+}
+
 function riskRank(risk: WorkflowRiskProfile): number {
   switch (risk) {
     case 'safe':
@@ -4940,8 +5073,14 @@ class WorkflowStabilizeTool {
     const assertionRepairSuggestionsBeforeApply = buildAssertionRepairSuggestions(workingFlow, recentRuns);
     const recommendationsBeforeApply = buildRepairRecommendations(workingFlow, hints, recentRuns);
     const descriptor = buildWorkflowToolDescriptor(workingFlow);
-    const sideEffects = descriptor.sideEffects.summary;
-    const risk = classifyWorkflowRisk(sideEffects);
+    const runtimeSideEffectEvidence = collectRuntimeSideEffectEvidence(recentRuns);
+    const staticSideEffects = descriptor.sideEffects.summary;
+    const sideEffects = mergeWorkflowSideEffectSummaries(
+      staticSideEffects,
+      runtimeSideEffectEvidence.summary,
+    );
+    const staticRisk = classifyWorkflowRisk(staticSideEffects);
+    const risk = maxWorkflowRisk(staticRisk, runtimeSideEffectEvidence.risk);
     const executionMode = normalizeExecutionMode(args?.safety?.executionMode);
     const iterations = clampNumber(args?.iterations, 3, 1, 10);
     const minPassRate =
@@ -4973,6 +5112,14 @@ class WorkflowStabilizeTool {
         code: 'STABILIZE_APPROVAL_REJECTED',
         category: 'safety',
         message: approvalCheck.reason ?? 'approval reference was not accepted',
+      });
+    }
+    if (riskRank(runtimeSideEffectEvidence.risk) > riskRank(staticRisk)) {
+      warnings.push({
+        code: 'STABILIZE_RUNTIME_SIDE_EFFECT_EVIDENCE',
+        category: 'safety',
+        message:
+          'Recent runtime observations indicate stronger side-effect risk than static node classification.',
       });
     }
 
@@ -5396,6 +5543,7 @@ class WorkflowStabilizeTool {
               blocked: Boolean(validationBlockedReason),
               ...(validationBlockedReason ? { blockedReason: validationBlockedReason } : {}),
               sideEffects,
+              runtimeEvidence: runtimeSideEffectEvidence,
               approvalReferenceAccepted: hasApprovalReference,
               ...(approvalCheck.approval
                 ? {
