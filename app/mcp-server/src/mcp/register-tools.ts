@@ -901,6 +901,7 @@ function filterFlowRunToolForCapabilities(
     ...tool,
     inputSchema: {
       ...inputSchema,
+      type: 'object',
       properties,
     },
   };
