@@ -34,14 +34,15 @@ import {
   isResourceLimitError,
 } from "../record-replay-v3/domain/errors";
 
-function hasDisallowedPublicUrlScheme(url: string): boolean {
-  const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
-  if (!match) {
+function isAllowedPublicStartUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
     return false;
   }
 
-  const protocol = match[1]?.toLowerCase();
-  return protocol !== "http" && protocol !== "https";
+  return parsed.protocol === "http:" || parsed.protocol === "https:";
 }
 
 function sleep(ms: number): Promise<void> {
@@ -1058,7 +1059,7 @@ class FlowRunTool {
     }
     const normalizedStartUrl =
       typeof startUrl === "string" && startUrl.trim() ? startUrl.trim() : undefined;
-    if (normalizedStartUrl && hasDisallowedPublicUrlScheme(normalizedStartUrl)) {
+    if (normalizedStartUrl && !isAllowedPublicStartUrl(normalizedStartUrl)) {
       return createErrorResponse(
         "Only http:// and https:// URLs are allowed for startUrl",
       );

@@ -4401,15 +4401,17 @@ describe("recording/editing/flow toolchain integration", () => {
       ),
     );
 
-    const result = await flowRunTool.execute({
-      flowId,
-      startUrl: "file:///tmp/secret.txt",
-    });
+    for (const startUrl of ["file:///tmp/secret.txt", "example.com"]) {
+      const result = await flowRunTool.execute({
+        flowId,
+        startUrl,
+      });
 
-    expect(result.isError).toBe(true);
-    expect(String((result.content[0] as { text?: string })?.text)).toContain(
-      "Only http:// and https:// URLs are allowed for startUrl",
-    );
+      expect(result.isError).toBe(true);
+      expect(String((result.content[0] as { text?: string })?.text)).toContain(
+        "Only http:// and https:// URLs are allowed for startUrl",
+      );
+    }
     expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
   });
 
