@@ -2,9 +2,11 @@ import type { JsonObject, JsonValue } from "./domain/json";
 
 export const WORKFLOW_SECRET_STORE_KEY = "webpageMcpWorkflowSecrets";
 
+type WorkflowSecretScope = "session" | "profile" | "workflow";
+
 export interface WorkflowSecretRefValue {
   secretRef: string;
-  scope?: "session" | "profile" | "workflow";
+  scope?: WorkflowSecretScope;
 }
 
 export class WorkflowSecretRefError extends Error {
@@ -50,6 +52,10 @@ function isJsonValue(value: unknown): value is JsonValue {
   return isRecord(value) && Object.values(value).every((item) => isJsonValue(item));
 }
 
+function normalizeSecretScope(value: unknown): WorkflowSecretScope | undefined {
+  return value === "session" || value === "profile" || value === "workflow" ? value : undefined;
+}
+
 export function isWorkflowSecretRefValue(value: unknown): value is WorkflowSecretRefValue {
   return isRecord(value) && typeof value.secretRef === "string" && value.secretRef.trim().length > 0;
 }
@@ -61,10 +67,7 @@ function normalizeSecretRef(value: WorkflowSecretRefValue, path: string): Workfl
       path,
     });
   }
-  const scope =
-    value.scope === "session" || value.scope === "profile" || value.scope === "workflow"
-      ? value.scope
-      : undefined;
+  const scope = normalizeSecretScope(value.scope);
   return { secretRef, ...(scope ? { scope } : {}) };
 }
 
@@ -108,6 +111,24 @@ function unwrapStoredSecret(raw: unknown): StoredWorkflowSecret | undefined {
   return { value: raw };
 }
 
+function assertSecretScopeMatches(
+  stored: StoredWorkflowSecret,
+  ref: WorkflowSecretRefValue,
+  path: string,
+): void {
+  const storedScope = normalizeSecretScope(stored.scope);
+  if (!storedScope && !ref.scope) {
+    return;
+  }
+  if (storedScope !== ref.scope) {
+    throw new WorkflowSecretRefError(
+      "SECRET_REF_SCOPE_MISMATCH",
+      `Secret reference scope does not match stored secret scope: ${ref.secretRef}`,
+      { path, secretRef: ref.secretRef },
+    );
+  }
+}
+
 function resolveStoredSecretValue(
   store: Record<string, unknown>,
   ref: WorkflowSecretRefValue,
@@ -128,6 +149,7 @@ function resolveStoredSecretValue(
       { path, secretRef: ref.secretRef },
     );
   }
+  assertSecretScopeMatches(stored, ref, path);
   if (typeof stored.expiresAt === "string") {
     const expiresAtMs = Date.parse(stored.expiresAt);
     if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now()) {

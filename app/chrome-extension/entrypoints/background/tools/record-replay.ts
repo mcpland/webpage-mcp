@@ -186,7 +186,8 @@ function createFlowRunSecretRefError(flowId: string, error: WorkflowSecretRefErr
             code:
               error.code === RR_ERROR_CODES.SECRET_REF_NOT_FOUND ||
               error.code === RR_ERROR_CODES.SECRET_REF_EXPIRED ||
-              error.code === RR_ERROR_CODES.SECRET_REF_REVOKED
+              error.code === RR_ERROR_CODES.SECRET_REF_REVOKED ||
+              error.code === RR_ERROR_CODES.SECRET_REF_SCOPE_MISMATCH
                 ? error.code
                 : RR_ERROR_CODES.SECRET_REF_INVALID,
             category: "validation",

@@ -18,6 +18,8 @@ export const RR_ERROR_CODES = {
   SECRET_REF_REVOKED: 'SECRET_REF_REVOKED',
   /** Workflow secret reference is invalid */
   SECRET_REF_INVALID: 'SECRET_REF_INVALID',
+  /** Workflow secret reference scope does not match stored secret scope */
+  SECRET_REF_SCOPE_MISMATCH: 'SECRET_REF_SCOPE_MISMATCH',
   /** Workflow output contract validation failed */
   OUTPUT_VALIDATION_FAILED: 'OUTPUT_VALIDATION_FAILED',
   /** Workflow descriptor revision is stale */

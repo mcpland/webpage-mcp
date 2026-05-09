@@ -4582,6 +4582,73 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
   });
 
+  it("flowRunTool enforces secretRef scope against the stored secret scope", async () => {
+    const flowId = `flow-run-secret-scope-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: { target: { selector: "#password" }, value: "{password}" },
+          },
+        ],
+        {
+          variables: [{ name: "password", kind: "string", required: true, sensitive: true }],
+        },
+      ),
+    );
+    asMock(chrome.storage.local.get).mockResolvedValue({
+      [WORKFLOW_SECRET_STORE_KEY]: {
+        "secret://workflow-password": { value: "workflow-secret", scope: "workflow" },
+      },
+    });
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-secret-scope" } as any,
+      events: [],
+      result: {
+        runId: "run-secret-scope",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 2 },
+        outputs: null,
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const matched = await flowRunTool.execute({
+      flowId,
+      args: {
+        password: { secretRef: "secret://workflow-password", scope: "workflow" },
+      },
+    });
+    expect(matched.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(1);
+
+    mocks.enqueueRunAndWait.mockClear();
+    const mismatched = await flowRunTool.execute({
+      flowId,
+      args: {
+        password: { secretRef: "secret://workflow-password", scope: "profile" },
+      },
+    });
+    const payload = parseToolPayload(mismatched);
+
+    expect(mismatched.isError).toBe(true);
+    expect(payload).toMatchObject({
+      success: false,
+      flowId,
+      status: "blocked",
+      error: {
+        code: "SECRET_REF_SCOPE_MISMATCH",
+        path: "/args/password",
+      },
+    });
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+  });
+
   it("flowRunTool projects declared outputs and validates their schema", async () => {
     const flowId = `flow-run-output-valid-${Date.now()}`;
     await createStoragePort().flows.save(
