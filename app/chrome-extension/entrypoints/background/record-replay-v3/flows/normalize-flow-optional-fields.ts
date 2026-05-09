@@ -328,7 +328,13 @@ const QUALITY_STATUS_VALUES = ["draft", "stable", "verified", "stale", "paused",
 const QUALITY_LEVEL_VALUES = ["unverified", "stable", "verified"] as const;
 const QUALITY_RISK_VALUES = ["safe", "idempotent", "dangerous", "unknown"] as const;
 const QUALITY_CAPABILITY_VALUES = ["full", "partial", "none", "unknown"] as const;
-const QUALITY_ORACLE_VALUES = ["none", "assertion", "declaredOutput", "expectedOutcome"] as const;
+const QUALITY_ORACLE_VALUES = [
+  "none",
+  "assertion",
+  "declaredOutput",
+  "expectedOutcome",
+  "externalReadback",
+] as const;
 const QUALITY_ORACLE_STRENGTH_VALUES = ["weak", "normal", "strong"] as const;
 const REVALIDATION_POLICY_VALUES = ["manual", "onFailure", "scheduled", "siteChange"] as const;
 const REVALIDATION_STATUS_VALUES = [
@@ -350,6 +356,7 @@ const AUDIT_EVENT_KIND_VALUES = [
   "schema_migration",
   "quality_downgrade",
   "quality_status_change",
+  "quality_run_skipped",
   "secret_ref_use",
   "policy_change",
 ] as const;

@@ -24,6 +24,7 @@ import {
   saveFlowToV3,
 } from "@/entrypoints/background/record-replay-v3/compat";
 import { RR_ERROR_CODES } from "@/entrypoints/background/record-replay-v3/domain/errors";
+import { normalizeFlowOptionalFields } from "@/entrypoints/background/record-replay-v3/flows/normalize-flow-optional-fields";
 import { calculateWorkflowRevision } from "@/entrypoints/background/record-replay-v3/flows/publish";
 
 function asMock(fn: unknown): ReturnType<typeof vi.fn> {
@@ -122,6 +123,43 @@ describe("record-replay-v3 compat", () => {
         tabId: 22,
       }),
     );
+  });
+
+  it("preserves current quality oracle and audit enum values during normalization", () => {
+    const normalized = normalizeFlowOptionalFields(
+      {
+        meta: {
+          quality: {
+            verification: {
+              oracle: "externalReadback",
+              oracleStrength: "strong",
+            },
+          },
+          audit: {
+            events: [
+              {
+                id: "audit-quality-skip",
+                kind: "quality_run_skipped",
+                actor: "runtime",
+                ts: "2026-01-01T00:00:00.000Z",
+                flowId: "flow-1",
+                runId: "run-1",
+                reason: "workflow_revision_changed",
+              },
+            ],
+          },
+        },
+      },
+      "Flow with quality metadata",
+      new Set(["node-1"]),
+    );
+
+    expect(normalized.meta?.quality?.verification?.oracle).toBe("externalReadback");
+    expect(normalized.meta?.audit?.events?.[0]).toMatchObject({
+      kind: "quality_run_skipped",
+      actor: "runtime",
+      runId: "run-1",
+    });
   });
 
   it("creates a new tab for explicit new-tab execution before enqueueing the run", async () => {
