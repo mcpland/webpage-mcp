@@ -3396,6 +3396,97 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("workflowStabilizeTool records validation-run runtime risk and stops further auto runs", async () => {
+    const flowId = `workflow-stabilize-validation-runtime-risk-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: { target: { selector: "#email" }, value: "alice@example.com" },
+        },
+      ]),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: {
+        id: `${flowId}-validation-1`,
+        flowId,
+        status: "succeeded",
+        createdAt: 1_000,
+        updatedAt: 1_200,
+        attempt: 1,
+        maxAttempts: 1,
+        tookMs: 200,
+      },
+      events: [
+        {
+          seq: 1,
+          ts: 1_050,
+          runId: `${flowId}-validation-1`,
+          type: "network.observed",
+          nodeId: "fill-1",
+          requestId: "autosave-validation-1",
+          url: "https://example.com/api/profile?token=secret-token",
+          resourceType: "fetch",
+          currentFrame: true,
+          startedAt: 1_020,
+          endedAt: 1_080,
+          status: 200,
+          method: "POST",
+        },
+      ],
+      result: {
+        runId: `${flowId}-validation-1`,
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 200 },
+        outputs: null,
+        eventSummary: { totalEvents: 1, nodeEvents: 0, artifactEvents: 0 },
+      },
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 3,
+      minPassRate: 1,
+      apply: true,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(1);
+    expect(payload.safety).toMatchObject({
+      risk: "dangerous",
+      blocked: true,
+      runtimeEvidence: {
+        risk: "dangerous",
+        observations: [
+          expect.objectContaining({
+            runId: `${flowId}-validation-1`,
+            nodeId: "fill-1",
+            eventType: "network.observed",
+            category: "dangerous",
+            method: "POST",
+          }),
+        ],
+      },
+    });
+    expect(payload.safety.blockedReason).toContain("runtime evidence blocks further automatic stabilization");
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "STABILIZE_RUNTIME_SIDE_EFFECT_EVIDENCE" }),
+        expect.objectContaining({ code: "STABILIZE_REPLAY_BLOCKED" }),
+        expect.objectContaining({ code: "STABILIZE_APPLY_SKIPPED" }),
+      ]),
+    );
+    expect(updated?.meta?.quality).toMatchObject({
+      risk: "dangerous",
+      validationRuns: 1,
+      validationRecords: [expect.objectContaining({ risk: "dangerous" })],
+    });
+  });
+
   it("workflowStabilizeTool defaults dangerous workflows to analyze-only", async () => {
     const flowId = `workflow-stabilize-dangerous-${Date.now()}`;
     await createStoragePort().flows.save(

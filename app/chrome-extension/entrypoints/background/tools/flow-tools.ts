@@ -304,6 +304,12 @@ interface WorkflowStabilizeRunSummary {
   debugArgs?: Record<string, unknown>;
 }
 
+interface WorkflowStabilizeValidationRuns {
+  targetRuns: WorkflowStabilizeRunSummary[];
+  resetRuns: WorkflowStabilizeRunSummary[];
+  targetDebugRuns: WorkflowDebugRun[];
+}
+
 interface WorkflowResetPlan {
   flow: FlowV3;
   workflow?: string;
@@ -4442,6 +4448,35 @@ function summarizeStabilizeRunResult(
   };
 }
 
+function buildValidationDebugRun(
+  flow: FlowV3,
+  result: Awaited<ReturnType<typeof enqueueRunAndWait>>,
+): WorkflowDebugRun {
+  const { run, events } = result;
+  const sensitiveVariableNames = getSensitiveVariableNames(flow);
+  const now = Date.now();
+  return {
+    id: run.id,
+    status: run.status,
+    createdAt: typeof run.createdAt === 'number' ? run.createdAt : now,
+    updatedAt: typeof run.updatedAt === 'number' ? run.updatedAt : now,
+    ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
+    ...(run.finishedAt !== undefined ? { finishedAt: run.finishedAt } : {}),
+    ...(run.tookMs !== undefined ? { tookMs: run.tookMs } : {}),
+    ...(run.tabId !== undefined ? { tabId: run.tabId } : {}),
+    ...(run.currentNodeId !== undefined ? { currentNodeId: run.currentNodeId } : {}),
+    attempt: typeof run.attempt === 'number' ? run.attempt : 0,
+    maxAttempts: typeof run.maxAttempts === 'number' ? run.maxAttempts : 1,
+    ...(run.args ? { args: sanitizeRunObject(run.args, sensitiveVariableNames) } : {}),
+    ...(run.execution ? { execution: run.execution } : {}),
+    ...(run.error ? { error: sanitizeError(run.error, sensitiveVariableNames) } : {}),
+    ...(run.outputs ? { outputs: sanitizeRunObject(run.outputs, sensitiveVariableNames) } : {}),
+    events: Array.isArray(events)
+      ? events.map((event) => sanitizeEvent(event as RunEvent, sensitiveVariableNames))
+      : [],
+  };
+}
+
 function summarizeStabilizeRunError(
   phase: WorkflowStabilizeRunSummary['phase'],
   iteration: number,
@@ -4485,9 +4520,16 @@ async function executeStabilizeValidationRuns(
   warnings: WorkflowStabilizeWarning[],
   segmentPlan: WorkflowSegmentPlan,
   resetPlan?: WorkflowResetPlan,
-): Promise<{ targetRuns: WorkflowStabilizeRunSummary[]; resetRuns: WorkflowStabilizeRunSummary[] }> {
+  options: {
+    stopAfterTargetRun?: (
+      targetDebugRuns: WorkflowDebugRun[],
+      targetRuns: WorkflowStabilizeRunSummary[],
+    ) => boolean;
+  } = {},
+): Promise<WorkflowStabilizeValidationRuns> {
   const runs: WorkflowStabilizeRunSummary[] = [];
   const resetRuns: WorkflowStabilizeRunSummary[] = [];
+  const targetDebugRuns: WorkflowDebugRun[] = [];
   const normalizedStartUrl =
     typeof args?.startUrl === 'string' && args.startUrl.trim() ? args.startUrl.trim() : undefined;
   const execution = {
@@ -4567,7 +4609,12 @@ async function executeStabilizeValidationRuns(
         ...(stopBeforeNodeId ? { stopBeforeNodeId } : {}),
         ...(endNodeId ? { endNodeId } : {}),
       });
-      runs.push(summarizeStabilizeRunResult(phase, index + 1, revision, result));
+      const summary = summarizeStabilizeRunResult(phase, index + 1, revision, result);
+      runs.push(summary);
+      targetDebugRuns.push(buildValidationDebugRun(flow, result));
+      if (options.stopAfterTargetRun?.(targetDebugRuns, runs)) {
+        break;
+      }
     } catch (error) {
       const runError = summarizeStabilizeRunError(phase, index + 1, revision, error);
       warnings.push({
@@ -4582,7 +4629,7 @@ async function executeStabilizeValidationRuns(
     }
   }
 
-  return { targetRuns: runs, resetRuns };
+  return { targetRuns: runs, resetRuns, targetDebugRuns };
 }
 
 type WorkflowRepairSource = 'workflow_repair' | 'workflow_stabilize';
@@ -5430,14 +5477,14 @@ class WorkflowStabilizeTool {
     const assertionRepairSuggestionsBeforeApply = buildAssertionRepairSuggestions(workingFlow, recentRuns);
     const recommendationsBeforeApply = buildRepairRecommendations(workingFlow, hints, recentRuns);
     const descriptor = buildWorkflowToolDescriptor(workingFlow);
-    const runtimeSideEffectEvidence = collectRuntimeSideEffectEvidence(recentRuns);
+    let runtimeSideEffectEvidence = collectRuntimeSideEffectEvidence(recentRuns);
     const staticSideEffects = descriptor.sideEffects.summary;
-    const sideEffects = mergeWorkflowSideEffectSummaries(
+    let sideEffects = mergeWorkflowSideEffectSummaries(
       staticSideEffects,
       runtimeSideEffectEvidence.summary,
     );
     const staticRisk = classifyWorkflowRisk(staticSideEffects);
-    const risk = maxWorkflowRisk(staticRisk, runtimeSideEffectEvidence.risk);
+    let risk = maxWorkflowRisk(staticRisk, runtimeSideEffectEvidence.risk);
     const executionMode = normalizeExecutionMode(args?.safety?.executionMode);
     const iterations = clampNumber(args?.iterations, 3, 1, 10);
     const minPassRate =
@@ -5471,6 +5518,7 @@ class WorkflowStabilizeTool {
         message: approvalCheck.reason ?? 'approval reference was not accepted',
       });
     }
+    let runtimeSideEffectWarningEmitted = false;
     if (riskRank(runtimeSideEffectEvidence.risk) > riskRank(staticRisk)) {
       warnings.push({
         code: 'STABILIZE_RUNTIME_SIDE_EFFECT_EVIDENCE',
@@ -5478,6 +5526,7 @@ class WorkflowStabilizeTool {
         message:
           'Recent runtime observations indicate stronger side-effect risk than static node classification.',
       });
+      runtimeSideEffectWarningEmitted = true;
     }
 
     const nodeRiskOverrides =
@@ -5616,7 +5665,7 @@ class WorkflowStabilizeTool {
       });
     }
 
-    const validationBlockedReason =
+    let validationBlockedReason =
       blockedReason ??
       resetValidation.blockedReason ??
       boundaryError?.message ??
@@ -5635,6 +5684,50 @@ class WorkflowStabilizeTool {
       });
     }
 
+    let validationDebugRuns: WorkflowDebugRun[] = [];
+    let runtimeSafetyBlockWarningEmitted = false;
+    const refreshRuntimeSideEffectEvidence = (): void => {
+      runtimeSideEffectEvidence = collectRuntimeSideEffectEvidence([...recentRuns, ...validationDebugRuns]);
+      sideEffects = mergeWorkflowSideEffectSummaries(
+        staticSideEffects,
+        runtimeSideEffectEvidence.summary,
+      );
+      risk = maxWorkflowRisk(staticRisk, runtimeSideEffectEvidence.risk);
+      if (
+        !runtimeSideEffectWarningEmitted &&
+        riskRank(runtimeSideEffectEvidence.risk) > riskRank(staticRisk)
+      ) {
+        warnings.push({
+          code: 'STABILIZE_RUNTIME_SIDE_EFFECT_EVIDENCE',
+          category: 'safety',
+          message:
+            'Validation runtime observations indicate stronger side-effect risk than static node classification.',
+        });
+        runtimeSideEffectWarningEmitted = true;
+      }
+    };
+    const blockFurtherAutomaticStabilizationForRuntimeRisk = (): boolean => {
+      if (
+        validationBlockedReason ||
+        executionMode !== 'auto' ||
+        hasApprovalReference ||
+        hasAutoRiskBoundary ||
+        (risk !== 'dangerous' && risk !== 'unknown')
+      ) {
+        return false;
+      }
+      validationBlockedReason = `${risk} workflow runtime evidence blocks further automatic stabilization`;
+      if (!runtimeSafetyBlockWarningEmitted) {
+        warnings.push({
+          code: 'STABILIZE_REPLAY_BLOCKED',
+          category: 'safety',
+          message: validationBlockedReason,
+        });
+        runtimeSafetyBlockWarningEmitted = true;
+      }
+      return true;
+    };
+
     const baselineValidation =
       canRunValidation && requestedValidationIterations > 0
         ? await executeStabilizeValidationRuns(
@@ -5646,9 +5739,19 @@ class WorkflowStabilizeTool {
             warnings,
             segmentPlan,
             resetValidation.plan,
+            {
+              stopAfterTargetRun: (targetDebugRuns) => {
+                validationDebugRuns = targetDebugRuns;
+                refreshRuntimeSideEffectEvidence();
+                return blockFurtherAutomaticStabilizationForRuntimeRisk();
+              },
+            },
           )
-        : { targetRuns: [], resetRuns: [] };
+        : { targetRuns: [], resetRuns: [], targetDebugRuns: [] };
     const baselineRuns = baselineValidation.targetRuns;
+    validationDebugRuns = baselineValidation.targetDebugRuns;
+    refreshRuntimeSideEffectEvidence();
+    blockFurtherAutomaticStabilizationForRuntimeRisk();
     const resetRuns = [...baselineValidation.resetRuns];
     const baselineScore = scoreStabilizeRuns(baselineRuns);
     const shouldApply = args?.apply === true && args?.dryRun !== true && !validationBlockedReason;
@@ -5746,7 +5849,7 @@ class WorkflowStabilizeTool {
     }
 
     const postRepairValidation =
-      applied && canRunValidation && requestedValidationIterations > 0
+      applied && !validationBlockedReason && requestedValidationIterations > 0
         ? await executeStabilizeValidationRuns(
             workingFlow,
             args,
@@ -5756,9 +5859,25 @@ class WorkflowStabilizeTool {
             warnings,
             segmentPlan,
             resetValidation.plan,
+            {
+              stopAfterTargetRun: (targetDebugRuns) => {
+                validationDebugRuns = [
+                  ...baselineValidation.targetDebugRuns,
+                  ...targetDebugRuns,
+                ];
+                refreshRuntimeSideEffectEvidence();
+                return blockFurtherAutomaticStabilizationForRuntimeRisk();
+              },
+            },
           )
-        : { targetRuns: [], resetRuns: [] };
+        : { targetRuns: [], resetRuns: [], targetDebugRuns: [] };
     resetRuns.push(...postRepairValidation.resetRuns);
+    validationDebugRuns = [
+      ...baselineValidation.targetDebugRuns,
+      ...postRepairValidation.targetDebugRuns,
+    ];
+    refreshRuntimeSideEffectEvidence();
+    blockFurtherAutomaticStabilizationForRuntimeRisk();
     const postRepairRuns = postRepairValidation.targetRuns;
     const postRepairScore = scoreStabilizeRuns(postRepairRuns);
     const finalScore = postRepairRuns.length > 0 ? postRepairScore : baselineScore;
