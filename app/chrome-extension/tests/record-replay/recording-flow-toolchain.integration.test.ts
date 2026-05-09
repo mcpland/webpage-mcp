@@ -2589,6 +2589,57 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.updatedAt).not.toBe(new Date(0).toISOString());
   });
 
+  it("workflowStabilizeTool redacts sensitive startUrl details in quality context", async () => {
+    const flowId = `workflow-stabilize-start-url-redaction-${Date.now()}`;
+    const rawStartUrl =
+      "https://user:secret@example.com/app?token=plain-token&safe=1&sessionId=plain-session";
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: {
+        id: "run-stabilize-redacted-url",
+        flowId,
+        status: "succeeded",
+        tookMs: 5,
+      } as any,
+      events: [],
+      result: {
+        runId: "run-stabilize-redacted-url",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+        outputs: null,
+        eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+      },
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      minPassRate: 1,
+      startUrl: rawStartUrl,
+    });
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({ startUrl: rawStartUrl }),
+    );
+    expect(updated?.meta?.quality?.validationContext?.startUrl).toBe(
+      "https://<redacted>@example.com/app?token=<redacted>&safe=1&sessionId=<redacted>",
+    );
+    expect(JSON.stringify(updated?.meta?.quality?.validationContext)).not.toContain("plain-token");
+    expect(JSON.stringify(updated?.meta?.quality?.validationContext)).not.toContain("plain-session");
+    expect(JSON.stringify(updated?.meta?.quality?.validationContext)).not.toContain("user:secret");
+  });
+
   it("workflowStabilizeTool runs reset workflow before validation without scoring reset runs", async () => {
     const flowId = `workflow-stabilize-reset-${Date.now()}`;
     const resetFlowId = `workflow-reset-${Date.now()}`;

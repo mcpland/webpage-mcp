@@ -3822,12 +3822,14 @@ async function buildStabilizeQualityRecord(options: {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const userAgentHash = createPublicStringHash(globalThis.navigator?.userAgent);
   const extensionVersion = getExtensionVersion();
+  const validationStartUrl =
+    typeof options.args?.startUrl === 'string' && options.args.startUrl.trim()
+      ? options.args.startUrl.trim()
+      : undefined;
   const validationContext: NonNullable<FlowQualityMeta['validationContext']> = {
     argsHash: await createWorkflowArgsHash(options.args?.args ?? {}),
     argsHashAlgorithm: 'hmac-sha256',
-    ...(typeof options.args?.startUrl === 'string' && options.args.startUrl.trim()
-      ? { startUrl: options.args.startUrl.trim() }
-      : {}),
+    ...(validationStartUrl ? { startUrl: redactUrl(validationStartUrl) } : {}),
     tabTarget: options.args?.tabTarget === 'new' ? 'new' : 'current',
     background: options.args?.background === true,
     executionMode: options.executionMode,
