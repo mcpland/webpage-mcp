@@ -157,7 +157,7 @@ export async function saveFlowToV3(
   const runtime = await ensureV3Runtime();
   const nowIso = new Date().toISOString();
 
-  let flow = isFlowV3Object(rawFlow)
+  const flow = isFlowV3Object(rawFlow)
     ? (JSON.parse(JSON.stringify(rawFlow)) as FlowV3)
     : isCompatFlowObject(rawFlow)
       ? (() => {

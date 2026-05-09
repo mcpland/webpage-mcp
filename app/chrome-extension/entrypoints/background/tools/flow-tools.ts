@@ -6088,7 +6088,7 @@ function applyWorkflowMigrationRollback(
   const beforeQuality = buildWorkflowQualitySummary(flow);
   const restoredRuntime = isRecord(snapshot.runtime) ? cloneJson(snapshot.runtime) : undefined;
   const restoredQuality = isRecord(snapshot.quality) ? cloneJson(snapshot.quality) : undefined;
-  let nextMeta: NonNullable<FlowV3['meta']> = {
+  const nextMeta: NonNullable<FlowV3['meta']> = {
     ...(flow.meta ? cloneJson(flow.meta) : {}),
   };
   if (restoredRuntime) {
