@@ -4969,6 +4969,105 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.meta?.quality?.staleReason).toBeUndefined();
   });
 
+  it("flowRunTool skips quality outcome updates when the workflow revision changes during replay", async () => {
+    const flowId = `flow-run-quality-revision-skip-${Date.now()}`;
+    const storage = createStoragePort();
+    const flow = createFlow(flowId, [
+      {
+        id: "nav-1" as any,
+        kind: "navigate",
+        config: { url: "https://example.com/a" },
+      },
+    ]);
+    flow.meta = {
+      quality: {
+        revision: calculateWorkflowRevision(flow),
+        level: "stable",
+        status: "stable",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        consecutiveFailureCount: 2,
+        staleReason: "consecutive_failures",
+        lastValidatedAt: "2026-01-01T00:00:00.000Z" as any,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        revalidation: {
+          policy: "onFailure",
+          lastRevalidateReason: "workflow_run_failure",
+        },
+      },
+    };
+    const runStartRevision = calculateWorkflowRevision(flow);
+    await storage.flows.save(flow);
+
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      const latest = await storage.flows.get(flowId as any);
+      await storage.flows.save({
+        ...latest!,
+        nodes: [
+          {
+            ...latest!.nodes[0],
+            config: { url: "https://example.com/b" },
+          },
+        ],
+      });
+      return {
+        run: {
+          id: "run-quality-revision-skip",
+          flowId,
+          status: "succeeded",
+          currentNodeId: "nav-1",
+          tookMs: 4,
+        } as any,
+        events: [],
+        result: {
+          runId: "run-quality-revision-skip",
+          success: true,
+          status: "succeeded",
+          summary: { total: 1, success: 1, failed: 0, tookMs: 4 },
+          outputs: null,
+          logs: [],
+          paused: false,
+        },
+      };
+    });
+
+    const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+    const updated = await storage.flows.get(flowId as any);
+    const currentRevision = calculateWorkflowRevision(updated!);
+
+    expect(result.isError).toBe(false);
+    expect(currentRevision).not.toBe(runStartRevision);
+    expect(payload.quality).toMatchObject({
+      status: "stale",
+      staleReason: "revision_mismatch",
+    });
+    expect(updated?.meta?.quality).toMatchObject({
+      consecutiveFailureCount: 2,
+      staleReason: "consecutive_failures",
+      revalidation: {
+        lastRevalidateReason: "workflow_run_failure",
+      },
+    });
+    expect(updated?.meta?.audit?.events?.filter((event) => event.kind === "quality_run_skipped")).toEqual([
+      expect.objectContaining({
+        actor: "runtime",
+        runId: "run-quality-revision-skip",
+        reason: "workflow_revision_changed",
+        metadata: {
+          runStartRevision,
+          currentRevision,
+          runSuccess: true,
+        },
+      }),
+    ]);
+  });
+
   it("flowRunTool downgrades stale quality after consecutive failures", async () => {
     const flowId = `flow-run-quality-downgrade-${Date.now()}`;
     const flow = createFlow(flowId, [

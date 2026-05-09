@@ -392,7 +392,7 @@ function buildFlowRunRuntimeMetrics(
 async function recordQualityRunOutcome(
   flow: FlowV3,
   success: boolean,
-  context: { runId?: string; secretRefCount?: number } = {},
+  context: { runId?: string; secretRefCount?: number; runStartRevision?: string } = {},
 ): Promise<FlowV3> {
   const flowId = flow.id as FlowId;
   const storage = createStoragePort();
@@ -422,6 +422,26 @@ async function recordQualityRunOutcome(
       if (next !== latest) {
         await storage.flows.save(next);
       }
+      return next;
+    }
+    const currentRevision = calculateWorkflowRevision(next);
+    if (context.runStartRevision && currentRevision !== context.runStartRevision) {
+      next = {
+        ...appendWorkflowAuditEvent(next, {
+          kind: "quality_run_skipped",
+          actor: "runtime",
+          runId: context.runId,
+          revision: currentRevision,
+          reason: "workflow_revision_changed",
+          metadata: {
+            runStartRevision: context.runStartRevision,
+            currentRevision,
+            runSuccess: success,
+          },
+        }),
+        updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
+      };
+      await storage.flows.save(next);
       return next;
     }
     const existingQuality = next.meta.quality;
@@ -1091,6 +1111,7 @@ class FlowRunTool {
     flow = await recordQualityRunOutcome(flow, contractedResult.success === true, {
       runId: contractedResult.runId,
       secretRefCount,
+      runStartRevision: currentRevision,
     });
     const revision = calculateWorkflowRevision(flow);
     const publishedInfo = getPublishedFlowInfo(flow);

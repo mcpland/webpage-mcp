@@ -293,6 +293,7 @@ export type FlowAuditEventKind =
   | "schema_migration"
   | "quality_downgrade"
   | "quality_status_change"
+  | "quality_run_skipped"
   | "secret_ref_use"
   | "policy_change";
 
