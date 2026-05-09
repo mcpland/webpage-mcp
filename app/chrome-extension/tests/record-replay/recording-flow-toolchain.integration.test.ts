@@ -6090,6 +6090,47 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
   });
 
+  it("flowRunTool suppresses undeclared raw outputs", async () => {
+    const flowId = `flow-run-output-undeclared-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "extract-1" as any,
+          kind: "extract",
+          config: { selector: "#api-token" },
+        },
+      ]),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-output-undeclared" } as any,
+      events: [],
+      result: {
+        runId: "run-output-undeclared",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 2 },
+        outputs: {
+          "extract-1": { value: "opaque-runtime-token" },
+          apiToken: "opaque-runtime-token",
+        },
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(payload.outputs).toEqual({});
+    expect(payload.outputValidation).toMatchObject({
+      ok: true,
+      declaredOutputCount: 0,
+      redacted: [],
+      errors: [],
+    });
+  });
+
   it("flowRunTool projects declared outputs and validates their schema", async () => {
     const flowId = `flow-run-output-valid-${Date.now()}`;
     await createStoragePort().flows.save(

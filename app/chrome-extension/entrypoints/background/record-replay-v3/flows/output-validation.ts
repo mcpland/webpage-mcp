@@ -292,7 +292,7 @@ export function projectAndValidateWorkflowOutputs(
   if (declared.length === 0) {
     return {
       ok: true,
-      outputs: isRecord(rawOutputs) ? (toJsonValue(rawOutputs) as JsonObject) : {},
+      outputs: {},
       declaredOutputCount: 0,
       redacted: [],
       errors: [],
