@@ -19,6 +19,7 @@ import {
 } from '@/entrypoints/background/record-replay-v3';
 import { resetBreakpointRegistry } from '@/entrypoints/background/record-replay-v3/engine/kernel/breakpoints';
 import { recoverFromCrash } from '@/entrypoints/background/record-replay-v3/engine/recovery/recovery-coordinator';
+import { calculateWorkflowRevision } from '@/entrypoints/background/record-replay-v3/flows/publish';
 
 import { createV3E2EHarness, type V3E2EHarness, type RpcClient } from './v3-e2e-harness';
 
@@ -148,6 +149,43 @@ describe('V3 service-level E2E', () => {
       // Verify sequence of events
       expect(types.indexOf('run.queued')).toBeLessThan(types.indexOf('run.started'));
       expect(types.indexOf('run.started')).toBeLessThan(types.indexOf('run.succeeded'));
+    });
+
+    it('fails before execution when expectedRevision becomes stale while queued', async () => {
+      await h.dispose();
+      h = createV3E2EHarness({ autoStartScheduler: false });
+      client = h.createClient();
+
+      const flow = createTestFlow('flow-stale-queued-revision');
+      await h.storage.flows.save(flow);
+      const expectedRevision = calculateWorkflowRevision(flow);
+
+      const result = await client.call<{ runId: string; position: number }>('rr_v3.enqueueRun', {
+        flowId: flow.id,
+        expectedRevision,
+      });
+
+      await h.storage.flows.save({
+        ...flow,
+        updatedAt: new Date(1).toISOString(),
+        nodes: [{ id: 'node-1', kind: 'test', config: { action: 'fail' } }],
+      });
+
+      h.scheduler.start();
+      const run = await h.waitForTerminal(result.runId);
+      expect(run.status).toBe('failed');
+      expect(run.error).toMatchObject({
+        code: 'STALE_WORKFLOW_DESCRIPTOR',
+        retryable: true,
+        data: {
+          flowId: flow.id,
+          expectedRevision,
+        },
+      });
+
+      await h.waitForQueueItemGone(result.runId);
+      const events = await h.listEvents(result.runId);
+      expect(eventTypes(events, result.runId)).not.toContain('node.started');
     });
 
     it('failed node leads to run.failed', async () => {

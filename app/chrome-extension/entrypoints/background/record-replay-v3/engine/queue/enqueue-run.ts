@@ -48,6 +48,8 @@ export interface EnqueueRunDeps {
 export interface EnqueueRunInput {
   /** Flow ID (Required) */
   flowId: FlowId;
+  /** Expected workflow descriptor revision, when the caller requires one */
+  expectedRevision?: string;
   /** Preferred tab binding for the run. */
   tabId?: number;
   /** Starting node ID (optional, Flow’s entryNodeId is used by default) */
@@ -236,6 +238,7 @@ export async function enqueueRun(
     schemaVersion: RUN_SCHEMA_VERSION,
     id: runId,
     flowId,
+    expectedRevision: input.expectedRevision,
     status: 'queued',
     createdAt: ts,
     updatedAt: ts,
@@ -257,6 +260,7 @@ export async function enqueueRun(
   await deps.storage.queue.enqueue({
     id: runId,
     flowId,
+    expectedRevision: input.expectedRevision,
     profile,
     tabId: input.tabId,
     priority,

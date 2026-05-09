@@ -103,6 +103,8 @@ export interface RunQueueItem {
   id: RunId;
   /** Flow ID */
   flowId: FlowId;
+  /** Expected workflow descriptor revision, when the caller requires one */
+  expectedRevision?: string;
   /** Scheduling risk/profile used for profile-level concurrency limits */
   profile?: RunQueueProfile;
   /** Status */

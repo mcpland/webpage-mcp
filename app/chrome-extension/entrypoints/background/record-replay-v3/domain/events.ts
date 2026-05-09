@@ -236,6 +236,8 @@ export interface RunRecordV3 {
   id: RunId;
   /** Associated Flow ID */
   flowId: FlowId;
+  /** Expected workflow descriptor revision, when the caller requires one */
+  expectedRevision?: string;
 
   /** Current status */
   status: RunStatus;

@@ -4372,6 +4372,7 @@ async function executeStabilizeValidationRuns(
         try {
           const resetResult = await enqueueRunAndWait({
             flowId: resetPlan.flow.id as FlowId,
+            expectedRevision: resetPlan.revision,
             tabId:
               typeof args?.tabId === 'number' && Number.isFinite(args.tabId)
                 ? Math.floor(args.tabId)
@@ -4419,6 +4420,7 @@ async function executeStabilizeValidationRuns(
     try {
       const result = await enqueueRunAndWait({
         flowId: flow.id as FlowId,
+        expectedRevision: revision,
         tabId:
           typeof args?.tabId === 'number' && Number.isFinite(args.tabId)
             ? Math.floor(args.tabId)

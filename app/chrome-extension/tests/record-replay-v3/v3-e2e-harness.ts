@@ -59,8 +59,10 @@ import { RpcServer } from '@/entrypoints/background/record-replay-v3/engine/tran
 import {
   RR_ERROR_CODES,
   createRRError,
+  type RRError,
 } from '@/entrypoints/background/record-replay-v3/domain/errors';
 import { isTerminalStatus } from '@/entrypoints/background/record-replay-v3/domain/events';
+import { calculateWorkflowRevision } from '@/entrypoints/background/record-replay-v3/flows/publish';
 
 // ==================== Types ====================
 
@@ -532,6 +534,27 @@ function createE2EExecutor(deps: {
       await failRun(deps, runId, `Flow "${item.flowId}" not found`);
       return;
     }
+    const expectedRevision = run.expectedRevision ?? item.expectedRevision;
+    if (expectedRevision) {
+      const currentRevision = calculateWorkflowRevision(flow);
+      if (currentRevision !== expectedRevision) {
+        const message = `Flow "${item.flowId}" changed before execution; expected revision ${expectedRevision}, current ${currentRevision}`;
+        await failRun(
+          deps,
+          runId,
+          message,
+          createRRError(RR_ERROR_CODES.STALE_WORKFLOW_DESCRIPTOR, message, {
+            retryable: true,
+            data: {
+              flowId: item.flowId,
+              expectedRevision,
+              currentRevision,
+            },
+          }),
+        );
+        return;
+      }
+    }
 
     // 3. Synchronize attempt/tabId to RunRecord
     const tabId = item.tabId ?? run.tabId ?? 1;
@@ -572,9 +595,10 @@ async function failRun(
   deps: { storage: StoragePort; events: EventsBus; now: () => number },
   runId: RunId,
   message: string,
+  errorOverride?: RRError,
 ): Promise<void> {
   const t = deps.now();
-  const error = createRRError(RR_ERROR_CODES.VALIDATION_ERROR, message);
+  const error = errorOverride ?? createRRError(RR_ERROR_CODES.VALIDATION_ERROR, message);
 
   await deps.storage.runs.patch(runId, {
     status: 'failed',

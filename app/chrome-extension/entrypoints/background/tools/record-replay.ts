@@ -1098,6 +1098,7 @@ class FlowRunTool {
     try {
       ({ result } = await enqueueRunAndWait({
         flowId: flow.id as FlowId,
+        ...(requiredRevision ? { expectedRevision: requiredRevision } : {}),
         tabId:
           typeof tabId === "number" && Number.isFinite(tabId)
             ? Math.floor(tabId)

@@ -66,6 +66,7 @@ import {
 
 import { acquireKeepalive } from "../keepalive-manager";
 import { createStoragePort } from "./index";
+import { calculateWorkflowRevision } from "./flows/publish";
 import { WorkflowSecretRefError, resolveWorkflowSecretRefs } from "./secrets";
 
 // ==================== Types ====================
@@ -261,6 +262,29 @@ function createDefaultRunExecutor(deps: {
         ),
       );
       return;
+    }
+    const expectedRevision = run.expectedRevision ?? item.expectedRevision;
+    if (expectedRevision) {
+      const currentRevision = calculateWorkflowRevision(flow);
+      if (currentRevision !== expectedRevision) {
+        await failRun(
+          deps,
+          runId,
+          createRRError(
+            RR_ERROR_CODES.STALE_WORKFLOW_DESCRIPTOR,
+            `Flow "${item.flowId}" changed before execution; expected revision ${expectedRevision}, current ${currentRevision}`,
+            {
+              retryable: true,
+              data: {
+                flowId: item.flowId,
+                expectedRevision,
+                currentRevision,
+              },
+            },
+          ),
+        );
+        return;
+      }
     }
 
     // 3. Parse Tab ID

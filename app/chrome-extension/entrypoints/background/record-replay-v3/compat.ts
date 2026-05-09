@@ -492,6 +492,7 @@ export function buildCompatRunResult(
 
 export async function enqueueRunAndWait(input: {
   flowId: FlowId;
+  expectedRevision?: string;
   tabId?: number;
   tabTarget?: RunTargetPreference;
   args?: JsonObject;
@@ -519,6 +520,7 @@ export async function enqueueRunAndWait(input: {
     },
     {
       flowId: input.flowId,
+      expectedRevision: input.expectedRevision,
       tabId: resolvedTabId,
       args: input.args,
       execution: input.execution,

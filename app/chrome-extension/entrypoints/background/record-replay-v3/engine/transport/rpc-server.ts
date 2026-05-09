@@ -294,6 +294,10 @@ export class RpcServer {
       },
       {
         flowId: params?.flowId as FlowId,
+        expectedRevision:
+          typeof params?.expectedRevision === "string" && params.expectedRevision.trim()
+            ? params.expectedRevision.trim()
+            : undefined,
         tabId: resolvedTabId,
         startNodeId: params?.startNodeId as NodeId | undefined,
         stopBeforeNodeId: params?.stopBeforeNodeId as NodeId | undefined,
