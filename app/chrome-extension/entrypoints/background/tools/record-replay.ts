@@ -578,6 +578,14 @@ function applyOutputContractToRunResult(
     };
   }
 
+  if (result.success !== true) {
+    return {
+      ...result,
+      outputs: outputContract.outputs,
+      outputValidation,
+    };
+  }
+
   return {
     ...result,
     success: false,

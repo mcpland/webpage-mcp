@@ -6251,6 +6251,78 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("flowRunTool preserves runtime failures when declared outputs are missing", async () => {
+    const flowId = `flow-run-runtime-failure-output-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "extract-1" as any,
+            kind: "extract",
+            config: { selector: "#account-id" },
+          },
+        ],
+        {
+          meta: {
+            exposedOutputs: [
+              {
+                nodeId: "extract-1" as any,
+                as: "accountId",
+                path: ["value"],
+                schema: { type: "string" },
+              },
+            ],
+          },
+        },
+      ),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-runtime-failure-output" } as any,
+      events: [],
+      result: {
+        runId: "run-runtime-failure-output",
+        success: false,
+        status: "failed",
+        errorCode: "ELEMENT_NOT_FOUND",
+        error: {
+          code: "ELEMENT_NOT_FOUND",
+          category: "runtime",
+          retryable: false,
+          message: "Could not find #account-id",
+        },
+        summary: { total: 1, success: 0, failed: 1, tookMs: 2 },
+        outputs: null,
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({
+      success: false,
+      status: "failed",
+      errorCode: "ELEMENT_NOT_FOUND",
+      error: {
+        code: "ELEMENT_NOT_FOUND",
+        message: "Could not find #account-id",
+      },
+      outputs: {},
+      outputValidation: {
+        ok: false,
+        errors: [
+          expect.objectContaining({
+            code: "OUTPUT_MISSING",
+            alias: "accountId",
+          }),
+        ],
+      },
+    });
+  });
+
   it("flowRunTool redacts sensitive declared outputs by default", async () => {
     const flowId = `flow-run-output-sensitive-${Date.now()}`;
     await createStoragePort().flows.save(
