@@ -587,6 +587,22 @@ function oracleStrengthRank(strength: FlowQualityOracleStrength | undefined): nu
   return strength === "strong" ? 3 : strength === "normal" ? 2 : strength === "weak" ? 1 : 0;
 }
 
+function isHighRiskQualityRisk(risk: FlowQualityMeta["risk"] | undefined): boolean {
+  return risk === "dangerous" || risk === "unknown";
+}
+
+function hasHighRiskQualityEvidence(quality: FlowQualityMeta | undefined): boolean {
+  if (isHighRiskQualityRisk(quality?.risk)) {
+    return true;
+  }
+  return Boolean(
+    quality?.validationRecords?.some(
+      (record) =>
+        record.revision === quality.revision && isHighRiskQualityRisk(record.risk),
+    ),
+  );
+}
+
 export function evaluateWorkflowPublishGate(
   flow: FlowV3,
   options: WorkflowPublishGateOptions = {},
@@ -603,12 +619,15 @@ export function evaluateWorkflowPublishGate(
   const minStabilityScore = clampScore(options.minStabilityScore ?? 0);
   const requireStable = options.requireStable === true || options.requireVerified === true;
   const hasHighRiskSideEffects =
-    descriptor.sideEffects.summary.dangerous > 0 || descriptor.sideEffects.summary.unknown > 0;
+    descriptor.sideEffects.summary.dangerous > 0 ||
+    descriptor.sideEffects.summary.unknown > 0 ||
+    hasHighRiskQualityEvidence(flow.meta?.quality);
 
   if (hasHighRiskSideEffects) {
     warnings.push({
       code: "PUBLISH_SIDE_EFFECTS_REQUIRE_REVIEW",
-      message: "Workflow has dangerous or unknown side effects and should be run only in an approved environment.",
+      message:
+        "Workflow has dangerous or unknown side effects or runtime risk evidence and should be run only in an approved environment.",
     });
   }
   if (quality.verification.oracle === "none") {

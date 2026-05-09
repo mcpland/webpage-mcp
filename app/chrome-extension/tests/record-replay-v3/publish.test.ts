@@ -485,6 +485,61 @@ describe('listPublishedFlowDetails', () => {
     expect(evaluateWorkflowPublishGate(flow, { requireVerified: true }).allowed).toBe(true);
   });
 
+  it('requires a strong oracle when runtime quality evidence elevated risk', () => {
+    const flow = createPublishedFlow();
+    const revision = calculateWorkflowRevision(flow);
+    flow.meta = {
+      ...flow.meta,
+      quality: {
+        revision,
+        level: 'verified',
+        status: 'verified',
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: '2999-01-01T00:00:00.000Z' as any,
+        risk: 'dangerous',
+        verification: {
+          oracle: 'assertion',
+          oracleStrength: 'normal',
+        },
+        validationRecords: [
+          {
+            id: 'runtime-risk-record',
+            tool: 'workflow_stabilize',
+            revision,
+            completedAt: '2026-01-01T00:00:00.000Z' as any,
+            passRate: 1,
+            stabilityScore: 1,
+            countedRuns: 3,
+            passedRuns: 3,
+            failedRuns: 0,
+            risk: 'dangerous',
+          },
+        ],
+      },
+    };
+
+    const normalOracle = evaluateWorkflowPublishGate(flow, { requireVerified: true });
+    expect(normalOracle.allowed).toBe(false);
+    expect(normalOracle.errors.map((error) => error.code)).toContain(
+      'PUBLISH_STRONG_ORACLE_REQUIRED',
+    );
+    expect(normalOracle.warnings.map((warning) => warning.code)).toContain(
+      'PUBLISH_SIDE_EFFECTS_REQUIRE_REVIEW',
+    );
+
+    flow.meta!.quality!.verification = {
+      oracle: 'externalReadback',
+      oracleStrength: 'strong',
+    };
+    expect(evaluateWorkflowPublishGate(flow, { requireVerified: true }).allowed).toBe(true);
+  });
+
   it('omits builder trigger nodes from side-effect metadata', () => {
     const flow = createPublishedFlow();
     flow.nodes = [
