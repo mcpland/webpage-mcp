@@ -2625,7 +2625,7 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(payload.recommendations.map((item: { code: string }) => item.code)).toContain(
       "missing_default_timeout_policy",
     );
-    expect(payload.capabilities.unsupportedReasons[0]).toContain("stabilize MVP");
+    expect(payload.capabilities.unsupportedReasons[0]).toContain("bounded validation");
     expect(payload.capabilities).toMatchObject({
       domSnapshot: "none",
       accessibilitySnapshot: "none",
@@ -3183,6 +3183,136 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(payload.warnings.map((warning: { code: string }) => warning.code)).toEqual(
       expect.arrayContaining(["STABILIZE_REPLAY_BLOCKED", "STABILIZE_APPLY_SKIPPED"]),
     );
+  });
+
+  it("workflowStabilizeTool stops auto validation before the first dangerous node", async () => {
+    const flowId = `workflow-stabilize-auto-segment-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "wait-1" as any,
+            kind: "wait",
+            config: { condition: { kind: "selector", selector: "#ready" } },
+          },
+          {
+            id: "click-1" as any,
+            kind: "click",
+            config: { target: { selector: "#buy" } },
+          },
+        ],
+        {
+          edges: [
+            {
+              id: "edge-wait-click" as any,
+              from: "wait-1" as any,
+              to: "click-1" as any,
+            },
+          ],
+        },
+      ),
+    );
+    let runCall = 0;
+    mocks.enqueueRunAndWait.mockImplementation(
+      async (input: { stopBeforeNodeId?: string }) => {
+        runCall += 1;
+        expect(input.stopBeforeNodeId).toBe("click-1");
+        const runId = `auto-segment-${runCall}`;
+        return {
+          run: {
+            id: runId,
+            flowId,
+            status: "stopped_at_boundary",
+            currentNodeId: "click-1",
+            stopBeforeNodeId: "click-1",
+            tookMs: 5,
+          } as any,
+          events: [],
+          result: {
+            runId,
+            success: true,
+            status: "stopped_at_boundary",
+            currentNodeId: "click-1",
+            summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+            outputs: null,
+            eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+          },
+        };
+      },
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 2,
+      minPassRate: 1,
+      apply: false,
+      safety: {
+        segments: {
+          mode: "stopBeforeDangerous",
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(2);
+    expect(payload).toMatchObject({
+      success: true,
+      applied: false,
+      stable: false,
+      score: {
+        passRate: 1,
+        iterations: 2,
+      },
+      safety: {
+        risk: "dangerous",
+        executionMode: "auto",
+        executedIterations: 2,
+        segments: {
+          mode: "stopBeforeDangerous",
+          stopBeforeNodeId: "click-1",
+          autoBoundary: true,
+          boundaryNodeId: "click-1",
+          boundaryKind: "click",
+          boundaryRisk: "dangerous",
+          boundarySource: "static",
+        },
+      },
+      quality: {
+        level: "unverified",
+        passRate: 0,
+        countedValidationRuns: 0,
+      },
+    });
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "STABILIZE_AUTO_SEGMENT_BOUNDARY",
+          nodeId: "click-1",
+        }),
+      ]),
+    );
+    expect(payload.warnings.map((warning: { code: string }) => warning.code)).not.toContain(
+      "STABILIZE_REPLAY_BLOCKED",
+    );
+    expect(updated?.meta?.quality).toMatchObject({
+      level: "unverified",
+      passRate: 0,
+      validationRuns: 2,
+      countedValidationRuns: 0,
+      excludedRuns: {
+        count: 2,
+        reasons: ["segment_only"],
+      },
+      validationRecords: [
+        expect.objectContaining({
+          segmentOnly: true,
+          countedRuns: 0,
+        }),
+      ],
+    });
   });
 
   it("workflowStabilizeTool accepts trusted approval records from the local approval store", async () => {

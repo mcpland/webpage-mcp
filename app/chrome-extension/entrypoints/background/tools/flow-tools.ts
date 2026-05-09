@@ -20,7 +20,7 @@ import {
 } from '../record-replay-v3/domain/flow';
 import type { JsonObject } from '../record-replay-v3/domain/json';
 import type { RunEvent, RunRecordV3 } from '../record-replay-v3/domain/events';
-import type { FlowId, RunId } from '../record-replay-v3/domain/ids';
+import type { FlowId, NodeId, RunId } from '../record-replay-v3/domain/ids';
 import type { ArtifactRecord } from '../record-replay-v3/storage/artifacts';
 import {
   RR_ERROR_CODES,
@@ -30,6 +30,7 @@ import {
 import { normalizeVariableDefinitions } from '../record-replay-v3/domain/variables';
 import { createStoragePort } from '../record-replay-v3';
 import { enqueueRunAndWait, saveFlowToV3 } from '../record-replay-v3/compat';
+import { findNextNode } from '../record-replay-v3/engine/kernel/traversal';
 import {
   FlowWriteConflictError,
   withFlowWriteLock,
@@ -322,6 +323,17 @@ interface WorkflowResetValidation {
   errors: WorkflowStabilizeValidationError[];
 }
 
+interface WorkflowSegmentPlan {
+  mode: 'none' | 'explicit' | 'stopBeforeDangerous';
+  stopBeforeNodeId?: string;
+  endNodeId?: string;
+  autoBoundary?: boolean;
+  boundaryNodeId?: string;
+  boundaryKind?: string;
+  boundaryRisk?: WorkflowRiskProfile;
+  boundarySource?: 'static' | 'runtime';
+}
+
 interface TrustedWorkflowApproval {
   approvalId: string;
   approvedBy: 'user' | 'ui' | 'policy';
@@ -472,7 +484,7 @@ function buildWorkflowCapabilityMatrix(
   const unsupportedReasons: string[] = [];
   if (mode === 'stabilize') {
     unsupportedReasons.push(
-      'Reset workflow execution and automatic stopBeforeDangerous segmentation are not enabled in the stabilize MVP',
+      'Reset workflow execution and automatic stopBeforeDangerous segmentation are bounded validation features, not rollback guarantees',
     );
   } else {
     unsupportedReasons.push(
@@ -682,6 +694,158 @@ function riskRank(risk: WorkflowRiskProfile): number {
     case 'unknown':
       return 3;
   }
+}
+
+function getNodeWorkflowRisk(node: FlowV3['nodes'][number]): WorkflowRiskProfile {
+  if (!isKnownWorkflowSideEffectKind(node.kind)) {
+    return 'unknown';
+  }
+  const profile = getNodeSideEffectProfile(node);
+  return profile.category;
+}
+
+function buildRuntimeNodeRiskMap(evidence: RuntimeSideEffectEvidence): Map<string, WorkflowRiskProfile> {
+  const risks = new Map<string, WorkflowRiskProfile>();
+  for (const observation of evidence.observations) {
+    if (!observation.nodeId) {
+      continue;
+    }
+    const previous = risks.get(observation.nodeId) ?? 'safe';
+    risks.set(observation.nodeId, maxWorkflowRisk(previous, observation.category));
+  }
+  return risks;
+}
+
+function getSegmentBoundaryRisk(
+  node: FlowV3['nodes'][number],
+  runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
+): { risk: WorkflowRiskProfile; source: 'static' | 'runtime' } {
+  const staticRisk = getNodeWorkflowRisk(node);
+  const runtimeRisk = runtimeNodeRisks.get(String(node.id));
+  if (runtimeRisk && riskRank(runtimeRisk) >= riskRank(staticRisk)) {
+    return { risk: runtimeRisk, source: 'runtime' };
+  }
+  return { risk: staticRisk, source: 'static' };
+}
+
+function isRiskBoundary(
+  node: FlowV3['nodes'][number],
+  runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
+): boolean {
+  const { risk } = getSegmentBoundaryRisk(node, runtimeNodeRisks);
+  return risk === 'dangerous' || risk === 'unknown';
+}
+
+function findNodeByPublicId(flow: FlowV3, nodeId: string): FlowV3['nodes'][number] | undefined {
+  return (Array.isArray(flow.nodes) ? flow.nodes : []).find((node) => String(node.id) === nodeId);
+}
+
+function findFirstSequentialRiskBoundary(
+  flow: FlowV3,
+  runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
+): FlowV3['nodes'][number] | undefined {
+  const visited = new Set<string>();
+  let currentNodeId: NodeId | null = flow.entryNodeId as NodeId;
+
+  while (currentNodeId && !visited.has(String(currentNodeId))) {
+    visited.add(String(currentNodeId));
+    const node = findNodeByPublicId(flow, currentNodeId);
+    if (!node) {
+      break;
+    }
+    if (isRiskBoundary(node, runtimeNodeRisks)) {
+      return node;
+    }
+    currentNodeId = findNextNode(flow, node.id as NodeId);
+  }
+
+  return undefined;
+}
+
+function findFirstReachableRiskBoundary(
+  flow: FlowV3,
+  runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
+): FlowV3['nodes'][number] | undefined {
+  const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
+  const nodeById = new Map(nodes.map((node) => [String(node.id), node]));
+  const queue: string[] = [String(flow.entryNodeId)];
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift();
+    if (!nodeId || visited.has(nodeId)) {
+      continue;
+    }
+    visited.add(nodeId);
+    const node = nodeById.get(nodeId);
+    if (!node) {
+      continue;
+    }
+    if (isRiskBoundary(node, runtimeNodeRisks)) {
+      return node;
+    }
+    for (const edge of Array.isArray(flow.edges) ? flow.edges : []) {
+      if (String(edge.from) === nodeId && !visited.has(String(edge.to))) {
+        queue.push(String(edge.to));
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function buildWorkflowSegmentPlan(
+  flow: FlowV3,
+  args: any,
+  runtimeEvidence: RuntimeSideEffectEvidence,
+): WorkflowSegmentPlan {
+  const segments = isRecord(args?.safety?.segments) ? args.safety.segments : {};
+  if (segments.mode === 'explicit') {
+    const stopBeforeNodeId =
+      typeof segments.stopBeforeNodeId === 'string' && segments.stopBeforeNodeId.trim()
+        ? segments.stopBeforeNodeId.trim()
+        : undefined;
+    const endNodeId =
+      typeof segments.endNodeId === 'string' && segments.endNodeId.trim()
+        ? segments.endNodeId.trim()
+        : undefined;
+    return {
+      mode: 'explicit',
+      ...(stopBeforeNodeId ? { stopBeforeNodeId } : {}),
+      ...(endNodeId ? { endNodeId } : {}),
+    };
+  }
+
+  if (segments.mode !== 'stopBeforeDangerous') {
+    return { mode: 'none' };
+  }
+
+  const runtimeNodeRisks = buildRuntimeNodeRiskMap(runtimeEvidence);
+  const boundaryNode =
+    findFirstSequentialRiskBoundary(flow, runtimeNodeRisks) ??
+    findFirstReachableRiskBoundary(flow, runtimeNodeRisks);
+  if (!boundaryNode) {
+    return { mode: 'stopBeforeDangerous' };
+  }
+
+  const boundary = getSegmentBoundaryRisk(boundaryNode, runtimeNodeRisks);
+  return {
+    mode: 'stopBeforeDangerous',
+    stopBeforeNodeId: String(boundaryNode.id),
+    autoBoundary: true,
+    boundaryNodeId: String(boundaryNode.id),
+    boundaryKind: boundaryNode.kind,
+    boundaryRisk: boundary.risk,
+    boundarySource: boundary.source,
+  };
+}
+
+function hasSegmentBoundary(plan: WorkflowSegmentPlan): boolean {
+  return Boolean(plan.stopBeforeNodeId || plan.endNodeId);
+}
+
+function isBoundaryStoppedStatus(status: string): boolean {
+  return status === 'stopped' || status === 'stopped_at_boundary';
 }
 
 function normalizeExecutionMode(value: unknown): 'auto' | 'analyzeOnly' | 'sandboxReplay' | 'userApprovedReplay' {
@@ -956,6 +1120,7 @@ function getStabilizeTestEnvironment(args: any): Record<string, unknown> | undef
 function getSandboxReplayBoundaryError(
   args: any,
   resetValidation: WorkflowResetValidation,
+  segmentPlan: WorkflowSegmentPlan,
 ): WorkflowStabilizeValidationError | undefined {
   const testEnvironment = getStabilizeTestEnvironment(args);
   if (!testEnvironment) {
@@ -980,17 +1145,12 @@ function getSandboxReplayBoundaryError(
     typeof testEnvironment.accountLabel === 'string' && testEnvironment.accountLabel.trim()
       ? testEnvironment.accountLabel.trim()
       : '';
-  const segments = isRecord(args?.safety?.segments) ? args.safety.segments : {};
-  const hasExplicitSegmentBoundary =
-    segments.mode === 'explicit' &&
-    ((typeof segments.stopBeforeNodeId === 'string' && segments.stopBeforeNodeId.trim()) ||
-      (typeof segments.endNodeId === 'string' && segments.endNodeId.trim()));
-  if (!accountLabel && !resetValidation.plan && !hasExplicitSegmentBoundary) {
+  if (!accountLabel && !resetValidation.plan && !hasSegmentBoundary(segmentPlan)) {
     return {
       code: 'SANDBOX_REPLAY_REQUIRES_BOUNDED_ENVIRONMENT',
       path: '/safety',
       message:
-        'sandboxReplay is bounded test replay, not a rollback sandbox; provide a test account label, reset workflow, or explicit segment boundary',
+        'sandboxReplay is bounded test replay, not a rollback sandbox; provide a test account label, reset workflow, or segment boundary',
     };
   }
 
@@ -4009,7 +4169,8 @@ async function buildStabilizeQualityRecord(options: {
   const freshnessExpiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const segmentOnly =
     options.args?.safety?.segments?.mode === 'explicit' ||
-    options.runs.some((run) => run.status === 'stopped');
+    options.args?.safety?.segments?.mode === 'stopBeforeDangerous' ||
+    options.runs.some((run) => isBoundaryStoppedStatus(run.status));
   const countedRuns = segmentOnly ? [] : options.runs;
   const countedScore = scoreStabilizeRuns(countedRuns);
   const stable =
@@ -4197,6 +4358,7 @@ async function executeStabilizeValidationRuns(
   iterations: number,
   revision: string,
   warnings: WorkflowStabilizeWarning[],
+  segmentPlan: WorkflowSegmentPlan,
   resetPlan?: WorkflowResetPlan,
 ): Promise<{ targetRuns: WorkflowStabilizeRunSummary[]; resetRuns: WorkflowStabilizeRunSummary[] }> {
   const runs: WorkflowStabilizeRunSummary[] = [];
@@ -4209,17 +4371,8 @@ async function executeStabilizeValidationRuns(
     redactDownloadPaths: true,
     ...(args?.background === true ? { backgroundTabs: true } : {}),
   };
-  const segments = args?.safety?.segments && typeof args.safety.segments === 'object'
-    ? args.safety.segments
-    : {};
-  const stopBeforeNodeId =
-    segments.mode === 'explicit' && typeof segments.stopBeforeNodeId === 'string'
-      ? segments.stopBeforeNodeId.trim()
-      : undefined;
-  const endNodeId =
-    segments.mode === 'explicit' && typeof segments.endNodeId === 'string'
-      ? segments.endNodeId.trim()
-      : undefined;
+  const stopBeforeNodeId = segmentPlan.stopBeforeNodeId;
+  const endNodeId = segmentPlan.endNodeId;
 
   for (let index = 0; index < iterations; index += 1) {
     if (resetPlan && resetPlan.maxRuns > 0) {
@@ -5246,17 +5399,20 @@ class WorkflowStabilizeTool {
       targetFlow: workingFlow,
       hasApprovalReference,
     });
+    const segmentPlan = buildWorkflowSegmentPlan(workingFlow, args, runtimeSideEffectEvidence);
+    const hasAutoRiskBoundary =
+      segmentPlan.mode === 'stopBeforeDangerous' && Boolean(segmentPlan.stopBeforeNodeId);
     const boundaryError = validateStabilizeStartUrlBoundary(args);
     const sandboxReplayBoundaryError =
       executionMode === 'sandboxReplay'
-        ? getSandboxReplayBoundaryError(args, resetValidation)
+        ? getSandboxReplayBoundaryError(args, resetValidation, segmentPlan)
         : undefined;
     let blockedReason: string | undefined;
     if (runtimeMigrationBlock) {
       blockedReason = `workflow runtime compatibility requires workflow_migrate before stabilization: ${runtimeMigrationBlock.staleReason ?? runtimeMigrationBlock.decision}`;
     } else if (workflowStatusRequiresResume && !hasApprovalReference) {
       blockedReason = `workflow quality status ${initialQuality.status} requires trusted resume approval and revalidation`;
-    } else if ((risk === 'dangerous' || risk === 'unknown') && executionMode === 'auto') {
+    } else if ((risk === 'dangerous' || risk === 'unknown') && executionMode === 'auto' && !hasAutoRiskBoundary) {
       blockedReason = `${risk} workflow defaults to analyze-only`;
     } else if (
       (risk === 'dangerous' || risk === 'unknown') &&
@@ -5306,12 +5462,19 @@ class WorkflowStabilizeTool {
           'sandboxReplay is bounded test replay in a declared environment; browser automation does not guarantee rollback of external side effects.',
       });
     }
-    if (args?.safety?.segments?.mode === 'stopBeforeDangerous') {
+    if (segmentPlan.mode === 'stopBeforeDangerous' && segmentPlan.stopBeforeNodeId) {
       warnings.push({
-        code: 'STABILIZE_AUTO_SEGMENT_NOT_AVAILABLE',
-        category: 'capability',
+        code: 'STABILIZE_AUTO_SEGMENT_BOUNDARY',
+        category: 'safety',
+        nodeId: segmentPlan.stopBeforeNodeId,
+        message: `Validation will stop before ${segmentPlan.boundaryRisk ?? 'risky'} node ${segmentPlan.stopBeforeNodeId}.`,
+      });
+    } else if (segmentPlan.mode === 'stopBeforeDangerous') {
+      warnings.push({
+        code: 'STABILIZE_AUTO_SEGMENT_BOUNDARY_NOT_FOUND',
+        category: 'safety',
         message:
-          'Automatic stopBeforeDangerous segmentation is not enabled; use safety.segments.mode="explicit" with a boundary node.',
+          'No dangerous or unknown node was found for stopBeforeDangerous segmentation; validation uses normal safety gating.',
       });
     }
 
@@ -5322,7 +5485,7 @@ class WorkflowStabilizeTool {
       sandboxReplayBoundaryError?.message;
     const canRunValidation = !validationBlockedReason && executionMode !== 'analyzeOnly';
     const requestedValidationIterations =
-      risk === 'dangerous' || risk === 'unknown'
+      (risk === 'dangerous' || risk === 'unknown') && !hasAutoRiskBoundary
         ? Math.min(iterations, maxDangerousRuns)
         : iterations;
     if (canRunValidation && requestedValidationIterations === 0) {
@@ -5343,6 +5506,7 @@ class WorkflowStabilizeTool {
             requestedValidationIterations,
             initialRevision,
             warnings,
+            segmentPlan,
             resetValidation.plan,
           )
         : { targetRuns: [], resetRuns: [] };
@@ -5452,6 +5616,7 @@ class WorkflowStabilizeTool {
             requestedValidationIterations,
             postRepairRevision ?? calculateWorkflowRevision(workingFlow),
             warnings,
+            segmentPlan,
             resetValidation.plan,
           )
         : { targetRuns: [], resetRuns: [] };
@@ -5497,7 +5662,8 @@ class WorkflowStabilizeTool {
     const validationRunsForQuality = postRepairRuns.length > 0 ? postRepairRuns : baselineRuns;
     const segmentOnlyValidation =
       args?.safety?.segments?.mode === 'explicit' ||
-      validationRunsForQuality.some((run) => run.status === 'stopped');
+      args?.safety?.segments?.mode === 'stopBeforeDangerous' ||
+      validationRunsForQuality.some((run) => isBoundaryStoppedStatus(run.status));
     const minValidationRuns = Math.max(1, requestedValidationIterations);
     let quality: ReturnType<typeof buildWorkflowToolDescriptor>['quality'] | undefined;
     if (validationRunsForQuality.length > 0) {
@@ -5645,6 +5811,22 @@ class WorkflowStabilizeTool {
               ...(validationBlockedReason ? { blockedReason: validationBlockedReason } : {}),
               sideEffects,
               runtimeEvidence: runtimeSideEffectEvidence,
+              segments: {
+                mode: segmentPlan.mode,
+                ...(segmentPlan.stopBeforeNodeId
+                  ? { stopBeforeNodeId: segmentPlan.stopBeforeNodeId }
+                  : {}),
+                ...(segmentPlan.endNodeId ? { endNodeId: segmentPlan.endNodeId } : {}),
+                ...(segmentPlan.autoBoundary
+                  ? {
+                      autoBoundary: true,
+                      boundaryNodeId: segmentPlan.boundaryNodeId,
+                      boundaryKind: segmentPlan.boundaryKind,
+                      boundaryRisk: segmentPlan.boundaryRisk,
+                      boundarySource: segmentPlan.boundarySource,
+                    }
+                  : {}),
+              },
               ...(executionMode === 'sandboxReplay'
                 ? {
                     sandboxReplay: {
