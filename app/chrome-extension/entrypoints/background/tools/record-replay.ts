@@ -394,78 +394,87 @@ async function recordQualityRunOutcome(
   success: boolean,
   context: { runId?: string; secretRefCount?: number } = {},
 ): Promise<FlowV3> {
-  let next = flow;
-  if ((context.secretRefCount ?? 0) > 0) {
+  const flowId = flow.id as FlowId;
+  const storage = createStoragePort();
+  return withFlowWriteLock(flowId, async () => {
+    const latest = await storage.flows.get(flowId);
+    if (!latest) {
+      return flow;
+    }
+
+    let next = latest;
+    if ((context.secretRefCount ?? 0) > 0) {
+      next = {
+        ...appendWorkflowAuditEvent(next, {
+          kind: "secret_ref_use",
+          actor: "runtime",
+          runId: context.runId,
+          revision: calculateWorkflowRevision(next),
+          reason: "workflow_run_secret_ref_args",
+          metadata: {
+            secretRefCount: context.secretRefCount ?? 0,
+          },
+        }),
+        updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
+      };
+    }
+    if (!next.meta?.quality) {
+      if (next !== latest) {
+        await storage.flows.save(next);
+      }
+      return next;
+    }
+    const existingQuality = next.meta.quality;
+    const previousQuality = buildWorkflowQualitySummary(next);
+    const previousFailures = existingQuality.consecutiveFailureCount ?? 0;
+    const consecutiveFailureCount = success ? 0 : previousFailures + 1;
+    const staleReason =
+      !success && consecutiveFailureCount >= 3
+        ? "consecutive_failures"
+        : success && existingQuality.staleReason === "consecutive_failures"
+          ? undefined
+          : existingQuality.staleReason;
     next = {
-      ...appendWorkflowAuditEvent(next, {
-        kind: "secret_ref_use",
+      ...next,
+      updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
+      meta: {
+        ...(next.meta ?? {}),
+        quality: {
+          ...existingQuality,
+          consecutiveFailureCount,
+          ...(staleReason ? { staleReason } : {}),
+          revalidation: {
+            ...(next.meta.quality.revalidation ?? {}),
+            lastRevalidateReason: success ? "workflow_run_success" : "workflow_run_failure",
+          },
+        },
+      },
+    };
+    if (!staleReason) {
+      delete next.meta?.quality?.staleReason;
+    }
+    const nextQuality = buildWorkflowQualitySummary(next);
+    if (
+      previousQuality.status !== "stale" &&
+      nextQuality.status === "stale" &&
+      nextQuality.staleReason
+    ) {
+      next = appendWorkflowAuditEvent(next, {
+        kind: "quality_downgrade",
         actor: "runtime",
         runId: context.runId,
         revision: calculateWorkflowRevision(next),
-        reason: "workflow_run_secret_ref_args",
+        previousStatus: previousQuality.status,
+        nextStatus: nextQuality.status,
+        reason: nextQuality.staleReason,
         metadata: {
-          secretRefCount: context.secretRefCount ?? 0,
+          consecutiveFailureCount,
         },
-      }),
-      updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
-    };
-  }
-  if (!next.meta?.quality) {
-    if (next !== flow) {
-      await createStoragePort().flows.save(next);
+      });
     }
+    await storage.flows.save(next);
     return next;
-  }
-  const existingQuality = next.meta.quality;
-  const previousQuality = buildWorkflowQualitySummary(next);
-  const previousFailures = existingQuality.consecutiveFailureCount ?? 0;
-  const consecutiveFailureCount = success ? 0 : previousFailures + 1;
-  const staleReason =
-    !success && consecutiveFailureCount >= 3
-      ? "consecutive_failures"
-      : success && existingQuality.staleReason === "consecutive_failures"
-        ? undefined
-        : existingQuality.staleReason;
-  next = {
-    ...next,
-    updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
-    meta: {
-      ...(next.meta ?? {}),
-      quality: {
-        ...existingQuality,
-        consecutiveFailureCount,
-        ...(staleReason ? { staleReason } : {}),
-        revalidation: {
-          ...(next.meta.quality.revalidation ?? {}),
-          lastRevalidateReason: success ? "workflow_run_success" : "workflow_run_failure",
-        },
-      },
-    },
-  };
-  if (!staleReason) {
-    delete next.meta?.quality?.staleReason;
-  }
-  const nextQuality = buildWorkflowQualitySummary(next);
-  if (
-    previousQuality.status !== "stale" &&
-    nextQuality.status === "stale" &&
-    nextQuality.staleReason
-  ) {
-    next = appendWorkflowAuditEvent(next, {
-      kind: "quality_downgrade",
-      actor: "runtime",
-      runId: context.runId,
-      revision: calculateWorkflowRevision(next),
-      previousStatus: previousQuality.status,
-      nextStatus: nextQuality.status,
-      reason: nextQuality.staleReason,
-      metadata: {
-        consecutiveFailureCount,
-      },
-    });
-  }
-  await createStoragePort().flows.save(next);
-  return next;
+  });
 }
 
 function jsonToolResult(payload: Record<string, unknown>, isError = false): ToolResult {

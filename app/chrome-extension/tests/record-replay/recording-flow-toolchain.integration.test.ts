@@ -4779,6 +4779,82 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("flowRunTool merges quality outcome into the latest flow state", async () => {
+    const flowId = `flow-run-quality-merge-${Date.now()}`;
+    const storage = createStoragePort();
+    const flow = createFlow(flowId, [
+      {
+        id: "wait-1" as any,
+        kind: "wait",
+        config: { condition: { kind: "selector", selector: "#ready" } },
+      },
+    ]);
+    flow.name = "Original Flow Name";
+    flow.meta = {
+      quality: {
+        revision: calculateWorkflowRevision(flow),
+        level: "stable",
+        status: "stable",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        consecutiveFailureCount: 2,
+        staleReason: "consecutive_failures",
+        lastValidatedAt: "2026-01-01T00:00:00.000Z" as any,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        revalidation: {
+          policy: "onFailure",
+          lastRevalidateReason: "workflow_run_failure",
+        },
+      },
+    };
+    await storage.flows.save(flow);
+
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      const latest = await storage.flows.get(flowId as any);
+      await storage.flows.save({
+        ...latest!,
+        name: "Concurrent Flow Rename",
+      });
+      return {
+        run: {
+          id: "run-quality-merge",
+          flowId,
+          status: "succeeded",
+          currentNodeId: "wait-1",
+          tookMs: 4,
+        } as any,
+        events: [],
+        result: {
+          runId: "run-quality-merge",
+          success: true,
+          status: "succeeded",
+          summary: { total: 1, success: 1, failed: 0, tookMs: 4 },
+          outputs: null,
+          logs: [],
+          paused: false,
+        },
+      };
+    });
+
+    const result = await flowRunTool.execute({ flowId });
+    const updated = await storage.flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(updated?.name).toBe("Concurrent Flow Rename");
+    expect(updated?.meta?.quality).toMatchObject({
+      consecutiveFailureCount: 0,
+      revalidation: {
+        lastRevalidateReason: "workflow_run_success",
+      },
+    });
+    expect(updated?.meta?.quality?.staleReason).toBeUndefined();
+  });
+
   it("flowRunTool downgrades stale quality after consecutive failures", async () => {
     const flowId = `flow-run-quality-downgrade-${Date.now()}`;
     const flow = createFlow(flowId, [
