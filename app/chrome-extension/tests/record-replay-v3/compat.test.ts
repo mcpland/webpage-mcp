@@ -17,12 +17,14 @@ vi.mock(
 );
 
 import {
+  FlowRevisionConflictError,
   buildCompatRunResult,
   enqueueRunAndWait,
   importFlowsToV3,
   saveFlowToV3,
 } from "@/entrypoints/background/record-replay-v3/compat";
 import { RR_ERROR_CODES } from "@/entrypoints/background/record-replay-v3/domain/errors";
+import { calculateWorkflowRevision } from "@/entrypoints/background/record-replay-v3/flows/publish";
 
 function asMock(fn: unknown): ReturnType<typeof vi.fn> {
   return fn as ReturnType<typeof vi.fn>;
@@ -598,6 +600,49 @@ describe("record-replay-v3 compat", () => {
         entryNodeId: "step-1",
       }),
     );
+  });
+
+  it("saveFlowToV3 rejects writes when the expected revision is stale", async () => {
+    const runtime = createRuntime();
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+    const baseline = await saveFlowToV3({
+      schemaVersion: 3,
+      id: "revision-guard",
+      name: "Revision Guard",
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      entryNodeId: "node-1",
+      nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com/a" } }],
+      edges: [],
+    });
+    const expectedRevision = calculateWorkflowRevision(baseline);
+    await saveFlowToV3({
+      ...baseline,
+      nodes: [{ id: "node-1", kind: "navigate", config: { url: "https://example.com/b" } }],
+    });
+
+    await expect(
+      saveFlowToV3(
+        {
+          ...baseline,
+          name: "Stale Save",
+        },
+        { expectedRevision },
+      ),
+    ).rejects.toMatchObject({
+      code: "STALE_WORKFLOW_REVISION",
+      flowId: "revision-guard",
+      expectedRevision,
+    });
+    await expect(
+      saveFlowToV3(
+        {
+          ...baseline,
+          name: "Stale Save",
+        },
+        { expectedRevision },
+      ),
+    ).rejects.toBeInstanceOf(FlowRevisionConflictError);
   });
 
   it("importFlowsToV3 accepts legacy steps-only JSON payloads", async () => {

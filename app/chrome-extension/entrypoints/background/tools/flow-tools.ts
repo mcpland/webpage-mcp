@@ -893,6 +893,51 @@ function createStructuredToolError(
   };
 }
 
+interface FlowRevisionConflictLike {
+  code: 'STALE_WORKFLOW_REVISION';
+  message?: string;
+  flowId?: unknown;
+  expectedRevision?: unknown;
+  currentRevision?: unknown;
+}
+
+function getFlowRevisionConflict(error: unknown): FlowRevisionConflictLike | null {
+  return isRecord(error) && error.code === 'STALE_WORKFLOW_REVISION'
+    ? (error as unknown as FlowRevisionConflictLike)
+    : null;
+}
+
+function createWorkflowRevisionConflictError(
+  error: FlowRevisionConflictLike,
+  message: string,
+): ToolResult {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          success: false,
+          status: 'stale_revision',
+          error: {
+            code: 'STALE_WORKFLOW_REVISION',
+            category: 'conflict',
+            retryable: true,
+            message,
+            ...(typeof error.flowId === 'string' ? { flowId: error.flowId } : {}),
+            ...(typeof error.expectedRevision === 'string'
+              ? { expectedRevision: error.expectedRevision }
+              : {}),
+            ...(typeof error.currentRevision === 'string' || error.currentRevision === null
+              ? { currentRevision: error.currentRevision }
+              : {}),
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
+}
+
 function isSafeForFlowDefaultRetry(node: FlowV3['nodes'][number]): boolean {
   return workflowSideEffectAllowsRetry(getNodeSideEffectProfile(node), 'flowDefault');
 }
@@ -4510,7 +4555,22 @@ class WorkflowRepairTool {
     if (updated) {
       recordWorkflowRepairHistory(flow, initialRevision, changes, 'workflow_repair', rollbackSnapshot);
       flow.updatedAt = new Date().toISOString();
-      await saveFlowToV3(flow);
+      try {
+        await saveFlowToV3(flow, {
+          expectedRevision: initialRevision,
+          revisionConflictMessage:
+            'workflow_repair could not apply because the workflow changed while repair analysis was in progress',
+        });
+      } catch (error) {
+        const conflict = getFlowRevisionConflict(error);
+        if (conflict) {
+          return createWorkflowRevisionConflictError(
+            conflict,
+            'workflow_repair could not apply because the workflow changed while repair analysis was in progress',
+          );
+        }
+        throw error;
+      }
     }
 
     const finalHints = shouldApply ? collectFlowHints(flow) : initialHints;
@@ -5086,7 +5146,22 @@ class WorkflowStabilizeTool {
         rollbackSnapshot,
       );
       workingFlow.updatedAt = new Date().toISOString();
-      workingFlow = await saveFlowToV3(workingFlow);
+      try {
+        workingFlow = await saveFlowToV3(workingFlow, {
+          expectedRevision: initialRevision,
+          revisionConflictMessage:
+            'workflow_stabilize could not apply repairs because the workflow changed during validation',
+        });
+      } catch (error) {
+        const conflict = getFlowRevisionConflict(error);
+        if (conflict) {
+          return createWorkflowRevisionConflictError(
+            conflict,
+            'workflow_stabilize could not apply repairs because the workflow changed during validation',
+          );
+        }
+        throw error;
+      }
       postRepairRevision = calculateWorkflowRevision(workingFlow);
     }
 
@@ -5209,7 +5284,22 @@ class WorkflowStabilizeTool {
             },
           });
         }
-        workingFlow = await saveFlowToV3(nextWorkingFlow);
+        try {
+          workingFlow = await saveFlowToV3(nextWorkingFlow, {
+            expectedRevision: postRepairRevision ?? initialRevision,
+            revisionConflictMessage:
+              'workflow_stabilize could not record quality because the workflow changed during validation',
+          });
+        } catch (error) {
+          const conflict = getFlowRevisionConflict(error);
+          if (conflict) {
+            return createWorkflowRevisionConflictError(
+              conflict,
+              'workflow_stabilize could not record quality because the workflow changed during validation',
+            );
+          }
+          throw error;
+        }
       }
       quality = buildWorkflowToolDescriptor({
         ...workingFlow,
@@ -6735,9 +6825,27 @@ class WorkflowMigrateTool {
           isError: false,
         };
       }
-      const rolledBack = await saveFlowToV3(
-        applyWorkflowMigrationRollback(flow, rollbackMigrationId, snapshot),
-      );
+      let rolledBack: FlowV3;
+      const rollbackExpectedRevision = calculateWorkflowRevision(flow);
+      try {
+        rolledBack = await saveFlowToV3(
+          applyWorkflowMigrationRollback(flow, rollbackMigrationId, snapshot),
+          {
+            expectedRevision: rollbackExpectedRevision,
+            revisionConflictMessage:
+              'workflow_migrate rollback could not apply because the workflow changed after rollback analysis',
+          },
+        );
+      } catch (error) {
+        const conflict = getFlowRevisionConflict(error);
+        if (conflict) {
+          return createWorkflowRevisionConflictError(
+            conflict,
+            'workflow_migrate rollback could not apply because the workflow changed after rollback analysis',
+          );
+        }
+        throw error;
+      }
       return {
         content: [
           {
@@ -6782,16 +6890,28 @@ class WorkflowMigrateTool {
       const report = buildWorkflowMigrationPlan(flow, migrationId);
       if (!dryRun && report.changed === true) {
         try {
-          const migrated = await saveFlowToV3(applyWorkflowMigration(flow, migrationId));
+          const migrated = await saveFlowToV3(applyWorkflowMigration(flow, migrationId), {
+            expectedRevision: calculateWorkflowRevision(flow),
+            revisionConflictMessage:
+              'workflow_migrate could not apply because the workflow changed after migration planning',
+          });
           reports.push({
             ...buildWorkflowMigrationPlan(migrated, migrationId),
             applied: true,
             auditRecorded: true,
           });
         } catch (error) {
+          const conflict = getFlowRevisionConflict(error);
           reports.push({
             ...report,
             applied: false,
+            ...(conflict
+              ? {
+                  errorCode: conflict.code,
+                  expectedRevision: conflict.expectedRevision ?? null,
+                  currentRevision: conflict.currentRevision ?? null,
+                }
+              : {}),
             error: error instanceof Error ? error.message : String(error),
             recoverable: true,
           });

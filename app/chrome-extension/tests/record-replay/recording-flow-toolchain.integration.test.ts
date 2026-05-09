@@ -137,12 +137,30 @@ describe("recording/editing/flow toolchain integration", () => {
     asMock(chrome.storage.local.get).mockResolvedValue({});
     asMock(chrome.storage.local.set).mockResolvedValue(undefined);
     asMock(chrome.runtime.sendMessage).mockResolvedValue(undefined);
-    mocks.saveFlowToV3.mockImplementation(async (flow: FlowV3) => {
+    mocks.saveFlowToV3.mockImplementation(async (flow: FlowV3, options?: { expectedRevision?: string }) => {
+      const existing = await createStoragePort().flows.get(flow.id as any);
+      if (options?.expectedRevision) {
+        const currentRevision = existing ? calculateWorkflowRevision(existing) : null;
+        if (currentRevision !== options.expectedRevision) {
+          throw Object.assign(
+            new Error(
+              `Flow "${flow.id}" changed while the operation was in progress; expected revision ${options.expectedRevision}, current ${currentRevision ?? "missing"}`,
+            ),
+            {
+              code: "STALE_WORKFLOW_REVISION",
+              retryable: true,
+              flowId: flow.id,
+              expectedRevision: options.expectedRevision,
+              currentRevision,
+            },
+          );
+        }
+      }
       const now = new Date().toISOString();
       const persisted = {
         ...flow,
         schemaVersion: 3,
-        createdAt: flow.createdAt ?? (now as any),
+        createdAt: existing?.createdAt ?? flow.createdAt ?? (now as any),
         updatedAt: now as any,
       };
       await createStoragePort().flows.save(persisted as FlowV3);
@@ -1166,51 +1184,51 @@ describe("recording/editing/flow toolchain integration", () => {
 
   it("workflowRepairTool applies safe parameterization and default stability policy", async () => {
     const flowId = `workflow-repair-apply-${Date.now()}`;
-    await createStoragePort().flows.save(
-      createFlow(
-        flowId,
-        [
-          {
-            id: "nav-1" as any,
-            kind: "navigate",
-            config: { url: "https://example.com/search?q=laptop" },
-          },
-          {
-            id: "fill-1" as any,
-            kind: "fill",
-            config: {
-              target: { selector: "#email" },
-              value: "alice@example.com",
-            },
-          },
-          {
-            id: "wait-1" as any,
-            kind: "wait",
-            config: { condition: { kind: "selector", selector: "#results" } },
-          },
-        ],
+    const originalFlow = createFlow(
+      flowId,
+      [
         {
-          meta: {
-            recording: {
-              parameterSuggestions: [
-                {
-                  nodeId: "nav-1" as any,
-                  kind: "navigate",
-                  suggestedKey: "q",
-                  currentValue: "laptop",
-                },
-                {
-                  nodeId: "fill-1" as any,
-                  kind: "fill",
-                  suggestedKey: "email",
-                  currentValue: "alice@example.com",
-                },
-              ],
-            },
+          id: "nav-1" as any,
+          kind: "navigate",
+          config: { url: "https://example.com/search?q=laptop" },
+        },
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: {
+            target: { selector: "#email" },
+            value: "alice@example.com",
           },
         },
-      ),
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#results" } },
+        },
+      ],
+      {
+        meta: {
+          recording: {
+            parameterSuggestions: [
+              {
+                nodeId: "nav-1" as any,
+                kind: "navigate",
+                suggestedKey: "q",
+                currentValue: "laptop",
+              },
+              {
+                nodeId: "fill-1" as any,
+                kind: "fill",
+                suggestedKey: "email",
+                currentValue: "alice@example.com",
+              },
+            ],
+          },
+        },
+      },
     );
+    const originalRevision = calculateWorkflowRevision(originalFlow);
+    await createStoragePort().flows.save(originalFlow);
 
     const result = await workflowRepairTool.execute({
       flowId,
@@ -1302,6 +1320,10 @@ describe("recording/editing/flow toolchain integration", () => {
         }),
       },
     });
+    expect(mocks.saveFlowToV3).toHaveBeenCalledWith(
+      expect.objectContaining({ id: flowId }),
+      expect.objectContaining({ expectedRevision: originalRevision }),
+    );
   });
 
   it("workflowRepairRollbackTool restores a pre-repair workflow snapshot", async () => {
@@ -1471,6 +1493,10 @@ describe("recording/editing/flow toolchain integration", () => {
         },
       },
     });
+    expect(mocks.saveFlowToV3).toHaveBeenCalledWith(
+      expect.objectContaining({ id: flowId }),
+      expect.objectContaining({ expectedRevision: revision }),
+    );
 
     const rollback = parseToolPayload(
       await workflowMigrateTool.execute({
@@ -1974,6 +2000,10 @@ describe("recording/editing/flow toolchain integration", () => {
           }),
         }),
       ]),
+    );
+    expect(mocks.saveFlowToV3).toHaveBeenCalledWith(
+      expect.objectContaining({ id: flowId }),
+      expect.objectContaining({ expectedRevision: revision }),
     );
   });
 

@@ -14,6 +14,7 @@ import { bootstrapV3, type V3Runtime } from "./bootstrap";
 import { enqueueRun } from "./engine/queue/enqueue-run";
 import { isV3UnsupportedNodeType } from "@/entrypoints/shared/utils/v3-authoring";
 import {
+  calculateWorkflowRevision,
   ensurePublishedSlugAvailable,
   normalizeToolSlug,
 } from "./flows/publish";
@@ -30,6 +31,35 @@ import type { ExecutionFlags } from "@/entrypoints/background/replay-actions";
 
 const DEFAULT_RUN_TIMEOUT_MS = 60_000;
 const RUN_POLL_INTERVAL_MS = 150;
+
+export interface SaveFlowToV3Options {
+  expectedRevision?: string;
+  revisionConflictMessage?: string;
+}
+
+export class FlowRevisionConflictError extends Error {
+  readonly code = "STALE_WORKFLOW_REVISION" as const;
+  readonly retryable = true;
+  readonly flowId: FlowId;
+  readonly expectedRevision: string;
+  readonly currentRevision: string | null;
+
+  constructor(
+    flowId: FlowId,
+    expectedRevision: string,
+    currentRevision: string | null,
+    message?: string,
+  ) {
+    super(
+      message ??
+        `Flow "${flowId}" changed while the operation was in progress; expected revision ${expectedRevision}, current ${currentRevision ?? "missing"}`,
+    );
+    this.name = "FlowRevisionConflictError";
+    this.flowId = flowId;
+    this.expectedRevision = expectedRevision;
+    this.currentRevision = currentRevision;
+  }
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -120,7 +150,10 @@ export async function ensureV3Runtime(): Promise<V3Runtime> {
   return bootstrapV3();
 }
 
-export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
+export async function saveFlowToV3(
+  rawFlow: unknown,
+  options: SaveFlowToV3Options = {},
+): Promise<FlowV3> {
   const runtime = await ensureV3Runtime();
   const nowIso = new Date().toISOString();
 
@@ -148,6 +181,17 @@ export async function saveFlowToV3(rawFlow: unknown): Promise<FlowV3> {
   return withFlowWriteLock(parsedFlow.id as FlowId, async () => {
     let flow: FlowV3 = parsedFlow;
     const existing = await runtime.storage.flows.get(flow.id as FlowId);
+    if (options.expectedRevision) {
+      const currentRevision = existing ? calculateWorkflowRevision(existing) : null;
+      if (currentRevision !== options.expectedRevision) {
+        throw new FlowRevisionConflictError(
+          flow.id as FlowId,
+          options.expectedRevision,
+          currentRevision,
+          options.revisionConflictMessage,
+        );
+      }
+    }
     flow = {
       ...flow,
       schemaVersion: FLOW_SCHEMA_VERSION,
