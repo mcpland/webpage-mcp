@@ -3055,6 +3055,10 @@
     "message": "실행 중",
     "description": "Auto-generated localized message"
   },
+  "workflowsRunStoppedAtBoundary": {
+    "message": "경계에서 중지됨",
+    "description": "Auto-generated localized message"
+  },
   "workflowsRunStatusPrefix": {
     "message": "상태",
     "description": "Auto-generated localized message"

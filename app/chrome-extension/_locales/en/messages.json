@@ -3055,6 +3055,10 @@
     "message": "Running",
     "description": "Workflow run status running"
   },
+  "workflowsRunStoppedAtBoundary": {
+    "message": "Stopped at boundary",
+    "description": "Workflow run status stopped at boundary"
+  },
   "workflowsRunStatusPrefix": {
     "message": "Status",
     "description": "Workflow run status label prefix"

@@ -3055,6 +3055,10 @@
     "message": "运行中",
     "description": "Workflow run status running"
   },
+  "workflowsRunStoppedAtBoundary": {
+    "message": "在边界处停止",
+    "description": "Workflow run status stopped at boundary"
+  },
   "workflowsRunStatusPrefix": {
     "message": "状态",
     "description": "Workflow run status label prefix"

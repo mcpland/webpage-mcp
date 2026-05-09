@@ -3055,6 +3055,10 @@
     "message": "Wird ausgeführt",
     "description": "Auto-generated localized message"
   },
+  "workflowsRunStoppedAtBoundary": {
+    "message": "An der Grenze gestoppt",
+    "description": "Auto-generated localized message"
+  },
   "workflowsRunStatusPrefix": {
     "message": "Status",
     "description": "Auto-generated localized message"

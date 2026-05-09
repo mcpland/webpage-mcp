@@ -3055,6 +3055,10 @@
     "message": "執行中",
     "description": "自動生成的 i18n 文案"
   },
+  "workflowsRunStoppedAtBoundary": {
+    "message": "在邊界處停止",
+    "description": "自動生成的 i18n 文案"
+  },
   "workflowsRunStatusPrefix": {
     "message": "狀態",
     "description": "自動生成的 i18n 文案"
