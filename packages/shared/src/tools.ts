@@ -1015,6 +1015,14 @@ export const TOOL_SCHEMAS: Tool[] = [
           description: 'Published workflow slug to unpublish. Exactly one of workflow or flowId is required.',
         },
       },
+      oneOf: [{ required: ['flowId'] }, { required: ['workflow'] }],
+      allOf: [
+        {
+          not: {
+            required: ['flowId', 'workflow'],
+          },
+        },
+      ],
       required: [],
     },
   },

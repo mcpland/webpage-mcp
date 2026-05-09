@@ -521,6 +521,14 @@ describe('dynamic published flow tools', () => {
     });
     expect(unpublishTool?.inputSchema).toMatchObject({
       additionalProperties: false,
+      oneOf: [{ required: ['flowId'] }, { required: ['workflow'] }],
+      allOf: [
+        {
+          not: {
+            required: ['flowId', 'workflow'],
+          },
+        },
+      ],
       properties: {
         flowId: expect.any(Object),
         workflow: expect.any(Object),
