@@ -635,6 +635,7 @@ describe('dynamic published flow tools', () => {
     expect(workflowInput.properties?.captureNetwork).toBeUndefined();
     expect(workflowInput.properties?.returnLogs).toBeUndefined();
     expect(flowRunInput.properties?.flowId).toBeTruthy();
+    expect(flowRunInput.properties?.requireRevision).toBeTruthy();
     expect(flowRunInput.properties?.args).toBeTruthy();
     expect(flowRunInput.properties?.tabTarget).toBeTruthy();
     expect(flowRunInput.properties?.timeoutMs).toBeTruthy();

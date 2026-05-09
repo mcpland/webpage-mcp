@@ -887,7 +887,7 @@ function filterFlowRunToolForCapabilities(
   const baseProperties = inputSchema?.properties || {};
   const runOptionKeys = getRunOptionKeySet(capabilities);
   const properties: Record<string, any> = {};
-  for (const key of ['flowId', 'args']) {
+  for (const key of ['flowId', 'requireRevision', 'args']) {
     if (baseProperties[key]) {
       properties[key] = baseProperties[key];
     }
