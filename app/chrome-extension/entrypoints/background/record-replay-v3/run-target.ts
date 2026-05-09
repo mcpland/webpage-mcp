@@ -120,6 +120,13 @@ export async function resolveRunTargetTab(
   const startUrl = normalizeStartUrl(input.startUrl);
   const shouldRefresh = input.refresh === true;
   const background = prefersBackgroundTabs(input.execution);
+  if (
+    startUrl &&
+    enforcesPublicPageRestrictions(input.execution) &&
+    !isAllowedPublicFlowTabUrl(startUrl)
+  ) {
+    throw new Error(PUBLIC_FLOW_RUN_TARGET_ERROR);
+  }
 
   const explicitTab =
     explicitTabId !== undefined

@@ -425,6 +425,42 @@ describe("V3 RPC Queue Management APIs", () => {
       );
     });
 
+    it("does not enqueue when public run target resolution rejects", async () => {
+      const flow = createTestFlow("flow-public-target-reject");
+      getInternal(storage).flowsMap.set(flow.id, flow);
+
+      (chrome.runtime as any).getManifest = vi.fn(() => ({ manifest_version: 3 }));
+      const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
+      tabsGet.mockResolvedValue({
+        id: 91,
+        active: true,
+        currentWindow: true,
+        url: "file:///tmp/secret.txt",
+        status: "complete",
+        windowId: 1,
+      });
+
+      await expect(
+        (server as unknown as { handleRequest: Function }).handleRequest(
+          {
+            method: "rr_v3.enqueueRun",
+            params: {
+              flowId: "flow-public-target-reject",
+              tabId: 91,
+              execution: { disallowLocalFilePages: true },
+            },
+            requestId: "req-public-target-reject",
+          },
+          { subscriptions: new Set() },
+        ),
+      ).rejects.toThrow(
+        "Public flow runs only support HTTP(S) tabs. Switch to an HTTP(S) page or provide an HTTP(S) startUrl.",
+      );
+
+      expect(storage.runs.save).not.toHaveBeenCalled();
+      expect(storage.queue.enqueue).not.toHaveBeenCalled();
+    });
+
     it("creates run record, enqueues, emits event, and kicks scheduler", async () => {
       // Setup: add a flow
       const flow = createTestFlow("flow-1");

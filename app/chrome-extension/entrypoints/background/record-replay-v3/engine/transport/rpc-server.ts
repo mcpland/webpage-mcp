@@ -278,9 +278,10 @@ export class RpcServer {
         });
       } catch (error) {
         console.warn(
-          "[RR-V3][RPC] Failed to resolve run target tab, falling back to scheduler default:",
+          "[RR-V3][RPC] Failed to resolve run target tab:",
           error,
         );
+        throw error;
       }
     }
 

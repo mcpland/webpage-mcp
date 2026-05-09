@@ -80,4 +80,19 @@ describe('resolveRunTargetTab background mode', () => {
     expect(tabId).toBe(9);
     expect(tabsUpdate).toHaveBeenCalledWith(9, { url: 'https://example.com/next' });
   });
+
+  it('rejects non-http startUrl values when public-page restrictions are enabled', async () => {
+    await expect(
+      resolveRunTargetTab({
+        tabTarget: 'new',
+        startUrl: 'file:///tmp/secret.txt',
+        execution: { disallowLocalFilePages: true },
+      }),
+    ).rejects.toThrow(
+      'Public flow runs only support HTTP(S) tabs. Switch to an HTTP(S) page or provide an HTTP(S) startUrl.',
+    );
+
+    expect(tabsCreate).not.toHaveBeenCalled();
+    expect(tabsUpdate).not.toHaveBeenCalled();
+  });
 });
