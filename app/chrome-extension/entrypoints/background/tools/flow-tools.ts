@@ -4867,6 +4867,7 @@ class WorkflowStabilizeTool {
     });
     const hasApprovalReference = approvalCheck.accepted;
     const initialQuality = buildWorkflowQualitySummary(workingFlow);
+    const runtimeMigrationBlock = workflowRuntimeRequiresMigration(workingFlow);
     const workflowStatusRequiresResume =
       initialQuality.status === 'paused' || initialQuality.status === 'blocked';
     const warnings: WorkflowStabilizeWarning[] = [];
@@ -4933,7 +4934,9 @@ class WorkflowStabilizeTool {
     });
     const boundaryError = validateStabilizeStartUrlBoundary(args);
     let blockedReason: string | undefined;
-    if (workflowStatusRequiresResume && !hasApprovalReference) {
+    if (runtimeMigrationBlock) {
+      blockedReason = `workflow runtime compatibility requires workflow_migrate before stabilization: ${runtimeMigrationBlock.staleReason ?? runtimeMigrationBlock.decision}`;
+    } else if (workflowStatusRequiresResume && !hasApprovalReference) {
       blockedReason = `workflow quality status ${initialQuality.status} requires trusted resume approval and revalidation`;
     } else if ((risk === 'dangerous' || risk === 'unknown') && executionMode === 'auto') {
       blockedReason = `${risk} workflow defaults to analyze-only`;
@@ -5785,6 +5788,11 @@ function evaluateWorkflowRuntimeCompatibility(flow: FlowV3): WorkflowRuntimeComp
     affectedFields: Array.from(affectedFields).sort(),
     compatibilityNotes,
   };
+}
+
+function workflowRuntimeRequiresMigration(flow: FlowV3): WorkflowRuntimeCompatibility | null {
+  const compatibility = evaluateWorkflowRuntimeCompatibility(flow);
+  return compatibility.decision === 'blocked_breaking_change' ? compatibility : null;
 }
 
 function normalizeMigrationQuality(

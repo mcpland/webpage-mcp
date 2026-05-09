@@ -1977,6 +1977,90 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("workflowStabilizeTool keeps runtime-incompatible workflows blocked even with approval", async () => {
+    const flowId = `workflow-stabilize-runtime-block-${Date.now()}`;
+    const storage = createStoragePort();
+    const flow = createFlow(flowId, [
+      {
+        id: "click-1" as any,
+        kind: "click",
+        config: { target: { selector: "#submit" } },
+      },
+    ]);
+    const revision = calculateWorkflowRevision(flow);
+    const legacyDslVersion = previousRuntimeVersion(FLOW_DSL_VERSION, "major");
+    flow.meta = {
+      runtime: {
+        dslVersion: legacyDslVersion,
+        nodeSemanticsVersion: FLOW_NODE_SEMANTICS_VERSION,
+      },
+      quality: {
+        revision,
+        status: "stable",
+        level: "stable",
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        lastValidatedAt: new Date(0).toISOString() as any,
+        freshnessExpiresAt: new Date(Date.now() + 60_000).toISOString() as any,
+      },
+    };
+    await storage.flows.save(flow);
+
+    const approvalId = "approval-runtime-block";
+    asMock(chrome.storage.local.get).mockImplementation(async (key: string) => {
+      if (key === "webpageMcpWorkflowApprovals") {
+        return {
+          webpageMcpWorkflowApprovals: {
+            [approvalId]: {
+              approvalId,
+              approvedBy: "user",
+              approvedAt: "2026-01-01T00:00:00.000Z",
+              expiresAt: "2999-01-01T00:00:00.000Z",
+              scope: {
+                flowId,
+                revision,
+              },
+            },
+          },
+        };
+      }
+      return {};
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      safety: {
+        executionMode: "userApprovedReplay",
+        authorization: {
+          approvalId,
+          approvedBy: "user",
+          approvedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+    const persisted = await storage.flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(payload.safety).toMatchObject({
+      blocked: true,
+      executionMode: "analyzeOnly",
+      blockedReason:
+        "workflow runtime compatibility requires workflow_migrate before stabilization: dsl_major_mismatch",
+      approvalReferenceAccepted: true,
+    });
+    expect(payload.summary).toMatchObject({
+      baselineRunCount: 0,
+      postRepairRunCount: 0,
+    });
+    expect(persisted?.meta?.runtime?.dslVersion).toBe(legacyDslVersion);
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+  });
+
   it("workflowRepairTool suggests selector replacement without applying when failure artifacts are missing", async () => {
     const flowId = `workflow-repair-selector-suggest-${Date.now()}`;
     const runId = `${flowId}-run`;
