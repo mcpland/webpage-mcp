@@ -1082,6 +1082,7 @@ class FlowRunTool {
       normalizeScreenshotBaselines(screenshotBaselines);
     const unsupportedOptions = {
       captureNetwork,
+      returnLogs,
       debugStepByStep,
       stepDelayMs,
       captureStepScreenshots,

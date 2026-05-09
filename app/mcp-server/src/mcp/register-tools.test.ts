@@ -660,6 +660,7 @@ describe('dynamic published flow tools', () => {
     expect(flowRunInput.properties?.timeoutMs).toBeTruthy();
     expect(flowRunInput.properties?.background).toBeUndefined();
     expect(flowRunInput.properties?.captureNetwork).toBeUndefined();
+    expect(flowRunInput.properties?.returnLogs).toBeUndefined();
   });
 
   it('runs workflow_run by resolving a published slug to the existing flow runner', async () => {

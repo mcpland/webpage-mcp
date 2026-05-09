@@ -908,11 +908,6 @@ export const TOOL_SCHEMAS: Tool[] = [
             'Run without activating/focusing target tabs or windows where Chrome APIs allow it. Default: false',
         },
         refresh: { type: 'boolean', description: 'Refresh before running (default false)' },
-        captureNetwork: {
-          type: 'boolean',
-          description: 'Capture network snippets for debugging (default false)',
-        },
-        returnLogs: { type: 'boolean', description: 'Return run logs (default false)' },
         timeoutMs: { type: 'number', description: 'Global timeout in ms (optional)' },
         startUrl: {
           type: 'string',
