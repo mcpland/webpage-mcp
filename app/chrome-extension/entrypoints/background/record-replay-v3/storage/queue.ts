@@ -17,9 +17,6 @@ import {
 } from '../engine/queue/queue';
 import { RR_V3_STORES, withTransaction } from './db';
 
-/** Default lease TTL in milliseconds (from shared config to avoid drift) */
-const DEFAULT_LEASE_TTL_MS = DEFAULT_QUEUE_CONFIG.leaseTtlMs;
-
 interface ResolvedQueueAdmissionConfig {
   maxQueuedRuns: number;
   maxQueuedRunsPerFlow: number;
@@ -43,6 +40,12 @@ function resolveQueueAdmissionConfig(config: Partial<RunQueueConfig> = {}): Reso
       : DEFAULT_QUEUE_CONFIG.maxQueuedRunsPerFlow ?? 25;
 
   return { maxQueuedRuns, maxQueuedRunsPerFlow };
+}
+
+function resolveLeaseTtlMs(config: Partial<RunQueueConfig> = {}): number {
+  return typeof config.leaseTtlMs === 'number' && Number.isFinite(config.leaseTtlMs)
+    ? Math.max(1, Math.floor(config.leaseTtlMs))
+    : DEFAULT_QUEUE_CONFIG.leaseTtlMs;
 }
 
 async function countIndex(index: IDBIndex, query?: IDBValidKey | IDBKeyRange): Promise<number> {
@@ -164,6 +167,7 @@ async function enforceQueuedBackpressure(
  */
 export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue {
   const admissionConfig = resolveQueueAdmissionConfig(config);
+  const leaseTtlMs = resolveLeaseTtlMs(config);
 
   return {
     async enqueue(input: EnqueueInput): Promise<RunQueueItem> {
@@ -220,7 +224,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
           attempt: existing.attempt + 1,
           lease: {
             ownerId,
-            expiresAt: now + DEFAULT_LEASE_TTL_MS,
+            expiresAt: now + leaseTtlMs,
           },
         };
 
@@ -275,7 +279,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
                 updatedAt: now,
                 lease: {
                   ...lease,
-                  expiresAt: now + DEFAULT_LEASE_TTL_MS,
+                  expiresAt: now + leaseTtlMs,
                 },
               };
 
@@ -459,7 +463,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
                 updatedAt: now,
                 lease: {
                   ownerId,
-                  expiresAt: now + DEFAULT_LEASE_TTL_MS,
+                  expiresAt: now + leaseTtlMs,
                 },
               };
 
@@ -509,7 +513,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
           attempt: nextAttempt,
           lease: {
             ownerId,
-            expiresAt: now + DEFAULT_LEASE_TTL_MS,
+            expiresAt: now + leaseTtlMs,
           },
         };
 
@@ -541,7 +545,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
           updatedAt: now,
           lease: {
             ownerId,
-            expiresAt: now + DEFAULT_LEASE_TTL_MS,
+            expiresAt: now + leaseTtlMs,
           },
         };
 

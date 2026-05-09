@@ -491,6 +491,29 @@ describe('V3 Queue contracts', () => {
       expect(otherAfter!.lease!.expiresAt).toBe(otherExpiresAtBefore);
     });
 
+    it('uses configured lease TTL for claims, pauses, and heartbeats', async () => {
+      const leaseTtlMs = 2_500;
+      const queue = createQueueStore({ leaseTtlMs });
+      const t0 = 1_700_000_000_000;
+      const t1 = t0 + 1_000;
+
+      await queue.enqueue({ id: 'run-claim', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: 'run-paused', flowId: 'flow-1', priority: 1 });
+
+      const claimed = await queue.claimNext('owner-1', t0);
+      expect(claimed!.lease!.expiresAt).toBe(t0 + leaseTtlMs);
+
+      await queue.markPaused('run-paused', 'owner-1', t0);
+      const paused = await queue.get('run-paused');
+      expect(paused!.lease!.expiresAt).toBe(t0 + leaseTtlMs);
+
+      await queue.heartbeat('owner-1', t1);
+      const renewedClaim = await queue.get('run-claim');
+      const renewedPaused = await queue.get('run-paused');
+      expect(renewedClaim!.lease!.expiresAt).toBe(t1 + leaseTtlMs);
+      expect(renewedPaused!.lease!.expiresAt).toBe(t1 + leaseTtlMs);
+    });
+
     it('is a no-op when the owner has no leased items', async () => {
       const queue = createQueueStore();
       await expect(queue.heartbeat('owner-1', 1_700_000_000_000)).resolves.toBeUndefined();
