@@ -6974,6 +6974,20 @@ class FlowUpdateTool {
 
     const flow = await createStoragePort().flows.get(flowId as FlowV3['id']);
     if (!flow) return createErrorResponse(`Flow not found: ${flowId}`);
+    const initialRevision = calculateWorkflowRevision(flow);
+    const requireCurrentRevision =
+      typeof args?.requireCurrentRevision === 'string' ? args.requireCurrentRevision.trim() : '';
+    if (requireCurrentRevision && requireCurrentRevision !== initialRevision) {
+      return createWorkflowRevisionConflictError(
+        {
+          code: 'STALE_WORKFLOW_REVISION',
+          flowId,
+          expectedRevision: requireCurrentRevision,
+          currentRevision: initialRevision,
+        },
+        'flow_update requireCurrentRevision does not match the current workflow revision',
+      );
+    }
 
     let changed = false;
 
@@ -7043,7 +7057,22 @@ class FlowUpdateTool {
     }
 
     flow.updatedAt = new Date().toISOString();
-    await saveFlowToV3(flow);
+    try {
+      await saveFlowToV3(flow, {
+        expectedRevision: initialRevision,
+        revisionConflictMessage:
+          'flow_update could not save because the workflow changed during update',
+      });
+    } catch (error) {
+      const conflict = getFlowRevisionConflict(error);
+      if (conflict) {
+        return createWorkflowRevisionConflictError(
+          conflict,
+          'flow_update could not save because the workflow changed during update',
+        );
+      }
+      throw error;
+    }
 
     return {
       content: [

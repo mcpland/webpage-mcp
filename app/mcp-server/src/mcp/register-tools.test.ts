@@ -78,6 +78,7 @@ describe('dynamic published flow tools', () => {
     clearDynamicFlowCacheForSession('dynamic-flow-conflict');
     clearDynamicFlowCacheForSession('dynamic-flow-cache-invalidation');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-refresh');
+    clearDynamicFlowCacheForSession('flow-update-schema');
   });
 
   afterEach(() => {
@@ -277,6 +278,24 @@ describe('dynamic published flow tools', () => {
 
     expect(tools.find((tool) => tool.name === 'workflow_run')).toBeTruthy();
     expect(tools.find((tool) => tool.name === 'flow.signup')).toBeUndefined();
+  });
+
+  it('exposes flow_update with a current revision guard', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [],
+    });
+    const ctx = createContext('flow-update-schema', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const updateTool = tools.find((tool) => tool.name === 'flow_update');
+    const input = updateTool?.inputSchema as {
+      properties?: Record<string, any>;
+    };
+
+    expect(input.properties?.requireCurrentRevision).toMatchObject({
+      type: 'string',
+    });
   });
 
   it('exposes workflow_stabilize with strict safety schema', async () => {

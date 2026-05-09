@@ -248,6 +248,11 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'If true, applies flow.meta.recording.parameterSuggestions to nodes and auto-adds missing variables.',
         },
+        requireCurrentRevision: {
+          type: 'string',
+          description:
+            'Optional workflow revision guard. When provided, the update is rejected if the current workflow revision differs.',
+        },
       },
       required: ['flowId'],
     },

@@ -4012,6 +4012,42 @@ describe("recording/editing/flow toolchain integration", () => {
     ]);
   });
 
+  it("flowUpdateTool rejects stale requireCurrentRevision before saving", async () => {
+    const flowId = `flow-update-stale-revision-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "node-1" as any,
+          kind: "navigate",
+          config: { url: "https://example.com" },
+        },
+      ]),
+    );
+
+    const result = await flowUpdateTool.execute({
+      flowId,
+      name: "Stale update",
+      requireCurrentRevision: "rev-fnv1a32-stale",
+    });
+    const payload = parseToolPayload(result);
+    const unchanged = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({
+      success: false,
+      status: "stale_revision",
+      error: {
+        code: "STALE_WORKFLOW_REVISION",
+        category: "conflict",
+        retryable: true,
+        expectedRevision: "rev-fnv1a32-stale",
+        currentRevision: expect.stringMatching(/^rev-fnv1a32-/),
+      },
+    });
+    expect(unchanged?.name).toBe(`Flow ${flowId}`);
+    expect(mocks.saveFlowToV3).not.toHaveBeenCalled();
+  });
+
   it("flowUpdateTool recalculates entryNodeId when the node graph is replaced", async () => {
     const flowId = `flow-update-entry-${Date.now()}`;
     await createStoragePort().flows.save(
