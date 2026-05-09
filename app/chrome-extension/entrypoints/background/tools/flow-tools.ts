@@ -261,6 +261,9 @@ interface WaitRepairEvidence {
   resourceType?: string;
   currentFrame?: boolean;
   matchCount?: number;
+  requestGroup?: string;
+  quietWindowMs?: number;
+  longLived?: boolean;
 }
 
 interface WaitRepairPlan {
@@ -2349,6 +2352,9 @@ function sanitizeEvent(event: RunEvent, sensitiveVariableNames: ReadonlySet<stri
     if (event.frameId !== undefined) base.frameId = event.frameId;
     if (event.method !== undefined) base.method = truncateString(event.method, 20);
     if (event.fromCache !== undefined) base.fromCache = event.fromCache;
+    if (event.requestGroup !== undefined) base.requestGroup = truncateString(event.requestGroup, 80);
+    if (event.quietWindowMs !== undefined) base.quietWindowMs = event.quietWindowMs;
+    if (event.longLived !== undefined) base.longLived = event.longLived;
   }
   if (event.type === 'dom.visibility') {
     base.selector = sanitizeDebugValue(event.selector, 'selector', sensitiveVariableNames);
@@ -3542,19 +3548,38 @@ function buildNetworkIdleWaitPlanFromEvent(
   const observedNodeId = getEventNodeId(event);
   if (!observedNodeId || !observedNodeIds.has(observedNodeId)) return undefined;
   if (event.currentFrame !== true || typeof event.endedAt !== 'number') return undefined;
+  const resourceType = typeof event.resourceType === 'string' ? event.resourceType : undefined;
+  const longLived =
+    event.longLived === true || resourceType === 'websocket' || resourceType === 'eventsource';
+  const requestGroup = typeof event.requestGroup === 'string' ? event.requestGroup.trim() : '';
+  const quietWindowMs =
+    typeof event.quietWindowMs === 'number' && Number.isFinite(event.quietWindowMs)
+      ? Math.max(0, Math.floor(event.quietWindowMs))
+      : undefined;
+  const hasRelevantRequestGroup =
+    requestGroup === 'relevant' ||
+    requestGroup === 'current-node' ||
+    requestGroup === 'current-frame';
+  const hasQuietWindow = quietWindowMs !== undefined && quietWindowMs >= 750;
+  const strongEvidence = !longLived && hasRelevantRequestGroup && hasQuietWindow;
   return {
     op: 'addWaitBefore',
     nodeId,
-    status: 'suggestion',
-    reason: 'A preceding step produced current-frame network activity before this failure; add a bounded network-idle wait.',
-    confidence: 0.86,
-    condition: { kind: 'networkIdle', idleMs: 750 },
+    status: strongEvidence ? 'autoPatch' : 'suggestion',
+    reason: strongEvidence
+      ? 'A preceding step produced relevant current-frame network activity followed by a bounded quiet window.'
+      : 'A preceding step produced current-frame network activity, but relevant request group and quiet-window evidence are required before automatic network-idle repair.',
+    confidence: strongEvidence ? 0.9 : 0.72,
+    condition: { kind: 'networkIdle', idleMs: quietWindowMs ?? 750 },
     evidence: {
       runId: run.id,
       observedNodeId,
       eventType: 'network.observed',
-      resourceType: typeof event.resourceType === 'string' ? event.resourceType : undefined,
+      resourceType,
       currentFrame: true,
+      ...(requestGroup ? { requestGroup } : {}),
+      ...(quietWindowMs !== undefined ? { quietWindowMs } : {}),
+      ...(longLived ? { longLived } : {}),
     },
   };
 }

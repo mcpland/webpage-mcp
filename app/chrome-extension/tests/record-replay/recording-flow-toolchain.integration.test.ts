@@ -2233,6 +2233,75 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("workflowRepairTool does not auto-apply network idle waits without quiet-window evidence", async () => {
+    const flowId = `workflow-repair-network-idle-suggest-${Date.now()}`;
+    const runId = `${flowId}-run`;
+    const storage = createStoragePort();
+    await storage.flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: { target: { selector: "#email" }, value: "alice@example.com" },
+        },
+      ]),
+    );
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: runId as any,
+      flowId: flowId as any,
+      status: "failed",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      currentNodeId: "fill-1" as any,
+      attempt: 1,
+      maxAttempts: 1,
+      error: { code: "TARGET_NOT_FOUND", message: "Missing input" },
+      nextSeq: 1,
+    } as RunRecordV3);
+    await storage.events.append({
+      runId: runId as any,
+      type: "node.failed",
+      nodeId: "fill-1" as any,
+      attempt: 1,
+      error: { code: "TARGET_NOT_FOUND", message: "Missing input" },
+      decision: "stop",
+    });
+    await storage.events.append({
+      runId: runId as any,
+      type: "network.observed",
+      nodeId: "fill-1" as any,
+      requestId: "req-1",
+      url: "https://example.com/api/options",
+      resourceType: "fetch",
+      currentFrame: true,
+      startedAt: 1_000,
+      endedAt: 1_100,
+      status: 200,
+      method: "GET",
+    });
+
+    const result = await workflowRepairTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(payload.waitRepairs).toEqual([
+      expect.objectContaining({
+        op: "addWaitBefore",
+        nodeId: "fill-1",
+        status: "suggestion",
+        condition: { kind: "networkIdle", idleMs: 750 },
+        confidence: expect.any(Number),
+        evidence: expect.objectContaining({
+          eventType: "network.observed",
+          currentFrame: true,
+          resourceType: "fetch",
+        }),
+      }),
+    ]);
+    expect(payload.waitRepairs[0].confidence).toBeLessThan(0.85);
+    expect(payload.plannedAutoFixes).not.toContain("wait_repair");
+  });
+
   it("workflowRepairTool scopes flow-level onError retry to safe nodes", async () => {
     const flowId = `workflow-repair-onerror-retry-${Date.now()}`;
     await createStoragePort().flows.save(

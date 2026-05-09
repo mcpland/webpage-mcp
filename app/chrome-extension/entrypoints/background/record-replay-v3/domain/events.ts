@@ -154,6 +154,9 @@ export type RunEvent =
       frameId?: number | string;
       method?: string;
       fromCache?: boolean;
+      requestGroup?: string;
+      quietWindowMs?: number;
+      longLived?: boolean;
     })
   | (EventBase & {
       type: 'dom.visibility';
