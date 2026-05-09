@@ -3527,6 +3527,160 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("workflowStabilizeTool applies risk override elevations before automatic replay", async () => {
+    const flowId = `workflow-stabilize-risk-override-block-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "fill-1" as any,
+          kind: "fill",
+          config: { target: { selector: "#email" }, value: "alice@example.com" },
+        },
+      ]),
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 2,
+      apply: true,
+      safety: {
+        nodeRiskOverrides: {
+          "fill-1": "dangerous",
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+    expect(payload).toMatchObject({
+      success: true,
+      applied: false,
+      safety: {
+        risk: "dangerous",
+        executionMode: "analyzeOnly",
+        executedIterations: 0,
+        blocked: true,
+        blockedReason: "dangerous workflow defaults to analyze-only",
+        sideEffects: {
+          dangerous: 1,
+          idempotent: 0,
+        },
+      },
+    });
+    expect(payload.warnings.map((warning: { code: string }) => warning.code)).toEqual(
+      expect.arrayContaining(["STABILIZE_REPLAY_BLOCKED", "STABILIZE_APPLY_SKIPPED"]),
+    );
+  });
+
+  it("workflowStabilizeTool uses risk overrides for automatic segment boundaries", async () => {
+    const flowId = `workflow-stabilize-risk-override-segment-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "wait-1" as any,
+            kind: "wait",
+            config: { condition: { kind: "selector", selector: "#ready" } },
+          },
+          {
+            id: "fill-1" as any,
+            kind: "fill",
+            config: { target: { selector: "#email" }, value: "alice@example.com" },
+          },
+        ],
+        {
+          edges: [
+            {
+              id: "edge-wait-fill" as any,
+              from: "wait-1" as any,
+              to: "fill-1" as any,
+            },
+          ],
+        },
+      ),
+    );
+    mocks.enqueueRunAndWait.mockImplementation(
+      async (input: { stopBeforeNodeId?: string }) => {
+        expect(input.stopBeforeNodeId).toBe("fill-1");
+        return {
+          run: {
+            id: `${flowId}-run`,
+            flowId,
+            status: "stopped_at_boundary",
+            currentNodeId: "fill-1",
+            stopBeforeNodeId: "fill-1",
+            tookMs: 5,
+          } as any,
+          events: [],
+          result: {
+            runId: `${flowId}-run`,
+            success: true,
+            status: "stopped_at_boundary",
+            currentNodeId: "fill-1",
+            summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+            outputs: null,
+            eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+          },
+        };
+      },
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      minPassRate: 1,
+      apply: false,
+      safety: {
+        segments: {
+          mode: "stopBeforeDangerous",
+        },
+        nodeRiskOverrides: {
+          "fill-1": "dangerous",
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).toHaveBeenCalledTimes(1);
+    expect(payload).toMatchObject({
+      success: true,
+      applied: false,
+      stable: false,
+      safety: {
+        risk: "dangerous",
+        executionMode: "auto",
+        executedIterations: 1,
+        segments: {
+          mode: "stopBeforeDangerous",
+          stopBeforeNodeId: "fill-1",
+          autoBoundary: true,
+          boundaryNodeId: "fill-1",
+          boundaryKind: "fill",
+          boundaryRisk: "dangerous",
+          boundarySource: "override",
+        },
+      },
+      quality: {
+        level: "unverified",
+        countedValidationRuns: 0,
+      },
+    });
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "STABILIZE_AUTO_SEGMENT_BOUNDARY",
+          nodeId: "fill-1",
+        }),
+      ]),
+    );
+    expect(payload.warnings.map((warning: { code: string }) => warning.code)).not.toContain(
+      "STABILIZE_REPLAY_BLOCKED",
+    );
+  });
+
   it("workflowStabilizeTool stops auto validation before the first dangerous node", async () => {
     const flowId = `workflow-stabilize-auto-segment-${Date.now()}`;
     await createStoragePort().flows.save(

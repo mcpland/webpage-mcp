@@ -328,6 +328,8 @@ interface WorkflowResetValidation {
   errors: WorkflowStabilizeValidationError[];
 }
 
+type WorkflowSegmentBoundarySource = 'static' | 'runtime' | 'override';
+
 interface WorkflowSegmentPlan {
   mode: 'none' | 'explicit' | 'stopBeforeDangerous';
   stopBeforeNodeId?: string;
@@ -336,7 +338,7 @@ interface WorkflowSegmentPlan {
   boundaryNodeId?: string;
   boundaryKind?: string;
   boundaryRisk?: WorkflowRiskProfile;
-  boundarySource?: 'static' | 'runtime';
+  boundarySource?: WorkflowSegmentBoundarySource;
   ambiguousBoundaryNodeIds?: string[];
 }
 
@@ -537,12 +539,24 @@ function getPublicNodeExecutionMetadata(
   };
 }
 
-function summarizeWorkflowSideEffects(flow: FlowV3): WorkflowSideEffectSummary {
+function sideEffectSummaryKeyForRisk(risk: WorkflowRiskProfile): keyof WorkflowSideEffectSummary {
+  return risk === 'unknown' ? 'unknown' : risk;
+}
+
+function summarizeWorkflowSideEffects(
+  flow: FlowV3,
+  nodeRiskOverrides: ReadonlyMap<string, WorkflowRiskProfile> = new Map(),
+): WorkflowSideEffectSummary {
   const summary = createEmptyWorkflowSideEffectSummary();
   for (const node of Array.isArray(flow.nodes) ? flow.nodes : []) {
-    const profile = getNodeSideEffectProfile(node);
-    summary[profile.category] += 1;
-    if (!isKnownWorkflowSideEffectKind(node.kind)) {
+    const override = nodeRiskOverrides.get(String(node.id));
+    if (override) {
+      summary[sideEffectSummaryKeyForRisk(override)] += 1;
+    } else {
+      const profile = getNodeSideEffectProfile(node);
+      summary[profile.category] += 1;
+    }
+    if (!override && !isKnownWorkflowSideEffectKind(node.kind)) {
       summary.unknown += 1;
     }
   }
@@ -725,20 +739,24 @@ function buildRuntimeNodeRiskMap(evidence: RuntimeSideEffectEvidence): Map<strin
 function getSegmentBoundaryRisk(
   node: FlowV3['nodes'][number],
   runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
-): { risk: WorkflowRiskProfile; source: 'static' | 'runtime' } {
-  const staticRisk = getNodeWorkflowRisk(node);
+  nodeRiskOverrides: ReadonlyMap<string, WorkflowRiskProfile>,
+): { risk: WorkflowRiskProfile; source: WorkflowSegmentBoundarySource } {
+  const overrideRisk = nodeRiskOverrides.get(String(node.id));
+  const staticRisk = overrideRisk ?? getNodeWorkflowRisk(node);
+  const staticSource: WorkflowSegmentBoundarySource = overrideRisk ? 'override' : 'static';
   const runtimeRisk = runtimeNodeRisks.get(String(node.id));
-  if (runtimeRisk && riskRank(runtimeRisk) >= riskRank(staticRisk)) {
+  if (runtimeRisk && riskRank(runtimeRisk) > riskRank(staticRisk)) {
     return { risk: runtimeRisk, source: 'runtime' };
   }
-  return { risk: staticRisk, source: 'static' };
+  return { risk: staticRisk, source: staticSource };
 }
 
 function isRiskBoundary(
   node: FlowV3['nodes'][number],
   runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
+  nodeRiskOverrides: ReadonlyMap<string, WorkflowRiskProfile>,
 ): boolean {
-  const { risk } = getSegmentBoundaryRisk(node, runtimeNodeRisks);
+  const { risk } = getSegmentBoundaryRisk(node, runtimeNodeRisks, nodeRiskOverrides);
   return risk === 'dangerous' || risk === 'unknown';
 }
 
@@ -749,6 +767,7 @@ function findNodeByPublicId(flow: FlowV3, nodeId: string): FlowV3['nodes'][numbe
 function findUniqueFirstRiskBoundary(
   flow: FlowV3,
   runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
+  nodeRiskOverrides: ReadonlyMap<string, WorkflowRiskProfile>,
 ): { node?: FlowV3['nodes'][number]; ambiguousNodeIds?: string[] } {
   const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
   const nodeById = new Map(nodes.map((node) => [String(node.id), node]));
@@ -766,7 +785,7 @@ function findUniqueFirstRiskBoundary(
     if (!node) {
       continue;
     }
-    if (isRiskBoundary(node, runtimeNodeRisks)) {
+    if (isRiskBoundary(node, runtimeNodeRisks, nodeRiskOverrides)) {
       boundaryNodeIds.add(nodeId);
       continue;
     }
@@ -791,6 +810,7 @@ function buildWorkflowSegmentPlan(
   flow: FlowV3,
   args: any,
   runtimeEvidence: RuntimeSideEffectEvidence,
+  nodeRiskOverrides: ReadonlyMap<string, WorkflowRiskProfile> = new Map(),
 ): WorkflowSegmentPlan {
   const segments = isRecord(args?.safety?.segments) ? args.safety.segments : {};
   if (segments.mode === 'explicit') {
@@ -814,7 +834,7 @@ function buildWorkflowSegmentPlan(
   }
 
   const runtimeNodeRisks = buildRuntimeNodeRiskMap(runtimeEvidence);
-  const boundaryResult = findUniqueFirstRiskBoundary(flow, runtimeNodeRisks);
+  const boundaryResult = findUniqueFirstRiskBoundary(flow, runtimeNodeRisks, nodeRiskOverrides);
   const boundaryNode = boundaryResult.node;
   if (!boundaryNode) {
     return {
@@ -825,7 +845,7 @@ function buildWorkflowSegmentPlan(
     };
   }
 
-  const boundary = getSegmentBoundaryRisk(boundaryNode, runtimeNodeRisks);
+  const boundary = getSegmentBoundaryRisk(boundaryNode, runtimeNodeRisks, nodeRiskOverrides);
   return {
     mode: 'stopBeforeDangerous',
     stopBeforeNodeId: String(boundaryNode.id),
@@ -5478,12 +5498,12 @@ class WorkflowStabilizeTool {
     const recommendationsBeforeApply = buildRepairRecommendations(workingFlow, hints, recentRuns);
     const descriptor = buildWorkflowToolDescriptor(workingFlow);
     let runtimeSideEffectEvidence = collectRuntimeSideEffectEvidence(recentRuns);
-    const staticSideEffects = descriptor.sideEffects.summary;
+    let staticSideEffects = descriptor.sideEffects.summary;
     let sideEffects = mergeWorkflowSideEffectSummaries(
       staticSideEffects,
       runtimeSideEffectEvidence.summary,
     );
-    const staticRisk = classifyWorkflowRisk(staticSideEffects);
+    let staticRisk = classifyWorkflowRisk(staticSideEffects);
     let risk = maxWorkflowRisk(staticRisk, runtimeSideEffectEvidence.risk);
     const executionMode = normalizeExecutionMode(args?.safety?.executionMode);
     const iterations = clampNumber(args?.iterations, 3, 1, 10);
@@ -5519,15 +5539,6 @@ class WorkflowStabilizeTool {
       });
     }
     let runtimeSideEffectWarningEmitted = false;
-    if (riskRank(runtimeSideEffectEvidence.risk) > riskRank(staticRisk)) {
-      warnings.push({
-        code: 'STABILIZE_RUNTIME_SIDE_EFFECT_EVIDENCE',
-        category: 'safety',
-        message:
-          'Recent runtime observations indicate stronger side-effect risk than static node classification.',
-      });
-      runtimeSideEffectWarningEmitted = true;
-    }
 
     const nodeRiskOverrides =
       args?.safety?.nodeRiskOverrides &&
@@ -5536,6 +5547,7 @@ class WorkflowStabilizeTool {
         ? (args.safety.nodeRiskOverrides as Record<string, WorkflowRiskProfile>)
         : {};
     const acceptedRiskOverrideNodeIds: string[] = [];
+    const acceptedRiskOverrides = new Map<string, WorkflowRiskProfile>();
     for (const [nodeId, override] of Object.entries(nodeRiskOverrides)) {
       if (override !== 'safe' && override !== 'idempotent' && override !== 'dangerous') {
         warnings.push({
@@ -5547,8 +5559,8 @@ class WorkflowStabilizeTool {
         });
         continue;
       }
-      const node = workingFlow.nodes.find((candidate) => candidate.id === nodeId);
-      const actualRisk = node ? getNodeSideEffectProfile(node).category : 'unknown';
+      const node = workingFlow.nodes.find((candidate) => String(candidate.id) === nodeId);
+      const actualRisk = node ? getNodeWorkflowRisk(node) : 'unknown';
       if (riskRank(override) < riskRank(actualRisk) && !hasApprovalReference) {
         warnings.push({
           code: 'UNTRUSTED_RISK_DOWNGRADE_IGNORED',
@@ -5563,6 +5575,25 @@ class WorkflowStabilizeTool {
       if (override !== actualRisk) {
         acceptedRiskOverrideNodeIds.push(nodeId);
       }
+      acceptedRiskOverrides.set(nodeId, override);
+    }
+    if (acceptedRiskOverrides.size > 0) {
+      staticSideEffects = summarizeWorkflowSideEffects(workingFlow, acceptedRiskOverrides);
+      sideEffects = mergeWorkflowSideEffectSummaries(
+        staticSideEffects,
+        runtimeSideEffectEvidence.summary,
+      );
+      staticRisk = classifyWorkflowRisk(staticSideEffects);
+      risk = maxWorkflowRisk(staticRisk, runtimeSideEffectEvidence.risk);
+    }
+    if (riskRank(runtimeSideEffectEvidence.risk) > riskRank(staticRisk)) {
+      warnings.push({
+        code: 'STABILIZE_RUNTIME_SIDE_EFFECT_EVIDENCE',
+        category: 'safety',
+        message:
+          'Recent runtime observations indicate stronger side-effect risk than static node classification.',
+      });
+      runtimeSideEffectWarningEmitted = true;
     }
 
     const requestsExternalSideEffects = args?.safety?.allowExternalSideEffects === true;
@@ -5575,7 +5606,12 @@ class WorkflowStabilizeTool {
       targetFlow: workingFlow,
       hasApprovalReference,
     });
-    const segmentPlan = buildWorkflowSegmentPlan(workingFlow, args, runtimeSideEffectEvidence);
+    const segmentPlan = buildWorkflowSegmentPlan(
+      workingFlow,
+      args,
+      runtimeSideEffectEvidence,
+      acceptedRiskOverrides,
+    );
     const hasAutoRiskBoundary =
       segmentPlan.mode === 'stopBeforeDangerous' && Boolean(segmentPlan.stopBeforeNodeId);
     const boundaryError = await validateStabilizeReplayBoundary(args, executionMode);
