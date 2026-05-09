@@ -14,6 +14,7 @@ import { failed, invalid, ok } from '../registry';
 import type { ActionHandler, ElementTarget } from '../types';
 import {
   ensureElementVisible,
+  hasElementTargetSpec,
   logSelectorFallback,
   resolveString,
   selectorLocator,
@@ -25,15 +26,6 @@ import {
 function extractToolError(result: unknown, fallback: string): string {
   const content = (result as { content?: Array<{ text?: string }> })?.content;
   return content?.find((c) => typeof c?.text === 'string')?.text || fallback;
-}
-
-/** Check if target has valid selector specification */
-function hasTargetSpec(target: unknown): boolean {
-  if (!target || typeof target !== 'object') return false;
-  const t = target as { ref?: unknown; candidates?: unknown };
-  const hasRef = typeof t.ref === 'string' && t.ref.trim().length > 0;
-  const hasCandidates = Array.isArray(t.candidates) && t.candidates.length > 0;
-  return hasRef || hasCandidates;
 }
 
 /** Strip frame prefix from composite selector */
@@ -55,8 +47,8 @@ export const keyHandler: ActionHandler<'key'> = {
       return invalid('Missing keys parameter');
     }
 
-    if (action.params.target !== undefined && !hasTargetSpec(action.params.target)) {
-      return invalid('Target must include a non-empty ref or selector candidates');
+    if (action.params.target !== undefined && !hasElementTargetSpec(action.params.target)) {
+      return invalid('Target must include a non-empty ref, selector, or selector candidates');
     }
 
     return ok();

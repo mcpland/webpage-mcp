@@ -12,16 +12,13 @@ import { handleCallTool } from '@/entrypoints/background/tools';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { failed, invalid, ok, tryResolveNumber } from '../registry';
 import type { ActionHandler, ElementTarget } from '../types';
-import { logSelectorFallback, selectorLocator, sendMessageToTab, toSelectorTarget } from './common';
-
-/** Check if target has valid selector specification */
-function hasTargetSpec(target: unknown): boolean {
-  if (!target || typeof target !== 'object') return false;
-  const t = target as { ref?: unknown; candidates?: unknown };
-  const hasRef = typeof t.ref === 'string' && t.ref.trim().length > 0;
-  const hasCandidates = Array.isArray(t.candidates) && t.candidates.length > 0;
-  return hasRef || hasCandidates;
-}
+import {
+  hasElementTargetSpec,
+  logSelectorFallback,
+  selectorLocator,
+  sendMessageToTab,
+  toSelectorTarget,
+} from './common';
 
 /** Strip frame prefix from composite selector */
 function stripCompositeSelector(selector: string): string {
@@ -48,8 +45,8 @@ export const scrollHandler: ActionHandler<'scroll'> = {
       return invalid(`Unsupported scroll mode: ${String(mode)}`);
     }
 
-    if ((mode === 'element' || mode === 'container') && !hasTargetSpec(action.params.target)) {
-      return invalid(`Scroll mode "${mode}" requires a target ref or selector candidates`);
+    if ((mode === 'element' || mode === 'container') && !hasElementTargetSpec(action.params.target)) {
+      return invalid(`Scroll mode "${mode}" requires a target ref, selector, or selector candidates`);
     }
 
     return ok();

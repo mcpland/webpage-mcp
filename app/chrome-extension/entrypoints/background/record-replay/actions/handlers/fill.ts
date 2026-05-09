@@ -15,6 +15,7 @@ import { failed, invalid, ok } from '../registry';
 import type { ActionHandler } from '../types';
 import {
   ensureElementVisible,
+  hasElementTargetSpec,
   logSelectorFallback,
   resolveString,
   selectorLocator,
@@ -26,15 +27,12 @@ export const fillHandler: ActionHandler<'fill'> = {
   type: 'fill',
 
   validate: (action) => {
-    const target = action.params.target as { ref?: string; candidates?: unknown[] };
-    const hasRef = typeof target?.ref === 'string' && target.ref.trim().length > 0;
-    const hasCandidates = Array.isArray(target?.candidates) && target.candidates.length > 0;
     const hasValue = action.params.value !== undefined;
 
     if (!hasValue) {
       return invalid('Missing value parameter');
     }
-    if (!hasRef && !hasCandidates) {
+    if (!hasElementTargetSpec(action.params.target)) {
       return invalid('Missing target selector or ref');
     }
     return ok();

@@ -26,6 +26,7 @@ import type {
 import {
   clampInt,
   ensureElementVisible,
+  hasElementTargetSpec,
   logSelectorFallback,
   readTabUrl,
   selectorLocator,
@@ -145,11 +146,9 @@ async function executeClick<T extends 'click' | 'dblclick'>(
 function validateClickTarget(target: {
   ref?: string;
   candidates?: unknown[];
+  selector?: unknown;
 }): { ok: true } | { ok: false; errors: [string, ...string[]] } {
-  const hasRef = typeof target?.ref === 'string' && target.ref.trim().length > 0;
-  const hasCandidates = Array.isArray(target?.candidates) && target.candidates.length > 0;
-
-  if (hasRef || hasCandidates) {
+  if (hasElementTargetSpec(target)) {
     return ok();
   }
   return invalid('Missing target selector or ref');
@@ -159,7 +158,7 @@ export const clickHandler: ActionHandler<'click'> = {
   type: 'click',
 
   validate: (action) =>
-    validateClickTarget(action.params.target as { ref?: string; candidates?: unknown[] }),
+    validateClickTarget(action.params.target as { ref?: string; candidates?: unknown[]; selector?: unknown }),
 
   describe: (action) => {
     const target = action.params.target;
@@ -178,7 +177,7 @@ export const dblclickHandler: ActionHandler<'dblclick'> = {
   type: 'dblclick',
 
   validate: (action) =>
-    validateClickTarget(action.params.target as { ref?: string; candidates?: unknown[] }),
+    validateClickTarget(action.params.target as { ref?: string; candidates?: unknown[]; selector?: unknown }),
 
   describe: (action) => {
     const target = action.params.target;

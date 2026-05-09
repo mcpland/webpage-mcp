@@ -90,6 +90,43 @@ export interface ConvertedSelectorTarget {
   firstCssOrAttr?: string;
 }
 
+function hasResolvableStringSpec(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as {
+    kind?: unknown;
+    ref?: unknown;
+    expr?: { code?: unknown };
+    parts?: unknown;
+  };
+  if (candidate.kind === 'var') {
+    return typeof candidate.ref === 'string' && candidate.ref.trim().length > 0;
+  }
+  if (candidate.kind === 'expr') {
+    return typeof candidate.expr?.code === 'string' && candidate.expr.code.trim().length > 0;
+  }
+  if (candidate.kind === 'template') {
+    return Array.isArray(candidate.parts) && candidate.parts.length > 0;
+  }
+  return false;
+}
+
+/** Check if target has a locator specification accepted by toSelectorTarget(). */
+export function hasElementTargetSpec(target: unknown): boolean {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) {
+    return false;
+  }
+  const t = target as { ref?: unknown; candidates?: unknown; selector?: unknown };
+  const hasRef = typeof t.ref === 'string' && t.ref.trim().length > 0;
+  const hasCandidates = Array.isArray(t.candidates) && t.candidates.length > 0;
+  const hasSelector = hasResolvableStringSpec(t.selector);
+  return hasRef || hasCandidates || hasSelector;
+}
+
 /**
  * Convert Action ElementTarget to shared SelectorTarget
  *

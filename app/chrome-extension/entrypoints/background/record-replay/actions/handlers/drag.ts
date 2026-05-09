@@ -16,6 +16,7 @@ import { failed, invalid, ok } from '../registry';
 import type { ActionHandler, ElementTarget, Point, VariableStore } from '../types';
 import {
   ensureElementVisible,
+  hasElementTargetSpec,
   logSelectorFallback,
   selectorLocator,
   toSelectorTarget,
@@ -24,15 +25,6 @@ import {
 interface Coordinates {
   x: number;
   y: number;
-}
-
-/** Check if target has valid selector specification */
-function hasTargetSpec(target: unknown): boolean {
-  if (!target || typeof target !== 'object') return false;
-  const t = target as { ref?: unknown; candidates?: unknown };
-  const hasRef = typeof t.ref === 'string' && t.ref.trim().length > 0;
-  const hasCandidates = Array.isArray(t.candidates) && t.candidates.length > 0;
-  return hasRef || hasCandidates;
 }
 
 /** Check if value is a finite number */
@@ -76,7 +68,7 @@ async function locateTarget(
   | { ok: true; ref?: string; firstCandidateType?: string; resolvedBy?: string }
   | { ok: false; error: string; code: 'TARGET_NOT_FOUND' | 'ELEMENT_NOT_VISIBLE' }
 > {
-  if (!target || !hasTargetSpec(target)) {
+  if (!target || !hasElementTargetSpec(target)) {
     return { ok: true };
   }
 
@@ -118,16 +110,16 @@ export const dragHandler: ActionHandler<'drag'> = {
       return invalid('path must contain at least two points with finite x/y coordinates');
     }
 
-    const hasStart = hasTargetSpec(action.params.start);
-    const hasEnd = hasTargetSpec(action.params.end);
+    const hasStart = hasElementTargetSpec(action.params.start);
+    const hasEnd = hasElementTargetSpec(action.params.end);
     const hasPath = !!pathEndpoints;
 
     // Must have either target spec or path coordinates
     if (!hasStart && !hasPath) {
-      return invalid('Drag start must include a non-empty ref or selector candidates');
+      return invalid('Drag start must include a non-empty ref, selector, or selector candidates');
     }
     if (!hasEnd && !hasPath) {
-      return invalid('Drag end must include a non-empty ref or selector candidates');
+      return invalid('Drag end must include a non-empty ref, selector, or selector candidates');
     }
 
     return ok();

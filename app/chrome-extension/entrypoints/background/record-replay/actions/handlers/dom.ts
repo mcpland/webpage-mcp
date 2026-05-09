@@ -23,6 +23,7 @@ import type {
   VariableStore,
 } from '../types';
 import {
+  hasElementTargetSpec,
   interpolateBraces,
   logSelectorFallback,
   resolveString,
@@ -56,18 +57,6 @@ interface ResolvedTarget {
 // ================================
 // Shared Utilities
 // ================================
-
-/**
- * Check if target has valid ref or candidates
- * Accepts unknown to safely handle malformed input in validate()
- */
-function hasValidTarget(target: unknown): boolean {
-  if (typeof target !== 'object' || target === null) return false;
-  const t = target as { ref?: unknown; candidates?: unknown };
-  const hasRef = typeof t.ref === 'string' && t.ref.trim().length > 0;
-  const hasCandidates = Array.isArray(t.candidates) && t.candidates.length > 0;
-  return hasRef || hasCandidates;
-}
 
 /**
  * Strip frame prefix from composite selector (e.g., "frame|>selector" -> "selector")
@@ -178,8 +167,8 @@ export const triggerEventHandler: ActionHandler<'triggerEvent'> = {
   type: 'triggerEvent',
 
   validate: (action) => {
-    if (!hasValidTarget(action.params.target)) {
-      return invalid('triggerEvent requires a target ref or selector candidates');
+    if (!hasElementTargetSpec(action.params.target)) {
+      return invalid('triggerEvent requires a target ref, selector, or selector candidates');
     }
 
     const event = action.params.event;
@@ -296,8 +285,8 @@ export const setAttributeHandler: ActionHandler<'setAttribute'> = {
   type: 'setAttribute',
 
   validate: (action) => {
-    if (!hasValidTarget(action.params.target)) {
-      return invalid('setAttribute requires a target ref or selector candidates');
+    if (!hasElementTargetSpec(action.params.target)) {
+      return invalid('setAttribute requires a target ref, selector, or selector candidates');
     }
 
     const name = action.params.name;
