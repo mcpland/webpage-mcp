@@ -50,7 +50,6 @@ import {
 } from '../record-replay-v3/flows/sensitive';
 import { findEntryNodeId } from '../record-replay-v3/storage/import/flow-convert';
 import { applyFlowParameterSuggestions } from './flow-parameterization';
-import { hasDisallowedPublicUrlScheme } from './browser/common';
 import type { NodePolicy, RetryPolicy } from '../record-replay-v3/domain/policy';
 import {
   compareSelectorCandidates,
@@ -754,6 +753,17 @@ function hostMatchesBoundary(host: string, allowedHost: string): boolean {
   return normalizedHost === normalizedAllowed || normalizedHost.endsWith(`.${normalizedAllowed}`);
 }
 
+function isAllowedPublicStartUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    return false;
+  }
+
+  return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+}
+
 function validateStabilizeStartUrlBoundary(args: any): WorkflowStabilizeValidationError | undefined {
   const startUrl = typeof args?.startUrl === 'string' ? args.startUrl.trim() : '';
   if (!startUrl) {
@@ -830,7 +840,7 @@ function validateWorkflowStabilizeArgs(args: any): WorkflowStabilizeValidationEr
     });
   }
   const startUrl = typeof args?.startUrl === 'string' ? args.startUrl.trim() : '';
-  if (startUrl && hasDisallowedPublicUrlScheme(startUrl)) {
+  if (startUrl && !isAllowedPublicStartUrl(startUrl)) {
     errors.push({
       code: 'INVALID_START_URL',
       path: '/startUrl',

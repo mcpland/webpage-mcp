@@ -3842,6 +3842,31 @@ describe("recording/editing/flow toolchain integration", () => {
     );
   });
 
+  it("workflowStabilizeTool rejects startUrl values without an http scheme", async () => {
+    const result = await workflowStabilizeTool.execute({
+      flowId: "flow-a",
+      startUrl: "example.com",
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(true);
+    expect(payload).toMatchObject({
+      success: false,
+      status: "validation_failed",
+      error: {
+        code: "INVALID_WORKFLOW_STABILIZE_ARGS",
+        errors: [
+          {
+            code: "INVALID_START_URL",
+            path: "/startUrl",
+            message: "Only http:// and https:// URLs are allowed for startUrl",
+          },
+        ],
+      },
+    });
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+  });
+
   it("flowUpdateTool applies parameter suggestions and persists the edited flow", async () => {
     const flowId = `flow-update-${Date.now()}`;
     await createStoragePort().flows.save(
