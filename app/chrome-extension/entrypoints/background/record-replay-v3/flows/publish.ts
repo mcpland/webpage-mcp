@@ -317,17 +317,9 @@ function getQualityStaleReason(
   if ((quality.consecutiveFailureCount ?? 0) >= 3) {
     return "consecutive_failures";
   }
-  if (
-    flow.meta?.runtime?.dslVersion &&
-    flow.meta.runtime.dslVersion !== FLOW_DSL_VERSION
-  ) {
-    return "dsl_version_mismatch";
-  }
-  if (
-    flow.meta?.runtime?.nodeSemanticsVersion &&
-    flow.meta.runtime.nodeSemanticsVersion !== FLOW_NODE_SEMANTICS_VERSION
-  ) {
-    return "node_semantics_mismatch";
+  const runtimeCompatibility = getWorkflowRuntimeQualityCompatibility(flow);
+  if (runtimeCompatibility.staleReason) {
+    return runtimeCompatibility.staleReason;
   }
   return quality.staleReason ?? null;
 }
@@ -405,6 +397,103 @@ function buildWorkflowSloSummary(
   };
 }
 
+type WorkflowRuntimeVersionChange =
+  | "same"
+  | "patch"
+  | "minor"
+  | "major"
+  | "legacy_unknown"
+  | "future";
+
+interface ParsedWorkflowRuntimeVersion {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+function parseWorkflowRuntimeVersion(value: string | undefined): ParsedWorkflowRuntimeVersion | null {
+  if (!value) {
+    return null;
+  }
+  const match = value.trim().match(/^(\d+)(?:[.-](\d+))?(?:[.-](\d+))?/);
+  if (!match) {
+    return null;
+  }
+  const major = Number(match[1]);
+  const minor = Number(match[2] ?? 0);
+  const patch = Number(match[3] ?? 0);
+  if (![major, minor, patch].every((part) => Number.isFinite(part) && part >= 0)) {
+    return null;
+  }
+  return { major, minor, patch };
+}
+
+function compareParsedWorkflowRuntimeVersion(
+  before: ParsedWorkflowRuntimeVersion,
+  target: ParsedWorkflowRuntimeVersion,
+): number {
+  if (before.major !== target.major) return before.major - target.major;
+  if (before.minor !== target.minor) return before.minor - target.minor;
+  return before.patch - target.patch;
+}
+
+function classifyWorkflowRuntimeVersionChange(
+  beforeValue: string | undefined,
+  targetValue: string,
+): WorkflowRuntimeVersionChange {
+  if (!beforeValue || beforeValue === targetValue) {
+    return "same";
+  }
+  const before = parseWorkflowRuntimeVersion(beforeValue);
+  const target = parseWorkflowRuntimeVersion(targetValue);
+  if (!before || !target) {
+    return "legacy_unknown";
+  }
+  if (compareParsedWorkflowRuntimeVersion(before, target) > 0) {
+    return "future";
+  }
+  if (before.major !== target.major) return "major";
+  if (before.minor !== target.minor) return "minor";
+  if (before.patch !== target.patch) return "patch";
+  return "same";
+}
+
+function getWorkflowRuntimeQualityCompatibility(flow: FlowV3): {
+  staleReason: string | null;
+  blocked: boolean;
+} {
+  const runtime = flow.meta?.runtime;
+  const dslChange = classifyWorkflowRuntimeVersionChange(runtime?.dslVersion, FLOW_DSL_VERSION);
+  const nodeSemanticsChange = classifyWorkflowRuntimeVersionChange(
+    runtime?.nodeSemanticsVersion,
+    FLOW_NODE_SEMANTICS_VERSION,
+  );
+  let staleReason: string | null = null;
+  let blocked = false;
+  const mark = (reason: string, isBlocked: boolean) => {
+    staleReason = staleReason ?? reason;
+    blocked = blocked || isBlocked;
+  };
+
+  if (dslChange === "major") {
+    mark("dsl_major_mismatch", true);
+  } else if (dslChange === "future") {
+    mark("dsl_future_version", true);
+  } else if (dslChange !== "same") {
+    mark("dsl_version_mismatch", false);
+  }
+
+  if (nodeSemanticsChange === "major") {
+    mark("node_semantics_major_mismatch", true);
+  } else if (nodeSemanticsChange === "future") {
+    mark("node_semantics_future_version", true);
+  } else if (nodeSemanticsChange !== "same") {
+    mark("node_semantics_mismatch", false);
+  }
+
+  return { staleReason, blocked };
+}
+
 export function buildWorkflowQualitySummary(
   flow: FlowV3,
   options: { nowMs?: number } = {},
@@ -412,13 +501,17 @@ export function buildWorkflowQualitySummary(
   const currentRevision = calculateWorkflowRevision(flow);
   const quality = flow.meta?.quality;
   const nowMs = options.nowMs ?? Date.now();
+  const runtimeCompatibility = getWorkflowRuntimeQualityCompatibility(flow);
   const staleReason = getQualityStaleReason(flow, quality, currentRevision, nowMs);
   const explicitStatus = quality?.status;
   const suspendedOrBlocked = explicitStatus === "paused" || explicitStatus === "blocked";
-  const current = Boolean(quality) && !staleReason && !suspendedOrBlocked;
+  const runtimeBlocked = runtimeCompatibility.blocked;
+  const current = Boolean(quality) && !staleReason && !suspendedOrBlocked && !runtimeBlocked;
   const level = quality?.level ?? "unverified";
   const status =
-    !quality
+    runtimeBlocked
+      ? "blocked"
+      : !quality
       ? "draft"
       : suspendedOrBlocked
         ? explicitStatus

@@ -1805,6 +1805,54 @@ describe("recording/editing/flow toolchain integration", () => {
         },
       });
     }
+
+    const runtimeBlockedFlowId = `workflow-run-runtime-blocked-${Date.now()}`;
+    const runtimeBlockedFlow = createFlow(runtimeBlockedFlowId, [
+      {
+        id: "click-1" as any,
+        kind: "click",
+        config: { target: { selector: "#submit" } },
+      },
+    ]);
+    const runtimeBlockedRevision = calculateWorkflowRevision(runtimeBlockedFlow);
+    runtimeBlockedFlow.meta = {
+      runtime: {
+        dslVersion: previousRuntimeVersion(FLOW_DSL_VERSION, "major"),
+        nodeSemanticsVersion: FLOW_NODE_SEMANTICS_VERSION,
+      },
+      quality: {
+        revision: runtimeBlockedRevision,
+        status: "stable",
+        level: "stable",
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        lastValidatedAt: new Date(0).toISOString() as any,
+        freshnessExpiresAt: new Date(Date.now() + 60_000).toISOString() as any,
+      },
+    };
+    await storage.flows.save(runtimeBlockedFlow);
+
+    const runtimeBlockedResult = await flowRunTool.execute({ flowId: runtimeBlockedFlowId });
+    const runtimeBlockedPayload = parseToolPayload(runtimeBlockedResult);
+
+    expect(runtimeBlockedResult.isError).toBe(true);
+    expect(runtimeBlockedPayload).toMatchObject({
+      success: false,
+      flowId: runtimeBlockedFlowId,
+      status: "blocked",
+      quality: {
+        status: "blocked",
+        current: false,
+        staleReason: "dsl_major_mismatch",
+      },
+      error: {
+        code: "WORKFLOW_BLOCKED",
+        retryable: false,
+      },
+    });
     expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
   });
 
