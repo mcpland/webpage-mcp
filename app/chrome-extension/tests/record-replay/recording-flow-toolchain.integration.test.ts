@@ -3022,6 +3022,52 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.meta?.quality).toBeUndefined();
   });
 
+  it("workflowStabilizeTool blocks sandboxReplay without a bounded test account reset or segment", async () => {
+    const flowId = `workflow-stabilize-sandbox-bounded-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      startUrl: "https://staging.example.com/app/dashboard",
+      safety: {
+        executionMode: "sandboxReplay",
+        testEnvironment: {
+          name: "staging",
+          origins: ["https://staging.example.com"],
+          pathPrefixes: ["/app"],
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+    expect(payload.safety).toMatchObject({
+      executionMode: "analyzeOnly",
+      blocked: true,
+      blockedReason: expect.stringContaining("bounded test replay"),
+      sandboxReplay: {
+        mode: "bounded_test_replay",
+        rollback: "not_guaranteed",
+      },
+    });
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "SANDBOX_REPLAY_REQUIRES_BOUNDED_ENVIRONMENT" }),
+        expect.objectContaining({ code: "STABILIZE_SANDBOX_REPLAY_LIMITED" }),
+      ]),
+    );
+  });
+
   it("workflowStabilizeTool elevates risk from mutating runtime network evidence", async () => {
     const flowId = `workflow-stabilize-runtime-side-effect-${Date.now()}`;
     const runId = `${flowId}-run`;

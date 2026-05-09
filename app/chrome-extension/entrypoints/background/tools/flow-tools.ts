@@ -945,6 +945,58 @@ function validateStabilizeStartUrlBoundary(args: any): WorkflowStabilizeValidati
   return undefined;
 }
 
+function getStabilizeTestEnvironment(args: any): Record<string, unknown> | undefined {
+  return args?.safety?.testEnvironment &&
+    typeof args.safety.testEnvironment === 'object' &&
+    !Array.isArray(args.safety.testEnvironment)
+    ? args.safety.testEnvironment
+    : undefined;
+}
+
+function getSandboxReplayBoundaryError(
+  args: any,
+  resetValidation: WorkflowResetValidation,
+): WorkflowStabilizeValidationError | undefined {
+  const testEnvironment = getStabilizeTestEnvironment(args);
+  if (!testEnvironment) {
+    return {
+      code: 'SANDBOX_REPLAY_REQUIRES_TEST_ENVIRONMENT',
+      path: '/safety/testEnvironment',
+      message: 'sandboxReplay requires safety.testEnvironment',
+    };
+  }
+
+  const name = typeof testEnvironment.name === 'string' ? testEnvironment.name.trim() : '';
+  const origins = normalizeBoundaryStrings(testEnvironment.origins);
+  if (!name || origins.length === 0) {
+    return {
+      code: 'SANDBOX_REPLAY_TEST_ENVIRONMENT_INCOMPLETE',
+      path: '/safety/testEnvironment',
+      message: 'sandboxReplay requires safety.testEnvironment.name and at least one origin',
+    };
+  }
+
+  const accountLabel =
+    typeof testEnvironment.accountLabel === 'string' && testEnvironment.accountLabel.trim()
+      ? testEnvironment.accountLabel.trim()
+      : '';
+  const segments = isRecord(args?.safety?.segments) ? args.safety.segments : {};
+  const hasExplicitSegmentBoundary =
+    segments.mode === 'explicit' &&
+    ((typeof segments.stopBeforeNodeId === 'string' && segments.stopBeforeNodeId.trim()) ||
+      (typeof segments.endNodeId === 'string' && segments.endNodeId.trim()));
+  if (!accountLabel && !resetValidation.plan && !hasExplicitSegmentBoundary) {
+    return {
+      code: 'SANDBOX_REPLAY_REQUIRES_BOUNDED_ENVIRONMENT',
+      path: '/safety',
+      message:
+        'sandboxReplay is bounded test replay, not a rollback sandbox; provide a test account label, reset workflow, or explicit segment boundary',
+    };
+  }
+
+  return undefined;
+}
+
 function validateWorkflowStabilizeArgs(args: any): WorkflowStabilizeValidationError[] {
   const errors: WorkflowStabilizeValidationError[] = [];
   const flowId = typeof args?.flowId === 'string' ? args.flowId.trim() : '';
@@ -5195,6 +5247,10 @@ class WorkflowStabilizeTool {
       hasApprovalReference,
     });
     const boundaryError = validateStabilizeStartUrlBoundary(args);
+    const sandboxReplayBoundaryError =
+      executionMode === 'sandboxReplay'
+        ? getSandboxReplayBoundaryError(args, resetValidation)
+        : undefined;
     let blockedReason: string | undefined;
     if (runtimeMigrationBlock) {
       blockedReason = `workflow runtime compatibility requires workflow_migrate before stabilization: ${runtimeMigrationBlock.staleReason ?? runtimeMigrationBlock.decision}`;
@@ -5208,8 +5264,8 @@ class WorkflowStabilizeTool {
       !hasApprovalReference
     ) {
       blockedReason = 'external side effects require a trusted approval reference';
-    } else if (executionMode === 'sandboxReplay' && !args?.safety?.testEnvironment) {
-      blockedReason = 'sandboxReplay requires safety.testEnvironment';
+    } else if (sandboxReplayBoundaryError && !boundaryError) {
+      blockedReason = sandboxReplayBoundaryError.message;
     }
 
     if (blockedReason) {
@@ -5234,6 +5290,22 @@ class WorkflowStabilizeTool {
         message: boundaryError.message,
       });
     }
+    if (sandboxReplayBoundaryError) {
+      warnings.push({
+        code: sandboxReplayBoundaryError.code,
+        category: 'safety',
+        path: sandboxReplayBoundaryError.path,
+        message: sandboxReplayBoundaryError.message,
+      });
+    }
+    if (executionMode === 'sandboxReplay') {
+      warnings.push({
+        code: 'STABILIZE_SANDBOX_REPLAY_LIMITED',
+        category: 'safety',
+        message:
+          'sandboxReplay is bounded test replay in a declared environment; browser automation does not guarantee rollback of external side effects.',
+      });
+    }
     if (args?.safety?.segments?.mode === 'stopBeforeDangerous') {
       warnings.push({
         code: 'STABILIZE_AUTO_SEGMENT_NOT_AVAILABLE',
@@ -5243,7 +5315,11 @@ class WorkflowStabilizeTool {
       });
     }
 
-    const validationBlockedReason = blockedReason ?? resetValidation.blockedReason ?? boundaryError?.message;
+    const validationBlockedReason =
+      blockedReason ??
+      resetValidation.blockedReason ??
+      boundaryError?.message ??
+      sandboxReplayBoundaryError?.message;
     const canRunValidation = !validationBlockedReason && executionMode !== 'analyzeOnly';
     const requestedValidationIterations =
       risk === 'dangerous' || risk === 'unknown'
@@ -5569,6 +5645,15 @@ class WorkflowStabilizeTool {
               ...(validationBlockedReason ? { blockedReason: validationBlockedReason } : {}),
               sideEffects,
               runtimeEvidence: runtimeSideEffectEvidence,
+              ...(executionMode === 'sandboxReplay'
+                ? {
+                    sandboxReplay: {
+                      mode: 'bounded_test_replay',
+                      rollback: 'not_guaranteed',
+                      requires: ['testEnvironment', 'testAccountOrResetOrSegment'],
+                    },
+                  }
+                : {}),
               approvalReferenceAccepted: hasApprovalReference,
               ...(approvalCheck.approval
                 ? {
