@@ -305,33 +305,45 @@ export function projectAndValidateWorkflowOutputs(
   );
   if (!hasNodeKey) {
     const aliasProjected: JsonObject = {};
+    const errors: WorkflowOutputValidationError[] = [];
+    const redacted: string[] = [];
     for (const declaration of declared) {
+      const outputPath = `/outputs/${declaration.as}`;
       if (Object.prototype.hasOwnProperty.call(outputRoot, declaration.as)) {
-        aliasProjected[declaration.as] = toJsonValue(outputRoot[declaration.as]);
-      } else if (declaration.required !== false) {
-        return {
-          ok: false,
-          outputs: aliasProjected,
-          declaredOutputCount: declared.length,
-          redacted: [],
-          errors: [
-            {
-              code: "OUTPUT_MISSING",
-              path: `/outputs/${declaration.as}`,
-              message: `Required workflow output is missing: ${declaration.as}`,
+        const jsonValue = toJsonValue(outputRoot[declaration.as]);
+        const schemaErrors = validateAgainstSchema(declaration.schema ?? {}, jsonValue, outputPath);
+        if (schemaErrors.length > 0) {
+          errors.push(
+            ...schemaErrors.map((error) => ({
+              ...error,
               nodeId: declaration.nodeId,
               alias: declaration.as,
-            },
-          ],
-        };
+            })),
+          );
+          continue;
+        }
+        if (shouldRedactOutput(declaration, jsonValue)) {
+          aliasProjected[declaration.as] = REDACTED;
+          redacted.push(declaration.as);
+        } else {
+          aliasProjected[declaration.as] = jsonValue;
+        }
+      } else if (declaration.required !== false) {
+        errors.push({
+          code: "OUTPUT_MISSING",
+          path: outputPath,
+          message: `Required workflow output is missing: ${declaration.as}`,
+          nodeId: declaration.nodeId,
+          alias: declaration.as,
+        });
       }
     }
     return {
-      ok: true,
+      ok: errors.length === 0,
       outputs: aliasProjected,
       declaredOutputCount: declared.length,
-      redacted: [],
-      errors: [],
+      redacted,
+      errors,
     };
   }
 

@@ -4825,6 +4825,68 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("flowRunTool validates and redacts alias-shaped declared outputs", async () => {
+    const flowId = `flow-run-output-alias-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(
+        flowId,
+        [
+          {
+            id: "extract-1" as any,
+            kind: "extract",
+            config: { selector: "#account" },
+          },
+        ],
+        {
+          meta: {
+            exposedOutputs: [
+              {
+                nodeId: "extract-1" as any,
+                as: "accountId",
+                schema: { type: "string", pattern: "^acct_[0-9]+$" },
+              },
+              {
+                nodeId: "extract-1" as any,
+                as: "apiToken",
+                schema: { type: "string" },
+                sensitive: true,
+              },
+            ],
+          },
+        },
+      ),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-output-alias" } as any,
+      events: [],
+      result: {
+        runId: "run-output-alias",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 2 },
+        outputs: {
+          accountId: "acct_123",
+          apiToken: "opaque-runtime-token",
+        },
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(payload.outputs).toEqual({
+      accountId: "acct_123",
+      apiToken: "[REDACTED]",
+    });
+    expect(payload.outputValidation).toMatchObject({
+      ok: true,
+      redacted: ["apiToken"],
+    });
+  });
+
   it("flowRunTool marks failed runs as MCP errors", async () => {
     const flowId = `flow-run-failed-${Date.now()}`;
     await createStoragePort().flows.save(
