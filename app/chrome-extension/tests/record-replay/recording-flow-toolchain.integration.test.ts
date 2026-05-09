@@ -2709,6 +2709,70 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(JSON.stringify(updated?.meta?.quality?.validationContext)).not.toContain("user:secret");
   });
 
+  it("workflowStabilizeTool records object test environment context", async () => {
+    const flowId = `workflow-stabilize-test-env-context-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: {
+        id: "run-stabilize-test-env-context",
+        flowId,
+        status: "succeeded",
+        tookMs: 5,
+      } as any,
+      events: [],
+      result: {
+        runId: "run-stabilize-test-env-context",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 5 },
+        outputs: null,
+        eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+      },
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      minPassRate: 1,
+      startUrl: "https://staging.example.com/app/dashboard",
+      safety: {
+        executionMode: "sandboxReplay",
+        allowedHosts: ["staging.example.com"],
+        testEnvironment: {
+          name: "staging",
+          accountLabel: "staging-user@example.com",
+          origins: ["https://staging.example.com"],
+          pathPrefixes: ["/app"],
+        },
+      },
+    });
+    const updated = await createStoragePort().flows.get(flowId as any);
+    const validationContext = updated?.meta?.quality?.validationContext;
+
+    expect(result.isError).toBe(false);
+    expect(validationContext).toMatchObject({
+      executionMode: "sandboxReplay",
+      testEnvironment: "staging",
+      accountLabel: expect.stringMatching(/^fnv1a32:/),
+      allowedHosts: ["staging.example.com"],
+      testEnvironmentOrigins: ["https://staging.example.com"],
+      testEnvironmentPathPrefixes: ["/app"],
+    });
+    expect(JSON.stringify(validationContext)).not.toContain("staging-user@example.com");
+    expect(updated?.meta?.quality?.validationRecords?.[0]?.validationContext).toMatchObject({
+      testEnvironment: "staging",
+      testEnvironmentOrigins: ["https://staging.example.com"],
+    });
+  });
+
   it("workflowStabilizeTool runs reset workflow before validation without scoring reset runs", async () => {
     const flowId = `workflow-stabilize-reset-${Date.now()}`;
     const resetFlowId = `workflow-reset-${Date.now()}`;

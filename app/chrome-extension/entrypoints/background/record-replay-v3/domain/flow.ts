@@ -137,6 +137,9 @@ export interface FlowQualityValidationContext {
   background?: boolean;
   executionMode?: string;
   testEnvironment?: string;
+  testEnvironmentOrigins?: string[];
+  testEnvironmentPathPrefixes?: string[];
+  allowedHosts?: string[];
   siteFingerprint?: string;
   runGroupId?: string;
   tabOwnership?: "owned" | "current";

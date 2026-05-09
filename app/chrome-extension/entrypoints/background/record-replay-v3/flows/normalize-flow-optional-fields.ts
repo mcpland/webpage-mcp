@@ -405,6 +405,17 @@ function normalizeFlowQualityValidationContext(
       (context as Record<string, unknown>)[field] = text;
     }
   }
+  const stringArrayFields = [
+    "testEnvironmentOrigins",
+    "testEnvironmentPathPrefixes",
+    "allowedHosts",
+  ] as const;
+  for (const field of stringArrayFields) {
+    const values = normalizeStringArray(value[field], 20);
+    if (values) {
+      (context as Record<string, unknown>)[field] = values;
+    }
+  }
   if (context.argsHashAlgorithm !== "hmac-sha256") {
     delete context.argsHashAlgorithm;
   }

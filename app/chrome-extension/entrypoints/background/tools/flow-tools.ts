@@ -4239,6 +4239,46 @@ function getLastFailure(runs: WorkflowStabilizeRunSummary[]):
   };
 }
 
+function buildValidationEnvironmentContext(args: any): Partial<NonNullable<FlowQualityMeta['validationContext']>> {
+  const context: Partial<NonNullable<FlowQualityMeta['validationContext']>> = {};
+  const legacyTestEnvironment =
+    typeof args?.safety?.testEnvironment === 'string' && args.safety.testEnvironment.trim()
+      ? args.safety.testEnvironment.trim()
+      : '';
+  if (legacyTestEnvironment) {
+    context.testEnvironment = legacyTestEnvironment;
+  }
+
+  const testEnvironment = getStabilizeTestEnvironment(args);
+  if (testEnvironment) {
+    const name = typeof testEnvironment.name === 'string' ? testEnvironment.name.trim() : '';
+    const accountLabel =
+      typeof testEnvironment.accountLabel === 'string' ? testEnvironment.accountLabel.trim() : '';
+    const origins = normalizeBoundaryStrings(testEnvironment.origins);
+    const pathPrefixes = normalizeBoundaryStrings(testEnvironment.pathPrefixes);
+    if (name) {
+      context.testEnvironment = name;
+    }
+    const accountLabelHash = createPublicStringHash(accountLabel);
+    if (accountLabelHash) {
+      context.accountLabel = accountLabelHash;
+    }
+    if (origins.length > 0) {
+      context.testEnvironmentOrigins = origins;
+    }
+    if (pathPrefixes.length > 0) {
+      context.testEnvironmentPathPrefixes = pathPrefixes;
+    }
+  }
+
+  const allowedHosts = normalizeBoundaryStrings(args?.safety?.allowedHosts);
+  if (allowedHosts.length > 0) {
+    context.allowedHosts = allowedHosts;
+  }
+
+  return context;
+}
+
 async function buildStabilizeQualityRecord(options: {
   flow: FlowV3;
   args: any;
@@ -4280,6 +4320,7 @@ async function buildStabilizeQualityRecord(options: {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const userAgentHash = createPublicStringHash(globalThis.navigator?.userAgent);
   const extensionVersion = getExtensionVersion();
+  const validationEnvironment = buildValidationEnvironmentContext(options.args);
   const validationStartUrl =
     typeof options.args?.startUrl === 'string' && options.args.startUrl.trim()
       ? options.args.startUrl.trim()
@@ -4291,10 +4332,7 @@ async function buildStabilizeQualityRecord(options: {
     tabTarget: options.args?.tabTarget === 'new' ? 'new' : 'current',
     background: options.args?.background === true,
     executionMode: options.executionMode,
-    ...(typeof options.args?.safety?.testEnvironment === 'string' &&
-    options.args.safety.testEnvironment.trim()
-      ? { testEnvironment: options.args.safety.testEnvironment.trim() }
-      : {}),
+    ...validationEnvironment,
     ...(siteFingerprint ? { siteFingerprint } : {}),
     runGroupId: options.runGroupId ?? `stabilize-${Date.now().toString(36)}`,
     tabOwnership: options.args?.tabTarget === 'new' ? 'owned' : 'current',
