@@ -509,6 +509,28 @@ function jsonToolResult(payload: Record<string, unknown>, isError = false): Tool
   };
 }
 
+async function persistScheduledRevalidationCatchUp(flow: FlowV3): Promise<FlowV3> {
+  const initialCatchUp = markScheduledRevalidationCatchUp(flow);
+  if (!initialCatchUp.changed) {
+    return flow;
+  }
+
+  const flowId = flow.id as FlowId;
+  const storage = createStoragePort();
+  return withFlowWriteLock(flowId, async () => {
+    const latest = await storage.flows.get(flowId);
+    if (!latest) {
+      return flow;
+    }
+    const catchUp = markScheduledRevalidationCatchUp(latest);
+    if (catchUp.changed) {
+      await storage.flows.save(catchUp.flow);
+      return catchUp.flow;
+    }
+    return latest;
+  });
+}
+
 function workflowToolError(
   code: string,
   message: string,
@@ -1206,11 +1228,7 @@ class ListPublishedTool {
     const storage = createStoragePort();
     const flows: FlowV3[] = [];
     for (const flow of await storage.flows.list()) {
-      const catchUp = markScheduledRevalidationCatchUp(flow);
-      if (catchUp.changed) {
-        await storage.flows.save(catchUp.flow);
-      }
-      flows.push(catchUp.flow);
+      flows.push(await persistScheduledRevalidationCatchUp(flow));
     }
     const list = listPublishedFlowDetails(flows);
     return {

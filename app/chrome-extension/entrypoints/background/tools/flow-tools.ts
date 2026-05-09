@@ -938,6 +938,28 @@ function createWorkflowRevisionConflictError(
   };
 }
 
+async function persistScheduledRevalidationCatchUp(flow: FlowV3): Promise<FlowV3> {
+  const initialCatchUp = markScheduledRevalidationCatchUp(flow);
+  if (!initialCatchUp.changed) {
+    return flow;
+  }
+
+  const flowId = flow.id as FlowId;
+  const storage = createStoragePort();
+  return withFlowWriteLock(flowId, async () => {
+    const latest = await storage.flows.get(flowId);
+    if (!latest) {
+      return flow;
+    }
+    const catchUp = markScheduledRevalidationCatchUp(latest);
+    if (catchUp.changed) {
+      await storage.flows.save(catchUp.flow);
+      return catchUp.flow;
+    }
+    return latest;
+  });
+}
+
 function isSafeForFlowDefaultRetry(node: FlowV3['nodes'][number]): boolean {
   return workflowSideEffectAllowsRetry(getNodeSideEffectProfile(node), 'flowDefault');
 }
@@ -4358,11 +4380,7 @@ class WorkflowDescribeTool {
           : `Published workflow not found: ${requestedWorkflow}`,
       );
     }
-    const catchUp = markScheduledRevalidationCatchUp(flow);
-    if (catchUp.changed) {
-      await createStoragePort().flows.save(catchUp.flow);
-      flow = catchUp.flow;
-    }
+    flow = await persistScheduledRevalidationCatchUp(flow);
 
     const publishedInfo = getPublishedFlowInfo(flow);
     const descriptor = buildWorkflowToolDescriptor(flow);
