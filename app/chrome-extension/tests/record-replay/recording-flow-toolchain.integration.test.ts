@@ -11,7 +11,10 @@ import {
   type FlowV3,
 } from "@/entrypoints/background/record-replay-v3/domain/flow";
 import { calculateWorkflowRevision } from "@/entrypoints/background/record-replay-v3/flows/publish";
-import { tryAcquireWorkflowCatalogWriteLock } from "@/entrypoints/background/record-replay-v3/flows/write-lock";
+import {
+  tryAcquireFlowWriteLock,
+  tryAcquireWorkflowCatalogWriteLock,
+} from "@/entrypoints/background/record-replay-v3/flows/write-lock";
 import { WORKFLOW_SECRET_STORE_KEY } from "@/entrypoints/background/record-replay-v3/secrets";
 import { deleteRrV3Db } from "@/entrypoints/background/record-replay-v3/storage/db";
 
@@ -4416,6 +4419,64 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.meta?.audit?.events?.map((event) => event.kind)).toEqual(
       expect.arrayContaining(["approval_revoke", "quality_downgrade"]),
     );
+  });
+
+  it("workflowApprovalStoreTool reports retryable audit conflicts without stale flow writes", async () => {
+    const flowId = `workflow-approval-revoke-conflict-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "click-1" as any,
+        kind: "click",
+        config: { target: { selector: "#submit" } },
+      },
+    ]);
+    const revision = calculateWorkflowRevision(flow);
+    await createStoragePort().flows.save(flow);
+    let approvalStore: any = {
+      "approval-revoke-conflict": {
+        approvedBy: "policy",
+        approvedAt: "2026-01-01T00:00:00.000Z",
+        expiresAt: "2999-01-01T00:00:00.000Z",
+        scope: {
+          flowId,
+          revision,
+        },
+      },
+    };
+    asMock(chrome.storage.local.get).mockImplementation(async () => ({
+      webpageMcpWorkflowApprovals: approvalStore,
+    }));
+    asMock(chrome.storage.local.set).mockImplementation(async (payload: any) => {
+      approvalStore = payload.webpageMcpWorkflowApprovals;
+    });
+
+    const release = tryAcquireFlowWriteLock(flowId as any);
+    try {
+      const revoke = parseToolPayload(
+        await workflowApprovalStoreTool.execute({
+          operation: "revoke",
+          approvalId: "approval-revoke-conflict",
+        }),
+      );
+      const persisted = await createStoragePort().flows.get(flowId as any);
+
+      expect(revoke).toMatchObject({
+        success: true,
+        operation: "revoke",
+        audit: {
+          audited: false,
+          flowId,
+          reason: "flow_write_conflict",
+          retryable: true,
+        },
+      });
+      expect(approvalStore["approval-revoke-conflict"]).toMatchObject({
+        revoked: true,
+      });
+      expect(persisted?.meta?.audit?.events).toBeUndefined();
+    } finally {
+      release();
+    }
   });
 
   it("workflowStabilizeTool applies safe repairs and reruns validation", async () => {

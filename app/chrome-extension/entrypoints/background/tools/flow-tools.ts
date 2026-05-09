@@ -6289,64 +6289,81 @@ async function auditApprovalRevocation(
   approval: StoredWorkflowApproval,
   reason: string,
 ): Promise<Record<string, unknown>> {
-  const flow = await createStoragePort().flows.get(approval.scope.flowId as FlowId);
-  if (!flow) {
-    return {
-      audited: false,
-      flowId: approval.scope.flowId,
-      reason: 'flow_not_found',
-    };
-  }
-  const previousQuality = buildWorkflowQualitySummary(flow);
-  let nextFlow: FlowV3 = {
-    ...flow,
-    meta: {
-      ...(flow.meta ?? {}),
-      ...(flow.meta?.quality
-        ? { quality: markQualityStaleForApprovalRevoke(flow.meta.quality) }
-        : {}),
-    },
-  };
-  const nextQuality = buildWorkflowQualitySummary(nextFlow);
-  nextFlow = appendWorkflowAuditEvent(nextFlow, {
-    kind: 'approval_revoke',
-    actor: 'mcp',
-    revision: calculateWorkflowRevision(nextFlow),
-    previousStatus: previousQuality.status,
-    nextStatus: nextQuality.status,
-    reason: 'workflow_approval_store_revoke',
-    metadata: {
-      approvalId: approval.approvalId,
-      approvedBy: approval.approvedBy,
-      approvedAt: approval.approvedAt,
-      expiresAt: approval.expiresAt,
-      scope: approval.scope,
-      revokeReason: reason || 'not_specified',
-    },
-  });
-  if (previousQuality.current && !nextQuality.current) {
-    nextFlow = appendWorkflowAuditEvent(nextFlow, {
-      kind: 'quality_downgrade',
-      actor: 'mcp',
-      revision: calculateWorkflowRevision(nextFlow),
-      previousStatus: previousQuality.status,
-      nextStatus: nextQuality.status,
-      reason: 'approval_revoked',
-      metadata: {
-        approvalId: approval.approvalId,
-        tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_APPROVAL_STORE,
-      },
+  const flowId = approval.scope.flowId as FlowId;
+  const storage = createStoragePort();
+  try {
+    return await withFlowWriteLock(flowId, async () => {
+      const flow = await storage.flows.get(flowId);
+      if (!flow) {
+        return {
+          audited: false,
+          flowId: approval.scope.flowId,
+          reason: 'flow_not_found',
+        };
+      }
+      const previousQuality = buildWorkflowQualitySummary(flow);
+      let nextFlow: FlowV3 = {
+        ...flow,
+        updatedAt: new Date().toISOString() as FlowV3['updatedAt'],
+        meta: {
+          ...(flow.meta ?? {}),
+          ...(flow.meta?.quality
+            ? { quality: markQualityStaleForApprovalRevoke(flow.meta.quality) }
+            : {}),
+        },
+      };
+      const nextQuality = buildWorkflowQualitySummary(nextFlow);
+      nextFlow = appendWorkflowAuditEvent(nextFlow, {
+        kind: 'approval_revoke',
+        actor: 'mcp',
+        revision: calculateWorkflowRevision(nextFlow),
+        previousStatus: previousQuality.status,
+        nextStatus: nextQuality.status,
+        reason: 'workflow_approval_store_revoke',
+        metadata: {
+          approvalId: approval.approvalId,
+          approvedBy: approval.approvedBy,
+          approvedAt: approval.approvedAt,
+          expiresAt: approval.expiresAt,
+          scope: approval.scope,
+          revokeReason: reason || 'not_specified',
+        },
+      });
+      if (previousQuality.current && !nextQuality.current) {
+        nextFlow = appendWorkflowAuditEvent(nextFlow, {
+          kind: 'quality_downgrade',
+          actor: 'mcp',
+          revision: calculateWorkflowRevision(nextFlow),
+          previousStatus: previousQuality.status,
+          nextStatus: nextQuality.status,
+          reason: 'approval_revoked',
+          metadata: {
+            approvalId: approval.approvalId,
+            tool: TOOL_NAMES.RECORD_REPLAY.WORKFLOW_APPROVAL_STORE,
+          },
+        });
+      }
+      await storage.flows.save(nextFlow);
+      return {
+        audited: true,
+        flowId: flow.id,
+        workflow: getPublishedFlowInfo(flow)?.slug,
+        previousStatus: previousQuality.status,
+        nextStatus: nextQuality.status,
+        staleReason: nextQuality.staleReason ?? null,
+      };
     });
+  } catch (error) {
+    if (error instanceof FlowWriteConflictError) {
+      return {
+        audited: false,
+        flowId: approval.scope.flowId,
+        reason: 'flow_write_conflict',
+        retryable: true,
+      };
+    }
+    throw error;
   }
-  await saveFlowToV3(nextFlow);
-  return {
-    audited: true,
-    flowId: flow.id,
-    workflow: getPublishedFlowInfo(flow)?.slug,
-    previousStatus: previousQuality.status,
-    nextStatus: nextQuality.status,
-    staleReason: nextQuality.staleReason ?? null,
-  };
 }
 
 class WorkflowApprovalStoreTool {
