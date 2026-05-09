@@ -935,6 +935,54 @@ describe("V3 RPC Queue Management APIs", () => {
       expect(result).toMatchObject({ ok: true, runId: "run-1" });
     });
 
+    it("keeps queue cancel successful when canceled-event persistence fails", async () => {
+      getInternal(storage).queueMap.set("run-event-failure", {
+        id: "run-event-failure",
+        flowId: "flow-1",
+        status: "queued",
+        priority: 0,
+        createdAt: 1000,
+        updatedAt: 1000,
+        attempt: 0,
+        maxAttempts: 1,
+      });
+      getInternal(storage).runsMap.set("run-event-failure", {
+        schemaVersion: 3,
+        id: "run-event-failure",
+        flowId: "flow-1",
+        status: "queued",
+        createdAt: 1000,
+        updatedAt: 1000,
+        attempt: 0,
+        maxAttempts: 1,
+        nextSeq: 0,
+      });
+      (events.append as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error("event store unavailable"),
+      );
+
+      const result = await (
+        server as unknown as { handleRequest: Function }
+      ).handleRequest(
+        {
+          method: "rr_v3.cancelQueueItem",
+          params: { runId: "run-event-failure", reason: "User canceled" },
+          requestId: "req-cancel-event-failure",
+        },
+        { subscriptions: new Set() },
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        runId: "run-event-failure",
+      });
+      expect(getInternal(storage).queueMap.has("run-event-failure")).toBe(false);
+      expect(getInternal(storage).runsMap.get("run-event-failure")).toMatchObject({
+        status: "canceled",
+        finishedAt: fixedNow,
+      });
+    });
+
     it("throws if runId is missing", async () => {
       await expect(
         (server as unknown as { handleRequest: Function }).handleRequest(

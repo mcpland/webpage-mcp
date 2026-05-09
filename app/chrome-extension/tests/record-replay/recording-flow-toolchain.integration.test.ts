@@ -5611,6 +5611,84 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("runCancelTool keeps cancellation successful when terminal event persistence fails", async () => {
+    const flowId = `run-cancel-event-failure-flow-${Date.now()}`;
+    const runId = `run-cancel-event-failure-${Date.now()}`;
+    const storage = createStoragePort();
+    const appendEvent = vi.fn(async () => {
+      throw new Error("event store unavailable");
+    });
+    const runtime = {
+      storage,
+      events: {
+        append: appendEvent,
+        list: ({ runId: targetRunId, fromSeq, limit }: any) =>
+          storage.events.list(targetRunId, { fromSeq, limit }),
+        subscribe: vi.fn(() => () => undefined),
+      },
+      runners: {
+        get: vi.fn(() => undefined),
+        register: vi.fn(),
+        unregister: vi.fn(),
+        list: vi.fn(() => []),
+      },
+      scheduler: {
+        kick: vi.fn(async () => undefined),
+      },
+    };
+    mocks.ensureV3Runtime
+      .mockImplementationOnce(async () => runtime)
+      .mockImplementationOnce(async () => runtime);
+    await storage.flows.save(
+      createFlow(flowId, [
+        {
+          id: "start" as any,
+          kind: "wait",
+          config: { ms: 1 },
+        },
+      ]),
+    );
+    await storage.runs.save({
+      schemaVersion: RUN_SCHEMA_VERSION,
+      id: runId as any,
+      flowId: flowId as any,
+      status: "queued",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      attempt: 0,
+      maxAttempts: 1,
+      nextSeq: 0,
+    } as RunRecordV3);
+    await storage.queue.enqueue({ id: runId as any, flowId: flowId as any, priority: 1 });
+
+    const result = await runCancelTool.execute({
+      runId,
+      reason: "No event needed",
+    });
+    const payload = parseToolPayload(result);
+    const run = await storage.runs.get(runId as any);
+    const queueItem = await storage.queue.get(runId as any);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: true,
+      canceled: true,
+      terminal: true,
+      previousStatus: "queued",
+      status: "canceled",
+      cleanup: "queued",
+    });
+    expect(run?.status).toBe("canceled");
+    expect(queueItem).toBeNull();
+    expect(appendEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId,
+        type: "run.canceled",
+        reason: "No event needed",
+      }),
+    );
+  });
+
   it("runCancelTool force-cancels orphaned active runs without leaving queue entries", async () => {
     const flowId = `run-cancel-active-flow-${Date.now()}`;
     const runId = `run-cancel-active-${Date.now()}`;

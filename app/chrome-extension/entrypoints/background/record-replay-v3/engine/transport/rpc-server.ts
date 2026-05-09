@@ -389,11 +389,15 @@ export class RpcServer {
     });
 
     // 5. Publish the run.canceled event (via EventsBus to ensure broadcasting)
-    await this.events.append({
-      runId,
-      type: "run.canceled",
-      reason,
-    });
+    try {
+      await this.events.append({
+        runId,
+        type: "run.canceled",
+        reason,
+      });
+    } catch {
+      // The queue item and run record are already terminal; keep cancel idempotent.
+    }
 
     return { ok: true, runId };
   }

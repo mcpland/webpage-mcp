@@ -930,11 +930,15 @@ async function forceCancelRunRecord(
     finishedAt: now,
     ...(tookMs !== undefined ? { tookMs } : {}),
   });
-  await runtime.events.append({
-    runId: run.id,
-    type: "run.canceled",
-    ...(reason ? { reason } : {}),
-  });
+  try {
+    await runtime.events.append({
+      runId: run.id,
+      type: "run.canceled",
+      ...(reason ? { reason } : {}),
+    });
+  } catch {
+    // Cancellation state is already persisted; event persistence is best-effort.
+  }
   return (await runtime.storage.runs.get(run.id)) ?? {
     ...run,
     status: "canceled",
