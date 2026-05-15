@@ -19,6 +19,7 @@ interface KeyboardToolParams {
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
   frameId?: number; // target frame id for iframe support
+  background?: boolean; // when true, do not activate tab or focus window
 }
 
 const KEY_MODIFIER_MASKS: Record<string, number> = {
@@ -223,7 +224,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
 
     try {
       const explicit = await this.tryGetTab(args.tabId);
-      const tab =
+      let tab =
         explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {
         return createErrorResponse(
@@ -233,6 +234,15 @@ class KeyboardTool extends BaseBrowserToolExecutor {
       if (hasDisallowedPublicUrlScheme(String(tab.url || ''))) {
         return createErrorResponse(
           'Only http:// and https:// pages are supported by chrome_keyboard',
+        );
+      }
+      if (args.background !== true) {
+        tab = await this.activateTabIfNeeded(tab);
+      }
+      const targetTabId = tab.id;
+      if (!targetTabId) {
+        return createErrorResponse(
+          ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID',
         );
       }
 
@@ -248,7 +258,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
 
       // Ensure helper is loaded for XPath or potential focus operations
       await this.injectContentScript(
-        tab.id,
+        targetTabId,
         ['inject-scripts/accessibility-tree-helper.js'],
         false,
         'ISOLATED',
@@ -263,7 +273,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
             ? undefined
             : targetFrameId;
           const ensured = await this.sendMessageToTab(
-            tab.id,
+            targetTabId,
             {
               action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
               selector: finalSelector,
@@ -279,12 +289,12 @@ class KeyboardTool extends BaseBrowserToolExecutor {
             );
           }
           targetFrameId = await resolveFrameIdForMessageResult(
-            tab.id,
+            targetTabId,
             targetFrameId,
             ensured,
           );
           await this.injectContentScript(
-            tab.id,
+            targetTabId,
             ['inject-scripts/accessibility-tree-helper.js'],
             false,
             'ISOLATED',
@@ -294,7 +304,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
           refForFocus = ensured.ref;
           // Try to resolve ref to CSS selector
           const resolved = await this.sendMessageToTab(
-            tab.id,
+            targetTabId,
             {
               action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
               ref: ensured.ref,
@@ -315,7 +325,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
 
       if (refForFocus) {
         const focusResult = await this.sendMessageToTab(
-          tab.id,
+          targetTabId,
           {
             action: 'focusByRef',
             ref: refForFocus,
@@ -330,11 +340,11 @@ class KeyboardTool extends BaseBrowserToolExecutor {
       }
 
       try {
-        await cdpSessionManager.attach(tab.id, 'keyboard');
+        await cdpSessionManager.attach(targetTabId, 'keyboard');
         try {
-          await dispatchKeySequence(tab.id, keys, delay);
+          await dispatchKeySequence(targetTabId, keys, delay);
         } finally {
-          await cdpSessionManager.detach(tab.id, 'keyboard');
+          await cdpSessionManager.detach(targetTabId, 'keyboard');
         }
       } catch (cdpError) {
         console.warn(
@@ -343,7 +353,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         );
         const helperResult = await dispatchHelperKeySequence(
           this,
-          tab.id,
+          targetTabId,
           keys,
           delay,
           refForFocus ? undefined : finalSelector,

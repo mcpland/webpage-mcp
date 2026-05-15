@@ -17,6 +17,7 @@ interface ReadPageParams {
   refId?: string; // focus on subtree rooted at this refId
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
+  background?: boolean; // when true, do not activate tab or focus window
 }
 
 function hasDisallowedPublicPageScheme(url: string): boolean {
@@ -46,7 +47,10 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
     // Validate depth parameter
     const requestedDepth = depth === undefined ? undefined : Number(depth);
-    if (requestedDepth !== undefined && (!Number.isInteger(requestedDepth) || requestedDepth < 0)) {
+    if (
+      requestedDepth !== undefined &&
+      (!Number.isInteger(requestedDepth) || requestedDepth < 0)
+    ) {
       return createErrorResponse(
         `${ERROR_MESSAGES.INVALID_PARAMETERS}: depth must be a non-negative integer`,
       );
@@ -61,12 +65,24 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         "If the specific element you need is missing from the returned data, use the 'screenshot' tool to capture the current viewport and confirm the element's on-screen coordinates. Also note: 'markedElements' are user-marked elements and have the highest priority when choosing targets.";
 
       const explicit = await this.tryGetTab(args?.tabId);
-      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
+      let tab =
+        explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
       if (!tab.id)
-        return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+        return createErrorResponse(
+          ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID',
+        );
       if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
         return createErrorResponse(
           'Only http:// and https:// pages are supported by chrome_read_page',
+        );
+      }
+      if (args?.background !== true) {
+        tab = await this.activateTabIfNeeded(tab);
+      }
+      const targetTabId = tab.id;
+      if (!targetTabId) {
+        return createErrorResponse(
+          ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID',
         );
       }
 
@@ -77,7 +93,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       // Inject helper in ISOLATED world to enable chrome.runtime messaging
       // Inject into all frames to support same-origin iframe operations
       await this.injectContentScript(
-        tab.id,
+        targetTabId,
         ['inject-scripts/accessibility-tree-helper.js'],
         false,
         'ISOLATED',
@@ -85,7 +101,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       );
 
       // Ask content script to generate accessibility tree
-      const resp = await this.sendMessageToTab(tab.id, {
+      const resp = await this.sendMessageToTab(targetTabId, {
         action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
         filter: filter || null,
         depth: requestedDepth,
@@ -108,7 +124,8 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           : null;
 
       const lines = pageContent
-        ? pageContent.split('\n').filter((l: string) => l.trim().length > 0).length
+        ? pageContent.split('\n').filter((l: string) => l.trim().length > 0)
+            .length
         : 0;
       const refCount = Array.isArray(resp?.refMap) ? resp.refMap.length : 0;
 
@@ -129,16 +146,21 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       const formatElementsAsPageContent = (elements: any[]): string => {
         const out: string[] = [];
         for (const e of elements || []) {
-          const type = typeof e?.type === 'string' && e.type ? e.type : 'element';
+          const type =
+            typeof e?.type === 'string' && e.type ? e.type : 'element';
           const rawText = typeof e?.text === 'string' ? e.text.trim() : '';
           const text =
             rawText.length > 0
               ? ` "${rawText.replace(/\s+/g, ' ').slice(0, 100).replace(/"/g, '\\"')}"`
               : '';
           const selector =
-            typeof e?.selector === 'string' && e.selector ? ` selector="${e.selector}"` : '';
+            typeof e?.selector === 'string' && e.selector
+              ? ` selector="${e.selector}"`
+              : '';
           const coords =
-            e?.coordinates && Number.isFinite(e.coordinates.x) && Number.isFinite(e.coordinates.y)
+            e?.coordinates &&
+            Number.isFinite(e.coordinates.x) &&
+            Number.isFinite(e.coordinates.y)
               ? ` (x=${Math.round(e.coordinates.x)},y=${Math.round(e.coordinates.y)})`
               : '';
           out.push(`- ${type}${text}${selector}${coords}`);
@@ -153,7 +175,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         filter: filter || 'all',
         pageContent,
         tips: standardTips,
-        viewport: treeOk ? resp.viewport : { width: null, height: null, dpr: null },
+        viewport: treeOk
+          ? resp.viewport
+          : { width: null, height: null, dpr: null },
         stats: stats || { processed: 0, included: 0, durationMs: 0 },
         refMapCount: refCount,
         sparse: treeOk ? isSparse : false,
@@ -177,18 +201,24 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
       // When refId is explicitly provided, do not fallback (refs are frame-local and may expire)
       if (focusRefId) {
-        return createErrorResponse(resp?.error || `refId "${focusRefId}" not found or expired`);
+        return createErrorResponse(
+          resp?.error || `refId "${focusRefId}" not found or expired`,
+        );
       }
 
       // When user explicitly controls depth, do not override with fallback heuristics
       if (requestedDepth !== undefined) {
-        return createErrorResponse(resp?.error || 'Failed to generate accessibility tree');
+        return createErrorResponse(
+          resp?.error || 'Failed to generate accessibility tree',
+        );
       }
 
       // Fallback path: try get_interactive_elements once
       try {
-        await this.injectContentScript(tab.id, ['inject-scripts/interactive-elements-helper.js']);
-        const fallback = await this.sendMessageToTab(tab.id, {
+        await this.injectContentScript(targetTabId, [
+          'inject-scripts/interactive-elements-helper.js',
+        ]);
+        const fallback = await this.sendMessageToTab(targetTabId, {
           action: TOOL_MESSAGE_TYPES.GET_INTERACTIVE_ELEMENTS,
           includeCoordinates: true,
         });
@@ -206,11 +236,16 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             priority: 'highest',
           }));
           const seen = new Set(markerEls.map((e) => e.selector));
-          const merged = [...markerEls, ...limited.filter((e: any) => !seen.has(e.selector))];
+          const merged = [
+            ...markerEls,
+            ...limited.filter((e: any) => !seen.has(e.selector)),
+          ];
 
           basePayload.fallbackUsed = true;
           basePayload.fallbackSource = 'get_interactive_elements';
-          basePayload.reason = treeOk ? 'sparse_tree' : resp?.error || 'tree_failed';
+          basePayload.reason = treeOk
+            ? 'sparse_tree'
+            : resp?.error || 'tree_failed';
           basePayload.elements = merged;
           basePayload.count = fallback.elements.length;
           if (!basePayload.pageContent) {
@@ -230,7 +265,8 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       return createErrorResponse(
         treeOk
           ? 'Accessibility tree is too sparse and fallback failed'
-          : resp?.error || 'Failed to generate accessibility tree and fallback failed',
+          : resp?.error ||
+              'Failed to generate accessibility tree and fallback failed',
       );
     } catch (error) {
       console.error('Error in read page tool:', error);

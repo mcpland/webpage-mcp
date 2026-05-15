@@ -197,6 +197,7 @@ interface ClickToolParams {
   };
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
+  background?: boolean; // when true, do not activate tab or focus window
 }
 
 /**
@@ -360,7 +361,7 @@ class ClickTool extends BaseBrowserToolExecutor {
     try {
       // Resolve tab
       const explicit = await this.tryGetTab(args.tabId);
-      const tab =
+      let tab =
         explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {
         return createErrorResponse(
@@ -372,9 +373,18 @@ class ClickTool extends BaseBrowserToolExecutor {
           'Only http:// and https:// pages are supported by chrome_click_element',
         );
       }
+      if (args.background !== true) {
+        tab = await this.activateTabIfNeeded(tab);
+      }
+      const targetTabId = tab.id;
+      if (!targetTabId) {
+        return createErrorResponse(
+          ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID',
+        );
+      }
 
       const beforeUrl = String(tab.url || '');
-      const resolvedTarget = await this.resolveTarget(tab.id, args);
+      const resolvedTarget = await this.resolveTarget(targetTabId, args);
       let navigationOccurred = false;
       let transport: 'cdp' | 'helper' = resolvedTarget.nativeCoordinates
         ? 'cdp'
@@ -383,14 +393,18 @@ class ClickTool extends BaseBrowserToolExecutor {
 
       if (resolvedTarget.nativeCoordinates) {
         try {
-          await dispatchNativeClick(tab.id, resolvedTarget.nativeCoordinates, {
-            button,
-            double: args.double === true,
-            modifiers,
-          });
+          await dispatchNativeClick(
+            targetTabId,
+            resolvedTarget.nativeCoordinates,
+            {
+              button,
+              double: args.double === true,
+              modifiers,
+            },
+          );
           if (waitForNavigation) {
             navigationOccurred = await waitForNavigationAfterClick(
-              tab.id,
+              targetTabId,
               beforeUrl,
               timeout,
             );
@@ -403,7 +417,7 @@ class ClickTool extends BaseBrowserToolExecutor {
           transport = 'helper';
           const helperResult = await dispatchHelperClick(
             this,
-            tab.id,
+            targetTabId,
             args,
             resolvedTarget.helperTarget,
           );
@@ -416,7 +430,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       } else {
         const helperResult = await dispatchHelperClick(
           this,
-          tab.id,
+          targetTabId,
           args,
           resolvedTarget.helperTarget,
         );
@@ -433,9 +447,18 @@ class ClickTool extends BaseBrowserToolExecutor {
             type: 'text',
             text: JSON.stringify({
               success: true,
-              message: 'Click operation successful',
+              message:
+                waitForNavigation && !navigationOccurred
+                  ? 'Click dispatched; no navigation was observed before timeout'
+                  : 'Click operation successful',
               elementInfo,
               navigationOccurred,
+              warnings:
+                waitForNavigation && !navigationOccurred
+                  ? [
+                      'waitForNavigation was requested, but the page URL/status did not change before timeout.',
+                    ]
+                  : undefined,
               clickMethod: elementInfo.clickMethod,
               transport,
             }),
@@ -463,6 +486,7 @@ interface FillToolParams {
   frameId?: number;
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
+  background?: boolean; // when true, do not activate tab or focus window
 }
 
 /**
@@ -493,7 +517,7 @@ class FillTool extends BaseBrowserToolExecutor {
 
     try {
       const explicit = await this.tryGetTab(args.tabId);
-      const tab =
+      let tab =
         explicit || (await this.getActiveTabOrThrowInWindow(args.windowId));
       if (!tab.id) {
         return createErrorResponse(
@@ -505,18 +529,27 @@ class FillTool extends BaseBrowserToolExecutor {
           'Only http:// and https:// pages are supported by chrome_fill_or_select',
         );
       }
+      if (args.background !== true) {
+        tab = await this.activateTabIfNeeded(tab);
+      }
+      const targetTabId = tab.id;
+      if (!targetTabId) {
+        return createErrorResponse(
+          ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID',
+        );
+      }
 
       let finalRef = ref;
       let finalSelector = selector;
 
       // If selector is XPath, convert to ref first
       if (selector && selectorType === 'xpath') {
-        await this.injectContentScript(tab.id, [
+        await this.injectContentScript(targetTabId, [
           'inject-scripts/accessibility-tree-helper.js',
         ]);
         try {
           const resolved = await this.sendMessageToTab(
-            tab.id,
+            targetTabId,
             {
               action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
               selector,
@@ -539,11 +572,13 @@ class FillTool extends BaseBrowserToolExecutor {
         }
       }
 
-      await this.injectContentScript(tab.id, ['inject-scripts/fill-helper.js']);
+      await this.injectContentScript(targetTabId, [
+        'inject-scripts/fill-helper.js',
+      ]);
 
       // Send fill message to content script
       const result = await this.sendMessageToTab(
-        tab.id,
+        targetTabId,
         {
           action: TOOL_MESSAGE_TYPES.FILL_ELEMENT,
           selector: finalSelector,

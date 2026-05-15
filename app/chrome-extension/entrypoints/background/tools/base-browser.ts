@@ -37,7 +37,10 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
           : chrome.tabs.sendMessage(tabId, { action: `${this.name}_ping` }),
         new Promise((_, reject) =>
           setTimeout(
-            () => reject(new Error(`${this.name} Ping action to tab ${tabId} timed out`)),
+            () =>
+              reject(
+                new Error(`${this.name} Ping action to tab ${tabId} timed out`),
+              ),
             PING_TIMEOUT_MS,
           ),
         ),
@@ -58,7 +61,11 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
     }
 
     try {
-      const target: { tabId: number; allFrames?: boolean; frameIds?: number[] } = { tabId };
+      const target: {
+        tabId: number;
+        allFrames?: boolean;
+        frameIds?: number[];
+      } = { tabId };
       if (frameIds && frameIds.length > 0) {
         target.frameIds = frameIds;
       } else if (allFrames) {
@@ -70,10 +77,14 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
         injectImmediately,
         world,
       } as any);
-      console.log(`'${files.join(', ')}' injection successful for tab ${tabId}`);
+      console.log(
+        `'${files.join(', ')}' injection successful for tab ${tabId}`,
+      );
     } catch (injectionError) {
       const errorMessage =
-        injectionError instanceof Error ? injectionError.message : String(injectionError);
+        injectionError instanceof Error
+          ? injectionError.message
+          : String(injectionError);
       console.error(
         `Content script '${files.join(', ')}' injection failed for tab ${tabId}: ${errorMessage}`,
       );
@@ -86,7 +97,11 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
   /**
    * Send message to tab
    */
-  protected async sendMessageToTab(tabId: number, message: any, frameId?: number): Promise<any> {
+  protected async sendMessageToTab(
+    tabId: number,
+    message: any,
+    frameId?: number,
+  ): Promise<any> {
     try {
       const response =
         typeof frameId === 'number'
@@ -99,7 +114,8 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
 
       return response;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       console.error(
         `Error sending message to tab ${tabId} for action ${message?.action || 'unknown'}: ${errorMessage}`,
       );
@@ -127,7 +143,10 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
    * Get the active tab in the current window. Throws when not found.
    */
   protected async getActiveTabOrThrow(): Promise<chrome.tabs.Tab> {
-    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [active] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
     if (!active || !active.id) throw new Error('Active tab not found');
     return active;
   }
@@ -151,9 +170,32 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
   }
 
   /**
+   * Activate a target tab before viewport-dependent operations. Inactive tabs can
+   * report a 0x0 viewport, which makes accessibility trees and coordinate
+   * interaction unreliable.
+   */
+  protected async activateTabIfNeeded(
+    tab: chrome.tabs.Tab,
+  ): Promise<chrome.tabs.Tab> {
+    if (tab.active === true || typeof tab.id !== 'number') {
+      return tab;
+    }
+
+    await this.ensureFocus(tab, { activate: true, focusWindow: true });
+
+    try {
+      return await chrome.tabs.get(tab.id);
+    } catch {
+      return { ...tab, active: true };
+    }
+  }
+
+  /**
    * Get the active tab. When windowId provided, search within that window; otherwise currentWindow.
    */
-  protected async getActiveTabInWindow(windowId?: number): Promise<chrome.tabs.Tab | null> {
+  protected async getActiveTabInWindow(
+    windowId?: number,
+  ): Promise<chrome.tabs.Tab | null> {
     if (typeof windowId === 'number') {
       const tabs = await chrome.tabs.query({ active: true, windowId });
       return tabs && tabs[0] ? tabs[0] : null;
@@ -165,7 +207,9 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
   /**
    * Same as getActiveTabInWindow, but throws if not found.
    */
-  protected async getActiveTabOrThrowInWindow(windowId?: number): Promise<chrome.tabs.Tab> {
+  protected async getActiveTabOrThrowInWindow(
+    windowId?: number,
+  ): Promise<chrome.tabs.Tab> {
     const tab = await this.getActiveTabInWindow(windowId);
     if (!tab || !tab.id) throw new Error('Active tab not found');
     return tab;

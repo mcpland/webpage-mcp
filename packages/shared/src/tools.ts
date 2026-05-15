@@ -149,12 +149,14 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         reason: {
           type: 'string',
-          description: 'Optional cancellation reason recorded in the run.canceled event.',
+          description:
+            'Optional cancellation reason recorded in the run.canceled event.',
         },
         waitForTerminal: {
           type: 'boolean',
           default: true,
-          description: 'Wait briefly for a running/paused run to reach canceled terminal state.',
+          description:
+            'Wait briefly for a running/paused run to reach canceled terminal state.',
         },
         timeoutMs: {
           type: 'number',
@@ -169,7 +171,8 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.RECORD_REPLAY.FLOW_UPDATE,
-    description: 'Update a flow using partial fields such as nodes, edges, variables or metadata.',
+    description:
+      'Update a flow using partial fields such as nodes, edges, variables or metadata.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -230,7 +233,8 @@ export const TOOL_SCHEMAS: Tool[] = [
               },
               rules: {
                 type: 'object',
-                description: 'Legacy compatibility wrapper for `required` and enum `options`.',
+                description:
+                  'Legacy compatibility wrapper for `required` and enum `options`.',
                 properties: {
                   required: { type: 'boolean' },
                   enum: {
@@ -266,11 +270,13 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         flowId: {
           type: 'string',
-          description: 'Flow ID to describe. Either flowId or workflow is required.',
+          description:
+            'Flow ID to describe. Either flowId or workflow is required.',
         },
         workflow: {
           type: 'string',
-          description: 'Published workflow slug to describe. Either workflow or flowId is required.',
+          description:
+            'Published workflow slug to describe. Either workflow or flowId is required.',
         },
       },
       required: [],
@@ -285,11 +291,13 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         flowId: {
           type: 'string',
-          description: 'Flow ID to inspect. Either flowId or workflow is required.',
+          description:
+            'Flow ID to inspect. Either flowId or workflow is required.',
         },
         workflow: {
           type: 'string',
-          description: 'Published workflow slug to inspect. Either workflow or flowId is required.',
+          description:
+            'Published workflow slug to inspect. Either workflow or flowId is required.',
         },
         runId: {
           type: 'string',
@@ -297,7 +305,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         nodeId: {
           type: 'string',
-          description: 'Optional node ID filter for returned events and artifacts.',
+          description:
+            'Optional node ID filter for returned events and artifacts.',
         },
         includeRuns: {
           type: 'boolean',
@@ -308,7 +317,8 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'number',
           minimum: 0,
           maximum: 10,
-          description: 'Maximum recent runs to include when runId is omitted. Default: 3.',
+          description:
+            'Maximum recent runs to include when runId is omitted. Default: 3.',
         },
         maxEventsPerRun: {
           type: 'number',
@@ -325,7 +335,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         includeArtifacts: {
           type: 'boolean',
           default: true,
-          description: 'Include persisted debug artifact metadata for returned runs.',
+          description:
+            'Include persisted debug artifact metadata for returned runs.',
         },
         includeArtifactData: {
           type: 'boolean',
@@ -358,11 +369,13 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         flowId: {
           type: 'string',
-          description: 'Flow ID to repair. Either flowId or workflow is required.',
+          description:
+            'Flow ID to repair. Either flowId or workflow is required.',
         },
         workflow: {
           type: 'string',
-          description: 'Published workflow slug to repair. Either workflow or flowId is required.',
+          description:
+            'Published workflow slug to repair. Either workflow or flowId is required.',
         },
         runId: {
           type: 'string',
@@ -395,7 +408,8 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'number',
           minimum: 0,
           maximum: 10,
-          description: 'Maximum recent runs to inspect when runId is omitted. Default: 3.',
+          description:
+            'Maximum recent runs to inspect when runId is omitted. Default: 3.',
         },
         maxEventsPerRun: {
           type: 'number',
@@ -417,11 +431,13 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         flowId: {
           type: 'string',
-          description: 'Flow ID to rollback. Exactly one of flowId or workflow is required.',
+          description:
+            'Flow ID to rollback. Exactly one of flowId or workflow is required.',
         },
         workflow: {
           type: 'string',
-          description: 'Published workflow slug to rollback. Exactly one of workflow or flowId is required.',
+          description:
+            'Published workflow slug to rollback. Exactly one of workflow or flowId is required.',
         },
         repairRevision: {
           type: 'string',
@@ -436,7 +452,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         dryRun: {
           type: 'boolean',
           default: false,
-          description: 'Inspect the selected rollback snapshot without writing changes.',
+          description:
+            'Inspect the selected rollback snapshot without writing changes.',
         },
         force: {
           type: 'boolean',
@@ -466,11 +483,13 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         flowId: {
           type: 'string',
-          description: 'Draft or recorded flow ID to stabilize. Exactly one of flowId or workflow is required.',
+          description:
+            'Draft or recorded flow ID to stabilize. Exactly one of flowId or workflow is required.',
         },
         workflow: {
           type: 'string',
-          description: 'Published workflow slug to stabilize. Exactly one of workflow or flowId is required.',
+          description:
+            'Published workflow slug to stabilize. Exactly one of workflow or flowId is required.',
         },
         args: {
           type: 'object',
@@ -479,11 +498,13 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         startUrl: {
           type: 'string',
-          description: 'Optional http(s) URL used as the validation start point.',
+          description:
+            'Optional http(s) URL used as the validation start point.',
         },
         tabId: {
           type: 'number',
-          description: 'Explicit tab to bind diagnostic runs to. Cannot be combined with tabTarget=new.',
+          description:
+            'Explicit tab to bind diagnostic runs to. Cannot be combined with tabTarget=new.',
         },
         tabTarget: {
           type: 'string',
@@ -516,7 +537,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         stopOnDangerousSideEffects: {
           type: 'boolean',
-          description: 'Compatibility alias. Prefer safety.executionMode and safety.maxDangerousRuns.',
+          description:
+            'Compatibility alias. Prefer safety.executionMode and safety.maxDangerousRuns.',
         },
         repair: {
           type: 'object',
@@ -535,11 +557,21 @@ export const TOOL_SCHEMAS: Tool[] = [
           properties: {
             executionMode: {
               type: 'string',
-              enum: ['auto', 'analyzeOnly', 'sandboxReplay', 'userApprovedReplay'],
+              enum: [
+                'auto',
+                'analyzeOnly',
+                'sandboxReplay',
+                'userApprovedReplay',
+              ],
               default: 'auto',
             },
             allowExternalSideEffects: { type: 'boolean', default: false },
-            maxDangerousRuns: { type: 'number', minimum: 0, maximum: 3, default: 0 },
+            maxDangerousRuns: {
+              type: 'number',
+              minimum: 0,
+              maximum: 3,
+              default: 0,
+            },
             requireRevision: { type: 'string' },
             allowedHosts: { type: 'array', items: { type: 'string' } },
             testEnvironment: {
@@ -550,7 +582,10 @@ export const TOOL_SCHEMAS: Tool[] = [
                 origins: { type: 'array', items: { type: 'string' } },
                 pathPrefixes: { type: 'array', items: { type: 'string' } },
                 accountLabel: { type: 'string' },
-                allowedExternalDestinations: { type: 'array', items: { type: 'string' } },
+                allowedExternalDestinations: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
               },
             },
             authorization: {
@@ -580,7 +615,11 @@ export const TOOL_SCHEMAS: Tool[] = [
               type: 'object',
               additionalProperties: false,
               properties: {
-                mode: { type: 'string', enum: ['none', 'stopBeforeDangerous', 'explicit'], default: 'none' },
+                mode: {
+                  type: 'string',
+                  enum: ['none', 'stopBeforeDangerous', 'explicit'],
+                  default: 'none',
+                },
                 stopBeforeNodeId: { type: 'string' },
                 endNodeId: { type: 'string' },
               },
@@ -612,7 +651,12 @@ export const TOOL_SCHEMAS: Tool[] = [
               enum: ['none', 'failureTargetSlice', 'accessibilitySlice'],
               default: 'none',
             },
-            maxEventsPerRun: { type: 'number', minimum: 0, maximum: 100, default: 40 },
+            maxEventsPerRun: {
+              type: 'number',
+              minimum: 0,
+              maximum: 100,
+              default: 40,
+            },
             artifactTtlMs: { type: 'number', minimum: 1000 },
             maxArtifactBytes: { type: 'number', minimum: 0 },
           },
@@ -621,9 +665,17 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'object',
           additionalProperties: false,
           properties: {
-            ownership: { type: 'string', enum: ['owned', 'current'], default: 'owned' },
+            ownership: {
+              type: 'string',
+              enum: ['owned', 'current'],
+              default: 'owned',
+            },
             allowFocusChange: { type: 'boolean', default: false },
-            cleanup: { type: 'string', enum: ['always', 'onSuccess', 'manual'], default: 'always' },
+            cleanup: {
+              type: 'string',
+              enum: ['always', 'onSuccess', 'manual'],
+              default: 'always',
+            },
           },
         },
       },
@@ -661,16 +713,19 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         flowId: {
           type: 'string',
-          description: 'Flow ID to migrate. Exactly one of flowId, workflow, or all=true is required.',
+          description:
+            'Flow ID to migrate. Exactly one of flowId, workflow, or all=true is required.',
         },
         workflow: {
           type: 'string',
-          description: 'Published workflow slug to migrate. Exactly one of workflow, flowId, or all=true is required.',
+          description:
+            'Published workflow slug to migrate. Exactly one of workflow, flowId, or all=true is required.',
         },
         all: {
           type: 'boolean',
           default: false,
-          description: 'Inspect or migrate all stored workflows. Cannot be used for rollback.',
+          description:
+            'Inspect or migrate all stored workflows. Cannot be used for rollback.',
         },
         dryRun: {
           type: 'boolean',
@@ -680,11 +735,13 @@ export const TOOL_SCHEMAS: Tool[] = [
         apply: {
           type: 'boolean',
           default: false,
-          description: 'Persist the reported migration changes. Cannot be true when dryRun is true.',
+          description:
+            'Persist the reported migration changes. Cannot be true when dryRun is true.',
         },
         rollbackMigrationId: {
           type: 'string',
-          description: 'Rollback a previously applied migration on a single flow/workflow using the audit rollback snapshot.',
+          description:
+            'Rollback a previously applied migration on a single flow/workflow using the audit rollback snapshot.',
         },
       },
       oneOf: [
@@ -771,49 +828,58 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         flowId: {
           type: 'string',
-          description: 'Optional single flow ID to assess. Mutually exclusive with workflow and all=true.',
+          description:
+            'Optional single flow ID to assess. Mutually exclusive with workflow and all=true.',
         },
         workflow: {
           type: 'string',
-          description: 'Optional published workflow slug to assess. Mutually exclusive with flowId and all=true.',
+          description:
+            'Optional published workflow slug to assess. Mutually exclusive with flowId and all=true.',
         },
         all: {
           type: 'boolean',
           default: true,
-          description: 'Assess all stored workflows when no flowId or workflow is provided.',
+          description:
+            'Assess all stored workflows when no flowId or workflow is provided.',
         },
         publishedOnly: {
           type: 'boolean',
           default: false,
-          description: 'When true, only published workflows are included in all-scope reports.',
+          description:
+            'When true, only published workflows are included in all-scope reports.',
         },
         releaseId: {
           type: 'string',
-          description: 'Optional release/checklist identifier. Generated when omitted.',
+          description:
+            'Optional release/checklist identifier. Generated when omitted.',
         },
         defaultOn: {
           type: 'boolean',
           default: false,
-          description: 'Evaluate the stricter default-on gate. Unmet checklist items become blocked.',
+          description:
+            'Evaluate the stricter default-on gate. Unmet checklist items become blocked.',
         },
         persist: {
           type: 'boolean',
           default: true,
-          description: 'Persist the generated checklist snapshot to the local release checklist store.',
+          description:
+            'Persist the generated checklist snapshot to the local release checklist store.',
         },
         minSafeWorkflowCount: {
           type: 'number',
           minimum: 1,
           maximum: 10000,
           default: 30,
-          description: 'Minimum safe/idempotent workflow sample count required before default-on SLO claims.',
+          description:
+            'Minimum safe/idempotent workflow sample count required before default-on SLO claims.',
         },
         minValidationRuns: {
           type: 'number',
           minimum: 1,
           maximum: 100000,
           default: 100,
-          description: 'Minimum counted validation run sample required before default-on SLO claims.',
+          description:
+            'Minimum counted validation run sample required before default-on SLO claims.',
         },
         minReliability: {
           type: 'number',
@@ -827,7 +893,8 @@ export const TOOL_SCHEMAS: Tool[] = [
           minimum: 0,
           maximum: 1,
           default: 0.7,
-          description: 'Minimum paired transcript token reduction required for the token SLO.',
+          description:
+            'Minimum paired transcript token reduction required for the token SLO.',
         },
         maxFalseRepairRate: {
           type: 'number',
@@ -850,7 +917,8 @@ export const TOOL_SCHEMAS: Tool[] = [
             links: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Optional local file paths, run IDs, or issue links supporting the checklist.',
+              description:
+                'Optional local file paths, run IDs, or issue links supporting the checklist.',
             },
           },
         },
@@ -895,7 +963,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Explicit tab to bind the run to. Overrides `tabTarget`.',
+          description:
+            'Explicit tab to bind the run to. Overrides `tabTarget`.',
         },
         tabTarget: {
           type: 'string',
@@ -907,11 +976,18 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'Run without activating/focusing target tabs or windows where Chrome APIs allow it. Default: false',
         },
-        refresh: { type: 'boolean', description: 'Refresh before running (default false)' },
-        timeoutMs: { type: 'number', description: 'Global timeout in ms (optional)' },
+        refresh: {
+          type: 'boolean',
+          description: 'Refresh before running (default false)',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Global timeout in ms (optional)',
+        },
         startUrl: {
           type: 'string',
-          description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
+          description:
+            'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
         },
       },
       required: ['flowId'],
@@ -946,7 +1022,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         description: {
           type: 'string',
-          description: 'Optional public workflow description for descriptors and lists.',
+          description:
+            'Optional public workflow description for descriptors and lists.',
         },
         category: {
           type: 'string',
@@ -974,19 +1051,22 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'number',
           minimum: 0,
           maximum: 1,
-          description: 'Optional minimum stability score for the publish quality gate.',
+          description:
+            'Optional minimum stability score for the publish quality gate.',
         },
         minValidationRuns: {
           type: 'number',
           minimum: 1,
           maximum: 100,
-          description: 'Optional minimum counted validation run count for the publish quality gate.',
+          description:
+            'Optional minimum counted validation run count for the publish quality gate.',
         },
         minPassRate: {
           type: 'number',
           minimum: 0,
           maximum: 1,
-          description: 'Optional minimum passRate for the publish quality gate. Default: 1.',
+          description:
+            'Optional minimum passRate for the publish quality gate. Default: 1.',
         },
         allowWeakOracle: {
           type: 'boolean',
@@ -1008,11 +1088,13 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         flowId: {
           type: 'string',
-          description: 'Flow ID to unpublish. Exactly one of flowId or workflow is required.',
+          description:
+            'Flow ID to unpublish. Exactly one of flowId or workflow is required.',
         },
         workflow: {
           type: 'string',
-          description: 'Published workflow slug to unpublish. Exactly one of workflow or flowId is required.',
+          description:
+            'Published workflow slug to unpublish. Exactly one of workflow or flowId is required.',
         },
       },
       oneOf: [{ required: ['flowId'] }, { required: ['workflow'] }],
@@ -1040,11 +1122,13 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         autoStop: {
           type: 'boolean',
-          description: 'Determines if the trace should be automatically stopped (default false).',
+          description:
+            'Determines if the trace should be automatically stopped (default false).',
         },
         durationMs: {
           type: 'number',
-          description: 'Auto-stop duration in milliseconds when autoStop is true (default 5000).',
+          description:
+            'Auto-stop duration in milliseconds when autoStop is true (default 5000).',
         },
       },
       required: [],
@@ -1052,17 +1136,20 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE,
-    description: 'Stops the active performance trace recording on the selected HTTP(S) page.',
+    description:
+      'Stops the active performance trace recording on the selected HTTP(S) page.',
     inputSchema: {
       type: 'object',
       properties: {
         saveToDownloads: {
           type: 'boolean',
-          description: 'Whether to save the trace as a JSON file in Downloads (default true).',
+          description:
+            'Whether to save the trace as a JSON file in Downloads (default true).',
         },
         filenamePrefix: {
           type: 'string',
-          description: 'Optional filename prefix for the downloaded trace JSON.',
+          description:
+            'Optional filename prefix for the downloaded trace JSON.',
         },
       },
       required: [],
@@ -1117,7 +1204,13 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         windowId: {
           type: 'number',
-          description: 'Target window ID to pick active tab when tabId is omitted.',
+          description:
+            'Target window ID to pick active tab when tabId is omitted.',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'Read without activating/focusing the target tab. Default: false, because inactive tabs can report a 0x0 viewport.',
         },
       },
       required: [],
@@ -1130,7 +1223,10 @@ export const TOOL_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        tabId: { type: 'number', description: 'Target tab ID (default: active tab)' },
+        tabId: {
+          type: 'number',
+          description: 'Target tab ID (default: active tab)',
+        },
         background: {
           type: 'boolean',
           description:
@@ -1165,7 +1261,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         startRef: {
           type: 'string',
-          description: 'Drag start ref from chrome_read_page (alternative to startCoordinates).',
+          description:
+            'Drag start ref from chrome_read_page (alternative to startCoordinates).',
         },
         scrollDirection: {
           type: 'string',
@@ -1215,22 +1312,36 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         value: {
           oneOf: [{ type: 'string' }, { type: 'boolean' }, { type: 'number' }],
-          description: 'Value to set for action=fill (string | boolean | number)',
+          description:
+            'Value to set for action=fill (string | boolean | number)',
         },
         elements: {
           type: 'array',
-          description: 'For action=fill_form: list of elements to fill (ref + value)',
+          description:
+            'For action=fill_form: list of elements to fill (ref + value)',
           items: {
             type: 'object',
             properties: {
-              ref: { type: 'string', description: 'Element ref from chrome_read_page' },
-              value: { type: 'string', description: 'Value to set (stringified if non-string)' },
+              ref: {
+                type: 'string',
+                description: 'Element ref from chrome_read_page',
+              },
+              value: {
+                type: 'string',
+                description: 'Value to set (stringified if non-string)',
+              },
             },
             required: ['ref', 'value'],
           },
         },
-        width: { type: 'number', description: 'For action=resize_page: viewport width' },
-        height: { type: 'number', description: 'For action=resize_page: viewport height' },
+        width: {
+          type: 'number',
+          description: 'For action=resize_page: viewport width',
+        },
+        height: {
+          type: 'number',
+          description: 'For action=resize_page: viewport height',
+        },
         appear: {
           type: 'boolean',
           description:
@@ -1395,23 +1506,36 @@ export const TOOL_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Name for the screenshot, if saving as PNG' },
-        selector: { type: 'string', description: 'CSS selector for element to screenshot' },
+        name: {
+          type: 'string',
+          description: 'Name for the screenshot, if saving as PNG',
+        },
+        selector: {
+          type: 'string',
+          description: 'CSS selector for element to screenshot',
+        },
         tabId: {
           type: 'number',
           description: 'Target tab ID to capture from (default: active tab).',
         },
         windowId: {
           type: 'number',
-          description: 'Target window ID to pick active tab from when tabId is not provided.',
+          description:
+            'Target window ID to pick active tab from when tabId is not provided.',
         },
         background: {
           type: 'boolean',
           description:
             'Attempt capture without bringing tab/window to foreground. CDP-based capture is used for simple viewport captures. For element/full-page capture, the tab may still be made active in its window without focusing the window. Default: false',
         },
-        width: { type: 'number', description: 'Width in pixels (default: 800)' },
-        height: { type: 'number', description: 'Height in pixels (default: 600)' },
+        width: {
+          type: 'number',
+          description: 'Width in pixels (default: 800)',
+        },
+        height: {
+          type: 'number',
+          description: 'Height in pixels (default: 600)',
+        },
         storeBase64: {
           type: 'boolean',
           description:
@@ -1444,7 +1568,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         url: {
           type: 'string',
-          description: 'Close tabs matching this HTTP(S) URL. Can be used instead of tabIds.',
+          description:
+            'Close tabs matching this HTTP(S) URL. Can be used instead of tabIds.',
         },
         tabId: {
           type: 'number',
@@ -1500,7 +1625,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         background: {
           type: 'boolean',
-          description: 'Do not activate tab/focus window while fetching (default: false)',
+          description:
+            'Do not activate tab/focus window while fetching (default: false)',
         },
         htmlContent: {
           type: 'boolean',
@@ -1569,7 +1695,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         action: {
           type: 'string',
           enum: ['start', 'stop'],
-          description: 'Action to perform: "start" begins capture, "stop" ends and returns results',
+          description:
+            'Action to perform: "start" begins capture, "stop" ends and returns results',
         },
         needResponseBody: {
           type: 'boolean',
@@ -1587,11 +1714,13 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         inactivityTimeout: {
           type: 'number',
-          description: 'Stop after inactivity in milliseconds (default: 60000). Set 0 to disable.',
+          description:
+            'Stop after inactivity in milliseconds (default: 60000). Set 0 to disable.',
         },
         includeStatic: {
           type: 'boolean',
-          description: 'Include static resources like images/scripts/styles (default: false)',
+          description:
+            'Include static resources like images/scripts/styles (default: false)',
         },
         tabId: {
           type: 'number',
@@ -1624,9 +1753,18 @@ export const TOOL_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        filenameContains: { type: 'string', description: 'Filter by substring in filename or URL' },
-        timeoutMs: { type: 'number', description: 'Timeout in ms (default 60000, max 300000)' },
-        waitForComplete: { type: 'boolean', description: 'Wait until completed (default true)' },
+        filenameContains: {
+          type: 'string',
+          description: 'Filter by substring in filename or URL',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Timeout in ms (default 60000, max 300000)',
+        },
+        waitForComplete: {
+          type: 'boolean',
+          description: 'Wait until completed (default true)',
+        },
       },
       required: [],
     },
@@ -1669,7 +1807,8 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.BOOKMARK_SEARCH,
-    description: 'Search Chrome bookmarks by title and URL. Only HTTP(S) bookmarks are returned.',
+    description:
+      'Search Chrome bookmarks by title and URL. Only HTTP(S) bookmarks are returned.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1699,11 +1838,13 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         url: {
           type: 'string',
-          description: 'HTTP(S) URL to bookmark. If not provided, uses the current active tab URL.',
+          description:
+            'HTTP(S) URL to bookmark. If not provided, uses the current active tab URL.',
         },
         title: {
           type: 'string',
-          description: 'Title for the bookmark. If not provided, uses the page title from the URL.',
+          description:
+            'Title for the bookmark. If not provided, uses the page title from the URL.',
         },
         parentId: {
           type: 'string',
@@ -1712,7 +1853,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         createFolder: {
           type: 'boolean',
-          description: 'Whether to create the parent folder if it does not exist (default: false)',
+          description:
+            'Whether to create the parent folder if it does not exist (default: false)',
         },
         tabId: {
           type: 'number',
@@ -1736,15 +1878,18 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         bookmarkId: {
           type: 'string',
-          description: 'ID of the bookmark to delete. Either bookmarkId or url must be provided.',
+          description:
+            'ID of the bookmark to delete. Either bookmarkId or url must be provided.',
         },
         url: {
           type: 'string',
-          description: 'HTTP(S) URL of the bookmark to delete. Used if bookmarkId is not provided.',
+          description:
+            'HTTP(S) URL of the bookmark to delete. Used if bookmarkId is not provided.',
         },
         title: {
           type: 'string',
-          description: 'Title of the bookmark to help with matching when deleting by URL.',
+          description:
+            'Title of the bookmark to help with matching when deleting by URL.',
         },
       },
       required: [],
@@ -1843,7 +1988,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
+          description:
+            'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         timeoutMs: {
           type: 'number',
@@ -1876,7 +2022,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         ref: {
           type: 'string',
-          description: 'Element ref from chrome_read_page (takes precedence over selector).',
+          description:
+            'Element ref from chrome_read_page (takes precedence over selector).',
         },
         coordinates: {
           type: 'object',
@@ -1908,7 +2055,13 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         waitForNavigation: {
           type: 'boolean',
-          description: 'Wait for navigation to complete after click (default: false).',
+          description:
+            'Wait for navigation to complete after click (default: false).',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'Click without activating/focusing the target tab. Default: false for reliable viewport coordinates.',
         },
         timeout: {
           type: 'number',
@@ -1916,11 +2069,13 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
+          description:
+            'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         windowId: {
           type: 'number',
-          description: 'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
+          description:
+            'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
         },
         frameId: {
           type: 'number',
@@ -1948,7 +2103,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         ref: {
           type: 'string',
-          description: 'Element ref from chrome_read_page (takes precedence over selector).',
+          description:
+            'Element ref from chrome_read_page (takes precedence over selector).',
         },
         value: {
           type: ['string', 'number', 'boolean'],
@@ -1957,15 +2113,22 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
+          description:
+            'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         windowId: {
           type: 'number',
-          description: 'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
+          description:
+            'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
         },
         frameId: {
           type: 'number',
           description: 'Target frame ID for iframe support.',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'Fill without activating/focusing the target tab. Default: false for reliable focus and DOM interaction.',
         },
       },
       required: ['value'],
@@ -2012,11 +2175,13 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
+          description:
+            'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         windowId: {
           type: 'number',
-          description: 'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
+          description:
+            'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
         },
       },
       required: ['requests'],
@@ -2036,7 +2201,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         selector: {
           type: 'string',
-          description: 'CSS selector or XPath for target element to receive keyboard events.',
+          description:
+            'CSS selector or XPath for target element to receive keyboard events.',
         },
         selectorType: {
           type: 'string',
@@ -2045,19 +2211,27 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         delay: {
           type: 'number',
-          description: 'Delay between keystrokes in milliseconds (default: 50).',
+          description:
+            'Delay between keystrokes in milliseconds (default: 50).',
         },
         tabId: {
           type: 'number',
-          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
+          description:
+            'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         windowId: {
           type: 'number',
-          description: 'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
+          description:
+            'Window ID to select the active HTTP(S) tab from (when tabId is omitted).',
         },
         frameId: {
           type: 'number',
           description: 'Target frame ID for iframe support.',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            'Send keys without activating/focusing the target tab. Default: false so keyboard input reaches the expected page.',
         },
       },
       required: ['keys'],
@@ -2077,19 +2251,23 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target an existing HTTP(S) tab by ID (default: active tab).',
+          description:
+            'Target an existing HTTP(S) tab by ID (default: active tab).',
         },
         windowId: {
           type: 'number',
-          description: 'Target window ID to pick active tab when tabId is omitted.',
+          description:
+            'Target window ID to pick active tab when tabId is omitted.',
         },
         background: {
           type: 'boolean',
-          description: 'Do not activate tab/focus window when capturing via CDP. Default: false',
+          description:
+            'Do not activate tab/focus window when capturing via CDP. Default: false',
         },
         includeExceptions: {
           type: 'boolean',
-          description: 'Include uncaught exceptions in the output (default: true)',
+          description:
+            'Include uncaught exceptions in the output (default: true)',
         },
         maxMessages: {
           type: 'number',
@@ -2142,14 +2320,19 @@ export const TOOL_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        tabId: { type: 'number', description: 'Target HTTP(S) tab ID (default: active tab)' },
+        tabId: {
+          type: 'number',
+          description: 'Target HTTP(S) tab ID (default: active tab)',
+        },
         windowId: {
           type: 'number',
-          description: 'Target window ID to pick the active HTTP(S) tab when tabId is omitted',
+          description:
+            'Target window ID to pick the active HTTP(S) tab when tabId is omitted',
         },
         selector: {
           type: 'string',
-          description: 'CSS selector for the file input element (input[type="file"]) on the target HTTP(S) page',
+          description:
+            'CSS selector for the file input element (input[type="file"]) on the target HTTP(S) page',
         },
         fileUrl: {
           type: 'string',
@@ -2161,11 +2344,13 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         fileName: {
           type: 'string',
-          description: 'Optional filename when using base64 or URL (default: "uploaded-file")',
+          description:
+            'Optional filename when using base64 or URL (default: "uploaded-file")',
         },
         multiple: {
           type: 'boolean',
-          description: 'Whether the input accepts multiple files (default: false)',
+          description:
+            'Whether the input accepts multiple files (default: false)',
         },
       },
       required: ['selector'],
@@ -2173,7 +2358,8 @@ export const TOOL_SCHEMAS: Tool[] = [
   },
   {
     name: TOOL_NAMES.BROWSER.HANDLE_DIALOG,
-    description: 'Handle JavaScript dialogs (alert/confirm/prompt) on an HTTP(S) browser tab via CDP',
+    description:
+      'Handle JavaScript dialogs (alert/confirm/prompt) on an HTTP(S) browser tab via CDP',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2184,11 +2370,13 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         tabId: {
           type: 'number',
-          description: 'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
+          description:
+            'Target HTTP(S) tab ID. If omitted, uses the current active tab.',
         },
         windowId: {
           type: 'number',
-          description: 'Window ID to select the active HTTP(S) tab from when tabId is omitted.',
+          description:
+            'Window ID to select the active HTTP(S) tab from when tabId is omitted.',
         },
       },
       required: ['action'],
@@ -2203,7 +2391,15 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         action: {
           type: 'string',
-          enum: ['start', 'stop', 'status', 'auto_start', 'capture', 'clear', 'export'],
+          enum: [
+            'start',
+            'stop',
+            'status',
+            'auto_start',
+            'capture',
+            'clear',
+            'export',
+          ],
           description:
             'Action to perform:\n- "start": Begin fixed-FPS recording (captures frames at regular intervals)\n- "auto_start": Begin auto-capture mode (frames captured on tool actions)\n- "stop": End recording and save GIF\n- "status": Get current recording state\n- "capture": Manually trigger a frame capture in auto mode\n- "clear": Clear all recording state and cached GIF without saving\n- "export": Export the last recorded GIF (download or drag&drop upload)',
         },
@@ -2242,7 +2438,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         filename: {
           type: 'string',
-          description: 'Output filename (without extension). Defaults to timestamped name.',
+          description:
+            'Output filename (without extension). Defaults to timestamped name.',
         },
         captureDelayMs: {
           type: 'number',
@@ -2304,7 +2501,10 @@ export const TOOL_SCHEMAS: Tool[] = [
                       description:
                         'CSS color for click indicator (default: "rgba(255, 87, 34, 0.8)")',
                     },
-                    radius: { type: 'number', description: 'Initial radius in px (default: 20)' },
+                    radius: {
+                      type: 'number',
+                      description: 'Initial radius in px (default: 20)',
+                    },
                     animationDurationMs: {
                       type: 'number',
                       description: 'Animation duration in ms (default: 400)',
@@ -2315,7 +2515,8 @@ export const TOOL_SCHEMAS: Tool[] = [
                     },
                     animationIntervalMs: {
                       type: 'number',
-                      description: 'Interval between animation frames in ms (default: 80)',
+                      description:
+                        'Interval between animation frames in ms (default: 80)',
                     },
                   },
                 },
@@ -2335,9 +2536,13 @@ export const TOOL_SCHEMAS: Tool[] = [
                     },
                     color: {
                       type: 'string',
-                      description: 'CSS color for drag path (default: "rgba(33, 150, 243, 0.7)")',
+                      description:
+                        'CSS color for drag path (default: "rgba(33, 150, 243, 0.7)")',
                     },
-                    lineWidth: { type: 'number', description: 'Line width in px (default: 3)' },
+                    lineWidth: {
+                      type: 'number',
+                      description: 'Line width in px (default: 3)',
+                    },
                     lineDash: {
                       type: 'array',
                       items: { type: 'number' },
@@ -2350,7 +2555,8 @@ export const TOOL_SCHEMAS: Tool[] = [
                   },
                 },
               ],
-              description: 'Drag path overlay config (true for defaults, or object for custom).',
+              description:
+                'Drag path overlay config (true for defaults, or object for custom).',
             },
             labels: {
               oneOf: [
@@ -2364,31 +2570,45 @@ export const TOOL_SCHEMAS: Tool[] = [
                     },
                     font: {
                       type: 'string',
-                      description: 'Font for labels (default: "bold 12px sans-serif")',
+                      description:
+                        'Font for labels (default: "bold 12px sans-serif")',
                     },
-                    textColor: { type: 'string', description: 'Text color (default: "#fff")' },
+                    textColor: {
+                      type: 'string',
+                      description: 'Text color (default: "#fff")',
+                    },
                     bgColor: {
                       type: 'string',
-                      description: 'Background color (default: "rgba(0,0,0,0.7)")',
+                      description:
+                        'Background color (default: "rgba(0,0,0,0.7)")',
                     },
-                    padding: { type: 'number', description: 'Padding in px (default: 4)' },
+                    padding: {
+                      type: 'number',
+                      description: 'Padding in px (default: 4)',
+                    },
                     borderRadius: {
                       type: 'number',
                       description: 'Border radius in px (default: 4)',
                     },
                     offset: {
                       type: 'object',
-                      properties: { x: { type: 'number' }, y: { type: 'number' } },
-                      description: 'Offset from action position (default: {x: 10, y: -20})',
+                      properties: {
+                        x: { type: 'number' },
+                        y: { type: 'number' },
+                      },
+                      description:
+                        'Offset from action position (default: {x: 10, y: -20})',
                     },
                   },
                 },
               ],
-              description: 'Action label overlay config (true for defaults, or object for custom).',
+              description:
+                'Action label overlay config (true for defaults, or object for custom).',
             },
             durationMs: {
               type: 'number',
-              description: 'How long overlays remain visible in ms (default: 1500).',
+              description:
+                'How long overlays remain visible in ms (default: 1500).',
             },
           },
         },

@@ -7,7 +7,7 @@ import { captureFrameOnAction, isAutoCaptureActive } from './gif-recorder';
 const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 720;
 const NAVIGATION_POLL_MS = 100;
-const NAVIGATION_WAIT_TIMEOUT_MS = 3000;
+const NAVIGATION_WAIT_TIMEOUT_MS = 8000;
 
 type NavigateOpenMode = 'current_tab' | 'new_tab' | 'new_window';
 
@@ -88,7 +88,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
       return 'new_tab';
     }
 
-    if (args.openMode === 'current_tab' || typeof explicitTab?.id === 'number') {
+    if (
+      args.openMode === 'current_tab' ||
+      typeof explicitTab?.id === 'number'
+    ) {
       return 'current_tab';
     }
 
@@ -97,7 +100,11 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
   private async waitForUpdatedTab(
     tabId: number,
-    options: { previousUrl?: string; targetUrl?: string; timeoutMs?: number } = {},
+    options: {
+      previousUrl?: string;
+      targetUrl?: string;
+      timeoutMs?: number;
+    } = {},
   ): Promise<chrome.tabs.Tab> {
     const timeoutMs = options.timeoutMs ?? NAVIGATION_WAIT_TIMEOUT_MS;
     const deadline = Date.now() + timeoutMs;
@@ -107,7 +114,8 @@ class NavigateTool extends BaseBrowserToolExecutor {
       const current = await chrome.tabs.get(tabId);
       lastSeen = current;
 
-      const pendingUrl = (current as chrome.tabs.Tab & { pendingUrl?: string }).pendingUrl || '';
+      const pendingUrl =
+        (current as chrome.tabs.Tab & { pendingUrl?: string }).pendingUrl || '';
       const currentUrl = current.url || '';
       const observedUrl = pendingUrl || currentUrl;
 
@@ -115,7 +123,11 @@ class NavigateTool extends BaseBrowserToolExecutor {
         return current;
       }
 
-      if (options.previousUrl && observedUrl && observedUrl !== options.previousUrl) {
+      if (
+        options.previousUrl &&
+        observedUrl &&
+        observedUrl !== options.previousUrl
+      ) {
         return current;
       }
 
@@ -228,8 +240,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
       if (refresh) {
         console.log('Refreshing current active tab');
         // Get target tab (explicit or active in provided window)
-        const targetTab = explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
-        if (!targetTab.id) return createErrorResponse('No target tab found to refresh');
+        const targetTab =
+          explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
+        if (!targetTab.id)
+          return createErrorResponse('No target tab found to refresh');
         if (hasDisallowedPublicUrlScheme(String(targetTab.url || ''))) {
           return createErrorResponse(getNavigateTargetPageError('refresh'));
         }
@@ -265,14 +279,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
       // Validate that url is provided when not refreshing
       if (!url) {
-        return createErrorResponse('URL parameter is required when refresh is not true');
+        return createErrorResponse(
+          'URL parameter is required when refresh is not true',
+        );
       }
 
       // Handle history navigation: url="back" or url="forward"
       if (url === 'back' || url === 'forward') {
-        const targetTab = explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
+        const targetTab =
+          explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
         if (!targetTab.id) {
-          return createErrorResponse('No target tab found for history navigation');
+          return createErrorResponse(
+            'No target tab found for history navigation',
+          );
         }
         if (hasDisallowedPublicUrlScheme(String(targetTab.url || ''))) {
           return createErrorResponse(getNavigateTargetPageError('history'));
@@ -330,14 +349,60 @@ class NavigateTool extends BaseBrowserToolExecutor {
       console.log(`Resolved navigation mode: ${effectiveOpenMode}`);
 
       if (effectiveOpenMode === 'current_tab') {
-        const targetTab = explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
+        const targetTab =
+          explicitTab || (await this.getActiveTabOrThrowInWindow(windowId));
         if (!targetTab.id) {
           return createErrorResponse('No target tab found to navigate');
         }
 
+        if (
+          !explicitTab &&
+          hasDisallowedPublicUrlScheme(String(targetTab.url || '')) &&
+          !isChromeNewTabUrl(String(targetTab.url || ''))
+        ) {
+          const targetWindow = await this.resolveTargetWindowForNewTab(
+            windowId,
+            targetTab,
+          );
+          if (!targetWindow?.id) {
+            return createErrorResponse(
+              'Current tab is not an HTTP(S) page and no target window was found',
+            );
+          }
+
+          const createdTab = await chrome.tabs.create({
+            url,
+            windowId: targetWindow.id,
+            active: background === true ? false : true,
+          });
+          if (!createdTab.id) {
+            return createErrorResponse('Failed to create new tab');
+          }
+          if (background !== true) {
+            await chrome.windows.update(targetWindow.id, { focused: true });
+          }
+
+          const updatedTab = await this.waitForUpdatedTab(createdTab.id, {
+            targetUrl: url,
+          });
+          await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+          return this.buildTabResult(
+            updatedTab,
+            'Opened URL in new tab because current tab is not an HTTP(S) page',
+          );
+        }
+
+        const activeTargetTab =
+          background === true
+            ? targetTab
+            : await this.activateTabIfNeeded(targetTab);
+        const activeTargetTabId = activeTargetTab.id;
+        if (!activeTargetTabId) {
+          return createErrorResponse('No target tab found to navigate');
+        }
         const beforeUrl = targetTab.url || '';
-        await chrome.tabs.update(targetTab.id, { url });
-        const updatedTab = await this.waitForUpdatedTab(targetTab.id, {
+        await chrome.tabs.update(activeTargetTabId, { url });
+        const updatedTab = await this.waitForUpdatedTab(activeTargetTabId, {
           previousUrl: beforeUrl,
           targetUrl: url,
         });
@@ -367,19 +432,33 @@ class NavigateTool extends BaseBrowserToolExecutor {
               : await chrome.tabs.query({ windowId: createdWindow.id });
           const firstTab = windowTabs[0];
           if (firstTab?.id) {
-            const updatedFirstTab = await this.waitForUpdatedTab(firstTab.id, { targetUrl: url });
-            await this.triggerAutoCapture(updatedFirstTab.id!, updatedFirstTab.url);
-            return this.buildWindowResult(createdWindow, 'Opened URL in new window', [
-              updatedFirstTab,
-            ]);
+            const updatedFirstTab = await this.waitForUpdatedTab(firstTab.id, {
+              targetUrl: url,
+            });
+            await this.triggerAutoCapture(
+              updatedFirstTab.id!,
+              updatedFirstTab.url,
+            );
+            return this.buildWindowResult(
+              createdWindow,
+              'Opened URL in new window',
+              [updatedFirstTab],
+            );
           }
 
-          return this.buildWindowResult(createdWindow, 'Opened URL in new window', windowTabs);
+          return this.buildWindowResult(
+            createdWindow,
+            'Opened URL in new window',
+            windowTabs,
+          );
         }
       }
 
       console.log('Opening URL in a new tab.');
-      const targetWindow = await this.resolveTargetWindowForNewTab(windowId, explicitTab);
+      const targetWindow = await this.resolveTargetWindowForNewTab(
+        windowId,
+        explicitTab,
+      );
       if (targetWindow && targetWindow.id !== undefined) {
         const createdTab = await chrome.tabs.create({
           url,
@@ -393,12 +472,16 @@ class NavigateTool extends BaseBrowserToolExecutor {
           await chrome.windows.update(targetWindow.id, { focused: true });
         }
 
-        const updatedTab = await this.waitForUpdatedTab(createdTab.id, { targetUrl: url });
+        const updatedTab = await this.waitForUpdatedTab(createdTab.id, {
+          targetUrl: url,
+        });
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
         return this.buildTabResult(updatedTab, 'Opened URL in new tab');
       }
 
-      console.warn('No target window found, falling back to creating a new window.');
+      console.warn(
+        'No target window found, falling back to creating a new window.',
+      );
       const fallbackWindow = await chrome.windows.create({
         url,
         width: DEFAULT_WINDOW_WIDTH,
@@ -413,22 +496,38 @@ class NavigateTool extends BaseBrowserToolExecutor {
             : await chrome.tabs.query({ windowId: fallbackWindow.id });
         const firstTab = fallbackTabs[0];
         if (firstTab?.id) {
-          const updatedFirstTab = await this.waitForUpdatedTab(firstTab.id, { targetUrl: url });
-          await this.triggerAutoCapture(updatedFirstTab.id!, updatedFirstTab.url);
-          return this.buildWindowResult(fallbackWindow, 'Opened URL in new window', [
-            updatedFirstTab,
-          ]);
+          const updatedFirstTab = await this.waitForUpdatedTab(firstTab.id, {
+            targetUrl: url,
+          });
+          await this.triggerAutoCapture(
+            updatedFirstTab.id!,
+            updatedFirstTab.url,
+          );
+          return this.buildWindowResult(
+            fallbackWindow,
+            'Opened URL in new window',
+            [updatedFirstTab],
+          );
         }
 
-        return this.buildWindowResult(fallbackWindow, 'Opened URL in new window', fallbackTabs);
+        return this.buildWindowResult(
+          fallbackWindow,
+          'Opened URL in new window',
+          fallbackTabs,
+        );
       }
 
       // If all attempts fail, return a generic error
       return createErrorResponse('Failed to open URL: Unknown error occurred');
     } catch (error) {
       if (chrome.runtime.lastError) {
-        console.error(`Chrome API Error: ${chrome.runtime.lastError.message}`, error);
-        return createErrorResponse(`Chrome API Error: ${chrome.runtime.lastError.message}`);
+        console.error(
+          `Chrome API Error: ${chrome.runtime.lastError.message}`,
+          error,
+        );
+        return createErrorResponse(
+          `Chrome API Error: ${chrome.runtime.lastError.message}`,
+        );
       } else {
         console.error('Error in navigate:', error);
         return createErrorResponse(
@@ -474,11 +573,15 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
             try {
               const u = new URL(urlPattern);
               const basePath = u.pathname || '/';
-              const pathWithWildcard = basePath.endsWith('/') ? `${basePath}*` : `${basePath}/*`;
+              const pathWithWildcard = basePath.endsWith('/')
+                ? `${basePath}*`
+                : `${basePath}/*`;
               urlPattern = `${u.protocol}//${u.host}${pathWithWildcard}`;
             } catch {
               // Not a fully-qualified URL; ensure it ends with wildcard
-              urlPattern = urlPattern.endsWith('/') ? `${urlPattern}*` : `${urlPattern}/*`;
+              urlPattern = urlPattern.endsWith('/')
+                ? `${urlPattern}*`
+                : `${urlPattern}/*`;
             }
           }
         } catch {
@@ -511,7 +614,9 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           };
         }
 
-        console.log(`Found ${tabs.length} tabs with URL pattern: ${urlPattern}`);
+        console.log(
+          `Found ${tabs.length} tabs with URL pattern: ${urlPattern}`,
+        );
         const tabIdsToClose = tabs
           .map((tab) => tab.id)
           .filter((id): id is number => id !== undefined);
@@ -608,7 +713,9 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
         explicit ||
         (typeof windowId === 'number'
           ? (await chrome.tabs.query({ active: true, windowId }))[0]
-          : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]);
+          : (
+              await chrome.tabs.query({ active: true, currentWindow: true })
+            )[0]);
 
       if (!activeTab || !activeTab.id) {
         return createErrorResponse('No active tab found');
@@ -659,7 +766,9 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
   async execute(args: SwitchTabToolParams): Promise<ToolResult> {
     const { tabId, windowId, background } = args;
 
-    console.log(`Attempting to switch to tab ID: ${tabId} in window ID: ${windowId}`);
+    console.log(
+      `Attempting to switch to tab ID: ${tabId} in window ID: ${windowId}`,
+    );
 
     try {
       const targetTab = await chrome.tabs.get(tabId);
@@ -696,8 +805,13 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
       };
     } catch (error) {
       if (chrome.runtime.lastError) {
-        console.error(`Chrome API Error: ${chrome.runtime.lastError.message}`, error);
-        return createErrorResponse(`Chrome API Error: ${chrome.runtime.lastError.message}`);
+        console.error(
+          `Chrome API Error: ${chrome.runtime.lastError.message}`,
+          error,
+        );
+        return createErrorResponse(
+          `Chrome API Error: ${chrome.runtime.lastError.message}`,
+        );
       } else {
         console.error('Error in SwitchTabTool.execute:', error);
         return createErrorResponse(
