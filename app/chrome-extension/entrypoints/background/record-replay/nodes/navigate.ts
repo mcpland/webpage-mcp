@@ -17,7 +17,9 @@ export const navigateNode: NodeRuntime<any> = {
     const tabId = await resolveNodeTabId(ctx);
     const res = await handleCallTool({
       name: TOOL_NAMES.BROWSER.NAVIGATE,
-      args: { url, tabId, background },
+      // Workflow nodes drive a specific tab; require in-place semantics so the
+      // default new_tab behaviour does not detach the node from its tab.
+      args: { url, tabId, background, openMode: 'current_tab' },
     });
     if ((res as any).isError) throw new Error('navigate failed');
     return {} as ExecResult;

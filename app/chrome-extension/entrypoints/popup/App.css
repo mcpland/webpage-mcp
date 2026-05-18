@@ -299,6 +299,12 @@
   border-top: 1px solid var(--ac-border, #e7e5e4);
   padding-top: 12px;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mcp-background-mode-row {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -309,6 +315,17 @@
   align-items: center;
   min-width: 0;
   gap: 8px;
+}
+
+.mcp-background-mode-notice {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(16, 185, 129, 0.26);
+  background: rgba(16, 185, 129, 0.08);
+  color: #047857;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .mcp-background-mode-state {

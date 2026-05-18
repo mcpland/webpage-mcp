@@ -2007,6 +2007,10 @@
     "message": "対応する MCP ツールはタブをフォーカスせずに実行されます",
     "description": "Auto-generated localized message"
   },
+  "popupMcpBackgroundModeOverrideNotice": {
+    "message": "オンの間、MCP ツール呼び出しで明示的に渡された background:false は無視され、モデルがタブを前面に戻せないようにします。",
+    "description": "Auto-generated localized message"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "ワンタイムホスト登録（現在の拡張機能 ID）",
     "description": "Auto-generated localized message"

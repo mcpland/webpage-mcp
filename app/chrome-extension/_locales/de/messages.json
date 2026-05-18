@@ -2007,6 +2007,10 @@
     "message": "Unterstützte MCP-Werkzeuge laufen, ohne Tabs zu fokussieren",
     "description": "Auto-generated localized message"
   },
+  "popupMcpBackgroundModeOverrideNotice": {
+    "message": "Solange aktiv, wird ein ausdrückliches background:false aus MCP-Tool-Aufrufen ignoriert, damit das Modell keinen Tab in den Vordergrund holen kann.",
+    "description": "Auto-generated localized message"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "Einmalige Host-Registrierung (aktuelle Erweiterungs-ID)",
     "description": "Auto-generated localized message"

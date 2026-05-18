@@ -4,6 +4,10 @@ const mocks = vi.hoisted(() => ({
   navigateExecute: vi.fn(),
   screenshotExecute: vi.fn(),
   switchExecute: vi.fn(),
+  readPageExecute: vi.fn(),
+  clickExecute: vi.fn(),
+  fillExecute: vi.fn(),
+  keyboardExecute: vi.fn(),
   flowRunExecute: vi.fn(),
   runCancelExecute: vi.fn(),
   listPublishedExecute: vi.fn(),
@@ -23,6 +27,10 @@ vi.mock('@/entrypoints/background/tools/browser', () => ({
   navigateTool: { name: 'chrome_navigate', execute: mocks.navigateExecute },
   screenshotTool: { name: 'chrome_screenshot', execute: mocks.screenshotExecute },
   switchTabTool: { name: 'chrome_switch_tab', execute: mocks.switchExecute },
+  readPageTool: { name: 'chrome_read_page', execute: mocks.readPageExecute },
+  clickTool: { name: 'chrome_click_element', execute: mocks.clickExecute },
+  fillTool: { name: 'chrome_fill_or_select', execute: mocks.fillExecute },
+  keyboardTool: { name: 'chrome_keyboard', execute: mocks.keyboardExecute },
 }));
 
 vi.mock('@/entrypoints/background/tools/record-replay', () => ({
@@ -112,6 +120,19 @@ describe('handleCallTool navigation routing', () => {
       content: [{ type: 'text', text: JSON.stringify({ success: true, tabId: 99, windowId: 88 }) }],
       isError: false,
     });
+    const okJson = (extra: Record<string, unknown> = {}) => ({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ success: true, tabId: 10, windowId: 55, ...extra }),
+        },
+      ],
+      isError: false,
+    });
+    mocks.readPageExecute.mockResolvedValue(okJson({ pageContent: '' }));
+    mocks.clickExecute.mockResolvedValue(okJson());
+    mocks.fillExecute.mockResolvedValue(okJson());
+    mocks.keyboardExecute.mockResolvedValue(okJson());
     mocks.flowRunExecute.mockResolvedValue({
       content: [
         {
@@ -154,15 +175,19 @@ describe('handleCallTool navigation routing', () => {
     vi.unstubAllGlobals();
   });
 
-  it('keeps default URL navigation targeted at the session tab', async () => {
+  it('routes default URL navigation as a new tab in the session window (tabId not pinned)', async () => {
+    // After chrome_navigate's default flipped to "new_tab", the routing layer
+    // is window-scoped for implicit-new-tab calls: it injects the session's
+    // windowId so the new tab lands in the right window, but it must NOT pin
+    // tabId (otherwise NavigateTool would treat it as an in-place target).
     mocks.navigateExecute.mockResolvedValueOnce({
       content: [
         {
           type: 'text',
           text: JSON.stringify({
             success: true,
-            message: 'Navigated current tab',
-            tabId: 10,
+            message: 'Opened URL in new tab',
+            tabId: 200,
             windowId: 55,
             url: 'https://www.baidu.com',
           }),
@@ -181,13 +206,12 @@ describe('handleCallTool navigation routing', () => {
     expect(mocks.navigateExecute).toHaveBeenCalledWith({
       url: 'https://www.baidu.com',
       background: false,
-      tabId: 10,
       windowId: 55,
     });
-    expect(mocks.runInTabQueue).toHaveBeenCalledTimes(1);
+    expect(mocks.runInTabQueue).not.toHaveBeenCalled();
     expect(mocks.patchSessionContext).toHaveBeenCalledWith(
       'session-1',
-      { tabId: 10, windowId: 55 },
+      { tabId: 200, windowId: 55 },
       undefined,
     );
   });
@@ -219,9 +243,10 @@ describe('handleCallTool navigation routing', () => {
     });
 
     expect(mocks.storageGet).not.toHaveBeenCalled();
+    // Implicit new_tab default → routing is window-scoped; tabId must not be
+    // injected (otherwise NavigateTool would treat it as an in-place target).
     expect(mocks.navigateExecute).toHaveBeenCalledWith({
       url: 'https://www.baidu.com',
-      tabId: 99,
       windowId: 88,
     });
   });
@@ -236,9 +261,9 @@ describe('handleCallTool navigation routing', () => {
     });
 
     expect(mocks.storageGet).toHaveBeenCalledWith([MCP_BACKGROUND_MODE_STORAGE_KEY]);
+    // Implicit new_tab default → window-scoped; tabId is not pinned.
     expect(mocks.navigateExecute).toHaveBeenCalledWith({
       url: 'https://www.baidu.com',
-      tabId: 99,
       windowId: 88,
       background: true,
     });
@@ -290,18 +315,52 @@ describe('handleCallTool navigation routing', () => {
     });
   });
 
-  it('keeps an explicit background value ahead of the popup default', async () => {
+  it('honours an explicit background:false when MCP Background Mode is disabled', async () => {
+    mocks.storageGet.mockResolvedValueOnce({});
+
     await handleCallTool({
       name: TOOL_NAMES.BROWSER.NAVIGATE,
       args: { url: 'https://www.baidu.com', background: false },
       meta: { mcpSessionId: 'session-1' },
     });
 
-    expect(mocks.storageGet).not.toHaveBeenCalled();
+    expect(mocks.storageGet).toHaveBeenCalledWith([MCP_BACKGROUND_MODE_STORAGE_KEY]);
+    // Implicit new_tab → window-scoped; tabId is intentionally dropped.
     expect(mocks.navigateExecute).toHaveBeenCalledWith({
       url: 'https://www.baidu.com',
       background: false,
-      tabId: 10,
+      windowId: 55,
+    });
+  });
+
+  it('forces background:true even when caller passes false once MCP Background Mode is enabled', async () => {
+    mocks.storageGet.mockResolvedValueOnce({ [MCP_BACKGROUND_MODE_STORAGE_KEY]: true });
+
+    await handleCallTool({
+      name: TOOL_NAMES.BROWSER.NAVIGATE,
+      args: { url: 'https://www.baidu.com', background: false },
+      meta: { mcpSessionId: 'session-1' },
+    });
+
+    expect(mocks.storageGet).toHaveBeenCalledWith([MCP_BACKGROUND_MODE_STORAGE_KEY]);
+    expect(mocks.navigateExecute).toHaveBeenCalledWith({
+      url: 'https://www.baidu.com',
+      background: true,
+      windowId: 55,
+    });
+  });
+
+  it('skips the storage lookup when caller already opted into background:true', async () => {
+    await handleCallTool({
+      name: TOOL_NAMES.BROWSER.NAVIGATE,
+      args: { url: 'https://www.baidu.com', background: true },
+      meta: { mcpSessionId: 'session-1' },
+    });
+
+    expect(mocks.storageGet).not.toHaveBeenCalled();
+    expect(mocks.navigateExecute).toHaveBeenCalledWith({
+      url: 'https://www.baidu.com',
+      background: true,
       windowId: 55,
     });
   });
@@ -398,6 +457,81 @@ describe('handleCallTool navigation routing', () => {
     expect(mocks.switchExecute).toHaveBeenCalledWith({ tabId: 44 });
     expect(mocks.patchSessionContext).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      label: 'chrome_read_page',
+      name: TOOL_NAMES.BROWSER.READ_PAGE,
+      args: { filter: 'interactive' as const },
+      mock: () => mocks.readPageExecute,
+    },
+    {
+      label: 'chrome_click_element',
+      name: TOOL_NAMES.BROWSER.CLICK,
+      args: { selector: '#btn' },
+      mock: () => mocks.clickExecute,
+    },
+    {
+      label: 'chrome_fill_or_select',
+      name: TOOL_NAMES.BROWSER.FILL,
+      args: { selector: '#email', value: 'a@b.c' },
+      mock: () => mocks.fillExecute,
+    },
+    {
+      label: 'chrome_keyboard',
+      name: TOOL_NAMES.BROWSER.KEYBOARD,
+      args: { keys: 'Enter' },
+      mock: () => mocks.keyboardExecute,
+    },
+  ])(
+    'applies MCP Background Mode default to $label so interaction tools stay in the background',
+    async ({ name, args, mock }) => {
+      mocks.storageGet.mockResolvedValueOnce({ [MCP_BACKGROUND_MODE_STORAGE_KEY]: true });
+
+      await handleCallTool({
+        name,
+        args,
+        meta: { source: 'mcp' },
+      });
+
+      expect(mock()).toHaveBeenCalledWith({
+        ...args,
+        tabId: 99,
+        windowId: 88,
+        background: true,
+      });
+    },
+  );
+
+  it.each([
+    {
+      label: 'chrome_read_page',
+      name: TOOL_NAMES.BROWSER.READ_PAGE,
+      args: { background: false },
+      mock: () => mocks.readPageExecute,
+    },
+    {
+      label: 'chrome_click_element',
+      name: TOOL_NAMES.BROWSER.CLICK,
+      args: { selector: '#btn', background: false },
+      mock: () => mocks.clickExecute,
+    },
+  ])(
+    'overrides an explicit background:false for $label when MCP Background Mode is enabled',
+    async ({ name, args, mock }) => {
+      mocks.storageGet.mockResolvedValueOnce({ [MCP_BACKGROUND_MODE_STORAGE_KEY]: true });
+
+      await handleCallTool({
+        name,
+        args,
+        meta: { source: 'mcp' },
+      });
+
+      expect(mock()).toHaveBeenCalledWith(
+        expect.objectContaining({ background: true }),
+      );
+    },
+  );
 
   it('does not add background to tools without background support', async () => {
     mocks.storageGet.mockResolvedValueOnce({ [MCP_BACKGROUND_MODE_STORAGE_KEY]: true });

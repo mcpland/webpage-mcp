@@ -494,16 +494,18 @@
     if (el.getAttribute('aria-hidden') === 'true') return false;
     if (!isVisible(el)) return false;
     if (cfg.filter !== 'all') {
-      const r = /** @type {HTMLElement} */ (el).getBoundingClientRect();
-      if (
-        !(
-          r.top < window.innerHeight &&
-          r.bottom > 0 &&
-          r.left < window.innerWidth &&
-          r.right > 0
-        )
-      )
-        return false;
+      // Inactive/background tabs frequently report window.innerWidth/innerHeight
+      // as 0 because Chrome does not allocate a layout viewport for hidden tabs.
+      // Fall back to the document element's client size (which still reflects
+      // intrinsic layout) and, if even that is zero, skip the viewport filter
+      // entirely so background tabs still produce a usable accessibility tree.
+      const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+      const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+      if (vw > 0 && vh > 0) {
+        const r = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+        if (!(r.top < vh && r.bottom > 0 && r.left < vw && r.right > 0))
+          return false;
+      }
     }
     if (cfg.filter === 'interactive') return isInteractive(el);
     if (isInteractive(el)) return true;
@@ -724,8 +726,10 @@
         pageContent,
         focus,
         viewport: {
-          width: window.innerWidth,
-          height: window.innerHeight,
+          // Prefer the live viewport size, but fall back to the document element's
+          // intrinsic client size so background/inactive tabs do not report 0x0.
+          width: window.innerWidth || document.documentElement.clientWidth || 0,
+          height: window.innerHeight || document.documentElement.clientHeight || 0,
           dpr: window.devicePixelRatio || 1,
         },
         stats: {

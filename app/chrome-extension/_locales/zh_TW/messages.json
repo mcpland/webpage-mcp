@@ -2007,6 +2007,10 @@
     "message": "支援的 MCP 工具無需聚焦分頁即可執行",
     "description": "MCP 背景模式開關提示"
   },
+  "popupMcpBackgroundModeOverrideNotice": {
+    "message": "開啟後，MCP 工具呼叫中明確傳入的 background:false 會被忽略，確保模型無法將分頁切回前景。",
+    "description": "MCP 背景模式啟用時顯示的內嵌提示"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "一次性主機註冊（目前擴充功能 ID）",
     "description": "自動生成的 i18n 文案"

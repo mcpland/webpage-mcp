@@ -2007,6 +2007,10 @@
     "message": "지원되는 MCP 도구는 탭에 포커스를 맞추지 않고 실행됩니다",
     "description": "Auto-generated localized message"
   },
+  "popupMcpBackgroundModeOverrideNotice": {
+    "message": "켜져 있는 동안 MCP 도구 호출에서 명시적으로 전달한 background:false는 무시되어 모델이 탭을 전면으로 가져올 수 없습니다.",
+    "description": "Auto-generated localized message"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "일회성 호스트 등록(현재 확장 프로그램 ID)",
     "description": "Auto-generated localized message"

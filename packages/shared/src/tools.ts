@@ -974,7 +974,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Run without activating/focusing target tabs or windows where Chrome APIs allow it. Default: false',
+            'Run without activating/focusing target tabs or windows where Chrome APIs allow it. Default: false. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.',
         },
         refresh: {
           type: 'boolean',
@@ -1210,7 +1210,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Read without activating/focusing the target tab. Default: false, because inactive tabs can report a 0x0 viewport.',
+            'Read without activating/focusing the target tab. Default: false. When the user has enabled MCP Background Mode in the extension popup, this defaults to true and an explicit false is ignored. The accessibility tree helper now falls back to the document client size when a tab has no live viewport, so background tabs return a usable tree.',
         },
       },
       required: [],
@@ -1230,7 +1230,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Avoid focusing/activating tab/window for certain operations (best-effort). Default: false',
+            'Avoid focusing/activating tab/window for certain operations (best-effort). Default: false. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.',
         },
         action: {
           type: 'string',
@@ -1440,7 +1440,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.NAVIGATE,
     description:
-      'Navigate the current tab, open a URL in a new tab or window, refresh the current HTTP(S) tab, or navigate browser history (back/forward) on an HTTP(S) tab',
+      'Open a URL in a new tab (default), navigate the user\'s current tab, open a new window, refresh the current HTTP(S) tab, or navigate browser history (back/forward) on an HTTP(S) tab. Defaults to opening URLs in a brand-new tab so the user\'s existing tabs are never clobbered; pass openMode="current_tab" only for explicit in-place navigation.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1453,7 +1453,7 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: 'string',
           enum: ['current_tab', 'new_tab', 'new_window'],
           description:
-            'How to open the URL. Use "current_tab" to load the URL in the target/current tab, "new_tab" to force a brand-new tab, or "new_window" to force a new window. Defaults to "current_tab" unless you explicitly request a new tab or window.',
+            'How to open the URL. Defaults to "new_tab" so the user\'s existing tabs are preserved. Pick a mode based on user intent:\n- "new_tab" (default): use for "open / show me / pull up / let\'s look at X" style requests, or when starting a new browsing task. Always safe when unsure.\n- "current_tab": use ONLY when the user explicitly says things like "in this tab", "navigate to", "go to", "load X here", or when you are following up on a previously returned tabId for the same in-progress task on that page.\n- "new_window": use only when the user explicitly asks for a separate window.',
         },
         newTab: {
           type: 'boolean',
@@ -1468,7 +1468,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         tabId: {
           type: 'number',
           description:
-            'Target an existing tab by ID. When provided and openMode is omitted, the URL is loaded in that tab.',
+            'Target an existing tab by ID. Only consumed when openMode="current_tab" (selects which tab to navigate in-place); ignored for "new_tab" / "new_window". Passing tabId alone no longer forces in-place navigation — combine it with openMode="current_tab" if that is your intent.',
         },
         windowId: {
           type: 'number',
@@ -1478,17 +1478,17 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Perform the operation without stealing focus (do not activate the tab or focus the window). Default: false',
+            'Perform the operation without stealing focus (do not activate the tab or focus the window). Default: false. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.',
         },
         width: {
           type: 'number',
           description:
-            'Window width in pixels (default: 1280). When width or height is provided, a new window will be created.',
+            'Window width in pixels (default: 1280). Only honoured when openMode="new_window" or newWindow=true. Passing width/height alone no longer auto-creates a new window.',
         },
         height: {
           type: 'number',
           description:
-            'Window height in pixels (default: 720). When width or height is provided, a new window will be created.',
+            'Window height in pixels (default: 720). Only honoured when openMode="new_window" or newWindow=true. Passing width/height alone no longer auto-creates a new window.',
         },
         refresh: {
           type: 'boolean',
@@ -1526,7 +1526,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Attempt capture without bringing tab/window to foreground. CDP-based capture is used for simple viewport captures. For element/full-page capture, the tab may still be made active in its window without focusing the window. Default: false',
+            'Attempt capture without bringing tab/window to foreground. CDP-based capture is used for simple viewport captures. For element/full-page capture, the tab may still be made active in its window without focusing the window. Default: false. When the user has enabled MCP Background Mode, this defaults to true for viewport captures and an explicit false is ignored (full-page/selector captures still need foreground today).',
         },
         width: {
           type: 'number',
@@ -1602,7 +1602,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Select the target tab for subsequent tool calls without activating the tab or focusing the window. Default: false',
+            'Select the target tab for subsequent tool calls without activating the tab or focusing the window. Default: false. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored (the tab remains in the background).',
         },
       },
       required: ['tabId'],
@@ -1626,7 +1626,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Do not activate tab/focus window while fetching (default: false)',
+            'Do not activate tab/focus window while fetching (default: false). When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.',
         },
         htmlContent: {
           type: 'boolean',
@@ -1735,7 +1735,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'For action="start": avoid activating/focusing the tab/window when possible (default: false).',
+            'For action="start": avoid activating/focusing the tab/window when possible (default: false). When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.',
         },
         all: {
           type: 'boolean',
@@ -2061,7 +2061,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Click without activating/focusing the target tab. Default: false for reliable viewport coordinates.',
+            'Click without activating/focusing the target tab. Default: false for reliable viewport coordinates. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.',
         },
         timeout: {
           type: 'number',
@@ -2128,7 +2128,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Fill without activating/focusing the target tab. Default: false for reliable focus and DOM interaction.',
+            'Fill without activating/focusing the target tab. Default: false for reliable focus and DOM interaction. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.',
         },
       },
       required: ['value'],
@@ -2231,7 +2231,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Send keys without activating/focusing the target tab. Default: false so keyboard input reaches the expected page.',
+            'Send keys without activating/focusing the target tab. Default: false so keyboard input reaches the expected page. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.',
         },
       },
       required: ['keys'],
@@ -2262,7 +2262,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         background: {
           type: 'boolean',
           description:
-            'Do not activate tab/focus window when capturing via CDP. Default: false',
+            'Do not activate tab/focus window when capturing via CDP. Default: false. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.',
         },
         includeExceptions: {
           type: 'boolean',

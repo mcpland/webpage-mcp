@@ -59,6 +59,9 @@ const URL_PRIORITY_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.WEB_FETCHER,
   TOOL_NAMES.BROWSER.INJECT_SCRIPT,
 ]);
+// Tools whose `background` argument can be auto-populated from MCP Background Mode.
+// Every entry here must declare a `background` parameter in its schema and honour it
+// in the executor; otherwise the injected value is silently ignored.
 const BACKGROUND_DEFAULT_SUPPORTED_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.NAVIGATE,
   TOOL_NAMES.BROWSER.SCREENSHOT,
@@ -70,6 +73,13 @@ const BACKGROUND_DEFAULT_SUPPORTED_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.INJECT_SCRIPT,
   TOOL_NAMES.BROWSER.CONSOLE,
   TOOL_NAMES.BROWSER.COMPUTER,
+  // Interaction tools that previously fell through and silently activated the
+  // foreground tab; including them here lets background mode actually keep the
+  // tab in the background end-to-end.
+  TOOL_NAMES.BROWSER.READ_PAGE,
+  TOOL_NAMES.BROWSER.CLICK,
+  TOOL_NAMES.BROWSER.FILL,
+  TOOL_NAMES.BROWSER.KEYBOARD,
   TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
 ]);
 const MCP_CONTEXT_AWARE_TOOLS = new Set<string>([
@@ -136,16 +146,27 @@ function isHistoryNavigation(args: any): boolean {
 }
 
 function isExplicitNewWindowRequest(args: any): boolean {
-  return (
-    args?.openMode === 'new_window' ||
-    args?.newWindow === true ||
-    typeof args?.width === 'number' ||
-    typeof args?.height === 'number'
-  );
+  // Aligned with NavigateTool.normalizeOpenMode: width/height alone no longer
+  // promote a navigate call to a new window.
+  return args?.openMode === 'new_window' || args?.newWindow === true;
 }
 
 function isExplicitNewTabRequest(args: any): boolean {
   return args?.openMode === 'new_tab' || args?.newTab === true;
+}
+
+/**
+ * Whether a chrome_navigate call should be treated as a new-tab open for
+ * routing purposes. Mirrors NavigateTool.normalizeOpenMode: if the caller did
+ * not opt into current_tab/new_window, the implicit default is new_tab.
+ *
+ * Must be kept in sync with normalizeOpenMode in browser/common.ts.
+ */
+function isImplicitOrExplicitNewTabRequest(args: any): boolean {
+  if (isExplicitNewTabRequest(args)) return true;
+  if (args?.openMode === 'current_tab') return false;
+  if (isExplicitNewWindowRequest(args)) return false;
+  return true;
 }
 
 function shouldPreferWindowScopedExecution(toolName: string, args: any): boolean {
@@ -161,7 +182,7 @@ function shouldPreferWindowScopedExecution(toolName: string, args: any): boolean
     return false;
   }
 
-  return isExplicitNewTabRequest(args) || isExplicitNewWindowRequest(args);
+  return isImplicitOrExplicitNewTabRequest(args) || isExplicitNewWindowRequest(args);
 }
 
 async function resolveExecutionTarget(
@@ -296,7 +317,9 @@ async function mergeArgsWithDefaultBackground(toolName: string, args: any): Prom
     return args;
   }
 
-  if (isPlainArgsObject(args) && typeof args.background === 'boolean') {
+  // Fast path: caller already opted into background. No need to consult storage
+  // and no override possible.
+  if (isPlainArgsObject(args) && args.background === true) {
     return args;
   }
 
@@ -305,6 +328,10 @@ async function mergeArgsWithDefaultBackground(toolName: string, args: any): Prom
     return args;
   }
 
+  // MCP Background Mode is the user's session-level invariant. Force background:true
+  // even when the caller (typically an LLM) explicitly passed false, otherwise the
+  // model can — and in practice does — silently flip the user's preference by
+  // following the schema's documented "Default: false".
   return isPlainArgsObject(args) ? { ...args, background: true } : { background: true };
 }
 

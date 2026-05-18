@@ -755,38 +755,52 @@ export default function PopupApp() {
               ) : null}
 
               <div className="mcp-background-mode-section">
-                <div className="mcp-background-mode-info">
-                  <p className="mcp-config-label">
-                    {t("popupMcpBackgroundModeLabel", "Background MCP mode")}
-                  </p>
-                  <span
-                    className={`mcp-background-mode-state${
-                      mcpBackgroundMode ? " is-on" : ""
-                    }`}
-                  >
-                    {mcpBackgroundMode
-                      ? t("popupMcpBackgroundModeOn", "On")
-                      : t("popupMcpBackgroundModeOff", "Off")}
-                  </span>
-                </div>
-                <label
-                  className="mcp-background-mode-toggle has-tooltip"
-                  data-tooltip={t(
-                    "popupMcpBackgroundModeTooltip",
-                    "Supported MCP tools run without focusing tabs",
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={mcpBackgroundMode}
-                    onChange={() => void toggleMcpBackgroundMode()}
-                    aria-label={t(
-                      "popupMcpBackgroundModeLabel",
-                      "Background MCP mode",
+                <div className="mcp-background-mode-row">
+                  <div className="mcp-background-mode-info">
+                    <p className="mcp-config-label">
+                      {t("popupMcpBackgroundModeLabel", "Background MCP mode")}
+                    </p>
+                    <span
+                      className={`mcp-background-mode-state${
+                        mcpBackgroundMode ? " is-on" : ""
+                      }`}
+                    >
+                      {mcpBackgroundMode
+                        ? t("popupMcpBackgroundModeOn", "On")
+                        : t("popupMcpBackgroundModeOff", "Off")}
+                    </span>
+                  </div>
+                  <label
+                    className="mcp-background-mode-toggle has-tooltip"
+                    data-tooltip={t(
+                      "popupMcpBackgroundModeTooltip",
+                      "Supported MCP tools run without focusing tabs",
                     )}
-                  />
-                  <span className="mcp-background-mode-slider" />
-                </label>
+                  >
+                    <input
+                      type="checkbox"
+                      checked={mcpBackgroundMode}
+                      onChange={() => void toggleMcpBackgroundMode()}
+                      aria-label={t(
+                        "popupMcpBackgroundModeLabel",
+                        "Background MCP mode",
+                      )}
+                    />
+                    <span className="mcp-background-mode-slider" />
+                  </label>
+                </div>
+                {mcpBackgroundMode ? (
+                  <p
+                    className="mcp-background-mode-notice"
+                    role="note"
+                    aria-live="polite"
+                  >
+                    {t(
+                      "popupMcpBackgroundModeOverrideNotice",
+                      "While on, an explicit background:false from MCP tool calls is ignored so the model cannot bring tabs to the foreground.",
+                    )}
+                  </p>
+                ) : null}
               </div>
 
               <div className="mcp-config-section">

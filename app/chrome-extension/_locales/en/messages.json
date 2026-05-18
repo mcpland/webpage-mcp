@@ -2007,6 +2007,10 @@
     "message": "Supported MCP tools run without focusing tabs",
     "description": "Tooltip for the popup MCP background mode toggle"
   },
+  "popupMcpBackgroundModeOverrideNotice": {
+    "message": "While on, an explicit background:false from MCP tool calls is ignored so the model cannot bring tabs to the foreground.",
+    "description": "Inline hint shown under the popup MCP background mode toggle when it is enabled"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "One-time host registration (current extension ID)",
     "description": "Auto-generated i18n message"

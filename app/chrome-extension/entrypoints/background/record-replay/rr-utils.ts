@@ -72,7 +72,14 @@ export async function ensureTab(options: {
     if (startUrl) {
       await handleCallTool({
         name: TOOL_NAMES.BROWSER.NAVIGATE,
-        args: { url: startUrl, tabId: explicitTab.id, background: true },
+        // Replay startup navigates the explicit tab in place; default flipped
+        // to new_tab so the in-place intent must be declared.
+        args: {
+          url: startUrl,
+          tabId: explicitTab.id,
+          background: true,
+          openMode: 'current_tab',
+        },
       });
     } else if (options.refresh) {
       await handleCallTool({
@@ -99,10 +106,13 @@ export async function ensureTab(options: {
   if (startUrl) {
     await handleCallTool({
       name: TOOL_NAMES.BROWSER.NAVIGATE,
+      // Workflow startup with tabTarget='current' wants to reuse the active
+      // tab; declare in-place explicitly now that new_tab is the default.
       args: {
         url: startUrl,
         ...(typeof active?.id === 'number' ? { tabId: active.id } : {}),
         background: true,
+        openMode: 'current_tab',
       },
     });
   } else if (options.refresh) {

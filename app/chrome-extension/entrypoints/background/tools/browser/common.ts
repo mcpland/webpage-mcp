@@ -85,14 +85,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
   private normalizeOpenMode(
     args: NavigateToolParams,
-    explicitTab: chrome.tabs.Tab | null,
+    _explicitTab: chrome.tabs.Tab | null,
   ): NavigateOpenMode {
-    if (
-      args.openMode === 'new_window' ||
-      args.newWindow === true ||
-      typeof args.width === 'number' ||
-      typeof args.height === 'number'
-    ) {
+    if (args.openMode === 'new_window' || args.newWindow === true) {
       return 'new_window';
     }
 
@@ -100,14 +95,26 @@ class NavigateTool extends BaseBrowserToolExecutor {
       return 'new_tab';
     }
 
-    if (
-      args.openMode === 'current_tab' ||
-      typeof explicitTab?.id === 'number'
-    ) {
+    if (args.openMode === 'current_tab') {
       return 'current_tab';
     }
 
-    return 'current_tab';
+    // Default policy: open a brand-new tab. The previous default ("current_tab")
+    // silently clobbered the user's active tab whenever a model called
+    // chrome_navigate({ url }), which is the natural mapping of "open X" in
+    // human intent but the wrong destructive operation in practice.
+    //
+    // Two intentional non-defaults:
+    // - tabId alone no longer implies current_tab. Internal callers that want
+    //   in-place navigation against a specific tab must pass
+    //   `openMode: 'current_tab'` explicitly (record-replay handlers do this).
+    // - Bare width/height does not promote to new_window; size hints are only
+    //   honoured when the caller explicitly asks for a new_window.
+    return 'new_tab';
+  }
+
+  private isHttpLikeTabUrl(url: string): boolean {
+    return /^https?:\/\//i.test(url);
   }
 
   private async waitForUpdatedTab(
@@ -385,10 +392,14 @@ class NavigateTool extends BaseBrowserToolExecutor {
         }
 
         const targetTabUrl = String(targetTab.url || '');
-        if (
-          hasDisallowedPublicUrlScheme(targetTabUrl) &&
-          !isChromeNewTabUrl(targetTabUrl)
-        ) {
+        // Fallback when the resolved current tab is not safe to navigate
+        // in-place. Anything that is neither an HTTP(S) page nor a chrome
+        // new-tab page (empty url, about:blank, chrome://settings, extension
+        // pages, file://, devtools, etc.) is routed to a fresh tab so that
+        // implicit `current_tab` calls cannot corrupt non-web surfaces.
+        const targetIsHttpLike = this.isHttpLikeTabUrl(targetTabUrl);
+        const targetIsChromeNewTab = isChromeNewTabUrl(targetTabUrl);
+        if (!targetIsHttpLike && !targetIsChromeNewTab) {
           const targetWindow = await this.resolveTargetWindowForNewTab(
             windowId,
             targetTab,

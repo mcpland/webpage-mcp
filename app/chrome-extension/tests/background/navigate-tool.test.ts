@@ -90,46 +90,46 @@ describe('navigateTool', () => {
     vi.unstubAllGlobals();
   });
 
-  it('defaults URL navigation to reusing the current tab for backward compatibility', async () => {
-    let currentUrl = 'https://github.com/unadlib';
+  it('defaults URL navigation to opening a fresh new tab so existing tabs are not clobbered', async () => {
+    const targetUrl = 'https://www.baidu.com';
+    mocks.tabsCreate.mockResolvedValueOnce(
+      makeTab({
+        id: 88,
+        windowId: 20,
+        url: targetUrl,
+        status: 'loading',
+        active: true,
+      }),
+    );
     mocks.tabsGet.mockImplementation(async (tabId: number) =>
       makeTab({
         id: tabId,
         windowId: 20,
-        url: currentUrl,
+        url: targetUrl,
         status: 'complete',
         active: true,
       }),
     );
-    mocks.tabsUpdate.mockImplementation(
-      async (tabId: number, updateProperties: any) => {
-        if (typeof updateProperties?.url === 'string') {
-          currentUrl = updateProperties.url;
-        }
-        return makeTab({
-          id: tabId,
-          windowId: 20,
-          url: currentUrl,
-          status: 'loading',
-          active: true,
-        });
-      },
-    );
 
     const result = await navigateTool.execute({
-      url: 'https://www.baidu.com',
+      url: targetUrl,
       background: false,
     });
 
-    expect(mocks.tabsCreate).not.toHaveBeenCalled();
-    expect(mocks.tabsUpdate).toHaveBeenCalledWith(1, {
-      url: 'https://www.baidu.com',
+    expect(mocks.tabsUpdate).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ url: targetUrl }),
+    );
+    expect(mocks.tabsCreate).toHaveBeenCalledWith({
+      url: targetUrl,
+      windowId: 20,
+      active: true,
     });
 
     const payload = getTextPayload(result);
-    expect(payload.message).toBe('Navigated current tab');
-    expect(payload.tabId).toBe(1);
-    expect(payload.url).toBe('https://www.baidu.com');
+    expect(payload.message).toBe('Opened URL in new tab');
+    expect(payload.tabId).toBe(88);
+    expect(payload.url).toBe(targetUrl);
   });
 
   it('navigates the explicit target tab and reports the updated URL', async () => {
@@ -161,6 +161,7 @@ describe('navigateTool', () => {
     const result = await navigateTool.execute({
       url: 'https://www.baidu.com',
       tabId: 7,
+      openMode: 'current_tab',
       background: false,
     });
 
@@ -201,6 +202,7 @@ describe('navigateTool', () => {
     const result = await navigateTool.execute({
       url: targetUrl,
       tabId: 7,
+      openMode: 'current_tab',
       background: true,
     });
 
@@ -240,6 +242,7 @@ describe('navigateTool', () => {
       navigateTool.execute({
         url: targetUrl,
         tabId: 7,
+        openMode: 'current_tab',
         background: true,
       }),
       new Promise<'timeout'>((resolve) => {
@@ -257,6 +260,86 @@ describe('navigateTool', () => {
     expect(payload.message).toBe('Navigated current tab');
     expect(payload.tabId).toBe(7);
     expect(payload.url).toBe(redirectedUrl);
+  });
+
+  it('does not auto-promote width/height to new_window when openMode=current_tab', async () => {
+    let currentUrl = 'https://example.com/';
+    mocks.tabsGet.mockImplementation(async (tabId: number) =>
+      makeTab({
+        id: tabId,
+        windowId: 20,
+        url: currentUrl,
+        status: 'complete',
+        active: true,
+      }),
+    );
+    mocks.tabsUpdate.mockImplementation(
+      async (tabId: number, updateProperties: any) => {
+        if (typeof updateProperties?.url === 'string') {
+          currentUrl = updateProperties.url;
+        }
+        return makeTab({
+          id: tabId,
+          windowId: 20,
+          url: currentUrl,
+          status: 'loading',
+          active: true,
+        });
+      },
+    );
+
+    const result = await navigateTool.execute({
+      url: 'https://www.baidu.com',
+      openMode: 'current_tab',
+      width: 1280,
+      height: 800,
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(mocks.windowsCreate).not.toHaveBeenCalled();
+    expect(mocks.tabsUpdate).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ url: 'https://www.baidu.com' }),
+    );
+    const payload = getTextPayload(result);
+    expect(payload.message).toBe('Navigated current tab');
+  });
+
+  it('still opens a new window when openMode=new_window is explicit, sized per width/height', async () => {
+    mocks.windowsCreate.mockResolvedValueOnce({
+      id: 30,
+      tabs: [makeTab({ id: 101, windowId: 30, url: 'https://www.baidu.com' })],
+    });
+    mocks.tabsGet.mockImplementation(async (tabId: number) =>
+      makeTab({
+        id: tabId,
+        windowId: 30,
+        url: 'https://www.baidu.com',
+        status: 'complete',
+        active: false,
+      }),
+    );
+
+    const result = await navigateTool.execute({
+      url: 'https://www.baidu.com',
+      openMode: 'new_window',
+      width: 1280,
+      height: 800,
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(mocks.windowsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://www.baidu.com',
+        width: 1280,
+        height: 800,
+        focused: false,
+      }),
+    );
+    const payload = getTextPayload(result);
+    expect(payload.message).toBe('Opened URL in new window');
   });
 
   it('forces a new tab when newTab=true even if an explicit tabId is present', async () => {
@@ -352,6 +435,7 @@ describe('navigateTool', () => {
     const result = await navigateTool.execute({
       url: 'chrome://newtab/',
       tabId: 7,
+      openMode: 'current_tab',
     });
 
     expect(result.isError).toBe(false);
@@ -408,6 +492,7 @@ describe('navigateTool', () => {
     const result = await navigateTool.execute({
       url: 'https://www.baidu.com',
       tabId: 7,
+      openMode: 'current_tab',
     });
 
     expect(result.isError).toBe(false);
@@ -449,6 +534,7 @@ describe('navigateTool', () => {
 
     const result = await navigateTool.execute({
       url: targetUrl,
+      openMode: 'current_tab',
       background: false,
     });
 
@@ -502,6 +588,7 @@ describe('navigateTool', () => {
     const result = await navigateTool.execute({
       url: targetUrl,
       tabId: 7,
+      openMode: 'current_tab',
       background: true,
     });
 
@@ -556,6 +643,7 @@ describe('navigateTool', () => {
     const result = await navigateTool.execute({
       url: targetUrl,
       tabId: 7,
+      openMode: 'current_tab',
       background: false,
     });
 
@@ -573,6 +661,109 @@ describe('navigateTool', () => {
       'Opened URL in new tab because target tab is not an HTTP(S) page',
     );
     expect(payload.tabId).toBe(88);
+    expect(payload.url).toBe(targetUrl);
+  });
+
+  it('treats a bare tabId without openMode as a new-tab request (decoupled)', async () => {
+    const targetUrl = 'https://www.bing.com/';
+    mocks.tabsGet.mockImplementation(async (tabId: number) =>
+      makeTab({
+        id: tabId,
+        windowId: 20,
+        url:
+          tabId === 7
+            ? 'https://github.com/unadlib'
+            : targetUrl,
+        status: 'complete',
+        active: true,
+      }),
+    );
+    mocks.windowsGet.mockResolvedValueOnce({ id: 20 });
+    mocks.tabsCreate.mockResolvedValueOnce(
+      makeTab({
+        id: 89,
+        windowId: 20,
+        url: targetUrl,
+        status: 'loading',
+        active: true,
+      }),
+    );
+
+    const result = await navigateTool.execute({
+      url: targetUrl,
+      tabId: 7,
+      background: false,
+    });
+
+    expect(result.isError).toBe(false);
+    // tabId no longer silently forces in-place navigation; tab 7 must be untouched.
+    expect(mocks.tabsUpdate).not.toHaveBeenCalledWith(7, { url: targetUrl });
+    expect(mocks.tabsCreate).toHaveBeenCalledWith({
+      url: targetUrl,
+      windowId: 20,
+      active: true,
+    });
+
+    const payload = getTextPayload(result);
+    expect(payload.message).toBe('Opened URL in new tab');
+    expect(payload.tabId).toBe(89);
+    expect(payload.url).toBe(targetUrl);
+  });
+
+  it('falls back to a new tab when current_tab targets a tab without a URL (loading/restricted)', async () => {
+    const targetUrl = 'https://www.duckduckgo.com/';
+    // Active tab has an empty url — classic restricted/transient state where
+    // hasDisallowedPublicUrlScheme used to return false and we would have
+    // clobbered it. After the fix the fallback is driven by `isHttpLike`.
+    mocks.tabsQuery.mockResolvedValueOnce([
+      makeTab({
+        id: 7,
+        windowId: 20,
+        url: '',
+        title: '',
+        status: 'loading',
+        active: true,
+      } as Partial<chrome.tabs.Tab>),
+    ]);
+    mocks.windowsGet.mockResolvedValueOnce({ id: 20 });
+    mocks.tabsCreate.mockResolvedValueOnce(
+      makeTab({
+        id: 90,
+        windowId: 20,
+        url: targetUrl,
+        status: 'loading',
+        active: true,
+      }),
+    );
+    mocks.tabsGet.mockImplementation(async (tabId: number) =>
+      makeTab({
+        id: tabId,
+        windowId: 20,
+        url: targetUrl,
+        status: 'complete',
+        active: true,
+      }),
+    );
+
+    const result = await navigateTool.execute({
+      url: targetUrl,
+      openMode: 'current_tab',
+      background: false,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(mocks.tabsUpdate).not.toHaveBeenCalledWith(7, { url: targetUrl });
+    expect(mocks.tabsCreate).toHaveBeenCalledWith({
+      url: targetUrl,
+      windowId: 20,
+      active: true,
+    });
+
+    const payload = getTextPayload(result);
+    expect(payload.message).toBe(
+      'Opened URL in new tab because target tab is not an HTTP(S) page',
+    );
+    expect(payload.tabId).toBe(90);
     expect(payload.url).toBe(targetUrl);
   });
 

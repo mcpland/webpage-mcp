@@ -2007,6 +2007,10 @@
     "message": "支持的 MCP 工具无需聚焦标签页即可运行",
     "description": "MCP 后台模式开关提示"
   },
+  "popupMcpBackgroundModeOverrideNotice": {
+    "message": "开启后，MCP 工具调用中显式传入的 background:false 会被忽略，确保模型无法将标签页切回前台。",
+    "description": "MCP 后台模式开启时显示的内联提示"
+  },
   "popupOneTimeHostRegistrationLabel": {
     "message": "一次性主机注册（当前扩展程序 ID）",
     "description": "自动生成的 i18n 文案"

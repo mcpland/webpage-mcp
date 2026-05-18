@@ -88,7 +88,11 @@ export const navigateHandler: ActionHandler<'navigate'> = {
 
     const result = await handleCallTool({
       name: TOOL_NAMES.BROWSER.NAVIGATE,
-      args: { url, tabId, background },
+      // Replay navigates against the recorded tab in-place. After
+      // chrome_navigate's default flipped to "new_tab", in-place callers must
+      // opt in via openMode='current_tab' explicitly; otherwise the replay
+      // would create a fresh tab and lose its execution context.
+      args: { url, tabId, background, openMode: 'current_tab' },
     });
 
     if ((result as { isError?: boolean })?.isError) {
