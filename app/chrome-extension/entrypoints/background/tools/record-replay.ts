@@ -2,7 +2,7 @@ import { createErrorResponse, ToolResult } from "@/common/tool-handler";
 import { TOOL_NAMES } from "webpage-mcp-shared";
 import { createStoragePort } from "../record-replay-v3";
 import { enqueueRunAndWait, ensureV3Runtime } from "../record-replay-v3/compat";
-import { isTerminalStatus, type RunRecordV3 } from "../record-replay-v3/domain/events";
+import { isTerminalStatus, type RunEvent, type RunRecordV3 } from "../record-replay-v3/domain/events";
 import type { FlowId, RunId } from "../record-replay-v3/domain/ids";
 import type { JsonObject } from "../record-replay-v3/domain/json";
 import type { FlowV3 } from "../record-replay-v3/domain/flow";
@@ -604,6 +604,43 @@ function applyOutputContractToRunResult(
   };
 }
 
+function isAssertionNodeKind(kind: unknown): boolean {
+  return kind === "assert" || kind === "expect" || kind === "assertion";
+}
+
+function didCurrentRunSatisfyVerificationOracle(
+  flow: FlowV3,
+  events: RunEvent[],
+  outputContract: WorkflowOutputProjectionResult,
+  quality: ReturnType<typeof buildWorkflowQualitySummary>,
+): boolean {
+  if (quality.level !== "verified" || quality.verification.oracle === "none") {
+    return false;
+  }
+
+  if (quality.verification.oracle === "assertion") {
+    const assertionNodeIds = new Set(
+      (flow.nodes || [])
+        .filter((node) => node.disabled !== true && isAssertionNodeKind(node.kind))
+        .map((node) => String(node.id)),
+    );
+    if (assertionNodeIds.size === 0) {
+      return false;
+    }
+    return events.some(
+      (event) =>
+        event.type === "node.succeeded" &&
+        assertionNodeIds.has(String(event.nodeId)),
+    );
+  }
+
+  if (quality.verification.oracle === "declaredOutput") {
+    return outputContract.declaredOutputCount > 0 && outputContract.ok;
+  }
+
+  return false;
+}
+
 async function resolveFlowForUnpublish(args: any): Promise<
   | { ok: true; flow: FlowV3 }
   | { ok: false; result: ToolResult }
@@ -1125,8 +1162,9 @@ class FlowRunTool {
       .map(([key]) => key);
 
     let result;
+    let events: RunEvent[] = [];
     try {
-      ({ result } = await enqueueRunAndWait({
+      ({ result, events } = await enqueueRunAndWait({
         flowId: flow.id as FlowId,
         ...(requiredRevision ? { expectedRevision: requiredRevision } : {}),
         tabId:
@@ -1194,6 +1232,9 @@ class FlowRunTool {
             policy: flow.meta?.quality?.revalidation?.policy ?? "manual",
           },
         };
+    const verifiedThisRun =
+      contractedResult.success === true &&
+      didCurrentRunSatisfyVerificationOracle(flow, events, outputContract, quality);
     const response: Record<string, any> = {
       ...contractedResult,
       flowId: flow.id,
@@ -1211,10 +1252,7 @@ class FlowRunTool {
         current: quality.current,
         staleReason: quality.staleReason,
         slo: quality.slo,
-        verifiedThisRun:
-          contractedResult.success === true &&
-          quality.level === "verified" &&
-          quality.verification.oracle !== "none",
+        verifiedThisRun,
         verification: quality.verification,
       },
       metrics: buildFlowRunRuntimeMetrics(

@@ -6263,6 +6263,136 @@ describe("recording/editing/flow toolchain integration", () => {
     });
   });
 
+  it("flowRunTool marks verifiedThisRun only when this run executed a verification oracle", async () => {
+    const flowId = `flow-run-verified-this-run-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "assert-1" as any,
+        kind: "assert",
+        config: { assert: { kind: "visible", selector: "#done" } },
+      },
+    ]);
+    flow.meta = {
+      quality: {
+        revision: calculateWorkflowRevision(flow),
+        level: "verified",
+        status: "verified",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        verification: {
+          oracle: "assertion",
+          oracleStrength: "normal",
+        },
+      },
+    };
+    await createStoragePort().flows.save(flow);
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-verified-this-run" } as any,
+      events: [
+        {
+          runId: "run-verified-this-run",
+          seq: 1,
+          ts: 1,
+          type: "node.succeeded",
+          nodeId: "assert-1",
+          tookMs: 1,
+        },
+      ],
+      result: {
+        runId: "run-verified-this-run",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 1 },
+        outputs: {},
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(payload.quality).toMatchObject({
+      level: "verified",
+      verifiedThisRun: true,
+      verification: {
+        oracle: "assertion",
+      },
+    });
+  });
+
+  it("flowRunTool does not mark verifiedThisRun from historical verified quality alone", async () => {
+    const flowId = `flow-run-not-verified-this-run-${Date.now()}`;
+    const flow = createFlow(flowId, [
+      {
+        id: "assert-1" as any,
+        kind: "assert",
+        config: { assert: { kind: "visible", selector: "#done" } },
+      },
+    ]);
+    flow.meta = {
+      quality: {
+        revision: calculateWorkflowRevision(flow),
+        level: "verified",
+        status: "verified",
+        stabilityScore: 1,
+        passRate: 1,
+        validationRuns: 3,
+        countedValidationRuns: 3,
+        passedRuns: 3,
+        failedRuns: 0,
+        minValidationRuns: 3,
+        freshnessExpiresAt: "2999-01-01T00:00:00.000Z" as any,
+        verification: {
+          oracle: "assertion",
+          oracleStrength: "normal",
+        },
+      },
+    };
+    await createStoragePort().flows.save(flow);
+    mocks.enqueueRunAndWait.mockResolvedValue({
+      run: { id: "run-not-verified-this-run" } as any,
+      events: [
+        {
+          runId: "run-not-verified-this-run",
+          seq: 1,
+          ts: 1,
+          type: "run.succeeded",
+          tookMs: 1,
+          outputs: {},
+        },
+      ],
+      result: {
+        runId: "run-not-verified-this-run",
+        success: true,
+        status: "succeeded",
+        summary: { total: 1, success: 1, failed: 0, tookMs: 1 },
+        outputs: {},
+        logs: [],
+        paused: false,
+      },
+    });
+
+    const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
+
+    expect(result.isError).toBe(false);
+    expect(payload.quality).toMatchObject({
+      level: "verified",
+      verifiedThisRun: false,
+      verification: {
+        oracle: "assertion",
+      },
+    });
+  });
+
   it("flowRunTool fails successful replays when required output validation fails", async () => {
     const flowId = `flow-run-output-invalid-${Date.now()}`;
     await createStoragePort().flows.save(
