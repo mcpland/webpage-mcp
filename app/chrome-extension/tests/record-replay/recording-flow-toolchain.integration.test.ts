@@ -7005,17 +7005,30 @@ describe("recording/editing/flow toolchain integration", () => {
     });
 
     const result = await flowRunTool.execute({ flowId });
+    const payload = parseToolPayload(result);
     const updated = await storage.flows.get(flowId as any);
 
     expect(result.isError).toBe(false);
+    expect(payload.quality).toMatchObject({
+      status: "stale",
+      current: false,
+      staleReason: "consecutive_failures",
+    });
+    expect(payload.qualityWarning).toMatchObject({
+      code: "WORKFLOW_QUALITY_STALE",
+      revalidation: {
+        recommended: true,
+        policy: "onFailure",
+      },
+    });
     expect(updated?.name).toBe("Concurrent Flow Rename");
     expect(updated?.meta?.quality).toMatchObject({
       consecutiveFailureCount: 0,
+      staleReason: "consecutive_failures",
       revalidation: {
         lastRevalidateReason: "workflow_run_success",
       },
     });
-    expect(updated?.meta?.quality?.staleReason).toBeUndefined();
   });
 
   it("flowRunTool skips quality outcome updates when the workflow revision changes during replay", async () => {

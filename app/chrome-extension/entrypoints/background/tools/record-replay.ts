@@ -459,9 +459,7 @@ async function recordQualityRunOutcome(
     const staleReason =
       !success && consecutiveFailureCount >= 3
         ? "consecutive_failures"
-        : success && existingQuality.staleReason === "consecutive_failures"
-          ? undefined
-          : existingQuality.staleReason;
+        : existingQuality.staleReason;
     next = {
       ...next,
       updatedAt: new Date().toISOString() as FlowV3["updatedAt"],
