@@ -294,6 +294,7 @@ interface WorkflowStabilizeRunSummary {
   runId?: string;
   status: string;
   success: boolean;
+  verifiedAssertionNodeIds?: string[];
   currentNodeId?: string;
   failedNodeId?: string;
   errorCode?: string;
@@ -4230,15 +4231,59 @@ function inferValidationSiteFingerprint(flow: FlowV3, args: any): string | undef
   }
 }
 
-function inferWorkflowVerification(flow: FlowV3, stable: boolean): NonNullable<FlowQualityMeta['verification']> {
-  const hasAssertNode = (flow.nodes || []).some((node) =>
-    ['assert', 'expect', 'assertion'].includes(node.kind),
+function isWorkflowAssertionNodeKind(kind: unknown): boolean {
+  return kind === 'assert' || kind === 'expect' || kind === 'assertion';
+}
+
+function getExecutableAssertionNodeIds(flow: FlowV3): Set<string> {
+  return new Set(
+    (flow.nodes || [])
+      .filter((node) => node.disabled !== true && isWorkflowAssertionNodeKind(node.kind))
+      .map((node) => String(node.id)),
   );
-  if (hasAssertNode) {
+}
+
+function getSuccessfulAssertionNodeIds(flow: FlowV3, events: RunEvent[] | undefined): string[] {
+  const assertionNodeIds = getExecutableAssertionNodeIds(flow);
+  if (assertionNodeIds.size === 0 || !Array.isArray(events)) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      events
+        .filter((event) => event.type === 'node.succeeded' && assertionNodeIds.has(String(event.nodeId)))
+        .map((event) => String(event.nodeId)),
+    ),
+  );
+}
+
+function countedRunsSatisfiedAssertionOracle(runs: WorkflowStabilizeRunSummary[]): boolean {
+  const successfulRuns = runs.filter((run) => run.success);
+  return (
+    successfulRuns.length > 0 &&
+    successfulRuns.every((run) => (run.verifiedAssertionNodeIds?.length ?? 0) > 0)
+  );
+}
+
+function inferWorkflowVerification(
+  flow: FlowV3,
+  stable: boolean,
+  countedRuns: WorkflowStabilizeRunSummary[],
+): NonNullable<FlowQualityMeta['verification']> {
+  const assertionNodeIds = getExecutableAssertionNodeIds(flow);
+  if (assertionNodeIds.size > 0 && countedRunsSatisfiedAssertionOracle(countedRuns)) {
     return {
       oracle: 'assertion',
       oracleStrength: 'normal',
       ...(stable ? { verifiedAt: new Date().toISOString() } : {}),
+    };
+  }
+  if (assertionNodeIds.size > 0) {
+    return {
+      oracle: 'none',
+      oracleStrength: 'weak',
+      missingReason:
+        'Assertion nodes exist, but no counted successful validation run recorded successful assertion execution.',
     };
   }
   if (Array.isArray(flow.meta?.exposedOutputs) && flow.meta.exposedOutputs.length > 0) {
@@ -4346,7 +4391,7 @@ async function buildStabilizeQualityRecord(options: {
   const stable =
     countedScore.iterations >= options.minValidationRuns &&
     countedScore.passRate >= options.minPassRate;
-  const verification = inferWorkflowVerification(options.flow, stable);
+  const verification = inferWorkflowVerification(options.flow, stable, countedRuns);
   const level = stable && verification.oracle === 'assertion' ? 'verified' : stable ? 'stable' : 'unverified';
   const stabilityScore = calculateStabilityScore(
     countedScore,
@@ -4452,12 +4497,14 @@ async function buildStabilizeQualityRecord(options: {
 }
 
 function summarizeStabilizeRunResult(
+  flow: FlowV3,
   phase: WorkflowStabilizeRunSummary['phase'],
   iteration: number,
   revision: string,
   result: Awaited<ReturnType<typeof enqueueRunAndWait>>,
 ): WorkflowStabilizeRunSummary {
   const { run, result: runResult } = result;
+  const verifiedAssertionNodeIds = getSuccessfulAssertionNodeIds(flow, result.events);
   const debugArgs = runResult.debug?.debugArgs
     ? { ...runResult.debug.debugArgs }
     : runResult.success === false
@@ -4475,6 +4522,7 @@ function summarizeStabilizeRunResult(
     runId: runResult.runId || run.id,
     status: run.status ?? runResult.status ?? (runResult.success ? 'succeeded' : 'failed'),
     success: runResult.success === true,
+    ...(verifiedAssertionNodeIds.length > 0 ? { verifiedAssertionNodeIds } : {}),
     ...(runResult.currentNodeId ? { currentNodeId: runResult.currentNodeId } : {}),
     ...(runResult.failedNodeId ? { failedNodeId: runResult.failedNodeId } : {}),
     ...(runResult.errorCode ? { errorCode: runResult.errorCode } : {}),
@@ -4597,6 +4645,7 @@ async function executeStabilizeValidationRuns(
             refresh: resetAttempt > 0,
           });
           const resetSummary = summarizeStabilizeRunResult(
+            resetPlan.flow,
             'reset',
             index + 1,
             resetPlan.revision,
@@ -4647,7 +4696,7 @@ async function executeStabilizeValidationRuns(
         ...(stopBeforeNodeId ? { stopBeforeNodeId } : {}),
         ...(endNodeId ? { endNodeId } : {}),
       });
-      const summary = summarizeStabilizeRunResult(phase, index + 1, revision, result);
+      const summary = summarizeStabilizeRunResult(flow, phase, index + 1, revision, result);
       runs.push(summary);
       targetDebugRuns.push(buildValidationDebugRun(flow, result));
       if (options.stopAfterTargetRun?.(targetDebugRuns, runs)) {

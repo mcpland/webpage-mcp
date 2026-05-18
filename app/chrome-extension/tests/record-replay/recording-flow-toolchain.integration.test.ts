@@ -2662,6 +2662,164 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.updatedAt).not.toBe(new Date(0).toISOString());
   });
 
+  it("workflowStabilizeTool does not verify assertion workflows without assertion run evidence", async () => {
+    const flowId = `workflow-stabilize-assertion-missing-evidence-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+        {
+          id: "assert-1" as any,
+          kind: "assert",
+          config: { assert: { kind: "visible", selector: "#done" } },
+        },
+      ]),
+    );
+    let runCall = 0;
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      runCall += 1;
+      const runId = `run-stabilize-assertion-missing-evidence-${runCall}`;
+      return {
+        run: {
+          id: runId,
+          flowId,
+          status: "succeeded",
+          tookMs: 5,
+        } as any,
+        events: [],
+        result: {
+          runId,
+          success: true,
+          status: "succeeded",
+          summary: { total: 2, success: 2, failed: 0, tookMs: 5 },
+          outputs: null,
+          eventSummary: { totalEvents: 0, nodeEvents: 0, artifactEvents: 0 },
+        },
+      };
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 2,
+      minPassRate: 1,
+      apply: false,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(payload.stable).toBe(true);
+    expect(payload.baselineRuns).toHaveLength(2);
+    expect(
+      payload.baselineRuns.some((run: { verifiedAssertionNodeIds?: string[] }) =>
+        Array.isArray(run.verifiedAssertionNodeIds),
+      ),
+    ).toBe(false);
+    expect(payload.quality).toMatchObject({
+      level: "stable",
+      verification: {
+        oracle: "none",
+        oracleStrength: "weak",
+        missingReason:
+          "Assertion nodes exist, but no counted successful validation run recorded successful assertion execution.",
+      },
+    });
+    expect(updated?.meta?.quality).toMatchObject({
+      level: "stable",
+      verification: {
+        oracle: "none",
+        oracleStrength: "weak",
+        missingReason:
+          "Assertion nodes exist, but no counted successful validation run recorded successful assertion execution.",
+      },
+    });
+  });
+
+  it("workflowStabilizeTool verifies assertion workflows from counted assertion run evidence", async () => {
+    const flowId = `workflow-stabilize-assertion-evidence-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+        {
+          id: "assert-1" as any,
+          kind: "assert",
+          config: { assert: { kind: "visible", selector: "#done" } },
+        },
+      ]),
+    );
+    let runCall = 0;
+    mocks.enqueueRunAndWait.mockImplementation(async () => {
+      runCall += 1;
+      const runId = `run-stabilize-assertion-evidence-${runCall}`;
+      return {
+        run: {
+          id: runId,
+          flowId,
+          status: "succeeded",
+          tookMs: 5,
+        } as any,
+        events: [
+          {
+            runId,
+            seq: 1,
+            ts: 1,
+            type: "node.succeeded",
+            nodeId: "assert-1",
+            tookMs: 2,
+          },
+        ],
+        result: {
+          runId,
+          success: true,
+          status: "succeeded",
+          summary: { total: 2, success: 2, failed: 0, tookMs: 5 },
+          outputs: null,
+          eventSummary: { totalEvents: 1, nodeEvents: 1, artifactEvents: 0 },
+        },
+      };
+    });
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 2,
+      minPassRate: 1,
+      apply: false,
+    });
+    const payload = parseToolPayload(result);
+    const updated = await createStoragePort().flows.get(flowId as any);
+
+    expect(result.isError).toBe(false);
+    expect(payload.stable).toBe(true);
+    expect(payload.baselineRuns).toEqual([
+      expect.objectContaining({ verifiedAssertionNodeIds: ["assert-1"] }),
+      expect.objectContaining({ verifiedAssertionNodeIds: ["assert-1"] }),
+    ]);
+    expect(payload.quality).toMatchObject({
+      level: "verified",
+      verification: {
+        oracle: "assertion",
+        oracleStrength: "normal",
+        verifiedAt: expect.any(String),
+      },
+    });
+    expect(updated?.meta?.quality).toMatchObject({
+      level: "verified",
+      status: "verified",
+      verification: {
+        oracle: "assertion",
+        oracleStrength: "normal",
+        verifiedAt: expect.any(String),
+      },
+    });
+  });
+
   it("workflowStabilizeTool redacts sensitive startUrl details in quality context", async () => {
     const flowId = `workflow-stabilize-start-url-redaction-${Date.now()}`;
     const rawStartUrl =
