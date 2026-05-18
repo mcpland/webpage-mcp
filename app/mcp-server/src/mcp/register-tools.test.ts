@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NativeMessageType } from 'webpage-mcp-shared';
+import {
+  NativeMessageType,
+  TOOL_SCHEMAS,
+  WEBPAGE_MCP_CAPABILITY_VERSION,
+  WEBPAGE_MCP_PROTOCOL_VERSION,
+  WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS,
+} from 'webpage-mcp-shared';
 import {
   callToolForContext,
   clearDynamicFlowCacheForSession,
@@ -13,12 +19,32 @@ function createContext(
   sessionId: string,
   sendRequestToExtensionAndWait: ReturnType<typeof vi.fn>,
   clientCapabilities?: Partial<McpClientCapabilityFallback>,
+  options: { injectDefaultExtensionCapabilities?: boolean } = {},
 ): McpToolContext {
+  const nativeSendRequestToExtensionAndWait =
+    options.injectDefaultExtensionCapabilities === false
+      ? sendRequestToExtensionAndWait
+      : vi.fn(async (...args: any[]) => {
+          const response = await sendRequestToExtensionAndWait(...args);
+          if (
+            args[1] === 'rr_list_published_flows' &&
+            response &&
+            typeof response === 'object' &&
+            !Array.isArray(response) &&
+            !Object.prototype.hasOwnProperty.call(response, 'capabilities')
+          ) {
+            return {
+              ...response,
+              capabilities: DEFAULT_TEST_EXTENSION_CAPABILITIES,
+            };
+          }
+          return response;
+        });
   return {
     sessionId,
     instanceId: 'unit-test',
     nativeHost: {
-      sendRequestToExtensionAndWait,
+      sendRequestToExtensionAndWait: nativeSendRequestToExtensionAndWait,
     } as unknown as McpToolContext['nativeHost'],
     clientCapabilities: clientCapabilities
       ? {
@@ -28,6 +54,15 @@ function createContext(
       : undefined,
   };
 }
+
+const DEFAULT_TEST_EXTENSION_CAPABILITIES = {
+  protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
+  capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
+  extensionVersion: 'unit-test-extension',
+  supportedTools: TOOL_SCHEMAS.map((tool) => tool.name),
+  supportedRunOptions: [...WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS],
+  featureFlags: ['unit_test_default_capabilities'],
+};
 
 function expectedForwardedMeta(sessionId: string) {
   return expect.objectContaining({
@@ -74,6 +109,8 @@ describe('dynamic published flow tools', () => {
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-capability-call');
     clearDynamicFlowCacheForSession('direct-flow-run-capability-call');
     clearDynamicFlowCacheForSession('unsupported-capability-call');
+    clearDynamicFlowCacheForSession('capability-fallback-conservative');
+    clearDynamicFlowCacheForSession('capability-omitted-conservative');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-missing');
     clearDynamicFlowCacheForSession('dynamic-flow-conflict');
     clearDynamicFlowCacheForSession('dynamic-flow-cache-invalidation');
@@ -671,6 +708,57 @@ describe('dynamic published flow tools', () => {
     expect(flowRunInput.properties?.returnLogs).toBeUndefined();
   });
 
+  it('hides extension-backed tools when the capability handshake fails', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockRejectedValue(new Error('extension offline'));
+    const ctx = createContext(
+      'capability-fallback-conservative',
+      sendRequestToExtensionAndWait,
+      undefined,
+      { injectDefaultExtensionCapabilities: false },
+    );
+
+    const tools = await listToolsForContext(ctx);
+
+    expect(tools).toEqual([]);
+    expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not infer workflow support when the extension omits capability data', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [
+        {
+          id: 'flow-signup',
+          slug: 'signup',
+          description: 'Published signup flow',
+        },
+      ],
+    });
+    const ctx = createContext(
+      'capability-omitted-conservative',
+      sendRequestToExtensionAndWait,
+      undefined,
+      { injectDefaultExtensionCapabilities: false },
+    );
+
+    const tools = await listToolsForContext(ctx);
+    const result = await callToolForContext(ctx, 'workflow_run', {
+      workflow: 'signup',
+    });
+
+    expect(tools.find((tool) => tool.name === 'workflow_run')).toBeUndefined();
+    expect(tools.find((tool) => tool.name === 'record_replay_flow_run')).toBeUndefined();
+    expect(result).toEqual({
+      content: [
+        {
+          type: 'text',
+          text: 'Error resolving workflow_run: workflow_run is not supported by the connected extension capability set.',
+        },
+      ],
+      isError: true,
+    });
+  });
+
   it('runs workflow_run by resolving a published slug to the existing flow runner', async () => {
     const sendRequestToExtensionAndWait = vi
       .fn()
@@ -731,6 +819,7 @@ describe('dynamic published flow tools', () => {
       .mockResolvedValueOnce({
         status: 'success',
         capabilities: {
+          supportedTools: ['record_replay_flow_run', 'record_replay_list_published'],
           supportedRunOptions: ['background'],
         },
         items: [

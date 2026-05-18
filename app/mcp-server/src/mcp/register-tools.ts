@@ -347,8 +347,8 @@ function createFallbackExtensionCapabilities(
     capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
     extensionVersion: 'unknown',
     mcpServerVersion: MCP_SERVER_VERSION,
-    supportedTools: TOOL_SCHEMAS.map((tool) => tool.name),
-    supportedRunOptions: [...DEFAULT_SUPPORTED_RUN_OPTION_KEYS],
+    supportedTools: [],
+    supportedRunOptions: [],
     featureFlags: ['capability_handshake_fallback'],
     warnings: [warning],
   };
@@ -390,11 +390,8 @@ function normalizeExtensionCapabilities(value: unknown): WebpageMcpExtensionCapa
       typeof raw.mcpServerVersion === 'string' && raw.mcpServerVersion.trim()
         ? raw.mcpServerVersion
         : MCP_SERVER_VERSION,
-    supportedTools: supportedTools.length > 0 ? supportedTools : TOOL_SCHEMAS.map((tool) => tool.name),
-    supportedRunOptions:
-      supportedRunOptions.length > 0
-        ? supportedRunOptions
-        : [...DEFAULT_SUPPORTED_RUN_OPTION_KEYS],
+    supportedTools,
+    supportedRunOptions,
     featureFlags: normalizeStringArray(raw.featureFlags),
     ...(warnings.length > 0 ? { warnings } : {}),
     ...(typeof raw.generatedAt === 'string' ? { generatedAt: raw.generatedAt } : {}),
