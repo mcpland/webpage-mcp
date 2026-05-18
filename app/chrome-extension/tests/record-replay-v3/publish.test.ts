@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildWorkflowQualitySummary,
   buildWorkflowBackgroundSupport,
+  buildWorkflowParameterSchema,
   calculateWorkflowRevision,
   evaluateWorkflowPublishGate,
   listPublishedFlowDetails,
@@ -115,7 +116,16 @@ describe('listPublishedFlowDetails', () => {
               type: 'array',
               items: { type: 'number' },
             }),
-            apiToken: expect.not.objectContaining({ default: 'super-secret-token' }),
+            apiToken: expect.objectContaining({
+              description: 'Sensitive value; pass plaintext or a secretRef object. Default is not exposed.',
+              anyOf: [
+                expect.objectContaining({ type: 'string' }),
+                expect.objectContaining({
+                  type: 'object',
+                  required: ['secretRef'],
+                }),
+              ],
+            }),
             metadata: expect.not.objectContaining({
               default: { headers: { authorization: 'Bearer opaque-value' } },
             }),
@@ -145,6 +155,36 @@ describe('listPublishedFlowDetails', () => {
         }),
       }),
     ]);
+  });
+
+  it('advertises secretRef objects for sensitive workflow parameters', () => {
+    const schema = buildWorkflowParameterSchema(createPublishedFlow());
+    const apiToken = schema.properties.apiToken as any;
+
+    expect(apiToken.default).toBeUndefined();
+    expect(apiToken).toMatchObject({
+      description: 'Sensitive value; pass plaintext or a secretRef object. Default is not exposed.',
+      anyOf: [
+        {
+          type: 'string',
+        },
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['secretRef'],
+          properties: {
+            secretRef: {
+              type: 'string',
+              minLength: 1,
+            },
+            scope: {
+              type: 'string',
+              enum: ['session', 'profile', 'workflow'],
+            },
+          },
+        },
+      ],
+    });
   });
 
   it('calculates canonical revisions from executable workflow fields', () => {

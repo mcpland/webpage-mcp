@@ -842,6 +842,24 @@ function inferVariableKind(variable: NonNullable<FlowV3["variables"]>[number]): 
   return "string";
 }
 
+function buildSecretRefParameterSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["secretRef"],
+    properties: {
+      secretRef: {
+        type: "string",
+        minLength: 1,
+      },
+      scope: {
+        type: "string",
+        enum: ["session", "profile", "workflow"],
+      },
+    },
+  };
+}
+
 function schemaForVariable(
   variable: NonNullable<FlowV3["variables"]>[number],
 ): Record<string, unknown> {
@@ -861,16 +879,28 @@ function schemaForVariable(
   };
   if (variable.label) schema.title = variable.label;
   if (variable.description) schema.description = variable.description;
-  if (sensitive) {
-    schema.description = [schema.description, "Sensitive value; default is not exposed."]
-      .filter(Boolean)
-      .join(" ");
-  }
   if (kind === "enum" && Array.isArray(variable.options) && variable.options.length > 0) {
     schema.enum = variable.options;
   }
   if (kind === "array" && variable.item) {
     schema.items = { type: variable.item === "json" ? "object" : variable.item };
+  }
+  if (sensitive) {
+    const description = [
+      variable.description,
+      "Sensitive value; pass plaintext or a secretRef object. Default is not exposed.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const rawValueSchema = { ...schema };
+    if (description) {
+      rawValueSchema.description = description;
+    }
+    return {
+      ...(schema.title ? { title: schema.title } : {}),
+      description,
+      anyOf: [rawValueSchema, buildSecretRefParameterSchema()],
+    };
   }
   if (!sensitive && variable.default !== undefined) {
     schema.default = variable.default;
