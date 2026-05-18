@@ -174,6 +174,91 @@ describe('navigateTool', () => {
     expect(payload.url).toBe('https://www.baidu.com');
   });
 
+  it('waits for the committed URL instead of returning a pending navigation', async () => {
+    const targetUrl = 'https://www.google.com';
+    let getCount = 0;
+    mocks.tabsGet.mockImplementation(async (tabId: number) => {
+      getCount += 1;
+      if (getCount <= 3) {
+        return makeTab({
+          id: tabId,
+          windowId: 31,
+          url: 'https://github.com/unadlib',
+          status: 'loading',
+          active: false,
+          pendingUrl: 'https://www.google.com/',
+        } as Partial<chrome.tabs.Tab>);
+      }
+      return makeTab({
+        id: tabId,
+        windowId: 31,
+        url: 'https://www.google.com/',
+        status: 'complete',
+        active: false,
+      });
+    });
+
+    const result = await navigateTool.execute({
+      url: targetUrl,
+      tabId: 7,
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(mocks.tabsUpdate).toHaveBeenCalledWith(7, { url: targetUrl });
+    const payload = getTextPayload(result);
+    expect(payload.message).toBe('Navigated current tab');
+    expect(payload.tabId).toBe(7);
+    expect(payload.url).toBe('https://www.google.com/');
+  });
+
+  it('returns promptly when navigation completes at a redirected URL', async () => {
+    const targetUrl = 'http://example.com/login';
+    const redirectedUrl = 'https://example.com/login';
+    let getCount = 0;
+    mocks.tabsGet.mockImplementation(async (tabId: number) => {
+      getCount += 1;
+      if (getCount <= 2) {
+        return makeTab({
+          id: tabId,
+          windowId: 31,
+          url: 'https://github.com/unadlib',
+          status: 'complete',
+          active: false,
+        });
+      }
+      return makeTab({
+        id: tabId,
+        windowId: 31,
+        url: redirectedUrl,
+        status: 'complete',
+        active: false,
+      });
+    });
+
+    const result = await Promise.race([
+      navigateTool.execute({
+        url: targetUrl,
+        tabId: 7,
+        background: true,
+      }),
+      new Promise<'timeout'>((resolve) => {
+        setTimeout(() => resolve('timeout'), 250);
+      }),
+    ]);
+
+    expect(result).not.toBe('timeout');
+    if (result === 'timeout') {
+      return;
+    }
+    expect(result.isError).toBe(false);
+    expect(mocks.tabsUpdate).toHaveBeenCalledWith(7, { url: targetUrl });
+    const payload = getTextPayload(result);
+    expect(payload.message).toBe('Navigated current tab');
+    expect(payload.tabId).toBe(7);
+    expect(payload.url).toBe(redirectedUrl);
+  });
+
   it('forces a new tab when newTab=true even if an explicit tabId is present', async () => {
     mocks.tabsGet.mockImplementation(async (tabId: number) => {
       if (tabId === 7) {
@@ -377,7 +462,115 @@ describe('navigateTool', () => {
 
     const payload = getTextPayload(result);
     expect(payload.message).toBe(
-      'Opened URL in new tab because current tab is not an HTTP(S) page',
+      'Opened URL in new tab because target tab is not an HTTP(S) page',
+    );
+    expect(payload.tabId).toBe(88);
+    expect(payload.url).toBe(targetUrl);
+  });
+
+  it('opens a background tab instead of mutating an explicit restricted tab', async () => {
+    const targetUrl = 'https://www.google.com/';
+    mocks.tabsGet.mockImplementation(async (tabId: number) => {
+      if (tabId === 7) {
+        return makeTab({
+          id: 7,
+          windowId: 20,
+          url: 'chrome://extensions/',
+          status: 'complete',
+          active: true,
+        });
+      }
+      return makeTab({
+        id: tabId,
+        windowId: 20,
+        url: targetUrl,
+        status: 'complete',
+        active: false,
+      });
+    });
+    mocks.windowsGet.mockResolvedValueOnce({ id: 20 });
+    mocks.tabsCreate.mockResolvedValueOnce(
+      makeTab({
+        id: 88,
+        windowId: 20,
+        url: targetUrl,
+        status: 'loading',
+        active: false,
+      }),
+    );
+
+    const result = await navigateTool.execute({
+      url: targetUrl,
+      tabId: 7,
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(mocks.tabsUpdate).not.toHaveBeenCalledWith(7, { url: targetUrl });
+    expect(mocks.tabsCreate).toHaveBeenCalledWith({
+      url: targetUrl,
+      windowId: 20,
+      active: false,
+    });
+    expect(mocks.windowsUpdate).not.toHaveBeenCalled();
+
+    const payload = getTextPayload(result);
+    expect(payload.message).toBe(
+      'Opened URL in new tab because target tab is not an HTTP(S) page',
+    );
+    expect(payload.tabId).toBe(88);
+    expect(payload.url).toBe(targetUrl);
+  });
+
+  it('opens a foreground tab and focuses the window when not in background mode for a restricted explicit tab', async () => {
+    const targetUrl = 'https://www.google.com/';
+    mocks.tabsGet.mockImplementation(async (tabId: number) => {
+      if (tabId === 7) {
+        return makeTab({
+          id: 7,
+          windowId: 20,
+          url: 'chrome://extensions/',
+          status: 'complete',
+          active: true,
+        });
+      }
+      return makeTab({
+        id: tabId,
+        windowId: 20,
+        url: targetUrl,
+        status: 'complete',
+        active: true,
+      });
+    });
+    mocks.windowsGet.mockResolvedValueOnce({ id: 20 });
+    mocks.tabsCreate.mockResolvedValueOnce(
+      makeTab({
+        id: 88,
+        windowId: 20,
+        url: targetUrl,
+        status: 'loading',
+        active: true,
+      }),
+    );
+
+    const result = await navigateTool.execute({
+      url: targetUrl,
+      tabId: 7,
+      background: false,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(mocks.tabsUpdate).not.toHaveBeenCalledWith(7, { url: targetUrl });
+    expect(mocks.tabsCreate).toHaveBeenCalledWith({
+      url: targetUrl,
+      windowId: 20,
+      active: true,
+    });
+    expect(mocks.windowsUpdate).toHaveBeenCalledWith(20, { focused: true });
+
+    const payload = getTextPayload(result);
+    expect(payload.message).toBe(
+      'Opened URL in new tab because target tab is not an HTTP(S) page',
     );
     expect(payload.tabId).toBe(88);
     expect(payload.url).toBe(targetUrl);

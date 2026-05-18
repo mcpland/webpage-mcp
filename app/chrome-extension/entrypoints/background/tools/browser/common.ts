@@ -41,6 +41,18 @@ function isChromeNewTabUrl(url: string): boolean {
 const CLOSE_TABS_PUBLIC_PAGE_ERROR =
   'Only http:// and https:// pages are supported by chrome_close_tabs';
 
+function urlsMatch(targetUrl: string, observedUrl: string): boolean {
+  if (targetUrl === observedUrl) {
+    return true;
+  }
+
+  try {
+    return new URL(targetUrl).href === new URL(observedUrl).href;
+  } catch {
+    return false;
+  }
+}
+
 function getNavigateTargetPageError(operation: 'refresh' | 'history'): string {
   return operation === 'refresh'
     ? 'Only http:// and https:// pages are supported by chrome_navigate refresh'
@@ -109,32 +121,49 @@ class NavigateTool extends BaseBrowserToolExecutor {
     const timeoutMs = options.timeoutMs ?? NAVIGATION_WAIT_TIMEOUT_MS;
     const deadline = Date.now() + timeoutMs;
     let lastSeen = await chrome.tabs.get(tabId);
+    let sawNavigationSignal = !options.previousUrl;
 
     while (Date.now() < deadline) {
       const current = await chrome.tabs.get(tabId);
       lastSeen = current;
 
-      const pendingUrl =
-        (current as chrome.tabs.Tab & { pendingUrl?: string }).pendingUrl || '';
       const currentUrl = current.url || '';
-      const observedUrl = pendingUrl || currentUrl;
-
-      if (options.targetUrl && observedUrl === options.targetUrl) {
-        return current;
-      }
+      const changedFromPrevious =
+        !!options.previousUrl &&
+        !!currentUrl &&
+        currentUrl !== options.previousUrl;
 
       if (
-        options.previousUrl &&
-        observedUrl &&
-        observedUrl !== options.previousUrl
+        options.targetUrl &&
+        currentUrl &&
+        urlsMatch(options.targetUrl, currentUrl)
       ) {
         return current;
       }
 
+      // Fallback for callers without a known targetUrl (e.g., reload/back/forward
+      // style flows): treat any committed URL change as completion.
+      if (
+        !options.targetUrl &&
+        options.previousUrl &&
+        currentUrl &&
+        currentUrl !== options.previousUrl
+      ) {
+        return current;
+      }
+
+      if (changedFromPrevious || current.status !== 'complete') {
+        sawNavigationSignal = true;
+      }
+
+      // Final fallback: navigation marked complete. When a targetUrl is supplied
+      // but redirects commit to a different URL, return only after a real
+      // navigation signal so we do not report the pre-navigation page.
       if (
         current.status === 'complete' &&
         currentUrl &&
-        (!options.previousUrl || currentUrl !== options.previousUrl)
+        (!options.previousUrl || changedFromPrevious) &&
+        (!options.targetUrl || sawNavigationSignal)
       ) {
         return current;
       }
@@ -355,10 +384,10 @@ class NavigateTool extends BaseBrowserToolExecutor {
           return createErrorResponse('No target tab found to navigate');
         }
 
+        const targetTabUrl = String(targetTab.url || '');
         if (
-          !explicitTab &&
-          hasDisallowedPublicUrlScheme(String(targetTab.url || '')) &&
-          !isChromeNewTabUrl(String(targetTab.url || ''))
+          hasDisallowedPublicUrlScheme(targetTabUrl) &&
+          !isChromeNewTabUrl(targetTabUrl)
         ) {
           const targetWindow = await this.resolveTargetWindowForNewTab(
             windowId,
@@ -366,7 +395,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           );
           if (!targetWindow?.id) {
             return createErrorResponse(
-              'Current tab is not an HTTP(S) page and no target window was found',
+              'Target tab is not an HTTP(S) page and no target window was found',
             );
           }
 
@@ -388,7 +417,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
           return this.buildTabResult(
             updatedTab,
-            'Opened URL in new tab because current tab is not an HTTP(S) page',
+            'Opened URL in new tab because target tab is not an HTTP(S) page',
           );
         }
 
