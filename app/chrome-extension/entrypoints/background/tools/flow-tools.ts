@@ -4251,7 +4251,10 @@ function getSuccessfulAssertionNodeIds(flow: FlowV3, events: RunEvent[] | undefi
   return Array.from(
     new Set(
       events
-        .filter((event) => event.type === 'node.succeeded' && assertionNodeIds.has(String(event.nodeId)))
+        .filter(
+          (event): event is Extract<RunEvent, { type: 'node.succeeded' }> =>
+            event.type === 'node.succeeded' && assertionNodeIds.has(String(event.nodeId)),
+        )
         .map((event) => String(event.nodeId)),
     ),
   );
