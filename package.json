@@ -57,10 +57,5 @@
     "commitizen": {
       "path": "cz-conventional-changelog"
     }
-  },
-  "pnpm": {
-    "overrides": {
-      "sharp": "0.34.5"
-    }
   }
 }
