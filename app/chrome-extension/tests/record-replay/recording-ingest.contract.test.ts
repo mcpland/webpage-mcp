@@ -12,6 +12,7 @@ function createSessionMock(sessionId = 'sess_test') {
     canAcceptSteps: vi.fn(() => true),
     getFlow: vi.fn(() => ({ id: 'flow-1' })),
     getSession: vi.fn(() => state),
+    hasActiveTab: vi.fn((tabId: number) => tabId === 101),
     appendSteps,
     appendVariables,
   };
@@ -184,6 +185,27 @@ describe('Recorder ingest protocol', () => {
         ok: false,
         code: 'SESSION_MISMATCH',
       }),
+    );
+  });
+
+  it('rejects recorder events from tabs outside the recording membership', () => {
+    const mock = createSessionMock();
+    const handler = createRecorderEventMessageHandler(mock.session as any);
+    const sendResponse = vi.fn();
+
+    handler(
+      {
+        type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
+        payload: { kind: 'steps', steps: [createClickStep('foreign')] },
+        meta: createMeta(),
+      },
+      createSender(999),
+      sendResponse,
+    );
+
+    expect(mock.appendSteps).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false, code: 'INVALID_SOURCE' }),
     );
   });
 

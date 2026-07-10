@@ -17,13 +17,15 @@ export function initBrowserEventListeners(session: RecordingSessionManager): voi
   };
 
   chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    let newlyTracked = false;
     try {
       if (session.getStatus() !== 'recording') return;
       const tabId = activeInfo.tabId;
+      const wasTracked = session.hasActiveTab(tabId);
+      if (!session.addActiveTab(tabId)) return;
+      newlyTracked = !wasTracked;
       await ensureRecorderInjected(tabId);
       await broadcastControlToTab(tabId, REC_CMD.START, getStartMeta());
-      // Track active tab for targeted STOP later
-      session.addActiveTab(tabId);
 
       const flow = session.getFlow();
       if (!flow) return;
@@ -36,6 +38,7 @@ export function initBrowserEventListeners(session: RecordingSessionManager): voi
       };
       session.appendSteps([step]);
     } catch (e) {
+      if (newlyTracked) session.removeActiveTab(activeInfo.tabId);
       console.warn('onActivated handler failed', e);
     }
   });
@@ -45,6 +48,11 @@ export function initBrowserEventListeners(session: RecordingSessionManager): voi
       if (session.getStatus() !== 'recording') return;
       if (details.frameId !== 0) return;
       const tabId = details.tabId;
+      if (!session.hasActiveTab(tabId)) return;
+
+      await ensureRecorderInjected(tabId);
+      await broadcastControlToTab(tabId, REC_CMD.START, getStartMeta());
+
       const t = details.transitionType;
       const link = t === 'link';
       if (!link) {
@@ -63,10 +71,6 @@ export function initBrowserEventListeners(session: RecordingSessionManager): voi
           if (flow && url) addNavigationStep(flow, url);
         }
       }
-      await ensureRecorderInjected(tabId);
-      await broadcastControlToTab(tabId, REC_CMD.START, getStartMeta());
-      // Track active tab for targeted STOP later
-      session.addActiveTab(tabId);
       if (session.getFlow()) {
         session.broadcastTimelineUpdate();
       }
@@ -78,8 +82,8 @@ export function initBrowserEventListeners(session: RecordingSessionManager): voi
   // Remove closed tabs from the active set to avoid stale broadcasts
   chrome.tabs.onRemoved.addListener((tabId) => {
     try {
-      // Even if not recording, removing is harmless; keep guard for clarity
-      if (session.getStatus() !== 'recording') return;
+      // Also prune while paused/stopping so the stop barrier cannot retain a
+      // closed tab that will never acknowledge the final flush.
       session.removeActiveTab(tabId);
     } catch (e) {
       console.warn('onRemoved handler failed', e);

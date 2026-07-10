@@ -365,6 +365,14 @@ export function createRecorderEventMessageHandler(
         });
         return true;
       }
+      if (!session.hasActiveTab(source.tabId)) {
+        sendResponse({
+          ok: false,
+          code: 'INVALID_SOURCE',
+          error: 'recorder event source tab is not part of this recording session',
+        });
+        return true;
+      }
 
       if (meta.sessionId !== sessionId) {
         sendResponse({

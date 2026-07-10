@@ -11,6 +11,7 @@ import { mapStepToNodeConfig, stepsToDAG, EDGE_LABELS } from 'webpage-mcp-shared
  * - stopping: Draining final steps from content scripts before save
  */
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'stopping';
+export const MAX_RECORDING_ACTIVE_TABS = 128;
 
 export interface RecordingSessionState {
   sessionId: string;
@@ -58,8 +59,12 @@ export class RecordingSessionManager {
     return this.state.originTabId;
   }
 
-  addActiveTab(tabId: number): void {
-    if (typeof tabId === 'number') this.state.activeTabs.add(tabId);
+  addActiveTab(tabId: number): boolean {
+    if (!Number.isInteger(tabId) || tabId < 0) return false;
+    if (this.state.activeTabs.has(tabId)) return true;
+    if (this.state.activeTabs.size >= MAX_RECORDING_ACTIVE_TABS) return false;
+    this.state.activeTabs.add(tabId);
+    return true;
   }
 
   removeActiveTab(tabId: number): void {
@@ -68,6 +73,10 @@ export class RecordingSessionManager {
 
   getActiveTabs(): number[] {
     return Array.from(this.state.activeTabs);
+  }
+
+  hasActiveTab(tabId: number): boolean {
+    return Number.isInteger(tabId) && tabId >= 0 && this.state.activeTabs.has(tabId);
   }
 
   async startSession(flow: Flow, originTabId: number): Promise<void> {
