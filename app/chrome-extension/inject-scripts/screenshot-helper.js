@@ -8,22 +8,57 @@ if (window.__SCREENSHOT_HELPER_INITIALIZED__) {
 } else {
   window.__SCREENSHOT_HELPER_INITIALIZED__ = true;
 
+  const MAX_DOM_SCAN_ELEMENTS = 12000;
+  const MAX_DOM_SCAN_DEPTH = 128;
+  const MAX_DOM_SCAN_MS = 250;
+  const MAX_HIDDEN_FIXED_ELEMENTS = 512;
+  const MAX_PAGE_PREPARATION_MS = 2 * 60 * 1000;
+
   // Save original styles
-  let originalOverflowStyle = '';
+  let originalOverflowStyle = null;
   let hiddenFixedElements = [];
+  let cleanupTimer = null;
 
   /**
    * Get fixed/sticky positioned elements
-   * @returns Array of fixed/sticky elements
+   * @returns {{items: Array, visited: number, truncated: boolean}}
    */
   function getFixedElements() {
     const fixed = [];
+    const root = document.documentElement;
+    if (!root) return { items: fixed, visited: 0, truncated: false };
 
-    document.querySelectorAll('*').forEach((el) => {
-      const htmlEl = el;
-      const style = window.getComputedStyle(htmlEl);
-      if (style.position === 'fixed' || style.position === 'sticky') {
-        // Filter out tiny or invisible elements, and elements that are part of the extension UI
+    const stack = [{ element: root, depth: 0 }];
+    const deadline = Date.now() + MAX_DOM_SCAN_MS;
+    let visited = 0;
+    let truncated = false;
+
+    while (stack.length > 0) {
+      if (visited >= MAX_DOM_SCAN_ELEMENTS || Date.now() > deadline) {
+        truncated = true;
+        break;
+      }
+
+      const frame = stack.pop();
+      if (!frame) break;
+      const htmlEl = frame.element;
+      visited += 1;
+
+      const sibling = htmlEl.nextElementSibling;
+      if (sibling) stack.push({ element: sibling, depth: frame.depth });
+      const child = htmlEl.firstElementChild;
+      if (child) {
+        if (frame.depth < MAX_DOM_SCAN_DEPTH) {
+          stack.push({ element: child, depth: frame.depth + 1 });
+        } else {
+          truncated = true;
+        }
+      }
+
+      try {
+        const style = window.getComputedStyle(htmlEl);
+        if (style.position !== 'fixed' && style.position !== 'sticky') continue;
+        // Filter out tiny or invisible elements, and elements that are part of the extension UI.
         if (
           htmlEl.offsetWidth > 1 &&
           htmlEl.offsetHeight > 1 &&
@@ -32,32 +67,70 @@ if (window.__SCREENSHOT_HELPER_INITIALIZED__) {
           fixed.push({
             element: htmlEl,
             originalDisplay: htmlEl.style.display,
-            originalVisibility: htmlEl.style.visibility,
           });
+          if (fixed.length >= MAX_HIDDEN_FIXED_ELEMENTS) {
+            truncated = truncated || stack.length > 0;
+            break;
+          }
         }
+      } catch {
+        // A hostile element must not abort cleanup for the rest of the page.
       }
-    });
-    return fixed;
+    }
+
+    return { items: fixed, visited, truncated };
   }
 
   /**
    * Hide fixed/sticky elements
    */
   function hideFixedElements() {
-    hiddenFixedElements = getFixedElements();
-    hiddenFixedElements.forEach((item) => {
-      item.element.style.display = 'none';
-    });
+    const result = getFixedElements();
+    hiddenFixedElements = [];
+    for (const item of result.items) {
+      try {
+        item.element.style.display = 'none';
+        hiddenFixedElements.push(item);
+      } catch {
+        // Continue so every successfully hidden element remains tracked for cleanup.
+      }
+    }
+    return {
+      hidden: hiddenFixedElements.length,
+      visited: result.visited,
+      truncated: result.truncated,
+    };
   }
 
   /**
    * Restore fixed/sticky elements
    */
   function showFixedElements() {
-    hiddenFixedElements.forEach((item) => {
-      item.element.style.display = item.originalDisplay || '';
-    });
+    const items = hiddenFixedElements;
     hiddenFixedElements = [];
+    for (const item of items) {
+      try {
+        item.element.style.display = item.originalDisplay || '';
+      } catch {
+        // Continue restoring the remaining bounded set.
+      }
+    }
+  }
+
+  function restorePageStyles() {
+    if (cleanupTimer !== null) {
+      clearTimeout(cleanupTimer);
+      cleanupTimer = null;
+    }
+    showFixedElements();
+    if (originalOverflowStyle !== null) {
+      try {
+        document.documentElement.style.overflow = originalOverflowStyle;
+      } catch {
+        // Best effort.
+      }
+      originalOverflowStyle = null;
+    }
   }
 
   // Listen for messages from the extension
@@ -70,15 +143,26 @@ if (window.__SCREENSHOT_HELPER_INITIALIZED__) {
 
     // Prepare page for capture
     else if (request.action === 'preparePageForCapture') {
-      originalOverflowStyle = document.documentElement.style.overflow;
-      document.documentElement.style.overflow = 'hidden'; // Hide main scrollbar
-      if (request.options?.fullPage) {
-        // Only hide fixed elements for full page to avoid flicker
-        hideFixedElements();
+      // A superseding preparation must first undo any styles left by the prior capture.
+      restorePageStyles();
+      let fixedElementScan = { hidden: 0, visited: 0, truncated: false };
+      try {
+        originalOverflowStyle = document.documentElement.style.overflow;
+        document.documentElement.style.overflow = 'hidden'; // Hide main scrollbar
+        if (request.options?.fullPage) {
+          // Only hide fixed elements for full page to avoid flicker
+          fixedElementScan = hideFixedElements();
+        }
+        // If the caller disappears before reset, do not leave the page modified indefinitely.
+        cleanupTimer = setTimeout(restorePageStyles, MAX_PAGE_PREPARATION_MS);
+      } catch {
+        restorePageStyles();
+        sendResponse({ success: false, error: 'Unable to prepare page styles for capture.' });
+        return false;
       }
       // Give styles a moment to apply
       setTimeout(() => {
-        sendResponse({ success: true });
+        sendResponse({ success: true, fixedElementScan });
       }, 50);
       return true; // Async response
     }
@@ -146,8 +230,7 @@ if (window.__SCREENSHOT_HELPER_INITIALIZED__) {
 
     // Reset page
     else if (request.action === 'resetPageAfterCapture') {
-      document.documentElement.style.overflow = originalOverflowStyle;
-      showFixedElements();
+      restorePageStyles();
       if (typeof request.scrollX !== 'undefined' && typeof request.scrollY !== 'undefined') {
         window.scrollTo({ left: request.scrollX, top: request.scrollY, behavior: 'instant' });
       }
