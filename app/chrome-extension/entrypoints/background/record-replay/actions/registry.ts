@@ -39,6 +39,7 @@ import {
   boundedRetryCount,
   boundedRetryDelay,
 } from '../engine/policies/retry-limits';
+import { boundedActionTimeout } from '../engine/policies/timeout-limits';
 
 // ================================
 // type definition
@@ -529,7 +530,13 @@ export class ActionRegistry {
       requestedRetryPolicy && workflowSideEffectAllowsRetry(sideEffectProfile, 'node')
         ? requestedRetryPolicy
         : undefined;
-    const timeoutPolicy = action.policy?.timeout;
+    const requestedTimeoutPolicy = action.policy?.timeout;
+    const timeoutPolicy = requestedTimeoutPolicy
+      ? {
+          ms: boundedActionTimeout(requestedTimeoutPolicy.ms),
+          scope: requestedTimeoutPolicy.scope === 'action' ? ('action' as const) : ('attempt' as const),
+        }
+      : undefined;
     const maxAttempts = 1 + boundedRetryCount(retryPolicy?.retries);
     if (requestedRetryPolicy && !retryPolicy) {
       try {
