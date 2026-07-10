@@ -981,6 +981,15 @@ async function verifyArtifactLegalFiles({ rootDir, tarEntries, zipEntries }) {
       expected: extensionLegal.notice,
       description: "extension zip THIRD_PARTY_NOTICES.md",
     },
+    {
+      actual: readZipEntry(
+        zipEntries,
+        extensionLegal.archiveThirdPartyLicenses,
+        "extension zip THIRD_PARTY_LICENSES.txt",
+      ),
+      expected: extensionLegal.thirdPartyLicenses,
+      description: "extension zip THIRD_PARTY_LICENSES.txt",
+    },
   ];
   for (const { actual, expected, description } of requiredFiles) {
     invariant(

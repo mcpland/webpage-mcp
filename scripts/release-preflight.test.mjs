@@ -140,6 +140,7 @@ async function createReleaseRoot(t, versions = {}) {
     "app/mcp-server/THIRD_PARTY_NOTICES.md",
     "app/chrome-extension/public/LICENSE",
     "app/chrome-extension/public/THIRD_PARTY_NOTICES.md",
+    "app/chrome-extension/public/THIRD_PARTY_LICENSES.txt",
   ]) {
     const targetPath = join(rootDir, relativePath);
     await mkdir(dirname(targetPath), { recursive: true });
@@ -391,6 +392,15 @@ async function createArtifacts(rootDir, overrides = {}) {
           [
             extensionLegal.archiveNotice,
             overrides.extensionNotice ?? extensionLegal.notice,
+          ],
+        ]
+      : []),
+    ...(!overrides.omitExtensionThirdPartyLicenses
+      ? [
+          [
+            extensionLegal.archiveThirdPartyLicenses,
+            overrides.extensionThirdPartyLicenses ??
+              extensionLegal.thirdPartyLicenses,
           ],
         ]
       : []),
@@ -723,6 +733,18 @@ test("release artifact verification fails closed", async (t) => {
       }),
       /Missing THIRD_PARTY_NOTICES\.md in extension zip THIRD_PARTY_NOTICES\.md/,
     );
+
+    const licenseBundleRoot = await createReleaseRoot(t);
+    const licenseBundleArtifacts = await createArtifacts(licenseBundleRoot, {
+      omitExtensionThirdPartyLicenses: true,
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: licenseBundleRoot,
+        artifactsDir: licenseBundleArtifacts.artifactsDir,
+      }),
+      /Missing THIRD_PARTY_LICENSES\.txt in extension zip THIRD_PARTY_LICENSES\.txt/,
+    );
   });
 
   await t.test("when either artifact corrupts a legal file", async (t) => {
@@ -748,6 +770,18 @@ test("release artifact verification fails closed", async (t) => {
         artifactsDir: extensionArtifacts.artifactsDir,
       }),
       /extension zip project LICENSE does not match the reviewed repository source/,
+    );
+
+    const licenseBundleRoot = await createReleaseRoot(t);
+    const licenseBundleArtifacts = await createArtifacts(licenseBundleRoot, {
+      extensionThirdPartyLicenses: "tampered third-party licenses\n",
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: licenseBundleRoot,
+        artifactsDir: licenseBundleArtifacts.artifactsDir,
+      }),
+      /extension zip THIRD_PARTY_LICENSES\.txt does not match the reviewed repository source/,
     );
   });
 

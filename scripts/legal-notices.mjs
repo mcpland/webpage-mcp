@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import console from "node:console";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
@@ -27,14 +28,20 @@ export const LEGAL_ARTIFACTS = Object.freeze({
     noticeSource: "app/chrome-extension/public/THIRD_PARTY_NOTICES.md",
     archiveLicense: "LICENSE",
     archiveNotice: "THIRD_PARTY_NOTICES.md",
+    thirdPartyLicensesSource:
+      "app/chrome-extension/public/THIRD_PARTY_LICENSES.txt",
+    archiveThirdPartyLicenses: "THIRD_PARTY_LICENSES.txt",
+    thirdPartyLicensesSha256:
+      "d3a67637321e53e845d8b50f3930081432c0cbce7b2822f5a731127278c96b9c",
     packageRoot: "app/chrome-extension",
     requiredMarkers: Object.freeze([
       "@xenova/transformers",
       "hnswlib-wasm-static",
       "onnxruntime-web",
-      "1.14.0",
       "1.22.0",
       "Vendored runtime files",
+      "Arc90 Readability",
+      "THIRD_PARTY_LICENSES.txt",
       "elkjs",
       "EPL-2.0",
       "Apache-2.0",
@@ -79,6 +86,38 @@ export function validateThirdPartyNotice(source, artifactName) {
   return source;
 }
 
+export function validateThirdPartyLicenseBundle(bytes, artifactName) {
+  const artifact = LEGAL_ARTIFACTS[artifactName];
+  if (!artifact?.thirdPartyLicensesSource) {
+    fail(`${String(artifactName)} has no reviewed third-party license bundle`);
+  }
+  if (!Buffer.isBuffer(bytes)) {
+    fail(`${artifactName} THIRD_PARTY_LICENSES must be bytes`);
+  }
+  const source = bytes.toString("utf8");
+  if (!Buffer.from(source, "utf8").equals(bytes)) {
+    fail(`${artifactName} THIRD_PARTY_LICENSES must be valid UTF-8`);
+  }
+  for (const marker of [
+    "THIRD-PARTY LICENSES AND ATTRIBUTIONS",
+    "ONNX Runtime@1.22.0 complete upstream ThirdPartyNotices.txt",
+    "Eclipse Public License - v 2.0",
+    "UNICODE LICENSE V3",
+    "Copyright (c) 2010 Arc90 Inc",
+  ]) {
+    if (!source.includes(marker)) {
+      fail(`${artifactName} THIRD_PARTY_LICENSES is missing marker: ${marker}`);
+    }
+  }
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  if (digest !== artifact.thirdPartyLicensesSha256) {
+    fail(
+      `${artifactName} THIRD_PARTY_LICENSES SHA-256 ${digest} does not match the reviewed digest`,
+    );
+  }
+  return bytes;
+}
+
 export function parseThirdPartyNoticeRows(source, artifactName) {
   validateThirdPartyNotice(source, artifactName);
   const rows = new Map();
@@ -88,7 +127,10 @@ export function parseThirdPartyNoticeRows(source, artifactName) {
       .split("|")
       .slice(1, -1)
       .map((cell) => cell.trim());
-    if (cells.length !== 6 || !["npm", "cargo"].includes(cells[0])) {
+    if (
+      cells.length !== 6 ||
+      !["npm", "cargo", "vendored"].includes(cells[0])
+    ) {
       continue;
     }
     const [
@@ -146,11 +188,23 @@ export async function loadReviewedLegalFiles({
     `${artifactName} THIRD_PARTY_NOTICES source`,
   );
   validateThirdPartyNotice(notice.toString("utf8"), artifactName);
+  let thirdPartyLicenses;
+  if (artifact.thirdPartyLicensesSource) {
+    thirdPartyLicenses = await readBoundedSource(
+      resolve(rootDir, artifact.thirdPartyLicensesSource),
+      `${artifactName} THIRD_PARTY_LICENSES source`,
+    );
+    validateThirdPartyLicenseBundle(thirdPartyLicenses, artifactName);
+  }
   return {
     license: Buffer.from(projectLicense),
     notice: Buffer.from(notice),
     archiveLicense: artifact.archiveLicense,
     archiveNotice: artifact.archiveNotice,
+    thirdPartyLicenses: thirdPartyLicenses
+      ? Buffer.from(thirdPartyLicenses)
+      : undefined,
+    archiveThirdPartyLicenses: artifact.archiveThirdPartyLicenses,
   };
 }
 
