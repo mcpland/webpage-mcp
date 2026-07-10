@@ -42,6 +42,37 @@ describe('interaction tools', () => {
     mocks.tabsSendMessage.mockReset();
   });
 
+  it('rejects oversized refs before injecting the accessibility helper', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue(
+      makeTab({ url: 'https://example.com/' }),
+    );
+    const injectContentScript = vi
+      .spyOn(clickTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+
+    const result = await clickTool.execute({
+      tabId: 7,
+      ref: 'r'.repeat(129),
+    });
+
+    expect(result.isError).toBe(true);
+    expect(injectContentScript).not.toHaveBeenCalled();
+  });
+
+  it('rejects expensive fill selectors before touching a tab', async () => {
+    const tryGetTab = vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue(
+      makeTab({ url: 'https://example.com/' }),
+    );
+
+    const result = await fillTool.execute({
+      selector: 'form:has(input)',
+      value: 'x',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(tryGetTab).not.toHaveBeenCalled();
+  });
+
   it('uses CDP native click dispatch for public pages', async () => {
     const tryGetTab = vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue(
       makeTab({

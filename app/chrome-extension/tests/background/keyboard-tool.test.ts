@@ -41,6 +41,24 @@ describe('keyboardTool', () => {
     mocks.tabsSendMessage.mockReset();
   });
 
+  it('rejects expensive selectors before helper injection', async () => {
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue(
+      makeTab({ url: 'https://example.com/' }),
+    );
+    const injectContentScript = vi
+      .spyOn(keyboardTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+
+    const result = await keyboardTool.execute({
+      tabId: 7,
+      keys: 'Enter',
+      selector: 'main:has(button)',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(injectContentScript).not.toHaveBeenCalled();
+  });
+
   it('uses CDP key dispatch for Enter on public pages', async () => {
     vi.stubGlobal('chrome', {
       runtime: { lastError: null },

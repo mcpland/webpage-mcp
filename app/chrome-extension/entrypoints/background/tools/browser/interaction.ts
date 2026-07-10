@@ -8,6 +8,8 @@ import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
   getResolvedViewportCoordinates,
   isCompositeSelector,
+  normalizeBrowserTargetRef,
+  normalizeBrowserTargetSelector,
   resolveFrameIdForMessageResult,
 } from './target-resolution';
 
@@ -210,7 +212,9 @@ class ClickTool extends BaseBrowserToolExecutor {
     tabId: number,
     args: ClickToolParams,
   ): Promise<ResolvedClickTarget> {
-    const { selector, selectorType = 'css', coordinates, frameId } = args;
+    const { selectorType = 'css', coordinates, frameId } = args;
+    const selector = normalizeBrowserTargetSelector(args.selector, selectorType);
+    let ref = normalizeBrowserTargetRef(args.ref);
     let targetFrameId = frameId;
 
     if (
@@ -240,10 +244,6 @@ class ClickTool extends BaseBrowserToolExecutor {
       typeof targetFrameId === 'number' ? [targetFrameId] : undefined,
     );
 
-    let ref =
-      typeof args.ref === 'string' && args.ref.trim()
-        ? args.ref.trim()
-        : undefined;
     if (!ref && selector) {
       const selectorFrameId = isCompositeSelector(selector)
         ? undefined
@@ -498,7 +498,17 @@ class FillTool extends BaseBrowserToolExecutor {
    * Execute fill operation
    */
   async execute(args: FillToolParams): Promise<ToolResult> {
-    const { selector, selectorType = 'css', ref, value, frameId } = args;
+    const { selectorType = 'css', value, frameId } = args;
+    let selector: string | undefined;
+    let ref: string | undefined;
+    try {
+      selector = normalizeBrowserTargetSelector(args.selector, selectorType);
+      ref = normalizeBrowserTargetRef(args.ref);
+    } catch (error) {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
 
 
     if (!selector && !ref) {

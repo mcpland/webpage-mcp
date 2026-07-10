@@ -24,6 +24,14 @@
   const MAX_PAGE_CONTENT_BYTES = 384 * 1024;
   const REF_MAP_LIMIT = 256;
   const MAX_LIVE_REFS = 5000;
+  const MAX_TARGET_SELECTOR_BYTES = 4 * 1024;
+  const MAX_TARGET_TEXT_BYTES = 1024;
+  const MAX_TARGET_ERROR_BYTES = 4 * 1024;
+  const MAX_TARGET_SCAN_NODES = 12000;
+  const MAX_TARGET_SCAN_DEPTH = 128;
+  const MAX_TARGET_SCAN_MS = 250;
+  const MAX_TARGET_STYLE_CHECKS = 1000;
+  const MAX_TARGET_LAYOUT_CHECKS = 1000;
 
   // Keep a weak map from ref id to elements
   if (!window.__claudeElementMap) window.__claudeElementMap = {};
@@ -402,42 +410,129 @@
     );
   }
 
-  // Utility: query CSS across open shadow roots (best-effort)
-  function querySelectorDeepFirst(selector) {
-    try {
-      // Fast path
-      const direct = document.querySelector(selector);
-      if (direct) return direct;
-    } catch (_) {}
-    const visited = new Set();
-    const stack = [document.documentElement];
-    while (stack.length) {
-      const node = stack.pop();
-      if (!node || visited.has(node)) continue;
-      visited.add(node);
-      try {
-        const root =
-          /** @type {any} */ (node).shadowRoot ||
-          (node.nodeType === 9 ? node : null);
-        if (root) {
-          try {
-            const hit = root.querySelector(selector);
-            if (hit) return hit;
-          } catch (_) {}
+  function targetScanNow() {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+  }
+
+  function createTargetScanBudget() {
+    return {
+      nodes: 0,
+      styleChecks: 0,
+      layoutChecks: 0,
+      deadline: targetScanNow() + MAX_TARGET_SCAN_MS,
+      truncated: false,
+    };
+  }
+
+  function createTargetScanFrame(node, depth) {
+    return {
+      node,
+      depth,
+      entered: false,
+      shadowChild: null,
+      lightChild: null,
+    };
+  }
+
+  // A depth-first scanner with O(depth) auxiliary memory. Wide child lists are
+  // followed through sibling pointers rather than copied into an Array.
+  function* walkTargetNodesDeep(root, budget) {
+    const first =
+      root instanceof Node && root.nodeType === Node.ELEMENT_NODE
+        ? root
+        : root && root.documentElement
+          ? root.documentElement
+          : root && root.firstElementChild
+            ? root.firstElementChild
+            : null;
+    if (!first) return;
+    const stack = [createTargetScanFrame(first, 0)];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      if (!frame.entered) {
+        frame.entered = true;
+        if (budget.nodes >= MAX_TARGET_SCAN_NODES) {
+          budget.truncated = true;
+          return;
         }
-      } catch (_) {}
-      // Traverse DOM and shadow roots
-      try {
-        const children = /** @type {Element} */ (node).children || [];
-        for (let i = 0; i < children.length; i++) stack.push(children[i]);
-        const sr = /** @type {any} */ (node).shadowRoot;
-        if (sr && sr.children) {
-          for (let i = 0; i < sr.children.length; i++)
-            stack.push(sr.children[i]);
+        budget.nodes++;
+        if ((budget.nodes & 63) === 0 && targetScanNow() > budget.deadline) {
+          budget.truncated = true;
+          return;
         }
-      } catch (_) {}
+        try {
+          frame.lightChild = frame.node.firstChild || null;
+        } catch (_) {}
+        try {
+          frame.shadowChild =
+            frame.node instanceof Element && frame.node.shadowRoot
+              ? frame.node.shadowRoot.firstChild
+              : null;
+        } catch (_) {}
+        yield frame.node;
+        continue;
+      }
+
+      let child = null;
+      if (frame.shadowChild) {
+        child = frame.shadowChild;
+        frame.shadowChild = child.nextSibling;
+      } else if (frame.lightChild) {
+        child = frame.lightChild;
+        frame.lightChild = child.nextSibling;
+      } else {
+        stack.pop();
+        continue;
+      }
+      if (frame.depth >= MAX_TARGET_SCAN_DEPTH) {
+        budget.truncated = true;
+        continue;
+      }
+      stack.push(createTargetScanFrame(child, frame.depth + 1));
     }
-    return null;
+  }
+
+  function normalizeTargetInput(value, name, maximumBytes) {
+    if (typeof value !== 'string') throw new Error(`${name} must be a string`);
+    const normalized = value.trim();
+    if (!normalized) throw new Error(`${name} is required`);
+    if (
+      normalized.length > maximumBytes ||
+      utf8ByteLength(normalized, maximumBytes) > maximumBytes
+    ) {
+      throw new Error(`${name} exceeds the ${maximumBytes}-byte UTF-8 limit`);
+    }
+    return normalized;
+  }
+
+  function validateCssTargetSelector(selector) {
+    const normalized = normalizeTargetInput(
+      selector,
+      'selector',
+      MAX_TARGET_SELECTOR_BYTES,
+    );
+    if (/:has\s*\(/iu.test(normalized)) {
+      throw new Error('selector must not use the resource-intensive :has() pseudo-class');
+    }
+    try {
+      document.documentElement.matches(normalized);
+    } catch (error) {
+      throw new Error(
+        `Invalid CSS selector: ${truncateUtf8(
+          error && error.message ? error.message : String(error),
+          512,
+        )}`,
+      );
+    }
+    return normalized;
+  }
+
+  // Utility: query CSS across the document and open shadow roots (best-effort).
+  function querySelectorDeepFirst(selector) {
+    const result = querySelectorWithUniquenessCheck(selector, true);
+    return result.error ? null : result.element;
   }
 
   /**
@@ -448,100 +543,39 @@
    * Note: matchCount is capped at 2 (where 2 means "2 or more") for performance
    */
   function querySelectorWithUniquenessCheck(selector, allowMultiple = false) {
-    const seen = new Set();
-    let firstMatch = null;
-    let matchCount = 0;
-
-    const recordMatch = (el) => {
-      if (!(el instanceof Element) || seen.has(el)) return false;
-      seen.add(el);
-      matchCount++;
-      if (!firstMatch) firstMatch = el;
-      // Short-circuit if:
-      // - allowMultiple is true and we found first match (no need to continue)
-      // - allowMultiple is false and we found multiple matches
-      if (allowMultiple && firstMatch) return true;
-      if (!allowMultiple && matchCount >= 2) return true;
-      return false;
-    };
-
-    // Query in main document
-    let selectorError = null;
     try {
-      const directMatches = document.querySelectorAll(selector);
-      for (let i = 0; i < directMatches.length; i++) {
-        if (recordMatch(directMatches[i])) {
-          // Early exit: either found first match (allowMultiple) or found multiple (not allowed)
-          return { element: firstMatch, matchCount: allowMultiple ? 1 : 2 };
+      const normalized = validateCssTargetSelector(selector);
+      const budget = createTargetScanBudget();
+      let firstMatch = null;
+      let matchCount = 0;
+      for (const node of walkTargetNodesDeep(document, budget)) {
+        if (!(node instanceof Element)) continue;
+        if (node.matches(normalized)) {
+          matchCount++;
+          if (!firstMatch) firstMatch = node;
+          if (allowMultiple || matchCount >= 2) {
+            return { element: firstMatch, matchCount: allowMultiple ? 1 : 2 };
+          }
         }
       }
-    } catch (e) {
-      selectorError = e;
-    }
-
-    if (selectorError) {
+      if (budget.truncated && (!allowMultiple || !firstMatch)) {
+        return {
+          element: null,
+          matchCount: 0,
+          error: 'Selector scan exceeded the bounded page traversal budget',
+        };
+      }
+      return { element: firstMatch, matchCount };
+    } catch (error) {
       return {
         element: null,
         matchCount: 0,
-        error: `Invalid CSS selector "${selector}": ${selectorError.message || selectorError}`,
+        error: truncateUtf8(
+          error && error.message ? error.message : String(error),
+          MAX_TARGET_ERROR_BYTES,
+        ),
       };
     }
-
-    // If allowMultiple and we already have a match, return immediately
-    if (allowMultiple && firstMatch) {
-      return { element: firstMatch, matchCount: 1 };
-    }
-
-    // Query in shadow DOMs
-    const visited = new Set();
-    const stack = [document.documentElement];
-    while (stack.length) {
-      const node = stack.pop();
-      if (!node || visited.has(node)) continue;
-      visited.add(node);
-
-      try {
-        const shadowRoot = /** @type {any} */ (node).shadowRoot;
-        if (shadowRoot) {
-          try {
-            const shadowMatches = shadowRoot.querySelectorAll(selector);
-            for (let i = 0; i < shadowMatches.length; i++) {
-              if (recordMatch(shadowMatches[i])) {
-                // Early exit: either found first match (allowMultiple) or found multiple (not allowed)
-                return {
-                  element: firstMatch,
-                  matchCount: allowMultiple ? 1 : 2,
-                };
-              }
-            }
-          } catch (e) {
-            return {
-              element: null,
-              matchCount: 0,
-              error: `Invalid CSS selector "${selector}": ${e.message || e}`,
-            };
-          }
-
-          // Add shadow root children to stack
-          try {
-            const shadowChildren = shadowRoot.children || [];
-            for (let i = 0; i < shadowChildren.length; i++) {
-              stack.push(shadowChildren[i]);
-            }
-          } catch (_) {}
-        }
-      } catch (_) {}
-
-      // Add regular children to stack
-      try {
-        const children = /** @type {Element} */ (node).children || [];
-        for (let i = 0; i < children.length; i++) {
-          stack.push(children[i]);
-        }
-      } catch (_) {}
-    }
-
-    return { element: firstMatch, matchCount: Math.min(matchCount, 2) };
   }
 
   /**
@@ -552,16 +586,20 @@
    * Note: matchCount is capped at 2 (where 2 means "2 or more") for performance
    */
   function queryXPathWithUniquenessCheck(selector, allowMultiple = false) {
-    if (!selector) {
-      return { element: null, matchCount: 0 };
-    }
-
     try {
+      const normalized = normalizeTargetInput(
+        selector,
+        'selector',
+        MAX_TARGET_SELECTOR_BYTES,
+      );
+      const structuralTokens = (normalized.match(/\/\/|\[|\]|\(|\)|\|/g) || [])
+        .length;
+      if (structuralTokens > 128) {
+        throw new Error('XPath exceeds the structural complexity limit');
+      }
       if (allowMultiple) {
-        // When multiple matches are allowed, use ANY_UNORDERED_NODE_TYPE for performance
-        // This returns just the first match without evaluating the entire result set
         const result = document.evaluate(
-          selector,
+          normalized,
           document,
           null,
           XPathResult.ANY_UNORDERED_NODE_TYPE,
@@ -573,28 +611,148 @@
             : null;
         return { element: firstMatch, matchCount: firstMatch ? 1 : 0 };
       } else {
-        // When uniqueness is required, use ORDERED_NODE_SNAPSHOT_TYPE to count matches
-        const snapshot = document.evaluate(
-          selector,
+        // Read at most two nodes. Snapshot result types retain every match.
+        const iterator = document.evaluate(
+          normalized,
           document,
           null,
-          XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+          XPathResult.ORDERED_NODE_ITERATOR_TYPE,
           null,
         );
-        const totalMatches = snapshot.snapshotLength;
-        // Cap at 2 for performance (2 means "2 or more")
-        const matchCount = Math.min(totalMatches, 2);
-        const firstMatch =
-          totalMatches > 0 && snapshot.snapshotItem(0) instanceof Element
-            ? /** @type {Element} */ (snapshot.snapshotItem(0))
-            : null;
+        const firstNode = iterator.iterateNext();
+        const secondNode = iterator.iterateNext();
+        const firstMatch = firstNode instanceof Element ? firstNode : null;
+        const matchCount = firstMatch ? (secondNode ? 2 : 1) : 0;
         return { element: firstMatch, matchCount };
       }
     } catch (e) {
       return {
         element: null,
         matchCount: 0,
-        error: `Invalid XPath "${selector}": ${e.message || e}`,
+        error: truncateUtf8(
+          `Invalid XPath: ${e && e.message ? e.message : String(e)}`,
+          MAX_TARGET_ERROR_BYTES,
+        ),
+      };
+    }
+  }
+
+  function normalizeTargetText(value) {
+    const normalized = normalizeTargetInput(
+      value,
+      'text',
+      MAX_TARGET_TEXT_BYTES,
+    );
+    return normalized.replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function normalizeTargetTag(value) {
+    if (value === undefined || value === null || value === '') return '';
+    const tag = normalizeTargetInput(value, 'tagName', 64).toUpperCase();
+    if (!/^[A-Z][A-Z0-9-]*$/.test(tag)) throw new Error('tagName is invalid');
+    return tag;
+  }
+
+  function closestTargetTag(element, tagName) {
+    if (!tagName) return element;
+    let current = element;
+    let steps = 0;
+    while (current && steps < 64) {
+      if (current.tagName === tagName) return current;
+      current = current.parentElement;
+      steps++;
+    }
+    return null;
+  }
+
+  function getTargetVisibleRect(element, budget) {
+    if (!element || !element.isConnected) return null;
+    if (budget.styleChecks >= MAX_TARGET_STYLE_CHECKS) {
+      budget.truncated = true;
+      return null;
+    }
+    budget.styleChecks++;
+    const style = window.getComputedStyle(element);
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.opacity === '0'
+    ) {
+      return null;
+    }
+    if (budget.layoutChecks >= MAX_TARGET_LAYOUT_CHECKS) {
+      budget.truncated = true;
+      return null;
+    }
+    budget.layoutChecks++;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 ? rect : null;
+  }
+
+  function boundedDiceCoefficient(text, query) {
+    if (text.length < 2 || query.length < 2) return text === query ? 1 : 0;
+    const counts = new Map();
+    for (let index = 0; index < text.length - 1; index++) {
+      const pair = text.slice(index, index + 2);
+      counts.set(pair, (counts.get(pair) || 0) + 1);
+    }
+    let intersection = 0;
+    for (let index = 0; index < query.length - 1; index++) {
+      const pair = query.slice(index, index + 2);
+      const count = counts.get(pair) || 0;
+      if (count > 0) {
+        intersection++;
+        counts.set(pair, count - 1);
+      }
+    }
+    return (2 * intersection) / (text.length - 1 + query.length - 1);
+  }
+
+  function findElementByTextBounded(text, tagName) {
+    try {
+      const query = normalizeTargetText(text);
+      const normalizedTag = normalizeTargetTag(tagName);
+      const budget = createTargetScanBudget();
+      let bestElement = null;
+      let bestScore = 0;
+      for (const node of walkTargetNodesDeep(document, budget)) {
+        if (node.nodeType !== Node.TEXT_NODE) continue;
+        const candidateText = truncateUtf8(
+          node.nodeValue || '',
+          MAX_TARGET_TEXT_BYTES,
+        )
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+        if (!candidateText) continue;
+        const candidate = closestTargetTag(node.parentElement, normalizedTag);
+        if (!candidate) continue;
+        if (candidateText.includes(query)) {
+          if (getTargetVisibleRect(candidate, budget)) {
+            return { element: candidate };
+          }
+          continue;
+        }
+        const score = boundedDiceCoefficient(candidateText, query);
+        if (score > bestScore && getTargetVisibleRect(candidate, budget)) {
+          bestElement = candidate;
+          bestScore = score;
+        }
+      }
+      if (budget.truncated) {
+        return {
+          element: null,
+          error: 'Text target scan exceeded the bounded page traversal budget',
+        };
+      }
+      return { element: bestScore >= 0.6 ? bestElement : null };
+    } catch (error) {
+      return {
+        element: null,
+        error: truncateUtf8(
+          error && error.message ? error.message : String(error),
+          MAX_TARGET_ERROR_BYTES,
+        ),
       };
     }
   }
@@ -971,16 +1129,25 @@
 
   function summarizeElement(el) {
     return {
-      tagName: el.tagName,
-      id: el.id || '',
-      className: el.className || '',
-      text: (el.textContent || '').trim().slice(0, 100),
+      tagName: truncateUtf8(el.tagName || '', 64),
+      id: truncateUtf8(el.id || '', MAX_ATTRIBUTE_BYTES),
+      className: truncateUtf8(
+        typeof el.className === 'string' ? el.className : '',
+        MAX_ATTRIBUTE_BYTES,
+      ),
+      text: collectBoundedText(el, null, MAX_ATTRIBUTE_BYTES),
     };
   }
 
   function findChildFrameElementForWindow(sourceWindow) {
-    const frames = Array.from(document.querySelectorAll('iframe, frame'));
-    for (const frame of frames) {
+    const budget = createTargetScanBudget();
+    for (const frame of walkTargetNodesDeep(document, budget)) {
+      if (
+        !(frame instanceof HTMLIFrameElement) &&
+        !(frame instanceof HTMLFrameElement)
+      ) {
+        continue;
+      }
       try {
         if (frame.contentWindow === sourceWindow) {
           return frame;
@@ -988,6 +1155,21 @@
       } catch {}
     }
     return null;
+  }
+
+  function collectChildFrames(maximum = 64) {
+    const frames = [];
+    const budget = createTargetScanBudget();
+    for (const frame of walkTargetNodesDeep(document, budget)) {
+      if (
+        frame instanceof HTMLIFrameElement ||
+        frame instanceof HTMLFrameElement
+      ) {
+        frames.push(frame);
+        if (frames.length >= maximum) break;
+      }
+    }
+    return frames;
   }
 
   function projectPointToTopViewport(point) {
@@ -1069,7 +1251,7 @@
 
   function forwardHoverRefToChildren(ref) {
     return new Promise((resolve) => {
-      const frames = Array.from(document.querySelectorAll('iframe, frame'));
+      const frames = collectChildFrames();
       if (!frames.length) {
         resolve({ success: false, error: `ref "${ref}" not found` });
         return;
@@ -1163,7 +1345,10 @@
         } catch (e) {
           sendResponse({
             success: false,
-            error: String(e && e.message ? e.message : e),
+            error: truncateUtf8(
+              e && e.message ? e.message : String(e),
+              MAX_TARGET_ERROR_BYTES,
+            ),
           });
           return true;
         }
@@ -1240,87 +1425,44 @@
               });
             } catch {}
           };
-          const uniqueClassSelector = (node) => {
-            try {
-              const classes = Array.from(node.classList || []).filter(
-                (c) => c && /^[a-zA-Z0-9_-]+$/.test(c),
-              );
-              for (const cls of classes) {
-                const sel = `.${CSS.escape(cls)}`;
-                if (document.querySelectorAll(sel).length === 1) return sel;
-              }
-              const tag = node.tagName ? node.tagName.toLowerCase() : '';
-              for (const cls of classes) {
-                const sel = `${tag}.${CSS.escape(cls)}`;
-                if (document.querySelectorAll(sel).length === 1) return sel;
-              }
-              for (let i = 0; i < Math.min(classes.length, 3); i++) {
-                for (let j = i + 1; j < Math.min(classes.length, 3); j++) {
-                  const sel = `.${CSS.escape(classes[i])}.${CSS.escape(classes[j])}`;
-                  if (document.querySelectorAll(sel).length === 1) return sel;
-                }
-              }
-            } catch {}
-            return '';
-          };
           const computeCandidates = (el) => {
             const cands = [];
-            // css by id / class / short path
+            const seen = new Set();
+            const addCandidate = (type, value) => {
+              const bounded = truncateUtf8(value, MAX_SELECTOR_BYTES);
+              const key = `${type}:${bounded}`;
+              if (!bounded || seen.has(key) || cands.length >= 8) return;
+              seen.add(key);
+              cands.push({ type, value: bounded });
+            };
             if (el.id) {
-              const idSel = `#${CSS.escape(el.id)}`;
-              if (document.querySelectorAll(idSel).length === 1)
-                cands.push({ type: 'css', value: idSel });
+              addCandidate('css', `#${cssEscapeIdentifier(el.id)}`);
             }
-            const classSel = uniqueClassSelector(el);
-            if (classSel) cands.push({ type: 'css', value: classSel });
-            // data-* and name
+            const classes = el.classList;
+            for (let index = 0; classes && index < Math.min(classes.length, 3); index++) {
+              const className = classes.item(index);
+              if (className && /^[a-zA-Z0-9_-]+$/.test(className)) {
+                addCandidate('css', `.${cssEscapeIdentifier(className)}`);
+              }
+            }
             for (const attr of ['data-testid', 'data-cy', 'name']) {
               const val = el.getAttribute(attr);
               if (val) {
-                const s = `[${attr}="${CSS.escape(val)}"]`;
-                if (document.querySelectorAll(s).length === 1)
-                  cands.push({ type: 'attr', value: s });
+                const escaped = truncateUtf8(val, MAX_SELECTOR_BYTES)
+                  .replace(/\\/g, '\\\\')
+                  .replace(/"/g, '\\"')
+                  .replace(/[\n\r\f]/g, ' ');
+                addCandidate('attr', `[${attr}="${escaped}"]`);
               }
             }
-            // aria
             const aria = el.getAttribute && el.getAttribute('aria-label');
-            if (aria)
-              cands.push({ type: 'aria', value: `textbox[name=${aria}]` });
-            // text for clickable
+            if (aria) addCandidate('aria', `textbox[name=${truncateUtf8(aria, 256)}]`);
             const tag = (el.tagName || '').toLowerCase();
             if (['button', 'a', 'summary'].includes(tag)) {
-              const text = (el.textContent || '').trim();
-              if (text)
-                cands.push({ type: 'text', value: text.substring(0, 64) });
+              const text = collectBoundedText(el, null, 256);
+              if (text) addCandidate('text', text);
             }
-            // fallback path selector
-            const gen = (node) => {
-              if (!(node instanceof Element)) return '';
-              let path = '';
-              let current = node;
-              while (
-                current &&
-                current.nodeType === Node.ELEMENT_NODE &&
-                current.tagName !== 'BODY'
-              ) {
-                let sel = current.tagName.toLowerCase();
-                const parent = current.parentElement;
-                if (parent) {
-                  const siblings = Array.from(parent.children).filter(
-                    (child) => child.tagName === current.tagName,
-                  );
-                  if (siblings.length > 1) {
-                    const index = siblings.indexOf(current) + 1;
-                    sel += `:nth-of-type(${index})`;
-                  }
-                }
-                path = path ? `${sel} > ${path}` : sel;
-                current = parent;
-              }
-              return path ? `body > ${path}` : 'body';
-            };
-            const pathSel = gen(el);
-            if (pathSel) cands.push({ type: 'css', value: pathSel });
+            addCandidate('css', generateSelector(el));
             return cands;
           };
           const onClick = (e) => {
@@ -1333,27 +1475,7 @@
               sendResponse({ success: false, error: 'no element' });
               return true;
             }
-            // create ref
-            try {
-              if (!window.__claudeElementMap) window.__claudeElementMap = {};
-              if (!window.__claudeRefCounter) window.__claudeRefCounter = 0;
-            } catch {}
-            let refId = null;
-            try {
-              for (const k in window.__claudeElementMap) {
-                if (
-                  window.__claudeElementMap[k].deref &&
-                  window.__claudeElementMap[k].deref() === el
-                ) {
-                  refId = k;
-                  break;
-                }
-              }
-              if (!refId) {
-                refId = `ref_${++window.__claudeRefCounter}`;
-                window.__claudeElementMap[refId] = new WeakRef(el);
-              }
-            } catch {}
+            const refId = ensureRef(el);
             const cands = computeCandidates(el);
             cleanup();
             sendResponse({ success: true, ref: refId, candidates: cands });
@@ -1406,7 +1528,14 @@
       if (request && request.action === 'ensureRefForSelector') {
         try {
           // Composite selector support: "frameSelector |> innerSelector"
-          const maybeSel = String(request.selector || '').trim();
+          const maybeSel =
+            request.selector === undefined || request.selector === null || request.selector === ''
+              ? ''
+              : normalizeTargetInput(
+                  request.selector,
+                  'selector',
+                  MAX_TARGET_SELECTOR_BYTES,
+                );
           const allowMultiple = !!request.allowMultiple;
           if (maybeSel.includes('|>')) {
             try {
@@ -1414,6 +1543,9 @@
                 .split('|>')
                 .map((s) => s.trim())
                 .filter(Boolean);
+              if (parts.length > 8) {
+                throw new Error('Composite selector exceeds the 8-frame segment limit');
+              }
               if (parts.length >= 2) {
                 const frameSel = parts[0];
                 const innerSel = parts.slice(1).join(' |> ');
@@ -1421,8 +1553,7 @@
                 let frameEl = null;
                 try {
                   frameEl =
-                    querySelectorDeepFirst(frameSel) ||
-                    document.querySelector(frameSel);
+                    querySelectorDeepFirst(frameSel);
                 } catch {}
                 if (
                   !frameEl ||
@@ -1476,16 +1607,31 @@
                     cleanup();
 
                     if (data.success) {
+                      const childRef = normalizeTargetInput(data.ref, 'ref', 128);
+                      const center = {
+                        x: Number.isFinite(Number(data.center && data.center.x))
+                          ? Number(data.center.x)
+                          : 0,
+                        y: Number.isFinite(Number(data.center && data.center.y))
+                          ? Number(data.center.y)
+                          : 0,
+                      };
                       sendResponse({
                         success: true,
-                        ref: data.ref,
-                        center: data.center,
-                        href: data.href,
+                        ref: childRef,
+                        center,
+                        href: truncateUtf8(
+                          typeof data.href === 'string' ? data.href : '',
+                          16 * 1024,
+                        ),
                       });
                     } else {
                       sendResponse({
                         success: false,
-                        error: data.error || 'child failed',
+                        error: truncateUtf8(
+                          typeof data.error === 'string' ? data.error : 'child failed',
+                          MAX_TARGET_ERROR_BYTES,
+                        ),
                       });
                     }
                   } catch (e) {
@@ -1494,7 +1640,10 @@
                       cleanup();
                       sendResponse({
                         success: false,
-                        error: String(e && e.message ? e.message : e),
+                        error: truncateUtf8(
+                          e && e.message ? e.message : String(e),
+                          MAX_TARGET_ERROR_BYTES,
+                        ),
                       });
                     }
                   }
@@ -1520,7 +1669,7 @@
                     selector: innerSel,
                     useText: !!request.useText,
                     isXPath: !!request.isXPath,
-                    tagName: String(request.tagName || ''),
+                    tagName: normalizeTargetTag(request.tagName),
                     allowMultiple: !!request.allowMultiple,
                   },
                   '*',
@@ -1530,109 +1679,31 @@
             } catch (e) {
               sendResponse({
                 success: false,
-                error: String(e && e.message ? e.message : e),
+                error: truncateUtf8(
+                  e && e.message ? e.message : String(e),
+                  MAX_TARGET_ERROR_BYTES,
+                ),
               });
               return true;
             }
           }
           // Support CSS selector, XPath, or visible text search
           const useText = !!request.useText;
-          const textQuery = String(request.text || '').trim();
-          const sel = String(request.selector || '').trim();
+          const textQuery =
+            request.text === undefined || request.text === null || request.text === ''
+              ? ''
+              : normalizeTargetInput(request.text, 'text', MAX_TARGET_TEXT_BYTES);
+          const sel = maybeSel;
           const isXPath = !!request.isXPath;
-          const limitTag = String(request.tagName || '')
-            .trim()
-            .toUpperCase();
+          const limitTag = normalizeTargetTag(request.tagName);
           let el = null;
           if (useText && textQuery) {
-            const normalize = (s) =>
-              String(s || '')
-                .replace(/\s+/g, ' ')
-                .trim()
-                .toLowerCase();
-            const query = normalize(textQuery);
-            const bigrams = (s) => {
-              const arr = [];
-              for (let i = 0; i < s.length - 1; i++)
-                arr.push(s.slice(i, i + 2));
-              return arr;
-            };
-            const dice = (a, b) => {
-              if (!a || !b) return 0;
-              const A = bigrams(a);
-              const B = bigrams(b);
-              if (A.length === 0 || B.length === 0) return 0;
-              let inter = 0;
-              const map = new Map();
-              for (const t of A) map.set(t, (map.get(t) || 0) + 1);
-              for (const t of B) {
-                const c = map.get(t) || 0;
-                if (c > 0) {
-                  inter++;
-                  map.set(t, c - 1);
-                }
-              }
-              return (2 * inter) / (A.length + B.length);
-            };
-            let best = { el: null, score: 0 };
-            // Deep traversal including shadow roots
-            const stack = [document.documentElement];
-            let visited = 0;
-            while (stack.length) {
-              const node = /** @type {any} */ (stack.pop());
-              if (!node || !(node instanceof Element)) continue;
-              try {
-                if (
-                  limitTag &&
-                  String(node.tagName || '').toUpperCase() !== limitTag
-                ) {
-                  // still traverse into children/shadow for performance? yes
-                } else {
-                  const cs = window.getComputedStyle(node);
-                  if (
-                    cs.display === 'none' ||
-                    cs.visibility === 'hidden' ||
-                    cs.opacity === '0'
-                  ) {
-                    /* skip hidden */
-                  } else {
-                    const rect = /** @type {HTMLElement} */ (
-                      node
-                    ).getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0) {
-                      const txt = normalize(node.textContent || '');
-                      if (txt) {
-                        if (txt.includes(query)) {
-                          el = /** @type {Element} */ (node);
-                          break;
-                        }
-                        const sc = dice(txt, query);
-                        if (sc > best.score)
-                          best = {
-                            el: /** @type {Element} */ (node),
-                            score: sc,
-                          };
-                      }
-                    }
-                  }
-                }
-              } catch {}
-              // push children and shadow children
-              try {
-                const children = node.children || [];
-                for (let i = 0; i < children.length; i++)
-                  stack.push(children[i]);
-              } catch {}
-              try {
-                const sr = node.shadowRoot;
-                if (sr && sr.children) {
-                  for (let i = 0; i < sr.children.length; i++)
-                    stack.push(sr.children[i]);
-                }
-              } catch {}
-              if (++visited > 8000) break;
+            const textResult = findElementByTextBounded(textQuery, limitTag);
+            if (textResult.error) {
+              sendResponse({ success: false, error: textResult.error });
+              return true;
             }
-            if (!el && best.el && best.score >= 0.6) el = best.el;
+            el = textResult.element;
           } else if (isXPath) {
             if (!sel) {
               sendResponse({ success: false, error: 'selector is required' });
@@ -1691,61 +1762,62 @@
             });
             return true;
           }
-          let refId = null;
-          for (const k in window.__claudeElementMap) {
-            if (
-              window.__claudeElementMap[k].deref &&
-              window.__claudeElementMap[k].deref() === el
-            ) {
-              refId = k;
-              break;
-            }
-          }
-          if (!refId) {
-            refId = `ref_${++window.__claudeRefCounter}`;
-            window.__claudeElementMap[refId] = new WeakRef(el);
-          }
+          const refId = ensureRef(el);
           const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
           sendResponse({
             success: true,
             ref: refId,
             center: {
-              x: Math.round(rect.left + rect.width / 2),
-              y: Math.round(rect.top + rect.height / 2),
+              x: Number.isFinite(rect.left + rect.width / 2)
+                ? Math.round(rect.left + rect.width / 2)
+                : 0,
+              y: Number.isFinite(rect.top + rect.height / 2)
+                ? Math.round(rect.top + rect.height / 2)
+                : 0,
             },
           });
           return true;
         } catch (e) {
           sendResponse({
             success: false,
-            error: String(e && e.message ? e.message : e),
+            error: truncateUtf8(
+              e && e.message ? e.message : String(e),
+              MAX_TARGET_ERROR_BYTES,
+            ),
           });
           return true;
         }
       }
       if (request && request.action === 'dispatchHoverForRef') {
-        handleHoverForRef(String(request.ref || '').trim())
+        const ref = normalizeTargetInput(request.ref, 'ref', 128);
+        handleHoverForRef(ref)
           .then((result) => sendResponse(result))
           .catch((error) =>
             sendResponse({
               success: false,
-              error: error?.message || String(error),
+              error: truncateUtf8(
+                error?.message || String(error),
+                MAX_TARGET_ERROR_BYTES,
+              ),
             }),
           );
         return true;
       }
       if (request && request.action === 'getAttributeForSelector') {
         try {
-          const sel = String(request.selector || '').trim();
-          const name = String(request.name || '').trim();
-          if (!sel || !name) {
-            sendResponse({
-              success: false,
-              error: 'selector and name are required',
-            });
-            return true;
+          const sel = validateCssTargetSelector(request.selector);
+          const name = normalizeTargetInput(request.name, 'name', 128);
+          if (
+            name !== 'text' &&
+            name !== 'textContent' &&
+            name !== 'value' &&
+            !/^[a-zA-Z_:][a-zA-Z0-9_.:-]*$/.test(name)
+          ) {
+            throw new Error('attribute name is invalid');
           }
-          const el = document.querySelector(sel) || querySelectorDeepFirst(sel);
+          const result = querySelectorWithUniquenessCheck(sel, true);
+          if (result.error) throw new Error(result.error);
+          const el = result.element;
           if (!el) {
             sendResponse({
               success: false,
@@ -1755,22 +1827,29 @@
           }
           let value = null;
           if (name === 'text' || name === 'textContent') {
-            value = (el.textContent || '').trim();
+            value = collectBoundedText(el, null, 64 * 1024);
           } else if (name === 'value') {
             try {
-              value = /** @type {HTMLInputElement} */ (el).value ?? null;
+              value = truncateUtf8(
+                /** @type {HTMLInputElement} */ (el).value ?? '',
+                64 * 1024,
+              );
             } catch (_) {
-              value = el.getAttribute('value');
+              value = truncateUtf8(el.getAttribute('value') || '', 64 * 1024);
             }
           } else {
-            value = el.getAttribute(name);
+            const attribute = el.getAttribute(name);
+            value = attribute === null ? null : truncateUtf8(attribute, 64 * 1024);
           }
           sendResponse({ success: true, value });
           return true;
         } catch (e) {
           sendResponse({
             success: false,
-            error: String(e && e.message ? e.message : e),
+            error: truncateUtf8(
+              e && e.message ? e.message : String(e),
+              MAX_TARGET_ERROR_BYTES,
+            ),
           });
           return true;
         }
@@ -1928,8 +2007,8 @@
         }
       }
       if (request && request.action === 'resolveRef') {
-        const ref = request.ref;
         try {
+          const ref = normalizeTargetInput(request.ref, 'ref', 128);
           const map = window.__claudeElementMap;
           const weak = map && map[ref];
           const el =
@@ -1946,67 +2025,7 @@
             x: Math.round(rect.left + rect.width / 2),
             y: Math.round(rect.top + rect.height / 2),
           };
-          const selector = (function () {
-            // Simple selector generation inline to avoid duplication
-            const generateSelector = function (node) {
-              if (!(node instanceof Element)) return '';
-              if (node.id) {
-                const idSel = `#${CSS.escape(node.id)}`;
-                if (document.querySelectorAll(idSel).length === 1) return idSel;
-              }
-              // prefer unique class selectors if available
-              try {
-                const classes = Array.from(node.classList || []).filter(
-                  (c) => c && /^[a-zA-Z0-9_-]+$/.test(c),
-                );
-                for (const cls of classes) {
-                  const sel = `.${CSS.escape(cls)}`;
-                  if (document.querySelectorAll(sel).length === 1) return sel;
-                }
-                const tag = node.tagName ? node.tagName.toLowerCase() : '';
-                for (const cls of classes) {
-                  const sel = `${tag}.${CSS.escape(cls)}`;
-                  if (document.querySelectorAll(sel).length === 1) return sel;
-                }
-                for (let i = 0; i < Math.min(classes.length, 3); i++) {
-                  for (let j = i + 1; j < Math.min(classes.length, 3); j++) {
-                    const sel = `.${CSS.escape(classes[i])}.${CSS.escape(classes[j])}`;
-                    if (document.querySelectorAll(sel).length === 1) return sel;
-                  }
-                }
-              } catch {}
-              for (const attr of ['data-testid', 'data-cy', 'name']) {
-                const val = node.getAttribute(attr);
-                if (val) {
-                  const s = `[${attr}="${CSS.escape(val)}"]`;
-                  if (document.querySelectorAll(s).length === 1) return s;
-                }
-              }
-              let path = '';
-              let current = node;
-              while (
-                current &&
-                current.nodeType === Node.ELEMENT_NODE &&
-                current.tagName !== 'BODY'
-              ) {
-                let sel = current.tagName.toLowerCase();
-                const parent = current.parentElement;
-                if (parent) {
-                  const siblings = Array.from(parent.children).filter(
-                    (c) => c.tagName === current.tagName,
-                  );
-                  if (siblings.length > 1) {
-                    const idx = siblings.indexOf(current) + 1;
-                    sel += `:nth-of-type(${idx})`;
-                  }
-                }
-                path = path ? `${sel} > ${path}` : sel;
-                current = parent;
-              }
-              return path ? `body > ${path}` : 'body';
-            };
-            return generateSelector(el);
-          })();
+          const selector = generateSelector(el);
 
           projectPointToTopViewport(center)
             .then((viewportCenter) => {
@@ -2034,8 +2053,9 @@
                 },
                 center,
                 selector,
-                projectionError: String(
-                  error && error.message ? error.message : error,
+                projectionError: truncateUtf8(
+                  error && error.message ? error.message : String(error),
+                  MAX_TARGET_ERROR_BYTES,
                 ),
               });
             });
@@ -2043,22 +2063,22 @@
         } catch (e) {
           sendResponse({
             success: false,
-            error: String(e && e.message ? e.message : e),
+            error: truncateUtf8(
+              e && e.message ? e.message : String(e),
+              MAX_TARGET_ERROR_BYTES,
+            ),
           });
           return true;
         }
       }
       if (request && request.action === 'verifyFingerprint') {
         try {
-          const ref = String(request.ref || '').trim();
-          const fingerprint = String(request.fingerprint || '').trim();
-          if (!ref || !fingerprint) {
-            sendResponse({
-              success: false,
-              error: 'ref and fingerprint are required',
-            });
-            return true;
-          }
+          const ref = normalizeTargetInput(request.ref, 'ref', 128);
+          const fingerprint = normalizeTargetInput(
+            request.fingerprint,
+            'fingerprint',
+            4 * 1024,
+          );
           const map = window.__claudeElementMap;
           const weak = map && map[ref];
           const el =
@@ -2085,7 +2105,7 @@
           const storedIdPart = parts.find((p) => p.startsWith('id='));
           if (storedIdPart) {
             const storedId = storedIdPart.slice(3);
-            const currentId = el.id ? String(el.id).trim() : '';
+            const currentId = truncateUtf8(el.id ? String(el.id).trim() : '', 4 * 1024);
             if (storedId !== currentId) {
               sendResponse({ success: true, match: false });
               return true;
@@ -2096,14 +2116,17 @@
         } catch (e) {
           sendResponse({
             success: false,
-            error: String(e && e.message ? e.message : e),
+            error: truncateUtf8(
+              e && e.message ? e.message : String(e),
+              MAX_TARGET_ERROR_BYTES,
+            ),
           });
           return true;
         }
       }
       if (request && request.action === 'focusByRef') {
         try {
-          const ref = String(request.ref || '');
+          const ref = normalizeTargetInput(request.ref, 'ref', 128);
           const map = window.__claudeElementMap || {};
           const weak = map[ref];
           const el =
@@ -2131,7 +2154,10 @@
         } catch (e) {
           sendResponse({
             success: false,
-            error: String(e && e.message ? e.message : e),
+            error: truncateUtf8(
+              e && e.message ? e.message : String(e),
+              MAX_TARGET_ERROR_BYTES,
+            ),
           });
           return true;
         }
@@ -2139,7 +2165,10 @@
     } catch (e) {
       sendResponse({
         success: false,
-        error: e && e.message ? e.message : String(e),
+        error: truncateUtf8(
+          e && e.message ? e.message : String(e),
+          MAX_TARGET_ERROR_BYTES,
+        ),
       });
       return true;
     }
@@ -2156,12 +2185,14 @@
           const data = ev && ev.data;
           // Handle hover-ref bridge requests from parent frame
           if (data && data.type === 'rr-bridge-hover-ref') {
-            handleHoverForRef(data.ref)
+            const reqId = normalizeTargetInput(data.reqId, 'reqId', 128);
+            const ref = normalizeTargetInput(data.ref, 'ref', 128);
+            handleHoverForRef(ref)
               .then((result) => {
                 ev.source?.postMessage(
                   {
                     type: 'rr-bridge-hover-ref-result',
-                    reqId: data.reqId,
+                    reqId,
                     result,
                   },
                   '*',
@@ -2171,10 +2202,13 @@
                 ev.source?.postMessage(
                   {
                     type: 'rr-bridge-hover-ref-result',
-                    reqId: data.reqId,
+                    reqId,
                     result: {
                       success: false,
-                      error: error?.message || String(error),
+                      error: truncateUtf8(
+                        error?.message || String(error),
+                        MAX_TARGET_ERROR_BYTES,
+                      ),
                     },
                   },
                   '*',
@@ -2228,21 +2262,26 @@
                 .catch((error) => {
                   respond({
                     success: false,
-                    error: String(
-                      error && error.message ? error.message : error,
+                    error: truncateUtf8(
+                      error && error.message ? error.message : String(error),
+                      MAX_TARGET_ERROR_BYTES,
                     ),
                   });
                 });
             } catch (error) {
               respond({
                 success: false,
-                error: String(error && error.message ? error.message : error),
+                error: truncateUtf8(
+                  error && error.message ? error.message : String(error),
+                  MAX_TARGET_ERROR_BYTES,
+                ),
               });
             }
             return;
           }
           if (!data || data.type !== 'rr-bridge-ensure-ref') return;
-          const { reqId, selector, useText, isXPath, tagName } = data || {};
+          const { selector, useText, isXPath, tagName } = data || {};
+          const reqId = normalizeTargetInput(data.reqId, 'reqId', 128);
           const respond = (payload) => {
             try {
               ev.source &&
@@ -2253,84 +2292,20 @@
             } catch {}
           };
           try {
-            const sel = String(selector || '').trim();
-            const limitTag = String(tagName || '')
-              .trim()
-              .toUpperCase();
+            const sel = normalizeTargetInput(
+              selector,
+              useText ? 'text' : 'selector',
+              useText ? MAX_TARGET_TEXT_BYTES : MAX_TARGET_SELECTOR_BYTES,
+            );
+            const limitTag = normalizeTargetTag(tagName);
             let el = null;
             if (useText && sel) {
-              const normalize = (s) =>
-                String(s || '')
-                  .replace(/\s+/g, ' ')
-                  .trim()
-                  .toLowerCase();
-              const query = normalize(sel);
-              const bigrams = (s) => {
-                const arr = [];
-                for (let i = 0; i < s.length - 1; i++)
-                  arr.push(s.slice(i, i + 2));
-                return arr;
-              };
-              const dice = (a, b) => {
-                if (!a || !b) return 0;
-                const A = bigrams(a),
-                  B = bigrams(b);
-                if (!A.length || !B.length) return 0;
-                let inter = 0;
-                const m = new Map();
-                for (const t of A) m.set(t, (m.get(t) || 0) + 1);
-                for (const t of B) {
-                  const c = m.get(t) || 0;
-                  if (c > 0) {
-                    inter++;
-                    m.set(t, c - 1);
-                  }
-                }
-                return (2 * inter) / (A.length + B.length);
-              };
-              let best = { el: null, score: 0 };
-              const stack = [document.documentElement];
-              while (stack.length) {
-                const node = stack.pop();
-                if (!node || !(node instanceof Element)) continue;
-                try {
-                  if (
-                    limitTag &&
-                    String(node.tagName || '').toUpperCase() !== limitTag
-                  ) {
-                  } else {
-                    const cs = window.getComputedStyle(node);
-                    if (
-                      cs.display !== 'none' &&
-                      cs.visibility !== 'hidden' &&
-                      cs.opacity !== '0'
-                    ) {
-                      const rect = node.getBoundingClientRect();
-                      if (rect.width > 0 && rect.height > 0) {
-                        const txt = normalize(node.textContent || '');
-                        if (txt) {
-                          if (txt.includes(query)) {
-                            el = node;
-                            break;
-                          }
-                          const sc = dice(txt, query);
-                          if (sc > best.score) best = { el: node, score: sc };
-                        }
-                      }
-                    }
-                  }
-                } catch {}
-                try {
-                  const children = node.children || [];
-                  for (let i = 0; i < children.length; i++)
-                    stack.push(children[i]);
-                  const sr = node.shadowRoot;
-                  if (sr && sr.children)
-                    for (let i = 0; i < sr.children.length; i++)
-                      stack.push(sr.children[i]);
-                } catch {}
+              const textResult = findElementByTextBounded(sel, limitTag);
+              if (textResult.error) {
+                respond({ success: false, error: textResult.error });
+                return;
               }
-              if (!el && best.el) el = best.el;
+              el = textResult.element;
             } else if (isXPath) {
               if (!sel) {
                 respond({ success: false, error: 'selector is required' });
@@ -2394,25 +2369,7 @@
               });
               return;
             }
-            if (!window.__claudeElementMap) window.__claudeElementMap = {};
-            if (!window.__claudeRefCounter) window.__claudeRefCounter = 0;
-            let refId = null;
-            for (const k in window.__claudeElementMap) {
-              const w = window.__claudeElementMap[k];
-              if (
-                w &&
-                typeof w.deref === 'function' &&
-                w.deref &&
-                w.deref() === el
-              ) {
-                refId = k;
-                break;
-              }
-            }
-            if (!refId) {
-              refId = `ref_${++window.__claudeRefCounter}`;
-              window.__claudeElementMap[refId] = new WeakRef(el);
-            }
+            const refId = ensureRef(el);
             const rect = el.getBoundingClientRect();
             respond({
               success: true,
@@ -2421,12 +2378,18 @@
                 x: Math.round(rect.left + rect.width / 2),
                 y: Math.round(rect.top + rect.height / 2),
               },
-              href: String(location && location.href ? location.href : ''),
+              href: truncateUtf8(
+                location && location.href ? location.href : '',
+                16 * 1024,
+              ),
             });
           } catch (e) {
             respond({
               success: false,
-              error: String(e && e.message ? e.message : e),
+              error: truncateUtf8(
+                e && e.message ? e.message : String(e),
+                MAX_TARGET_ERROR_BYTES,
+              ),
             });
           }
         } catch {}

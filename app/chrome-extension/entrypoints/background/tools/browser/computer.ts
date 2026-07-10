@@ -20,6 +20,8 @@ import {
 import {
   getResolvedViewportCoordinates,
   isCompositeSelector,
+  normalizeBrowserTargetRef,
+  normalizeBrowserTargetSelector,
   resolveFrameIdForMessageResult,
 } from './target-resolution';
 
@@ -403,12 +405,14 @@ class ComputerTool extends BaseBrowserToolExecutor {
       ref: string,
       frameId?: number,
     ): Promise<Coordinates | undefined> => {
+      const normalizedRef = normalizeBrowserTargetRef(ref);
+      if (!normalizedRef) return undefined;
       await injectAccessibilityHelper(frameId);
       const resolved = await this.sendMessageToTab(
         tab.id!,
         {
           action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-          ref,
+          ref: normalizedRef,
         },
         frameId,
       );
@@ -428,15 +432,17 @@ class ComputerTool extends BaseBrowserToolExecutor {
         }
       | undefined
     > => {
+      const normalizedSelector = normalizeBrowserTargetSelector(selector, selectorType);
+      if (!normalizedSelector) return undefined;
       await injectAccessibilityHelper(requestedFrameId);
-      const selectorFrameId = isCompositeSelector(selector)
+      const selectorFrameId = isCompositeSelector(normalizedSelector)
         ? undefined
         : requestedFrameId;
       const ensured = await this.sendMessageToTab(
         tab.id!,
         {
           action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-          selector,
+          selector: normalizedSelector,
           isXPath: selectorType === 'xpath',
         },
         selectorFrameId,

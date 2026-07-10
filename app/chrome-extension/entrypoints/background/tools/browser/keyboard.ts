@@ -7,6 +7,8 @@ import { hasDisallowedPublicUrlScheme } from './common';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
   isCompositeSelector,
+  normalizeBrowserTargetRef,
+  normalizeBrowserTargetSelector,
   resolveFrameIdForMessageResult,
 } from './target-resolution';
 
@@ -245,14 +247,8 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         );
       }
 
-      let finalSelector: string | undefined =
-        typeof selector === 'string' && selector.trim()
-          ? selector.trim()
-          : undefined;
-      let refForFocus: string | undefined =
-        typeof args.ref === 'string' && args.ref.trim()
-          ? args.ref.trim()
-          : undefined;
+      let finalSelector = normalizeBrowserTargetSelector(selector, selectorType);
+      let refForFocus = normalizeBrowserTargetRef(args.ref);
       let targetFrameId = args.frameId;
 
       // Ensure helper is loaded for XPath or potential focus operations
