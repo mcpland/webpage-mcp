@@ -52,7 +52,7 @@ vi.mock('./attachment-service', () => ({
   },
 }));
 
-import { AgentChatService } from './chat-service';
+import { AGENT_EXECUTION_LIMITS, AgentChatService } from './chat-service';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -201,6 +201,139 @@ describe('AgentChatService', () => {
     expect(messageServiceMocks.createMessage).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
     expect(streamedEvents).toEqual([]);
+  });
+
+  it('caps concurrent preparation for one runtime session', async () => {
+    const projectGate = deferred<any>();
+    projectServiceMocks.getProject.mockReturnValue(projectGate.promise);
+    const run = vi.fn().mockResolvedValue(undefined);
+    const service = new AgentChatService({
+      engines: [{ name: 'claude', supportsMcp: true, initializeAndRun: run }],
+      streamManager: new AgentStreamManager(),
+    });
+    const pending = Array.from({ length: AGENT_EXECUTION_LIMITS.maxPerSession }, (_, index) =>
+      service.handleAct('shared-runtime-session', {
+        instruction: 'wait for project',
+        projectId: 'project-1',
+        requestId: `session-cap-${index}`,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(projectServiceMocks.getProject).toHaveBeenCalledTimes(
+        AGENT_EXECUTION_LIMITS.maxPerSession,
+      ),
+    );
+
+    await expect(
+      service.handleAct('shared-runtime-session', {
+        instruction: 'one too many',
+        projectId: 'project-1',
+        requestId: 'session-cap-overflow',
+      }),
+    ).rejects.toThrow('session execution capacity');
+    expect(run).not.toHaveBeenCalled();
+
+    projectGate.resolve({
+      id: 'project-1',
+      rootPath: process.cwd(),
+      preferredCli: 'claude',
+    });
+    await Promise.all(pending);
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+  });
+
+  it('caps concurrent preparation globally across independent scopes', async () => {
+    const projectGate = deferred<any>();
+    projectServiceMocks.getProject.mockReturnValue(projectGate.promise);
+    const service = new AgentChatService({
+      engines: [
+        {
+          name: 'claude',
+          supportsMcp: true,
+          initializeAndRun: vi.fn().mockResolvedValue(undefined),
+        },
+      ],
+      streamManager: new AgentStreamManager(),
+    });
+    const pending = Array.from({ length: AGENT_EXECUTION_LIMITS.maxGlobal }, (_, index) =>
+      service.handleAct(`runtime-${index}`, {
+        instruction: 'wait globally',
+        projectId: `project-${index}`,
+        requestId: `global-cap-${index}`,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(projectServiceMocks.getProject).toHaveBeenCalledTimes(AGENT_EXECUTION_LIMITS.maxGlobal),
+    );
+
+    await expect(
+      service.handleAct('runtime-overflow', {
+        instruction: 'one too many',
+        projectId: 'project-overflow',
+        requestId: 'global-cap-overflow',
+      }),
+    ).rejects.toThrow('execution capacity reached');
+
+    projectGate.resolve({
+      id: 'project-any',
+      rootPath: process.cwd(),
+      preferredCli: 'claude',
+    });
+    await Promise.all(pending);
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+  });
+
+  it('rechecks project capacity after resolving database sessions', async () => {
+    const projectGate = deferred<any>();
+    projectServiceMocks.getProject.mockReturnValue(projectGate.promise);
+    sessionServiceMocks.getSession.mockImplementation(async (sessionId: string) => ({
+      id: sessionId,
+      projectId: 'project-1',
+      engineName: 'claude',
+      name: sessionId,
+      permissionMode: 'default',
+      allowDangerouslySkipPermissions: false,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    }));
+    const service = new AgentChatService({
+      engines: [
+        {
+          name: 'claude',
+          supportsMcp: true,
+          initializeAndRun: vi.fn().mockResolvedValue(undefined),
+        },
+      ],
+      streamManager: new AgentStreamManager(),
+    });
+    const pending = Array.from({ length: AGENT_EXECUTION_LIMITS.maxPerProject }, (_, index) =>
+      service.handleAct(`runtime-${index}`, {
+        instruction: 'resolve project later',
+        dbSessionId: `db-session-${index}`,
+        requestId: `project-cap-${index}`,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(projectServiceMocks.getProject).toHaveBeenCalledTimes(
+        AGENT_EXECUTION_LIMITS.maxPerProject,
+      ),
+    );
+
+    await expect(
+      service.handleAct('runtime-overflow', {
+        instruction: 'one too many for project',
+        dbSessionId: 'db-session-overflow',
+        requestId: 'project-cap-overflow',
+      }),
+    ).rejects.toThrow('project execution capacity');
+
+    projectGate.resolve({
+      id: 'project-1',
+      rootPath: process.cwd(),
+      preferredCli: 'claude',
+    });
+    await Promise.all(pending);
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
   });
 
   it('does not forward legacy engine-specific state when migrating a session onto Claude', async () => {

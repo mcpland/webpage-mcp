@@ -30,6 +30,12 @@ export interface AgentChatServiceOptions {
   defaultEngineName?: EngineName;
 }
 
+export const AGENT_EXECUTION_LIMITS = Object.freeze({
+  maxGlobal: 16,
+  maxPerSession: 4,
+  maxPerProject: 8,
+});
+
 type ExecutionPhase = 'preparing' | 'running' | 'settled';
 
 interface ExecutionRecord extends RunningExecution {
@@ -737,6 +743,7 @@ export class AgentChatService {
         ? payload.dbSessionId.trim()
         : undefined;
     this.assertLifecycleAllowsExecution(sessionId, dbSessionId, projectId);
+    this.assertExecutionCapacity(sessionId, dbSessionId, projectId);
 
     let resolveScopeReady!: () => void;
     const scopeReady = new Promise<void>((resolve) => {
@@ -792,7 +799,57 @@ export class AgentChatService {
     }
   }
 
+  private assertExecutionCapacity(
+    sessionId: string,
+    dbSessionId: string | undefined,
+    projectId: string | undefined,
+    excluded?: ExecutionRecord,
+  ): void {
+    let globalCount = 0;
+    let sessionCount = 0;
+    let projectCount = 0;
+    for (const execution of this.runningExecutions.values()) {
+      if (execution === excluded || execution.phase === 'settled') continue;
+      globalCount += 1;
+      if (
+        execution.sessionId === sessionId ||
+        execution.dbSessionId === sessionId ||
+        (dbSessionId !== undefined &&
+          (execution.sessionId === dbSessionId || execution.dbSessionId === dbSessionId))
+      ) {
+        sessionCount += 1;
+      }
+      if (projectId !== undefined && execution.projectId === projectId) {
+        projectCount += 1;
+      }
+    }
+
+    if (globalCount >= AGENT_EXECUTION_LIMITS.maxGlobal) {
+      throw new Error(
+        `Agent execution capacity reached (${AGENT_EXECUTION_LIMITS.maxGlobal} global)`,
+      );
+    }
+    if (sessionCount >= AGENT_EXECUTION_LIMITS.maxPerSession) {
+      throw new Error(
+        `Agent session execution capacity reached (${AGENT_EXECUTION_LIMITS.maxPerSession})`,
+      );
+    }
+    if (projectId !== undefined && projectCount >= AGENT_EXECUTION_LIMITS.maxPerProject) {
+      throw new Error(
+        `Agent project execution capacity reached (${AGENT_EXECUTION_LIMITS.maxPerProject})`,
+      );
+    }
+  }
+
   private associateExecutionProject(execution: ExecutionRecord, projectId: string): void {
+    if (execution.projectId !== projectId) {
+      this.assertExecutionCapacity(
+        execution.sessionId,
+        execution.dbSessionId,
+        projectId,
+        execution,
+      );
+    }
     execution.projectId = projectId;
     if (!execution.scopeResolved) {
       execution.scopeResolved = true;
