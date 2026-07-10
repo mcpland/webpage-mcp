@@ -3,6 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 import { config } from "dotenv";
 import { resolve } from "path";
+import { shouldMinifyExtensionBuild } from "./config/build-mode";
 
 config({ path: resolve(process.cwd(), ".env") });
 config({ path: resolve(process.cwd(), ".env.local") });
@@ -158,7 +159,7 @@ export default defineConfig({
       reportCompressedSize: false,
       // Trigger warning when chunk size exceeds 1500kb
       chunkSizeWarningLimit: 1500,
-      minify: false,
+      minify: shouldMinifyExtensionBuild(env.mode),
     },
   }),
 });
