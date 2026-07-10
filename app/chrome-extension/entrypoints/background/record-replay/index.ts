@@ -21,9 +21,44 @@ import {
 } from '../record-replay-v3/compat';
 import { RecorderManager } from './recording/recorder-manager';
 import { buildRecordingStateSnapshot } from './recording/recording-state';
+import { recordingSession } from './recording/session-manager';
+import {
+  RECORDER_CONTROL_REGISTER_ACTION,
+  RecorderControlAuthorizationStore,
+} from './recording/control-authorization';
 
 const DISABLED_AUTOMATION_SURFACE_ERROR =
   'Triggers and schedules are not supported in the single-path RR-V3 runtime.';
+
+const RECORD_REPLAY_REQUEST_TYPES = new Set<string>([
+  BACKGROUND_MESSAGE_TYPES.RR_START_RECORDING,
+  BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING,
+  BACKGROUND_MESSAGE_TYPES.RR_PAUSE_RECORDING,
+  BACKGROUND_MESSAGE_TYPES.RR_RESUME_RECORDING,
+  BACKGROUND_MESSAGE_TYPES.RR_GET_RECORDING_STATUS,
+  BACKGROUND_MESSAGE_TYPES.RR_LIST_FLOWS,
+  BACKGROUND_MESSAGE_TYPES.RR_GET_FLOW,
+  BACKGROUND_MESSAGE_TYPES.RR_DELETE_FLOW,
+  BACKGROUND_MESSAGE_TYPES.RR_PUBLISH_FLOW,
+  BACKGROUND_MESSAGE_TYPES.RR_UNPUBLISH_FLOW,
+  BACKGROUND_MESSAGE_TYPES.RR_RUN_FLOW,
+  BACKGROUND_MESSAGE_TYPES.RR_SAVE_FLOW,
+  BACKGROUND_MESSAGE_TYPES.RR_EXPORT_FLOW,
+  BACKGROUND_MESSAGE_TYPES.RR_EXPORT_ALL,
+  BACKGROUND_MESSAGE_TYPES.RR_IMPORT_FLOW,
+  BACKGROUND_MESSAGE_TYPES.RR_LIST_RUNS,
+  BACKGROUND_MESSAGE_TYPES.RR_LIST_TRIGGERS,
+  BACKGROUND_MESSAGE_TYPES.RR_SAVE_TRIGGER,
+  BACKGROUND_MESSAGE_TYPES.RR_DELETE_TRIGGER,
+  BACKGROUND_MESSAGE_TYPES.RR_REFRESH_TRIGGERS,
+  BACKGROUND_MESSAGE_TYPES.RR_LIST_SCHEDULES,
+  BACKGROUND_MESSAGE_TYPES.RR_SCHEDULE_FLOW,
+  BACKGROUND_MESSAGE_TYPES.RR_UNSCHEDULE_FLOW,
+]);
+
+export function isRecordReplayExtensionPageSender(sender: chrome.runtime.MessageSender): boolean {
+  return sender.id === chrome.runtime.id && sender.tab === undefined;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -105,9 +140,33 @@ async function updatePublishedState(
 
 export function initRecordReplayListeners(): void {
   RecorderManager.init().catch(() => {});
+  const controlAuthorization = new RecorderControlAuthorizationStore();
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
+      if (message?.action === RECORDER_CONTROL_REGISTER_ACTION) {
+        const success = controlAuthorization.register(message, sender, recordingSession);
+        sendResponse({
+          success,
+          ...(success ? {} : { error: 'recorder control registration denied' }),
+        });
+        return false;
+      }
+
+      const messageType = typeof message?.type === 'string' ? message.type : '';
+      if (RECORD_REPLAY_REQUEST_TYPES.has(messageType)) {
+        const authorizedOverlayStop =
+          messageType === BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING &&
+          controlAuthorization.authorizeStop(message, sender, recordingSession);
+        if (!authorizedOverlayStop && !isRecordReplayExtensionPageSender(sender)) {
+          sendResponse({
+            success: false,
+            error: 'record/replay request requires an extension page',
+          });
+          return false;
+        }
+      }
+
       switch (message?.type) {
         case BACKGROUND_MESSAGE_TYPES.RR_START_RECORDING: {
           RecorderManager.start(message.meta, message.tabId)
@@ -123,12 +182,13 @@ export function initRecordReplayListeners(): void {
 
         case BACKGROUND_MESSAGE_TYPES.RR_STOP_RECORDING: {
           RecorderManager.stop()
-            .then((result) =>
+            .then((result) => {
+              if (result.success) controlAuthorization.clear();
               sendResponse({
                 ...result,
                 state: buildRecordingStateSnapshot(),
-              }),
-            )
+              });
+            })
             .catch((error) => sendResponse({ success: false, error: errorMessage(error) }));
           return true;
         }

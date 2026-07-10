@@ -14,8 +14,20 @@
   }
   const { CONFIG, FRAME_EVENT, SelectorEngine } = shared;
   const RECORDER_EVENT_PROTOCOL_VERSION = 1;
+  const RECORDER_CONTROL_REGISTER_ACTION = 'rr_register_recorder_control';
   const SEND_RETRY_MAX = 2;
   const SEND_RETRY_BASE_MS = 80;
+  const RECORDER_CONTROL_CAPABILITY = (() => {
+    try {
+      const bytes = new Uint8Array(32);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    } catch {
+      // Page-level lifecycle controls are privileged. Disable them rather than
+      // minting a predictable capability when secure randomness is unavailable.
+      return '';
+    }
+  })();
   const RECORDER_DOCUMENT_ID = (() => {
     try {
       if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -33,7 +45,11 @@
   class UI {
     constructor(recorder) {
       this.recorder = recorder;
+      this._host = null;
+      this._shadow = null;
       this._box = null;
+      this._badge = null;
+      this._pauseButton = null;
       // Timeline elements state
       this._timeline = null;
       this._count = 0;
@@ -43,34 +59,46 @@
     ensure() {
       const rec = this.recorder;
       if (window !== window.top) return;
-      let root = document.getElementById('__rr_rec_overlay');
-      if (root) return;
-      root = document.createElement('div');
-      root.id = '__rr_rec_overlay';
+      if (this._host && this._host.isConnected) return;
+
+      // Keep page markup and selectors outside the recorder's control boundary. A
+      // closed shadow root also prevents the page from changing privacy controls
+      // and dispatching events directly at their nodes.
+      const host = document.createElement('div');
+      host.style.setProperty('all', 'initial', 'important');
+      host.style.setProperty('position', 'fixed', 'important');
+      host.style.setProperty('inset', '0', 'important');
+      host.style.setProperty('display', 'block', 'important');
+      host.style.setProperty('pointer-events', 'none', 'important');
+      host.style.setProperty('z-index', '2147483646', 'important');
+      const shadow = host.attachShadow({ mode: 'closed' });
+      const root = document.createElement('div');
       Object.assign(root.style, {
         position: 'fixed',
         top: '10px',
         right: '10px',
-        zIndex: 2147483646,
+        pointerEvents: 'auto',
         fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Arial',
       });
       root.innerHTML = `
-        <div id="__rr_rec_panel" style="background: rgba(220,38,38,0.95); color: #fff; padding:8px 10px; border-radius:8px; display:flex; align-items:center; gap:8px; box-shadow:0 4px 16px rgba(0,0,0,0.2);">
-          <span id="__rr_badge" style="font-weight:600;">Recording</span>
-          <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px;">
-            <input id="__rr_hide_values" type="checkbox" style="vertical-align:middle;" />Hide input value
+        <div data-recorder-panel style="background:rgba(220,38,38,0.95);color:#fff;padding:8px 10px;border-radius:8px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 16px rgba(0,0,0,0.2);">
+          <span data-recorder-badge style="font-weight:600;">Recording</span>
+          <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;">
+            <input data-recorder-hide-values type="checkbox" style="vertical-align:middle;" />Hide input value
           </label>
-          <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px;">
-            <input id="__rr_enable_highlight" type="checkbox" style="vertical-align:middle;" />Highlight
+          <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;">
+            <input data-recorder-highlight type="checkbox" style="vertical-align:middle;" />Highlight
           </label>
-          <button id="__rr_toggle_timeline" style="background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.5); border-radius:6px; padding:2px 6px; cursor:pointer; font-size:12px;">Collapse</button>
-          <button id="__rr_pause" style="background:#fff; color:#111; border:none; border-radius:6px; padding:4px 8px; cursor:pointer;">Pause</button>
-          <button id="__rr_stop" style="background:#111; color:#fff; border:none; border-radius:6px; padding:4px 8px; cursor:pointer;">Stop</button>
+          <button data-recorder-toggle style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.5);border-radius:6px;padding:2px 6px;cursor:pointer;font-size:12px;">Collapse</button>
+          <button data-recorder-pause style="background:#fff;color:#111;border:none;border-radius:6px;padding:4px 8px;cursor:pointer;">Pause</button>
+          <button data-recorder-stop style="background:#111;color:#fff;border:none;border-radius:6px;padding:4px 8px;cursor:pointer;">Stop</button>
         </div>`;
-      document.documentElement.appendChild(root);
+      shadow.appendChild(root);
+      document.documentElement.appendChild(host);
+      this._host = host;
+      this._shadow = shadow;
       // Build timeline container just below the panel
       const timeline = document.createElement('div');
-      timeline.id = '__rr_rec_timeline';
       Object.assign(timeline.style, {
         marginTop: '8px',
         width: '360px',
@@ -90,7 +118,6 @@
       header.style.opacity = '0.8';
       header.style.marginBottom = '4px';
       const list = document.createElement('ol');
-      list.id = '__rr_rec_timeline_list';
       list.style.listStyle = 'none';
       list.style.margin = '0';
       list.style.padding = '0';
@@ -102,32 +129,45 @@
       root.appendChild(timeline);
       this._timeline = list;
       this._timelineBox = timeline;
-      const btnPause = root.querySelector('#__rr_pause');
-      const btnStop = root.querySelector('#__rr_stop');
-      const hideChk = root.querySelector('#__rr_hide_values');
-      const highlightChk = root.querySelector('#__rr_enable_highlight');
-      const btnToggle = root.querySelector('#__rr_toggle_timeline');
+      const btnPause = root.querySelector('[data-recorder-pause]');
+      const btnStop = root.querySelector('[data-recorder-stop]');
+      const hideChk = root.querySelector('[data-recorder-hide-values]');
+      const highlightChk = root.querySelector('[data-recorder-highlight]');
+      const btnToggle = root.querySelector('[data-recorder-toggle]');
+      this._badge = root.querySelector('[data-recorder-badge]');
+      this._pauseButton = btnPause;
       hideChk.checked = !!rec.hideInputValues;
-      hideChk.addEventListener('change', () => (rec.hideInputValues = hideChk.checked));
+      hideChk.addEventListener('change', (event) => {
+        if (!event.isTrusted) return;
+        rec.hideInputValues = !!hideChk.checked;
+      });
       highlightChk.checked = !!rec.highlightEnabled;
-      highlightChk.addEventListener('change', () => {
+      highlightChk.addEventListener('change', (event) => {
+        if (!event.isTrusted) return;
         rec.highlightEnabled = !!highlightChk.checked;
         rec._updateHoverListener();
       });
       if (btnToggle) {
-        btnToggle.addEventListener('click', () => {
+        btnToggle.addEventListener('click', (event) => {
+          if (!event.isTrusted) return;
           this._collapsed = !this._collapsed;
           if (this._timelineBox)
             this._timelineBox.style.display = this._collapsed ? 'none' : 'block';
           btnToggle.textContent = this._collapsed ? 'Expand' : 'Collapse';
         });
       }
-      btnPause.addEventListener('click', () => {
+      btnPause.addEventListener('click', (event) => {
+        if (!event.isTrusted) return;
         if (!rec.isPaused) rec.pause();
         else rec.resume();
       });
-      btnStop.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ type: 'rr_stop_recording' });
+      btnStop.addEventListener('click', (event) => {
+        if (!event.isTrusted || !rec.sessionId || !RECORDER_CONTROL_CAPABILITY) return;
+        chrome.runtime.sendMessage({
+          type: 'rr_stop_recording',
+          sessionId: rec.sessionId,
+          controlCapability: RECORDER_CONTROL_CAPABILITY,
+        });
       });
       this._box = document.createElement('div');
       Object.assign(this._box.style, {
@@ -138,7 +178,7 @@
         pointerEvents: 'none',
         zIndex: 2147483645,
       });
-      document.documentElement.appendChild(this._box);
+      shadow.appendChild(this._box);
       if (rec.highlightEnabled)
         document.addEventListener('mousemove', rec._onMouseMove, {
           capture: true,
@@ -148,30 +188,32 @@
     }
     remove() {
       if (window === window.top) {
-        const root = document.getElementById('__rr_rec_overlay');
-        if (root) root.remove();
-        if (this._box) this._box.remove();
+        if (this._host) this._host.remove();
+        this._host = null;
+        this._shadow = null;
+        this._box = null;
+        this._badge = null;
+        this._pauseButton = null;
         this._timeline = null;
         this._timelineBox = null;
       }
     }
     updateStatus() {
-      const badge = document.getElementById('__rr_badge');
-      const pauseBtn = document.getElementById('__rr_pause');
-      if (badge) badge.textContent = this.recorder.isPaused ? 'Paused' : 'Recording';
-      if (pauseBtn) pauseBtn.textContent = this.recorder.isPaused ? 'Continue' : 'Pause';
+      if (this._badge) this._badge.textContent = this.recorder.isPaused ? 'Paused' : 'Recording';
+      if (this._pauseButton)
+        this._pauseButton.textContent = this.recorder.isPaused ? 'Continue' : 'Pause';
     }
 
     // Reset the timeline list content
     resetTimeline() {
       this._count = 0;
-      const list = this._timeline || document.getElementById('__rr_rec_timeline_list') || null;
+      const list = this._timeline;
       if (list) list.innerHTML = '';
     }
 
     // Append a new recorded step into the timeline UI
     appendStep(step) {
-      const list = this._timeline || document.getElementById('__rr_rec_timeline_list') || null;
+      const list = this._timeline;
       if (!list) return;
       this._count += 1;
       const item = document.createElement('li');
@@ -180,10 +222,7 @@
       item.style.display = 'flex';
       item.style.alignItems = 'flex-start';
       item.style.gap = '6px';
-      item.innerHTML = `
-        <span style="min-width:20px; text-align:right; opacity:0.8;">${this._count}.</span>
-        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:310px;">${text}</span>
-      `;
+      this._populateTimelineItem(item, this._count, text);
       list.appendChild(item);
       while (list.children.length > CONFIG.UI_MAX_STEPS) {
         list.removeChild(list.firstChild);
@@ -258,7 +297,7 @@
      * Used by applyTimelineUpdate for proper numbering.
      */
     _appendStepWithIndex(step, displayIndex) {
-      const list = this._timeline || document.getElementById('__rr_rec_timeline_list') || null;
+      const list = this._timeline;
       if (!list) return;
       const item = document.createElement('li');
       const text = this._formatStepText(step, displayIndex);
@@ -266,13 +305,30 @@
       item.style.display = 'flex';
       item.style.alignItems = 'flex-start';
       item.style.gap = '6px';
-      item.innerHTML = `
-        <span style="min-width:20px; text-align:right; opacity:0.8;">${displayIndex}.</span>
-        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:310px;">${text}</span>
-      `;
+      this._populateTimelineItem(item, displayIndex, text);
       list.appendChild(item);
       const container = list.parentElement;
       if (container) container.scrollTop = container.scrollHeight;
+    }
+
+    _populateTimelineItem(item, displayIndex, text) {
+      const index = document.createElement('span');
+      Object.assign(index.style, {
+        minWidth: '20px',
+        textAlign: 'right',
+        opacity: '0.8',
+      });
+      index.textContent = `${displayIndex}.`;
+      const description = document.createElement('span');
+      Object.assign(description.style, {
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        maxWidth: '310px',
+      });
+      // Step values and selectors originate in the page. Never parse them as markup.
+      description.textContent = String(text || '');
+      item.append(index, description);
     }
 
     // Create a short, human-readable text for a recorded step
@@ -1477,7 +1533,11 @@
     _DBLCLICK_THRESHOLD_MS = 300;
 
     _onClick(e) {
-      if (!this.isRecording || this.isPaused) return;
+      if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
+      try {
+        const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+        if (this.ui._host && path.includes(this.ui._host)) return;
+      } catch {}
       const el = e.target instanceof Element ? e.target : null;
       if (!el) return;
       try {
@@ -1486,8 +1546,6 @@
           const tt = String(t).toLowerCase();
           if (tt === 'checkbox' || tt === 'radio') return; // avoid duplicate with change
         }
-        const overlay = document.getElementById('__rr_rec_overlay');
-        if (overlay && (el === overlay || (el.closest && el.closest('#__rr_rec_overlay')))) return;
       } catch {}
 
       const target = SelectorEngine.buildTarget(el);
@@ -1553,7 +1611,7 @@
 
     // Per-element input handler (attached on focusin for native inputs/textarea/contenteditable)
     _onInput(e) {
-      if (!this.isRecording || this.isPaused) return;
+      if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
       // Avoid mid-composition spam (IME): handle final committed value
       try {
         if (e && typeof e.isComposing === 'boolean' && e.isComposing) return;
@@ -1574,7 +1632,7 @@
 
     // Document-level input handler: supports composed events from Shadow DOM (custom elements)
     _onDocInput(e) {
-      if (!this.isRecording || this.isPaused) return;
+      if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
       try {
         if (e && typeof e.isComposing === 'boolean' && e.isComposing) return;
       } catch {}
@@ -1729,7 +1787,7 @@
     }
 
     _onChange(e) {
-      if (!this.isRecording || this.isPaused) return;
+      if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
       const el = e.target;
       if (el instanceof HTMLSelectElement) {
         const val = el.value;
@@ -1853,7 +1911,7 @@
     // UI handled by injected UI class
 
     _onFocusIn(e) {
-      if (!this.isRecording || this.isPaused) return;
+      if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
       const el = e.target;
       const isEditable =
         el instanceof HTMLInputElement ||
@@ -1867,6 +1925,7 @@
     }
 
     _onFocusOut(e) {
+      if (!e?.isTrusted) return;
       const el = e.target;
       if (!el) return;
       if (this._focusedEl === el) {
@@ -1879,7 +1938,14 @@
     }
 
     _onMouseMove(e) {
-      if (!this.highlightEnabled || !this.ui._box || !this.isRecording || this.isPaused) return;
+      if (
+        !e?.isTrusted ||
+        !this.highlightEnabled ||
+        !this.ui._box ||
+        !this.isRecording ||
+        this.isPaused
+      )
+        return;
       if (this.hoverRAF) return;
       const el = e.target instanceof Element ? e.target : null;
       if (!el) return;
@@ -1899,19 +1965,10 @@
     }
 
     _onScroll(e) {
-      if (!this.isRecording || this.isPaused) return;
+      if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
       try {
-        const overlay = document.getElementById('__rr_rec_overlay');
-        if (overlay) {
-          // Use composedPath for shadow DOM compatibility, fallback to target
-          const path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
-          for (const element of path) {
-            // If the event path contains our overlay, ignore this scroll event
-            if (element === overlay) {
-              return;
-            }
-          }
-        }
+        const path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
+        if (this.ui._host && path.includes(this.ui._host)) return;
       } catch {
         // ignore
       }
@@ -1988,7 +2045,7 @@
 
     // Minimal key recorder: record Enter and modifier combos; avoid plain typing
     _onKeyDown(e) {
-      if (!this.isRecording || this.isPaused) return;
+      if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
       try {
         // Ignore autorepeat to prevent spam
         if (e.repeat) return;
@@ -2040,6 +2097,7 @@
     }
 
     _onKeyUp(e) {
+      if (!e?.isTrusted) return;
       const key = String(e.key || '').toLowerCase();
       if (key === 'shift' || key === 'control' || key === 'meta' || key === 'alt')
         this._pressed.delete(key);
@@ -2205,6 +2263,22 @@
         const cmd = request.cmd;
         if (cmd === 'start') {
           rec.start(request.meta || {});
+          if (window === window.top && rec.sessionId && RECORDER_CONTROL_CAPABILITY) {
+            try {
+              chrome.runtime.sendMessage(
+                {
+                  action: RECORDER_CONTROL_REGISTER_ACTION,
+                  sessionId: rec.sessionId,
+                  controlCapability: RECORDER_CONTROL_CAPABILITY,
+                },
+                () => {
+                  // Read lastError so rejected registrations do not leak an
+                  // unchecked runtime error into the inspected page.
+                  void chrome.runtime.lastError;
+                },
+              );
+            } catch {}
+          }
           sendResponse({ success: true });
           return true;
         }

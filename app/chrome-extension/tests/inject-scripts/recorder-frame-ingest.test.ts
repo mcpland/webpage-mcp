@@ -165,4 +165,37 @@ describe('recorder iframe ingest boundary', () => {
     expect(source).not.toContain('Math.random().toString(16)');
     expect(source).toMatch(/_newFrameEventId\(\)[\s\S]*?catch \{[\s\S]*?return '';/);
   });
+
+  it('isolates controls from preplanted markup and ignores synthetic page actions', () => {
+    const preplanted = document.createElement('div');
+    preplanted.id = '__rr_rec_overlay';
+    preplanted.innerHTML = `
+      <input id="__rr_hide_values" type="checkbox" />
+      <button id="__rr_stop">Stop</button>
+    `;
+    document.body.appendChild(preplanted);
+
+    const pageButton = document.createElement('button');
+    pageButton.textContent = 'Synthetic action';
+    const pageInput = document.createElement('input');
+    pageInput.value = 'secret-from-script';
+    document.body.append(pageButton, pageInput);
+
+    const { listener, sendMessage } = loadRecorder();
+    activeListener = listener;
+
+    const recorderHost = Array.from(document.documentElement.children).find(
+      (element) => element !== document.head && element !== document.body,
+    );
+    expect(recorderHost).toBeTruthy();
+    expect(recorderHost?.shadowRoot).toBeNull();
+    expect(document.getElementById('__rr_rec_overlay')).toBe(preplanted);
+
+    preplanted.querySelector('input')?.dispatchEvent(new Event('change', { bubbles: true }));
+    preplanted.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    pageButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    pageInput.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
 });
