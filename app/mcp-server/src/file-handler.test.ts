@@ -32,6 +32,112 @@ afterEach(() => {
 });
 
 describe('FileHandler temp file safety', () => {
+  it('enforces single-file bytes before writing', async () => {
+    const handler = trackHandler(
+      new FileHandler(os.tmpdir(), {
+        maxFileBytes: 4,
+        maxTotalBytes: 8,
+      }),
+    );
+
+    const result = await handler.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('12345').toString('base64'),
+      fileName: 'oversized.txt',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('File exceeds the 4 byte limit');
+    expect(fs.readdirSync(handler.getTempDir())).toEqual([]);
+  });
+
+  it('enforces temporary file count and total-byte quotas', async () => {
+    const countLimited = trackHandler(
+      new FileHandler(os.tmpdir(), {
+        maxFileBytes: 4,
+        maxFiles: 1,
+        maxTotalBytes: 8,
+      }),
+    );
+    const totalLimited = trackHandler(
+      new FileHandler(os.tmpdir(), {
+        maxFileBytes: 4,
+        maxFiles: 3,
+        maxTotalBytes: 5,
+      }),
+    );
+
+    await countLimited.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('a').toString('base64'),
+      fileName: 'first.txt',
+    });
+    const countResult = await countLimited.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('b').toString('base64'),
+      fileName: 'second.txt',
+    });
+
+    await totalLimited.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('1234').toString('base64'),
+      fileName: 'first.txt',
+    });
+    const totalResult = await totalLimited.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('12').toString('base64'),
+      fileName: 'second.txt',
+    });
+
+    expect(countResult.success).toBe(false);
+    expect(countResult.error).toContain('file limit reached (1)');
+    expect(totalResult.success).toBe(false);
+    expect(totalResult.error).toContain('storage exceeds the 5 byte limit');
+  });
+
+  it('releases quota after cleanup and bounds base64 read responses', async () => {
+    const handler = trackHandler(
+      new FileHandler(os.tmpdir(), {
+        maxFileBytes: 8,
+        maxFiles: 1,
+        maxTotalBytes: 8,
+        maxBase64ReadFileBytes: 2,
+      }),
+    );
+    const saved = await handler.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('123').toString('base64'),
+      fileName: 'first.txt',
+    });
+
+    const readResult = await handler.handleFileRequest({
+      action: 'readBase64File',
+      filePath: saved.filePath,
+    });
+    await handler.handleFileRequest({ action: 'cleanupFile', filePath: saved.filePath });
+    const replacement = await handler.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('next').toString('base64'),
+      fileName: 'next.txt',
+    });
+
+    expect(readResult.success).toBe(false);
+    expect(readResult.error).toContain('2 byte base64 response limit');
+    expect(replacement.success).toBe(true);
+  });
+
+  it('rejects file names that cannot fit in one filesystem component', async () => {
+    const { handler } = createTestHandler();
+    const result = await handler.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('hello').toString('base64'),
+      fileName: `${'界'.repeat(100)}.txt`,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('fileName exceeds the 255 byte limit');
+  });
+
   it('sanitizes client-provided file names before writing temp files', async () => {
     const { handler, tempDir } = createTestHandler();
     dirsToCleanup.push(tempDir);

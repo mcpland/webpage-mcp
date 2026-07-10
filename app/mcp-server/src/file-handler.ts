@@ -5,16 +5,73 @@ import * as crypto from 'crypto';
 
 const INVALID_TEMP_FILE_NAME_CHARS = new Set(['<', '>', ':', '"', '/', '\\', '|', '?', '*']);
 const MAX_CONTROL_CHARACTER_CODE = 31;
+export const DEFAULT_TEMP_UPLOAD_MAX_FILE_BYTES = 16 * 1024 * 1024;
+export const DEFAULT_TEMP_UPLOAD_MAX_FILES = 128;
+export const DEFAULT_TEMP_UPLOAD_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+export const DEFAULT_TEMP_BASE64_READ_MAX_FILE_BYTES = 700 * 1024;
+export const TEMP_UPLOAD_MAX_FILENAME_BYTES = 255;
+const DATA_URL_PREFIX_ALLOWANCE = 4096;
+
+export interface FileHandlerLimits {
+  maxFileBytes?: number;
+  maxFiles?: number;
+  maxTotalBytes?: number;
+  maxBase64ReadFileBytes?: number;
+}
+
+interface ResolvedFileHandlerLimits {
+  maxFileBytes: number;
+  maxFiles: number;
+  maxTotalBytes: number;
+  maxBase64ReadFileBytes: number;
+}
+
+function resolvePositiveSafeInteger(
+  value: number | undefined,
+  fallback: number,
+  name: string,
+): number {
+  const resolved = value ?? fallback;
+  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
+    throw new RangeError(`${name} must be a positive safe integer`);
+  }
+  return resolved;
+}
 
 /**
  * File handler for managing file uploads through the native messaging host
  */
 export class FileHandler {
   private readonly tempDir: string;
+  private readonly limits: ResolvedFileHandlerLimits;
+  private tempFileCount = 0;
+  private tempFileBytes = 0;
   private disposed = false;
   private readonly exitHandler = (): void => this.dispose();
 
-  constructor(temporaryRoot = os.tmpdir()) {
+  constructor(temporaryRoot = os.tmpdir(), limits: FileHandlerLimits = {}) {
+    this.limits = {
+      maxFileBytes: resolvePositiveSafeInteger(
+        limits.maxFileBytes,
+        DEFAULT_TEMP_UPLOAD_MAX_FILE_BYTES,
+        'maxFileBytes',
+      ),
+      maxFiles: resolvePositiveSafeInteger(
+        limits.maxFiles,
+        DEFAULT_TEMP_UPLOAD_MAX_FILES,
+        'maxFiles',
+      ),
+      maxTotalBytes: resolvePositiveSafeInteger(
+        limits.maxTotalBytes,
+        DEFAULT_TEMP_UPLOAD_MAX_TOTAL_BYTES,
+        'maxTotalBytes',
+      ),
+      maxBase64ReadFileBytes: resolvePositiveSafeInteger(
+        limits.maxBase64ReadFileBytes,
+        DEFAULT_TEMP_BASE64_READ_MAX_FILE_BYTES,
+        'maxBase64ReadFileBytes',
+      ),
+    };
     // A per-process unpredictable directory prevents pre-planted symlinks and
     // cross-instance file access through a shared /tmp path.
     this.tempDir = fs.mkdtempSync(path.join(temporaryRoot, 'webpage-mcp-uploads-'));
@@ -33,6 +90,8 @@ export class FileHandler {
     this.disposed = true;
     process.removeListener('exit', this.exitHandler);
     fs.rmSync(this.tempDir, { recursive: true, force: true });
+    this.tempFileCount = 0;
+    this.tempFileBytes = 0;
   }
 
   /**
@@ -91,11 +150,31 @@ export class FileHandler {
    */
   private async saveBase64File(base64Data: string, fileName?: string): Promise<any> {
     try {
+      if (typeof base64Data !== 'string') {
+        throw new Error('base64Data must be a string');
+      }
+      const maximumEncodedCharacters =
+        Math.ceil((this.limits.maxFileBytes * 4) / 3) + DATA_URL_PREFIX_ALLOWANCE;
+      if (base64Data.length > maximumEncodedCharacters) {
+        throw new Error(`File exceeds the ${this.limits.maxFileBytes} byte limit`);
+      }
+
       // Remove data URL prefix if present
       const base64Content = base64Data.replace(/^data:.*?;base64,/, '');
 
       // Convert base64 to buffer
       const buffer = Buffer.from(base64Content, 'base64');
+      if (buffer.length > this.limits.maxFileBytes) {
+        throw new Error(`File exceeds the ${this.limits.maxFileBytes} byte limit`);
+      }
+      if (this.tempFileCount >= this.limits.maxFiles) {
+        throw new Error(`Temporary upload file limit reached (${this.limits.maxFiles})`);
+      }
+      if (this.tempFileBytes + buffer.length > this.limits.maxTotalBytes) {
+        throw new Error(
+          `Temporary upload storage exceeds the ${this.limits.maxTotalBytes} byte limit`,
+        );
+      }
 
       // Normalize the client-provided name so temp writes can never escape tempDir.
       const finalFileName = this.normalizeTempFileName(fileName) || this.generateFileName();
@@ -103,6 +182,8 @@ export class FileHandler {
 
       // Save to file
       fs.writeFileSync(filePath, buffer, { flag: 'wx', mode: 0o600 });
+      this.tempFileCount += 1;
+      this.tempFileBytes += buffer.length;
 
       return {
         success: true,
@@ -129,6 +210,11 @@ export class FileHandler {
       }
       const safePath = this.resolveSafeExistingTempFile(resolvedPath);
       const stats = fs.statSync(safePath);
+      if (stats.size > this.limits.maxBase64ReadFileBytes) {
+        throw new Error(
+          `File exceeds the ${this.limits.maxBase64ReadFileBytes} byte base64 response limit`,
+        );
+      }
       const buf = fs.readFileSync(safePath);
       const base64 = buf.toString('base64');
       return {
@@ -160,7 +246,11 @@ export class FileHandler {
       }
 
       if (fs.existsSync(resolvedPath)) {
-        fs.unlinkSync(this.resolveSafeExistingTempFile(resolvedPath));
+        const safePath = this.resolveSafeExistingTempFile(resolvedPath);
+        const size = fs.statSync(safePath).size;
+        fs.unlinkSync(safePath);
+        this.tempFileCount = Math.max(0, this.tempFileCount - 1);
+        this.tempFileBytes = Math.max(0, this.tempFileBytes - size);
       }
 
       return {
@@ -185,6 +275,10 @@ export class FileHandler {
   private normalizeTempFileName(fileName?: string): string | null {
     if (typeof fileName !== 'string') {
       return null;
+    }
+
+    if (Buffer.byteLength(fileName, 'utf8') > TEMP_UPLOAD_MAX_FILENAME_BYTES) {
+      throw new Error(`fileName exceeds the ${TEMP_UPLOAD_MAX_FILENAME_BYTES} byte limit`);
     }
 
     const trimmed = fileName.trim();
@@ -270,6 +364,8 @@ export class FileHandler {
         const stats = fs.lstatSync(filePath);
         if (!stats.isSymbolicLink() && stats.isFile() && now - stats.mtimeMs > oneHour) {
           fs.unlinkSync(filePath);
+          this.tempFileCount = Math.max(0, this.tempFileCount - 1);
+          this.tempFileBytes = Math.max(0, this.tempFileBytes - stats.size);
           // Use stderr to avoid polluting stdout (Native Messaging protocol)
           console.error(`Cleaned up old temp file: ${file}`);
         }
