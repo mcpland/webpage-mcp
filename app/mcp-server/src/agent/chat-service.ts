@@ -45,6 +45,8 @@ interface ExecutionRecord extends RunningExecution {
   resolveSettled: () => void;
   scopeResolved: boolean;
   pendingPersistence: Set<Promise<void>>;
+  pendingFinalAssistantPersistence: Set<Promise<void>>;
+  finalAssistantPersistenceError?: Error;
   settling?: Promise<void>;
 }
 
@@ -472,6 +474,7 @@ export class AgentChatService {
               createdAt: msg.createdAt,
               upsertById: true,
             }).then(() => undefined),
+            msg.role === 'assistant' && msg.isFinal === true,
           );
         }
       },
@@ -770,6 +773,7 @@ export class AgentChatService {
       resolveSettled,
       scopeResolved: projectId !== undefined,
       pendingPersistence: new Set(),
+      pendingFinalAssistantPersistence: new Set(),
     };
 
     this.runningExecutions.set(key, execution);
@@ -922,14 +926,37 @@ export class AgentChatService {
     return cancelled;
   }
 
-  private trackPersistence(execution: ExecutionRecord, operation: Promise<void>): void {
+  private trackPersistence(
+    execution: ExecutionRecord,
+    operation: Promise<void>,
+    requiredForCompletion = false,
+  ): void {
     const tracked = operation.catch((error) => {
       console.error('[AgentChatService] Failed to persist agent message:', error);
+      if (requiredForCompletion && !execution.finalAssistantPersistenceError) {
+        const detail = error instanceof Error ? error.message : String(error);
+        execution.finalAssistantPersistenceError = new Error(
+          `Failed to persist final assistant message: ${detail}`,
+        );
+      }
     });
     execution.pendingPersistence.add(tracked);
+    if (requiredForCompletion) {
+      execution.pendingFinalAssistantPersistence.add(tracked);
+    }
     void tracked.finally(() => {
       execution.pendingPersistence.delete(tracked);
+      execution.pendingFinalAssistantPersistence.delete(tracked);
     });
+  }
+
+  private async awaitFinalAssistantPersistence(execution: ExecutionRecord): Promise<void> {
+    while (execution.pendingFinalAssistantPersistence.size > 0) {
+      await Promise.all(Array.from(execution.pendingFinalAssistantPersistence));
+    }
+    if (execution.finalAssistantPersistenceError) {
+      throw execution.finalAssistantPersistenceError;
+    }
   }
 
   private async settleExecution(execution: ExecutionRecord): Promise<void> {
@@ -988,6 +1015,7 @@ export class AgentChatService {
       };
 
       await engine.initializeAndRun(optionsWithSignal, ctx);
+      await this.awaitFinalAssistantPersistence(execution);
 
       // Only emit completed if not aborted
       if (this.isExecutionCurrent(execution)) {

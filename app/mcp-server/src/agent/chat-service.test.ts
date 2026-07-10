@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEngine, EngineInitOptions } from './engines/types';
 import { AgentStreamManager } from './stream-manager';
 import type { AgentSession } from './session-service';
+import type { RealtimeEvent } from './types';
 import {
   AGENT_CLIENT_META_MAX_JSON_BYTES,
   AGENT_DISPLAY_TEXT_MAX_BYTES,
@@ -943,6 +944,125 @@ describe('AgentChatService', () => {
     await expect(deletePromise).resolves.toBe('deleted');
     expect(deleteSession).toHaveBeenCalledOnce();
     expect(service.getRunningExecutions()).toHaveLength(0);
+  });
+
+  it('publishes an error instead of completed when final assistant persistence fails', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    messageServiceMocks.createMessage
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('assistant database unavailable'));
+
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(_options, ctx) {
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'final-assistant-persistence-failure',
+            sessionId: legacySession.id,
+            role: 'assistant',
+            content: 'This reply must be durable before completion',
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId: 'final-persistence-failure',
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Generate a durable reply',
+      dbSessionId: legacySession.id,
+      requestId: 'final-persistence-failure',
+    });
+
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(2);
+    expect(
+      streamedEvents.some((event) => event.type === 'status' && event.data.status === 'completed'),
+    ).toBe(false);
+    expect(streamedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'error',
+          error: 'Failed to persist final assistant message: assistant database unavailable',
+        }),
+        expect.objectContaining({
+          type: 'status',
+          data: expect.objectContaining({
+            status: 'error',
+            requestId: 'final-persistence-failure',
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('publishes completed exactly once after final assistant persistence succeeds', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const finalPersistence = deferred<void>();
+    messageServiceMocks.createMessage
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(() => finalPersistence.promise);
+
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(_options, ctx) {
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'final-assistant-persistence-success',
+            sessionId: legacySession.id,
+            role: 'assistant',
+            content: 'This reply becomes durable before completion',
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId: 'final-persistence-success',
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Generate a durable reply',
+      dbSessionId: legacySession.id,
+      requestId: 'final-persistence-success',
+    });
+    await vi.waitFor(() => expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(2));
+
+    expect(service.getRunningExecutions()).toHaveLength(1);
+    expect(
+      streamedEvents.some((event) => event.type === 'status' && event.data.status === 'completed'),
+    ).toBe(false);
+
+    finalPersistence.resolve();
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'status' && event.data.status === 'completed',
+      ),
+    ).toHaveLength(1);
+    expect(streamedEvents.some((event) => event.type === 'error')).toBe(false);
   });
 
   it('drains late assistant persistence before session history is deleted', async () => {
