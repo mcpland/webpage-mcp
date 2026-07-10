@@ -104,9 +104,72 @@ interface RuleIndex {
   stats: { styleSheets: number; rulesScanned: number };
 }
 
+export const CSSOM_RESOURCE_LIMITS = Object.freeze({
+  maxStyleSheets: 128,
+  maxRulesScanned: 5_000,
+  maxFlatRules: 4_000,
+  maxRuleDepth: 32,
+  maxScanMs: 250,
+  maxRulesPerElement: 4_000,
+  maxMatchedRulesPerElement: 1_000,
+  maxDeclarationsPerRule: 256,
+  maxDeclarationsPerElement: 4_000,
+  maxInheritanceDepth: 16,
+  maxWarnings: 64,
+  maxTextCodeUnits: 8_192,
+  maxSelectorCodeUnits: 4_096,
+});
+
+interface CssomScanBudget {
+  deadline: number;
+  styleSheets: number;
+  rules: number;
+  flatRules: number;
+  seenSheets: WeakSet<CSSStyleSheet>;
+}
+
+function createCssomScanBudget(): CssomScanBudget {
+  return {
+    deadline: Date.now() + CSSOM_RESOURCE_LIMITS.maxScanMs,
+    styleSheets: 0,
+    rules: 0,
+    flatRules: 0,
+    seenSheets: new WeakSet<CSSStyleSheet>(),
+  };
+}
+
+function boundCssomText(
+  value: unknown,
+  maximum: number = CSSOM_RESOURCE_LIMITS.maxTextCodeUnits,
+): string {
+  const text = String(value ?? '');
+  return text.length <= maximum ? text : `${text.slice(0, Math.max(0, maximum - 1))}…`;
+}
+
+function pushCssomWarning(warnings: string[], message: unknown): void {
+  if (warnings.length >= CSSOM_RESOURCE_LIMITS.maxWarnings) return;
+  const bounded = boundCssomText(message, 2_048);
+  if (!warnings.includes(bounded)) warnings.push(bounded);
+}
+
+function registerStyleSheet(budget: CssomScanBudget, sheet: CSSStyleSheet): boolean {
+  if (budget.seenSheets.has(sheet)) return true;
+  if (budget.styleSheets >= CSSOM_RESOURCE_LIMITS.maxStyleSheets) return false;
+  budget.seenSheets.add(sheet);
+  budget.styleSheets += 1;
+  return true;
+}
+
+function canScanCssom(budget: CssomScanBudget): boolean {
+  return (
+    budget.rules < CSSOM_RESOURCE_LIMITS.maxRulesScanned && Date.now() <= budget.deadline
+  );
+}
+
 interface CollectElementOptions {
   includeInline: boolean;
   declFilter: (decl: { property: string; affects: readonly string[] }) => boolean;
+  deadline?: number;
 }
 
 interface CollectedElementRules {
@@ -851,11 +914,11 @@ function isSheetApplicable(sheet: CSSStyleSheet): boolean {
 }
 
 function describeStyleSheet(sheet: CSSStyleSheet, fallbackIndex: number): CssRuleSource {
-  const href = typeof sheet.href === 'string' ? sheet.href : undefined;
+  const href = typeof sheet.href === 'string' ? boundCssomText(sheet.href) : undefined;
 
   if (href) {
     const file = href.split('/').pop()?.split('?')[0] ?? href;
-    return { url: href, label: file };
+    return { url: href, label: boundCssomText(file, 2_048) };
   }
 
   const ownerNode = sheet.ownerNode as Node | null | undefined;
@@ -880,9 +943,13 @@ function evalMediaRule(rule: CSSMediaRule, warnings: string[]): boolean {
   try {
     const mediaText = rule.media?.mediaText?.trim() ?? '';
     if (!mediaText || mediaText.toLowerCase() === 'all') return true;
+    if (mediaText.length > CSSOM_RESOURCE_LIMITS.maxSelectorCodeUnits) {
+      pushCssomWarning(warnings, 'Skipped oversized @media condition');
+      return false;
+    }
     return window.matchMedia(mediaText).matches;
   } catch (e) {
-    warnings.push(`Failed to evaluate @media rule: ${String(e)}`);
+    pushCssomWarning(warnings, `Failed to evaluate @media rule: ${String(e)}`);
     return false;
   }
 }
@@ -891,33 +958,74 @@ function evalSupportsRule(rule: CSSSupportsRule, warnings: string[]): boolean {
   try {
     const cond = rule.conditionText?.trim() ?? '';
     if (!cond) return true;
+    if (cond.length > CSSOM_RESOURCE_LIMITS.maxSelectorCodeUnits) {
+      pushCssomWarning(warnings, 'Skipped oversized @supports condition');
+      return false;
+    }
     if (typeof CSS?.supports !== 'function') return true;
     return CSS.supports(cond);
   } catch (e) {
-    warnings.push(`Failed to evaluate @supports rule: ${String(e)}`);
+    pushCssomWarning(warnings, `Failed to evaluate @supports rule: ${String(e)}`);
     return false;
   }
 }
 
-function createRuleIndexForRoot(root: Document | ShadowRoot, rootId: number): RuleIndex {
+function createRuleIndexForRoot(
+  root: Document | ShadowRoot,
+  rootId: number,
+  budget: CssomScanBudget = createCssomScanBudget(),
+): RuleIndex {
   const warnings: string[] = [];
   const flatRules: FlatStyleRule[] = [];
   let rulesScanned = 0;
+  let resourceTruncated = false;
+
+  const noteTruncation = (reason: string): void => {
+    resourceTruncated = true;
+    pushCssomWarning(warnings, `CSSOM collection truncated: ${reason}`);
+  };
 
   const docOrShadow = root as DocumentOrShadowRoot;
   const styleSheets: CSSStyleSheet[] = [];
+  const queuedSheets = new WeakSet<CSSStyleSheet>();
+
+  const appendStyleSheet = (sheet: unknown): boolean => {
+    if (!(sheet instanceof CSSStyleSheet) || queuedSheets.has(sheet)) return true;
+    if (!registerStyleSheet(budget, sheet)) {
+      noteTruncation(`stylesheet limit (${CSSOM_RESOURCE_LIMITS.maxStyleSheets}) reached`);
+      return false;
+    }
+    queuedSheets.add(sheet);
+    styleSheets.push(sheet);
+    return true;
+  };
 
   try {
-    for (const s of Array.from(docOrShadow.styleSheets ?? [])) {
-      if (s && s instanceof CSSStyleSheet) styleSheets.push(s);
+    const sheets = docOrShadow.styleSheets;
+    const length = Math.min(
+      Number(sheets?.length ?? 0),
+      CSSOM_RESOURCE_LIMITS.maxStyleSheets,
+    );
+    for (let index = 0; index < length; index += 1) {
+      const sheet = typeof sheets?.item === 'function' ? sheets.item(index) : sheets?.[index];
+      if (!appendStyleSheet(sheet)) break;
+    }
+    if (Number(sheets?.length ?? 0) > length) {
+      noteTruncation(`stylesheet limit (${CSSOM_RESOURCE_LIMITS.maxStyleSheets}) reached`);
     }
   } catch {
     // ignore
   }
 
   try {
-    const adopted = Array.from(docOrShadow.adoptedStyleSheets ?? []) as CSSStyleSheet[];
-    for (const s of adopted) if (s && s instanceof CSSStyleSheet) styleSheets.push(s);
+    const adopted = docOrShadow.adoptedStyleSheets ?? [];
+    const length = Math.min(adopted.length, CSSOM_RESOURCE_LIMITS.maxStyleSheets);
+    for (let index = 0; index < length; index += 1) {
+      if (!appendStyleSheet(adopted[index])) break;
+    }
+    if (adopted.length > length) {
+      noteTruncation(`stylesheet limit (${CSSOM_RESOURCE_LIMITS.maxStyleSheets}) reached`);
+    }
   } catch {
     // ignore
   }
@@ -932,17 +1040,34 @@ function createRuleIndexForRoot(root: Document | ShadowRoot, rootId: number): Ru
       topSheet: CSSStyleSheet;
       stack: Set<CSSStyleSheet>;
     },
+    depth = 0,
   ): void {
-    for (const rule of Array.from(list)) {
+    if (depth > CSSOM_RESOURCE_LIMITS.maxRuleDepth) {
+      noteTruncation(`rule nesting limit (${CSSOM_RESOURCE_LIMITS.maxRuleDepth}) reached`);
+      return;
+    }
+    const length = Number(list?.length ?? 0);
+    for (let index = 0; index < length; index += 1) {
+      if (!canScanCssom(budget)) {
+        noteTruncation(
+          Date.now() > budget.deadline
+            ? `time limit (${CSSOM_RESOURCE_LIMITS.maxScanMs}ms) reached`
+            : `rule limit (${CSSOM_RESOURCE_LIMITS.maxRulesScanned}) reached`,
+        );
+        return;
+      }
+      const rule = typeof list.item === 'function' ? list.item(index) : list[index];
+      if (!rule) continue;
+      budget.rules += 1;
       rulesScanned += 1;
 
       if (CONTAINER_RULE && rule.type === CONTAINER_RULE) {
-        warnings.push('Skipped @container rules (not evaluated in CSSOM collector)');
+        pushCssomWarning(warnings, 'Skipped @container rules (not evaluated in CSSOM collector)');
         continue;
       }
 
       if (SCOPE_RULE && rule.type === SCOPE_RULE) {
-        warnings.push('Skipped @scope rules (not evaluated in CSSOM collector)');
+        pushCssomWarning(warnings, 'Skipped @scope rules (not evaluated in CSSOM collector)');
         continue;
       }
 
@@ -954,8 +1079,13 @@ function createRuleIndexForRoot(root: Document | ShadowRoot, rootId: number): Ru
           if (
             mediaText &&
             mediaText.toLowerCase() !== 'all' &&
+            mediaText.length <= CSSOM_RESOURCE_LIMITS.maxSelectorCodeUnits &&
             !window.matchMedia(mediaText).matches
           ) {
+            continue;
+          }
+          if (mediaText.length > CSSOM_RESOURCE_LIMITS.maxSelectorCodeUnits) {
+            pushCssomWarning(warnings, 'Skipped oversized @import media condition');
             continue;
           }
         } catch {
@@ -967,7 +1097,11 @@ function createRuleIndexForRoot(root: Document | ShadowRoot, rootId: number): Ru
           // Check for cycle BEFORE adding to stack
           if (ctx.stack.has(imported)) {
             const src = describeStyleSheet(imported, ctx.sheetIndex);
-            warnings.push(`Detected @import cycle, skipping: ${src.url ?? src.label}`);
+            pushCssomWarning(warnings, `Detected @import cycle, skipping: ${src.url ?? src.label}`);
+            continue;
+          }
+          if (!registerStyleSheet(budget, imported)) {
+            noteTruncation(`stylesheet limit (${CSSOM_RESOURCE_LIMITS.maxStyleSheets}) reached`);
             continue;
           }
 
@@ -983,18 +1117,23 @@ function createRuleIndexForRoot(root: Document | ShadowRoot, rootId: number): Ru
             const src = describeStyleSheet(imported, ctx.sheetIndex);
 
             if (!cssRules) {
-              warnings.push(
+              pushCssomWarning(
+                warnings,
                 `Skipped @import stylesheet (cannot access cssRules, likely cross-origin): ${src.url ?? src.label}`,
               );
               continue;
             }
 
-            walkRuleList(cssRules, {
-              sheetIndex: ctx.sheetIndex,
-              sourceForRules: src,
-              topSheet: imported,
-              stack: ctx.stack,
-            });
+            walkRuleList(
+              cssRules,
+              {
+                sheetIndex: ctx.sheetIndex,
+                sourceForRules: src,
+                topSheet: imported,
+                stack: ctx.stack,
+              },
+              depth + 1,
+            );
           } finally {
             ctx.stack.delete(imported);
           }
@@ -1004,27 +1143,39 @@ function createRuleIndexForRoot(root: Document | ShadowRoot, rootId: number): Ru
 
       if (rule.type === CSSRule.MEDIA_RULE) {
         if (evalMediaRule(rule as CSSMediaRule, warnings)) {
-          walkRuleList((rule as CSSMediaRule).cssRules, ctx);
+          walkRuleList((rule as CSSMediaRule).cssRules, ctx, depth + 1);
         }
         continue;
       }
 
       if (rule.type === CSSRule.SUPPORTS_RULE) {
         if (evalSupportsRule(rule as CSSSupportsRule, warnings)) {
-          walkRuleList((rule as CSSSupportsRule).cssRules, ctx);
+          walkRuleList((rule as CSSSupportsRule).cssRules, ctx, depth + 1);
         }
         continue;
       }
 
       if (rule.type === CSSRule.STYLE_RULE) {
         const styleRule = rule as CSSStyleRule;
+        const selectorText = styleRule.selectorText ?? '';
+        if (selectorText.length > CSSOM_RESOURCE_LIMITS.maxSelectorCodeUnits) {
+          noteTruncation(
+            `selector length limit (${CSSOM_RESOURCE_LIMITS.maxSelectorCodeUnits}) reached`,
+          );
+          continue;
+        }
+        if (budget.flatRules >= CSSOM_RESOURCE_LIMITS.maxFlatRules) {
+          noteTruncation(`style rule limit (${CSSOM_RESOURCE_LIMITS.maxFlatRules}) reached`);
+          return;
+        }
         flatRules.push({
           sheetIndex: ctx.sheetIndex,
           order: order++,
-          selectorText: styleRule.selectorText ?? '',
+          selectorText,
           style: styleRule.style,
           source: ctx.sourceForRules,
         });
+        budget.flatRules += 1;
         continue;
       }
 
@@ -1032,7 +1183,7 @@ function createRuleIndexForRoot(root: Document | ShadowRoot, rootId: number): Ru
       const anyRule = rule as { cssRules?: CSSRuleList };
       if (anyRule.cssRules && typeof anyRule.cssRules.length === 'number') {
         try {
-          walkRuleList(anyRule.cssRules, ctx);
+          walkRuleList(anyRule.cssRules, ctx, depth + 1);
         } catch {
           // ignore
         }
@@ -1041,13 +1192,22 @@ function createRuleIndexForRoot(root: Document | ShadowRoot, rootId: number): Ru
   }
 
   for (let sheetIndex = 0; sheetIndex < styleSheets.length; sheetIndex++) {
+    if (!canScanCssom(budget)) {
+      noteTruncation(
+        Date.now() > budget.deadline
+          ? `time limit (${CSSOM_RESOURCE_LIMITS.maxScanMs}ms) reached`
+          : `rule limit (${CSSOM_RESOURCE_LIMITS.maxRulesScanned}) reached`,
+      );
+      break;
+    }
     const sheet = styleSheets[sheetIndex]!;
     if (!isSheetApplicable(sheet)) continue;
 
     const sheetSource = describeStyleSheet(sheet, sheetIndex);
     const cssRules = safeReadCssRules(sheet);
     if (!cssRules) {
-      warnings.push(
+      pushCssomWarning(
+        warnings,
         `Skipped stylesheet (cannot access cssRules, likely cross-origin): ${sheetSource.url ?? sheetSource.label}`,
       );
       continue;
@@ -1064,6 +1224,10 @@ function createRuleIndexForRoot(root: Document | ShadowRoot, rootId: number): Ru
     });
   }
 
+  if (resourceTruncated && warnings.length === 0) {
+    pushCssomWarning(warnings, 'CSSOM collection truncated by resource limits');
+  }
+
   return {
     root,
     rootId,
@@ -1077,7 +1241,10 @@ function createRuleIndexForRoot(root: Document | ShadowRoot, rootId: number): Ru
 // Per-element collection
 // =============================================================================
 
-function readStyleDecls(style: CSSStyleDeclaration): Array<{
+function readStyleDecls(
+  style: CSSStyleDeclaration,
+  maximumDeclarations: number = CSSOM_RESOURCE_LIMITS.maxDeclarationsPerRule,
+): Array<{
   property: string;
   value: string;
   important: boolean;
@@ -1085,16 +1252,22 @@ function readStyleDecls(style: CSSStyleDeclaration): Array<{
 }> {
   const out: Array<{ property: string; value: string; important: boolean; declIndex: number }> = [];
 
-  const len = Number(style?.length ?? 0);
+  const len = Math.min(
+    Number(style?.length ?? 0),
+    Math.max(0, Math.floor(maximumDeclarations)),
+  );
   for (let i = 0; i < len; i++) {
     let prop = '';
     try {
-      prop = style.item(i);
+      prop =
+        typeof style.item === 'function'
+          ? style.item(i)
+          : ((style as CSSStyleDeclaration & Record<number, string>)[i] ?? '');
     } catch {
       prop = '';
     }
     prop = normalizePropertyName(prop);
-    if (!prop) continue;
+    if (!prop || prop.length > 256) continue;
 
     let value = '';
     let important = false;
@@ -1106,7 +1279,12 @@ function readStyleDecls(style: CSSStyleDeclaration): Array<{
       important = false;
     }
 
-    out.push({ property: prop, value: String(value).trim(), important, declIndex: i });
+    out.push({
+      property: prop,
+      value: boundCssomText(String(value).trim()),
+      important,
+      declIndex: i,
+    });
   }
 
   return out;
@@ -1124,12 +1302,16 @@ function canReadInlineStyle(element: Element): element is Element & { style: CSS
 function formatElementLabel(element: Element, maxClasses = 2): string {
   const tag = element.tagName.toLowerCase();
   const id = (element as HTMLElement).id?.trim();
-  if (id) return `${tag}#${id}`;
+  if (id) return boundCssomText(`${tag}#${id}`, 2_048);
 
-  const classes = Array.from(element.classList ?? [])
-    .slice(0, maxClasses)
-    .filter(Boolean);
-  if (classes.length) return `${tag}.${classes.join('.')}`;
+  const classes: string[] = [];
+  const classList = element.classList;
+  const classLimit = Math.min(classList?.length ?? 0, Math.max(0, maxClasses));
+  for (let index = 0; index < classLimit; index += 1) {
+    const className = classList.item(index);
+    if (className) classes.push(boundCssomText(className, 512));
+  }
+  if (classes.length) return boundCssomText(`${tag}.${classes.join('.')}`, 2_048);
 
   return tag;
 }
@@ -1165,13 +1347,27 @@ function collectForElement(
   const warnings: string[] = [];
   const matchedRules: CssRuleView[] = [];
   const candidates: DeclCandidate[] = [];
+  const deadline = options.deadline ?? Date.now() + CSSOM_RESOURCE_LIMITS.maxScanMs;
+  let rulesConsidered = 0;
+  let declarationsConsidered = 0;
 
   const rootType: 'document' | 'shadow' = index.root instanceof ShadowRoot ? 'shadow' : 'document';
 
   let inlineRule: CssRuleView | null = null;
 
   if (options.includeInline && canReadInlineStyle(element)) {
-    const declsRaw = readStyleDecls(element.style);
+    const inlineLimit = Math.min(
+      CSSOM_RESOURCE_LIMITS.maxDeclarationsPerRule,
+      CSSOM_RESOURCE_LIMITS.maxDeclarationsPerElement,
+    );
+    const declsRaw = readStyleDecls(element.style, inlineLimit);
+    declarationsConsidered += declsRaw.length;
+    if (Number(element.style.length ?? 0) > inlineLimit) {
+      pushCssomWarning(
+        warnings,
+        `Inline declarations truncated at ${CSSOM_RESOURCE_LIMITS.maxDeclarationsPerRule}`,
+      );
+    }
     const decls: CssDeclView[] = [];
 
     for (const d of declsRaw) {
@@ -1215,10 +1411,33 @@ function collectForElement(
   }
 
   for (const flat of index.flatRules) {
+    if (
+      rulesConsidered >= CSSOM_RESOURCE_LIMITS.maxRulesPerElement ||
+      matchedRules.length >= CSSOM_RESOURCE_LIMITS.maxMatchedRulesPerElement ||
+      declarationsConsidered >= CSSOM_RESOURCE_LIMITS.maxDeclarationsPerElement ||
+      Date.now() > deadline
+    ) {
+      pushCssomWarning(warnings, 'Per-element CSS rule matching truncated by resource limits');
+      break;
+    }
+    rulesConsidered += 1;
     const match = computeMatchedRuleSpecificity(element, flat.selectorText);
     if (!match) continue;
 
-    const declsRaw = readStyleDecls(flat.style);
+    const remainingDeclarations =
+      CSSOM_RESOURCE_LIMITS.maxDeclarationsPerElement - declarationsConsidered;
+    const declarationLimit = Math.min(
+      CSSOM_RESOURCE_LIMITS.maxDeclarationsPerRule,
+      remainingDeclarations,
+    );
+    const declsRaw = readStyleDecls(flat.style, declarationLimit);
+    declarationsConsidered += declsRaw.length;
+    if (Number(flat.style.length ?? 0) > declarationLimit) {
+      pushCssomWarning(
+        warnings,
+        `Rule declarations truncated at ${CSSOM_RESOURCE_LIMITS.maxDeclarationsPerRule}`,
+      );
+    }
     const decls: CssDeclView[] = [];
     const ruleId = `rule:${index.rootId}:${flat.sheetIndex}:${flat.order}`;
 
@@ -1302,10 +1521,12 @@ export function collectMatchedRules(element: Element): {
 } {
   const root = getElementRoot(element);
 
-  const index = createRuleIndexForRoot(root, 1);
+  const scanBudget = createCssomScanBudget();
+  const index = createRuleIndexForRoot(root, 1, scanBudget);
   const res = collectForElement(element, index, 1, {
     includeInline: true,
     declFilter: () => true,
+    deadline: scanBudget.deadline,
   });
 
   return {
@@ -1330,8 +1551,12 @@ export function collectCssPanelSnapshot(
 ): CssPanelSnapshot {
   const warnings: string[] = [];
   const maxDepth = Number.isFinite(options.maxInheritanceDepth)
-    ? Math.max(0, options.maxInheritanceDepth!)
-    : 10;
+    ? Math.min(
+        CSSOM_RESOURCE_LIMITS.maxInheritanceDepth,
+        Math.max(0, Math.floor(options.maxInheritanceDepth!)),
+      )
+    : Math.min(10, CSSOM_RESOURCE_LIMITS.maxInheritanceDepth);
+  const scanBudget = createCssomScanBudget();
 
   const elementIds = new WeakMap<Element, number>();
   let nextElementId = 1;
@@ -1359,7 +1584,7 @@ export function collectCssPanelSnapshot(
         rootIds.set(root, v);
         return v;
       })();
-    const idx = createRuleIndexForRoot(root, rootId);
+    const idx = createRuleIndexForRoot(root, rootId, scanBudget);
     indexCache.set(root, idx);
     indexList.push(idx); // Also add to list for stats aggregation
     return idx;
@@ -1377,11 +1602,12 @@ export function collectCssPanelSnapshot(
   // ---- Target (direct rules) ----
   const targetRoot = getElementRoot(element);
   const targetIndex = getIndex(targetRoot);
-  warnings.push(...targetIndex.warnings);
+  for (const warning of targetIndex.warnings) pushCssomWarning(warnings, warning);
 
   const targetCollected = collectForElement(element, targetIndex, getElementId(element), {
     includeInline: true,
     declFilter: () => true,
+    deadline: scanBudget.deadline,
   });
 
   // Compute overrides on target itself.
@@ -1422,11 +1648,12 @@ export function collectCssPanelSnapshot(
   for (const a of ancestors) {
     const aRoot = getElementRoot(a);
     const aIndex = getIndex(aRoot);
-    warnings.push(...aIndex.warnings);
+    for (const warning of aIndex.warnings) pushCssomWarning(warnings, warning);
 
     const aCollected = collectForElement(a, aIndex, getElementId(a), {
       includeInline: true,
       declFilter: ({ affects }) => affects.some(isInheritableProperty),
+      deadline: scanBudget.deadline,
     });
 
     // Filter candidates to inheritable longhands only (affects subset).
@@ -1533,7 +1760,10 @@ export function collectCssPanelSnapshot(
     totalRulesScanned += idx.stats.rulesScanned;
   }
 
-  const dedupWarnings = Array.from(new Set([...warnings, ...targetCollected.warnings]));
+  const dedupWarnings: string[] = [];
+  for (const warning of [...warnings, ...targetCollected.warnings]) {
+    pushCssomWarning(dedupWarnings, warning);
+  }
 
   return {
     target: {
