@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { promisify } from "util";
 import { COMMAND_NAME, DESCRIPTION, EXTENSION_ID, HOST_NAME } from "./constant";
 import {
@@ -23,6 +23,54 @@ import {
 export const access = promisify(fs.access);
 export const mkdir = promisify(fs.mkdir);
 export const writeFile = promisify(fs.writeFile);
+
+interface SyncFileCommandOptions {
+  encoding?: BufferEncoding;
+  stdio: "pipe";
+}
+
+export type SyncFileCommandRunner = (
+  command: string,
+  args: string[],
+  options: SyncFileCommandOptions,
+) => string | Buffer;
+
+const runSyncFileCommand: SyncFileCommandRunner = (
+  command,
+  args,
+  options,
+) => {
+  if (options.encoding) {
+    return execFileSync(command, args, {
+      encoding: options.encoding,
+      stdio: options.stdio,
+    });
+  }
+  return execFileSync(command, args, { stdio: options.stdio });
+};
+
+export function queryWindowsRegistryDefaultValue(
+  registryKey: string,
+  runCommand: SyncFileCommandRunner = runSyncFileCommand,
+): string {
+  const output = runCommand("reg", ["query", registryKey, "/ve"], {
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  return typeof output === "string" ? output : output.toString("utf8");
+}
+
+export function setWindowsRegistryDefaultValue(
+  registryKey: string,
+  manifestPath: string,
+  runCommand: SyncFileCommandRunner = runSyncFileCommand,
+): void {
+  runCommand(
+    "reg",
+    ["add", registryKey, "/ve", "/t", "REG_SZ", "/d", manifestPath, "/f"],
+    { stdio: "pipe" },
+  );
+}
 
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
 const RUNTIME_DIR_NAME = ".webpage-mcp";
@@ -630,10 +678,7 @@ function verifyWindowsRegistryEntry(
     path.normalize(filePath).toLowerCase();
 
   try {
-    const output = execSync(`reg query "${registryKey}" /ve`, {
-      encoding: "utf8",
-      stdio: "pipe",
-    });
+    const output = queryWindowsRegistryDefaultValue(registryKey);
     const lines = output
       .split(/\r?\n/)
       .map((l) => l.trim())
@@ -781,9 +826,10 @@ export async function tryRegisterUserLevelHost(
         // WindowsAdditional registry keys required
         if (os.platform() === "win32" && config.registryKey) {
           try {
-            // NOTE: There is no need to double-write the backslashes manually, the reg command will handle Windows paths correctly
-            const regCommand = `reg add "${config.registryKey}" /ve /t REG_SZ /d "${config.userManifestPath}" /f`;
-            execSync(regCommand, { stdio: "pipe" });
+            setWindowsRegistryDefaultValue(
+              config.registryKey,
+              config.userManifestPath,
+            );
 
             if (
               verifyWindowsRegistryEntry(
@@ -1304,8 +1350,6 @@ export async function registerWithElevatedPermissions(
         }
 
         if (os.platform() === "win32" && config.systemRegistryKey) {
-          const regCommand = `reg add "${config.systemRegistryKey}" /ve /t REG_SZ /d "${config.systemManifestPath}" /f`;
-
           console.log(
             colorText(
               `Creating system registry entry: ${config.systemRegistryKey}`,
@@ -1316,7 +1360,10 @@ export async function registerWithElevatedPermissions(
             colorText(`Manifest path: ${config.systemManifestPath}`, "blue"),
           );
 
-          execSync(regCommand, { stdio: "pipe" });
+          setWindowsRegistryDefaultValue(
+            config.systemRegistryKey,
+            config.systemManifestPath,
+          );
 
           if (
             verifyWindowsRegistryEntry(

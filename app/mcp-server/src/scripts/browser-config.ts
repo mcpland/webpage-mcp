@@ -1,8 +1,14 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { HOST_NAME } from './constant';
+
+export type BrowserDetectionCommandRunner = (command: string, args: string[]) => void;
+
+const runBrowserDetectionCommand: BrowserDetectionCommandRunner = (command, args) => {
+  execFileSync(command, args, { stdio: 'pipe' });
+};
 
 export enum BrowserType {
   CHROME = 'chrome',
@@ -338,9 +344,11 @@ export function getBrowserConfig(browser: BrowserType): BrowserConfig {
 /**
  * Detect installed browsers on the system
  */
-export function detectInstalledBrowsers(): BrowserType[] {
+export function detectInstalledBrowsers(
+  runCommand: BrowserDetectionCommandRunner = runBrowserDetectionCommand,
+  platform: NodeJS.Platform = os.platform(),
+): BrowserType[] {
   const detectedBrowsers: BrowserType[] = [];
-  const platform = os.platform();
 
   if (platform === 'win32') {
     // Check Windows registry for installed browsers
@@ -351,7 +359,7 @@ export function detectInstalledBrowsers(): BrowserType[] {
 
     for (const browser of browsers) {
       try {
-        execSync(`reg query "${browser.registryPath}" 2>nul`, { stdio: 'pipe' });
+        runCommand('reg', ['query', browser.registryPath]);
         detectedBrowsers.push(browser.type);
       } catch {
         // Browser not installed
@@ -382,7 +390,7 @@ export function detectInstalledBrowsers(): BrowserType[] {
     for (const browser of browsers) {
       for (const cmd of browser.commands) {
         try {
-          execSync(`which ${cmd} 2>/dev/null`, { stdio: 'pipe' });
+          runCommand('which', [cmd]);
           if (!detectedBrowsers.includes(browser.type)) {
             detectedBrowsers.push(browser.type);
           }

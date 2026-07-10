@@ -4,7 +4,12 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EXTENSION_ID } from './constant';
-import { resolveAllowedOrigins } from './utils';
+import {
+  queryWindowsRegistryDefaultValue,
+  resolveAllowedOrigins,
+  setWindowsRegistryDefaultValue,
+  type SyncFileCommandRunner,
+} from './utils';
 
 describe('Native Messaging registration security', () => {
   const originEnvironmentKeys = [
@@ -107,5 +112,60 @@ describe('Native Messaging registration security', () => {
       `chrome-extension://${explicitOriginId}/popup.html/`,
     );
     expect(origins).not.toContain('https://example.com/');
+  });
+
+  it('passes registry keys with shell metacharacters as one query argument', () => {
+    const registryKey = 'HKCU\\Software\\Vendor name\\Host "quoted" & whoami';
+    const calls: Array<{
+      command: string;
+      args: string[];
+      options: { encoding?: BufferEncoding; stdio: 'pipe' };
+    }> = [];
+    const runner: SyncFileCommandRunner = (command, args, options) => {
+      calls.push({ command, args, options });
+      return Buffer.from('query output', 'utf8');
+    };
+
+    expect(queryWindowsRegistryDefaultValue(registryKey, runner)).toBe('query output');
+    expect(calls).toEqual([
+      {
+        command: 'reg',
+        args: ['query', registryKey, '/ve'],
+        options: { encoding: 'utf8', stdio: 'pipe' },
+      },
+    ]);
+  });
+
+  it('passes quoted manifest paths with shell metacharacters as one add argument', () => {
+    const registryKey = 'HKCU\\Software\\Vendor name\\Host "quoted" & whoami';
+    const manifestPath = 'C:\\Users\\A B\\host "quoted" & calc.exe.json';
+    const calls: Array<{
+      command: string;
+      args: string[];
+      options: { encoding?: BufferEncoding; stdio: 'pipe' };
+    }> = [];
+    const runner: SyncFileCommandRunner = (command, args, options) => {
+      calls.push({ command, args, options });
+      return Buffer.alloc(0);
+    };
+
+    setWindowsRegistryDefaultValue(registryKey, manifestPath, runner);
+
+    expect(calls).toEqual([
+      {
+        command: 'reg',
+        args: [
+          'add',
+          registryKey,
+          '/ve',
+          '/t',
+          'REG_SZ',
+          '/d',
+          manifestPath,
+          '/f',
+        ],
+        options: { stdio: 'pipe' },
+      },
+    ]);
   });
 });
