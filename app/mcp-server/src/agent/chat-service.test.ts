@@ -23,6 +23,7 @@ const sessionServiceMocks = vi.hoisted(() => ({
 
 const attachmentServiceMocks = vi.hoisted(() => ({
   saveAttachment: vi.fn(),
+  deleteAttachment: vi.fn(),
 }));
 
 vi.mock('./project-service', () => projectServiceMocks);
@@ -41,6 +42,7 @@ vi.mock('./session-service', async () => {
 vi.mock('./attachment-service', () => ({
   attachmentService: {
     saveAttachment: attachmentServiceMocks.saveAttachment,
+    deleteAttachment: attachmentServiceMocks.deleteAttachment,
   },
 }));
 
@@ -117,6 +119,7 @@ describe('AgentChatService legacy session migration', () => {
     sessionServiceMocks.updateManagementInfo.mockResolvedValue(undefined);
     sessionServiceMocks.updateSessionEngineName.mockResolvedValue(undefined);
     sessionServiceMocks.touchSessionActivity.mockResolvedValue(undefined);
+    attachmentServiceMocks.deleteAttachment.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -442,5 +445,95 @@ describe('AgentChatService legacy session migration', () => {
         requestId: payload.requestId,
       });
     });
+  });
+
+  it('rolls back earlier files when an attachment batch fails', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const run = vi.fn();
+    const service = new AgentChatService({
+      engines: [{ name: 'claude', supportsMcp: true, initializeAndRun: run }],
+      streamManager: new AgentStreamManager(),
+    });
+    attachmentServiceMocks.saveAttachment
+      .mockResolvedValueOnce({
+        absolutePath: '/private/first.png',
+        filename: 'first.png',
+        metadata: { filename: 'first.png' },
+      })
+      .mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(
+      service.handleAct(legacySession.id, {
+        instruction: 'Inspect both images',
+        dbSessionId: legacySession.id,
+        attachments: [
+          {
+            type: 'image',
+            name: 'first.png',
+            mimeType: 'image/png',
+            dataBase64: 'Zmlyc3Q=',
+          },
+          {
+            type: 'image',
+            name: 'second.png',
+            mimeType: 'image/png',
+            dataBase64: 'c2Vjb25k',
+          },
+        ],
+      }),
+    ).rejects.toThrow('Failed to save attachments: disk full');
+
+    expect(attachmentServiceMocks.deleteAttachment).toHaveBeenCalledWith(
+      'project-1',
+      'first.png',
+    );
+    expect(messageServiceMocks.createMessage).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('rolls back files when their message metadata cannot be persisted', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const streamManager = new AgentStreamManager();
+    const streamedMessages: string[] = [];
+    streamManager.addListener(legacySession.id, (event) => {
+      if (event.type === 'message' && event.data?.content) streamedMessages.push(event.data.content);
+    });
+    const run = vi.fn();
+    const service = new AgentChatService({
+      engines: [{ name: 'claude', supportsMcp: true, initializeAndRun: run }],
+      streamManager,
+    });
+    attachmentServiceMocks.saveAttachment.mockResolvedValueOnce({
+      absolutePath: '/private/first.png',
+      filename: 'first.png',
+      metadata: { filename: 'first.png' },
+    });
+    messageServiceMocks.createMessage.mockRejectedValueOnce(new Error('database unavailable'));
+
+    await expect(
+      service.handleAct(legacySession.id, {
+        instruction: 'Inspect this image',
+        dbSessionId: legacySession.id,
+        attachments: [
+          {
+            type: 'image',
+            name: 'first.png',
+            mimeType: 'image/png',
+            dataBase64: 'Zmlyc3Q=',
+          },
+        ],
+      }),
+    ).rejects.toThrow('Failed to persist message attachments: database unavailable');
+
+    expect(attachmentServiceMocks.deleteAttachment).toHaveBeenCalledWith(
+      'project-1',
+      'first.png',
+    );
+    expect(streamedMessages).not.toContain('Inspect this image');
+    expect(run).not.toHaveBeenCalled();
   });
 });

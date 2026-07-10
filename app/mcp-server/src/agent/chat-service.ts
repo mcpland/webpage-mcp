@@ -21,6 +21,7 @@ import {
   type AgentSession,
 } from './session-service';
 import { attachmentService, type SavedAttachment } from './attachment-service';
+import { validateAgentAttachments } from './attachment-limits';
 
 export interface AgentChatServiceOptions {
   engines: AgentEngine[];
@@ -125,16 +126,8 @@ export class AgentChatService {
     if (!trimmed) {
       throw new Error('instruction is required');
     }
-    if (
-      payload.attachments?.some(
-        (attachment) =>
-          !attachment ||
-          typeof attachment !== 'object' ||
-          (attachment as { type?: unknown }).type !== 'image',
-      )
-    ) {
-      throw new Error('Only image attachments are supported');
-    }
+    const attachmentError = validateAgentAttachments(payload.attachments);
+    if (attachmentError) throw new Error(attachmentError);
     const engineInstruction = buildInstructionWithContext(trimmed, payload.context);
 
     const requestId = payload.requestId || randomUUID();
@@ -280,7 +273,10 @@ export class AgentChatService {
           );
         } catch (error) {
           console.error('[AgentChatService] Failed to save attachments:', error);
-          // Continue without attachments - don't fail the entire request
+          await this.rollbackAttachments(projectId, savedAttachments);
+          throw new Error(
+            `Failed to save attachments: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       }
     }
@@ -320,8 +316,6 @@ export class AgentChatService {
       metadata: userMessageMetadata,
     };
 
-    this.streamManager.publish({ type: 'message', data: userMessage });
-
     if (projectId) {
       // Persist user message into project history for later reload.
       try {
@@ -345,8 +339,16 @@ export class AgentChatService {
         });
       } catch (error) {
         console.error('[AgentChatService] Failed to persist user message:', error);
+        if (savedAttachments.length > 0) {
+          await this.rollbackAttachments(projectId, savedAttachments);
+          throw new Error(
+            `Failed to persist message attachments: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
     }
+
+    this.streamManager.publish({ type: 'message', data: userMessage });
 
     this.streamManager.publish({
       type: 'status',
@@ -593,6 +595,22 @@ export class AgentChatService {
       this.runningExecutions.get(executionKey(execution.sessionId, execution.requestId)) ===
         execution
     );
+  }
+
+  private async rollbackAttachments(
+    projectId: string,
+    attachments: SavedAttachment[],
+  ): Promise<void> {
+    const results = await Promise.allSettled(
+      attachments.map((attachment) =>
+        attachmentService.deleteAttachment(projectId, attachment.filename),
+      ),
+    );
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        console.error('[AgentChatService] Failed to roll back attachment:', result.reason);
+      }
+    }
   }
 
   private async withExecutionReservation<T>(key: string, task: () => Promise<T>): Promise<T> {

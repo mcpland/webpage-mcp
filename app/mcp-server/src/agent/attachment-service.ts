@@ -18,6 +18,12 @@ import type {
   AttachmentProjectStats,
 } from 'webpage-mcp-shared';
 import { getAgentDataDir, PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE } from './storage';
+import {
+  ALLOWED_AGENT_ATTACHMENT_MIME_TYPES,
+  decodeValidatedAgentAttachment,
+  MAX_PROJECT_ATTACHMENT_BYTES,
+  MAX_PROJECT_ATTACHMENT_FILES,
+} from './attachment-limits';
 
 // ============================================================
 // Types
@@ -72,8 +78,10 @@ export interface CleanupResult {
 
 const ATTACHMENTS_DIR_NAME = 'attachments';
 
-/** Allowed MIME types for image attachments */
-const ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+export interface AttachmentServiceOptions {
+  maxProjectBytes?: number;
+  maxProjectFiles?: number;
+}
 
 // ============================================================
 // Helper Functions
@@ -140,6 +148,21 @@ function isValidProjectId(projectId: string): boolean {
 // ============================================================
 
 export class AttachmentService {
+  private readonly maxProjectBytes: number;
+  private readonly maxProjectFiles: number;
+  private readonly projectWriteTails = new Map<string, Promise<void>>();
+
+  constructor(options: AttachmentServiceOptions = {}) {
+    this.maxProjectBytes = options.maxProjectBytes ?? MAX_PROJECT_ATTACHMENT_BYTES;
+    this.maxProjectFiles = options.maxProjectFiles ?? MAX_PROJECT_ATTACHMENT_FILES;
+    if (!Number.isSafeInteger(this.maxProjectBytes) || this.maxProjectBytes <= 0) {
+      throw new RangeError('maxProjectBytes must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(this.maxProjectFiles) || this.maxProjectFiles <= 0) {
+      throw new RangeError('maxProjectFiles must be a positive safe integer');
+    }
+  }
+
   /**
    * Get the root directory for all attachments.
    */
@@ -196,7 +219,7 @@ export class AttachmentService {
     if (attachment.type !== 'image') {
       throw new Error(`Unsupported attachment type: ${attachment.type}`);
     }
-    if (!ALLOWED_MIME_TYPES.has(attachment.mimeType)) {
+    if (!ALLOWED_AGENT_ATTACHMENT_MIME_TYPES.has(attachment.mimeType)) {
       throw new Error(`Unsupported MIME type: ${attachment.mimeType}`);
     }
 
@@ -210,20 +233,29 @@ export class AttachmentService {
     const absolutePath = path.join(projectDir, filename);
 
     // Decode base64 and get size
-    const buffer = Buffer.from(attachment.dataBase64, 'base64');
+    const buffer = decodeValidatedAgentAttachment(attachment);
     const sizeBytes = buffer.length;
 
-    // Create directory and write file
-    await fs.mkdir(projectDir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-    if (process.platform !== 'win32') {
-      await Promise.all([
-        fs.chmod(this.getAttachmentsRootDir(), PRIVATE_DIRECTORY_MODE),
-        fs.chmod(projectDir, PRIVATE_DIRECTORY_MODE),
-      ]);
-    }
-    await fs.writeFile(absolutePath, buffer, {
-      flag: 'wx',
-      mode: PRIVATE_FILE_MODE,
+    await this.withProjectWriteLock(projectId, async () => {
+      // Create directory and enforce the persistent per-project quota atomically.
+      await fs.mkdir(projectDir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+      if (process.platform !== 'win32') {
+        await Promise.all([
+          fs.chmod(this.getAttachmentsRootDir(), PRIVATE_DIRECTORY_MODE),
+          fs.chmod(projectDir, PRIVATE_DIRECTORY_MODE),
+        ]);
+      }
+      const projectStats = await this.getProjectStats(projectId, projectDir);
+      if (projectStats.fileCount >= this.maxProjectFiles) {
+        throw new Error(`Project attachment file limit (${this.maxProjectFiles}) reached`);
+      }
+      if (projectStats.totalBytes + sizeBytes > this.maxProjectBytes) {
+        throw new Error(`Project attachment byte limit (${this.maxProjectBytes}) exceeded`);
+      }
+      await fs.writeFile(absolutePath, buffer, {
+        flag: 'wx',
+        mode: PRIVATE_FILE_MODE,
+      });
     });
 
     // Build metadata
@@ -248,6 +280,41 @@ export class AttachmentService {
       filename,
       metadata,
     };
+  }
+
+  /** Delete one previously saved attachment, used to roll back failed batches. */
+  async deleteAttachment(projectId: string, filename: string): Promise<void> {
+    await this.withProjectWriteLock(projectId, async () => {
+      const filePath = this.getAttachmentPath(projectId, filename);
+      await fs.rm(filePath, { force: true });
+      const projectDir = this.getProjectAttachmentsDir(projectId);
+      try {
+        if ((await fs.readdir(projectDir)).length === 0) {
+          await fs.rmdir(projectDir);
+        }
+      } catch {
+        // The directory is non-empty, already gone, or concurrently unavailable.
+      }
+    });
+  }
+
+  private async withProjectWriteLock<T>(projectId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.projectWriteTails.get(projectId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => gate);
+    this.projectWriteTails.set(projectId, tail);
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+      if (this.projectWriteTails.get(projectId) === tail) {
+        this.projectWriteTails.delete(projectId);
+      }
+    }
   }
 
   /**

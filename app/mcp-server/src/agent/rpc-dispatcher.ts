@@ -33,6 +33,7 @@ import {
   sanitizeManagementInfoForPublicRead,
   sanitizeSessionForPublicRead,
 } from './public-session-sanitizer';
+import { validateAgentAttachments } from './attachment-limits';
 import { sanitizeProjectForPublicRead } from './public-project-sanitizer';
 import { getProject } from './project-service';
 import { getDefaultWorkspaceDir, getDefaultProjectRoot } from './storage';
@@ -238,29 +239,6 @@ function toAgentActRequest(payload: Record<string, unknown>): AgentActRequest {
         : undefined,
     displayText: readString(payload.displayText),
   };
-}
-
-function validateAgentAttachments(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value)) return 'attachments must be an array';
-
-  for (const attachment of value) {
-    if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) {
-      return 'attachments must contain objects';
-    }
-    const record = attachment as Record<string, unknown>;
-    if (record.type !== 'image') {
-      return 'Only image attachments are supported';
-    }
-    if (
-      typeof record.name !== 'string' ||
-      typeof record.mimeType !== 'string' ||
-      typeof record.dataBase64 !== 'string'
-    ) {
-      return 'image attachments require name, mimeType, and dataBase64';
-    }
-  }
-  return undefined;
 }
 
 function readOpenTargetFromBody(payload: Record<string, unknown>): string | undefined {
