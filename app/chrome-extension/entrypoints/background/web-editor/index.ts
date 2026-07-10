@@ -32,6 +32,7 @@ import {
   normalizeOpenSourcePayload,
   normalizeRevertPayload,
   normalizeSelectionChangedPayload,
+  normalizeSessionStatusIdentifier,
   normalizeStatusQueryMessage,
   normalizeStoredExcludedKeys,
   normalizeTxChangedPayload,
@@ -116,6 +117,10 @@ function rememberExecutionOwner(
 ): void {
   const scope = getExecutionSenderScope(sender);
   if (!scope) return;
+  const previous = executionOwners.get(requestId);
+  if (previous && previous.sessionId !== sessionId) {
+    void closeSessionStatusSubscription(previous.sessionId, requestId);
+  }
   executionOwners.delete(requestId);
   executionOwners.set(requestId, {
     ...scope,
@@ -125,7 +130,11 @@ function rememberExecutionOwner(
   while (executionOwners.size > MAX_EXECUTION_OWNERS) {
     const oldestRequestId = executionOwners.keys().next().value as string | undefined;
     if (!oldestRequestId) break;
+    const oldestOwner = executionOwners.get(oldestRequestId);
     executionOwners.delete(oldestRequestId);
+    if (oldestOwner) {
+      void closeSessionStatusSubscription(oldestOwner.sessionId, oldestRequestId);
+    }
   }
 }
 
@@ -133,6 +142,7 @@ function getExecutionOwner(requestId: string): ExecutionOwner | undefined {
   const owner = executionOwners.get(requestId);
   if (owner && Date.now() - owner.updatedAt > STATUS_CACHE_TTL) {
     executionOwners.delete(requestId);
+    void closeSessionStatusSubscription(owner.sessionId, requestId);
     return undefined;
   }
   return owner;
@@ -168,83 +178,125 @@ function getExecutionStatus(requestId: string): ExecutionStatusEntry | undefined
   return executionStatusCache.get(requestId);
 }
 
-// Stream subscriptions for status updates (per sessionId)
-const sseConnections = new Map<
-  string,
-  {
-    subscriptionId: string;
-    lastRequestId: string;
-    listener: (message: unknown, sender: chrome.runtime.MessageSender) => void;
-  }
->();
+export const WEB_EDITOR_MAX_SESSION_STATUS_SUBSCRIPTIONS = 16;
+export const WEB_EDITOR_SESSION_STATUS_WATCHDOG_MS = 15 * 60 * 1000;
+
+type SessionStatusWatchdog = ReturnType<typeof globalThis.setTimeout>;
+
+interface SessionStatusConnection {
+  readonly subscriptionId: string;
+  readonly lastRequestId: string;
+  readonly listener: (message: unknown, sender: chrome.runtime.MessageSender) => void;
+  readonly watchdog: SessionStatusWatchdog;
+}
 
 interface SessionStatusSubscriptionIntent {
   readonly requestId: string;
   readonly token: symbol;
+  readonly watchdog: SessionStatusWatchdog;
 }
 
-/** Latest requested subscription, including subscriptions still awaiting native-host setup. */
+// A session occupies exactly one pending or active lifecycle slot.
+const sseConnections = new Map<string, SessionStatusConnection>();
 const sseSubscriptionIntents = new Map<string, SessionStatusSubscriptionIntent>();
+
+function clearSessionStatusWatchdog(watchdog: SessionStatusWatchdog): void {
+  globalThis.clearTimeout(watchdog);
+}
+
+function createSessionStatusWatchdog(sessionId: string, requestId: string): SessionStatusWatchdog {
+  return globalThis.setTimeout(() => {
+    const pending = sseSubscriptionIntents.get(sessionId);
+    const active = sseConnections.get(sessionId);
+    if (pending?.requestId !== requestId && active?.lastRequestId !== requestId) return;
+    setExecutionStatus(requestId, 'failed', 'Agent status subscription timed out.');
+    void closeSessionStatusSubscription(sessionId, requestId);
+  }, WEB_EDITOR_SESSION_STATUS_WATCHDOG_MS);
+}
 
 export async function closeSessionStatusSubscription(
   sessionId: string,
   requestId?: string,
 ): Promise<void> {
-  const intent = sseSubscriptionIntents.get(sessionId);
-  if (!requestId || intent?.requestId === requestId) {
-    sseSubscriptionIntents.delete(sessionId);
+  const boundedSessionId = normalizeSessionStatusIdentifier(sessionId, 'sessionId');
+  const boundedRequestId =
+    requestId === undefined
+      ? undefined
+      : normalizeSessionStatusIdentifier(requestId, 'requestId');
+  const intent = sseSubscriptionIntents.get(boundedSessionId);
+  if (!boundedRequestId || intent?.requestId === boundedRequestId) {
+    if (intent) clearSessionStatusWatchdog(intent.watchdog);
+    sseSubscriptionIntents.delete(boundedSessionId);
   }
 
-  const existing = sseConnections.get(sessionId);
-  if (!existing) {
-    return;
-  }
-  if (requestId && existing.lastRequestId !== requestId) {
-    return;
-  }
+  const existing = sseConnections.get(boundedSessionId);
+  if (!existing || (boundedRequestId && existing.lastRequestId !== boundedRequestId)) return;
 
   // Relinquish ownership before awaiting so a replacement cannot be deleted
   // by this older close operation after it finishes.
-  sseConnections.delete(sessionId);
+  sseConnections.delete(boundedSessionId);
+  clearSessionStatusWatchdog(existing.watchdog);
   chrome.runtime.onMessage.removeListener(existing.listener);
   await unsubscribeAgentStream(existing.subscriptionId).catch(() => {});
 }
 
-/**
- * Start SSE subscription for a session to receive status updates
- */
+/** Start a bounded SSE subscription for a session to receive status updates. */
 export async function subscribeToSessionStatus(
   sessionId: string,
   requestId: string,
 ): Promise<void> {
-  const intent: SessionStatusSubscriptionIntent = {
-    requestId,
-    token: Symbol(requestId),
-  };
-  sseSubscriptionIntents.set(sessionId, intent);
+  const boundedSessionId = normalizeSessionStatusIdentifier(sessionId, 'sessionId');
+  const boundedRequestId = normalizeSessionStatusIdentifier(requestId, 'requestId');
+  const hasExistingSlot =
+    sseSubscriptionIntents.has(boundedSessionId) || sseConnections.has(boundedSessionId);
+  if (
+    !hasExistingSlot &&
+    sseSubscriptionIntents.size + sseConnections.size >=
+      WEB_EDITOR_MAX_SESSION_STATUS_SUBSCRIPTIONS
+  ) {
+    throw new Error('Too many Web Editor status subscriptions');
+  }
 
-  // Close existing subscription for this session if any
-  const existing = sseConnections.get(sessionId);
+  const previousIntent = sseSubscriptionIntents.get(boundedSessionId);
+  if (previousIntent) {
+    sseSubscriptionIntents.delete(boundedSessionId);
+    clearSessionStatusWatchdog(previousIntent.watchdog);
+  }
+
+  const existing = sseConnections.get(boundedSessionId);
   if (existing) {
-    sseConnections.delete(sessionId);
+    sseConnections.delete(boundedSessionId);
+    clearSessionStatusWatchdog(existing.watchdog);
     chrome.runtime.onMessage.removeListener(existing.listener);
+  }
+
+  const intent: SessionStatusSubscriptionIntent = {
+    requestId: boundedRequestId,
+    token: Symbol(boundedRequestId),
+    watchdog: createSessionStatusWatchdog(boundedSessionId, boundedRequestId),
+  };
+  sseSubscriptionIntents.set(boundedSessionId, intent);
+
+  if (existing) {
     await unsubscribeAgentStream(existing.subscriptionId).catch(() => {});
   }
+  if (sseSubscriptionIntents.get(boundedSessionId)?.token !== intent.token) return;
 
-  if (sseSubscriptionIntents.get(sessionId)?.token !== intent.token) {
-    return;
-  }
-
-  // Set initial status
-  setExecutionStatus(requestId, 'starting', 'Connecting to Agent...');
-
+  setExecutionStatus(boundedRequestId, 'starting', 'Connecting to Agent...');
+  let subscriptionId: string | undefined;
   try {
-    const subscription = await subscribeAgentStream(sessionId, {
-      subscriptionId: `web-editor-${sessionId}-${requestId}`,
+    const subscription = await subscribeAgentStream(boundedSessionId, {
+      subscriptionId: `web-editor-${boundedSessionId}-${boundedRequestId}`,
     });
+    const boundedSubscriptionId = normalizeSessionStatusIdentifier(
+      subscription.subscriptionId,
+      'subscriptionId',
+      'subscription',
+    );
+    subscriptionId = boundedSubscriptionId;
 
-    if (sseSubscriptionIntents.get(sessionId)?.token !== intent.token) {
-      await unsubscribeAgentStream(subscription.subscriptionId).catch(() => {});
+    if (sseSubscriptionIntents.get(boundedSessionId)?.token !== intent.token) {
+      await unsubscribeAgentStream(boundedSubscriptionId).catch(() => {});
       return;
     }
 
@@ -252,36 +304,47 @@ export async function subscribeToSessionStatus(
       if (!isExtensionRuntimeSender(sender)) return;
       const msg = message as {
         type?: string;
-        payload?: {
-          subscriptionId?: string;
-          event?: unknown;
-        };
+        payload?: { subscriptionId?: string; event?: unknown };
       };
-      if (msg?.type !== BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT) {
-        return;
-      }
+      if (msg?.type !== BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT) return;
       const relay = sanitizeAgentStreamRelayPayload(msg.payload);
-      if (relay?.subscriptionId !== subscription.subscriptionId) {
-        return;
-      }
-      handleSseEvent(sessionId, requestId, relay.event);
+      if (relay?.subscriptionId !== boundedSubscriptionId) return;
+      handleSseEvent(boundedSessionId, boundedRequestId, relay.event);
     };
 
-    sseConnections.set(sessionId, {
-      subscriptionId: subscription.subscriptionId,
-      lastRequestId: requestId,
+    sseSubscriptionIntents.delete(boundedSessionId);
+    sseConnections.set(boundedSessionId, {
+      subscriptionId: boundedSubscriptionId,
+      lastRequestId: boundedRequestId,
       listener: onMessage,
+      watchdog: intent.watchdog,
     });
     chrome.runtime.onMessage.addListener(onMessage);
-    setExecutionStatus(requestId, 'running', 'Agent processing...');
-  } catch (err) {
-    if (sseSubscriptionIntents.get(sessionId)?.token !== intent.token) {
-      return;
+    setExecutionStatus(boundedRequestId, 'running', 'Agent processing...');
+  } catch {
+    let ownedFailure = false;
+    const pending = sseSubscriptionIntents.get(boundedSessionId);
+    if (pending?.token === intent.token) {
+      ownedFailure = true;
+      sseSubscriptionIntents.delete(boundedSessionId);
+      clearSessionStatusWatchdog(pending.watchdog);
     }
-    sseSubscriptionIntents.delete(sessionId);
-    const cached = getExecutionStatus(requestId);
+    const active = sseConnections.get(boundedSessionId);
+    if (subscriptionId && active?.subscriptionId === subscriptionId) {
+      ownedFailure = true;
+      sseConnections.delete(boundedSessionId);
+      clearSessionStatusWatchdog(active.watchdog);
+      chrome.runtime.onMessage.removeListener(active.listener);
+    }
+    if (subscriptionId) await unsubscribeAgentStream(subscriptionId).catch(() => {});
+    if (!ownedFailure) return;
+    const cached = getExecutionStatus(boundedRequestId);
     if (cached && !['completed', 'failed', 'cancelled'].includes(cached.status)) {
-      setExecutionStatus(requestId, 'running', 'Agent processing (connection lost)...');
+      setExecutionStatus(
+        boundedRequestId,
+        'running',
+        'Agent processing (connection lost)...',
+      );
     }
   }
 }
@@ -749,7 +812,9 @@ export function initWebEditorListeners(): void {
       chrome.storage.session.remove(keys).catch(() => {});
     } catch {}
     for (const [requestId, owner] of executionOwners) {
-      if (owner.tabId === tabId) executionOwners.delete(requestId);
+      if (owner.tabId !== tabId) continue;
+      executionOwners.delete(requestId);
+      void closeSessionStatusSubscription(owner.sessionId, requestId);
     }
     void releasePropsAgentEarlyInjection(tabId).catch(() => {});
   });
@@ -1069,11 +1134,14 @@ export function initWebEditorListeners(): void {
 
           const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
 
-          const sessionId =
+          const storedSessionId =
             normalizeBoundedIdentifier(
               stored?.[STORAGE_KEY_SELECTED_SESSION],
               'selected Agent session ID',
             ) ?? '';
+          const sessionId = storedSessionId
+            ? normalizeSessionStatusIdentifier(storedSessionId, 'selected Agent session ID')
+            : '';
 
           // Best-effort: open Agent Setup so the selected session is visible.
           if (typeof senderTabId === 'number') {
@@ -1170,7 +1238,10 @@ export function initWebEditorListeners(): void {
           }
 
           const json: any = resp.json || {};
-          const requestId = normalizeBoundedIdentifier(json?.requestId, 'Agent request ID');
+          const rawRequestId = normalizeBoundedIdentifier(json?.requestId, 'Agent request ID');
+          const requestId = rawRequestId
+            ? normalizeSessionStatusIdentifier(rawRequestId, 'Agent request ID')
+            : undefined;
 
           if (requestId) {
             rememberExecutionOwner(requestId, sessionId, _sender as chrome.runtime.MessageSender);
@@ -1309,11 +1380,14 @@ export function initWebEditorListeners(): void {
           const payload = normalizeApplyPayload(message.payload);
 
           const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
-          const sessionId =
+          const storedSessionId =
             normalizeBoundedIdentifier(
               stored?.[STORAGE_KEY_SELECTED_SESSION],
               'selected Agent session ID',
             ) ?? '';
+          const sessionId = storedSessionId
+            ? normalizeSessionStatusIdentifier(storedSessionId, 'selected Agent session ID')
+            : '';
 
           if (typeof senderTabId === 'number') {
             openAgentSetupSidepanel(senderTabId, senderWindowId, sessionId || undefined).catch(
@@ -1350,7 +1424,10 @@ export function initWebEditorListeners(): void {
           }
 
           const json: any = resp.json || {};
-          const requestId = normalizeBoundedIdentifier(json?.requestId, 'Agent request ID');
+          const rawRequestId = normalizeBoundedIdentifier(json?.requestId, 'Agent request ID');
+          const requestId = rawRequestId
+            ? normalizeSessionStatusIdentifier(rawRequestId, 'Agent request ID')
+            : undefined;
 
           if (requestId) {
             rememberExecutionOwner(requestId, sessionId, sender);

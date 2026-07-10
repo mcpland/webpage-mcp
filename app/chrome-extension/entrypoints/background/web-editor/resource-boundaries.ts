@@ -33,6 +33,8 @@ export const WEB_EDITOR_RESOURCE_LIMITS = {
   transactionIds: 256,
   techStackHints: 32,
   identifierBytes: 1024,
+  sessionStatusIdBytes: 384,
+  subscriptionIdBytes: 1024,
   pageUrlBytes: 16 * 1024,
   fileBytes: 8 * 1024,
   labelBytes: 2 * 1024,
@@ -323,6 +325,18 @@ export function normalizeBoundedIdentifier(
   required = false,
 ): string | undefined {
   return boundedString(value, path, WEB_EDITOR_RESOURCE_LIMITS.identifierBytes, { required });
+}
+
+export function normalizeSessionStatusIdentifier(
+  value: unknown,
+  path: string,
+  kind: 'session-or-request' | 'subscription' = 'session-or-request',
+): string {
+  const maxBytes =
+    kind === 'subscription'
+      ? WEB_EDITOR_RESOURCE_LIMITS.subscriptionIdBytes
+      : WEB_EDITOR_RESOURCE_LIMITS.sessionStatusIdBytes;
+  return boundedString(value, path, maxBytes, { required: true })!;
 }
 
 export function normalizeBoundedPageUrl(
