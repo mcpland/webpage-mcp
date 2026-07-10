@@ -11,6 +11,7 @@ const authorizationMocks = vi.hoisted(() => ({
 }));
 const sidepanelMocks = vi.hoisted(() => ({ openAgentSetupSidepanel: vi.fn() }));
 const propsInjectionMocks = vi.hoisted(() => ({
+  initPropsAgentEarlyInjectionNavigationLifecycle: vi.fn(),
   pruneOrphanedPropsAgentEarlyInjections: vi.fn(),
   registerPropsAgentEarlyInjection: vi.fn(),
   releasePropsAgentEarlyInjection: vi.fn(),
@@ -81,6 +82,18 @@ describe('Web Editor listener role authorization', () => {
       origin: 'chrome-extension://test-extension-id',
     };
   }
+
+  it('registers the navigation lifecycle before starting asynchronous reconciliation', () => {
+    expect(
+      propsInjectionMocks.initPropsAgentEarlyInjectionNavigationLifecycle,
+    ).toHaveBeenCalledOnce();
+    expect(propsInjectionMocks.pruneOrphanedPropsAgentEarlyInjections).toHaveBeenCalledOnce();
+    expect(
+      propsInjectionMocks.initPropsAgentEarlyInjectionNavigationLifecycle.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      propsInjectionMocks.pruneOrphanedPropsAgentEarlyInjections.mock.invocationCallOrder[0],
+    );
+  });
 
   it.each([
     BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TOGGLE,

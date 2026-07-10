@@ -11,6 +11,7 @@ import { openAgentSetupSidepanel } from '../utils/sidepanel';
 import { requestAgentRpcFetch, subscribeAgentStream, unsubscribeAgentStream } from '../native-host';
 import { consumePrivilegedUiAuthorization } from '../privileged-ui-authorization';
 import {
+  initPropsAgentEarlyInjectionNavigationLifecycle,
   pruneOrphanedPropsAgentEarlyInjections,
   registerPropsAgentEarlyInjection,
   releasePropsAgentEarlyInjection,
@@ -798,6 +799,9 @@ async function getActiveTabId(): Promise<number | null> {
 }
 
 export function initWebEditorListeners(): void {
+  // MV3 lifecycle events can be dispatched immediately after worker startup;
+  // register this listener synchronously before starting async reconciliation.
+  initPropsAgentEarlyInjectionNavigationLifecycle();
   ensureContextMenu().catch(() => {});
   pruneOrphanedPropsAgentEarlyInjections().catch(() => {});
 

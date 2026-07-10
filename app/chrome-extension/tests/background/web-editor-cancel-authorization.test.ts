@@ -14,6 +14,7 @@ const sidepanelMocks = vi.hoisted(() => ({
   openAgentSetupSidepanel: vi.fn(),
 }));
 const propsInjectionMocks = vi.hoisted(() => ({
+  initPropsAgentEarlyInjectionNavigationLifecycle: vi.fn(),
   pruneOrphanedPropsAgentEarlyInjections: vi.fn(),
   registerPropsAgentEarlyInjection: vi.fn(),
   releasePropsAgentEarlyInjection: vi.fn(),
