@@ -48,6 +48,7 @@
   if (!window.__claudeElementRefs) window.__claudeElementRefs = new WeakMap();
   if (!window.__claudeRefOrder) window.__claudeRefOrder = [];
   if (!window.__rrOverlayState) window.__rrOverlayState = { bytes: 0 };
+  if (!window.__rrPickerCleanup) window.__rrPickerCleanup = null;
 
   function utf8BytesForCodePoint(codePoint) {
     if (codePoint <= 0x7f) return 1;
@@ -1474,8 +1475,13 @@
       // Element picker: start a temporary overlay to let user pick an element
       if (request && request.action === 'rr_picker_start') {
         try {
+          if (typeof window.__rrPickerCleanup === 'function') {
+            window.__rrPickerCleanup();
+          }
           // state
           const state = { active: true };
+          let settled = false;
+          let cancelPicker = null;
           const hostId = '__rr_picker_host__';
           let host = document.getElementById(hostId);
           if (host) host.remove();
@@ -1526,7 +1532,17 @@
               document.removeEventListener('keydown', onKey, true);
             } catch {}
             state.active = false;
+            if (window.__rrPickerCleanup === cancelPicker) {
+              window.__rrPickerCleanup = null;
+            }
           };
+          cancelPicker = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            sendResponse({ success: false, cancelled: true, reason: 'superseded' });
+          };
+          window.__rrPickerCleanup = cancelPicker;
 
           const onMove = (e) => {
             if (!state.active) return;
@@ -1589,18 +1605,21 @@
             e.stopPropagation();
             const el = e.target instanceof Element ? e.target : null;
             if (!el) {
+              settled = true;
               cleanup();
               sendResponse({ success: false, error: 'no element' });
               return true;
             }
             const refId = ensureRef(el);
             const cands = computeCandidates(el);
+            settled = true;
             cleanup();
             sendResponse({ success: true, ref: refId, candidates: cands });
             return true;
           };
           const onKey = (e) => {
             if (e.key === 'Escape') {
+              settled = true;
               cleanup();
               sendResponse({ success: false, cancelled: true });
             }
@@ -1619,8 +1638,12 @@
       }
       if (request && request.action === 'rr_picker_stop') {
         try {
-          const host = document.getElementById('__rr_picker_host__');
-          if (host) host.remove();
+          if (typeof window.__rrPickerCleanup === 'function') {
+            window.__rrPickerCleanup();
+          } else {
+            const host = document.getElementById('__rr_picker_host__');
+            if (host) host.remove();
+          }
           sendResponse({ success: true });
           return true;
         } catch (e) {

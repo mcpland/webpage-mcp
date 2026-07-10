@@ -369,4 +369,39 @@ describe('accessibility-tree-helper resource boundaries', () => {
     ).toBeLessThanOrEqual(4 * 1024);
   });
 
+  it('cancels and detaches an existing element picker before starting another', async () => {
+    const add = vi.spyOn(document, 'addEventListener');
+    const remove = vi.spyOn(document, 'removeEventListener');
+    loadHelper();
+    const listener = getRuntimeListener();
+    const firstResponse = vi.fn();
+    const secondResponse = vi.fn();
+
+    listener(
+      { action: 'rr_picker_start' },
+      {} as chrome.runtime.MessageSender,
+      firstResponse,
+    );
+    listener(
+      { action: 'rr_picker_start' },
+      {} as chrome.runtime.MessageSender,
+      secondResponse,
+    );
+
+    expect(firstResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, cancelled: true }),
+    );
+    expect(remove.mock.calls.filter(([type]) => type === 'mousemove')).toHaveLength(1);
+    expect(remove.mock.calls.filter(([type]) => type === 'click')).toHaveLength(1);
+    expect(remove.mock.calls.filter(([type]) => type === 'keydown')).toHaveLength(1);
+    expect(add.mock.calls.filter(([type]) => type === 'mousemove')).toHaveLength(2);
+
+    const stop = await dispatch(listener, { action: 'rr_picker_stop' });
+    expect(stop).toEqual({ success: true });
+    expect(secondResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, cancelled: true }),
+    );
+    expect(remove.mock.calls.filter(([type]) => type === 'mousemove')).toHaveLength(2);
+  });
+
 });
