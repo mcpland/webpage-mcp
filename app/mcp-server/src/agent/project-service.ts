@@ -15,6 +15,12 @@ import type { AgentProject } from "webpage-mcp-shared";
 import type { CreateOrUpdateProjectInput } from "./project-types";
 import { getDb, projects, type ProjectRow } from "./db";
 import { attachmentService } from "./attachment-service";
+import {
+  validateOptionalProjectIdentifier,
+  validateProjectIdentifier,
+  validateProjectPath,
+  validateProjectUpsertPayload,
+} from "./project-payload-limits";
 
 const VALID_PROJECT_CLI_PREFERENCES = new Set<AgentProject["preferredCli"]>([
   "claude",
@@ -102,6 +108,7 @@ export interface PathValidationResult {
 export async function validateRootPath(
   rootPath: string,
 ): Promise<PathValidationResult> {
+  validateProjectPath(rootPath, "rootPath", { allowEmpty: true });
   const trimmed = rootPath.trim();
   if (!trimmed) {
     return {
@@ -184,7 +191,7 @@ export async function createProjectDirectory(
   if (validation.exists) {
     throw new Error("Directory already exists");
   }
-  await mkdir(absolutePath, { recursive: true });
+  await mkdir(validation.absolute, { recursive: true });
 }
 
 /**
@@ -268,6 +275,7 @@ export async function listProjects(): Promise<AgentProject[]> {
 export async function getProject(
   id: string,
 ): Promise<AgentProject | undefined> {
+  validateProjectIdentifier(id, "projectId");
   const db = getDb();
   const rows = await db
     .select()
@@ -283,12 +291,13 @@ export async function getProject(
 export async function upsertProject(
   input: CreateOrUpdateProjectInput,
 ): Promise<AgentProject> {
-  const db = getDb();
-  const now = new Date().toISOString();
+  validateProjectUpsertPayload(input);
   const rootPath = await normalizeRootPath(
     input.rootPath,
     input.allowCreate ?? false,
   );
+  const db = getDb();
+  const now = new Date().toISOString();
 
   const id = input.id?.trim() || randomUUID();
   const existing = await getProject(id);
@@ -333,6 +342,7 @@ export async function upsertProject(
  * Messages are automatically deleted via cascade.
  */
 export async function deleteProject(id: string): Promise<void> {
+  validateProjectIdentifier(id, "projectId");
   const db = getDb();
   await attachmentService.cleanupAttachments({ projectIds: [id] });
   await db.delete(projects).where(eq(projects.id, id));
@@ -342,6 +352,7 @@ export async function deleteProject(id: string): Promise<void> {
  * Update the last activity timestamp for a project.
  */
 export async function touchProjectActivity(id: string): Promise<void> {
+  validateProjectIdentifier(id, "projectId");
   const db = getDb();
   const now = new Date().toISOString();
   await db
@@ -359,6 +370,12 @@ export async function updateProjectClaudeSessionId(
   id: string,
   claudeSessionId: string | null,
 ): Promise<void> {
+  validateProjectIdentifier(id, "projectId");
+  validateOptionalProjectIdentifier(
+    claudeSessionId,
+    "activeClaudeSessionId",
+    { allowNull: true, allowEmpty: true },
+  );
   const db = getDb();
   const now = new Date().toISOString();
   await db

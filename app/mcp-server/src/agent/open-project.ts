@@ -24,6 +24,11 @@ import {
   resolvePathForContainment,
   validateRootPath,
 } from './project-service';
+import {
+  validateProjectOpenFilePayload,
+  validateProjectOpenTarget,
+  validateProjectPath,
+} from './project-payload-limits';
 
 // ============================================================
 // Types
@@ -235,6 +240,9 @@ export async function openFileInVSCode(
   column?: number,
 ): Promise<OpenProjectResponse> {
   try {
+    validateProjectPath(projectRoot, 'rootPath');
+    validateProjectOpenFilePayload(filePath, line, column);
+
     // Validate project root
     const projectValidation = await validateRootPath(projectRoot);
     if (!projectValidation.valid) {
@@ -494,6 +502,9 @@ export async function openProjectDirectory(
   target: OpenProjectTarget,
 ): Promise<OpenProjectResponse> {
   try {
+    validateProjectPath(rootPath, 'rootPath');
+    validateProjectOpenTarget(target);
+
     // Validate path security and existence
     const validation = await validateRootPath(rootPath);
 

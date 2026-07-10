@@ -39,6 +39,14 @@ import {
   validateSessionCreatePayload,
   validateSessionUpdatePayload,
 } from './session-payload-limits';
+import {
+  validateProjectIdentifier,
+  validateProjectName,
+  validateProjectOpenFilePayload,
+  validateProjectOpenTarget,
+  validateProjectPath,
+  validateProjectUpsertPayload,
+} from './project-payload-limits';
 import { sanitizeProjectForPublicRead } from './public-project-sanitizer';
 import { getProject } from './project-service';
 import { getDefaultWorkspaceDir, getDefaultProjectRoot } from './storage';
@@ -310,6 +318,12 @@ function readParam(params: Record<string, unknown> | undefined, key: string): st
   return value?.trim() || '';
 }
 
+function readProjectIdParam(params: Record<string, unknown> | undefined): string {
+  const value = params?.projectId;
+  validateProjectIdentifier(value);
+  return value.trim();
+}
+
 function toCreateOrUpdateProjectInput(
   payload: Record<string, unknown>,
 ): CreateOrUpdateProjectInput | null {
@@ -358,7 +372,8 @@ function toAgentActRequest(payload: Record<string, unknown>): AgentActRequest {
 }
 
 function readOpenTargetFromBody(payload: Record<string, unknown>): string | undefined {
-  return readString(payload.target)?.trim();
+  validateProjectOpenTarget(payload.target);
+  return payload.target.trim();
 }
 
 function normalizeError(error: unknown): string {
@@ -396,7 +411,9 @@ export async function dispatchAgentRpc(
 
       case 'agent.projects.upsert': {
         const validEngineNames = getRegisteredEngineNames(deps.chatService);
-        const rawPayload = bodyAsRecord(body);
+        const normalizedPayload = normalizeBody(body);
+        validateProjectUpsertPayload(normalizedPayload);
+        const rawPayload = normalizedPayload;
         const payload = toCreateOrUpdateProjectInput(rawPayload);
         if (!payload) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
@@ -413,7 +430,7 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.projects.delete': {
-        const projectId = readParam(params, 'projectId');
+        const projectId = readProjectIdParam(params);
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'project id is required' });
         }
@@ -433,20 +450,16 @@ export async function dispatchAgentRpc(
 
       case 'agent.projects.validatePath': {
         const payload = bodyAsRecord(body);
-        const rootPath = readString(payload.rootPath);
-        if (!rootPath) {
-          return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'rootPath is required' });
-        }
+        validateProjectPath(payload.rootPath, 'rootPath');
+        const rootPath = payload.rootPath;
         const result = await validateRootPath(rootPath);
         return jsonResponse(HTTP_STATUS.OK, result);
       }
 
       case 'agent.projects.createDirectory': {
         const payload = bodyAsRecord(body);
-        const absolutePath = readString(payload.absolutePath);
-        if (!absolutePath) {
-          return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'absolutePath is required' });
-        }
+        validateProjectPath(payload.absolutePath, 'absolutePath');
+        const absolutePath = payload.absolutePath;
         try {
           await createProjectDirectory(absolutePath);
           return jsonResponse(HTTP_STATUS.OK, { success: true, path: absolutePath });
@@ -462,10 +475,8 @@ export async function dispatchAgentRpc(
 
       case 'agent.projects.defaultRoot': {
         const payload = bodyAsRecord(body);
-        const projectName = readString(payload.projectName);
-        if (!projectName) {
-          return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectName is required' });
-        }
+        validateProjectName(payload.projectName);
+        const projectName = payload.projectName;
         const rootPath = getDefaultProjectRoot(projectName);
         return jsonResponse(HTTP_STATUS.OK, { success: true, path: rootPath });
       }
@@ -490,7 +501,7 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.projects.sessions.list': {
-        const projectId = readParam(params, 'projectId');
+        const projectId = readProjectIdParam(params);
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectId is required' });
         }
@@ -504,7 +515,7 @@ export async function dispatchAgentRpc(
 
       case 'agent.projects.sessions.create': {
         const validEngineNames = getRegisteredEngineNames(deps.chatService);
-        const projectId = readParam(params, 'projectId');
+        const projectId = readProjectIdParam(params);
         const payload = bodyAsRecord(body) as CreateSessionOptions & { engineName?: string };
 
         if (!projectId) {
@@ -703,7 +714,7 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.projects.claudeInfo': {
-        const projectId = readParam(params, 'projectId');
+        const projectId = readProjectIdParam(params);
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectId is required' });
         }
@@ -771,7 +782,7 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.projects.open': {
-        const projectId = readParam(params, 'projectId');
+        const projectId = readProjectIdParam(params);
         const payload = bodyAsRecord(body);
         const target = readOpenTargetFromBody(payload);
 
@@ -804,11 +815,12 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.projects.openFile': {
-        const projectId = readParam(params, 'projectId');
+        const projectId = readProjectIdParam(params);
         const payload = bodyAsRecord(body);
-        const filePath = readString(payload.filePath);
-        const line = readNumber(payload.line);
-        const column = readNumber(payload.column);
+        validateProjectOpenFilePayload(payload.filePath, payload.line, payload.column);
+        const filePath = payload.filePath;
+        const line = payload.line as number | undefined;
+        const column = payload.column as number | undefined;
 
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { success: false, error: 'projectId is required' });
@@ -833,7 +845,7 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.chat.messages.list': {
-        const projectId = readParam(params, 'projectId');
+        const projectId = readProjectIdParam(params);
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectId is required' });
         }
@@ -869,7 +881,7 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.chat.messages.create': {
-        const projectId = readParam(params, 'projectId');
+        const projectId = readProjectIdParam(params);
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectId is required' });
         }
@@ -950,7 +962,7 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.chat.messages.delete': {
-        const projectId = readParam(params, 'projectId');
+        const projectId = readProjectIdParam(params);
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectId is required' });
         }

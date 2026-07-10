@@ -10,6 +10,7 @@
  */
 import os from 'node:os';
 import path from 'node:path';
+import { validateProjectName } from './project-payload-limits';
 
 const DEFAULT_DATA_DIR = path.join(os.homedir(), '.webpage-mcp-agent');
 
@@ -60,6 +61,7 @@ export function getDefaultWorkspaceDir(): string {
  * Generate a default project root path for a given project name.
  */
 export function getDefaultProjectRoot(projectName: string): string {
+  validateProjectName(projectName);
   // Sanitize project name for use as directory name
   const safeName = projectName
     .trim()
