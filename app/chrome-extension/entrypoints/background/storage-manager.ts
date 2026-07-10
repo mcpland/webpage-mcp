@@ -1,4 +1,5 @@
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { isExtensionPageSender } from '@/common/runtime-sender-auth';
 
 /**
  * Get storage statistics
@@ -96,13 +97,25 @@ export async function handleClearAllData(): Promise<{ success: boolean; error?: 
  * Initialize storage manager module message listeners
  */
 export const initStorageManagerListener = () => {
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message.type === BACKGROUND_MESSAGE_TYPES.GET_STORAGE_STATS) {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const messageType = message?.type;
+    const isStorageRequest =
+      messageType === BACKGROUND_MESSAGE_TYPES.GET_STORAGE_STATS ||
+      messageType === BACKGROUND_MESSAGE_TYPES.CLEAR_ALL_DATA;
+
+    if (!isStorageRequest) return;
+
+    if (!isExtensionPageSender(sender)) {
+      sendResponse({ success: false, error: 'Storage management requires an extension page' });
+      return false;
+    }
+
+    if (messageType === BACKGROUND_MESSAGE_TYPES.GET_STORAGE_STATS) {
       handleGetStorageStats()
         .then((result: { success: boolean; stats?: any; error?: string }) => sendResponse(result))
         .catch((error: any) => sendResponse({ success: false, error: error.message }));
       return true;
-    } else if (message.type === BACKGROUND_MESSAGE_TYPES.CLEAR_ALL_DATA) {
+    } else {
       handleClearAllData()
         .then((result: { success: boolean; error?: string }) => sendResponse(result))
         .catch((error: any) => sendResponse({ success: false, error: error.message }));
