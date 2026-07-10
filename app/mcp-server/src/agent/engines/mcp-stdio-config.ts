@@ -1,5 +1,9 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import {
+  resolveInstanceId,
+  WEBPAGE_MCP_INSTANCE_ID_ENV,
+} from '../../instance-id';
 
 export interface WebpageMcpStdioConfig {
   command: string;
@@ -14,16 +18,15 @@ function parseArgs(raw: string): string[] {
     .filter(Boolean);
 }
 
-export function resolveWebpageMcpStdioConfig(): WebpageMcpStdioConfig {
+export function resolveWebpageMcpStdioConfig(instanceId?: string): WebpageMcpStdioConfig {
   const explicitCommand = process.env.WEBPAGE_MCP_STDIO_COMMAND?.trim();
   const explicitArgs = process.env.WEBPAGE_MCP_STDIO_ARGS?.trim();
 
   const nativeSocketPath = process.env.WEBPAGE_MCP_NATIVE_SOCKET?.trim();
-  const env = nativeSocketPath
-    ? {
-        WEBPAGE_MCP_NATIVE_SOCKET: nativeSocketPath,
-      }
-    : undefined;
+  const env: Record<string, string> = {
+    [WEBPAGE_MCP_INSTANCE_ID_ENV]: resolveInstanceId(instanceId),
+    ...(nativeSocketPath ? { WEBPAGE_MCP_NATIVE_SOCKET: nativeSocketPath } : {}),
+  };
 
   if (explicitCommand) {
     return {

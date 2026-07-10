@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { DEFAULT_MCP_INSTANCE_ID } from 'webpage-mcp-shared';
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
 import type { AgentMessage, RealtimeEvent } from '../types';
 import { getProject } from '../project-service';
@@ -50,6 +51,8 @@ const TOOL_NAME_ACTION_MAP: Record<string, ToolAction> = {
 export class ClaudeEngine implements AgentEngine {
   public readonly name = 'claude' as const;
   public readonly supportsMcp = true;
+
+  constructor(public readonly instanceId = DEFAULT_MCP_INSTANCE_ID) {}
 
   /**
    * Maximum number of stderr lines to keep in memory.
@@ -716,7 +719,7 @@ export class ClaudeEngine implements AgentEngine {
       // This only controls the built-in "webpage-mcp" entry; user-configured MCP servers remain untouched.
       const WEBPAGE_MCP_SERVER_NAME = 'webpage-mcp';
       if (enableWebpageMcp) {
-        const stdioConfig = resolveWebpageMcpStdioConfig();
+        const stdioConfig = resolveWebpageMcpStdioConfig(this.instanceId);
         const existingMcpServers =
           queryOptions.mcpServers &&
           typeof queryOptions.mcpServers === 'object' &&

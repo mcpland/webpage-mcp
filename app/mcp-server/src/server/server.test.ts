@@ -45,6 +45,20 @@ describe("Server agent RPC runtime", () => {
     expect(cancelAllExecutions).toHaveBeenCalledOnce();
   });
 
+  test("binds embedded MCP engines to the Server instance", () => {
+    const instanceServer = new Server({ instanceId: "tenant-a" });
+    const engines = (
+      instanceServer as unknown as {
+        agentChatService: {
+          engines: Map<string, { instanceId: string }>;
+        };
+      }
+    ).agentChatService.engines;
+
+    expect(engines.get("codex")?.instanceId).toBe("tenant-a");
+    expect(engines.get("claude")?.instanceId).toBe("tenant-a");
+  });
+
   test("agent.engines.list returns engines", async () => {
     const response = await server.invokeAgentRpc({
       operation: "agent.engines.list",

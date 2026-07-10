@@ -46,7 +46,7 @@ export class Server {
     this.instanceId = resolveInstanceId(options.instanceId);
     this.agentStreamManager = new AgentStreamManager();
     this.agentChatService = new AgentChatService({
-      engines: [new CodexEngine(), new ClaudeEngine()],
+      engines: [new CodexEngine(this.instanceId), new ClaudeEngine(this.instanceId)],
       streamManager: this.agentStreamManager,
     });
   }

@@ -17,6 +17,10 @@ import { getLegacyNativeSocketPath, getNativeSocketPath } from '../ipc/socket-pa
 import { IPC_AUTH_METHOD, readNativeIpcCredential } from '../ipc/bridge-auth';
 import { BoundedNdjsonDecoder } from '../ipc/bounded-ndjson';
 import { IPC_CANCEL_REQUEST_METHOD } from '../ipc/bridge-protocol';
+import {
+  resolveInstanceId,
+  WEBPAGE_MCP_INSTANCE_ID_ENV,
+} from '../instance-id';
 import { autoBootstrapNativeMessagingForStdio } from '../scripts/utils';
 import { resolveMcpClientCapabilities } from './register-tools';
 import { shouldNotifyWorkflowToolListChanged } from './tool-list-change';
@@ -459,6 +463,7 @@ class NativeIpcBridgeClient {
 
 const bridgeClient = new NativeIpcBridgeClient();
 const mcpSessionId = randomUUID();
+const mcpInstanceId = resolveInstanceId(process.env[WEBPAGE_MCP_INSTANCE_ID_ENV]);
 let stdioMcpServer: Server | null = null;
 let shutdownStarted = false;
 
@@ -493,6 +498,7 @@ async function listToolsFromBridge(signal?: AbortSignal): Promise<Tool[]> {
     'mcp_list_tools',
     {
       sessionId: mcpSessionId,
+      instanceId: mcpInstanceId,
       clientCapabilities: resolveMcpClientCapabilities(stdioMcpServer?.getClientCapabilities()),
     },
     30_000,
@@ -513,6 +519,7 @@ async function callToolFromBridge(
     'mcp_call_tool',
     {
       sessionId: mcpSessionId,
+      instanceId: mcpInstanceId,
       name,
       args,
       clientCapabilities: resolveMcpClientCapabilities(stdioMcpServer?.getClientCapabilities()),

@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import {
   CODEX_AUTO_INSTRUCTIONS,
   DEFAULT_CODEX_CONFIG,
+  DEFAULT_MCP_INSTANCE_ID,
   type CodexEngineConfig,
 } from 'webpage-mcp-shared';
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
@@ -62,7 +63,7 @@ export function buildCodexSpawnSpec(): { command: string; shell: false } {
 export class CodexEngine implements AgentEngine {
   public readonly name = 'codex' as const;
   public readonly supportsMcp = false;
-  constructor() {}
+  constructor(public readonly instanceId = DEFAULT_MCP_INSTANCE_ID) {}
 
   /**
    * Maximum number of stderr lines to keep in memory to avoid unbounded growth.
@@ -143,7 +144,7 @@ export class CodexEngine implements AgentEngine {
 
     // Inject local Webpage MCP server via stdio bridge (no HTTP dependency)
     if (enableWebpageMcp) {
-      const stdioConfig = resolveWebpageMcpStdioConfig();
+      const stdioConfig = resolveWebpageMcpStdioConfig(this.instanceId);
       args.push('-c', 'mcp_servers.webpage_mcp.type="stdio"');
       args.push('-c', `mcp_servers.webpage_mcp.command=${JSON.stringify(stdioConfig.command)}`);
       args.push('-c', `mcp_servers.webpage_mcp.args=${JSON.stringify(stdioConfig.args)}`);

@@ -1,6 +1,7 @@
 import { DEFAULT_MCP_INSTANCE_ID } from 'webpage-mcp-shared';
 
 export const INSTANCE_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+export const WEBPAGE_MCP_INSTANCE_ID_ENV = 'WEBPAGE_MCP_INSTANCE_ID';
 
 /**
  * Resolve an optional instance identifier without allowing malformed explicit
