@@ -71,6 +71,7 @@ const DEFAULT_PROJECT_MESSAGE_LIMIT = 50;
 const DEFAULT_SESSION_HISTORY_LIMIT = 100;
 const MAX_MESSAGE_PAGE_LIMIT = 500;
 export const AGENT_RPC_JSON_RESPONSE_MAX_BYTES = 700 * 1024;
+export const AGENT_RPC_MESSAGE_PAGE_FETCH_LIMIT = 16;
 
 interface MessagePagePagination {
   limit: number;
@@ -628,6 +629,7 @@ export async function dispatchAgentRpc(
         const limit = readNumber(readQueryValue(query, 'limit'));
         const offset = readNumber(readQueryValue(query, 'offset'));
         const safeLimit = normalizeMessagePageLimit(limit, DEFAULT_SESSION_HISTORY_LIMIT);
+        const fetchLimit = Math.min(safeLimit, AGENT_RPC_MESSAGE_PAGE_FETCH_LIMIT);
         const safeOffset = typeof offset === 'number' && offset >= 0 ? Math.floor(offset) : 0;
 
         const session = await getSession(sessionId);
@@ -636,7 +638,7 @@ export async function dispatchAgentRpc(
         }
 
         const [messages, totalCount] = await Promise.all([
-          getMessagesBySessionId(sessionId, safeLimit, safeOffset, session.projectId),
+          getMessagesBySessionId(sessionId, fetchLimit, safeOffset, session.projectId),
           getMessagesCountBySessionId(sessionId, session.projectId),
         ]);
 
@@ -843,10 +845,11 @@ export async function dispatchAgentRpc(
         const limit = readNumber(readQueryValue(query, 'limit'));
         const offset = readNumber(readQueryValue(query, 'offset'));
         const safeLimit = normalizeMessagePageLimit(limit, DEFAULT_PROJECT_MESSAGE_LIMIT);
+        const fetchLimit = Math.min(safeLimit, AGENT_RPC_MESSAGE_PAGE_FETCH_LIMIT);
         const safeOffset = typeof offset === 'number' && offset >= 0 ? Math.floor(offset) : 0;
 
         const [messages, totalCount] = await Promise.all([
-          getMessagesByProjectId(projectId, safeLimit, safeOffset),
+          getMessagesByProjectId(projectId, fetchLimit, safeOffset),
           getMessagesCountByProjectId(projectId),
         ]);
 

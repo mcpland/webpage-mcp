@@ -130,6 +130,106 @@ describe('Agent RPC response encoding', () => {
     await expectNativeWriterAccepts(failure);
   });
 
+  it('caps 500-message reads and advances through every bounded batch', async () => {
+    const workspaceBase = await createTempDir('rpc-read-cap-workspace-');
+    const dataDir = await createTempDir('rpc-read-cap-data-');
+    const projectRoot = path.join(workspaceBase, 'project');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = path.join(dataDir, 'agent.db');
+
+    const { projectService, sessionService, messageService, rpcDispatcher } =
+      await loadAgentModules();
+    const project = await projectService.upsertProject({
+      name: 'RPC read cap',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const session = await sessionService.createSession(project.id, 'codex');
+    const messages = await Promise.all(
+      Array.from({ length: 500 }, (_, index) =>
+        messageService.createMessage({
+          projectId: project.id,
+          sessionId: session.id,
+          role: 'user',
+          messageType: 'chat',
+          content: `message-${index}`,
+          createdAt: new Date(Date.UTC(2026, 0, 1) + index).toISOString(),
+        }),
+      ),
+    );
+    const expectedIds = messages.map((message) => message.id);
+
+    const readAllBatches = async (options: {
+      operation: 'agent.sessions.history' | 'agent.chat.messages.list';
+      params: Record<string, string>;
+      collection: 'messages' | 'data';
+    }): Promise<string[]> => {
+      const ids: string[] = [];
+      let offset = 0;
+
+      for (let pageIndex = 0; pageIndex < 40; pageIndex += 1) {
+        const response = await rpcDispatcher.dispatchAgentRpc(
+          {
+            operation: options.operation,
+            params: options.params,
+            query: { limit: 500, offset },
+          },
+          createRpcDeps(),
+        );
+        expect(response.statusCode).toBe(200);
+
+        const payload = response.json as {
+          messages?: Array<{ id: string }>;
+          data?: Array<{ id: string }>;
+          pagination: {
+            limit: number;
+            count: number;
+            hasMore: boolean;
+            nextOffset: number | null;
+          };
+        };
+        const pageMessages = payload[options.collection] ?? [];
+        expect(payload.pagination.limit).toBe(500);
+        expect(payload.pagination.count).toBe(pageMessages.length);
+        expect(pageMessages.length).toBeLessThanOrEqual(
+          rpcDispatcher.AGENT_RPC_MESSAGE_PAGE_FETCH_LIMIT,
+        );
+        if (pageIndex === 0) {
+          expect(pageMessages).toHaveLength(rpcDispatcher.AGENT_RPC_MESSAGE_PAGE_FETCH_LIMIT);
+        }
+        ids.push(...pageMessages.map((message) => message.id));
+
+        if (!payload.pagination.hasMore) {
+          expect(payload.pagination.nextOffset).toBeNull();
+          return ids;
+        }
+
+        expect(pageMessages.length).toBeGreaterThan(0);
+        expect(payload.pagination.nextOffset).toBe(offset + pageMessages.length);
+        offset = payload.pagination.nextOffset!;
+      }
+
+      throw new Error('Bounded message reads did not terminate');
+    };
+
+    const historyIds = await readAllBatches({
+      operation: 'agent.sessions.history',
+      params: { sessionId: session.id },
+      collection: 'messages',
+    });
+    const projectIds = await readAllBatches({
+      operation: 'agent.chat.messages.list',
+      params: { projectId: project.id },
+      collection: 'data',
+    });
+
+    expect(historyIds).toEqual(expectedIds);
+    expect(projectIds).toEqual(expectedIds);
+  });
+
   it('paginates escaped message JSON by exact bytes without loss or stalled offsets', async () => {
     const workspaceBase = await createTempDir('rpc-budget-workspace-');
     const dataDir = await createTempDir('rpc-budget-data-');
