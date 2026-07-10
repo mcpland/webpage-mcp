@@ -256,6 +256,18 @@ describe('agent.sessions.history', () => {
     expect(response.json?.messages).toHaveLength(1);
     expect(response.json?.messages?.[0]?.content).toBe('expected session history message');
     expect(response.json?.totalCount).toBe(1);
+    expect(response.json?.pagination).toMatchObject({ limit: 100, offset: 0, hasMore: false });
+
+    const cappedResponse = await dispatchAgentRpc(
+      {
+        operation: 'agent.sessions.history',
+        params: { sessionId: session.id },
+        query: { limit: 999_999 },
+      },
+      createRpcDeps(),
+    );
+    expect(cappedResponse.statusCode).toBe(200);
+    expect(cappedResponse.json?.pagination?.limit).toBe(500);
   });
 });
 
@@ -726,6 +738,17 @@ describe('project-scoped chat message RPCs', () => {
       pageUrlRedacted: true,
       elementCount: 1,
     });
+
+    const cappedResponse = await dispatchAgentRpc(
+      {
+        operation: 'agent.chat.messages.list',
+        params: { projectId: project.id },
+        query: { limit: 999_999 },
+      },
+      createRpcDeps(),
+    );
+    expect(cappedResponse.statusCode).toBe(200);
+    expect(cappedResponse.json?.pagination?.limit).toBe(500);
   });
 });
 

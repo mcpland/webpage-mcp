@@ -50,6 +50,16 @@ import type {
 
 const VALID_OPEN_TARGETS: readonly OpenProjectTarget[] = ['vscode', 'terminal'];
 const ATTACHMENT_ROOT_DISPLAY_PATH = 'attachments';
+const DEFAULT_PROJECT_MESSAGE_LIMIT = 50;
+const DEFAULT_SESSION_HISTORY_LIMIT = 100;
+const MAX_MESSAGE_PAGE_LIMIT = 500;
+
+function normalizeMessagePageLimit(value: number | undefined, fallback: number): number {
+  if (typeof value !== 'number' || value <= 0) {
+    return fallback;
+  }
+  return Math.min(Math.floor(value), MAX_MESSAGE_PAGE_LIMIT);
+}
 
 function toPublicAttachmentDirPath(projectId: string): string {
   return `${ATTACHMENT_ROOT_DISPLAY_PATH}/${projectId}`;
@@ -476,7 +486,7 @@ export async function dispatchAgentRpc(
 
         const limit = readNumber(readQueryValue(query, 'limit'));
         const offset = readNumber(readQueryValue(query, 'offset'));
-        const safeLimit = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : 0;
+        const safeLimit = normalizeMessagePageLimit(limit, DEFAULT_SESSION_HISTORY_LIMIT);
         const safeOffset = typeof offset === 'number' && offset >= 0 ? Math.floor(offset) : 0;
 
         const session = await getSession(sessionId);
@@ -498,7 +508,7 @@ export async function dispatchAgentRpc(
             limit: safeLimit,
             offset: safeOffset,
             count: messages.length,
-            hasMore: safeLimit > 0 ? safeOffset + messages.length < totalCount : false,
+            hasMore: safeOffset + messages.length < totalCount,
           },
         });
       }
@@ -688,7 +698,7 @@ export async function dispatchAgentRpc(
 
         const limit = readNumber(readQueryValue(query, 'limit'));
         const offset = readNumber(readQueryValue(query, 'offset'));
-        const safeLimit = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : 50;
+        const safeLimit = normalizeMessagePageLimit(limit, DEFAULT_PROJECT_MESSAGE_LIMIT);
         const safeOffset = typeof offset === 'number' && offset >= 0 ? Math.floor(offset) : 0;
 
         const [messages, totalCount] = await Promise.all([
