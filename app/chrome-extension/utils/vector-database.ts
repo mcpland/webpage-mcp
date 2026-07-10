@@ -125,6 +125,36 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
+function cloneVectorDocument(document: VectorDocument): VectorDocument {
+  return {
+    ...document,
+    chunk: { ...document.chunk },
+    embedding: new Float32Array(document.embedding),
+  };
+}
+
+function assertPositiveHnswInteger(name: string, value: unknown): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    (value as number) <= 0 ||
+    (value as number) > MAX_HNSW_LABEL
+  ) {
+    throw new TypeError(
+      `${name} must be a positive safe integer no greater than ${MAX_HNSW_LABEL}`,
+    );
+  }
+  return value as number;
+}
+
+function assertValidRetentionDays(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new TypeError(
+      "maxRetentionDays must be a finite non-negative number",
+    );
+  }
+  return value;
+}
+
 function parsePersistedEmbedding(
   value: unknown,
   dimension: number,
@@ -987,7 +1017,7 @@ export class VectorDatabase {
   private readonly config: VectorDatabaseConfig;
 
   constructor(config?: Partial<VectorDatabaseConfig>) {
-    this.config = {
+    const resolvedConfig: VectorDatabaseConfig = {
       dimension: 384,
       maxElements: 100000,
       efConstruction: 200,
@@ -998,6 +1028,18 @@ export class VectorDatabase {
       maxRetentionDays: 30,
       ...config,
     };
+    resolvedConfig.dimension = assertPositiveHnswInteger(
+      "dimension",
+      resolvedConfig.dimension,
+    );
+    resolvedConfig.maxElements = assertPositiveHnswInteger(
+      "maxElements",
+      resolvedConfig.maxElements,
+    );
+    resolvedConfig.maxRetentionDays = assertValidRetentionDays(
+      resolvedConfig.maxRetentionDays,
+    );
+    this.config = resolvedConfig;
 
     console.log("VectorDatabase: Initialized with config:", {
       dimension: this.config.dimension,
@@ -1446,12 +1488,23 @@ export class VectorDatabase {
     chunk: TextChunk,
     embedding: Float32Array,
   ): Promise<number> {
+    // Snapshot caller-owned mutable inputs before initialization or the
+    // mutation queue can yield. Neither the caller nor search consumers may
+    // retain a reference to the database's durable document state.
+    const chunkSnapshot = { ...chunk };
+    const embeddingSnapshot = new Float32Array(embedding);
     if (!this.isInitialized) {
       await this.initialize();
     }
 
     return this.enqueueMutation(() =>
-      this.addDocumentInternal(tabId, url, title, chunk, embedding),
+      this.addDocumentInternal(
+        tabId,
+        url,
+        title,
+        chunkSnapshot,
+        embeddingSnapshot,
+      ),
     );
   }
 
@@ -1466,6 +1519,7 @@ export class VectorDatabase {
     const documentId = this.generateDocumentId(tabId, chunk.index);
     let label: number | null = null;
     let pointAdded = false;
+    let addPointFailedAmbiguously = false;
     try {
       // Validate vector data
       if (!embedding || embedding.length !== this.config.dimension) {
@@ -1496,75 +1550,59 @@ export class VectorDatabase {
         }
       }
 
-      // Ensure we have a clean Float32Array
-      let cleanEmbedding: Float32Array;
-      if (embedding instanceof Float32Array) {
-        cleanEmbedding = embedding;
-      } else {
-        cleanEmbedding = new Float32Array(embedding);
-      }
+      const cleanEmbedding = new Float32Array(embedding);
 
-      // Labels are never reused, including after a failed write or rollback.
-      label = this.nextLabel++;
-
-      console.log(
-        `VectorDatabase: Adding document with label ${label}, embedding dimension: ${embedding.length}`,
-      );
-
-      // Add vector to index
-      // According to hnswlib-wasm-static emscripten binding requirements, need to create VectorFloat type
-      console.log(
-        `VectorDatabase: 🔧 DEBUGGING - About to call addPoint with:`,
-        {
-          embeddingType: typeof cleanEmbedding,
-          isFloat32Array: cleanEmbedding instanceof Float32Array,
-          length: cleanEmbedding.length,
-          firstFewValues: Array.from(cleanEmbedding.slice(0, 3)),
-          label: label,
-          replaceDeleted: false,
-        },
-      );
-
-      // Method 1: Try using VectorFloat constructor (if available). Embind
-      // allocations must be released on success and every failure path.
-      if (globalHnswlib && globalHnswlib.VectorFloat) {
-        let vectorToAdd: any = null;
-        try {
+      // Select and fully construct one binding-compatible representation
+      // before crossing addPoint's mutation boundary. An addPoint exception
+      // is ambiguous because the native index may already have changed, so it
+      // must never be retried with another representation.
+      let vectorToAdd: any;
+      let ownedVectorToAdd: any = null;
+      try {
+        if (globalHnswlib?.VectorFloat) {
           console.log("VectorDatabase: Using VectorFloat constructor");
-          vectorToAdd = new globalHnswlib.VectorFloat();
+          ownedVectorToAdd = new globalHnswlib.VectorFloat();
           for (let i = 0; i < cleanEmbedding.length; i++) {
-            vectorToAdd.push_back(cleanEmbedding[i]);
+            ownedVectorToAdd.push_back(cleanEmbedding[i]);
           }
+          vectorToAdd = ownedVectorToAdd;
+        } else {
+          console.log("VectorDatabase: Using plain JS array for addPoint");
+          vectorToAdd = Array.from(cleanEmbedding);
+        }
+
+        // Labels are never reused, including after an ambiguous native
+        // failure.
+        label = this.reserveNextLabel();
+
+        console.log(
+          `VectorDatabase: Adding document with label ${label}, embedding dimension: ${embedding.length}`,
+        );
+
+        // Add vector to index
+        // According to hnswlib-wasm-static emscripten binding requirements, need to create VectorFloat type
+        console.log(
+          `VectorDatabase: 🔧 DEBUGGING - About to call addPoint with:`,
+          {
+            embeddingType: typeof cleanEmbedding,
+            isFloat32Array: cleanEmbedding instanceof Float32Array,
+            length: cleanEmbedding.length,
+            firstFewValues: Array.from(cleanEmbedding.slice(0, 3)),
+            label: label,
+            replaceDeleted: false,
+          },
+        );
+
+        try {
           this.index.addPoint(vectorToAdd, label, false);
           pointAdded = true;
-        } catch (vectorError) {
-          console.error(
-            "VectorDatabase: VectorFloat approach failed, trying alternatives:",
-            vectorError,
-          );
-        } finally {
-          if (vectorToAdd && typeof vectorToAdd.delete === "function") {
-            vectorToAdd.delete();
-          }
+        } catch (error) {
+          addPointFailedAmbiguously = true;
+          throw error;
         }
-      }
-
-      if (!pointAdded) {
-        // Method 2: Try passing Float32Array directly.
-        try {
-          console.log("VectorDatabase: Trying Float32Array directly");
-          this.index.addPoint(cleanEmbedding, label, false);
-          pointAdded = true;
-        } catch (float32Error) {
-          console.error(
-            "VectorDatabase: Float32Array approach failed:",
-            float32Error,
-          );
-
-          // Method 3: Last resort - use a plain array.
-          console.log("VectorDatabase: Trying spread operator as last resort");
-          this.index.addPoint([...cleanEmbedding], label, false);
-          pointAdded = true;
+      } finally {
+        if (ownedVectorToAdd && typeof ownedVectorToAdd.delete === "function") {
+          ownedVectorToAdd.delete();
         }
       }
       console.log(
@@ -1576,7 +1614,7 @@ export class VectorDatabase {
         tabId,
         url,
         title,
-        chunk,
+        chunk: { ...chunk },
         embedding: cleanEmbedding,
         timestamp: Date.now(),
       };
@@ -1642,8 +1680,111 @@ export class VectorDatabase {
       });
       if (pointAdded && label !== null) {
         await this.rollbackAddedDocument(label, tabId, error);
+      } else if (addPointFailedAmbiguously && label !== null) {
+        await this.recoverAmbiguousAddPointFailure(label, tabId, error);
       }
       throw error;
+    }
+  }
+
+  private reserveNextLabel(): number {
+    if (
+      !isNonNegativeSafeInteger(this.nextLabel) ||
+      this.nextLabel >= MAX_HNSW_LABEL
+    ) {
+      throw new Error("HNSW label space is exhausted or invalid");
+    }
+    const label = this.nextLabel;
+    this.nextLabel += 1;
+    return label;
+  }
+
+  private async recoverAmbiguousAddPointFailure(
+    label: number,
+    tabId: number,
+    originalError: unknown,
+  ): Promise<void> {
+    let labels: ReturnType<VectorDatabase["inspectHnswActiveLabels"]>;
+    try {
+      labels = this.inspectHnswActiveLabels();
+    } catch (inspectionError) {
+      await this.resetAfterAmbiguousAddPointFailure(
+        label,
+        originalError,
+        inspectionError,
+      );
+      return;
+    }
+
+    if (labels.activeLabels.has(label)) {
+      await this.rollbackAddedDocument(label, tabId, originalError);
+      return;
+    }
+
+    const invariantFailure = this.activeLabelInvariantFailure(
+      this.documents.keys(),
+      this.nextLabel,
+    );
+    if (invariantFailure) {
+      await this.resetAfterAmbiguousAddPointFailure(
+        label,
+        originalError,
+        new Error(invariantFailure),
+      );
+      return;
+    }
+
+    // The label is either absent or already tombstoned. Persist both stores so
+    // a worker restart cannot reuse this ambiguous label or resurrect a native
+    // mutation that became visible only after addPoint threw.
+    const persistenceFailures: Error[] = [];
+    try {
+      await this.saveIndex();
+    } catch (error) {
+      persistenceFailures.push(
+        cleanupError("persist ambiguous vector index recovery", error),
+      );
+    }
+    try {
+      await this.saveDocumentMappings();
+    } catch (error) {
+      persistenceFailures.push(
+        cleanupError("persist ambiguous vector mapping recovery", error),
+      );
+    }
+    if (persistenceFailures.length > 0) {
+      const failure = new AggregateError(
+        [
+          cleanupError("original vector add failure", originalError),
+          ...persistenceFailures,
+        ],
+        `Vector add for label ${label} failed and its ambiguous state could not be persisted`,
+      );
+      this.unsafeMutationState = failure;
+      throw failure;
+    }
+  }
+
+  private async resetAfterAmbiguousAddPointFailure(
+    label: number,
+    originalError: unknown,
+    stateError: unknown,
+  ): Promise<void> {
+    try {
+      await this.replaceUnsafePersistedIndexWithEmpty(
+        `addPoint for label ${label} threw and its resulting state could not be verified: ${errorMessage(stateError)}`,
+      );
+    } catch (resetError) {
+      const failure = new AggregateError(
+        [
+          cleanupError("original vector add failure", originalError),
+          cleanupError("inspect ambiguous addPoint state", stateError),
+          resetError,
+        ],
+        `Vector add for label ${label} failed and its ambiguous state could not be reset`,
+      );
+      this.unsafeMutationState = failure;
+      throw failure;
     }
   }
 
@@ -1730,13 +1871,12 @@ export class VectorDatabase {
     queryEmbedding: Float32Array,
     topK: number = 10,
   ): Promise<SearchResult[]> {
+    const querySnapshot = new Float32Array(queryEmbedding);
     if (!this.isInitialized) {
       await this.initialize();
     }
 
-    return this.enqueueMutation(() =>
-      this.searchInternal(queryEmbedding, topK),
-    );
+    return this.enqueueMutation(() => this.searchInternal(querySnapshot, topK));
   }
 
   private async searchInternal(
@@ -1894,7 +2034,7 @@ export class VectorDatabase {
             `VectorDatabase: Found document for label ${label}: ${document.id}`,
           );
           results.push({
-            document,
+            document: cloneVectorDocument(document),
             similarity,
             distance,
           });

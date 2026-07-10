@@ -14,6 +14,7 @@ const hnswMocks = vi.hoisted(() => {
   const syncCalls: boolean[] = [];
   const writeCalls: string[] = [];
   const readCalls: string[] = [];
+  const addPointCalls: Array<{ label: number; vector: unknown }> = [];
   const addedLabels: number[] = [];
   const deletedLabels: number[] = [];
   const searchCalls: Array<{
@@ -32,6 +33,10 @@ const hnswMocks = vi.hoisted(() => {
   let vectorFloatDeleteCalls = 0;
   let searchFailuresRemaining = 0;
   let writeFailuresRemaining = 0;
+  let nextAddPointFailure: {
+    error: Error;
+    timing: "after-mutation" | "before-mutation";
+  } | null = null;
 
   class VectorFloat {
     private readonly values: number[] = [];
@@ -94,10 +99,21 @@ const hnswMocks = vi.hoisted(() => {
         : [...this.deleted];
     }
 
-    addPoint(_vector: unknown, label: number) {
+    addPoint(vector: unknown, label: number) {
+      addPointCalls.push({ label, vector });
+      if (nextAddPointFailure?.timing === "before-mutation") {
+        const { error } = nextAddPointFailure;
+        nextAddPointFailure = null;
+        throw error;
+      }
       addedLabels.push(label);
       this.labels.push(label);
       this.count += 1;
+      if (nextAddPointFailure?.timing === "after-mutation") {
+        const { error } = nextAddPointFailure;
+        nextAddPointFailure = null;
+        throw error;
+      }
     }
 
     searchKnn(
@@ -249,6 +265,7 @@ const hnswMocks = vi.hoisted(() => {
   };
 
   return {
+    addPointCalls,
     addedLabels,
     deletedLabels,
     fileCounts,
@@ -271,6 +288,7 @@ const hnswMocks = vi.hoisted(() => {
       searchFailuresRemaining = 0;
       populateSnapshot = null;
       writeFailuresRemaining = 0;
+      nextAddPointFailure = null;
     },
     setAutoCompleteWriteSync(value: boolean) {
       autoCompleteWriteSync = value;
@@ -286,6 +304,12 @@ const hnswMocks = vi.hoisted(() => {
     },
     setWriteFailures(value: number) {
       writeFailuresRemaining = value;
+    },
+    failNextAddPoint(
+      timing: "after-mutation" | "before-mutation",
+      message: string,
+    ) {
+      nextAddPointFailure = { error: new Error(message), timing };
     },
     setSearchFailures(value: number) {
       searchFailuresRemaining = value;
@@ -519,6 +543,7 @@ afterEach(() => {
   chrome.storage.local.set = originalStorageSet;
   chrome.storage.local.remove = originalStorageRemove;
   vi.clearAllMocks();
+  hnswMocks.addPointCalls.length = 0;
   hnswMocks.addedLabels.length = 0;
   hnswMocks.deletedLabels.length = 0;
   hnswMocks.fileCounts.clear();
@@ -784,6 +809,26 @@ describe("vector database cleanup", () => {
     expect(chrome.storage.local.remove).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects invalid HNSW sizing and retention configuration before initialization", () => {
+    for (const dimension of [0, -1, 1.5, 0x1_0000_0000]) {
+      expect(() => new VectorDatabase({ dimension })).toThrow(
+        "dimension must be a positive safe integer",
+      );
+    }
+    for (const maxElements of [0, -1, 1.5, 0x1_0000_0000]) {
+      expect(() => new VectorDatabase({ maxElements })).toThrow(
+        "maxElements must be a positive safe integer",
+      );
+    }
+    for (const maxRetentionDays of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => new VectorDatabase({ maxRetentionDays })).toThrow(
+        "maxRetentionDays must be a finite non-negative number",
+      );
+    }
+    expect(() => new VectorDatabase({ maxRetentionDays: 0 })).not.toThrow();
+    expect(hnswMocks.instances).toHaveLength(0);
+  });
+
   it("bounds the initial wait when the HNSW filesystem never becomes idle", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     hnswMocks.setSynced(false);
@@ -800,6 +845,33 @@ describe("vector database cleanup", () => {
 
     await rejection;
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects writes when the durable HNSW label space is exhausted", async () => {
+    const indexFileName = `label-exhausted-${crypto.randomUUID()}.dat`;
+    const mapping = createMappingPayload({
+      dimension: 3,
+      indexFileName,
+      withDocument: false,
+    });
+    mapping.nextLabel = 0xffffffff;
+    await putVectorMappingRecord(indexFileName, mapping);
+    useStatefulChromeStorage();
+    hnswMocks.setPopulateSnapshot([[indexFileName, 0]]);
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    await expect(
+      database.addDocument(
+        7,
+        "https://example.test/exhausted",
+        "Exhausted",
+        { text: "blocked", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([1, 0, 0]),
+      ),
+    ).rejects.toThrow("HNSW label space is exhausted");
+    expect(hnswMocks.addPointCalls).toHaveLength(0);
+    expect(hnswMocks.getVectorFloatDeleteCalls()).toBe(1);
   });
 
   it("replaces an initialized index with a supported empty HNSW index", async () => {
@@ -1233,6 +1305,44 @@ describe("vector database cleanup", () => {
     expect(hnswMocks.getVectorFloatDeleteCalls() - deletesBeforeSearch).toBe(1);
   });
 
+  it("keeps owned document data isolated from add inputs and search results", async () => {
+    const indexFileName = `document-copy-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    const chunk = {
+      text: "original",
+      source: "content",
+      index: 0,
+      wordCount: 1,
+    };
+    const embedding = new Float32Array([1, 0, 0]);
+
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      chunk,
+      embedding,
+    );
+    chunk.text = "mutated input";
+    embedding[0] = 99;
+    await database.commitTabPage(7, "https://example.test/page", "Page");
+
+    const first = await database.search(new Float32Array([1, 0, 0]));
+    expect(first[0].document.chunk.text).toBe("original");
+    expect(Array.from(first[0].document.embedding)).toEqual([1, 0, 0]);
+
+    first[0].document.chunk.text = "mutated result";
+    first[0].document.embedding[0] = 88;
+    const second = await database.search(new Float32Array([1, 0, 0]));
+    expect(second[0].document.chunk.text).toBe("original");
+    expect(Array.from(second[0].document.embedding)).toEqual([1, 0, 0]);
+    expect(second[0].document).not.toBe(first[0].document);
+    expect(second[0].document.chunk).not.toBe(first[0].document.chunk);
+    expect(second[0].document.embedding).not.toBe(first[0].document.embedding);
+  });
+
   it("releases a failed VectorFloat query before using the search fallback", async () => {
     const indexFileName = `search-vector-release-${crypto.randomUUID()}.dat`;
     useStatefulChromeStorage();
@@ -1542,6 +1652,95 @@ describe("vector database cleanup", () => {
     expect(database.getStats().totalDocuments).toBe(0);
     expect(hnswMocks.deletedLabels).toEqual([0]);
     expect(hnswMocks.getVectorFloatDeleteCalls()).toBe(1);
+  });
+
+  it("calls addPoint only once for a capacity error and durably retires its label", async () => {
+    const indexFileName = `capacity-add-failure-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    hnswMocks.failNextAddPoint(
+      "before-mutation",
+      "HNSW index capacity exceeded",
+    );
+
+    await expect(
+      database.addDocument(
+        7,
+        "https://example.test/full",
+        "Full",
+        { text: "full", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([1, 0, 0]),
+      ),
+    ).rejects.toThrow("capacity exceeded");
+
+    expect(hnswMocks.addPointCalls).toHaveLength(1);
+    expect(hnswMocks.addedLabels).toEqual([]);
+    expect(hnswMocks.deletedLabels).toEqual([]);
+    expect(hnswMocks.getVectorFloatDeleteCalls()).toBe(1);
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      nextLabel: 1,
+      documents: [],
+      tabDocuments: [],
+    });
+
+    await expect(
+      database.addDocument(
+        8,
+        "https://example.test/retry",
+        "Retry",
+        { text: "retry", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([0, 1, 0]),
+      ),
+    ).resolves.toBe(1);
+    expect(hnswMocks.addPointCalls).toHaveLength(2);
+  });
+
+  it("rolls back a possibly mutated addPoint failure without replaying it", async () => {
+    const indexFileName = `ambiguous-add-failure-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    hnswMocks.failNextAddPoint(
+      "after-mutation",
+      "native add failed after mutation",
+    );
+
+    await expect(
+      database.addDocument(
+        7,
+        "https://example.test/ambiguous",
+        "Ambiguous",
+        { text: "private", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([1, 0, 0]),
+      ),
+    ).rejects.toThrow("native add failed after mutation");
+
+    expect(hnswMocks.addPointCalls).toHaveLength(1);
+    expect(hnswMocks.addedLabels).toEqual([0]);
+    expect(hnswMocks.deletedLabels).toEqual([0]);
+    expect(hnswMocks.getVectorFloatDeleteCalls()).toBe(1);
+    expect(hnswMocks.fileLabelSnapshots.get(indexFileName)).toMatchObject({
+      currentCount: 1,
+      deletedLabels: [0],
+      usedLabels: [0],
+    });
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      nextLabel: 1,
+      documents: [],
+      tabDocuments: [],
+    });
+
+    await expect(
+      database.addDocument(
+        8,
+        "https://example.test/safe",
+        "Safe",
+        { text: "safe", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([0, 1, 0]),
+      ),
+    ).resolves.toBe(1);
+    expect(hnswMocks.addPointCalls).toHaveLength(2);
   });
 
   it("serializes a concurrent add behind rollback after an aborted mapping transaction", async () => {
