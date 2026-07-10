@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { computerTool } from '@/entrypoints/background/tools/browser/computer';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
+const nativeMouseEvent = window.MouseEvent;
+
 function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
     id: 7,
@@ -18,6 +20,13 @@ function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
 
 describe('computerTool', () => {
   afterEach(() => {
+    delete (document as any).elementFromPoint;
+    delete (chrome as any).scripting;
+    Object.defineProperty(window, 'MouseEvent', {
+      configurable: true,
+      value: nativeMouseEvent,
+    });
+    document.body.innerHTML = '';
     vi.restoreAllMocks();
   });
 
@@ -173,5 +182,44 @@ describe('computerTool', () => {
       buttons: 0,
     });
     expect(detach).toHaveBeenCalledWith(7, 'computer');
+  });
+
+  it('bounds DOM hover text without materializing the target subtree', async () => {
+    const target = document.createElement('div');
+    target.append(document.createTextNode('Bounded hover label'));
+    Object.defineProperty(target, 'textContent', {
+      configurable: true,
+      get: () => {
+        throw new Error('textContent must not be materialized');
+      },
+    });
+    document.body.append(target);
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn().mockReturnValue(target),
+    });
+    Object.defineProperty(window, 'MouseEvent', {
+      configurable: true,
+      value: function MouseEventForTest(type: string, init: MouseEventInit = {}) {
+        return new window.Event(type, {
+          bubbles: init.bubbles,
+          cancelable: init.cancelable,
+        });
+      },
+    });
+    const executeScript = vi.fn(async ({ func, args }: any) => [
+      { result: await func(...args) },
+    ]);
+    (chrome as any).scripting = { executeScript };
+
+    const result = await (computerTool as any).domHoverFallback(
+      7,
+      { x: 5, y: 5 },
+      'coordinates',
+    );
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.target.text).toBe('Bounded hover label');
   });
 });

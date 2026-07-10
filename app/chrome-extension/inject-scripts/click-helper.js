@@ -5,6 +5,78 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
   // Already initialized, skip
 } else {
   window.__CLICK_HELPER_INITIALIZED__ = true;
+
+  const MAX_TEXT_SCAN_NODES = 512;
+  const MAX_TEXT_SCAN_MS = 25;
+  const MAX_TEXT_BYTES = 512;
+  const MAX_TEXT_LENGTH = 100;
+
+  function utf8BytesForCodePoint(codePoint) {
+    if (codePoint <= 0x7f) return 1;
+    if (codePoint <= 0x7ff) return 2;
+    if (codePoint <= 0xffff) return 3;
+    return 4;
+  }
+
+  function truncateUtf8(value, maximumBytes) {
+    if (typeof value !== 'string') return '';
+    let bytes = 0;
+    let end = 0;
+    for (const character of value) {
+      const nextBytes = utf8BytesForCodePoint(character.codePointAt(0) || 0);
+      if (bytes + nextBytes > maximumBytes) break;
+      bytes += nextBytes;
+      end += character.length;
+    }
+    return value.slice(0, end);
+  }
+
+  function utf8ByteLength(value) {
+    let bytes = 0;
+    for (const character of typeof value === 'string' ? value : '') {
+      bytes += utf8BytesForCodePoint(character.codePointAt(0) || 0);
+    }
+    return bytes;
+  }
+
+  function collectBoundedText(element) {
+    if (!(element instanceof Element)) return '';
+    try {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
+      const deadline = Date.now() + MAX_TEXT_SCAN_MS;
+      let visited = 0;
+      let output = '';
+      let outputBytes = 0;
+
+      while (visited < MAX_TEXT_SCAN_NODES && Date.now() <= deadline) {
+        const node = walker.nextNode();
+        if (!node) break;
+        visited += 1;
+        if (node.nodeType !== Node.TEXT_NODE) continue;
+        const parentTag = node.parentElement?.tagName?.toLowerCase() || '';
+        if (parentTag === 'script' || parentTag === 'style' || parentTag === 'noscript') continue;
+
+        const separator = output ? ' ' : '';
+        const remaining = MAX_TEXT_BYTES - outputBytes - separator.length;
+        if (remaining <= 0) break;
+        const part = truncateUtf8(
+          typeof node.nodeValue === 'string' ? node.nodeValue : '',
+          remaining,
+        );
+        if (!part) continue;
+        output += separator + part;
+        outputBytes += separator.length + utf8ByteLength(part);
+      }
+
+      return truncateUtf8(output, MAX_TEXT_BYTES)
+        .trim()
+        .replace(/\s+/g, ' ')
+        .substring(0, MAX_TEXT_LENGTH);
+    } catch {
+      return '';
+    }
+  }
+
   /**
    * Click on an element matching the selector or at specific coordinates
    * @param {string} selector - CSS selector for the element to click
@@ -57,7 +129,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
           tagName: element.tagName,
           id: element.id,
           className: element.className,
-          text: element.textContent?.trim().substring(0, 100) || '',
+          text: collectBoundedText(element),
           href: element.href || null,
           type: element.type || null,
           isVisible: true,
@@ -90,7 +162,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
             tagName: element.tagName,
             id: element.id,
             className: element.className,
-            text: element.textContent?.trim().substring(0, 100) || '',
+            text: collectBoundedText(element),
             href: element.href || null,
             type: element.type || null,
             isVisible: true,
@@ -127,7 +199,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
           tagName: element.tagName,
           id: element.id,
           className: element.className,
-          text: element.textContent?.trim().substring(0, 100) || '',
+          text: collectBoundedText(element),
           href: element.href || null,
           type: element.type || null,
           isVisible: true,

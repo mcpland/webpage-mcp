@@ -1609,6 +1609,76 @@ class ComputerTool extends BaseBrowserToolExecutor {
         target: { tabId },
         world: 'MAIN',
         func: (point) => {
+          const maxTextScanNodes = 512;
+          const maxTextScanMs = 25;
+          const maxTextBytes = 512;
+          const maxTextLength = 100;
+
+          const utf8BytesForCodePoint = (codePoint: number): number => {
+            if (codePoint <= 0x7f) return 1;
+            if (codePoint <= 0x7ff) return 2;
+            if (codePoint <= 0xffff) return 3;
+            return 4;
+          };
+          const truncateUtf8 = (value: string, maximumBytes: number): string => {
+            let bytes = 0;
+            let end = 0;
+            for (const character of value) {
+              const nextBytes = utf8BytesForCodePoint(character.codePointAt(0) || 0);
+              if (bytes + nextBytes > maximumBytes) break;
+              bytes += nextBytes;
+              end += character.length;
+            }
+            return value.slice(0, end);
+          };
+          const utf8ByteLength = (value: string): number => {
+            let bytes = 0;
+            for (const character of value) {
+              bytes += utf8BytesForCodePoint(character.codePointAt(0) || 0);
+            }
+            return bytes;
+          };
+          const collectBoundedText = (element: Element): string => {
+            try {
+              const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
+              const deadline = Date.now() + maxTextScanMs;
+              let visited = 0;
+              let output = '';
+              let outputBytes = 0;
+              while (visited < maxTextScanNodes && Date.now() <= deadline) {
+                const node = walker.nextNode();
+                if (!node) break;
+                visited += 1;
+                if (node.nodeType !== Node.TEXT_NODE) continue;
+                const parentTag = node.parentElement?.tagName?.toLowerCase() || '';
+                if (
+                  parentTag === 'script' ||
+                  parentTag === 'style' ||
+                  parentTag === 'noscript'
+                ) {
+                  continue;
+                }
+
+                const separator = output ? ' ' : '';
+                const remaining = maxTextBytes - outputBytes - separator.length;
+                if (remaining <= 0) break;
+                const part = truncateUtf8(
+                  typeof node.nodeValue === 'string' ? node.nodeValue : '',
+                  remaining,
+                );
+                if (!part) continue;
+                output += separator + part;
+                outputBytes += separator.length + utf8ByteLength(part);
+              }
+              return truncateUtf8(output, maxTextBytes)
+                .trim()
+                .replace(/\s+/g, ' ')
+                .slice(0, maxTextLength);
+            } catch {
+              return '';
+            }
+          };
+
           const target = document.elementFromPoint(point.x, point.y);
           if (!target) {
             return { success: false, error: 'No element found at coordinates' };
@@ -1633,7 +1703,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
               tagName: target.tagName,
               id: target.id,
               className: target.className,
-              text: target.textContent?.trim()?.slice(0, 100) || '',
+              text: collectBoundedText(target),
             },
           };
         },
