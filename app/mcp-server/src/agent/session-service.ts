@@ -7,7 +7,7 @@
  * - JSON config and management info caching
  */
 import { randomUUID } from 'node:crypto';
-import { eq, desc, and, asc } from 'drizzle-orm';
+import { eq, desc, and, asc, count } from 'drizzle-orm';
 import {
   DEFAULT_CLAUDE_PERMISSION_MODE,
   type ClaudePermissionMode,
@@ -349,26 +349,53 @@ async function addPreviewsToSessions(rows: SessionRow[]): Promise<AgentSession[]
  * Get all sessions for a project, sorted by most recently updated.
  * Includes preview from first user message for each session.
  */
-export async function getSessionsByProject(projectId: string): Promise<AgentSession[]> {
+export async function getSessionsByProject(
+  projectId: string,
+  limit = 0,
+  offset = 0,
+): Promise<AgentSession[]> {
   const db = getDb();
-  const rows = await db
+  const query = db
     .select()
     .from(sessions)
     .where(eq(sessions.projectId, projectId))
-    .orderBy(desc(sessions.updatedAt));
+    .orderBy(desc(sessions.updatedAt), desc(sessions.id));
 
+  if (limit > 0) query.limit(limit);
+  if (offset > 0) query.offset(offset);
+
+  const rows = await query;
   return addPreviewsToSessions(rows);
+}
+
+export async function getSessionsCountByProject(projectId: string): Promise<number> {
+  const db = getDb();
+  const result = await db
+    .select({ count: count() })
+    .from(sessions)
+    .where(eq(sessions.projectId, projectId));
+  return result[0]?.count ?? 0;
 }
 
 /**
  * Get all sessions across all projects, sorted by most recently updated.
  * Includes preview from first user message for each session.
  */
-export async function getAllSessions(): Promise<AgentSession[]> {
+export async function getAllSessions(limit = 0, offset = 0): Promise<AgentSession[]> {
   const db = getDb();
-  const rows = await db.select().from(sessions).orderBy(desc(sessions.updatedAt));
+  const query = db.select().from(sessions).orderBy(desc(sessions.updatedAt), desc(sessions.id));
 
+  if (limit > 0) query.limit(limit);
+  if (offset > 0) query.offset(offset);
+
+  const rows = await query;
   return addPreviewsToSessions(rows);
+}
+
+export async function getAllSessionsCount(): Promise<number> {
+  const db = getDb();
+  const result = await db.select({ count: count() }).from(sessions);
+  return result[0]?.count ?? 0;
 }
 
 /**

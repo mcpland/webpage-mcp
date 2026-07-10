@@ -144,6 +144,67 @@ export async function requestAgentRpcJson<T = unknown>(
   return parseAgentRpcJson<T>(response);
 }
 
+interface AgentRpcCollectionPagination {
+  count: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+}
+
+const AGENT_RPC_COLLECTION_REQUEST_LIMIT = 500;
+const AGENT_RPC_COLLECTION_MAX_PAGES = 10_000;
+
+/** Read every bounded collection page, accepting legacy one-shot responses. */
+export async function requestAgentRpcCollection<T>(
+  payload: AgentRpcRequestPayload,
+  collectionKey: string,
+): Promise<T[]> {
+  const rawOffset = payload.query?.offset;
+  let offset =
+    typeof rawOffset === 'number' && Number.isSafeInteger(rawOffset) && rawOffset >= 0
+      ? rawOffset
+      : 0;
+  const rawLimit = payload.query?.limit;
+  const limit =
+    typeof rawLimit === 'number' && Number.isSafeInteger(rawLimit) && rawLimit > 0
+      ? rawLimit
+      : AGENT_RPC_COLLECTION_REQUEST_LIMIT;
+  const collected: T[] = [];
+
+  for (let pageIndex = 0; pageIndex < AGENT_RPC_COLLECTION_MAX_PAGES; pageIndex += 1) {
+    const response = await requestAgentRpcJson<Record<string, unknown>>({
+      ...payload,
+      query: { ...payload.query, limit, offset },
+    });
+    const rawItems = response[collectionKey];
+    if (!Array.isArray(rawItems)) {
+      throw new Error(`Agent RPC collection response is missing ${collectionKey}`);
+    }
+    const pageItems = rawItems as T[];
+    for (const item of pageItems) collected.push(item);
+
+    const rawPagination = response.pagination;
+    if (!rawPagination || typeof rawPagination !== 'object' || Array.isArray(rawPagination)) {
+      return collected;
+    }
+    const pagination = rawPagination as Partial<AgentRpcCollectionPagination>;
+    if (pagination.count !== pageItems.length || typeof pagination.hasMore !== 'boolean') {
+      throw new Error('Agent RPC collection response has invalid pagination');
+    }
+    if (!pagination.hasMore) return collected;
+    if (
+      typeof pagination.nextOffset !== 'number' ||
+      !Number.isSafeInteger(pagination.nextOffset) ||
+      pagination.nextOffset !== offset + pageItems.length ||
+      pagination.nextOffset <= offset
+    ) {
+      throw new Error('Agent RPC collection pagination did not advance');
+    }
+    offset = pagination.nextOffset;
+  }
+
+  throw new Error('Agent RPC collection exceeded the page limit');
+}
+
 export async function requestAgentRpcBlob(payload: AgentRpcRequestPayload): Promise<Blob> {
   const response = await requestAgentRpcFetch(payload);
   if (!response.ok) {

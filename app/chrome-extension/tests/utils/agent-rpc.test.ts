@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
-import { requestAgentRpcBlobInChunks } from '@/utils/agent-rpc';
+import { requestAgentRpcBlobInChunks, requestAgentRpcCollection } from '@/utils/agent-rpc';
 
 function toBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -104,5 +104,101 @@ describe('agent attachment RPC ranges', () => {
       .mockResolvedValueOnce(rangedResponse(2, new Uint8Array([3, 4]), 5));
 
     await expect(requestAgentRpcBlobInChunks({ operation: 'agent.attachments.get' })).rejects.toThrow('size changed');
+  });
+});
+
+describe('agent RPC collection pagination', () => {
+  const sendMessage = globalThis.chrome.runtime.sendMessage as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    sendMessage.mockReset();
+  });
+
+  it('walks bounded pages while preserving params and query fields', async () => {
+    const pages = new Map<number, Array<{ id: string }>>([
+      [0, [{ id: 'session-1' }, { id: 'session-2' }]],
+      [2, [{ id: 'session-3' }, { id: 'session-4' }]],
+      [4, [{ id: 'session-5' }]],
+    ]);
+    sendMessage.mockImplementation(async (message) => {
+      const offset = message.payload.query.offset as number;
+      const sessions = pages.get(offset) ?? [];
+      const nextOffset = offset + sessions.length;
+      const hasMore = nextOffset < 5;
+      return {
+        success: true,
+        payload: {
+          ok: true,
+          statusCode: 200,
+          body: '',
+          json: {
+            sessions,
+            pagination: {
+              count: sessions.length,
+              hasMore,
+              nextOffset: hasMore ? nextOffset : null,
+            },
+          },
+        },
+      };
+    });
+
+    await expect(
+      requestAgentRpcCollection<{ id: string }>(
+        {
+          operation: 'agent.projects.sessions.list',
+          params: { projectId: 'project-1' },
+          query: { view: 'setup' },
+        },
+        'sessions',
+      ),
+    ).resolves.toEqual([
+      { id: 'session-1' },
+      { id: 'session-2' },
+      { id: 'session-3' },
+      { id: 'session-4' },
+      { id: 'session-5' },
+    ]);
+    expect(sendMessage.mock.calls.map(([message]) => message.payload.query)).toEqual([
+      { view: 'setup', limit: 500, offset: 0 },
+      { view: 'setup', limit: 500, offset: 2 },
+      { view: 'setup', limit: 500, offset: 4 },
+    ]);
+    expect(
+      sendMessage.mock.calls.every(
+        ([message]) => message.payload.params.projectId === 'project-1',
+      ),
+    ).toBe(true);
+  });
+
+  it('accepts legacy one-shot collections and rejects non-advancing pages', async () => {
+    sendMessage.mockResolvedValueOnce({
+      success: true,
+      payload: {
+        ok: true,
+        statusCode: 200,
+        body: '',
+        json: { projects: [{ id: 'legacy-project' }] },
+      },
+    });
+    await expect(
+      requestAgentRpcCollection<{ id: string }>({ operation: 'agent.projects.list' }, 'projects'),
+    ).resolves.toEqual([{ id: 'legacy-project' }]);
+
+    sendMessage.mockResolvedValueOnce({
+      success: true,
+      payload: {
+        ok: true,
+        statusCode: 200,
+        body: '',
+        json: {
+          projects: [],
+          pagination: { count: 0, hasMore: true, nextOffset: 0 },
+        },
+      },
+    });
+    await expect(
+      requestAgentRpcCollection<{ id: string }>({ operation: 'agent.projects.list' }, 'projects'),
+    ).rejects.toThrow('did not advance');
   });
 });

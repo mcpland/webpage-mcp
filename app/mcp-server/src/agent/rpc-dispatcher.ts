@@ -5,6 +5,7 @@ import type { CreateOrUpdateProjectInput } from './project-types';
 import {
   createProjectDirectory,
   deleteProject,
+  getProjectsCount,
   listProjects,
   upsertProject,
   validateRootPath,
@@ -22,7 +23,9 @@ import {
   createSession,
   deleteSession,
   getSession,
+  getAllSessionsCount,
   getSessionsByProject,
+  getSessionsCountByProject,
   getSessionsByProjectAndEngine,
   getAllSessions,
   updateSession,
@@ -75,13 +78,14 @@ import {
 
 const VALID_OPEN_TARGETS: readonly OpenProjectTarget[] = ['vscode', 'terminal'];
 const ATTACHMENT_ROOT_DISPLAY_PATH = 'attachments';
+const DEFAULT_COLLECTION_PAGE_LIMIT = 50;
 const DEFAULT_PROJECT_MESSAGE_LIMIT = 50;
 const DEFAULT_SESSION_HISTORY_LIMIT = 100;
-const MAX_MESSAGE_PAGE_LIMIT = 500;
+const MAX_COLLECTION_PAGE_LIMIT = 500;
 export const AGENT_RPC_JSON_RESPONSE_MAX_BYTES = 700 * 1024;
-export const AGENT_RPC_MESSAGE_PAGE_FETCH_LIMIT = 16;
+export const AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT = 16;
 
-interface MessagePagePagination {
+interface CollectionPagePagination {
   limit: number;
   offset: number;
   count: number;
@@ -89,11 +93,11 @@ interface MessagePagePagination {
   nextOffset: number | null;
 }
 
-function normalizeMessagePageLimit(value: number | undefined, fallback: number): number {
+function normalizeCollectionPageLimit(value: number | undefined, fallback: number): number {
   if (typeof value !== 'number' || value <= 0) {
     return fallback;
   }
-  return Math.min(Math.floor(value), MAX_MESSAGE_PAGE_LIMIT);
+  return Math.min(Math.floor(value), MAX_COLLECTION_PAGE_LIMIT);
 }
 
 function jsonUtf8Bytes(value: unknown): number {
@@ -105,24 +109,23 @@ function jsonUtf8Bytes(value: unknown): number {
 }
 
 /**
- * Fit a message page to the native RPC response budget using the exact JSON
- * representation of every item. JSON string escaping can make the wire size
- * substantially larger than the messages' raw UTF-8 content.
+ * Fit a collection page to the native RPC response budget using the exact
+ * JSON representation of every item, including string escaping.
  */
-function createBoundedMessagePage<T>(options: {
-  messages: readonly T[];
+function createBoundedCollectionPage<T>(options: {
+  items: readonly T[];
   totalCount: number;
   limit: number;
   offset: number;
-  buildPayload: (messages: readonly T[], pagination: MessagePagePagination) => unknown;
+  buildPayload: (items: readonly T[], pagination: CollectionPagePagination) => unknown;
 }): unknown {
   const selected: T[] = [];
   let selectedItemBytes = 0;
 
-  for (const message of options.messages) {
+  for (const item of options.items) {
     const nextCount = selected.length + 1;
     const nextHasMore = options.offset + nextCount < options.totalCount;
-    const pagination: MessagePagePagination = {
+    const pagination: CollectionPagePagination = {
       limit: options.limit,
       offset: options.offset,
       count: nextCount,
@@ -130,8 +133,8 @@ function createBoundedMessagePage<T>(options: {
       nextOffset: nextHasMore ? options.offset + nextCount : null,
     };
     const skeletonBytes = jsonUtf8Bytes(options.buildPayload([], pagination));
-    const messageBytes = jsonUtf8Bytes(message);
-    const arrayContentsBytes = selectedItemBytes + messageBytes + selected.length;
+    const itemBytes = jsonUtf8Bytes(item);
+    const arrayContentsBytes = selectedItemBytes + itemBytes + selected.length;
 
     // Replacing the skeleton's [] with the serialized items adds exactly the
     // item bytes plus one comma per item after the first.
@@ -139,16 +142,16 @@ function createBoundedMessagePage<T>(options: {
       break;
     }
 
-    selected.push(message);
-    selectedItemBytes += messageBytes;
+    selected.push(item);
+    selectedItemBytes += itemBytes;
   }
 
-  if (options.messages.length > 0 && selected.length === 0) {
-    throw new RangeError('A stored message exceeds the Agent RPC response byte budget');
+  if (options.items.length > 0 && selected.length === 0) {
+    throw new RangeError('A collection item exceeds the Agent RPC response byte budget');
   }
 
   const hasMore = options.offset + selected.length < options.totalCount;
-  const pagination: MessagePagePagination = {
+  const pagination: CollectionPagePagination = {
     limit: options.limit,
     offset: options.offset,
     count: selected.length,
@@ -405,8 +408,27 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.projects.list': {
-        const projects = (await listProjects()).map(sanitizeProjectForPublicRead);
-        return jsonResponse(HTTP_STATUS.OK, { projects });
+        const limit = readNumber(readQueryValue(query, 'limit'));
+        const offset = readNumber(readQueryValue(query, 'offset'));
+        const safeLimit = normalizeCollectionPageLimit(limit, DEFAULT_COLLECTION_PAGE_LIMIT);
+        const fetchLimit = Math.min(safeLimit, AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT);
+        const safeOffset = typeof offset === 'number' && offset >= 0 ? Math.floor(offset) : 0;
+        const [projects, totalCount] = await Promise.all([
+          listProjects(fetchLimit, safeOffset),
+          getProjectsCount(),
+        ]);
+        const payload = createBoundedCollectionPage({
+          items: projects.map(sanitizeProjectForPublicRead),
+          totalCount,
+          limit: safeLimit,
+          offset: safeOffset,
+          buildPayload: (pageProjects, pagination) => ({
+            projects: pageProjects,
+            totalCount,
+            pagination,
+          }),
+        });
+        return jsonResponse(HTTP_STATUS.OK, payload);
       }
 
       case 'agent.projects.upsert': {
@@ -496,8 +518,27 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.sessions.list': {
-        const sessions = (await getAllSessions()).map(sanitizeSessionForPublicRead);
-        return jsonResponse(HTTP_STATUS.OK, { sessions });
+        const limit = readNumber(readQueryValue(query, 'limit'));
+        const offset = readNumber(readQueryValue(query, 'offset'));
+        const safeLimit = normalizeCollectionPageLimit(limit, DEFAULT_COLLECTION_PAGE_LIMIT);
+        const fetchLimit = Math.min(safeLimit, AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT);
+        const safeOffset = typeof offset === 'number' && offset >= 0 ? Math.floor(offset) : 0;
+        const [sessions, totalCount] = await Promise.all([
+          getAllSessions(fetchLimit, safeOffset),
+          getAllSessionsCount(),
+        ]);
+        const payload = createBoundedCollectionPage({
+          items: sessions.map(sanitizeSessionForPublicRead),
+          totalCount,
+          limit: safeLimit,
+          offset: safeOffset,
+          buildPayload: (pageSessions, pagination) => ({
+            sessions: pageSessions,
+            totalCount,
+            pagination,
+          }),
+        });
+        return jsonResponse(HTTP_STATUS.OK, payload);
       }
 
       case 'agent.projects.sessions.list': {
@@ -509,8 +550,27 @@ export async function dispatchAgentRpc(
         if (!project) {
           return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
         }
-        const sessions = (await getSessionsByProject(projectId)).map(sanitizeSessionForPublicRead);
-        return jsonResponse(HTTP_STATUS.OK, { sessions });
+        const limit = readNumber(readQueryValue(query, 'limit'));
+        const offset = readNumber(readQueryValue(query, 'offset'));
+        const safeLimit = normalizeCollectionPageLimit(limit, DEFAULT_COLLECTION_PAGE_LIMIT);
+        const fetchLimit = Math.min(safeLimit, AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT);
+        const safeOffset = typeof offset === 'number' && offset >= 0 ? Math.floor(offset) : 0;
+        const [sessions, totalCount] = await Promise.all([
+          getSessionsByProject(projectId, fetchLimit, safeOffset),
+          getSessionsCountByProject(projectId),
+        ]);
+        const payload = createBoundedCollectionPage({
+          items: sessions.map(sanitizeSessionForPublicRead),
+          totalCount,
+          limit: safeLimit,
+          offset: safeOffset,
+          buildPayload: (pageSessions, pagination) => ({
+            sessions: pageSessions,
+            totalCount,
+            pagination,
+          }),
+        });
+        return jsonResponse(HTTP_STATUS.OK, payload);
       }
 
       case 'agent.projects.sessions.create': {
@@ -639,8 +699,8 @@ export async function dispatchAgentRpc(
 
         const limit = readNumber(readQueryValue(query, 'limit'));
         const offset = readNumber(readQueryValue(query, 'offset'));
-        const safeLimit = normalizeMessagePageLimit(limit, DEFAULT_SESSION_HISTORY_LIMIT);
-        const fetchLimit = Math.min(safeLimit, AGENT_RPC_MESSAGE_PAGE_FETCH_LIMIT);
+        const safeLimit = normalizeCollectionPageLimit(limit, DEFAULT_SESSION_HISTORY_LIMIT);
+        const fetchLimit = Math.min(safeLimit, AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT);
         const safeOffset = typeof offset === 'number' && offset >= 0 ? Math.floor(offset) : 0;
 
         const session = await getSession(sessionId);
@@ -653,8 +713,8 @@ export async function dispatchAgentRpc(
           getMessagesCountBySessionId(sessionId, session.projectId),
         ]);
 
-        const payload = createBoundedMessagePage({
-          messages,
+        const payload = createBoundedCollectionPage({
+          items: messages,
           totalCount,
           limit: safeLimit,
           offset: safeOffset,
@@ -856,8 +916,8 @@ export async function dispatchAgentRpc(
 
         const limit = readNumber(readQueryValue(query, 'limit'));
         const offset = readNumber(readQueryValue(query, 'offset'));
-        const safeLimit = normalizeMessagePageLimit(limit, DEFAULT_PROJECT_MESSAGE_LIMIT);
-        const fetchLimit = Math.min(safeLimit, AGENT_RPC_MESSAGE_PAGE_FETCH_LIMIT);
+        const safeLimit = normalizeCollectionPageLimit(limit, DEFAULT_PROJECT_MESSAGE_LIMIT);
+        const fetchLimit = Math.min(safeLimit, AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT);
         const safeOffset = typeof offset === 'number' && offset >= 0 ? Math.floor(offset) : 0;
 
         const [messages, totalCount] = await Promise.all([
@@ -865,8 +925,8 @@ export async function dispatchAgentRpc(
           getMessagesCountByProjectId(projectId),
         ]);
 
-        const payload = createBoundedMessagePage({
-          messages,
+        const payload = createBoundedCollectionPage({
+          items: messages,
           totalCount,
           limit: safeLimit,
           offset: safeOffset,

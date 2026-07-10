@@ -195,10 +195,10 @@ describe('Agent RPC response encoding', () => {
         expect(payload.pagination.limit).toBe(500);
         expect(payload.pagination.count).toBe(pageMessages.length);
         expect(pageMessages.length).toBeLessThanOrEqual(
-          rpcDispatcher.AGENT_RPC_MESSAGE_PAGE_FETCH_LIMIT,
+          rpcDispatcher.AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT,
         );
         if (pageIndex === 0) {
-          expect(pageMessages).toHaveLength(rpcDispatcher.AGENT_RPC_MESSAGE_PAGE_FETCH_LIMIT);
+          expect(pageMessages).toHaveLength(rpcDispatcher.AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT);
         }
         ids.push(...pageMessages.map((message) => message.id));
 

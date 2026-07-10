@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { eq, desc } from "drizzle-orm";
+import { count, eq, desc } from "drizzle-orm";
 import type { AgentProject } from "webpage-mcp-shared";
 import type { CreateOrUpdateProjectInput } from "./project-types";
 import { getDb, projects, type ProjectRow } from "./db";
@@ -260,13 +260,24 @@ function rowToProject(row: ProjectRow): AgentProject {
 /**
  * List all projects, sorted by last activity (most recent first).
  */
-export async function listProjects(): Promise<AgentProject[]> {
+export async function listProjects(limit = 0, offset = 0): Promise<AgentProject[]> {
   const db = getDb();
-  const rows = await db
+  const query = db
     .select()
     .from(projects)
-    .orderBy(desc(projects.lastActiveAt));
+    .orderBy(desc(projects.lastActiveAt), desc(projects.id));
+
+  if (limit > 0) query.limit(limit);
+  if (offset > 0) query.offset(offset);
+
+  const rows = await query;
   return rows.map(rowToProject);
+}
+
+export async function getProjectsCount(): Promise<number> {
+  const db = getDb();
+  const result = await db.select({ count: count() }).from(projects);
+  return result[0]?.count ?? 0;
 }
 
 /**

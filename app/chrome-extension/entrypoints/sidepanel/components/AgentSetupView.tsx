@@ -8,7 +8,7 @@ import type {
   CreateAgentSessionInput,
   UpdateAgentSessionInput,
 } from 'webpage-mcp-shared';
-import { requestAgentRpcJson } from '@/utils/agent-rpc';
+import { requestAgentRpcCollection, requestAgentRpcJson } from '@/utils/agent-rpc';
 import {
   loadAgentSelection,
   persistAgentSelection,
@@ -112,18 +112,17 @@ export default function AgentSetupView() {
       : sandboxMode === 'danger-full-access';
 
   async function listProjects(): Promise<AgentProject[]> {
-    const response = await requestAgentRpcJson<{ projects?: AgentProject[] }>({
-      operation: 'agent.projects.list',
-    });
-    return response.projects ?? [];
+    return requestAgentRpcCollection<AgentProject>(
+      { operation: 'agent.projects.list' },
+      'projects',
+    );
   }
 
   async function listSessions(projectId: string): Promise<AgentSession[]> {
-    const response = await requestAgentRpcJson<{ sessions?: AgentSession[] }>({
-      operation: 'agent.projects.sessions.list',
-      params: { projectId },
-    });
-    return response.sessions ?? [];
+    return requestAgentRpcCollection<AgentSession>(
+      { operation: 'agent.projects.sessions.list', params: { projectId } },
+      'sessions',
+    );
   }
 
   async function getSession(sessionId: string): Promise<AgentSession | null> {
