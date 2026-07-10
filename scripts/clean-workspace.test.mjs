@@ -19,9 +19,14 @@ function fixture() {
     "node_modules",
     "app/extension/dist",
     "app/extension/.turbo",
+    "app/extension/.output",
+    "app/extension/.wxt",
+    "app/extension/coverage",
     "app/extension/node_modules",
     "packages/shared/dist",
     "packages/shared/node_modules",
+    "packages/wasm-simd/pkg",
+    "packages/wasm-simd/target",
   ]) {
     fs.mkdirSync(path.join(root, directory), { recursive: true });
   }
@@ -36,7 +41,15 @@ test("cleanWorkspace removes build outputs without deleting dependencies", (t) =
 
   assert.equal(fs.existsSync(path.join(root, "dist")), false);
   assert.equal(fs.existsSync(path.join(root, "app/extension/dist")), false);
+  assert.equal(fs.existsSync(path.join(root, "app/extension/.output")), false);
+  assert.equal(fs.existsSync(path.join(root, "app/extension/.wxt")), false);
+  assert.equal(fs.existsSync(path.join(root, "app/extension/coverage")), false);
   assert.equal(fs.existsSync(path.join(root, "packages/shared/dist")), false);
+  assert.equal(fs.existsSync(path.join(root, "packages/wasm-simd/pkg")), false);
+  assert.equal(
+    fs.existsSync(path.join(root, "packages/wasm-simd/target")),
+    false,
+  );
   assert.equal(fs.existsSync(path.join(root, "node_modules")), true);
   assert.equal(
     fs.existsSync(path.join(root, "app/extension/node_modules")),

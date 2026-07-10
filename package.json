@@ -15,7 +15,7 @@
     "copy:wasm": "pnpm --filter @webpage-mcp/wasm-simd copy:artifacts",
     "verify:wasm": "pnpm --filter @webpage-mcp/wasm-simd verify:artifacts",
     "test:release": "node --test scripts/release-preflight.test.mjs scripts/npm-dist-tag.test.mjs",
-    "test:workspace": "node --test scripts/clean-workspace.test.mjs",
+    "test:workspace": "node --test scripts/clean-workspace.test.mjs app/chrome-extension/scripts/rename-zip.test.mjs",
     "dev:shared": "pnpm --filter webpage-mcp-shared dev",
     "dev:mcp": "pnpm --filter webpage-mcp dev",
     "dev:extension": "pnpm --filter webpage-mcp-connector dev",

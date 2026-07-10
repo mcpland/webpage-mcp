@@ -23,12 +23,23 @@ function removePath(targetPath) {
   fs.rmSync(targetPath, { recursive: true, force: true });
 }
 
+const COMMON_BUILD_OUTPUTS = ["dist", ".turbo", ".output", ".wxt", "coverage"];
+
+const WORKSPACE_SPECIFIC_BUILD_OUTPUTS = [
+  ["packages", "wasm-simd", "pkg"],
+  ["packages", "wasm-simd", "target"],
+];
+
 export function cleanWorkspace(rootDir, target) {
   const workspaceDirs = workspaceDirectories(rootDir);
   if (target === "dist") {
     for (const directory of [rootDir, ...workspaceDirs]) {
-      removePath(path.join(directory, "dist"));
-      removePath(path.join(directory, ".turbo"));
+      for (const outputName of COMMON_BUILD_OUTPUTS) {
+        removePath(path.join(directory, outputName));
+      }
+    }
+    for (const outputParts of WORKSPACE_SPECIFIC_BUILD_OUTPUTS) {
+      removePath(path.join(rootDir, ...outputParts));
     }
     return;
   }
