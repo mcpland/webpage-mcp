@@ -12,6 +12,14 @@
 
 import type { ElementLocator } from '@/common/web-editor-types';
 import { findDebugSource } from './debug-source';
+import {
+  createDomTraversalBudget,
+  findElementIndex,
+  findUniqueElement,
+  readBoundedClassNames,
+  WEB_EDITOR_DOM_LIMITS,
+  type DomTraversalBudget,
+} from './dom-traversal';
 
 // =============================================================================
 // Types
@@ -31,6 +39,12 @@ export interface SelectorGenerationOptions {
 
 /** Maximum candidate selectors to generate */
 const DEFAULT_MAX_CANDIDATES = 5;
+
+/** Hard cap for caller-provided candidate counts and locator arrays */
+const MAX_SELECTOR_CANDIDATES = 16;
+
+/** Maximum number of iframe/shadow boundaries in a locator */
+const MAX_ROOT_CHAIN_DEPTH = 16;
 
 /** Maximum text length for fingerprint */
 const FINGERPRINT_TEXT_MAX_LENGTH = 32;
@@ -147,25 +161,10 @@ function getQueryRoot(element: Element): Document | ShadowRoot {
 }
 
 /**
- * Safely execute querySelector, returning null on invalid selectors
- */
-function safeQuerySelector(root: ParentNode, selector: string): Element | null {
-  try {
-    return root.querySelector(selector);
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Check if a selector matches exactly one element in the root
  */
-function isUnique(root: ParentNode, selector: string): boolean {
-  try {
-    return root.querySelectorAll(selector).length === 1;
-  } catch {
-    return false;
-  }
+function isUnique(root: ParentNode, selector: string, budget: DomTraversalBudget): boolean {
+  return findUniqueElement(root, selector, budget) !== null;
 }
 
 // =============================================================================
@@ -175,19 +174,28 @@ function isUnique(root: ParentNode, selector: string): boolean {
 /**
  * Try to build a unique ID-based selector
  */
-function tryIdSelector(element: Element, root: ParentNode): string | null {
+function tryIdSelector(
+  element: Element,
+  root: ParentNode,
+  budget: DomTraversalBudget,
+): string | null {
   const id = element.id?.trim();
   if (!id) return null;
 
   const selector = `#${cssEscape(id)}`;
-  return isUnique(root, selector) ? selector : null;
+  return isUnique(root, selector, budget) ? selector : null;
 }
 
 /**
  * Collect unique data-attribute selector candidates (ordered by priority).
  * Phase 2.9: Returns multiple candidates instead of just the first.
  */
-function collectDataAttrSelectors(element: Element, root: ParentNode, max: number): string[] {
+function collectDataAttrSelectors(
+  element: Element,
+  root: ParentNode,
+  max: number,
+  budget: DomTraversalBudget,
+): string[] {
   const out: string[] = [];
   if (max <= 0) return out;
 
@@ -200,14 +208,14 @@ function collectDataAttrSelectors(element: Element, root: ParentNode, max: numbe
 
     // Try attribute alone
     const attrOnly = `[${attr}="${cssEscape(value)}"]`;
-    if (isUnique(root, attrOnly)) {
+    if (isUnique(root, attrOnly, budget)) {
       out.push(attrOnly);
       continue;
     }
 
     // Try with tag prefix
     const withTag = `${tag}${attrOnly}`;
-    if (isUnique(root, withTag)) {
+    if (isUnique(root, withTag, budget)) {
       out.push(withTag);
     }
   }
@@ -216,24 +224,22 @@ function collectDataAttrSelectors(element: Element, root: ParentNode, max: numbe
 }
 
 /**
- * Try to build a unique data-attribute selector (single best)
- */
-function tryDataAttrSelector(element: Element, root: ParentNode): string | null {
-  return collectDataAttrSelectors(element, root, 1)[0] ?? null;
-}
-
-/**
  * Collect unique class-based selector candidates.
  * Phase 2.9: Produces multiple variants (single class, tag+class, combinations) with early stop.
  */
-function collectClassSelectors(element: Element, root: ParentNode, max: number): string[] {
+function collectClassSelectors(
+  element: Element,
+  root: ParentNode,
+  max: number,
+  budget: DomTraversalBudget,
+): string[] {
   const out: string[] = [];
   if (max <= 0) return out;
 
   const tag = element.tagName.toLowerCase();
-  const classes = Array.from(element.classList)
-    .filter((c) => c && /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(c))
-    .slice(0, MAX_SELECTOR_CLASS_COUNT);
+  const classes = readBoundedClassNames(element, MAX_SELECTOR_CLASS_COUNT).filter((className) =>
+    /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(className),
+  );
 
   if (classes.length === 0) return out;
 
@@ -243,7 +249,7 @@ function collectClassSelectors(element: Element, root: ParentNode, max: number):
   for (const cls of classes) {
     if (out.length >= max) return out;
     const sel = `.${cssEscape(cls)}`;
-    const unique = isUnique(root, sel);
+    const unique = isUnique(root, sel, budget);
     uniqueSingle.set(cls, unique);
     if (unique) out.push(sel);
   }
@@ -253,7 +259,7 @@ function collectClassSelectors(element: Element, root: ParentNode, max: number):
     if (out.length >= max) return out;
     if (uniqueSingle.get(cls) === true) continue;
     const sel = `${tag}.${cssEscape(cls)}`;
-    if (isUnique(root, sel)) out.push(sel);
+    if (isUnique(root, sel, budget)) out.push(sel);
   }
 
   // Try class combinations (pairs and triple) among the first few classes
@@ -264,23 +270,23 @@ function collectClassSelectors(element: Element, root: ParentNode, max: number):
       const a = classes[i];
       const b = classes[j];
       const pair = `.${cssEscape(a)}.${cssEscape(b)}`;
-      if (isUnique(root, pair)) {
+      if (isUnique(root, pair, budget)) {
         out.push(pair);
         continue;
       }
       const withTag = `${tag}${pair}`;
-      if (isUnique(root, withTag)) out.push(withTag);
+      if (isUnique(root, withTag, budget)) out.push(withTag);
     }
   }
 
   // Try triple combination if we have enough classes and room
   if (limit >= 3 && out.length < max) {
     const triple = `.${cssEscape(classes[0])}.${cssEscape(classes[1])}.${cssEscape(classes[2])}`;
-    if (isUnique(root, triple)) {
+    if (isUnique(root, triple, budget)) {
       out.push(triple);
     } else {
       const withTag = `${tag}${triple}`;
-      if (out.length < max && isUnique(root, withTag)) out.push(withTag);
+      if (out.length < max && isUnique(root, withTag, budget)) out.push(withTag);
     }
   }
 
@@ -288,23 +294,39 @@ function collectClassSelectors(element: Element, root: ParentNode, max: number):
 }
 
 /**
- * Try to build a unique class-based selector (single best)
- */
-function tryClassSelector(element: Element, root: ParentNode): string | null {
-  return collectClassSelectors(element, root, 1)[0] ?? null;
-}
-
-/**
  * Build a structural path selector using nth-of-type
  */
-function buildPathSelector(element: Element, root: Document | ShadowRoot): string {
+function getSameTagSiblingPosition(
+  element: Element,
+  parent: ParentNode,
+): { count: number; index: number } | null {
+  let count = 0;
+  let index = -1;
+  let visited = 0;
+
+  for (let sibling = parent.firstElementChild; sibling; sibling = sibling.nextElementSibling) {
+    if (visited >= WEB_EDITOR_DOM_LIMITS.maxDirectChildren) return null;
+    visited += 1;
+    if (sibling.tagName !== element.tagName) continue;
+    count += 1;
+    if (sibling === element) index = count;
+  }
+
+  return index > 0 ? { count, index } : null;
+}
+
+function buildPathSelector(element: Element, root: Document | ShadowRoot): string | null {
   const segments: string[] = [];
   let current: Element | null = element;
 
   // Determine stop condition based on root type
   const isDocument = root instanceof Document;
 
-  while (current && current.nodeType === Node.ELEMENT_NODE) {
+  for (
+    let depth = 0;
+    current && current.nodeType === Node.ELEMENT_NODE && depth < WEB_EDITOR_DOM_LIMITS.maxDepth;
+    depth++
+  ) {
     const tag = current.tagName.toLowerCase();
 
     // Stop at body for document, or at shadow root boundary
@@ -316,21 +338,14 @@ function buildPathSelector(element: Element, root: Document | ShadowRoot): strin
     const parent: Element | null = current.parentElement;
     const parentNode = current.parentNode;
 
-    // Get siblings from appropriate parent
-    let siblings: Element[];
-    if (parent) {
-      siblings = Array.from(parent.children);
-    } else if (parentNode instanceof ShadowRoot || parentNode instanceof Document) {
-      siblings = Array.from(parentNode.children);
-    } else {
-      siblings = [];
-    }
-
     // Add nth-of-type if there are siblings with same tag
-    const sameTagSiblings = siblings.filter((s) => s.tagName === current!.tagName);
-    if (sameTagSiblings.length > 1) {
-      const index = sameTagSiblings.indexOf(current) + 1;
-      selector += `:nth-of-type(${index})`;
+    const siblingParent =
+      parent ??
+      (parentNode instanceof ShadowRoot || parentNode instanceof Document ? parentNode : null);
+    if (siblingParent) {
+      const position = getSameTagSiblingPosition(current, siblingParent);
+      if (!position) return null;
+      if (position.count > 1) selector += `:nth-of-type(${position.index})`;
     }
 
     segments.unshift(selector);
@@ -341,7 +356,8 @@ function buildPathSelector(element: Element, root: Document | ShadowRoot): strin
   }
 
   const path = segments.join(' > ');
-  return isDocument ? `body > ${path}` : path || '*';
+  if (!path) return isDocument ? 'body' : '*';
+  return isDocument ? `body > ${path}` : path;
 }
 
 // =============================================================================
@@ -366,19 +382,14 @@ function buildRelativePathSelector(
     const parent: Element | null = current.parentElement;
     const parentNode = current.parentNode;
 
-    let siblings: Element[];
-    if (parent) {
-      siblings = Array.from(parent.children);
-    } else if (parentNode instanceof ShadowRoot || parentNode instanceof Document) {
-      siblings = Array.from(parentNode.children);
-    } else {
-      siblings = [];
-    }
-
-    const sameTagSiblings = siblings.filter((s) => s.tagName === current!.tagName);
-    if (sameTagSiblings.length > 1) {
-      const index = sameTagSiblings.indexOf(current) + 1;
-      selector += `:nth-of-type(${index})`;
+    const siblingParent =
+      parent ??
+      (parentNode instanceof ShadowRoot || parentNode instanceof Document ? parentNode : null);
+    if (!siblingParent) return null;
+    const position = getSameTagSiblingPosition(current, siblingParent);
+    if (!position) return null;
+    if (position.count > 1) {
+      selector += `:nth-of-type(${position.index})`;
     }
 
     segments.unshift(selector);
@@ -399,8 +410,12 @@ function buildRelativePathSelector(
 /**
  * Try to build a unique anchor selector for an ancestor (id or stable data-* only).
  */
-function tryAnchorSelector(element: Element, root: ParentNode): string | null {
-  const idSel = tryIdSelector(element, root);
+function tryAnchorSelector(
+  element: Element,
+  root: ParentNode,
+  budget: DomTraversalBudget,
+): string | null {
+  const idSel = tryIdSelector(element, root, budget);
   if (idSel) return idSel;
 
   const tag = element.tagName.toLowerCase();
@@ -410,10 +425,10 @@ function tryAnchorSelector(element: Element, root: ParentNode): string | null {
     if (!value) continue;
 
     const attrOnly = `[${attr}="${cssEscape(value)}"]`;
-    if (isUnique(root, attrOnly)) return attrOnly;
+    if (isUnique(root, attrOnly, budget)) return attrOnly;
 
     const withTag = `${tag}${attrOnly}`;
-    if (isUnique(root, withTag)) return withTag;
+    if (isUnique(root, withTag, budget)) return withTag;
   }
 
   return null;
@@ -424,14 +439,18 @@ function tryAnchorSelector(element: Element, root: ParentNode): string | null {
  * Finds a unique ancestor (id or stable data-*) and appends a relative path from there.
  * This improves matching when the target itself doesn't have unique attributes.
  */
-function buildAnchorRelPathSelector(element: Element, root: Document | ShadowRoot): string | null {
+function buildAnchorRelPathSelector(
+  element: Element,
+  root: Document | ShadowRoot,
+  budget: DomTraversalBudget,
+): string | null {
   let current: Element | null = element.parentElement;
 
   for (let depth = 0; current && depth < MAX_ANCHOR_DEPTH; depth++) {
     const tag = current.tagName.toUpperCase();
     if (tag === 'HTML' || tag === 'BODY') break;
 
-    const anchor = tryAnchorSelector(current, root);
+    const anchor = tryAnchorSelector(current, root, budget);
     if (anchor) {
       const rel = buildRelativePathSelector(current, element, root);
       if (!rel) {
@@ -440,14 +459,12 @@ function buildAnchorRelPathSelector(element: Element, root: Document | ShadowRoo
       }
 
       const composed = `${anchor} ${rel}`;
-      if (!isUnique(root, composed)) {
+      const found = findUniqueElement(root, composed, budget);
+      if (found !== element) {
         current = current.parentElement;
         continue;
       }
-
-      // Final verification: ensure the composed selector finds the exact element
-      const found = safeQuerySelector(root, composed);
-      if (found === element) return composed;
+      return composed;
     }
 
     current = current.parentElement;
@@ -467,7 +484,7 @@ export function getShadowHostChain(element: Element): string[] | undefined {
   const chain: string[] = [];
   let current: Element = element;
 
-  while (true) {
+  for (let depth = 0; depth < MAX_ROOT_CHAIN_DEPTH; depth++) {
     const root = current.getRootNode?.();
     if (!(root instanceof ShadowRoot)) break;
 
@@ -480,6 +497,12 @@ export function getShadowHostChain(element: Element): string[] | undefined {
 
     chain.unshift(hostSelector);
     current = host;
+  }
+
+  // Preserve an explicit over-limit result so locateElement fails closed
+  // instead of treating a partial chain as a top-level locator.
+  if (current.getRootNode?.() instanceof ShadowRoot) {
+    chain.unshift(':not(*)');
   }
 
   return chain.length > 0 ? chain : undefined;
@@ -513,7 +536,7 @@ export function computeFingerprint(element: Element): string {
   }
 
   // Class names (limited)
-  const classes = Array.from(element.classList).slice(0, FINGERPRINT_MAX_CLASSES);
+  const classes = readBoundedClassNames(element, FINGERPRINT_MAX_CLASSES);
   if (classes.length > 0) {
     parts.push(`class=${classes.join('.')}`);
   }
@@ -538,13 +561,13 @@ export function computeDomPath(element: Element): number[] {
   const path: number[] = [];
   let current: Element | null = element;
 
-  while (current) {
+  for (let depth = 0; current && depth < WEB_EDITOR_DOM_LIMITS.maxDepth; depth++) {
     const parent: Element | null = current.parentElement;
 
     if (parent) {
-      const siblings = Array.from(parent.children);
-      const index = siblings.indexOf(current);
-      if (index >= 0) path.unshift(index);
+      const index = findElementIndex(parent, current);
+      if (index === null) return [];
+      path.unshift(index);
       current = parent;
       continue;
     }
@@ -552,9 +575,9 @@ export function computeDomPath(element: Element): number[] {
     // Check for shadow root or document as parent
     const parentNode = current.parentNode;
     if (parentNode instanceof ShadowRoot || parentNode instanceof Document) {
-      const children = Array.from(parentNode.children);
-      const index = children.indexOf(current);
-      if (index >= 0) path.unshift(index);
+      const index = findElementIndex(parentNode, current);
+      if (index === null) return [];
+      path.unshift(index);
     }
 
     break;
@@ -578,7 +601,11 @@ export function generateSelectorCandidates(
   options: SelectorGenerationOptions = {},
 ): string[] {
   const root = options.root ?? getQueryRoot(element);
-  const maxCandidates = Math.max(1, options.maxCandidates ?? DEFAULT_MAX_CANDIDATES);
+  const requestedCandidates = Number.isFinite(options.maxCandidates)
+    ? Math.floor(options.maxCandidates ?? DEFAULT_MAX_CANDIDATES)
+    : DEFAULT_MAX_CANDIDATES;
+  const maxCandidates = Math.min(MAX_SELECTOR_CANDIDATES, Math.max(1, requestedCandidates));
+  const budget = createDomTraversalBudget();
 
   const candidates: string[] = [];
 
@@ -593,7 +620,9 @@ export function generateSelectorCandidates(
   // Pre-compute anchor+relPath candidate (intended as last fallback)
   // Only compute if we have room for it (maxCandidates >= 5)
   const anchorCandidate =
-    maxCandidates >= DEFAULT_MAX_CANDIDATES ? buildAnchorRelPathSelector(element, root) : null;
+    maxCandidates >= DEFAULT_MAX_CANDIDATES
+      ? buildAnchorRelPathSelector(element, root, budget)
+      : null;
 
   // Reserve space for path selector + optional anchor candidate
   // But ensure headLimit is at least 1 to allow ID/attr/class to compete with path
@@ -601,15 +630,25 @@ export function generateSelectorCandidates(
   const headLimit = Math.max(1, maxCandidates - tailReserved);
 
   // 1) ID selector (unique, highest priority)
-  push(tryIdSelector(element, root), headLimit);
+  push(tryIdSelector(element, root, budget), headLimit);
 
   // 2) Data attribute selectors (multiple candidates in priority order)
-  for (const sel of collectDataAttrSelectors(element, root, headLimit - candidates.length)) {
+  for (const sel of collectDataAttrSelectors(
+    element,
+    root,
+    headLimit - candidates.length,
+    budget,
+  )) {
     push(sel, headLimit);
   }
 
   // 3) Class selectors (multiple candidates with combinations)
-  for (const sel of collectClassSelectors(element, root, headLimit - candidates.length)) {
+  for (const sel of collectClassSelectors(
+    element,
+    root,
+    headLimit - candidates.length,
+    budget,
+  )) {
     push(sel, headLimit);
   }
 
@@ -657,17 +696,6 @@ export function createElementLocator(element: Element): ElementLocator {
 }
 
 /**
- * Safely check if a selector matches exactly one element
- */
-function isSelectorUnique(root: ParentNode, selector: string): boolean {
-  try {
-    return root.querySelectorAll(selector).length === 1;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Verify element matches the stored fingerprint
  */
 function verifyFingerprint(element: Element, fingerprint: string): boolean {
@@ -697,11 +725,13 @@ export function locateElement(
   rootDocument: Document = document,
 ): Element | null {
   let doc: Document = rootDocument;
+  const budget = createDomTraversalBudget();
 
   // Traverse iframe chain (Phase 4 - not implemented yet)
   if (locator.frameChain?.length) {
+    if (locator.frameChain.length > MAX_ROOT_CHAIN_DEPTH) return null;
     for (const frameSelector of locator.frameChain) {
-      const frame = safeQuerySelector(doc, frameSelector);
+      const frame = findUniqueElement(doc, frameSelector, budget);
       if (!(frame instanceof HTMLIFrameElement)) return null;
       const contentDoc = frame.contentDocument;
       if (!contentDoc) return null;
@@ -714,11 +744,9 @@ export function locateElement(
 
   // Traverse Shadow DOM host chain
   if (locator.shadowHostChain?.length) {
+    if (locator.shadowHostChain.length > MAX_ROOT_CHAIN_DEPTH) return null;
     for (const hostSelector of locator.shadowHostChain) {
-      // Verify host selector is unique
-      if (!isSelectorUnique(queryRoot, hostSelector)) return null;
-
-      const host = safeQuerySelector(queryRoot, hostSelector);
+      const host = findUniqueElement(queryRoot, hostSelector, budget);
       if (!host) return null;
 
       const shadowRoot = (host as HTMLElement).shadowRoot;
@@ -729,11 +757,11 @@ export function locateElement(
   }
 
   // Try each selector candidate with uniqueness and fingerprint verification
+  if (!Array.isArray(locator.selectors) || locator.selectors.length > MAX_SELECTOR_CANDIDATES) {
+    return null;
+  }
   for (const selector of locator.selectors) {
-    // Check if selector still matches exactly one element
-    if (!isSelectorUnique(queryRoot, selector)) continue;
-
-    const element = safeQuerySelector(queryRoot, selector);
+    const element = findUniqueElement(queryRoot, selector, budget);
     if (!element) continue;
 
     // Verify fingerprint matches to catch "same selector, different element" cases

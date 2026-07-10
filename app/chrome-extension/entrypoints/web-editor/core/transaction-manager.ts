@@ -20,6 +20,12 @@ import type {
   WebEditorElementKey,
 } from '@/common/web-editor-types';
 import { Disposer } from '../utils/disposables';
+import {
+  findElementIndex,
+  findElementInsertionReference,
+  readBoundedClassNames,
+  visitDescendantElements,
+} from './dom-traversal';
 import { generateStableElementKey } from './element-key';
 import { createElementLocator, locateElement, locatorKey } from './locator';
 
@@ -289,8 +295,8 @@ function readClassList(element: Element): string[] {
   try {
     // HTMLElement has classList, but SVG's className is SVGAnimatedString
     const list = (element as HTMLElement).classList;
-    if (list && typeof list[Symbol.iterator] === 'function') {
-      return Array.from(list).filter(Boolean);
+    if (list) {
+      return readBoundedClassNames(element);
     }
   } catch {
     // Fall back to attribute parsing
@@ -377,15 +383,12 @@ function parseSingleRootElement(html: string): Element | null {
  * Remove id attributes from an element and all its descendants.
  * Used by duplicate to avoid creating duplicate IDs on the page.
  */
-function stripIdsFromSubtree(root: Element): void {
+function stripIdsFromSubtree(root: Element): boolean {
   try {
     root.removeAttribute('id');
-    const descendantsWithId = root.querySelectorAll('[id]');
-    for (const el of Array.from(descendantsWithId)) {
-      el.removeAttribute('id');
-    }
+    return visitDescendantElements(root, (element) => element.removeAttribute('id'));
   } catch {
-    // Best-effort: ignore errors
+    return false;
   }
 }
 
@@ -412,9 +415,9 @@ function insertElementAtPosition(
 
   // Fallback to index-based insertion
   if (!reference) {
-    const children = Array.from(parent.children);
-    const index = Math.max(0, Math.min(position.insertIndex, children.length));
-    reference = children[index] ?? null;
+    const resolved = findElementInsertionReference(parent, position.insertIndex);
+    if (!resolved.complete) return false;
+    reference = resolved.reference;
   }
 
   try {
@@ -484,9 +487,8 @@ function buildInsertAfterPosition(target: Element): MoveOperationData | null {
   const parent = target.parentElement;
   if (!parent) return null;
 
-  const siblings = Array.from(parent.children);
-  const index = siblings.indexOf(target);
-  if (index < 0) return null;
+  const index = findElementIndex(parent, target);
+  if (index === null) return null;
 
   return {
     parentLocator: createElementLocator(parent),
@@ -779,9 +781,8 @@ function buildMoveOperationData(element: Element): MoveOperationData | null {
   const parent = element.parentElement;
   if (!parent) return null;
 
-  const siblings = Array.from(parent.children);
-  const insertIndex = siblings.indexOf(element);
-  if (insertIndex < 0) return null;
+  const insertIndex = findElementIndex(parent, element);
+  if (insertIndex === null) return null;
 
   const parentLocator = createElementLocator(parent);
 
@@ -850,14 +851,9 @@ function applyMoveOperation(target: Element, op: MoveOperationData): boolean {
 
   // Fallback: index-based
   if (!reference) {
-    const children = Array.from(parent.children);
-    // Remove target from consideration if it's already in parent
-    const existingIndex = children.indexOf(target);
-    if (existingIndex !== -1) {
-      children.splice(existingIndex, 1);
-    }
-    const index = Math.max(0, Math.min(op.insertIndex, children.length));
-    reference = children[index] ?? null;
+    const resolved = findElementInsertionReference(parent, op.insertIndex, target);
+    if (!resolved.complete) return false;
+    reference = resolved.reference;
   }
 
   try {
@@ -1470,7 +1466,7 @@ export function createTransactionManager(
 
       // Clone the element and strip IDs to avoid duplicates
       const clone = target.cloneNode(true) as Element;
-      stripIdsFromSubtree(clone);
+      if (!stripIdsFromSubtree(clone)) return null;
 
       try {
         // Insert immediately after target

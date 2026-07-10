@@ -5,6 +5,12 @@ import type {
   WebEditorElementKey,
 } from "@/common/web-editor-types";
 import { compareComputed, normalizeText, readComputedMap } from "./css-compare";
+import {
+  createDomTraversalBudget,
+  findUniqueElement,
+  readBoundedClassNames,
+  WEB_EDITOR_DOM_LIMITS,
+} from "./dom-traversal";
 import { locateElement } from "./locator";
 
 export type ApplyVerificationStatus =
@@ -37,6 +43,7 @@ export interface ApplyVerificationOptions {
 
 const DEFAULT_ATTEMPTS = 6;
 const DEFAULT_SETTLE_DELAY_MS = 250;
+const MAX_OBSERVATION_CHAIN_DEPTH = 16;
 const HEAD_MUTATION_OPTIONS: MutationObserverInit = {
   childList: true,
   subtree: true,
@@ -82,34 +89,19 @@ function uniqueNodes<T extends Node>(
   return out;
 }
 
-function safeQuerySelector(root: ParentNode, selector: string): Element | null {
-  try {
-    return root.querySelector(selector);
-  } catch {
-    return null;
-  }
-}
-
-function isSelectorUnique(root: ParentNode, selector: string): boolean {
-  try {
-    return root.querySelectorAll(selector).length === 1;
-  } catch {
-    return false;
-  }
-}
-
 function resolveObservationContext(
   locator: ElementLocator,
   rootDocument: Document = document,
 ): Pick<ApplyVerificationObservationContext, "documents" | "domTargets"> {
   let doc = rootDocument;
+  const budget = createDomTraversalBudget();
 
   if (locator.frameChain?.length) {
+    if (locator.frameChain.length > MAX_OBSERVATION_CHAIN_DEPTH) {
+      return { documents: [doc], domTargets: [] };
+    }
     for (const frameSelector of locator.frameChain) {
-      if (!isSelectorUnique(doc, frameSelector)) {
-        break;
-      }
-      const frame = safeQuerySelector(doc, frameSelector);
+      const frame = findUniqueElement(doc, frameSelector, budget);
       if (!(frame instanceof HTMLIFrameElement) || !frame.contentDocument) {
         break;
       }
@@ -121,11 +113,11 @@ function resolveObservationContext(
   const domTargets: Node[] = [];
 
   if (locator.shadowHostChain?.length) {
+    if (locator.shadowHostChain.length > MAX_OBSERVATION_CHAIN_DEPTH) {
+      return { documents: [doc], domTargets };
+    }
     for (const hostSelector of locator.shadowHostChain) {
-      if (!isSelectorUnique(queryRoot, hostSelector)) {
-        break;
-      }
-      const host = safeQuerySelector(queryRoot, hostSelector);
+      const host = findUniqueElement(queryRoot, hostSelector, budget);
       if (!(host instanceof Element)) {
         break;
       }
@@ -162,9 +154,16 @@ function buildObservationContexts(
 }
 
 function normalizeClassList(classes: readonly string[]): string[] {
-  return Array.from(
-    new Set(classes.map((value) => String(value ?? "").trim()).filter(Boolean)),
-  ).sort();
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const value of classes) {
+    if (normalized.length >= WEB_EDITOR_DOM_LIMITS.maxClasses) break;
+    const token = String(value ?? "").trim();
+    if (!token || seen.has(token)) continue;
+    seen.add(token);
+    normalized.push(token);
+  }
+  return normalized.sort();
 }
 
 function buildExpectedTarget(
@@ -187,7 +186,7 @@ function buildExpectedTarget(
   const expectedClasses = options.includeClasses
     ? normalizeClassList(
         options.expectedClasses ??
-          (liveElement ? Array.from(liveElement.classList) : []),
+          (liveElement ? readBoundedClassNames(liveElement) : []),
       )
     : undefined;
 
@@ -284,7 +283,7 @@ function verifyTarget(
 
   if (target.expectedClasses !== undefined) {
     checks += 1;
-    const actualClasses = normalizeClassList(Array.from(element.classList));
+    const actualClasses = normalizeClassList(readBoundedClassNames(element));
     if (actualClasses.join("\n") !== target.expectedClasses.join("\n")) {
       return { status: "mismatch" };
     }
