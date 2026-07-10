@@ -21,6 +21,13 @@ import {
   getNativeSocketPath,
 } from './ipc/socket-path';
 import {
+  constantTimeTokenEquals,
+  createNativeIpcCredential,
+  IPC_AUTH_METHOD,
+  removeNativeIpcCredential,
+  type NativeIpcCredential,
+} from './ipc/bridge-auth';
+import {
   callToolForContext,
   listToolsForContext,
   type McpClientCapabilityFallback,
@@ -113,6 +120,7 @@ export class NativeMessagingHost {
   private streamSubscriptions: Map<string, AgentStreamSubscription> = new Map();
   private ipcServer: net.Server | null = null;
   private ipcSockets: Set<net.Socket> = new Set();
+  private ipcCredential: NativeIpcCredential | null = null;
   private static readonly AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
 
   public constructor(private readonly messageWriter = new NativeMessageWriter(stdout)) {}
@@ -167,6 +175,8 @@ export class NativeMessagingHost {
       }
     }
 
+    this.ipcCredential = createNativeIpcCredential(socketPath);
+
     this.ipcServer = net.createServer((socket) => {
       this.handleIpcSocket(socket);
     });
@@ -183,6 +193,7 @@ export class NativeMessagingHost {
     this.ipcSockets.add(socket);
     socket.setEncoding('utf8');
     let buffer = '';
+    let authenticated = false;
 
     const send = (payload: unknown): void => {
       try {
@@ -210,6 +221,27 @@ export class NativeMessagingHost {
             id: null,
             error: error instanceof Error ? error.message : 'Invalid JSON payload',
           });
+          continue;
+        }
+
+        if (!authenticated) {
+          const token = parsed?.params?.token;
+          if (
+            parsed?.method !== IPC_AUTH_METHOD ||
+            !this.ipcCredential ||
+            !constantTimeTokenEquals(token, this.ipcCredential.token)
+          ) {
+            send({ id: parsed?.id ?? null, error: 'IPC authentication failed' });
+            socket.destroy();
+            return;
+          }
+          authenticated = true;
+          send({ id: parsed?.id ?? null, result: { authenticated: true } });
+          continue;
+        }
+
+        if (parsed?.method === IPC_AUTH_METHOD) {
+          send({ id: parsed?.id ?? null, error: 'IPC connection is already authenticated' });
           continue;
         }
 
@@ -985,6 +1017,10 @@ export class NativeMessagingHost {
         // ignore
       }
       this.ipcServer = null;
+    }
+    if (this.ipcCredential) {
+      removeNativeIpcCredential(this.ipcCredential);
+      this.ipcCredential = null;
     }
     const socketPath = getNativeSocketPath();
     if (process.platform !== 'win32') {

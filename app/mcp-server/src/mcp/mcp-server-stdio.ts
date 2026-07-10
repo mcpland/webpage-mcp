@@ -14,6 +14,7 @@ import {
 import { TOOL_SCHEMAS } from 'webpage-mcp-shared';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { getLegacyNativeSocketPath, getNativeSocketPath } from '../ipc/socket-path';
+import { IPC_AUTH_METHOD, readNativeIpcCredential } from '../ipc/bridge-auth';
 import { autoBootstrapNativeMessagingForStdio } from '../scripts/utils';
 import { resolveMcpClientCapabilities } from './register-tools';
 import { shouldNotifyWorkflowToolListChanged } from './tool-list-change';
@@ -114,6 +115,7 @@ function formatBridgeConnectError(
 
 class NativeIpcBridgeClient {
   private socket: net.Socket | null = null;
+  private authenticated = false;
   private buffer = '';
   private connectPromise: Promise<void> | null = null;
   private connectedSocketPath: string | null = null;
@@ -131,15 +133,32 @@ class NativeIpcBridgeClient {
       socket.on('connect', () => {
         cleanup();
         this.socket = socket;
+        this.authenticated = false;
         this.connectedSocketPath = socketPath;
         this.buffer = '';
 
         socket.setEncoding('utf8');
         socket.on('data', (chunk: string) => this.onData(chunk));
-        socket.on('close', () => this.onDisconnected('IPC socket closed'));
-        socket.on('error', (error) => this.onDisconnected(error.message));
+        socket.on('close', () => this.onDisconnected(socket, 'IPC socket closed'));
+        socket.on('error', (error) => this.onDisconnected(socket, error.message));
 
-        resolve();
+        void this.authenticate(socket, socketPath)
+          .then(() => {
+            if (this.socket !== socket || socket.destroyed) {
+              throw new Error('IPC socket closed during authentication');
+            }
+            this.authenticated = true;
+            resolve();
+          })
+          .catch((error) => {
+            if (this.socket === socket) {
+              this.socket = null;
+              this.authenticated = false;
+              this.connectedSocketPath = null;
+            }
+            socket.destroy();
+            reject(error);
+          });
       });
 
       socket.on('error', (error) => {
@@ -175,7 +194,7 @@ class NativeIpcBridgeClient {
   }
 
   async ensureConnected(): Promise<void> {
-    if (this.socket && !this.socket.destroyed) {
+    if (this.socket && !this.socket.destroyed && this.authenticated) {
       return;
     }
     if (this.connectPromise) {
@@ -231,8 +250,12 @@ class NativeIpcBridgeClient {
     }
   }
 
-  private onDisconnected(reason: string): void {
+  private onDisconnected(socket: net.Socket, reason: string): void {
+    if (this.socket !== socket) {
+      return;
+    }
     this.socket = null;
+    this.authenticated = false;
     this.connectedSocketPath = null;
     for (const [id, pending] of this.pending.entries()) {
       clearTimeout(pending.timer);
@@ -241,17 +264,33 @@ class NativeIpcBridgeClient {
     }
   }
 
-  async request<T = unknown>(method: string, params?: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
-    await this.ensureConnected();
-    if (!this.socket || this.socket.destroyed) {
-      const detail = this.connectedSocketPath ? ` (${this.connectedSocketPath})` : '';
-      throw new Error(`IPC socket is not connected${detail}`);
+  private async authenticate(socket: net.Socket, socketPath: string): Promise<void> {
+    const credential = readNativeIpcCredential(socketPath);
+    const result = await this.sendRequest<{ authenticated?: boolean }>(
+      socket,
+      IPC_AUTH_METHOD,
+      { token: credential.token },
+      5_000,
+    );
+    if (result?.authenticated !== true) {
+      throw new Error('Native IPC bridge did not authenticate the connection');
+    }
+  }
+
+  private sendRequest<T>(
+    socket: net.Socket,
+    method: string,
+    params: Record<string, unknown> | undefined,
+    timeoutMs: number,
+  ): Promise<T> {
+    if (socket.destroyed || this.socket !== socket) {
+      return Promise.reject(new Error('IPC socket is not connected'));
     }
 
     const id = randomUUID();
     const payload = JSON.stringify({ id, method, params });
 
-    const response = await new Promise<T>((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`IPC request timed out after ${timeoutMs}ms`));
@@ -263,7 +302,7 @@ class NativeIpcBridgeClient {
         timer,
       });
 
-      this.socket!.write(`${payload}\n`, (error) => {
+      socket.write(`${payload}\n`, (error) => {
         if (!error) {
           return;
         }
@@ -272,8 +311,16 @@ class NativeIpcBridgeClient {
         reject(error);
       });
     });
+  }
 
-    return response;
+  async request<T = unknown>(method: string, params?: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
+    await this.ensureConnected();
+    if (!this.socket || this.socket.destroyed) {
+      const detail = this.connectedSocketPath ? ` (${this.connectedSocketPath})` : '';
+      throw new Error(`IPC socket is not connected${detail}`);
+    }
+
+    return await this.sendRequest<T>(this.socket, method, params, timeoutMs);
   }
 
   close(): void {
@@ -285,7 +332,12 @@ class NativeIpcBridgeClient {
       }
       this.socket = null;
     }
-    this.onDisconnected('IPC client closed');
+    this.authenticated = false;
+    for (const [id, pending] of this.pending.entries()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('IPC client closed'));
+      this.pending.delete(id);
+    }
   }
 }
 
