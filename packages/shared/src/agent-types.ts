@@ -29,7 +29,7 @@ export interface AgentMessage {
 // Stream Events
 // ============================================================
 
-export type StreamTransport = 'sse' | 'websocket';
+export type StreamTransport = 'sse' | 'websocket' | 'native-messaging';
 
 export interface AgentStatusEvent {
   sessionId: string;

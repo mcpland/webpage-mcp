@@ -1,5 +1,6 @@
 import { Writable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_MCP_INSTANCE_ID, NativeMessageType } from 'webpage-mcp-shared';
 import {
   CHROME_NATIVE_MESSAGE_MAX_OUTBOUND_BYTES,
   NativeMessageWriter,
@@ -71,6 +72,49 @@ describe('NativeMessagingHost outbound requests', () => {
     expect(decodeFrame(output.chunks[0])).toMatchObject({
       responseToRequestId: 'extension-request',
       error: expect.stringContaining('could not encode response'),
+    });
+  });
+
+  it('labels native agent subscriptions with their actual transport', async () => {
+    const output = new CollectingWritable();
+    const host = new NativeMessagingHost(new NativeMessageWriter(output));
+    const subscribeAgentEvents = vi.fn(() => vi.fn());
+    (
+      host as unknown as {
+        servers: Map<
+          string,
+          {
+            isRunning: boolean;
+            subscribeAgentEvents: typeof subscribeAgentEvents;
+          }
+        >;
+        handleAgentStreamSubscribe: (message: unknown) => Promise<void>;
+      }
+    ).servers.set(DEFAULT_MCP_INSTANCE_ID, {
+      isRunning: true,
+      subscribeAgentEvents,
+    });
+
+    await (
+      host as unknown as {
+        handleAgentStreamSubscribe: (message: unknown) => Promise<void>;
+      }
+    ).handleAgentStreamSubscribe({
+      requestId: 'subscribe-1',
+      payload: { sessionId: 'session-1' },
+    });
+
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(2));
+    const connected = output.chunks.map(decodeFrame).find((message) => {
+      return message.type === NativeMessageType.AGENT_STREAM_EVENT;
+    });
+    expect(connected).toMatchObject({
+      payload: {
+        event: {
+          type: 'connected',
+          data: { transport: 'native-messaging' },
+        },
+      },
     });
   });
 });

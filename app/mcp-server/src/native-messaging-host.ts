@@ -919,7 +919,7 @@ export class NativeMessagingHost {
       type: 'connected',
       data: {
         sessionId,
-        transport: 'sse',
+        transport: 'native-messaging',
         timestamp: new Date().toISOString(),
       },
     };
