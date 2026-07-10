@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { gunzipSync, inflateRawSync } from "node:zlib";
 import { lstat, readFile, readdir } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { join, posix, relative, resolve, sep } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -58,12 +58,24 @@ const MCP_PACKED_FIELDS = [
   "preferGlobal",
   "dependencies",
 ];
-const MCP_REQUIRED_RUNTIME_FILES = [
+const MCP_RUNTIME_ENTRYPOINTS = [
   "package/dist/native-messaging-host.js",
   "package/dist/scripts/native-log-runner.js",
   "package/dist/scripts/postinstall.js",
   "package/dist/run_host.sh",
   "package/dist/run_host.bat",
+];
+// Keep the supervisor's first-party dependency edge explicit. Unlike the
+// bundled host entrypoint, native-log-runner.js is emitted as CommonJS and
+// requires this sibling module at process startup.
+const MCP_LOCAL_RUNTIME_DEPENDENCIES = {
+  "package/dist/scripts/native-log-runner.js": [
+    "package/dist/scripts/native-log-policy.js",
+  ],
+};
+const MCP_REQUIRED_RUNTIME_FILES = [
+  ...MCP_RUNTIME_ENTRYPOINTS,
+  ...new Set(Object.values(MCP_LOCAL_RUNTIME_DEPENDENCIES).flat()),
 ];
 const EXTENSION_REQUIRED_PERMISSIONS = [
   "nativeMessaging",
@@ -647,6 +659,43 @@ function requireNonemptyArchiveFile(entries, path, description) {
   return entry;
 }
 
+function verifyStaticLocalCommonJsDependencies(entries, entryPath) {
+  const source = requireNonemptyArchiveFile(
+    entries,
+    entryPath,
+    "npm tarball",
+  ).bytes.toString("utf8");
+  const specifiers = new Set(
+    Array.from(
+      source.matchAll(/\brequire\(\s*["'](\.[^"']*)["']\s*\)/g),
+      (match) => match[1],
+    ),
+  );
+  for (const specifier of specifiers) {
+    invariant(
+      !specifier.includes("\\"),
+      `npm runtime dependency must use a POSIX path: ${specifier}`,
+    );
+    const resolved = posix.normalize(
+      posix.join(posix.dirname(entryPath), specifier),
+    );
+    invariant(
+      resolved.startsWith("package/"),
+      `npm runtime dependency escapes package/: ${specifier}`,
+    );
+    const candidates = posix.extname(resolved)
+      ? [resolved]
+      : [`${resolved}.js`, `${resolved}/index.js`];
+    invariant(
+      candidates.some((candidate) => {
+        const entry = entries.get(candidate);
+        return entry && !entry.isDirectory && entry.bytes.length > 0;
+      }),
+      `${entryPath} is missing local dependency ${specifier}`,
+    );
+  }
+}
+
 function verifyPackedMcpPackage({ packedPackage, sourcePackage, tarEntries }) {
   invariant(
     isRecord(packedPackage),
@@ -703,6 +752,10 @@ function verifyPackedMcpPackage({ packedPackage, sourcePackage, tarEntries }) {
   for (const path of MCP_REQUIRED_RUNTIME_FILES) {
     requireNonemptyArchiveFile(tarEntries, path, "npm tarball");
   }
+  verifyStaticLocalCommonJsDependencies(
+    tarEntries,
+    "package/dist/scripts/native-log-runner.js",
+  );
 }
 
 function requireStringPath(rawPath, description) {

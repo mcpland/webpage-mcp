@@ -362,6 +362,11 @@ async function createArtifacts(rootDir, overrides = {}) {
           ["package/dist/native-messaging-host.js", "module.exports = {};\n"],
           [
             "package/dist/scripts/native-log-runner.js",
+            overrides.mcpRunnerSource ??
+              "require('./native-log-policy');\nmodule.exports = {};\n",
+          ],
+          [
+            "package/dist/scripts/native-log-policy.js",
             "module.exports = {};\n",
           ],
           ["package/dist/scripts/postinstall.js", "module.exports = {};\n"],
@@ -809,6 +814,35 @@ test("release artifacts must contain runnable npm and extension payloads", async
       /Missing package\/dist\/scripts\/native-log-runner\.js in npm tarball/,
     );
   });
+
+  await t.test(
+    "when the native log runner policy dependency is missing",
+    async (t) => {
+      const rootDir = await createReleaseRoot(t);
+      const { artifactsDir } = await createArtifacts(rootDir, {
+        omitMcpEntry: "package/dist/scripts/native-log-policy.js",
+      });
+      await assert.rejects(
+        verifyReleaseArtifacts({ rootDir, artifactsDir }),
+        /Missing package\/dist\/scripts\/native-log-policy\.js in npm tarball/,
+      );
+    },
+  );
+
+  await t.test(
+    "when the native log runner gains an uncovered local dependency",
+    async (t) => {
+      const rootDir = await createReleaseRoot(t);
+      const { artifactsDir } = await createArtifacts(rootDir, {
+        mcpRunnerSource:
+          "require('./native-log-policy');\nrequire('./missing-helper');\n",
+      });
+      await assert.rejects(
+        verifyReleaseArtifacts({ rootDir, artifactsDir }),
+        /native-log-runner\.js is missing local dependency \.\/missing-helper/,
+      );
+    },
+  );
 
   await t.test("when either archive is only a metadata skeleton", async (t) => {
     const npmRoot = await createReleaseRoot(t);
