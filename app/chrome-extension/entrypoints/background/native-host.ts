@@ -1097,10 +1097,11 @@ export function connectNativeHost(): boolean {
 
   try {
     lastNativeDisconnectError = null;
-    nativePort = chrome.runtime.connectNative(HOST_NAME);
+    const connectedPort = chrome.runtime.connectNative(HOST_NAME);
+    nativePort = connectedPort;
     syncConnectionBadge();
 
-    nativePort.onMessage.addListener(async (message) => {
+    connectedPort.onMessage.addListener(async (message) => {
       if (message?.responseToRequestId) {
         const requestId = String(message.responseToRequestId);
         const pending = pendingNativeRequests.get(requestId);
@@ -1268,7 +1269,11 @@ export function connectNativeHost(): boolean {
       }
     });
 
-    nativePort.onDisconnect.addListener(() => {
+    connectedPort.onDisconnect.addListener(() => {
+      if (nativePort !== connectedPort) {
+        return;
+      }
+
       const disconnectMessage =
         chrome.runtime.lastError?.message || ERROR_MESSAGES.NATIVE_DISCONNECTED;
       lastNativeDisconnectError = disconnectMessage;
