@@ -23,7 +23,11 @@ function collectTsFiles(dir: string): string[] {
       continue;
     }
 
-    if (fullPath.endsWith('.d.ts') || fullPath.endsWith('.test.ts') || fullPath.endsWith('.spec.ts')) {
+    if (
+      fullPath.endsWith('.d.ts') ||
+      fullPath.endsWith('.test.ts') ||
+      fullPath.endsWith('.spec.ts')
+    ) {
       continue;
     }
 
@@ -40,42 +44,46 @@ const transpileEntries = Object.fromEntries(
   }),
 );
 
-export default defineConfig([
-  {
-    entry: transpileEntries,
-    outDir: 'dist',
-    format: ['cjs'],
-    platform: 'node',
-    target: 'node20',
-    bundle: false,
-    sourcemap: true,
-    clean: true,
-    dts: false,
+// These phases intentionally run through separate CLI invocations. tsup executes
+// config arrays concurrently, but the bundled entries must overwrite matching
+// transpiled entries only after the first phase has finished.
+export const transpileConfig = {
+  entry: transpileEntries,
+  outDir: 'dist',
+  format: ['cjs'] as const,
+  platform: 'node' as const,
+  target: 'node20',
+  bundle: false,
+  sourcemap: true,
+  clean: true,
+  dts: false,
+};
+
+export const bundleConfig = {
+  entry: {
+    index: path.join(SRC_DIR, 'index.ts'),
+    'agent/attachment-service': path.join(SRC_DIR, 'agent/attachment-service.ts'),
+    'agent/engines/codex': path.join(SRC_DIR, 'agent/engines/codex.ts'),
+    'agent/rpc-dispatcher': path.join(SRC_DIR, 'agent/rpc-dispatcher.ts'),
+    'agent/types': path.join(SRC_DIR, 'agent/types.ts'),
+    'mcp/mcp-server-stdio': path.join(SRC_DIR, 'mcp/mcp-server-stdio.ts'),
+    'mcp/register-tools': path.join(SRC_DIR, 'mcp/register-tools.ts'),
+    'native-messaging-host': path.join(SRC_DIR, 'native-messaging-host.ts'),
+    'server/index': path.join(SRC_DIR, 'server/index.ts'),
   },
-  {
-    entry: {
-      index: path.join(SRC_DIR, 'index.ts'),
-      'agent/attachment-service': path.join(SRC_DIR, 'agent/attachment-service.ts'),
-      'agent/engines/codex': path.join(SRC_DIR, 'agent/engines/codex.ts'),
-      'agent/rpc-dispatcher': path.join(SRC_DIR, 'agent/rpc-dispatcher.ts'),
-      'agent/types': path.join(SRC_DIR, 'agent/types.ts'),
-      'mcp/mcp-server-stdio': path.join(SRC_DIR, 'mcp/mcp-server-stdio.ts'),
-      'mcp/register-tools': path.join(SRC_DIR, 'mcp/register-tools.ts'),
-      'native-messaging-host': path.join(SRC_DIR, 'native-messaging-host.ts'),
-      'server/index': path.join(SRC_DIR, 'server/index.ts'),
-    },
-    outDir: 'dist',
-    format: ['cjs'],
-    platform: 'node',
-    target: 'node20',
-    bundle: true,
-    splitting: false,
-    sourcemap: true,
-    clean: false,
-    dts: false,
-    noExternal: ['webpage-mcp-shared'],
-    alias: {
-      'webpage-mcp-shared': path.resolve(__dirname, '../../packages/shared/src/index.ts'),
-    },
+  outDir: 'dist',
+  format: ['cjs'] as const,
+  platform: 'node' as const,
+  target: 'node20',
+  bundle: true,
+  splitting: false,
+  sourcemap: true,
+  clean: false,
+  dts: false,
+  noExternal: ['webpage-mcp-shared'],
+  alias: {
+    'webpage-mcp-shared': path.resolve(__dirname, '../../packages/shared/src/index.ts'),
   },
-]);
+};
+
+export default defineConfig(transpileConfig);
