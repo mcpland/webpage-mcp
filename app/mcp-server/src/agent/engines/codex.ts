@@ -2,13 +2,19 @@ import spawn from 'cross-spawn';
 import readline from 'node:readline';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import type { Writable } from 'node:stream';
 import {
+  AGENT_FINAL_PROMPT_MAX_BYTES,
   CODEX_AUTO_INSTRUCTIONS,
   DEFAULT_CODEX_CONFIG,
   DEFAULT_MCP_INSTANCE_ID,
   type CodexEngineConfig,
 } from 'webpage-mcp-shared';
-import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
+import type {
+  AgentEngine,
+  EngineExecutionContext,
+  EngineInitOptions,
+} from './types';
 import { getProject } from '../project-service';
 import { validateCodexConfig } from '../session-security';
 import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
@@ -32,6 +38,206 @@ import {
   createBoundedAgentMessage,
   type AssistantStreamSnapshot,
 } from './stream-output';
+
+/** Resource budgets for the optional top-level project directory summary. */
+export const CODEX_PROJECT_CONTEXT_MAX_ENTRIES = 1_000;
+export const CODEX_PROJECT_CONTEXT_ENTRY_NAME_MAX_BYTES = 1_024;
+export const CODEX_PROJECT_CONTEXT_MAX_BYTES = 64 * 1024;
+export const CODEX_ENGINE_PROMPT_MAX_BYTES =
+  AGENT_FINAL_PROMPT_MAX_BYTES + CODEX_PROJECT_CONTEXT_MAX_BYTES;
+
+const PROJECT_CONTEXT_PREFIX =
+  '\n\n<current_project_context>\nCurrent files in project directory: ';
+const EMPTY_PROJECT_CONTEXT_PREFIX =
+  '\n\n<current_project_context>\nThis is an empty project directory.';
+const PROJECT_CONTEXT_TRUNCATION =
+  '\nProject directory listing was truncated to configured resource limits.';
+const PROJECT_CONTEXT_SUFFIX =
+  '\nWork directly in the current directory. Do not create subdirectories unless specifically requested.\n</current_project_context>';
+
+interface ProjectContextEntry {
+  name: string;
+}
+
+function utf8ByteLength(value: string): number {
+  return Buffer.byteLength(value, 'utf8');
+}
+
+function compareProjectEntryNames(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function boundProjectEntryName(value: string): {
+  text: string;
+  truncated: boolean;
+} {
+  const encoded = Buffer.from(value, 'utf8');
+  if (encoded.length <= CODEX_PROJECT_CONTEXT_ENTRY_NAME_MAX_BYTES) {
+    return { text: value, truncated: false };
+  }
+
+  const marker = '…';
+  const prefixBytes =
+    CODEX_PROJECT_CONTEXT_ENTRY_NAME_MAX_BYTES - utf8ByteLength(marker);
+  const prefix = encoded
+    .subarray(0, prefixBytes)
+    .toString('utf8')
+    .replace(/\uFFFD$/, '');
+  return { text: `${prefix}${marker}`, truncated: true };
+}
+
+/**
+ * Build a deterministic, byte-bounded project summary from a bounded prefix
+ * of a directory iterator. Production passes an fs.Dir so a very large
+ * directory is never materialized by readdir before the limit is applied.
+ */
+export async function buildCodexProjectContext(
+  entries: Iterable<ProjectContextEntry> | AsyncIterable<ProjectContextEntry>,
+): Promise<string> {
+  const visibleNames: string[] = [];
+  let inspectedEntries = 0;
+  let truncated = false;
+
+  for await (const entry of entries) {
+    // Read one sentinel entry beyond the retained limit so exact-limit
+    // directories are not incorrectly labelled as truncated.
+    if (inspectedEntries >= CODEX_PROJECT_CONTEXT_MAX_ENTRIES) {
+      truncated = true;
+      break;
+    }
+    inspectedEntries += 1;
+
+    if (entry.name.startsWith('.git') || entry.name === 'AGENTS.md') {
+      continue;
+    }
+
+    // Control characters in a filename must not be able to create new prompt
+    // instructions. Bound after sanitizing because U+FFFD uses three UTF-8 bytes.
+    const sanitizedName = entry.name.replace(
+      /[\u0000-\u001f\u007f]/g,
+      '\uFFFD',
+    );
+    const boundedName = boundProjectEntryName(sanitizedName);
+    visibleNames.push(boundedName.text);
+    if (boundedName.truncated) truncated = true;
+  }
+
+  visibleNames.sort(compareProjectEntryNames);
+
+  const prefix =
+    visibleNames.length === 0
+      ? EMPTY_PROJECT_CONTEXT_PREFIX
+      : PROJECT_CONTEXT_PREFIX;
+  const fixedBytes =
+    utf8ByteLength(prefix) +
+    utf8ByteLength(PROJECT_CONTEXT_TRUNCATION) +
+    utf8ByteLength(PROJECT_CONTEXT_SUFFIX);
+  let remainingBytes = CODEX_PROJECT_CONTEXT_MAX_BYTES - fixedBytes;
+  if (remainingBytes < 0) {
+    throw new Error(
+      'CodexEngine: project context framing exceeds its byte limit',
+    );
+  }
+
+  const retainedNames: string[] = [];
+  if (visibleNames.length > 0) {
+    for (const name of visibleNames) {
+      const token = retainedNames.length === 0 ? name : `, ${name}`;
+      const tokenBytes = utf8ByteLength(token);
+      if (tokenBytes > remainingBytes) {
+        truncated = true;
+        break;
+      }
+      retainedNames.push(name);
+      remainingBytes -= tokenBytes;
+    }
+  }
+
+  const listing = retainedNames.join(', ');
+  const context = `${prefix}${listing}${truncated ? PROJECT_CONTEXT_TRUNCATION : ''}${PROJECT_CONTEXT_SUFFIX}`;
+  if (utf8ByteLength(context) > CODEX_PROJECT_CONTEXT_MAX_BYTES) {
+    throw new Error('CodexEngine: project context exceeds its byte limit');
+  }
+  return context;
+}
+
+/**
+ * Deliver the prompt through a bounded pipe and settle only after Node reports
+ * that all buffered bytes were flushed. EPIPE, premature close, and abort are
+ * converted into ordinary promise rejections instead of unhandled stream errors.
+ */
+export function writeCodexPromptToStdin(
+  stdin: Writable | null,
+  prompt: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!stdin) {
+    return Promise.reject(
+      new Error('CodexEngine: Codex stdin pipe was not created'),
+    );
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = (): void => {
+      stdin.removeListener('error', handleError);
+      stdin.removeListener('finish', handleFinish);
+      stdin.removeListener('close', handleClose);
+      signal?.removeEventListener('abort', handleAbort);
+    };
+    const settle = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const handleError = (error: Error): void => {
+      settle(
+        new Error(
+          `CodexEngine: failed to write prompt to stdin: ${error.message}`,
+        ),
+      );
+    };
+    const handleFinish = (): void => settle();
+    const handleClose = (): void => {
+      if (stdin.writableFinished) {
+        settle();
+      } else {
+        settle(
+          new Error(
+            'CodexEngine: stdin closed before the prompt was delivered',
+          ),
+        );
+      }
+    };
+    const handleAbort = (): void => {
+      // Do not destroy with an Error: after cleanup that could become an
+      // unhandled 'error' event on some Writable implementations.
+      settle(new Error('CodexEngine: execution was cancelled'));
+      stdin.destroy();
+    };
+
+    stdin.once('error', handleError);
+    stdin.once('finish', handleFinish);
+    stdin.once('close', handleClose);
+    signal?.addEventListener('abort', handleAbort, { once: true });
+
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+
+    try {
+      // Writable.end() honours backpressure and 'finish' is emitted only after
+      // the buffered prompt has been handed to the underlying pipe.
+      stdin.end(prompt, 'utf8');
+    } catch (error) {
+      handleError(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
 
 type TodoListPhase = 'started' | 'update' | 'completed';
 
@@ -89,7 +295,10 @@ export class CodexEngine implements AgentEngine {
    */
   private static readonly MAX_STDERR_LINES = 200;
 
-  async initializeAndRun(options: EngineInitOptions, ctx: EngineExecutionContext): Promise<void> {
+  async initializeAndRun(
+    options: EngineInitOptions,
+    ctx: EngineExecutionContext,
+  ): Promise<void> {
     const {
       sessionId,
       instruction,
@@ -107,6 +316,13 @@ export class CodexEngine implements AgentEngine {
     // Check if already aborted
     if (signal?.aborted) {
       throw new Error('CodexEngine: execution was cancelled');
+    }
+
+    const instructionBytes = utf8ByteLength(instruction);
+    if (instructionBytes > AGENT_FINAL_PROMPT_MAX_BYTES) {
+      throw new Error(
+        `CodexEngine: instruction exceeds the ${AGENT_FINAL_PROMPT_MAX_BYTES}-byte UTF-8 limit`,
+      );
     }
 
     const normalizedInstruction = instruction.trim();
@@ -149,6 +365,12 @@ export class CodexEngine implements AgentEngine {
     const prompt = resolvedConfig.appendProjectContext
       ? await this.appendProjectContext(normalizedInstruction, repoPath)
       : normalizedInstruction;
+    const promptBytes = utf8ByteLength(prompt);
+    if (promptBytes > CODEX_ENGINE_PROMPT_MAX_BYTES) {
+      throw new Error(
+        `CodexEngine: prompt exceeds the ${CODEX_ENGINE_PROMPT_MAX_BYTES}-byte UTF-8 limit`,
+      );
+    }
 
     const spawnSpec = buildCodexSpawnSpec();
     const args: string[] = [
@@ -170,10 +392,19 @@ export class CodexEngine implements AgentEngine {
     if (enableWebpageMcp) {
       const stdioConfig = resolveWebpageMcpStdioConfig(this.instanceId);
       args.push('-c', 'mcp_servers.webpage_mcp.type="stdio"');
-      args.push('-c', `mcp_servers.webpage_mcp.command=${JSON.stringify(stdioConfig.command)}`);
-      args.push('-c', `mcp_servers.webpage_mcp.args=${JSON.stringify(stdioConfig.args)}`);
+      args.push(
+        '-c',
+        `mcp_servers.webpage_mcp.command=${JSON.stringify(stdioConfig.command)}`,
+      );
+      args.push(
+        '-c',
+        `mcp_servers.webpage_mcp.args=${JSON.stringify(stdioConfig.args)}`,
+      );
       if (stdioConfig.env && Object.keys(stdioConfig.env).length > 0) {
-        args.push('-c', `mcp_servers.webpage_mcp.env=${JSON.stringify(stdioConfig.env)}`);
+        args.push(
+          '-c',
+          `mcp_servers.webpage_mcp.env=${JSON.stringify(stdioConfig.env)}`,
+        );
       }
       console.error(
         `[CodexEngine] Webpage MCP server enabled via stdio: ${stdioConfig.command} ${stdioConfig.args.join(' ')}`,
@@ -188,11 +419,14 @@ export class CodexEngine implements AgentEngine {
 
     // Process image attachments - prefer resolvedImagePaths (persisted), fallback to temp files
     const tempFiles: string[] = [];
-    const hasResolvedPaths = resolvedImagePaths && resolvedImagePaths.length > 0;
+    const hasResolvedPaths =
+      resolvedImagePaths && resolvedImagePaths.length > 0;
 
     if (hasResolvedPaths) {
       // Use pre-resolved persistent paths (preferred - no temp files needed)
-      console.error(`[CodexEngine] Using ${resolvedImagePaths.length} pre-resolved image path(s)`);
+      console.error(
+        `[CodexEngine] Using ${resolvedImagePaths.length} pre-resolved image path(s)`,
+      );
       for (const imagePath of resolvedImagePaths) {
         args.push('--image', imagePath);
       }
@@ -205,13 +439,19 @@ export class CodexEngine implements AgentEngine {
             tempFiles.push(tempFile);
             args.push('--image', tempFile);
           } catch (err) {
-            console.error('[CodexEngine] Failed to write attachment to temp file:', err);
+            console.error(
+              '[CodexEngine] Failed to write attachment to temp file:',
+              err,
+            );
           }
         }
       }
     }
 
-    args.push(prompt);
+    // `codex exec -` consumes the prompt from stdin. Never place user content
+    // in argv where it is visible to process listings and constrained by OS
+    // command-line limits.
+    args.push('-');
 
     // Use explicit Promise wrapping to ensure child process errors are properly rejected.
     return new Promise<void>((resolve, reject) => {
@@ -219,7 +459,7 @@ export class CodexEngine implements AgentEngine {
         cwd: repoPath,
         env: this.buildCodexEnv(),
         shell: spawnSpec.shell,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         detached: shouldDetachChildProcess(),
       });
 
@@ -228,6 +468,7 @@ export class CodexEngine implements AgentEngine {
       let hasCompleted = false;
       let terminalError: Error | null = null;
       let finishPromise: Promise<void> | null = null;
+      let promptDeliveryPromise: Promise<void> | null = null;
 
       // Readline interface - declared early to avoid TDZ issues in finish()
       let rl: readline.Interface | null = null;
@@ -250,13 +491,20 @@ export class CodexEngine implements AgentEngine {
           } catch {
             // Closing readline is best-effort; process termination remains authoritative.
           }
+          try {
+            child.stdin?.destroy();
+          } catch {
+            // Closing stdin is best-effort; process termination remains authoritative.
+          }
         },
       });
 
       // Assistant message state
       let assistantMessageId: string | null = null;
       let assistantCreatedAt: string | null = null;
-      const streamedToolHashes = new BoundedSet<string>(STREAM_DEDUPE_MAX_ENTRIES);
+      const streamedToolHashes = new BoundedSet<string>(
+        STREAM_DEDUPE_MAX_ENTRIES,
+      );
       const activeCommands = new BoundedMap<string, { command?: string }>(
         STREAM_ACTIVE_COMMAND_MAX_ENTRIES,
       );
@@ -275,7 +523,10 @@ export class CodexEngine implements AgentEngine {
             console.error(`[CodexEngine] Cleaned up temp file: ${filePath}`);
           } catch (err) {
             // Ignore errors during cleanup - file may already be deleted
-            console.error(`[CodexEngine] Failed to cleanup temp file ${filePath}:`, err);
+            console.error(
+              `[CodexEngine] Failed to cleanup temp file ${filePath}:`,
+              err,
+            );
           }
         }
       };
@@ -309,6 +560,22 @@ export class CodexEngine implements AgentEngine {
                 lifecycleError instanceof Error
                   ? lifecycleError
                   : new Error(String(lifecycleError));
+            }
+          }
+
+          if (promptDeliveryPromise) {
+            if (child.stdin && !child.stdin.writableFinished) {
+              child.stdin.destroy();
+            }
+            try {
+              await promptDeliveryPromise;
+            } catch (promptError) {
+              if (!terminalError) {
+                terminalError =
+                  promptError instanceof Error
+                    ? promptError
+                    : new Error(String(promptError));
+              }
             }
           }
 
@@ -382,6 +649,18 @@ export class CodexEngine implements AgentEngine {
         },
       );
 
+      promptDeliveryPromise = writeCodexPromptToStdin(
+        child.stdin,
+        prompt,
+        signal,
+      );
+      void promptDeliveryPromise.catch((promptError) => {
+        // Cancellation/timeout already has a more precise lifecycle error.
+        if (!processLifecycle.isTerminationRequested) {
+          void finish(promptError);
+        }
+      });
+
       // Collect stderr with bounded buffer
       child.stderr?.on('data', (chunk) => {
         const text = String(chunk).trim();
@@ -390,7 +669,10 @@ export class CodexEngine implements AgentEngine {
         stderrBuffer.push(text);
         // Keep only the most recent lines to prevent memory growth
         if (stderrBuffer.length > CodexEngine.MAX_STDERR_LINES) {
-          stderrBuffer.splice(0, stderrBuffer.length - CodexEngine.MAX_STDERR_LINES);
+          stderrBuffer.splice(
+            0,
+            stderrBuffer.length - CodexEngine.MAX_STDERR_LINES,
+          );
         }
 
         console.error('[CodexEngine][stderr]', text);
@@ -516,16 +798,25 @@ export class CodexEngine implements AgentEngine {
           ? boundStreamText(rawCommand, STREAM_TOOL_FIELD_MAX_BYTES).text
           : tracked?.command;
         const rawOutput = this.pickFirstString(item.aggregated_output) ?? '';
-        const outputSnapshot = boundStreamText(rawOutput, STREAM_TOOL_CONTENT_MAX_BYTES);
+        const outputSnapshot = boundStreamText(
+          rawOutput,
+          STREAM_TOOL_CONTENT_MAX_BYTES,
+        );
         const output = outputSnapshot.text;
-        const exitCode = typeof item.exit_code === 'number' ? item.exit_code : undefined;
+        const exitCode =
+          typeof item.exit_code === 'number' ? item.exit_code : undefined;
         const status = this.pickFirstString(item.status);
-        const isError = status === 'failed' || (typeof exitCode === 'number' && exitCode !== 0);
+        const isError =
+          status === 'failed' ||
+          (typeof exitCode === 'number' && exitCode !== 0);
 
         const summary = command ? `Ran: ${command}` : 'Executed shell command';
-        const exitSuffix = typeof exitCode === 'number' ? ` (exit ${exitCode})` : '';
+        const exitSuffix =
+          typeof exitCode === 'number' ? ` (exit ${exitCode})` : '';
         const body = output.trim();
-        const fullContent = body ? `${summary}${exitSuffix}\n\n${body}` : `${summary}${exitSuffix}`;
+        const fullContent = body
+          ? `${summary}${exitSuffix}\n\n${body}`
+          : `${summary}${exitSuffix}`;
 
         dispatchToolMessage(
           fullContent,
@@ -555,22 +846,35 @@ export class CodexEngine implements AgentEngine {
 
       const emitFileChange = (item: Record<string, unknown>): void => {
         const { content, metadata } = this.summarizeApplyPatch({
-          changes: item.changes as Record<string, unknown> | Array<Record<string, unknown>>,
+          changes: item.changes as
+            | Record<string, unknown>
+            | Array<Record<string, unknown>>,
         });
         const status = this.pickFirstString(item.status) ?? 'completed';
         const isError = status === 'failed';
         const toolName =
-          (metadata?.toolName as string) || (metadata?.tool_name as string) || 'Edit';
+          (metadata?.toolName as string) ||
+          (metadata?.tool_name as string) ||
+          'Edit';
 
         dispatchToolMessage(
           isError ? `Failed: ${content}` : content,
-          { ...metadata, toolName, tool_name: toolName, status, is_error: isError || undefined },
+          {
+            ...metadata,
+            toolName,
+            tool_name: toolName,
+            status,
+            is_error: isError || undefined,
+          },
           'tool_result',
           false,
         );
       };
 
-      const emitTodoListUpdate = (record: Record<string, unknown>, phase: TodoListPhase): void => {
+      const emitTodoListUpdate = (
+        record: Record<string, unknown>,
+        phase: TodoListPhase,
+      ): void => {
         const rawItems = this.extractTodoListItems(record);
         const items = this.normalizeTodoListItems(rawItems);
         const content = this.buildTodoListContent(items, phase);
@@ -672,7 +976,10 @@ export class CodexEngine implements AgentEngine {
             try {
               event = JSON.parse(trimmed) as Record<string, unknown>;
             } catch {
-              console.warn('[CodexEngine] Failed to parse Codex event line:', trimmed);
+              console.warn(
+                '[CodexEngine] Failed to parse Codex event line:',
+                trimmed,
+              );
               continue;
             }
 
@@ -696,7 +1003,9 @@ export class CodexEngine implements AgentEngine {
                 const msg =
                   (item &&
                     typeof item === 'object' &&
-                    this.pickFirstString((item as Record<string, unknown>).error)) ||
+                    this.pickFirstString(
+                      (item as Record<string, unknown>).error,
+                    )) ||
                   'Codex execution failed';
                 hasCompleted = true;
                 throw new Error(msg);
@@ -707,7 +1016,9 @@ export class CodexEngine implements AgentEngine {
                 resetAssistantBuffers();
                 const msg =
                   this.pickFirstString((event as { error?: unknown }).error) ||
-                  this.pickFirstString((event as { message?: unknown }).message) ||
+                  this.pickFirstString(
+                    (event as { message?: unknown }).message,
+                  ) ||
                   stderrBuffer.slice(-5).join('\n') ||
                   'Codex execution error';
                 hasCompleted = true;
@@ -741,7 +1052,9 @@ export class CodexEngine implements AgentEngine {
 
   private resolveRepoPath(projectRoot?: string): string {
     const base =
-      (projectRoot && projectRoot.trim()) || process.env.MCP_AGENT_PROJECT_ROOT || process.cwd();
+      (projectRoot && projectRoot.trim()) ||
+      process.env.MCP_AGENT_PROJECT_ROOT ||
+      process.cwd();
     return path.resolve(base);
   }
 
@@ -749,28 +1062,15 @@ export class CodexEngine implements AgentEngine {
    * Append project context (file listing) to the prompt.
    * Aligned with other/cweb implementation.
    */
-  private async appendProjectContext(baseInstruction: string, repoPath: string): Promise<string> {
+  private async appendProjectContext(
+    baseInstruction: string,
+    repoPath: string,
+  ): Promise<string> {
     try {
       const fs = await import('node:fs/promises');
-      const entries = await fs.readdir(repoPath, { withFileTypes: true });
-      const visible = entries
-        .filter((entry) => !entry.name.startsWith('.git') && entry.name !== 'AGENTS.md')
-        .map((entry) => entry.name);
-
-      if (visible.length === 0) {
-        return `${baseInstruction}
-
-<current_project_context>
-This is an empty project directory. Work directly in the current folder without creating extra subdirectories.
-</current_project_context>`;
-      }
-
-      return `${baseInstruction}
-
-<current_project_context>
-Current files in project directory: ${visible.sort().join(', ')}
-Work directly in the current directory. Do not create subdirectories unless specifically requested.
-</current_project_context>`;
+      const directory = await fs.opendir(repoPath);
+      const context = await buildCodexProjectContext(directory);
+      return `${baseInstruction}${context}`;
     } catch (error) {
       console.warn('[CodexEngine] Failed to append project context:', error);
       return baseInstruction;
@@ -784,14 +1084,20 @@ Work directly in the current directory. Do not create subdirectories unless spec
   private buildCodexConfigArgs(config: CodexEngineConfig): string[] {
     const args: string[] = [];
 
-    const pushConfig = (key: string, value: string | number | boolean): void => {
+    const pushConfig = (
+      key: string,
+      value: string | number | boolean,
+    ): void => {
       args.push('-c', `${key}=${String(value)}`);
     };
 
     pushConfig('include_apply_patch_tool', config.includeApplyPatchTool);
     pushConfig('include_plan_tool', config.includePlanTool);
     pushConfig('tools.web_search_request', config.enableWebSearch);
-    pushConfig('use_experimental_streamable_shell_tool', config.useStreamableShell);
+    pushConfig(
+      'use_experimental_streamable_shell_tool',
+      config.useStreamableShell,
+    );
     pushConfig('sandbox_mode', config.sandboxMode);
     pushConfig('max_turns', config.maxTurns);
     pushConfig('max_thinking_tokens', config.maxThinkingTokens);
@@ -845,7 +1151,9 @@ Work directly in the current directory. Do not create subdirectories unless spec
     }
     if (extraPaths.length > 0) {
       const currentPath = env.PATH || env.Path || '';
-      env.PATH = [...extraPaths, currentPath].filter(Boolean).join(path.delimiter);
+      env.PATH = [...extraPaths, currentPath]
+        .filter(Boolean)
+        .join(path.delimiter);
     }
     return env;
   }
@@ -966,7 +1274,10 @@ Work directly in the current directory. Do not create subdirectories unless spec
     return result;
   }
 
-  private buildTodoListContent(items: TodoListItem[], phase: TodoListPhase): string {
+  private buildTodoListContent(
+    items: TodoListItem[],
+    phase: TodoListPhase,
+  ): string {
     if (items.length === 0) {
       switch (phase) {
         case 'started':
@@ -1016,5 +1327,4 @@ Work directly in the current directory. Do not create subdirectories unless spec
       ...(extra ?? {}),
     };
   }
-
 }
