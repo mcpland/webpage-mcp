@@ -3,6 +3,7 @@ import { OffscreenManager } from '@/utils/offscreen-manager';
 import { BACKGROUND_MESSAGE_TYPES, OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
 import { STORAGE_KEYS, ERROR_MESSAGES } from '@/common/constants';
 import { hasAnyModelCache } from '@/utils/semantic-similarity-engine';
+import { isExtensionPageSender, isOffscreenDocumentSender } from '@/common/runtime-sender-auth';
 
 /**
  * Model configuration state management interface
@@ -342,8 +343,26 @@ function analyzeErrorType(errorMessage: string): 'network' | 'file' | 'unknown' 
  * Initialize semantic similarity module message listeners
  */
 export const initSemanticSimilarityListener = () => {
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message.type === BACKGROUND_MESSAGE_TYPES.SWITCH_SEMANTIC_MODEL) {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const messageType = message?.type;
+    const isSemanticControl =
+      messageType === BACKGROUND_MESSAGE_TYPES.SWITCH_SEMANTIC_MODEL ||
+      messageType === BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS ||
+      messageType === BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS ||
+      messageType === BACKGROUND_MESSAGE_TYPES.INITIALIZE_SEMANTIC_ENGINE;
+
+    if (!isSemanticControl) return;
+
+    const isAuthorized =
+      messageType === BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS
+        ? isOffscreenDocumentSender(sender)
+        : isExtensionPageSender(sender) && !isOffscreenDocumentSender(sender);
+    if (!isAuthorized) {
+      sendResponse({ success: false, error: 'Unauthorized semantic engine control request' });
+      return false;
+    }
+
+    if (messageType === BACKGROUND_MESSAGE_TYPES.SWITCH_SEMANTIC_MODEL) {
       handleModelSwitch(
         message.modelPreset,
         message.modelVersion,
@@ -353,17 +372,17 @@ export const initSemanticSimilarityListener = () => {
         .then((result: { success: boolean; error?: string }) => sendResponse(result))
         .catch((error: any) => sendResponse({ success: false, error: error.message }));
       return true;
-    } else if (message.type === BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS) {
+    } else if (messageType === BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS) {
       handleGetModelStatus()
         .then((result: { success: boolean; status?: any; error?: string }) => sendResponse(result))
         .catch((error: any) => sendResponse({ success: false, error: error.message }));
       return true;
-    } else if (message.type === BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS) {
+    } else if (messageType === BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS) {
       handleUpdateModelStatus(message.modelState)
         .then((result: { success: boolean; error?: string }) => sendResponse(result))
         .catch((error: any) => sendResponse({ success: false, error: error.message }));
       return true;
-    } else if (message.type === BACKGROUND_MESSAGE_TYPES.INITIALIZE_SEMANTIC_ENGINE) {
+    } else {
       initializeDefaultSemanticEngine()
         .then(() => sendResponse({ success: true }))
         .catch((error: any) => sendResponse({ success: false, error: error.message }));
