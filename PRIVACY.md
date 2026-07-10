@@ -116,6 +116,18 @@ the corresponding GitHub or email service.
   locally under `~/.webpage-mcp-agent` by default, or at a path the user
   configures. They remain until the user deletes the corresponding data or the
   local files.
+- The selected Agent engine may also retain its own session records outside
+  Webpage MCP's data directory. The current Claude integration leaves Claude
+  Agent SDK session persistence enabled, so Claude Code stores session
+  transcripts under the `projects` area of its own configuration and data
+  directory and may store other session state elsewhere in that directory. Its
+  base directory defaults to `~/.claude` and can be changed with
+  `CLAUDE_CONFIG_DIR`. The current Codex integration invokes the Codex CLI
+  without ephemeral mode, so Codex can retain session rollout files in its own
+  data area, whose base is `CODEX_HOME` and is commonly `~/.codex`. These
+  engine-managed records follow the engine's retention and deletion controls.
+  Deleting `~/.webpage-mcp-agent`, a Webpage MCP project, or a Webpage MCP
+  session does not delete them.
 - Native-host logs are stored in the platform log directory with restrictive
   file permissions, per-file size limits, and bounded rotation. They are not
   uploaded automatically.
@@ -171,6 +183,8 @@ Users can:
 - stop Webpage MCP and manually remove native Agent data, logs, exported files,
   or downloads from their documented local locations when those records are no
   longer needed;
+- use Claude Code or Agent SDK controls and Codex CLI controls to manage
+  engine-maintained session data separately from Webpage MCP data;
 - generate diagnostics without logs and review or edit a report before sharing
   it; and
 - use the controls offered by each connected provider or website for data that
@@ -205,6 +219,10 @@ sensitive information in a public issue.
   [`app/mcp-server/src/agent/storage.ts`](app/mcp-server/src/agent/storage.ts),
   and native log retention is defined in
   [`app/mcp-server/src/scripts/native-log-policy.ts`](app/mcp-server/src/scripts/native-log-policy.ts).
+- External engine session behavior follows the invocation options in
+  [`app/mcp-server/src/agent/engines/claude.ts`](app/mcp-server/src/agent/engines/claude.ts)
+  and
+  [`app/mcp-server/src/agent/engines/codex.ts`](app/mcp-server/src/agent/engines/codex.ts).
 - Semantic data deletion is implemented in
   [`app/chrome-extension/entrypoints/background/storage-manager.ts`](app/chrome-extension/entrypoints/background/storage-manager.ts).
 - Semantic asset revision and ONNX integrity boundaries are defined in
@@ -220,3 +238,5 @@ sensitive information in a public issue.
 
 - [Chrome Web Store policy updates for 2026](https://developer.chrome.com/blog/cws-policy-updates-2026)
 - [Chrome Web Store Program Policies](https://developer.chrome.com/docs/webstore/program-policies/policies)
+- [Claude Code application data and cleanup controls](https://code.claude.com/docs/en/claude-directory)
+- [Codex CLI command and persistence reference](https://developers.openai.com/codex/cli/reference)
