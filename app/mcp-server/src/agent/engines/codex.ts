@@ -346,6 +346,17 @@ export function buildCodexSpawnSpec(): { command: string; shell: false } {
   };
 }
 
+/** Preserve defaults when a partial runtime config contains explicit undefined values. */
+export function resolveCodexConfig(
+  overrides?: Partial<CodexEngineConfig>,
+): CodexEngineConfig {
+  if (!overrides) return { ...DEFAULT_CODEX_CONFIG };
+  const definedOverrides = Object.fromEntries(
+    Object.entries(overrides).filter(([, value]) => value !== undefined),
+  ) as Partial<CodexEngineConfig>;
+  return { ...DEFAULT_CODEX_CONFIG, ...definedOverrides };
+}
+
 /**
  * CodexEngine integrates the Codex CLI as an AgentEngine implementation.
  *
@@ -404,10 +415,7 @@ export class CodexEngine implements AgentEngine {
     }
 
     // Merge user config with defaults
-    const resolvedConfig: CodexEngineConfig = {
-      ...DEFAULT_CODEX_CONFIG,
-      ...(codexConfig ?? {}),
-    };
+    const resolvedConfig = resolveCodexConfig(codexConfig);
 
     const configError = validateCodexConfig(resolvedConfig);
     if (configError) {

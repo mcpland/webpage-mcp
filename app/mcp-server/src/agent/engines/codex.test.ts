@@ -24,6 +24,7 @@ import {
   buildCodexProjectContext,
   buildCodexSandboxArgs,
   buildCodexSpawnSpec,
+  resolveCodexConfig,
   writeCodexPromptToStdin,
 } from './codex';
 
@@ -140,6 +141,26 @@ describe('buildCodexSandboxArgs', () => {
   it('does not promise full permissions in the default prompt', () => {
     expect(CODEX_AUTO_INSTRUCTIONS).toContain('Respect the configured sandbox');
     expect(CODEX_AUTO_INSTRUCTIONS).not.toContain('You have full permissions');
+  });
+});
+
+describe('resolveCodexConfig', () => {
+  it('does not let explicit undefined partial values erase safe defaults', () => {
+    const resolved = resolveCodexConfig({
+      sandboxMode: undefined,
+      autoInstructions: undefined,
+      maxTurns: undefined,
+    });
+
+    expect(resolved.sandboxMode).toBe('workspace-write');
+    expect(resolved.autoInstructions).toBe(CODEX_AUTO_INSTRUCTIONS);
+    expect(resolved.maxTurns).toBeGreaterThan(0);
+    expect(buildCodexSandboxArgs(resolved)).toEqual([
+      '--sandbox',
+      'workspace-write',
+      '--ask-for-approval',
+      'never',
+    ]);
   });
 });
 
