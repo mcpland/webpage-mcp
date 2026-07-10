@@ -360,6 +360,18 @@ function createSseSubscription(request: ActiveRequest): SseSubscription {
 
   void subscribeAgentStream(request.sessionId, { subscriptionId })
     .then(({ subscriptionId: actualSubscriptionId }) => {
+      if (
+        activeRequests.get(request.requestId) !== request ||
+        request.abortController.signal.aborted
+      ) {
+        void unsubscribeAgentStream(actualSubscriptionId).catch(() => {
+          // Best-effort cleanup for a subscription that completed after cancellation.
+        });
+        settleReady(false);
+        doneResolve();
+        return;
+      }
+
       request.streamSubscriptionId = actualSubscriptionId;
 
       const onMessage = (message: unknown): void => {

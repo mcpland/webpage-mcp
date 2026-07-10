@@ -161,4 +161,69 @@ describe('Quick Panel agent handler', () => {
     });
     expect(nativeHostMocks.requestAgentRpcFetch).not.toHaveBeenCalled();
   });
+
+  it('unsubscribes when cancellation wins the subscription race', async () => {
+    let requestListener: RequestListener | undefined;
+    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
+      (listener) => {
+        if (!requestListener) {
+          requestListener = listener as RequestListener;
+        }
+      },
+    );
+
+    let resolveSubscription!: (value: { subscriptionId: string }) => void;
+    nativeHostMocks.subscribeAgentStream.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSubscription = resolve;
+      }),
+    );
+
+    const { initQuickPanelAgentHandler } = await import(
+      '@/entrypoints/background/quick-panel/agent-handler'
+    );
+    initQuickPanelAgentHandler();
+
+    const sendResponse = vi.fn();
+    requestListener!(
+      {
+        type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
+        authorizationToken: 'one-time-token',
+        payload: { instruction: 'Review this page' },
+      },
+      { tab: { id: 7, windowId: 3 }, frameId: 0 } as chrome.runtime.MessageSender,
+      sendResponse,
+    );
+
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledWith({
+        success: true,
+        requestId: expect.any(String),
+        sessionId: 'session-123',
+      });
+      expect(nativeHostMocks.subscribeAgentStream).toHaveBeenCalledOnce();
+    });
+
+    const requestId = sendResponse.mock.calls[0]?.[0]?.requestId as string;
+    const cancelResponse = vi.fn();
+    requestListener!(
+      {
+        type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_CANCEL_AI,
+        payload: { requestId, sessionId: 'session-123' },
+      },
+      { tab: { id: 7, windowId: 3 }, frameId: 0 } as chrome.runtime.MessageSender,
+      cancelResponse,
+    );
+
+    await vi.waitFor(() => {
+      expect(cancelResponse).toHaveBeenCalledWith({ success: true });
+    });
+
+    resolveSubscription({ subscriptionId: 'late-subscription' });
+
+    await vi.waitFor(() => {
+      expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith('late-subscription');
+    });
+    expect(globalThis.chrome.runtime.onMessage.addListener).toHaveBeenCalledOnce();
+  });
 });
