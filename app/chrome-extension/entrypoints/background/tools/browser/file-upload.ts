@@ -29,6 +29,7 @@ const FILE_UPLOAD_PUBLIC_PAGE_ERROR =
 const MAX_FILE_UPLOAD_BYTES = 16 * 1024 * 1024;
 const FILE_URL_DOWNLOAD_TIMEOUT_MS = 30000;
 const MAX_BASE64_ENCODED_CHARACTERS = Math.ceil((MAX_FILE_UPLOAD_BYTES * 4) / 3) + 4;
+const MAX_FILE_INPUT_SELECTOR_BYTES = 4 * 1024;
 
 function formatByteLimit(bytes: number): string {
   return `${bytes / (1024 * 1024)} MiB`;
@@ -65,6 +66,25 @@ function isPublicUploadPage(url?: string | null): boolean {
   return typeof url === 'string' && url.trim().length > 0 && !hasDisallowedPublicUrlScheme(url);
 }
 
+function normalizeFileInputSelector(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error('Selector is required for file upload');
+  }
+  const selector = value.trim();
+  if (
+    selector.length > MAX_FILE_INPUT_SELECTOR_BYTES ||
+    new TextEncoder().encode(selector).byteLength > MAX_FILE_INPUT_SELECTOR_BYTES
+  ) {
+    throw new Error(
+      `Selector exceeds the ${MAX_FILE_INPUT_SELECTOR_BYTES}-byte UTF-8 limit`,
+    );
+  }
+  if (/:has\s*\(/iu.test(selector)) {
+    throw new Error('Selector must not use the resource-intensive :has() pseudo-class');
+  }
+  return selector;
+}
+
 /**
  * Tool for uploading files to web forms using Chrome DevTools Protocol
  * Similar to Playwright's setInputFiles implementation
@@ -79,7 +99,13 @@ class FileUploadTool extends BaseBrowserToolExecutor {
    * Execute file upload operation using Chrome DevTools Protocol
    */
   async execute(args: FileUploadToolParams): Promise<ToolResult> {
-    const { selector, filePath, fileUrl, base64Data, fileName, multiple = false } = args;
+    const { filePath, fileUrl, base64Data, fileName, multiple = false } = args;
+    let selector: string;
+    try {
+      selector = normalizeFileInputSelector(args.selector);
+    } catch (error) {
+      return createErrorResponse(error instanceof Error ? error.message : String(error));
+    }
     const normalizedFileUrl =
       typeof fileUrl === 'string' && fileUrl.trim() ? fileUrl.trim() : undefined;
 
@@ -93,10 +119,6 @@ class FileUploadTool extends BaseBrowserToolExecutor {
     });
 
     // Validate input
-    if (!selector) {
-      return createErrorResponse('Selector is required for file upload');
-    }
-
     if (filePath) {
       return createErrorResponse(
         'Direct local file paths are not supported for uploads. Use fileUrl or base64Data instead.',
@@ -165,12 +187,14 @@ class FileUploadTool extends BaseBrowserToolExecutor {
   }
 
   async uploadLocalFile(args: InternalLocalFileUploadParams): Promise<ToolResult> {
-    const selector = args.selector?.trim();
+    let selector: string;
+    try {
+      selector = normalizeFileInputSelector(args.selector);
+    } catch (error) {
+      return createErrorResponse(error instanceof Error ? error.message : String(error));
+    }
     const filePath = args.filePath?.trim();
 
-    if (!selector) {
-      return createErrorResponse('Selector is required for file upload');
-    }
     if (!filePath) {
       return createErrorResponse('filePath is required for internal file upload');
     }
@@ -214,7 +238,9 @@ class FileUploadTool extends BaseBrowserToolExecutor {
       await cdpSessionManager.sendCommand(tabId, 'Runtime.enable', {});
 
       const { root } = (await cdpSessionManager.sendCommand(tabId, 'DOM.getDocument', {
-        depth: -1,
+        // DOM.querySelector already searches descendants from this root. Do not
+        // materialize an attacker-controlled full DOM in the extension process.
+        depth: 0,
         pierce: true,
       })) as { root: { nodeId: number } };
 
@@ -227,45 +253,60 @@ class FileUploadTool extends BaseBrowserToolExecutor {
         throw new Error(`Element with selector "${selector}" not found`);
       }
 
-      const { node } = (await cdpSessionManager.sendCommand(tabId, 'DOM.describeNode', {
+      const { object } = (await cdpSessionManager.sendCommand(tabId, 'DOM.resolveNode', {
         nodeId,
-      })) as { node: { nodeName: string; attributes?: string[] } };
-
-      if (node.nodeName !== 'INPUT') {
-        throw new Error(`Element with selector "${selector}" is not an input element`);
+      })) as { object?: { objectId?: string } };
+      const objectId = object?.objectId;
+      if (!objectId) {
+        throw new Error(`Unable to resolve file input for selector "${selector}"`);
       }
 
-      const attributes = node.attributes || [];
-      let isFileInput = false;
-      for (let i = 0; i < attributes.length; i += 2) {
-        if (attributes[i] === 'type' && attributes[i + 1] === 'file') {
-          isFileInput = true;
-          break;
+      try {
+        const validation = (await cdpSessionManager.sendCommand(
+          tabId,
+          'Runtime.callFunctionOn',
+          {
+            objectId,
+            functionDeclaration: `function () {
+              return {
+                isInput: this instanceof HTMLInputElement,
+                isFileInput:
+                  this instanceof HTMLInputElement &&
+                  String(this.getAttribute('type') || '').toLowerCase() === 'file'
+              };
+            }`,
+            returnByValue: true,
+          },
+        )) as {
+          result?: { value?: { isInput?: boolean; isFileInput?: boolean } };
+        };
+        if (!validation.result?.value?.isInput) {
+          throw new Error(`Element with selector "${selector}" is not an input element`);
         }
+        if (!validation.result.value.isFileInput) {
+          throw new Error(
+            `Element with selector "${selector}" is not a file input (type="file")`,
+          );
+        }
+
+        await cdpSessionManager.sendCommand(tabId, 'DOM.setFileInputFiles', {
+          nodeId,
+          files,
+        });
+
+        await cdpSessionManager.sendCommand(tabId, 'Runtime.callFunctionOn', {
+          objectId,
+          functionDeclaration: `function () {
+            this.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }`,
+          returnByValue: true,
+        });
+      } finally {
+        await cdpSessionManager
+          .sendCommand(tabId, 'Runtime.releaseObject', { objectId })
+          .catch(() => undefined);
       }
-
-      if (!isFileInput) {
-        throw new Error(`Element with selector "${selector}" is not a file input (type="file")`);
-      }
-
-      await cdpSessionManager.sendCommand(tabId, 'DOM.setFileInputFiles', {
-        nodeId,
-        files,
-      });
-
-      await cdpSessionManager.sendCommand(tabId, 'Runtime.evaluate', {
-        expression: `
-          (function() {
-            const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
-            if (element) {
-              const event = new Event('change', { bubbles: true });
-              element.dispatchEvent(event);
-              return true;
-            }
-            return false;
-          })()
-        `,
-      });
     });
 
     return {

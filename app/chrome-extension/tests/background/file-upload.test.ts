@@ -48,8 +48,14 @@ describe('fileUploadTool', () => {
       if (method === 'DOM.querySelector') {
         return { nodeId: 2 };
       }
-      if (method === 'DOM.describeNode') {
-        return { node: { nodeName: 'INPUT', attributes: ['type', 'file'] } };
+      if (method === 'DOM.resolveNode') {
+        return { object: { objectId: 'file-input-object' } };
+      }
+      if (method === 'Runtime.callFunctionOn') {
+        if (String(params.functionDeclaration).includes('isFileInput')) {
+          return { result: { value: { isInput: true, isFileInput: true } } };
+        }
+        return { result: { value: true } };
       }
       if (method === 'DOM.setFileInputFiles') {
         return { files: params.files };
@@ -174,6 +180,20 @@ describe('fileUploadTool', () => {
       nodeId: 2,
       files: ['/tmp/prepared-upload.txt'],
     });
+    expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'DOM.getDocument', {
+      depth: 0,
+      pierce: true,
+    });
+    expect(mocks.sendCommand).not.toHaveBeenCalledWith(
+      7,
+      'DOM.describeNode',
+      expect.anything(),
+    );
+    expect(mocks.sendCommand).not.toHaveBeenCalledWith(
+      7,
+      'Runtime.evaluate',
+      expect.anything(),
+    );
     expect(payload).toMatchObject({
       success: true,
       files: ['prepared-upload.txt'],
@@ -236,6 +256,41 @@ describe('fileUploadTool', () => {
     expect(mocks.tabsGet).not.toHaveBeenCalled();
     expect(mocks.runtimeSendMessage).not.toHaveBeenCalled();
     logSpy.mockRestore();
+  });
+
+  it('rejects resource-intensive or oversized selectors before preparing a file', async () => {
+    for (const selector of [':has(input[type="file"])', `#${'a'.repeat(4097)}`]) {
+      const result = await fileUploadTool.execute({
+        selector,
+        base64Data: 'Zm9v',
+        tabId: 7,
+      });
+
+      expect(result.isError).toBe(true);
+    }
+
+    expect(mocks.runtimeSendMessage).not.toHaveBeenCalled();
+    expect(mocks.withSession).not.toHaveBeenCalled();
+  });
+
+  it('does not interpolate an attacker-controlled selector into page JavaScript', async () => {
+    const selector = `input[data-name="x'\\n);globalThis.pwned=true;//"]`;
+
+    const result = await fileUploadTool.execute({
+      selector,
+      base64Data: 'Zm9v',
+      tabId: 7,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'DOM.querySelector', {
+      nodeId: 1,
+      selector,
+    });
+    const executablePayloads = mocks.sendCommand.mock.calls
+      .filter(([, method]) => method === 'Runtime.evaluate' || method === 'Runtime.callFunctionOn')
+      .map(([, , params]) => JSON.stringify(params));
+    expect(executablePayloads.join('\n')).not.toContain(selector);
   });
 
   it('rejects remote files whose Content-Length exceeds the single-file limit', async () => {
