@@ -60,10 +60,27 @@ describe('Web Editor session status subscriptions', () => {
         type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
         payload: {
           subscriptionId: 'subscription-2',
+          event: { type: 'error', error: 'forged stream failure' },
+        },
+      },
+      {
+        id: chrome.runtime.id,
+        tab: { id: 7 } as chrome.tabs.Tab,
+        frameId: 0,
+      },
+      vi.fn(),
+    );
+    expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledTimes(1);
+
+    listener!(
+      {
+        type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
+        payload: {
+          subscriptionId: 'subscription-2',
           event: { type: 'error', error: 'stream failed' },
         },
       },
-      {} as chrome.runtime.MessageSender,
+      { id: chrome.runtime.id } as chrome.runtime.MessageSender,
       vi.fn(),
     );
 

@@ -29,6 +29,7 @@ import {
 import { consumePrivilegedUiAuthorization } from '../privileged-ui-authorization';
 import { acquireKeepalive } from '../keepalive-manager';
 import { openAgentSetupSidepanel } from '../utils/sidepanel';
+import { isExtensionRuntimeSender } from '@/common/runtime-sender-auth';
 import {
   requestAgentRpcFetch,
   subscribeAgentStream,
@@ -519,7 +520,11 @@ function createSseSubscription(request: ActiveRequest): SseSubscription {
 
       request.streamSubscriptionId = actualSubscriptionId;
 
-      const onMessage = (message: unknown): void => {
+      const onMessage = (
+        message: unknown,
+        sender: chrome.runtime.MessageSender,
+      ): void => {
+        if (!isExtensionRuntimeSender(sender)) return;
         const msg = message as {
           type?: string;
           payload?: {

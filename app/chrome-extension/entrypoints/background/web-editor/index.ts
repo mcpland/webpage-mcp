@@ -1,5 +1,8 @@
 import { BACKGROUND_MESSAGE_TYPES, PRIVILEGED_UI_ACTIONS } from '@/common/message-types';
-import { isExtensionPageSender } from '@/common/runtime-sender-auth';
+import {
+  isExtensionPageSender,
+  isExtensionRuntimeSender,
+} from '@/common/runtime-sender-auth';
 import {
   WEB_EDITOR_ACTIONS,
   type ElementChangeSummary,
@@ -163,7 +166,11 @@ function getExecutionStatus(requestId: string): ExecutionStatusEntry | undefined
 // Stream subscriptions for status updates (per sessionId)
 const sseConnections = new Map<
   string,
-  { subscriptionId: string; lastRequestId: string; listener: (message: unknown) => void }
+  {
+    subscriptionId: string;
+    lastRequestId: string;
+    listener: (message: unknown, sender: chrome.runtime.MessageSender) => void;
+  }
 >();
 
 interface SessionStatusSubscriptionIntent {
@@ -233,7 +240,11 @@ export async function subscribeToSessionStatus(
       return;
     }
 
-    const onMessage = (message: unknown): void => {
+    const onMessage = (
+      message: unknown,
+      sender: chrome.runtime.MessageSender,
+    ): void => {
+      if (!isExtensionRuntimeSender(sender)) return;
       const msg = message as {
         type?: string;
         payload?: {
