@@ -193,8 +193,9 @@ Users can:
 - disable or delete workflow triggers to stop their future automatic runs;
 - choose the MCP client, Claude or Codex engine, compatible endpoint, model, and
   Agent permission or sandbox settings;
-- use **Clear All Data** in the extension to remove semantic page indexes,
-  vector data, and related search metadata while preserving model preferences;
+- use **Clear semantic index data** in the extension Options/Settings page to
+  remove semantic page indexes, vector data, and related search metadata while
+  preserving model preferences;
 - stop Webpage MCP and manually remove native Agent data, logs, exported files,
   or downloads from their documented local locations when those records are no
   longer needed;
