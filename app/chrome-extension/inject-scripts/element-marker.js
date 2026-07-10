@@ -1,4 +1,3 @@
-/* eslint-disable */
 (function () {
   if (window.__ELEMENT_MARKER_INSTALLED__) return;
   window.__ELEMENT_MARKER_INSTALLED__ = true;
@@ -41,6 +40,23 @@
       VERIFY: '#3b82f6',
     },
   };
+
+  const RESOURCE_LIMITS = Object.freeze({
+    maxSelectorBytes: 4 * 1024,
+    maxDeepElements: 10000,
+    maxDeepDepth: 128,
+    maxDeepDurationMs: 200,
+    maxQueryResults: 100,
+    maxSiblingSteps: 256,
+    maxClasses: 64,
+    maxTextNodes: 512,
+    maxTextBytes: 2 * 1024,
+    maxTextDurationMs: 25,
+    maxXPathSteps: 256,
+    maxXPathIterations: 1000,
+  });
+  const NATIVE_ELEMENT_MATCHES = Element.prototype.matches;
+  let activeSelectorBudget = null;
 
   // ============================================================================
   // Panel Host Module - Shadow DOM Management
@@ -1110,8 +1126,118 @@
   // Selector Engine - Heuristic Selector Generation
   // ============================================================================
 
+  function utf8ByteLength(value, stopAfter = Number.POSITIVE_INFINITY) {
+    let bytes = 0;
+    for (const character of typeof value === 'string' ? value : '') {
+      const codePoint = character.codePointAt(0) || 0;
+      bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+      if (bytes > stopAfter) return bytes;
+    }
+    return bytes;
+  }
+
+  function normalizeBoundedSelector(value) {
+    if (
+      typeof value !== 'string' ||
+      value.length === 0 ||
+      value.length > RESOURCE_LIMITS.maxSelectorBytes ||
+      utf8ByteLength(value, RESOURCE_LIMITS.maxSelectorBytes) >
+        RESOURCE_LIMITS.maxSelectorBytes ||
+      /:has\s*\(/i.test(value)
+    ) {
+      return '';
+    }
+    return value.trim();
+  }
+
+  function createDeepTraversalBudget() {
+    return {
+      visited: 0,
+      deadline: Date.now() + RESOURCE_LIMITS.maxDeepDurationMs,
+      exhausted: false,
+    };
+  }
+
+  function boundedClassNames(el) {
+    const result = [];
+    try {
+      const list = el && el.classList;
+      const length = Math.min(Number(list && list.length) || 0, RESOURCE_LIMITS.maxClasses);
+      for (let index = 0; index < length; index += 1) {
+        const value = list[index] || (typeof list.item === 'function' ? list.item(index) : '');
+        if (value && /^[a-zA-Z0-9_-]+$/.test(value)) result.push(value);
+      }
+    } catch {}
+    return result;
+  }
+
+  function boundedText(el) {
+    if (!(el instanceof Element)) return '';
+    try {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_ALL);
+      const deadline = Date.now() + RESOURCE_LIMITS.maxTextDurationMs;
+      let output = '';
+      let bytes = 0;
+      let visited = 0;
+      while (visited < RESOURCE_LIMITS.maxTextNodes && Date.now() <= deadline) {
+        const node = walker.nextNode();
+        if (!node) break;
+        visited += 1;
+        if (node.nodeType !== Node.TEXT_NODE) continue;
+        const parentTag = node.parentElement?.tagName?.toLowerCase() || '';
+        if (parentTag === 'script' || parentTag === 'style' || parentTag === 'noscript') continue;
+        const raw = typeof node.nodeValue === 'string' ? node.nodeValue : '';
+        let part = '';
+        for (const character of raw) {
+          const codePoint = character.codePointAt(0) || 0;
+          const nextBytes =
+            codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+          if (bytes + nextBytes > RESOURCE_LIMITS.maxTextBytes) break;
+          part += character;
+          bytes += nextBytes;
+        }
+        if (part) output += `${output ? ' ' : ''}${part}`;
+        if (bytes >= RESOURCE_LIMITS.maxTextBytes) break;
+      }
+      return output.trim().replace(/\s+/g, ' ').slice(0, 256);
+    } catch {
+      return '';
+    }
+  }
+
+  function sameTagPosition(el, checkFollowing) {
+    let index = 1;
+    let scanned = 0;
+    let sibling = el && el.previousElementSibling;
+    while (sibling) {
+      if (scanned >= RESOURCE_LIMITS.maxSiblingSteps) {
+        return { index: 0, multiple: false, complete: false };
+      }
+      scanned += 1;
+      if (sibling.tagName === el.tagName) index += 1;
+      sibling = sibling.previousElementSibling;
+    }
+    if (index > 1 || !checkFollowing) return { index, multiple: index > 1, complete: true };
+
+    scanned = 0;
+    sibling = el && el.nextElementSibling;
+    while (sibling) {
+      if (scanned >= RESOURCE_LIMITS.maxSiblingSteps) {
+        return { index, multiple: false, complete: false };
+      }
+      scanned += 1;
+      if (sibling.tagName === el.tagName) return { index, multiple: true, complete: true };
+      sibling = sibling.nextElementSibling;
+    }
+    return { index, multiple: false, complete: true };
+  }
+
   function generateSelector(el) {
     if (!(el instanceof Element)) return '';
+
+    const previousBudget = activeSelectorBudget;
+    if (!activeSelectorBudget) activeSelectorBudget = createDeepTraversalBudget();
+    try {
 
     const prefs = StateStore.get('prefs');
 
@@ -1145,9 +1271,7 @@
 
     if (prefs.preferClass) {
       try {
-        const classes = Array.from(el.classList || []).filter(
-          (c) => c && /^[a-zA-Z0-9_-]+$/.test(c),
-        );
+        const classes = boundedClassNames(el);
         const tag = el.tagName.toLowerCase();
 
         for (const cls of classes) {
@@ -1187,7 +1311,8 @@
         const isShadowElement = root instanceof ShadowRoot;
         const boundary = isShadowElement ? root.host : document.body;
 
-        while (cur && cur !== boundary) {
+        let depth = 0;
+        while (cur && cur !== boundary && depth < RESOURCE_LIMITS.maxDeepDepth) {
           if (cur.id) {
             const anchor = `#${CSS.escape(cur.id)}`;
             if (isDeepSelectorUnique(anchor, cur)) {
@@ -1208,11 +1333,15 @@
             }
           }
           cur = cur.parentElement;
+          depth += 1;
         }
       } catch {}
     }
 
     return buildFullPath(el);
+    } finally {
+      activeSelectorBudget = previousBudget;
+    }
   }
 
   function buildPathFromAncestor(ancestor, target) {
@@ -1224,19 +1353,28 @@
     const isShadowElement = root instanceof ShadowRoot;
     const boundary = isShadowElement ? root.host : document.body;
 
-    while (cur && cur !== ancestor && cur !== boundary) {
+    let depth = 0;
+    while (
+      cur &&
+      cur !== ancestor &&
+      cur !== boundary &&
+      depth < RESOURCE_LIMITS.maxDeepDepth
+    ) {
       let seg = cur.tagName.toLowerCase();
       const parent = cur.parentElement;
 
       if (parent) {
-        const siblings = Array.from(parent.children).filter((c) => c.tagName === cur.tagName);
-        if (siblings.length > 1) {
-          seg += `:nth-of-type(${siblings.indexOf(cur) + 1})`;
+        const position = sameTagPosition(cur, true);
+        if (position.complete && position.multiple) {
+          seg += `:nth-of-type(${position.index})`;
         }
       }
 
+      const candidate = [seg, ...segs].join(' > ');
+      if (utf8ByteLength(candidate, RESOURCE_LIMITS.maxSelectorBytes) > RESOURCE_LIMITS.maxSelectorBytes) break;
       segs.unshift(seg);
       cur = parent;
+      depth += 1;
 
       // Stop if we've reached the shadow root host
       if (isShadowElement && cur === boundary) {
@@ -1258,19 +1396,28 @@
     // Determine the boundary where we should stop traversing
     const boundary = isShadowElement ? root.host : document.body;
 
-    while (current && current.nodeType === Node.ELEMENT_NODE && current !== boundary) {
+    let depth = 0;
+    while (
+      current &&
+      current.nodeType === Node.ELEMENT_NODE &&
+      current !== boundary &&
+      depth < RESOURCE_LIMITS.maxDeepDepth
+    ) {
       let sel = current.tagName.toLowerCase();
       const parent = current.parentElement;
 
       if (parent) {
-        const siblings = Array.from(parent.children).filter((c) => c.tagName === current.tagName);
-        if (siblings.length > 1) {
-          sel += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+        const position = sameTagPosition(current, true);
+        if (position.complete && position.multiple) {
+          sel += `:nth-of-type(${position.index})`;
         }
       }
 
-      path = path ? `${sel} > ${path}` : sel;
+      const candidate = path ? `${sel} > ${path}` : sel;
+      if (utf8ByteLength(candidate, RESOURCE_LIMITS.maxSelectorBytes - 7) > RESOURCE_LIMITS.maxSelectorBytes - 7) break;
+      path = candidate;
       current = parent;
+      depth += 1;
 
       // Stop if we've reached the shadow root host
       if (isShadowElement && current === boundary) {
@@ -1295,7 +1442,13 @@
     const segs = [];
     let cur = el;
 
-    while (cur && cur.nodeType === 1 && cur !== document.documentElement) {
+    let depth = 0;
+    while (
+      cur &&
+      cur.nodeType === 1 &&
+      cur !== document.documentElement &&
+      depth < RESOURCE_LIMITS.maxDeepDepth
+    ) {
       const tag = cur.tagName.toLowerCase();
 
       if (cur.id) {
@@ -1305,18 +1458,28 @@
 
       let i = 1;
       let sib = cur;
+      let scanned = 0;
       while ((sib = sib.previousElementSibling)) {
+        if (scanned >= RESOURCE_LIMITS.maxSiblingSteps) return '';
+        scanned += 1;
         if (sib.tagName.toLowerCase() === tag) i++;
       }
 
-      segs.unshift(`${tag}[${i}]`);
+      const segment = `${tag}[${i}]`;
+      const candidate = `${segs[0]?.startsWith('//*') ? '' : '//'}${[segment, ...segs].join('/')}`;
+      if (utf8ByteLength(candidate, RESOURCE_LIMITS.maxSelectorBytes) > RESOURCE_LIMITS.maxSelectorBytes) return '';
+      segs.unshift(segment);
       cur = cur.parentElement;
+      depth += 1;
     }
 
     return segs[0]?.startsWith('//*') ? segs.join('/') : '//' + segs.join('/');
   }
 
   function generateListSelector(target) {
+    const previousBudget = activeSelectorBudget;
+    if (!activeSelectorBudget) activeSelectorBudget = createDeepTraversalBudget();
+    try {
     const list = computeElementList(target);
     const selected = list?.[0] || target;
     const parent = selected.parentElement;
@@ -1327,6 +1490,9 @@
     const childRel = generateSelectorWithinRoot(selected, parent);
 
     return parentSel && childRel ? `${parentSel} ${childRel}` : generateSelector(target);
+    } finally {
+      activeSelectorBudget = previousBudget;
+    }
   }
 
   function generateSelectorWithinRoot(el, root) {
@@ -1362,7 +1528,7 @@
     }
 
     try {
-      const classes = Array.from(el.classList || []).filter((c) => c && /^[a-zA-Z0-9_-]+$/.test(c));
+      const classes = boundedClassNames(el);
 
       // Use isDeepSelectorUnique for classes to support shadow DOM elements
       for (const cls of classes) {
@@ -1384,7 +1550,7 @@
       const labelledby = el.getAttribute('aria-labelledby');
       if (labelledby) {
         const labelEl = document.getElementById(labelledby);
-        if (labelEl) return (labelEl.textContent || '').trim();
+        if (labelEl) return boundedText(labelEl);
       }
 
       const ariaLabel = el.getAttribute('aria-label');
@@ -1392,18 +1558,13 @@
 
       if (el.id) {
         const label = document.querySelector(`label[for="${el.id}"]`);
-        if (label) return (label.textContent || '').trim();
+        if (label) return boundedText(label);
       }
 
       const parentLabel = el.closest('label');
-      if (parentLabel) return (parentLabel.textContent || '').trim();
+      if (parentLabel) return boundedText(parentLabel);
 
-      return (
-        el.getAttribute('placeholder') ||
-        el.getAttribute('value') ||
-        el.textContent ||
-        ''
-      ).trim();
+      return (el.getAttribute('placeholder') || el.getAttribute('value') || boundedText(el)).trim();
     } catch {
       return '';
     }
@@ -1415,6 +1576,7 @@
 
   function getAllSiblings(el, selector) {
     const siblings = [el];
+    const deadline = Date.now() + RESOURCE_LIMITS.maxTextDurationMs;
     const validate = (element) => {
       const isSameTag = el.tagName === element.tagName;
       let ok = isSameTag;
@@ -1430,14 +1592,28 @@
     let prev = el;
     let elementIndex = 1;
 
-    while ((prev = prev?.previousElementSibling)) {
+    let scanned = 0;
+    while (
+      (prev = prev?.previousElementSibling) &&
+      scanned < RESOURCE_LIMITS.maxSiblingSteps &&
+      siblings.length < RESOURCE_LIMITS.maxQueryResults &&
+      Date.now() <= deadline
+    ) {
+      scanned += 1;
       if (validate(prev)) {
         elementIndex += 1;
         siblings.unshift(prev);
       }
     }
 
-    while ((next = next?.nextElementSibling)) {
+    scanned = 0;
+    while (
+      (next = next?.nextElementSibling) &&
+      scanned < RESOURCE_LIMITS.maxSiblingSteps &&
+      siblings.length < RESOURCE_LIMITS.maxQueryResults &&
+      Date.now() <= deadline
+    ) {
+      scanned += 1;
       if (validate(next)) siblings.push(next);
     }
 
@@ -1473,14 +1649,26 @@
   // Deep Query (Shadow DOM Support)
   // ============================================================================
 
-  function* walkAllNodesDeep(root) {
-    const stack = [root];
-    let count = 0;
-    const MAX = 10000;
+  function* walkAllNodesDeep(root, budget = createDeepTraversalBudget()) {
+    const first = root instanceof Element ? root : root && root.firstElementChild;
+    if (!(first instanceof Element)) return;
+    const stack = [{ element: first, depth: 0 }];
 
-    while (stack.length) {
-      const node = stack.pop();
-      if (!node || ++count > MAX) continue;
+    while (stack.length > 0) {
+      if (
+        budget.visited >= RESOURCE_LIMITS.maxDeepElements ||
+        Date.now() > budget.deadline
+      ) {
+        budget.exhausted = true;
+        return;
+      }
+      const entry = stack.pop();
+      if (!entry || entry.depth > RESOURCE_LIMITS.maxDeepDepth) {
+        budget.exhausted = true;
+        return;
+      }
+      const node = entry.element;
+      budget.visited += 1;
 
       // Skip overlay elements to prevent panel self-highlighting
       if (isOverlayElement(node)) {
@@ -1490,32 +1678,62 @@
       yield node;
 
       try {
-        if (node.children) {
-          const children = Array.from(node.children);
-          for (let i = children.length - 1; i >= 0; i--) {
-            stack.push(children[i]);
-          }
+        const sibling = node.nextElementSibling;
+        if (sibling) stack.push({ element: sibling, depth: entry.depth });
+        const child = node.firstElementChild;
+        const shadowChild = node.shadowRoot?.firstElementChild;
+        if ((child || shadowChild) && entry.depth >= RESOURCE_LIMITS.maxDeepDepth) {
+          budget.exhausted = true;
+          return;
         }
-
-        if (node.shadowRoot?.children) {
-          const srChildren = Array.from(node.shadowRoot.children);
-          for (let i = srChildren.length - 1; i >= 0; i--) {
-            stack.push(srChildren[i]);
-          }
-        }
+        if (child) stack.push({ element: child, depth: entry.depth + 1 });
+        if (shadowChild) stack.push({ element: shadowChild, depth: entry.depth + 1 });
       } catch {}
     }
   }
 
-  function queryAllDeep(selector) {
+  function scanDeepSelector(selector, maximumResults, budget) {
+    const normalized = normalizeBoundedSelector(selector);
+    if (!normalized) return { matches: [], complete: false };
     const results = [];
-    for (const node of walkAllNodesDeep(document)) {
-      if (!(node instanceof Element)) continue;
+    const traversalBudget = budget || createDeepTraversalBudget();
+    for (const node of walkAllNodesDeep(document, traversalBudget)) {
       try {
-        if (node.matches(selector)) results.push(node);
+        if (NATIVE_ELEMENT_MATCHES.call(node, normalized)) {
+          results.push(node);
+          if (results.length >= maximumResults) {
+            return { matches: results, complete: true };
+          }
+        }
       } catch {}
     }
-    return results;
+    return { matches: results, complete: !traversalBudget.exhausted };
+  }
+
+  function queryAllDeep(selector) {
+    return scanDeepSelector(
+      selector,
+      RESOURCE_LIMITS.maxQueryResults,
+      createDeepTraversalBudget(),
+    ).matches;
+  }
+
+  function querySelectorDeepFirst(selector) {
+    return scanDeepSelector(selector, 1, createDeepTraversalBudget()).matches[0] || null;
+  }
+
+  function findIframeBySource(source) {
+    if (!source) return null;
+    const budget = createDeepTraversalBudget();
+    for (const node of walkAllNodesDeep(document, budget)) {
+      if (node.tagName !== 'IFRAME' && node.tagName !== 'FRAME') continue;
+      try {
+        if (node.contentWindow === source) return node;
+      } catch {
+        // Continue through the bounded element traversal.
+      }
+    }
+    return null;
   }
 
   /**
@@ -1532,26 +1750,79 @@
   function isDeepSelectorUnique(selector, target) {
     if (!selector || !(target instanceof Element)) return false;
     try {
-      const matches = queryAllDeep(selector);
-      return matches.length === 1 && matches[0] === target;
+      const result = scanDeepSelector(
+        selector,
+        2,
+        activeSelectorBudget || createDeepTraversalBudget(),
+      );
+      return result.complete && result.matches.length === 1 && result.matches[0] === target;
     } catch (error) {
       return false;
     }
   }
 
+  function preflightXPathDom() {
+    const root = document.documentElement;
+    if (!root) return true;
+    const stack = [{ element: root, depth: 0 }];
+    const deadline = Date.now() + RESOURCE_LIMITS.maxDeepDurationMs;
+    let visited = 0;
+    while (stack.length > 0) {
+      if (visited >= RESOURCE_LIMITS.maxDeepElements || Date.now() > deadline) return false;
+      const entry = stack.pop();
+      if (!entry || entry.depth > RESOURCE_LIMITS.maxDeepDepth) return false;
+      const element = entry.element;
+      visited += 1;
+      const sibling = element.nextElementSibling;
+      if (sibling) stack.push({ element: sibling, depth: entry.depth });
+      const child = element.firstElementChild;
+      if (child) {
+        if (entry.depth >= RESOURCE_LIMITS.maxDeepDepth) return false;
+        stack.push({ element: child, depth: entry.depth + 1 });
+      }
+    }
+    return true;
+  }
+
+  function normalizeBoundedXPath(xpath) {
+    if (
+      typeof xpath !== 'string' ||
+      xpath.length === 0 ||
+      xpath.length > RESOURCE_LIMITS.maxSelectorBytes ||
+      utf8ByteLength(xpath, RESOURCE_LIMITS.maxSelectorBytes) > RESOURCE_LIMITS.maxSelectorBytes
+    ) {
+      return '';
+    }
+    let steps = 0;
+    for (const character of xpath) {
+      if ('/[]()|'.includes(character)) steps += 1;
+      if (steps > RESOURCE_LIMITS.maxXPathSteps) return '';
+    }
+    return xpath.trim();
+  }
+
   function evaluateXPathAll(xpath) {
     try {
+      const normalized = normalizeBoundedXPath(xpath);
+      if (!normalized || !preflightXPathDom()) return [];
       const arr = [];
       const res = document.evaluate(
-        xpath,
+        normalized,
         document,
         null,
-        XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+        XPathResult.ORDERED_NODE_ITERATOR_TYPE,
         null,
       );
-
-      for (let i = 0; i < res.snapshotLength; i++) {
-        const n = res.snapshotItem(i);
+      const deadline = Date.now() + RESOURCE_LIMITS.maxDeepDurationMs;
+      let iterations = 0;
+      while (
+        arr.length < RESOURCE_LIMITS.maxQueryResults &&
+        iterations < RESOURCE_LIMITS.maxXPathIterations &&
+        Date.now() <= deadline
+      ) {
+        const n = res.iterateNext();
+        if (!n) break;
+        iterations += 1;
         // Filter out overlay elements to prevent panel self-highlighting
         if (n?.nodeType === 1 && !isOverlayElement(n)) {
           arr.push(n);
@@ -2287,7 +2558,14 @@
    * Supports composite iframe selectors: "frameSelector |> innerSelector"
    */
   async function highlightSelectorExternal({ selector, selectorType = 'css', listMode = false }) {
-    const normalized = String(selector || '').trim();
+    if (
+      typeof selector !== 'string' ||
+      selector.length > RESOURCE_LIMITS.maxSelectorBytes ||
+      utf8ByteLength(selector, RESOURCE_LIMITS.maxSelectorBytes) > RESOURCE_LIMITS.maxSelectorBytes
+    ) {
+      return { success: false, error: 'selector exceeds the resource limit' };
+    }
+    const normalized = selector.trim();
     if (!normalized) {
       return { success: false, error: 'selector is required' };
     }
@@ -2307,7 +2585,7 @@
           // Find frame element
           let frameEl = null;
           try {
-            frameEl = querySelectorDeepFirst(frameSel) || document.querySelector(frameSel);
+            frameEl = querySelectorDeepFirst(frameSel);
           } catch {}
 
           if (
@@ -2775,14 +3053,7 @@
         // Only main frame handles these overlay-related messages
         if (!IS_MAIN) return;
 
-        const iframes = Array.from(document.querySelectorAll('iframe'));
-        const host = iframes.find((f) => {
-          try {
-            return f.contentWindow === ev.source;
-          } catch {
-            return false;
-          }
-        });
+        const host = findIframeBySource(ev.source);
 
         if (!host) return;
 
