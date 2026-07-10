@@ -249,7 +249,7 @@ test("release workflow verifies before either publish mutation", async () => {
   const githubJob = workflow.indexOf("  publish-github-release:");
   const buildJobBody = workflow.slice(buildJob, githubJob);
   const githubPublish = workflow.indexOf(
-    "uses: softprops/action-gh-release@v2",
+    "uses: softprops/action-gh-release@",
     githubJob,
   );
   const npmJob = workflow.indexOf("  publish-npm:");
@@ -258,6 +258,19 @@ test("release workflow verifies before either publish mutation", async () => {
     npmJob,
   );
   const npmPublish = workflow.indexOf('          npm publish "', npmJob);
+
+  const remoteActionRefs = Array.from(
+    workflow.matchAll(/^\s*uses:\s*([^\s#]+)/gm),
+    (match) => match[1],
+  ).filter((reference) => !reference.startsWith("./"));
+  assert.ok(remoteActionRefs.length > 0, "workflow must use remote actions");
+  for (const reference of remoteActionRefs) {
+    assert.match(
+      reference,
+      /^[^@]+@[a-f0-9]{40}$/,
+      `remote action must be pinned to a full commit SHA: ${reference}`,
+    );
+  }
 
   assert.ok(
     buildJob >= 0 && artifactPreflight > buildJob,
