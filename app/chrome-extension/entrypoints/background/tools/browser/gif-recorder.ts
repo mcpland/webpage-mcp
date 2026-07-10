@@ -256,10 +256,13 @@ async function captureFrame(
     `data:image/png;base64,${screenshot.data}`,
   );
 
-  // Scale image to target dimensions
-  ctx.clearRect(0, 0, width, height);
-  ctx.drawImage(imageBitmap, 0, 0, width, height);
-  imageBitmap.close();
+  try {
+    // Scale image to target dimensions
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(imageBitmap, 0, 0, width, height);
+  } finally {
+    imageBitmap.close();
+  }
 
   const imageData = ctx.getImageData(0, 0, width, height);
   return imageData.data;

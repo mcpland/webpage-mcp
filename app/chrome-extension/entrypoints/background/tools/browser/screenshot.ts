@@ -1,14 +1,18 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { toPublicDownloadLocation } from '@/entrypoints/background/download-paths';
 import { BaseBrowserToolExecutor } from '../base-browser';
-import { TOOL_NAMES } from 'webpage-mcp-shared';
+import { SCREENSHOT_LIMITS, TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import {
+  assertDevicePixelRatio,
+  assertPixelDimensions,
+  assertScreenshotDataUrl,
   canvasToDataURL,
   createImageBitmapFromUrl,
   cropAndResizeImage,
   stitchImages,
   compressImage,
+  toPhysicalPixels,
 } from '../../../../utils/image-utils';
 import { screenshotContextManager } from '@/utils/screenshot-context';
 
@@ -16,15 +20,11 @@ import { screenshotContextManager } from '@/utils/screenshot-context';
 const SCREENSHOT_CONSTANTS = {
   SCROLL_DELAY_MS: 350, // Time to wait after scroll for rendering and lazy loading
   CAPTURE_STITCH_DELAY_MS: 50, // Small delay between captures in a scroll sequence
-  MAX_CAPTURE_PARTS: 50, // Maximum number of parts to capture (for infinite scroll pages)
-  MAX_CAPTURE_HEIGHT_PX: 50000, // Maximum height in pixels to capture
   PIXEL_TOLERANCE: 1,
   SCRIPT_INIT_DELAY: 100, // Delay for script initialization
 } as {
   readonly SCROLL_DELAY_MS: number;
   CAPTURE_STITCH_DELAY_MS: number; // This one is mutable
-  readonly MAX_CAPTURE_PARTS: number;
-  readonly MAX_CAPTURE_HEIGHT_PX: number;
   readonly PIXEL_TOLERANCE: number;
   readonly SCRIPT_INIT_DELAY: number;
 };
@@ -79,6 +79,12 @@ interface ScreenshotPageDetails {
   currentScrollY: number;
 }
 
+interface ScreenshotCapture {
+  dataUrl: string;
+  widthCss: number;
+  heightCss: number;
+}
+
 const PAGE_DETAILS_REQUIRED_FIELDS: Array<keyof ScreenshotPageDetails> = [
   'totalWidth',
   'totalHeight',
@@ -96,6 +102,58 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function assertOptionalUserDimension(
+  value: number | undefined,
+  label: string,
+  maximum: number,
+): void {
+  if (value === undefined) return;
+  if (!Number.isSafeInteger(value) || value <= 0 || value > maximum) {
+    throw new Error(`${label} must be a positive integer no greater than ${maximum}.`);
+  }
+}
+
+function assertValidScreenshotParams(args: ScreenshotToolParams): void {
+  assertOptionalUserDimension(
+    args.width,
+    'Screenshot width',
+    SCREENSHOT_LIMITS.MAX_USER_DIMENSION_CSS,
+  );
+  assertOptionalUserDimension(
+    args.height,
+    'Screenshot height',
+    SCREENSHOT_LIMITS.MAX_USER_DIMENSION_CSS,
+  );
+  assertOptionalUserDimension(
+    args.maxHeight,
+    'Screenshot maxHeight',
+    SCREENSHOT_LIMITS.MAX_FULL_PAGE_HEIGHT_CSS,
+  );
+}
+
+function assertPositiveSafeInteger(value: unknown, label: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive safe integer.`);
+  }
+}
+
+function assertNonNegativeFiniteNumber(value: unknown, label: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be a finite non-negative number.`);
+  }
+}
+
+function toPhysicalCoordinate(cssPixels: number, dpr: number, label: string): number {
+  if (!Number.isFinite(cssPixels)) {
+    throw new Error(`${label} must be finite.`);
+  }
+  const value = Math.round(cssPixels * dpr);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`${label} exceeds the safe numeric range.`);
+  }
+  return value;
+}
+
 /**
  * Validates and asserts that the response from content script contains valid page details
  */
@@ -107,9 +165,10 @@ function assertValidPageDetails(details: unknown): ScreenshotPageDetails {
   }
 
   const candidate = details as Partial<ScreenshotPageDetails>;
-  const invalidFields = PAGE_DETAILS_REQUIRED_FIELDS.filter(
-    (field) => typeof candidate[field] !== 'number' || !Number.isFinite(candidate[field]),
-  );
+  const invalidFields = PAGE_DETAILS_REQUIRED_FIELDS.filter((field) => {
+    const value = candidate[field];
+    return typeof value !== 'number' || !Number.isFinite(value);
+  });
 
   if (invalidFields.length > 0) {
     throw new Error(
@@ -117,7 +176,38 @@ function assertValidPageDetails(details: unknown): ScreenshotPageDetails {
     );
   }
 
-  return candidate as ScreenshotPageDetails;
+  assertPositiveSafeInteger(candidate.totalWidth, 'Page width');
+  assertPositiveSafeInteger(candidate.totalHeight, 'Page height');
+  assertPositiveSafeInteger(candidate.viewportWidth, 'Viewport width');
+  assertPositiveSafeInteger(candidate.viewportHeight, 'Viewport height');
+  assertDevicePixelRatio(candidate.devicePixelRatio!, 'Page device pixel ratio');
+  assertNonNegativeFiniteNumber(candidate.currentScrollX, 'Horizontal scroll position');
+  assertNonNegativeFiniteNumber(candidate.currentScrollY, 'Vertical scroll position');
+
+  const validated = candidate as ScreenshotPageDetails;
+  if (
+    validated.viewportWidth > validated.totalWidth ||
+    validated.viewportHeight > validated.totalHeight
+  ) {
+    throw new Error('Screenshot helper returned page dimensions smaller than the viewport.');
+  }
+  const viewportWidthPx = toPhysicalPixels(
+    validated.viewportWidth,
+    validated.devicePixelRatio,
+    'Viewport width',
+  );
+  const viewportHeightPx = toPhysicalPixels(
+    validated.viewportHeight,
+    validated.devicePixelRatio,
+    'Viewport height',
+  );
+  assertPixelDimensions(
+    viewportWidthPx,
+    viewportHeightPx,
+    SCREENSHOT_LIMITS.MAX_SOURCE_PIXELS,
+    'Screenshot viewport',
+  );
+  return validated;
 }
 
 /**
@@ -139,6 +229,12 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     } = args;
 
     console.log(`Starting screenshot with options:`, args);
+
+    try {
+      assertValidScreenshotParams(args);
+    } catch (error) {
+      return createErrorResponse(`Screenshot error: ${formatErrorMessage(error)}`);
+    }
 
     // Resolve target tab (explicit or active)
     const explicit = await this.tryGetTab(args.tabId);
@@ -186,13 +282,30 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
               'Page.getLayoutMetrics',
               {},
             );
-            const viewport = metrics?.layoutViewport ||
-              metrics?.visualViewport || {
-                clientWidth: 800,
-                clientHeight: 600,
-                pageX: 0,
-                pageY: 0,
-              };
+            const viewport = metrics?.layoutViewport || metrics?.visualViewport;
+            assertPositiveSafeInteger(viewport?.clientWidth, 'CDP viewport width');
+            assertPositiveSafeInteger(viewport?.clientHeight, 'CDP viewport height');
+            const dprResult: any = await cdpSessionManager.sendCommand(tabId, 'Runtime.evaluate', {
+              expression: 'window.devicePixelRatio',
+              returnByValue: true,
+            });
+            const dpr = assertDevicePixelRatio(dprResult?.result?.value, 'CDP device pixel ratio');
+            const viewportWidthPx = toPhysicalPixels(
+              viewport.clientWidth,
+              dpr,
+              'CDP viewport width',
+            );
+            const viewportHeightPx = toPhysicalPixels(
+              viewport.clientHeight,
+              dpr,
+              'CDP viewport height',
+            );
+            assertPixelDimensions(
+              viewportWidthPx,
+              viewportHeightPx,
+              SCREENSHOT_LIMITS.MAX_SOURCE_PIXELS,
+              'CDP screenshot viewport',
+            );
             const shot: any = await cdpSessionManager.sendCommand(tabId, 'Page.captureScreenshot', {
               format: 'png',
             });
@@ -201,8 +314,15 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
               throw new Error('CDP Page.captureScreenshot returned empty data');
             }
             finalImageDataUrl = `data:image/png;base64,${base64Data}`;
-            finalImageWidthCss = Math.round(viewport.clientWidth || 800);
-            finalImageHeightCss = Math.round(viewport.clientHeight || 600);
+            assertScreenshotDataUrl(finalImageDataUrl, 'CDP screenshot data URL');
+            let bitmap: ImageBitmap | undefined;
+            try {
+              bitmap = await createImageBitmapFromUrl(finalImageDataUrl);
+            } finally {
+              bitmap?.close();
+            }
+            finalImageWidthCss = viewport.clientWidth;
+            finalImageHeightCss = viewport.clientHeight;
           });
         } catch (e) {
           throw new Error(`Background screenshot failed via CDP: ${formatErrorMessage(e)}`);
@@ -232,45 +352,34 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           action: TOOL_MESSAGE_TYPES.SCREENSHOT_GET_PAGE_DETAILS,
         });
         pageDetails = assertValidPageDetails(rawPageDetails);
-        originalScroll = { x: pageDetails.currentScrollX, y: pageDetails.currentScrollY };
+        originalScroll = {
+          x: pageDetails.currentScrollX,
+          y: pageDetails.currentScrollY,
+        };
 
         if (fullPage) {
           this.logInfo('Capturing full page...');
-          finalImageDataUrl = await this._captureFullPage(tab.id!, args, pageDetails);
-          // Compute final CSS size
-          if (args.width && args.height) {
-            finalImageWidthCss = args.width;
-            finalImageHeightCss = args.height;
-          } else if (args.width && !args.height) {
-            finalImageWidthCss = args.width;
-            const ratio = pageDetails.totalHeight / pageDetails.totalWidth;
-            finalImageHeightCss = Math.round(args.width * ratio);
-          } else if (!args.width && args.height) {
-            finalImageHeightCss = args.height;
-            const ratio = pageDetails.totalWidth / pageDetails.totalHeight;
-            finalImageWidthCss = Math.round(args.height * ratio);
-          } else {
-            finalImageWidthCss = pageDetails.totalWidth;
-            finalImageHeightCss = pageDetails.totalHeight;
-          }
+          const capture = await this._captureFullPage(tab.id!, args, pageDetails);
+          finalImageDataUrl = capture.dataUrl;
+          finalImageWidthCss = capture.widthCss;
+          finalImageHeightCss = capture.heightCss;
         } else if (selector) {
           this.logInfo(`Capturing element: ${selector}`);
-          finalImageDataUrl = await this._captureElement(
-            tab.id!,
-            args,
-            pageDetails.devicePixelRatio,
-          );
-          if (args.width && args.height) {
-            finalImageWidthCss = args.width;
-            finalImageHeightCss = args.height;
-          } else {
-            finalImageWidthCss = pageDetails.viewportWidth;
-            finalImageHeightCss = pageDetails.viewportHeight;
-          }
+          const capture = await this._captureElement(tab.id!, args, pageDetails.devicePixelRatio);
+          finalImageDataUrl = capture.dataUrl;
+          finalImageWidthCss = capture.widthCss;
+          finalImageHeightCss = capture.heightCss;
         } else {
           // Visible area only
           this.logInfo('Capturing visible area...');
           finalImageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+          assertScreenshotDataUrl(finalImageDataUrl, 'Visible screenshot data URL');
+          let bitmap: ImageBitmap | undefined;
+          try {
+            bitmap = await createImageBitmapFromUrl(finalImageDataUrl);
+          } finally {
+            bitmap?.close();
+          }
           finalImageWidthCss = pageDetails.viewportWidth;
           finalImageHeightCss = pageDetails.viewportHeight;
         }
@@ -279,6 +388,7 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       if (!finalImageDataUrl) {
         throw new Error('Failed to capture image data');
       }
+      assertScreenshotDataUrl(finalImageDataUrl, 'Final screenshot data URL');
 
       // 2. Process output
       // Update screenshot context for coordinate scaling by tools like chrome_computer
@@ -320,7 +430,10 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ base64Data, mimeType: compressed.mimeType }),
+              text: JSON.stringify({
+                base64Data,
+                mimeType: compressed.mimeType,
+              }),
             },
           ],
           isError: false,
@@ -408,27 +521,73 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     tabId: number,
     options: ScreenshotToolParams,
     pageDpr: number,
-  ): Promise<string> {
+  ): Promise<ScreenshotCapture> {
     const elementDetails = await this.sendMessageToTab(tabId, {
       action: TOOL_MESSAGE_TYPES.SCREENSHOT_GET_ELEMENT_DETAILS,
       selector: options.selector,
     });
 
-    const dpr = elementDetails.devicePixelRatio || pageDpr || 1;
+    if (!elementDetails || typeof elementDetails !== 'object' || !elementDetails.rect) {
+      throw new Error(
+        typeof elementDetails?.error === 'string'
+          ? elementDetails.error
+          : 'Screenshot helper returned invalid element details.',
+      );
+    }
+    const rect = elementDetails.rect as Partial<{
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }>;
+    for (const field of ['x', 'y', 'width', 'height'] as const) {
+      if (typeof rect[field] !== 'number' || !Number.isFinite(rect[field])) {
+        throw new Error(`Screenshot helper returned an invalid element ${field}.`);
+      }
+    }
+    if (rect.width! <= 0 || rect.height! <= 0) {
+      throw new Error('Screenshot element dimensions must be greater than 0.');
+    }
+
+    const dpr = assertDevicePixelRatio(
+      elementDetails.devicePixelRatio ?? pageDpr,
+      'Element device pixel ratio',
+    );
 
     // Element rect is viewport-relative, in CSS pixels
     // captureVisibleTab captures in physical pixels
     const cropRectPx = {
-      x: elementDetails.rect.x * dpr,
-      y: elementDetails.rect.y * dpr,
-      width: elementDetails.rect.width * dpr,
-      height: elementDetails.rect.height * dpr,
+      x: toPhysicalCoordinate(rect.x!, dpr, 'Element x coordinate'),
+      y: toPhysicalCoordinate(rect.y!, dpr, 'Element y coordinate'),
+      width: toPhysicalPixels(rect.width!, dpr, 'Element width'),
+      height: toPhysicalPixels(rect.height!, dpr, 'Element height'),
     };
+    assertPixelDimensions(
+      cropRectPx.width,
+      cropRectPx.height,
+      SCREENSHOT_LIMITS.MAX_SOURCE_PIXELS,
+      'Element crop',
+    );
+
+    const targetWidthPx = options.width
+      ? toPhysicalPixels(options.width, dpr, 'Element output width')
+      : cropRectPx.width;
+    const targetHeightPx = options.height
+      ? toPhysicalPixels(options.height, dpr, 'Element output height')
+      : cropRectPx.height;
+    assertPixelDimensions(
+      targetWidthPx,
+      targetHeightPx,
+      SCREENSHOT_LIMITS.MAX_TARGET_PIXELS,
+      'Element screenshot output',
+    );
 
     // Small delay to ensure element is fully rendered after scrollIntoView
     await new Promise((resolve) => setTimeout(resolve, SCREENSHOT_CONSTANTS.SCRIPT_INIT_DELAY));
 
-    const visibleCaptureDataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' });
+    const visibleCaptureDataUrl = await chrome.tabs.captureVisibleTab({
+      format: 'png',
+    });
     if (!visibleCaptureDataUrl) {
       throw new Error('Failed to capture visible tab for element cropping');
     }
@@ -440,7 +599,12 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       options.width, // Target output width in CSS pixels
       options.height, // Target output height in CSS pixels
     );
-    return canvasToDataURL(croppedCanvas);
+    const dataUrl = await canvasToDataURL(croppedCanvas);
+    return {
+      dataUrl,
+      widthCss: croppedCanvas.width / dpr,
+      heightCss: croppedCanvas.height / dpr,
+    };
   }
 
   /**
@@ -449,18 +613,52 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
   async _captureFullPage(
     tabId: number,
     options: ScreenshotToolParams,
-    initialPageDetails: any,
-  ): Promise<string> {
-    const dpr = initialPageDetails.devicePixelRatio;
-    const totalWidthCss = options.width || initialPageDetails.totalWidth; // Use option width if provided
-    const totalHeightCss = initialPageDetails.totalHeight; // Full page always uses actual height
+    initialPageDetails: ScreenshotPageDetails,
+  ): Promise<ScreenshotCapture> {
+    const dpr = assertDevicePixelRatio(initialPageDetails.devicePixelRatio);
+    const totalWidthCss = initialPageDetails.totalWidth;
+    const totalHeightCss = initialPageDetails.totalHeight;
+    const requestedMaxHeightCss = Math.min(
+      options.maxHeight ?? SCREENSHOT_LIMITS.MAX_FULL_PAGE_HEIGHT_CSS,
+      SCREENSHOT_LIMITS.MAX_FULL_PAGE_HEIGHT_CSS,
+    );
+    const limitedHeightCss = Math.min(totalHeightCss, requestedMaxHeightCss);
+    const totalWidthPx = toPhysicalPixels(totalWidthCss, dpr, 'Full-page width');
+    const totalHeightPx = toPhysicalPixels(limitedHeightCss, dpr, 'Full-page height');
+    assertPixelDimensions(
+      totalWidthPx,
+      totalHeightPx,
+      SCREENSHOT_LIMITS.MAX_STITCH_PIXELS,
+      'Full-page stitched canvas',
+    );
 
-    // Apply maximum height limit for infinite scroll pages
-    const maxHeightPx = options.maxHeight || SCREENSHOT_CONSTANTS.MAX_CAPTURE_HEIGHT_PX;
-    const limitedHeightCss = Math.min(totalHeightCss, maxHeightPx / dpr);
+    const expectedParts = Math.ceil(limitedHeightCss / initialPageDetails.viewportHeight);
+    if (expectedParts > SCREENSHOT_LIMITS.MAX_CAPTURE_PARTS) {
+      throw new Error(
+        `Full-page capture requires ${expectedParts} parts, exceeding the ${SCREENSHOT_LIMITS.MAX_CAPTURE_PARTS}-part limit. Reduce maxHeight or enlarge the viewport.`,
+      );
+    }
 
-    const totalWidthPx = totalWidthCss * dpr;
-    const totalHeightPx = limitedHeightCss * dpr;
+    let outputWidthCss = totalWidthCss;
+    let outputHeightCss = limitedHeightCss;
+    if (options.width !== undefined && options.height !== undefined) {
+      outputWidthCss = options.width;
+      outputHeightCss = options.height;
+    } else if (options.width !== undefined) {
+      outputWidthCss = options.width;
+      outputHeightCss = Math.max(1, Math.round((limitedHeightCss * options.width) / totalWidthCss));
+    } else if (options.height !== undefined) {
+      outputHeightCss = options.height;
+      outputWidthCss = Math.max(1, Math.round((totalWidthCss * options.height) / limitedHeightCss));
+    }
+    const outputWidthPx = toPhysicalPixels(outputWidthCss, dpr, 'Full-page output width');
+    const outputHeightPx = toPhysicalPixels(outputHeightCss, dpr, 'Full-page output height');
+    assertPixelDimensions(
+      outputWidthPx,
+      outputHeightPx,
+      SCREENSHOT_LIMITS.MAX_TARGET_PIXELS,
+      'Full-page output canvas',
+    );
 
     // Viewport dimensions (CSS pixels) - logged for debugging
     this.logInfo(
@@ -472,12 +670,18 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
     const viewportHeightCss = initialPageDetails.viewportHeight;
 
-    const capturedParts = [];
+    const capturedParts: Array<{ dataUrl: string; y: number }> = [];
+    let capturedDataUrlBytes = 0;
     let currentScrollYCss = 0;
     let capturedHeightPx = 0;
-    let partIndex = 0;
 
-    while (capturedHeightPx < totalHeightPx && partIndex < SCREENSHOT_CONSTANTS.MAX_CAPTURE_PARTS) {
+    while (capturedHeightPx < totalHeightPx) {
+      const partIndex = capturedParts.length;
+      if (partIndex >= SCREENSHOT_LIMITS.MAX_CAPTURE_PARTS) {
+        throw new Error(
+          `Full-page capture exceeded the ${SCREENSHOT_LIMITS.MAX_CAPTURE_PARTS}-part limit.`,
+        );
+      }
       this.logInfo(
         `Capturing part ${partIndex + 1}... (${Math.round((capturedHeightPx / totalHeightPx) * 100)}%)`,
       );
@@ -490,8 +694,16 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           y: currentScrollYCss,
           scrollDelay: SCREENSHOT_CONSTANTS.SCROLL_DELAY_MS,
         });
-        // Update currentScrollYCss based on actual scroll achieved
+        assertNonNegativeFiniteNumber(scrollResp?.newScrollY, 'Actual vertical scroll position');
+        if (scrollResp.newScrollY > totalHeightCss) {
+          throw new Error('Screenshot helper returned a vertical scroll position beyond the page.');
+        }
         currentScrollYCss = scrollResp.newScrollY;
+      }
+
+      const yOffsetPx = toPhysicalCoordinate(currentScrollYCss, dpr, 'Screenshot part offset');
+      if (yOffsetPx < 0 || yOffsetPx >= totalHeightPx) {
+        throw new Error('Screenshot part offset falls outside the stitched canvas.');
       }
 
       // Ensure rendering after scroll
@@ -501,75 +713,58 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
 
       const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' });
       if (!dataUrl) throw new Error('captureVisibleTab returned empty during full page capture');
+      assertScreenshotDataUrl(dataUrl, `Screenshot part ${partIndex + 1}`);
+      capturedDataUrlBytes += dataUrl.length;
+      if (
+        !Number.isSafeInteger(capturedDataUrlBytes) ||
+        capturedDataUrlBytes > SCREENSHOT_LIMITS.MAX_CAPTURE_DATA_URL_BYTES
+      ) {
+        throw new Error(
+          `Screenshot parts exceed the ${SCREENSHOT_LIMITS.MAX_CAPTURE_DATA_URL_BYTES.toLocaleString('en-US')}-byte aggregate limit.`,
+        );
+      }
 
-      const yOffsetPx = currentScrollYCss * dpr;
+      let image: ImageBitmap | undefined;
+      try {
+        image = await createImageBitmapFromUrl(dataUrl);
+        const effectiveHeightPx = Math.min(image.height, totalHeightPx - yOffsetPx);
+        capturedHeightPx = yOffsetPx + effectiveHeightPx;
+      } finally {
+        image?.close();
+      }
       capturedParts.push({ dataUrl, y: yOffsetPx });
-
-      const imgForHeight = await createImageBitmapFromUrl(dataUrl); // To get actual captured height
-      const lastPartEffectiveHeightPx = Math.min(imgForHeight.height, totalHeightPx - yOffsetPx);
-
-      capturedHeightPx = yOffsetPx + lastPartEffectiveHeightPx;
 
       if (capturedHeightPx >= totalHeightPx - SCREENSHOT_CONSTANTS.PIXEL_TOLERANCE) break;
 
-      currentScrollYCss += viewportHeightCss;
-      // Prevent overscrolling past the document height for the next scroll command
-      if (
-        currentScrollYCss > totalHeightCss - viewportHeightCss &&
-        currentScrollYCss < totalHeightCss
-      ) {
-        currentScrollYCss = totalHeightCss - viewportHeightCss;
+      const maximumScrollYCss = Math.max(0, limitedHeightCss - viewportHeightCss);
+      const nextScrollYCss = Math.min(currentScrollYCss + viewportHeightCss, maximumScrollYCss);
+      if (nextScrollYCss <= currentScrollYCss) {
+        throw new Error('Full-page capture could not make forward scroll progress.');
       }
-      partIndex++;
+      currentScrollYCss = nextScrollYCss;
     }
 
-    // Check if we hit any limits
-    if (partIndex >= SCREENSHOT_CONSTANTS.MAX_CAPTURE_PARTS) {
-      this.logInfo(
-        `Reached maximum number of capture parts (${SCREENSHOT_CONSTANTS.MAX_CAPTURE_PARTS}). This may be an infinite scroll page.`,
-      );
-    }
     if (totalHeightCss > limitedHeightCss) {
       this.logInfo(
-        `Page height (${totalHeightCss}px) exceeds maximum capture height (${maxHeightPx / dpr}px). Capturing limited portion.`,
+        `Page height (${totalHeightCss}px) exceeds maximum capture height (${requestedMaxHeightCss}px). Capturing limited portion.`,
       );
     }
 
     this.logInfo('Stitching image...');
     const finalCanvas = await stitchImages(capturedParts, totalWidthPx, totalHeightPx);
 
-    // If user specified width but not height (or vice versa for full page), resize maintaining aspect ratio
     let outputCanvas = finalCanvas;
-    if (options.width && !options.height) {
-      const targetWidthPx = options.width * dpr;
-      const aspectRatio = finalCanvas.height / finalCanvas.width;
-      const targetHeightPx = targetWidthPx * aspectRatio;
-      outputCanvas = new OffscreenCanvas(targetWidthPx, targetHeightPx);
+    if (outputWidthPx !== finalCanvas.width || outputHeightPx !== finalCanvas.height) {
+      outputCanvas = new OffscreenCanvas(outputWidthPx, outputHeightPx);
       const ctx = outputCanvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(finalCanvas, 0, 0, targetWidthPx, targetHeightPx);
+      if (!ctx) {
+        throw new Error('Unable to get full-page output canvas context.');
       }
-    } else if (options.height && !options.width) {
-      const targetHeightPx = options.height * dpr;
-      const aspectRatio = finalCanvas.width / finalCanvas.height;
-      const targetWidthPx = targetHeightPx * aspectRatio;
-      outputCanvas = new OffscreenCanvas(targetWidthPx, targetHeightPx);
-      const ctx = outputCanvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(finalCanvas, 0, 0, targetWidthPx, targetHeightPx);
-      }
-    } else if (options.width && options.height) {
-      // Both specified, direct resize
-      const targetWidthPx = options.width * dpr;
-      const targetHeightPx = options.height * dpr;
-      outputCanvas = new OffscreenCanvas(targetWidthPx, targetHeightPx);
-      const ctx = outputCanvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(finalCanvas, 0, 0, targetWidthPx, targetHeightPx);
-      }
+      ctx.drawImage(finalCanvas, 0, 0, outputWidthPx, outputHeightPx);
     }
 
-    return canvasToDataURL(outputCanvas);
+    const dataUrl = await canvasToDataURL(outputCanvas);
+    return { dataUrl, widthCss: outputWidthCss, heightCss: outputHeightCss };
   }
 }
 

@@ -62,6 +62,24 @@ export const TOOL_NAMES = {
   },
 };
 
+/**
+ * Resource ceilings shared by the screenshot schema and the extension runtime.
+ * Pixel budgets account for the RGBA buffers allocated while decoding and
+ * stitching images; encoded-byte budgets bound the strings retained in memory.
+ */
+export const SCREENSHOT_LIMITS = Object.freeze({
+  MAX_USER_DIMENSION_CSS: 8192,
+  MAX_FULL_PAGE_HEIGHT_CSS: 30000,
+  MAX_DEVICE_PIXEL_RATIO: 4,
+  MAX_BITMAP_EDGE_PX: 32767,
+  MAX_SOURCE_PIXELS: 40_000_000,
+  MAX_TARGET_PIXELS: 64_000_000,
+  MAX_STITCH_PIXELS: 64_000_000,
+  MAX_CAPTURE_PARTS: 50,
+  MAX_DATA_URL_BYTES: 32 * 1024 * 1024,
+  MAX_CAPTURE_DATA_URL_BYTES: 64 * 1024 * 1024,
+});
+
 export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
@@ -1529,12 +1547,22 @@ export const TOOL_SCHEMAS: Tool[] = [
             'Attempt capture without bringing tab/window to foreground. CDP-based capture is used for simple viewport captures. For element/full-page capture, the tab may still be made active in its window without focusing the window. Default: false. When the user has enabled MCP Background Mode, this defaults to true for viewport captures and an explicit false is ignored (full-page/selector captures still need foreground today).',
         },
         width: {
-          type: 'number',
-          description: 'Width in pixels (default: 800)',
+          type: 'integer',
+          minimum: 1,
+          maximum: SCREENSHOT_LIMITS.MAX_USER_DIMENSION_CSS,
+          description: `Optional output width in CSS pixels (1-${SCREENSHOT_LIMITS.MAX_USER_DIMENSION_CSS}).`,
         },
         height: {
-          type: 'number',
-          description: 'Height in pixels (default: 600)',
+          type: 'integer',
+          minimum: 1,
+          maximum: SCREENSHOT_LIMITS.MAX_USER_DIMENSION_CSS,
+          description: `Optional output height in CSS pixels (1-${SCREENSHOT_LIMITS.MAX_USER_DIMENSION_CSS}).`,
+        },
+        maxHeight: {
+          type: 'integer',
+          minimum: 1,
+          maximum: SCREENSHOT_LIMITS.MAX_FULL_PAGE_HEIGHT_CSS,
+          description: `Optional full-page capture height ceiling in CSS pixels (1-${SCREENSHOT_LIMITS.MAX_FULL_PAGE_HEIGHT_CSS}). It can only reduce the runtime hard limit.`,
         },
         storeBase64: {
           type: 'boolean',

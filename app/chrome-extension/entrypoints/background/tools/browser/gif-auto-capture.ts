@@ -172,10 +172,13 @@ async function captureFrameData(tabId: number, state: TabCaptureState): Promise<
 
   const imageBitmap = await createImageBitmapFromUrl(`data:image/png;base64,${screenshot.data}`);
 
-  // Scale to target dimensions
-  ctx.clearRect(0, 0, width, height);
-  ctx.drawImage(imageBitmap, 0, 0, width, height);
-  imageBitmap.close();
+  try {
+    // Scale to target dimensions
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(imageBitmap, 0, 0, width, height);
+  } finally {
+    imageBitmap.close();
+  }
 
   // Apply enhanced rendering overlays
   if (state.rendering.enabled) {
