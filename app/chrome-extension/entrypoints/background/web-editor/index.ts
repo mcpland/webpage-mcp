@@ -3,6 +3,7 @@ import {
   isExtensionPageSender,
   isExtensionRuntimeSender,
 } from '@/common/runtime-sender-auth';
+import { sanitizeAgentStreamRelayPayload } from '@/common/agent-stream-boundaries';
 import {
   WEB_EDITOR_ACTIONS,
   type ElementChangeSummary,
@@ -255,10 +256,11 @@ export async function subscribeToSessionStatus(
       if (msg?.type !== BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT) {
         return;
       }
-      if (msg.payload?.subscriptionId !== subscription.subscriptionId || !msg.payload.event) {
+      const relay = sanitizeAgentStreamRelayPayload(msg.payload);
+      if (relay?.subscriptionId !== subscription.subscriptionId) {
         return;
       }
-      handleSseEvent(sessionId, requestId, msg.payload.event);
+      handleSseEvent(sessionId, requestId, relay.event);
     };
 
     sseConnections.set(sessionId, {

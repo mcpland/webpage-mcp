@@ -31,6 +31,11 @@ import { acquireKeepalive } from '../keepalive-manager';
 import { openAgentSetupSidepanel } from '../utils/sidepanel';
 import { isExtensionRuntimeSender } from '@/common/runtime-sender-auth';
 import {
+  AGENT_STREAM_LIMITS,
+  agentStreamUtf8Bytes,
+  sanitizeAgentStreamRelayPayload,
+} from '@/common/agent-stream-boundaries';
+import {
   requestAgentRpcFetch,
   subscribeAgentStream,
   unsubscribeAgentStream,
@@ -102,7 +107,12 @@ interface ActiveRequest {
   readonly releaseKeepalive: () => void;
   readonly timeoutId: ReturnType<typeof setTimeout>;
   streamSubscriptionId?: string;
-  streamListener?: (message: unknown) => void;
+  streamListener?: (
+    message: unknown,
+    sender: chrome.runtime.MessageSender,
+  ) => void;
+  forwardedEventCount: number;
+  forwardedEventBytes: number;
 }
 
 // ============================================================
@@ -535,14 +545,34 @@ function createSseSubscription(request: ActiveRequest): SseSubscription {
         if (msg?.type !== BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT) {
           return;
         }
-        if (msg.payload?.subscriptionId !== actualSubscriptionId || !msg.payload.event) {
+        const relay = sanitizeAgentStreamRelayPayload(msg.payload);
+        if (relay?.subscriptionId !== actualSubscriptionId) {
           return;
         }
 
-        const event = msg.payload.event;
+        const event = relay.event;
         if (!shouldForwardEvent(event, request.requestId)) {
           return;
         }
+
+        const eventBytes = agentStreamUtf8Bytes(JSON.stringify(event));
+        if (
+          request.forwardedEventCount >= AGENT_STREAM_LIMITS.maxEventsPerRequest ||
+          request.forwardedEventBytes + eventBytes > AGENT_STREAM_LIMITS.maxBytesPerRequest
+        ) {
+          forwardEventToQuickPanel(
+            request,
+            createErrorEvent(
+              request.sessionId,
+              request.requestId,
+              'Quick Panel stream exceeded its resource budget.',
+            ),
+          );
+          cleanupRequest(request.requestId, 'stream_resource_limit');
+          return;
+        }
+        request.forwardedEventCount += 1;
+        request.forwardedEventBytes += eventBytes;
 
         forwardEventToQuickPanel(request, event);
         if (event.type === 'status' && event.data?.requestId === request.requestId) {
@@ -876,6 +906,8 @@ async function handleSendToAI(
     abortController,
     releaseKeepalive,
     timeoutId,
+    forwardedEventCount: 0,
+    forwardedEventBytes: 0,
   };
 
   activeRequests.set(requestId, request);

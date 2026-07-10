@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { AGENT_STREAM_LIMITS } from '@/common/agent-stream-boundaries';
 
 const nativeHostMocks = vi.hoisted(() => ({
   requestAgentRpcFetch: vi.fn(),
@@ -29,7 +30,7 @@ describe('Quick Panel Agent stream authorization', () => {
     vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation((listener) => {
       listeners.push(listener);
     });
-    vi.mocked(chrome.storage.local.get).mockResolvedValue({
+    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockResolvedValue({
       'agent-selected-session-id': 'session-1',
     });
     (chrome.tabs as typeof chrome.tabs & { sendMessage: ReturnType<typeof vi.fn> }).sendMessage = vi
@@ -80,7 +81,15 @@ describe('Quick Panel Agent stream authorization', () => {
         subscriptionId: 'subscription-1',
         event: {
           type: 'message',
-          data: { requestId, role: 'assistant', content: 'done' },
+          data: {
+            id: 'message-1',
+            sessionId: 'session-1',
+            requestId,
+            role: 'assistant',
+            content: 'done',
+            messageType: 'chat',
+            createdAt: new Date(0).toISOString(),
+          },
         },
       },
     };
@@ -105,6 +114,53 @@ describe('Quick Panel Agent stream authorization', () => {
       },
       { id: chrome.runtime.id },
       vi.fn(),
+    );
+  });
+
+  it('terminates a request at the cumulative stream event limit', async () => {
+    const sendResponse = vi.fn();
+    const contentSender = {
+      id: chrome.runtime.id,
+      tab: { id: 7, windowId: 2 } as chrome.tabs.Tab,
+      frameId: 0,
+      documentId: 'document-a',
+    } as chrome.runtime.MessageSender;
+    listeners[0](
+      {
+        type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
+        authorizationToken: 'token',
+        payload: { instruction: 'Review' },
+      },
+      contentSender,
+      sendResponse,
+    );
+    await vi.waitFor(() => expect(listeners).toHaveLength(2));
+    const requestId = sendResponse.mock.calls[0]?.[0]?.requestId;
+    const eventMessage = {
+      type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
+      payload: {
+        subscriptionId: 'subscription-1',
+        event: {
+          type: 'status',
+          data: { sessionId: 'session-1', requestId, status: 'running' },
+        },
+      },
+    };
+
+    for (let index = 0; index <= AGENT_STREAM_LIMITS.maxEventsPerRequest; index += 1) {
+      listeners[1](eventMessage, { id: chrome.runtime.id }, vi.fn());
+    }
+
+    expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith('subscription-1');
+    expect(chrome.tabs.sendMessage).toHaveBeenLastCalledWith(
+      7,
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'error',
+          error: 'Quick Panel stream exceeded its resource budget.',
+        }),
+      }),
+      { frameId: 0 },
     );
   });
 });

@@ -15,6 +15,7 @@ import {
   type NativeInstanceListPayload,
 } from "webpage-mcp-shared";
 import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import { sanitizeAgentStreamRelayPayload } from "@/common/agent-stream-boundaries";
 import {
   NATIVE_HOST,
   STORAGE_KEYS,
@@ -1292,10 +1293,15 @@ export function connectNativeHost(): boolean {
           },
         });
       } else if (message.type === NativeMessageType.AGENT_STREAM_EVENT) {
+        const payload = sanitizeAgentStreamRelayPayload(message.payload);
+        if (!payload) {
+          console.warn("Ignored invalid or oversized Agent stream event");
+          return;
+        }
         chrome.runtime
           .sendMessage({
             type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
-            payload: message.payload,
+            payload,
           })
           .catch(() => {
             // ignore when no listeners
