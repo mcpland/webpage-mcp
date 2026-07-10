@@ -24,6 +24,7 @@ export interface McpToolContext {
   sessionId: string;
   instanceId: string;
   nativeHost: NativeMessagingHost;
+  signal?: AbortSignal;
   clientCapabilities?: McpClientCapabilityFallback;
 }
 
@@ -35,6 +36,23 @@ export interface McpClientCapabilityFallback {
   largeResults: boolean;
   source: 'initialize' | 'env' | 'default';
   warnings: string[];
+}
+
+function sendExtensionRequest(
+  ctx: McpToolContext,
+  payload: unknown,
+  messageType: string,
+  timeoutMs: number,
+): Promise<any> {
+  if (ctx.signal) {
+    return ctx.nativeHost.sendRequestToExtensionAndWait(
+      payload,
+      messageType,
+      timeoutMs,
+      ctx.signal,
+    );
+  }
+  return ctx.nativeHost.sendRequestToExtensionAndWait(payload, messageType, timeoutMs);
 }
 
 interface PublishedFlowVariable {
@@ -694,7 +712,8 @@ async function fetchPublishedFlows(
   }
 
   const requestPromise = (async () => {
-    const response = await ctx.nativeHost.sendRequestToExtensionAndWait(
+    const response = await sendExtensionRequest(
+      ctx,
       {
         meta: buildExtensionToolMeta(ctx),
         handshake: {
@@ -1096,7 +1115,8 @@ export const callToolForContext = async (
           }
         }
 
-        const proxyRes = await ctx.nativeHost.sendRequestToExtensionAndWait(
+        const proxyRes = await sendExtensionRequest(
+          ctx,
           {
             name: 'record_replay_flow_run',
             args: {
@@ -1158,7 +1178,8 @@ export const callToolForContext = async (
           args: variables,
           ...runOptions,
         };
-        const proxyRes = await ctx.nativeHost.sendRequestToExtensionAndWait(
+        const proxyRes = await sendExtensionRequest(
+          ctx,
           {
             name: 'record_replay_flow_run',
             args: flowArgs,
@@ -1201,7 +1222,8 @@ export const callToolForContext = async (
       name === 'record_replay_flow_run'
         ? filterFlowRunArgsForCapabilities(args, capabilities)
         : args;
-    const response = await ctx.nativeHost.sendRequestToExtensionAndWait(
+    const response = await sendExtensionRequest(
+      ctx,
       {
         name,
         args: forwardedArgs,

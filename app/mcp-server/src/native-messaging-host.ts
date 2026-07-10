@@ -27,6 +27,7 @@ import {
   removeNativeIpcCredential,
   type NativeIpcCredential,
 } from './ipc/bridge-auth';
+import { BoundedNdjsonDecoder } from './ipc/bounded-ndjson';
 import {
   callToolForContext,
   listToolsForContext,
@@ -52,6 +53,12 @@ interface AgentStreamSubscription {
 }
 
 const INSTANCE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
+const IPC_MAX_REQUEST_LINE_BYTES = 1024 * 1024;
+const IPC_MAX_RESPONSE_LINE_BYTES = 16 * 1024 * 1024;
+const IPC_MAX_IN_FLIGHT_REQUESTS = 4;
+const IPC_MAX_PENDING_REQUESTS = 16;
+const IPC_PAUSE_HIGH_WATERMARK = 8;
+const IPC_RESUME_LOW_WATERMARK = 4;
 
 function removeSocketIfExists(socketPath: string): void {
   if (process.platform === 'win32') {
@@ -191,82 +198,190 @@ export class NativeMessagingHost {
 
   private handleIpcSocket(socket: net.Socket): void {
     this.ipcSockets.add(socket);
-    socket.setEncoding('utf8');
-    let buffer = '';
+    const decoder = new BoundedNdjsonDecoder(IPC_MAX_REQUEST_LINE_BYTES);
+    const requestQueue: any[] = [];
+    const activeControllers = new Set<AbortController>();
     let authenticated = false;
+    let activeRequests = 0;
+    let inputPaused = false;
+    let closing = false;
+    let closed = false;
+    let writeTail = Promise.resolve();
 
-    const send = (payload: unknown): void => {
-      try {
-        socket.write(`${JSON.stringify(payload)}\n`);
-      } catch {
-        // Ignore broken socket writes.
+    const send = (payload: any): Promise<void> => {
+      let serialized = JSON.stringify(payload);
+      if (Buffer.byteLength(serialized, 'utf8') > IPC_MAX_RESPONSE_LINE_BYTES) {
+        serialized = JSON.stringify({
+          id: payload?.id ?? null,
+          error: `IPC response exceeds the ${IPC_MAX_RESPONSE_LINE_BYTES}-byte limit`,
+        });
+      }
+      const framed = `${serialized}\n`;
+      const write = writeTail.then(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            if (socket.destroyed) {
+              reject(new Error('IPC socket is closed'));
+              return;
+            }
+            try {
+              socket.write(framed, (error) => {
+                if (error) {
+                  reject(error);
+                } else {
+                  resolve();
+                }
+              });
+            } catch (error) {
+              reject(error);
+            }
+          }),
+      );
+      writeTail = write.catch(() => {});
+      return write;
+    };
+
+    const abortConnectionWork = (): void => {
+      requestQueue.length = 0;
+      for (const controller of activeControllers) {
+        controller.abort();
+      }
+      activeControllers.clear();
+    };
+
+    const closeWithError = (id: unknown, error: string): void => {
+      if (closing || closed) {
+        return;
+      }
+      closing = true;
+      socket.pause();
+      abortConnectionWork();
+      void send({ id: typeof id === 'string' ? id : null, error }).finally(() => {
+        socket.destroy();
+      });
+    };
+
+    const updateInputBackpressure = (): void => {
+      if (closing || closed) {
+        return;
+      }
+      const pendingCount = activeRequests + requestQueue.length;
+      if (!inputPaused && pendingCount >= IPC_PAUSE_HIGH_WATERMARK) {
+        socket.pause();
+        inputPaused = true;
+      } else if (inputPaused && pendingCount <= IPC_RESUME_LOW_WATERMARK) {
+        socket.resume();
+        inputPaused = false;
       }
     };
 
-    socket.on('data', (chunk: string) => {
-      buffer += chunk;
-      while (true) {
-        const newlineIndex = buffer.indexOf('\n');
-        if (newlineIndex === -1) break;
+    const processRequestQueue = (): void => {
+      while (
+        !closing &&
+        !closed &&
+        activeRequests < IPC_MAX_IN_FLIGHT_REQUESTS &&
+        requestQueue.length > 0
+      ) {
+        const request = requestQueue.shift();
+        const controller = new AbortController();
+        activeControllers.add(controller);
+        activeRequests += 1;
 
-        const line = buffer.slice(0, newlineIndex).trim();
-        buffer = buffer.slice(newlineIndex + 1);
-        if (!line) continue;
+        void (async () => {
+          try {
+            const result = await this.handleIpcRequest(request, controller.signal);
+            if (!closing && !closed && !controller.signal.aborted) {
+              await send({ id: request.id, result });
+            }
+          } catch (error) {
+            if (!closing && !closed && !controller.signal.aborted) {
+              await send({
+                id: request?.id ?? null,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          } finally {
+            activeControllers.delete(controller);
+            activeRequests -= 1;
+            updateInputBackpressure();
+            processRequestQueue();
+          }
+        })();
+      }
+      updateInputBackpressure();
+    };
+
+    socket.on('data', (chunk: Buffer) => {
+      let lines: string[];
+      try {
+        lines = decoder.push(chunk);
+      } catch (error) {
+        closeWithError(null, error instanceof Error ? error.message : 'Invalid IPC frame');
+        return;
+      }
+
+      for (const line of lines) {
+        if (closing || closed || !line) {
+          continue;
+        }
 
         let parsed: any;
         try {
           parsed = JSON.parse(line);
-        } catch (error) {
-          send({
-            id: null,
-            error: error instanceof Error ? error.message : 'Invalid JSON payload',
-          });
-          continue;
+        } catch {
+          closeWithError(null, 'Invalid JSON payload');
+          return;
         }
 
         if (!authenticated) {
           const token = parsed?.params?.token;
           if (
+            typeof parsed?.id !== 'string' ||
+            !parsed.id ||
             parsed?.method !== IPC_AUTH_METHOD ||
             !this.ipcCredential ||
             !constantTimeTokenEquals(token, this.ipcCredential.token)
           ) {
-            send({ id: parsed?.id ?? null, error: 'IPC authentication failed' });
-            socket.destroy();
+            closeWithError(parsed?.id, 'IPC authentication failed');
             return;
           }
           authenticated = true;
-          send({ id: parsed?.id ?? null, result: { authenticated: true } });
+          void send({ id: parsed.id, result: { authenticated: true } });
           continue;
         }
 
         if (parsed?.method === IPC_AUTH_METHOD) {
-          send({ id: parsed?.id ?? null, error: 'IPC connection is already authenticated' });
+          void send({ id: parsed?.id ?? null, error: 'IPC connection is already authenticated' });
           continue;
         }
 
-        void this.handleIpcRequest(parsed)
-          .then((result) => {
-            send({ id: parsed?.id ?? null, result });
-          })
-          .catch((error) => {
-            send({
-              id: parsed?.id ?? null,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          });
+        if (typeof parsed?.id !== 'string' || !parsed.id) {
+          closeWithError(null, 'IPC request id must be a non-empty string');
+          return;
+        }
+        if (activeRequests + requestQueue.length >= IPC_MAX_PENDING_REQUESTS) {
+          closeWithError(parsed.id, 'IPC connection has too many pending requests');
+          return;
+        }
+        requestQueue.push(parsed);
+        processRequestQueue();
       }
     });
 
     socket.on('close', () => {
+      closed = true;
+      decoder.reset();
+      abortConnectionWork();
       this.ipcSockets.delete(socket);
     });
     socket.on('error', () => {
-      this.ipcSockets.delete(socket);
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
     });
   }
 
-  private async handleIpcRequest(request: any): Promise<unknown> {
+  private async handleIpcRequest(request: any, signal?: AbortSignal): Promise<unknown> {
     const method = typeof request?.method === 'string' ? request.method : '';
     const params = request?.params && typeof request.params === 'object' ? request.params : {};
     const instanceId = normalizeInstanceId((params as Record<string, unknown>).instanceId);
@@ -282,6 +397,7 @@ export class NativeMessagingHost {
           sessionId,
           instanceId,
           nativeHost: this,
+          signal,
           clientCapabilities: (params as Record<string, unknown>)
             .clientCapabilities as McpClientCapabilityFallback | undefined,
         });
@@ -299,6 +415,7 @@ export class NativeMessagingHost {
             sessionId,
             instanceId,
             nativeHost: this,
+            signal,
             clientCapabilities: paramsRecord.clientCapabilities as McpClientCapabilityFallback | undefined,
           },
           name,
@@ -912,17 +1029,45 @@ export class NativeMessagingHost {
     messagePayload: any,
     messageType: string = 'request_data',
     timeoutMs: number = TIMEOUTS.DEFAULT_REQUEST_TIMEOUT,
+    signal?: AbortSignal,
   ): Promise<any> {
     return new Promise((resolve, reject) => {
       const requestId = uuidv4(); // Generate unique request ID
+      let settled = false;
+
+      const finish = (callback: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutId);
+        signal?.removeEventListener('abort', handleAbort);
+        this.pendingRequests.delete(requestId);
+        callback();
+      };
+
+      const handleAbort = (): void => {
+        const error = new Error('Native bridge request cancelled');
+        error.name = 'AbortError';
+        finish(() => reject(error));
+      };
 
       const timeoutId = setTimeout(() => {
-        this.pendingRequests.delete(requestId); // Remove from Map after timeout
-        reject(new Error(`Request timed out after ${timeoutMs}ms`));
+        finish(() => reject(new Error(`Request timed out after ${timeoutMs}ms`)));
       }, timeoutMs);
 
       // Store request's resolve/reject functions and timeout ID
-      this.pendingRequests.set(requestId, { resolve, reject, timeoutId });
+      this.pendingRequests.set(requestId, {
+        resolve: (value) => finish(() => resolve(value)),
+        reject: (reason) => finish(() => reject(reason)),
+        timeoutId,
+      });
+
+      if (signal?.aborted) {
+        handleAbort();
+        return;
+      }
+      signal?.addEventListener('abort', handleAbort, { once: true });
 
       // Send message with requestId to Chrome. Encoding and stdout failures
       // reject immediately rather than leaving the request waiting for timeout.

@@ -15,6 +15,7 @@ import { TOOL_SCHEMAS } from 'webpage-mcp-shared';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { getLegacyNativeSocketPath, getNativeSocketPath } from '../ipc/socket-path';
 import { IPC_AUTH_METHOD, readNativeIpcCredential } from '../ipc/bridge-auth';
+import { BoundedNdjsonDecoder } from '../ipc/bounded-ndjson';
 import { autoBootstrapNativeMessagingForStdio } from '../scripts/utils';
 import { resolveMcpClientCapabilities } from './register-tools';
 import { shouldNotifyWorkflowToolListChanged } from './tool-list-change';
@@ -32,6 +33,9 @@ const CONNECT_RETRY_INTERVAL_MS = parsePositiveInt(
   250,
 );
 const CONNECT_MAX_WAIT_MS = parsePositiveInt(process.env.WEBPAGE_MCP_STDIO_CONNECT_TIMEOUT_MS, 10000);
+const IPC_MAX_REQUEST_LINE_BYTES = 1024 * 1024;
+const IPC_MAX_RESPONSE_LINE_BYTES = 16 * 1024 * 1024;
+const IPC_MAX_PENDING_REQUESTS = 16;
 
 interface PendingIpcRequest {
   resolve: (value: unknown) => void;
@@ -116,7 +120,8 @@ function formatBridgeConnectError(
 class NativeIpcBridgeClient {
   private socket: net.Socket | null = null;
   private authenticated = false;
-  private buffer = '';
+  private readonly decoder = new BoundedNdjsonDecoder(IPC_MAX_RESPONSE_LINE_BYTES);
+  private writeTail = Promise.resolve();
   private connectPromise: Promise<void> | null = null;
   private connectedSocketPath: string | null = null;
   private readonly pending = new Map<string, PendingIpcRequest>();
@@ -135,10 +140,9 @@ class NativeIpcBridgeClient {
         this.socket = socket;
         this.authenticated = false;
         this.connectedSocketPath = socketPath;
-        this.buffer = '';
+        this.decoder.reset();
 
-        socket.setEncoding('utf8');
-        socket.on('data', (chunk: string) => this.onData(chunk));
+        socket.on('data', (chunk: Buffer) => this.onData(socket, chunk));
         socket.on('close', () => this.onDisconnected(socket, 'IPC socket closed'));
         socket.on('error', (error) => this.onDisconnected(socket, error.message));
 
@@ -209,17 +213,19 @@ class NativeIpcBridgeClient {
     return await this.connectPromise;
   }
 
-  private onData(chunk: string): void {
-    this.buffer += chunk;
+  private onData(socket: net.Socket, chunk: Buffer): void {
+    if (this.socket !== socket) {
+      return;
+    }
+    let lines: string[];
+    try {
+      lines = this.decoder.push(chunk);
+    } catch {
+      socket.destroy(new Error('Invalid or oversized IPC response'));
+      return;
+    }
 
-    while (true) {
-      const newlineIndex = this.buffer.indexOf('\n');
-      if (newlineIndex === -1) {
-        break;
-      }
-
-      const line = this.buffer.slice(0, newlineIndex).trim();
-      this.buffer = this.buffer.slice(newlineIndex + 1);
+    for (const line of lines) {
       if (!line) {
         continue;
       }
@@ -228,7 +234,8 @@ class NativeIpcBridgeClient {
       try {
         message = JSON.parse(line);
       } catch {
-        continue;
+        socket.destroy(new Error('Invalid IPC response'));
+        return;
       }
 
       const id = typeof message?.id === 'string' ? message.id : '';
@@ -257,6 +264,7 @@ class NativeIpcBridgeClient {
     this.socket = null;
     this.authenticated = false;
     this.connectedSocketPath = null;
+    this.decoder.reset();
     for (const [id, pending] of this.pending.entries()) {
       clearTimeout(pending.timer);
       pending.reject(new Error(reason));
@@ -286,11 +294,21 @@ class NativeIpcBridgeClient {
     if (socket.destroyed || this.socket !== socket) {
       return Promise.reject(new Error('IPC socket is not connected'));
     }
+    if (this.pending.size >= IPC_MAX_PENDING_REQUESTS) {
+      return Promise.reject(
+        new Error(`IPC client has reached its ${IPC_MAX_PENDING_REQUESTS}-request limit`),
+      );
+    }
 
     const id = randomUUID();
     const payload = JSON.stringify({ id, method, params });
+    if (Buffer.byteLength(payload, 'utf8') > IPC_MAX_REQUEST_LINE_BYTES) {
+      return Promise.reject(
+        new Error(`IPC request exceeds the ${IPC_MAX_REQUEST_LINE_BYTES}-byte limit`),
+      );
+    }
 
-    return new Promise<T>((resolve, reject) => {
+    const response = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`IPC request timed out after ${timeoutMs}ms`));
@@ -301,16 +319,35 @@ class NativeIpcBridgeClient {
         reject,
         timer,
       });
-
-      socket.write(`${payload}\n`, (error) => {
-        if (!error) {
-          return;
-        }
-        clearTimeout(timer);
-        this.pending.delete(id);
-        reject(error);
-      });
     });
+
+    const write = this.writeTail.then(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          if (socket.destroyed || this.socket !== socket) {
+            reject(new Error('IPC socket is not connected'));
+            return;
+          }
+          socket.write(`${payload}\n`, (error) => {
+            if (error) {
+              reject(error);
+            } else {
+              resolve();
+            }
+          });
+        }),
+    );
+    this.writeTail = write.catch(() => {});
+    void write.catch((error) => {
+      const pending = this.pending.get(id);
+      if (pending) {
+        clearTimeout(pending.timer);
+        this.pending.delete(id);
+        pending.reject(error);
+      }
+    });
+
+    return response;
   }
 
   async request<T = unknown>(method: string, params?: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
