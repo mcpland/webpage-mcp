@@ -9,7 +9,7 @@ import {
   type WebEditorCancelExecutionPayload,
   type WebEditorCancelExecutionResponse,
 } from '@/common/web-editor-types';
-import { openAgentChatSidepanel } from '../utils/sidepanel';
+import { openAgentSetupSidepanel } from '../utils/sidepanel';
 import {
   requestAgentRpcFetch,
   subscribeAgentStream,
@@ -37,7 +37,7 @@ const WEB_EDITOR_SELECTION_SESSION_KEY_PREFIX = 'web-editor-selection-';
 /** Storage key prefix for excluded element keys (per-tab isolation, managed by sidepanel) */
 const WEB_EDITOR_EXCLUDED_KEYS_SESSION_KEY_PREFIX = 'web-editor-excluded-keys-';
 
-/** Storage key for AgentChat selected session ID */
+/** Storage key for the session selected in Agent Setup. */
 const STORAGE_KEY_SELECTED_SESSION = 'agent-selected-session-id';
 
 // In-memory execution status cache (per requestId)
@@ -490,7 +490,7 @@ function normalizeApplyBatchPayload(raw: unknown): WebEditorApplyBatchPayload {
 
 /**
  * Build a batch prompt for multiple element changes.
- * Designed for AgentChat integration to apply multiple visual edits at once.
+ * Designed for Agent session integration to apply multiple visual edits at once.
  */
 function buildAgentPromptBatch(elements: readonly ElementChangeSummary[], pageUrl: string): string {
   const lines: string[] = [];
@@ -979,9 +979,14 @@ export function initWebEditorListeners(): void {
             const projectId = stored['agent-selected-project-id'];
 
             if (!projectId || typeof projectId !== 'string') {
+              const senderTabId = (_sender as chrome.runtime.MessageSender)?.tab?.id;
+              const senderWindowId = (_sender as chrome.runtime.MessageSender)?.tab?.windowId;
+              if (typeof senderTabId === 'number') {
+                void openAgentSetupSidepanel(senderTabId, senderWindowId);
+              }
               return sendResponse({
                 success: false,
-                error: 'No project selected. Please select a project in AgentChat first.',
+                error: 'No project selected. Open Agent Setup and select a project first.',
               });
             }
 
@@ -1208,10 +1213,9 @@ export function initWebEditorListeners(): void {
 
           const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
 
-          // Best-effort: open AgentChat sidepanel so user can see the session
-          // Pass sessionId for deep linking directly to chat view
+          // Best-effort: open Agent Setup so the selected session is visible.
           if (typeof senderTabId === 'number') {
-            openAgentChatSidepanel(senderTabId, senderWindowId, sessionId || undefined).catch(
+            openAgentSetupSidepanel(senderTabId, senderWindowId, sessionId || undefined).catch(
               () => {},
             );
           }
@@ -1222,7 +1226,7 @@ export function initWebEditorListeners(): void {
             sendResponse({
               success: false,
               error:
-                'No Agent session selected. Please select or create a session in AgentChat, then try Apply again.',
+                'No Agent session selected. Open Agent Setup, select or create a session, then try Apply again.',
             });
             return;
           }
@@ -1483,7 +1487,7 @@ export function initWebEditorListeners(): void {
           const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
 
           if (typeof senderTabId === 'number') {
-            openAgentChatSidepanel(senderTabId, senderWindowId, sessionId || undefined).catch(
+            openAgentSetupSidepanel(senderTabId, senderWindowId, sessionId || undefined).catch(
               () => {},
             );
           }
@@ -1492,7 +1496,7 @@ export function initWebEditorListeners(): void {
             return sendResponse({
               success: false,
               error:
-                'No Agent session selected. Please select or create a session in AgentChat, then try Apply again.',
+                'No Agent session selected. Open Agent Setup, select or create a session, then try Apply again.',
             });
           }
 

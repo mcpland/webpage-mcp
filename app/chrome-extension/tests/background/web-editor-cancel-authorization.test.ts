@@ -11,7 +11,7 @@ const authorizationMocks = vi.hoisted(() => ({
   consumePrivilegedUiAuthorization: vi.fn(),
 }));
 const sidepanelMocks = vi.hoisted(() => ({
-  openAgentChatSidepanel: vi.fn(),
+  openAgentSetupSidepanel: vi.fn(),
 }));
 const propsInjectionMocks = vi.hoisted(() => ({
   pruneOrphanedPropsAgentEarlyInjections: vi.fn(),
@@ -41,7 +41,7 @@ describe('Web Editor execution cancellation authorization', () => {
     vi.clearAllMocks();
     requestListener = undefined;
     authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValue(true);
-    sidepanelMocks.openAgentChatSidepanel.mockResolvedValue(undefined);
+    sidepanelMocks.openAgentSetupSidepanel.mockResolvedValue(undefined);
     propsInjectionMocks.pruneOrphanedPropsAgentEarlyInjections.mockResolvedValue(undefined);
     propsInjectionMocks.releasePropsAgentEarlyInjection.mockResolvedValue(undefined);
     nativeHostMocks.subscribeAgentStream.mockResolvedValue({ subscriptionId: 'subscription-1' });

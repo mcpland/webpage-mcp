@@ -28,7 +28,7 @@ import {
 } from '@/common/message-types';
 import { consumePrivilegedUiAuthorization } from '../privileged-ui-authorization';
 import { acquireKeepalive } from '../keepalive-manager';
-import { openAgentChatSidepanel } from '../utils/sidepanel';
+import { openAgentSetupSidepanel } from '../utils/sidepanel';
 import {
   requestAgentRpcFetch,
   subscribeAgentStream,
@@ -42,7 +42,7 @@ import {
 const LOG_PREFIX = '[QuickPanelAgent]';
 const KEEPALIVE_TAG = 'quick-panel-ai';
 
-/** Storage key for AgentChat selected session ID (owned by sidepanel composables) */
+/** Storage key for the session selected in Agent Setup. */
 const STORAGE_KEY_SELECTED_SESSION = 'agent-selected-session-id';
 
 /** Timeout for initial SSE connection establishment */
@@ -539,18 +539,18 @@ async function startRequest(request: ActiveRequest): Promise<void> {
         createErrorEvent(
           request.sessionId,
           request.requestId,
-          'Selected Agent session is not available. Please open AgentChat and select a valid session.',
+          'Selected Agent session is not available. Open Agent Setup and select a valid session.',
         ),
       );
       // Open sidepanel without deep-linking to invalid session
-      void toPromise(openAgentChatSidepanel(request.tabId, request.windowId)).catch(() => {});
+      void toPromise(openAgentSetupSidepanel(request.tabId, request.windowId)).catch(() => {});
       cleanupRequest(request.requestId, 'session_invalid');
       return;
     }
 
     // Best-effort: open sidepanel deep-linked to current session
     void toPromise(
-      openAgentChatSidepanel(request.tabId, request.windowId, request.sessionId),
+      openAgentSetupSidepanel(request.tabId, request.windowId, request.sessionId),
     ).catch(() => {});
 
     // Start SSE subscription BEFORE sending act request to avoid missing early events
@@ -644,11 +644,11 @@ async function handleSendToAI(
 
   if (!sessionId) {
     // No session selected: open sidepanel for user to select/create one
-    void toPromise(openAgentChatSidepanel(tabId, windowId)).catch(() => {});
+    void toPromise(openAgentSetupSidepanel(tabId, windowId)).catch(() => {});
     return {
       success: false,
       error:
-        'No Agent session selected. Please open AgentChat, select or create a session, then try again.',
+        'No Agent session selected. Open Agent Setup, select or create a session, then try again.',
     };
   }
 
@@ -667,7 +667,7 @@ async function handleSendToAI(
       createErrorEvent(
         activeRequest.sessionId,
         activeRequest.requestId,
-        'Quick Panel stream timed out. Please continue in AgentChat sidepanel.',
+        'Quick Panel stream timed out. Review Agent Setup and try again.',
       ),
     );
     cleanupRequest(requestId, 'timeout');
@@ -746,7 +746,7 @@ async function handleCancelAI(
   if (!sessionId) {
     return {
       success: false,
-      error: 'Unknown sessionId for this request. Please cancel from AgentChat sidepanel.',
+      error: 'Unknown sessionId for this request.',
     };
   }
 

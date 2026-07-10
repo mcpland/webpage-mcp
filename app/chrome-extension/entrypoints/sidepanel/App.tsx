@@ -11,6 +11,7 @@ import type {
 import { openWorkflowBuilder } from "@/entrypoints/shared/utils";
 import { getMessage } from "@/utils/i18n";
 import type { AgentThemeId } from "./composables/useAgentTheme";
+import AgentSetupView from "./components/AgentSetupView";
 import SidepanelNavigator from "./components/SidepanelNavigator";
 import { WorkflowsView } from "./components/workflows";
 import type { TriggerDraft } from "./components/workflows/WorkflowsView";
@@ -20,7 +21,7 @@ import {
 } from "./react/useWorkflowsV3React";
 import "./App.css";
 
-type TabType = "workflows" | "element-markers";
+type TabType = "agent-setup" | "workflows" | "element-markers";
 
 type RecordingStatus = "idle" | "recording" | "paused" | "stopping";
 
@@ -719,7 +720,11 @@ export default function SidepanelApp() {
 
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get("tab");
-      if (tabParam === "element-markers" || tabParam === "workflows") {
+      if (
+        tabParam === "agent-setup" ||
+        tabParam === "element-markers" ||
+        tabParam === "workflows"
+      ) {
         setActiveTab(tabParam);
         if (tabParam === "element-markers") {
           await loadMarkers();
@@ -770,6 +775,8 @@ export default function SidepanelApp() {
       data-agent-theme={currentTheme}
     >
       <SidepanelNavigator activeTab={activeTab} onChange={handleTabChange} />
+
+      {activeTab === "agent-setup" ? <AgentSetupView /> : null}
 
       {activeTab === "workflows" ? (
         <div className="h-full">

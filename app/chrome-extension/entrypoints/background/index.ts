@@ -50,7 +50,7 @@ export default defineBackground(() => {
   initElementMarkerListeners();
   // Web editor: toggle edit-mode overlay
   initWebEditorListeners();
-  // Quick Panel: send messages to AgentChat via background-stream bridge
+  // Quick Panel: send messages to the selected Agent session via the background stream bridge.
   initQuickPanelAgentHandler();
   // Quick Panel: tabs search bridge for content script UI
   initQuickPanelTabsHandler();

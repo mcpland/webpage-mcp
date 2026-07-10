@@ -8,7 +8,7 @@ const nativeHostMocks = vi.hoisted(() => ({
 }));
 
 const sidepanelMocks = vi.hoisted(() => ({
-  openAgentChatSidepanel: vi.fn().mockResolvedValue(undefined),
+  openAgentSetupSidepanel: vi.fn().mockResolvedValue(undefined),
 }));
 
 const keepaliveMocks = vi.hoisted(() => ({
@@ -41,7 +41,7 @@ describe('Quick Panel agent handler', () => {
     (globalThis.chrome.storage.local.get as ReturnType<typeof vi.fn>).mockResolvedValue({
       'agent-selected-session-id': 'session-123',
     });
-    sidepanelMocks.openAgentChatSidepanel.mockResolvedValue(undefined);
+    sidepanelMocks.openAgentSetupSidepanel.mockResolvedValue(undefined);
     (globalThis.chrome.tabs as typeof globalThis.chrome.tabs & { sendMessage: ReturnType<typeof vi.fn> }).sendMessage =
       vi.fn().mockResolvedValue(undefined);
 
@@ -160,6 +160,42 @@ describe('Quick Panel agent handler', () => {
       });
     });
     expect(nativeHostMocks.requestAgentRpcFetch).not.toHaveBeenCalled();
+  });
+
+  it('opens Agent Setup when no session has been selected', async () => {
+    let requestListener: RequestListener | undefined;
+    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
+      (listener) => {
+        requestListener = listener as RequestListener;
+      },
+    );
+    (globalThis.chrome.storage.local.get as ReturnType<typeof vi.fn>).mockResolvedValue({});
+
+    const { initQuickPanelAgentHandler } = await import(
+      '@/entrypoints/background/quick-panel/agent-handler'
+    );
+    initQuickPanelAgentHandler();
+
+    const sendResponse = vi.fn();
+    requestListener!(
+      {
+        type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
+        authorizationToken: 'one-time-token',
+        payload: { instruction: 'Review this page' },
+      },
+      { tab: { id: 7, windowId: 3 }, frameId: 0 } as chrome.runtime.MessageSender,
+      sendResponse,
+    );
+
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledWith({
+        success: false,
+        error:
+          'No Agent session selected. Open Agent Setup, select or create a session, then try again.',
+      });
+      expect(sidepanelMocks.openAgentSetupSidepanel).toHaveBeenCalledWith(7, 3);
+    });
+    expect(nativeHostMocks.subscribeAgentStream).not.toHaveBeenCalled();
   });
 
   it('unsubscribes when cancellation wins the subscription race', async () => {

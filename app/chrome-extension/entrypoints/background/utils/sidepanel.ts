@@ -6,23 +6,27 @@
  */
 
 /**
- * Best-effort open the sidepanel with workflows tab selected.
+ * Best-effort open the sidepanel with Agent Setup selected.
  *
  * @param tabId - Tab ID to associate with sidepanel
  * @param windowId - Optional window ID for fallback when tab-level open fails
- * @param _sessionId - Deprecated, preserved for call-site compatibility
+ * @param sessionId - Optional session to select and review in Agent Setup
  *
  * @remarks
  * This function is intentionally resilient - it will not throw on failures.
  * Sidepanel availability varies across Chrome versions and contexts.
  */
-export async function openAgentChatSidepanel(
+export async function openAgentSetupSidepanel(
   tabId: number,
   windowId?: number,
-  _sessionId?: string,
+  sessionId?: string,
 ): Promise<void> {
   try {
-    const path = 'sidepanel.html?tab=workflows';
+    const query = new URLSearchParams({ tab: 'agent-setup' });
+    if (sessionId?.trim()) {
+      query.set('sessionId', sessionId.trim());
+    }
+    const path = `sidepanel.html?${query.toString()}`;
 
     // Configure sidepanel options for this tab
 
@@ -53,3 +57,6 @@ export async function openAgentChatSidepanel(
     // Intentionally suppress errors to avoid breaking calling code
   }
 }
+
+/** @deprecated Use openAgentSetupSidepanel. Kept for extension API compatibility. */
+export const openAgentChatSidepanel = openAgentSetupSidepanel;
