@@ -16,7 +16,10 @@ import type {
 import type { TriggerSpec } from "../../domain/triggers";
 import type { RunQueue } from "../queue/queue";
 import type { ArtifactStore } from "../../storage/artifacts";
-import type { PublishedFlowInfoV3 } from "../../flows/publish";
+import type {
+  PublishedFlowDetailsV3,
+  PublishedFlowInfoV3,
+} from "../../flows/publish";
 
 /**
  * FlowsStore interface
@@ -31,6 +34,8 @@ export interface FlowsStore {
   ): Promise<FlowId | null>;
   /** Return bounded, lightweight published catalog entries. */
   listPublishedInfos?(): Promise<PublishedFlowInfoV3[]>;
+  /** Return bounded public descriptors without materializing the flow catalog. */
+  listPublishedDetails?(): Promise<PublishedFlowDetailsV3[]>;
   /** Get a single flow */
   get(id: FlowId): Promise<FlowV3 | null>;
   /** Save Flow */

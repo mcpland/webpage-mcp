@@ -15,8 +15,10 @@ import {
 import { RR_ERROR_CODES, createRRError } from "../domain/errors";
 import { jsonUtf8ByteLength } from "../domain/json-limits";
 import {
+  getPublishedFlowDetails,
   getPublishedFlowInfo,
   normalizeToolSlug,
+  type PublishedFlowDetailsV3,
   type PublishedFlowInfoV3,
 } from "../flows/publish";
 import type { FlowsStore } from "../engine/storage/storage-port";
@@ -202,6 +204,40 @@ export function createFlowsStore(): FlowsStore {
               }
               aggregateBytes += addedBytes;
               results.push(info);
+            }
+            cursor.continue();
+          };
+        });
+      });
+    },
+
+    async listPublishedDetails(): Promise<PublishedFlowDetailsV3[]> {
+      return withTransaction(RR_V3_STORES.FLOWS, "readonly", async (stores) => {
+        const store = stores[RR_V3_STORES.FLOWS];
+        return new Promise<PublishedFlowDetailsV3[]>((resolve, reject) => {
+          const results: PublishedFlowDetailsV3[] = [];
+          let scanned = 0;
+          let aggregateBytes = 2;
+          const request = store.openCursor();
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor || scanned >= FLOW_RESOURCE_LIMITS.maxStoredFlows) {
+              resolve(results.sort((a, b) => a.slug.localeCompare(b.slug)));
+              return;
+            }
+            scanned += 1;
+
+            const detail = getPublishedFlowDetails(cursor.value as FlowV3);
+            if (detail) {
+              const remainingBytes =
+                FLOW_RESOURCE_LIMITS.maxPublishedListUtf8Bytes - aggregateBytes;
+              const detailBytes = jsonUtf8ByteLength(detail, remainingBytes);
+              const addedBytes = detailBytes + (results.length > 0 ? 1 : 0);
+              if (addedBytes <= remainingBytes) {
+                aggregateBytes += addedBytes;
+                results.push(detail);
+              }
             }
             cursor.continue();
           };

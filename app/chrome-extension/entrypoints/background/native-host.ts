@@ -24,7 +24,6 @@ import {
 } from "@/common/constants";
 import { handleCallTool } from "./tools";
 import { createStoragePort } from "./record-replay-v3";
-import { listPublishedFlowDetails } from "./record-replay-v3/flows/publish";
 import { acquireKeepalive } from "./keepalive-manager";
 import { updateConnectionBadge } from "./action-badge";
 import { maybeShowFirstConnectNotification } from "./first-connect-notification";
@@ -1261,9 +1260,11 @@ export function connectNativeHost(): boolean {
       ) {
         const requestId = message.requestId;
         try {
-          const items = listPublishedFlowDetails(
-            await createStoragePort().flows.list(),
-          );
+          const flows = createStoragePort().flows;
+          if (!flows.listPublishedDetails) {
+            throw new Error("Published workflow descriptors are unavailable");
+          }
+          const items = await flows.listPublishedDetails();
           postOnConnectedPort({
             responseToRequestId: requestId,
             payload: {

@@ -159,6 +159,73 @@ describe("V3 flow storage bounds", () => {
     ]);
   });
 
+  it("lists published descriptors beyond the default page while filtering drafts", async () => {
+    const store = createFlowsStore();
+    const flows = Array.from(
+      { length: FLOW_RESOURCE_LIMITS.maxStoredFlows },
+      (_, index) => {
+        const flow = createFlow(
+          `catalog-${String(index).padStart(2, "0")}`,
+          new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+        );
+        if (index % 5 !== 0) {
+          flow.meta = {
+            tool: {
+              published: true,
+              slug: `published-${String(index).padStart(2, "0")}`,
+            },
+          };
+        }
+        return flow;
+      },
+    );
+    await putFlowsWithoutValidation(flows);
+
+    await expect(store.list()).resolves.toHaveLength(
+      FLOW_RESOURCE_LIMITS.defaultListLimit,
+    );
+    const details = await store.listPublishedDetails!();
+
+    expect(details).toHaveLength(51);
+    expect(details.map((detail) => detail.id)).toContain("catalog-01");
+    expect(details.map((detail) => detail.id)).toContain("catalog-63");
+    expect(details.map((detail) => detail.id)).not.toContain("catalog-00");
+    expect(details.map((detail) => detail.slug)).toEqual(
+      details.map((detail) => detail.slug).sort(),
+    );
+  });
+
+  it("bounds the aggregate published descriptor payload and keeps scanning", async () => {
+    const store = createFlowsStore();
+    const largeDescription = "x".repeat(
+      FLOW_RESOURCE_LIMITS.maxStringUtf8Bytes,
+    );
+    const flows = Array.from({ length: 9 }, (_, index) => {
+      const flow = createFlow(`large-${index}`);
+      flow.meta = {
+        tool: {
+          published: true,
+          slug: `large-${index}`,
+          description: largeDescription,
+        },
+      };
+      return flow;
+    });
+    const finalSmallFlow = createFlow("zz-small");
+    finalSmallFlow.meta = {
+      tool: { published: true, slug: "zz-small" },
+    };
+    await putFlowsWithoutValidation([...flows, finalSmallFlow]);
+
+    const details = await store.listPublishedDetails!();
+
+    expect(details.length).toBeLessThan(flows.length + 1);
+    expect(details.map((detail) => detail.id)).toContain("zz-small");
+    expect(jsonUtf8ByteLength(details)).toBeLessThanOrEqual(
+      FLOW_RESOURCE_LIMITS.maxPublishedListUtf8Bytes,
+    );
+  });
+
   it("refuses a new flow after the collection cap but still permits updates", async () => {
     const store = createFlowsStore();
     const existing = Array.from(

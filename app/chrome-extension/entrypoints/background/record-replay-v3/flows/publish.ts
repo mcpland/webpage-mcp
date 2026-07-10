@@ -1014,18 +1014,25 @@ export function listPublishedFlowDetails(
 ): PublishedFlowDetailsV3[] {
   const details: PublishedFlowDetailsV3[] = [];
   for (const flow of flows) {
-    const info = getPublishedFlowInfo(flow);
-    if (!info) {
-      continue;
-    }
-    const publishedVariables = sanitizePublishedVariables(flow.variables);
-    details.push({
-      ...info,
-      ...(publishedVariables ? { variables: publishedVariables } : {}),
-      ...buildWorkflowToolDescriptor(flow),
-    });
+    const detail = getPublishedFlowDetails(flow);
+    if (detail) details.push(detail);
   }
   return details.sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
+/** Build the public tool descriptor for one published flow. */
+export function getPublishedFlowDetails(
+  flow: FlowV3,
+): PublishedFlowDetailsV3 | null {
+  const info = getPublishedFlowInfo(flow);
+  if (!info) return null;
+
+  const publishedVariables = sanitizePublishedVariables(flow.variables);
+  return {
+    ...info,
+    ...(publishedVariables ? { variables: publishedVariables } : {}),
+    ...buildWorkflowToolDescriptor(flow),
+  };
 }
 
 export function ensurePublishedSlugAvailable(
