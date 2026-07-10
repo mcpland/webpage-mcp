@@ -18,6 +18,9 @@ import {
   AGENT_STORED_MESSAGE_MAX_JSON_BYTES,
 } from 'webpage-mcp-shared';
 import {
+  AGENT_JSON_MAX_CONTAINER_ENTRIES,
+  AGENT_JSON_MAX_DEPTH,
+  AGENT_JSON_MAX_NODES,
   AGENT_PAYLOAD_INVALID,
   AGENT_PAYLOAD_TOO_LARGE,
   AgentPayloadLimitError,
@@ -370,5 +373,44 @@ describe('agent payload byte limits', () => {
       actualBytes: 11,
       maximumBytes: 10,
     });
+  });
+
+  it('rejects adversarial JSON depth, width, and node counts before serialization', () => {
+    let tooDeep: Record<string, unknown> = {};
+    const deepRoot = tooDeep;
+    for (let depth = 0; depth <= AGENT_JSON_MAX_DEPTH; depth += 1) {
+      const child: Record<string, unknown> = {};
+      tooDeep.child = child;
+      tooDeep = child;
+    }
+
+    const tooWide = Array.from(
+      { length: AGENT_JSON_MAX_CONTAINER_ENTRIES + 1 },
+      () => null,
+    );
+    const tooManyNodes = Array.from(
+      { length: Math.ceil(AGENT_JSON_MAX_NODES / AGENT_JSON_MAX_CONTAINER_ENTRIES) },
+      () => Array.from({ length: AGENT_JSON_MAX_CONTAINER_ENTRIES }, () => null),
+    );
+
+    for (const [field, value] of [
+      ['depth', deepRoot],
+      ['width', tooWide],
+      ['nodes', tooManyNodes],
+    ] as const) {
+      expect(() => getJsonByteLength(value, field)).toThrowError(
+        expect.objectContaining({ code: AGENT_PAYLOAD_INVALID, field }),
+      );
+    }
+  });
+
+  it('allows shared acyclic objects and exact structural boundaries', () => {
+    const shared = { value: true };
+    expect(() => getJsonByteLength({ first: shared, second: shared })).not.toThrow();
+    expect(() =>
+      getJsonByteLength(
+        Array.from({ length: AGENT_JSON_MAX_CONTAINER_ENTRIES }, () => null),
+      ),
+    ).not.toThrow();
   });
 });

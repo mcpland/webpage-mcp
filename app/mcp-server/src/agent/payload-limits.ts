@@ -20,6 +20,9 @@ import {
 
 export const AGENT_PAYLOAD_INVALID = 'AGENT_PAYLOAD_INVALID' as const;
 export const AGENT_PAYLOAD_TOO_LARGE = 'AGENT_PAYLOAD_TOO_LARGE' as const;
+export const AGENT_JSON_MAX_DEPTH = 64;
+export const AGENT_JSON_MAX_NODES = 50_000;
+export const AGENT_JSON_MAX_CONTAINER_ENTRIES = 10_000;
 
 export type AgentPayloadErrorCode =
   | typeof AGENT_PAYLOAD_INVALID
@@ -70,8 +73,64 @@ export function getUtf8ByteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8');
 }
 
+function assertJsonStructureLimits(value: unknown, field: string): void {
+  type StackEntry =
+    | { value: unknown; depth: number; exiting?: false }
+    | { value: object; depth: number; exiting: true };
+
+  const stack: StackEntry[] = [{ value, depth: 0 }];
+  const activeContainers = new WeakSet<object>();
+  let nodes = 0;
+
+  while (stack.length > 0) {
+    const entry = stack.pop()!;
+    if (entry.exiting) {
+      activeContainers.delete(entry.value);
+      continue;
+    }
+
+    nodes += 1;
+    if (nodes > AGENT_JSON_MAX_NODES) {
+      throw new AgentPayloadLimitError(AGENT_PAYLOAD_INVALID, field);
+    }
+
+    const current = entry.value;
+    if (!current || typeof current !== 'object') continue;
+    if (entry.depth > AGENT_JSON_MAX_DEPTH || activeContainers.has(current)) {
+      throw new AgentPayloadLimitError(AGENT_PAYLOAD_INVALID, field);
+    }
+
+    activeContainers.add(current);
+    stack.push({ value: current, depth: entry.depth, exiting: true });
+
+    if (Array.isArray(current)) {
+      if (current.length > AGENT_JSON_MAX_CONTAINER_ENTRIES) {
+        throw new AgentPayloadLimitError(AGENT_PAYLOAD_INVALID, field);
+      }
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: current[index], depth: entry.depth + 1 });
+      }
+      continue;
+    }
+
+    let entries = 0;
+    for (const key in current as Record<string, unknown>) {
+      if (!Object.prototype.hasOwnProperty.call(current, key)) continue;
+      entries += 1;
+      if (entries > AGENT_JSON_MAX_CONTAINER_ENTRIES) {
+        throw new AgentPayloadLimitError(AGENT_PAYLOAD_INVALID, field);
+      }
+      stack.push({
+        value: (current as Record<string, unknown>)[key],
+        depth: entry.depth + 1,
+      });
+    }
+  }
+}
+
 export function stringifyPayloadJson(value: unknown, field: string): string {
   try {
+    assertJsonStructureLimits(value, field);
     const serialized = JSON.stringify(value);
     if (serialized === undefined) {
       throw new AgentPayloadLimitError(AGENT_PAYLOAD_INVALID, field);
