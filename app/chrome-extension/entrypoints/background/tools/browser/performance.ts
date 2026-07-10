@@ -29,39 +29,80 @@ interface AnalyzeInsightParams {
 
 type DebuggeeEvent = (source: chrome.debugger.Debuggee, method: string, params?: any) => void;
 
+type TraceTruncationReason =
+  | 'max_duration'
+  | 'max_event_count'
+  | 'max_serialized_bytes'
+  | 'debugger_detached';
+type TraceStopReason = TraceTruncationReason | 'manual' | 'auto_stop' | 'tab_closed';
+
+const TRACE_STOP_TIMEOUT_MS = 10000;
+const TRACE_MAX_DURATION_MS = 60_000;
+const TRACE_MAX_EVENTS = 50_000;
+const TRACE_MAX_SERIALIZED_BYTES = 8 * 1024 * 1024;
+const TRACE_EMPTY_JSON_BYTES = utf8ByteLength('{"traceEvents":[]}');
+const LAST_RESULTS_MAX_ENTRIES = 5;
+const LAST_RESULTS_TTL_MS = 10 * 60_000;
+const TRACE_ALARM_PREFIX = 'performance-trace-stop:';
+const RESULT_ALARM_PREFIX = 'performance-trace-result-expiry:';
+
 interface TraceSessionState {
   recording: boolean;
-  events: any[];
+  serializedEvents: string[];
+  eventNameCounts: Map<string, number>;
+  observedEventCount: number;
+  serializedBytes: number;
   startedAt: number;
   pageUrl?: string;
   listener: DebuggeeEvent;
-  stopResolver?: (value: { completed: boolean }) => void;
-  stopPromise?: Promise<{ completed: boolean }>;
+  stopResolver: (value: { completed: boolean }) => void;
+  stopPromise: Promise<{ completed: boolean }>;
+  traceCompleted: boolean;
+  endRequested: boolean;
+  endRequestPromise?: Promise<void>;
+  alarmName: string;
+  timedStopReason: 'auto_stop' | 'max_duration';
+  truncated: boolean;
+  truncationReason?: TraceTruncationReason;
+  stopReason?: TraceStopReason;
 }
 
 function createTraceSessionState(
   tabId: number,
   pageUrl: string,
+  timedStopReason: 'auto_stop' | 'max_duration',
 ): TraceSessionState {
+  let stopResolver!: (value: { completed: boolean }) => void;
+  const stopPromise = new Promise<{ completed: boolean }>((resolve) => {
+    stopResolver = resolve;
+  });
   const state: TraceSessionState = {
     recording: true,
-    events: [],
+    serializedEvents: [],
+    eventNameCounts: new Map(),
+    observedEventCount: 0,
+    serializedBytes: TRACE_EMPTY_JSON_BYTES,
     startedAt: Date.now(),
     pageUrl,
     listener: () => undefined,
+    stopResolver,
+    stopPromise,
+    traceCompleted: false,
+    endRequested: false,
+    alarmName: `${TRACE_ALARM_PREFIX}${tabId}`,
+    timedStopReason,
+    truncated: false,
   };
 
   state.listener = (source, method, params) => {
     if (source.tabId !== tabId) return;
-    if (method === 'Tracing.dataCollected' && params?.value) {
-      try {
-        state.events.push(...(params.value as any[]));
-      } catch {
-        // ignore
-      }
+    if (method === 'Tracing.dataCollected' && Array.isArray(params?.value)) {
+      collectTraceEvents(tabId, state, params.value as any[]);
     } else if (method === 'Tracing.tracingComplete') {
       state.recording = false;
-      state.stopResolver?.({ completed: true });
+      state.traceCompleted = true;
+      state.stopResolver({ completed: true });
+      void chrome.alarms.clear(state.alarmName);
     }
   };
 
@@ -72,23 +113,127 @@ type SavedTraceArtifact = {
   downloadId?: number;
   filename?: string;
   fullPath?: string;
+  temporary?: boolean;
 };
 
+interface LastTraceResult {
+  eventCount: number;
+  observedEventCount: number;
+  serializedBytes: number;
+  topEventNames: Array<{ name: string; count: number }>;
+  startedAt: number;
+  endedAt: number;
+  expiresAt: number;
+  tabUrl: string;
+  saved?: SavedTraceArtifact;
+  metrics?: Record<string, number>;
+  truncated: boolean;
+  truncationReason?: TraceTruncationReason;
+  stopReason?: TraceStopReason;
+}
+
 const sessions = new Map<number, TraceSessionState>();
-const LAST_RESULTS = new Map<
-  number,
-  {
-    events: any[];
-    startedAt: number;
-    endedAt: number;
-    tabUrl: string;
-    saved?: SavedTraceArtifact;
-    metrics?: Record<string, number>;
-  }
->();
-const TRACE_STOP_TIMEOUT_MS = 10000;
+const LAST_RESULTS = new Map<number, LastTraceResult>();
 const PERFORMANCE_TRACE_PUBLIC_PAGE_ERROR =
   'Only http:// and https:// pages are supported by performance trace tools';
+
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) {
+      bytes += 1;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+function traceLimitMetadata(session: TraceSessionState | LastTraceResult) {
+  const retainedEventCount =
+    'eventCount' in session ? session.eventCount : session.serializedEvents.length;
+  return {
+    truncated: session.truncated,
+    truncationReason: session.truncationReason || null,
+    stopReason: session.stopReason || null,
+    observedEventCount: session.observedEventCount,
+    droppedEventCount: Math.max(0, session.observedEventCount - retainedEventCount),
+    serializedBytes: session.serializedBytes,
+    limits: {
+      maxDurationMs: TRACE_MAX_DURATION_MS,
+      maxEventCount: TRACE_MAX_EVENTS,
+      maxSerializedBytes: TRACE_MAX_SERIALIZED_BYTES,
+    },
+  };
+}
+
+function markTraceTruncated(state: TraceSessionState, reason: TraceTruncationReason): void {
+  if (!state.truncated) {
+    state.truncated = true;
+    state.truncationReason = reason;
+  }
+  state.stopReason ||= reason;
+}
+
+function collectTraceEvents(tabId: number, state: TraceSessionState, values: any[]): void {
+  if (!state.recording || state.endRequested || sessions.get(tabId) !== state) {
+    return;
+  }
+
+  state.observedEventCount += values.length;
+  let limitReason: TraceTruncationReason | undefined;
+
+  for (const event of values) {
+    if (state.serializedEvents.length >= TRACE_MAX_EVENTS) {
+      limitReason = 'max_event_count';
+      break;
+    }
+
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(event) ?? 'null';
+    } catch {
+      continue;
+    }
+
+    const additionalBytes =
+      utf8ByteLength(serialized) + (state.serializedEvents.length > 0 ? 1 : 0);
+    if (state.serializedBytes + additionalBytes > TRACE_MAX_SERIALIZED_BYTES) {
+      limitReason = 'max_serialized_bytes';
+      break;
+    }
+
+    state.serializedEvents.push(serialized);
+    state.serializedBytes += additionalBytes;
+    const eventName = typeof event?.name === 'string' ? event.name : 'unknown';
+    state.eventNameCounts.set(eventName, (state.eventNameCounts.get(eventName) || 0) + 1);
+
+    if (state.serializedEvents.length >= TRACE_MAX_EVENTS) {
+      limitReason = 'max_event_count';
+      break;
+    }
+    if (state.serializedBytes >= TRACE_MAX_SERIALIZED_BYTES) {
+      limitReason = 'max_serialized_bytes';
+      break;
+    }
+  }
+
+  if (limitReason) {
+    markTraceTruncated(state, limitReason);
+    void requestTraceEnd(tabId, state, limitReason).catch(() => cleanupTraceSession(tabId, state));
+  }
+}
 
 function hasDisallowedPublicPageScheme(url: string): boolean {
   const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
@@ -141,6 +286,16 @@ async function enablePerformanceMetrics(tabId: number): Promise<Record<string, n
   }
 }
 
+function utf8ToBase64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  const chunks: string[] = [];
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + chunkSize)));
+  }
+  return btoa(chunks.join(''));
+}
+
 async function saveTraceToDownloads(
   json: string,
   filenamePrefix = 'performance_trace',
@@ -148,7 +303,7 @@ async function saveTraceToDownloads(
   try {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `${filenamePrefix}_${timestamp}.json`;
-    const dataUrl = `data:application/json;base64,${btoa(unescape(encodeURIComponent(json)))}`;
+    const dataUrl = `data:application/json;base64,${utf8ToBase64(json)}`;
     const downloadId = await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
     // Attempt to resolve full path
     try {
@@ -170,7 +325,7 @@ async function saveTraceToNativeTemp(
   try {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `${filenamePrefix}_${timestamp}.json`;
-    const base64 = btoa(unescape(encodeURIComponent(json)));
+    const base64 = utf8ToBase64(json);
 
     const requestId = `trace-temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const timeoutMs = 30000;
@@ -212,7 +367,7 @@ async function saveTraceToNativeTemp(
     });
 
     if (resp && resp.success && resp.filePath) {
-      return { filename, fullPath: resp.filePath };
+      return { filename, fullPath: resp.filePath, temporary: true };
     }
   } catch {
     // ignore, fallback will apply
@@ -280,19 +435,7 @@ function toPublicSavedTraceArtifact(saved?: SavedTraceArtifact): {
   };
 }
 
-function getOrCreateStopPromise(session: TraceSessionState): Promise<{ completed: boolean }> {
-  if (session.stopPromise) return session.stopPromise;
-  session.stopPromise = new Promise((resolve) => {
-    session.stopResolver = resolve;
-  });
-  return session.stopPromise;
-}
-
-async function waitForTraceCompletion(
-  session: TraceSessionState,
-): Promise<{ completed: boolean }> {
-  const stopPromise = getOrCreateStopPromise(session);
-
+async function waitForTraceCompletion(session: TraceSessionState): Promise<{ completed: boolean }> {
   return await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(
@@ -302,7 +445,7 @@ async function waitForTraceCompletion(
       );
     }, TRACE_STOP_TIMEOUT_MS);
 
-    stopPromise.then(
+    session.stopPromise.then(
       (value) => {
         clearTimeout(timer);
         resolve(value);
@@ -315,11 +458,110 @@ async function waitForTraceCompletion(
   });
 }
 
-async function cleanupTraceSession(
+function requestTraceEnd(
   tabId: number,
-  session?: TraceSessionState,
+  session: TraceSessionState,
+  reason: TraceStopReason,
 ): Promise<void> {
+  if (session.endRequestPromise) {
+    return session.endRequestPromise;
+  }
+  if (!session.recording || session.traceCompleted || sessions.get(tabId) !== session) {
+    return Promise.resolve();
+  }
+
+  session.endRequested = true;
+  session.stopReason ||= reason;
+  session.endRequestPromise = cdpSessionManager
+    .sendCommand(tabId, 'Tracing.end')
+    .then(() => undefined);
+  return session.endRequestPromise;
+}
+
+function summarizeEventNames(
+  counts: ReadonlyMap<string, number>,
+): Array<{ name: string; count: number }> {
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20)
+    .map(([name, count]) => ({ name, count }));
+}
+
+function resultAlarmName(tabId: number): string {
+  return `${RESULT_ALARM_PREFIX}${tabId}`;
+}
+
+function disposeLastResult(tabId: number, result: LastTraceResult): void {
+  void chrome.alarms.clear(resultAlarmName(tabId));
+  if (result.saved?.temporary && result.saved.fullPath) {
+    void cleanupNativeTempFile(result.saved.fullPath);
+  }
+}
+
+function deleteLastResult(tabId: number): void {
+  const result = LAST_RESULTS.get(tabId);
+  if (!result) return;
+  LAST_RESULTS.delete(tabId);
+  disposeLastResult(tabId, result);
+}
+
+function pruneLastResults(now = Date.now()): void {
+  for (const [tabId, result] of LAST_RESULTS) {
+    if (result.expiresAt <= now) {
+      deleteLastResult(tabId);
+    }
+  }
+
+  while (LAST_RESULTS.size > LAST_RESULTS_MAX_ENTRIES) {
+    const oldestTabId = LAST_RESULTS.keys().next().value as number | undefined;
+    if (typeof oldestTabId !== 'number') break;
+    deleteLastResult(oldestTabId);
+  }
+}
+
+function storeLastResult(tabId: number, result: LastTraceResult): void {
+  const previous = LAST_RESULTS.get(tabId);
+  if (previous) {
+    LAST_RESULTS.delete(tabId);
+    if (previous.saved?.temporary && previous.saved.fullPath) {
+      void cleanupNativeTempFile(previous.saved.fullPath);
+    }
+  }
+  LAST_RESULTS.set(tabId, result);
+  pruneLastResults();
+  // Creating an alarm with the same name atomically replaces the prior expiry.
+  void chrome.alarms.create(resultAlarmName(tabId), { when: result.expiresAt });
+}
+
+function getLastResult(tabId: number): LastTraceResult | undefined {
+  pruneLastResults();
+  const result = LAST_RESULTS.get(tabId);
+  if (!result) return undefined;
+
+  // Refresh insertion order for strict LRU without extending the absolute TTL.
+  LAST_RESULTS.delete(tabId);
+  LAST_RESULTS.set(tabId, result);
+  return result;
+}
+
+async function cleanupTraceSession(tabId: number, session?: TraceSessionState): Promise<void> {
   const activeSession = session ?? sessions.get(tabId);
+
+  if (activeSession && sessions.get(tabId) === activeSession) {
+    sessions.delete(tabId);
+  }
+
+  if (activeSession) {
+    activeSession.recording = false;
+    activeSession.stopResolver({ completed: activeSession.traceCompleted });
+    activeSession.serializedEvents.length = 0;
+    activeSession.eventNameCounts.clear();
+    try {
+      await chrome.alarms.clear(activeSession.alarmName);
+    } catch {
+      // ignore
+    }
+  }
 
   try {
     if (activeSession) {
@@ -334,9 +576,52 @@ async function cleanupTraceSession(
   } catch {
     // ignore
   }
-
-  sessions.delete(tabId);
 }
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name.startsWith(TRACE_ALARM_PREFIX)) {
+    const tabId = Number(alarm.name.slice(TRACE_ALARM_PREFIX.length));
+    const session = sessions.get(tabId);
+    if (!session) return;
+
+    if (session.timedStopReason === 'max_duration') {
+      markTraceTruncated(session, 'max_duration');
+    }
+    void requestTraceEnd(tabId, session, session.timedStopReason).catch(() =>
+      cleanupTraceSession(tabId, session),
+    );
+    return;
+  }
+
+  if (alarm.name.startsWith(RESULT_ALARM_PREFIX)) {
+    const tabId = Number(alarm.name.slice(RESULT_ALARM_PREFIX.length));
+    const result = LAST_RESULTS.get(tabId);
+    if (!result) return;
+    if (result.expiresAt <= Date.now()) {
+      deleteLastResult(tabId);
+    } else {
+      void chrome.alarms.create(resultAlarmName(tabId), {
+        when: result.expiresAt,
+      });
+    }
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  deleteLastResult(tabId);
+  const session = sessions.get(tabId);
+  if (!session) return;
+  session.stopReason ||= 'tab_closed';
+  void cleanupTraceSession(tabId, session);
+});
+
+chrome.debugger.onDetach.addListener((source) => {
+  if (typeof source.tabId !== 'number') return;
+  const session = sessions.get(source.tabId);
+  if (!session) return;
+  markTraceTruncated(session, 'debugger_detached');
+  void cleanupTraceSession(source.tabId, session);
+});
 
 /**
  * Start performance trace
@@ -367,7 +652,7 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
       }
       tabId = activeTab.id;
       const existed = sessions.get(tabId);
-      if (existed?.recording) {
+      if (existed) {
         return {
           content: [{ type: 'text', text: 'Error: a performance trace is already running.' }],
           isError: true,
@@ -376,7 +661,17 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
 
       await cdpSessionManager.attach(tabId, 'performance');
 
-      state = createTraceSessionState(tabId, activeTab.url || '');
+      const requestedDurationMs =
+        typeof durationMs === 'number' && Number.isFinite(durationMs)
+          ? Math.max(1000, durationMs)
+          : 5000;
+      const effectiveDurationMs = autoStop
+        ? Math.min(requestedDurationMs, TRACE_MAX_DURATION_MS)
+        : TRACE_MAX_DURATION_MS;
+      const timedStopReason =
+        autoStop && requestedDurationMs <= TRACE_MAX_DURATION_MS ? 'auto_stop' : 'max_duration';
+
+      state = createTraceSessionState(tabId, activeTab.url || '', timedStopReason);
       chrome.debugger.onEvent.addListener(state.listener);
       sessions.set(tabId, state);
 
@@ -388,26 +683,16 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
         transferMode: 'ReportEvents',
       });
 
+      await chrome.alarms.create(state.alarmName, {
+        when: state.startedAt + effectiveDurationMs,
+      });
+
       if (reload) {
         try {
           await cdpSessionManager.sendCommand(tabId, 'Page.reload', { ignoreCache: true });
         } catch {
           // best effort; ignore if fails
         }
-      }
-
-      if (autoStop) {
-        const traceTabId = tabId;
-        setTimeout(
-          async () => {
-            try {
-              await cdpSessionManager.sendCommand(traceTabId, 'Tracing.end');
-            } catch {
-              // ignore
-            }
-          },
-          Math.max(1000, Math.min(durationMs, 60000)),
-        );
       }
 
       return {
@@ -419,6 +704,12 @@ class PerformanceStartTraceTool extends BaseBrowserToolExecutor {
               message: 'Performance trace is recording. Use performance_stop_trace to stop it.',
               reload,
               autoStop,
+              durationMs: effectiveDurationMs,
+              limits: {
+                maxDurationMs: TRACE_MAX_DURATION_MS,
+                maxEventCount: TRACE_MAX_EVENTS,
+                maxSerializedBytes: TRACE_MAX_SERIALIZED_BYTES,
+              },
             }),
           },
         ],
@@ -470,16 +761,22 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
       let stopResult: { completed: boolean } = { completed: false };
       if (session.recording) {
         // End tracing and wait for completion signal
-        await cdpSessionManager.sendCommand(tabId, 'Tracing.end');
-        stopResult = await waitForTraceCompletion(session);
+        await requestTraceEnd(tabId, session, 'manual');
+        stopResult = session.traceCompleted
+          ? { completed: true }
+          : await waitForTraceCompletion(session);
       } else {
         // Already auto-stopped; proceed to finalize without waiting
-        stopResult = { completed: true };
+        stopResult = { completed: session.traceCompleted };
+      }
+
+      if (sessions.get(tabId) !== session) {
+        return createErrorResponse('Performance trace session ended before it could be finalized');
       }
 
       const endedAt = Date.now();
       if (discardNonPublicTrace) {
-        LAST_RESULTS.delete(tabId);
+        deleteLastResult(tabId);
         return {
           content: [
             {
@@ -491,8 +788,10 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
                   'Stopped a performance trace on a non-public page. Trace data was discarded.',
                 startedAt: session.startedAt,
                 endedAt,
+                eventCount: session.serializedEvents.length,
                 durationMs: endedAt - session.startedAt,
                 tracingCompleted: stopResult?.completed === true,
+                ...traceLimitMetadata(session),
               }),
             },
           ],
@@ -503,8 +802,14 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
       // Fetch metrics before detach
       const metrics = await enablePerformanceMetrics(tabId);
 
-      const trace = { traceEvents: session.events };
-      const json = JSON.stringify(trace);
+      const eventCount = session.serializedEvents.length;
+      const topEventNames = summarizeEventNames(session.eventNameCounts);
+      let json = `{"traceEvents":[${session.serializedEvents.join(',')}]}`;
+      const actualSerializedBytes = utf8ByteLength(json);
+      if (actualSerializedBytes > TRACE_MAX_SERIALIZED_BYTES) {
+        throw new Error('Performance trace exceeded its serialized byte limit');
+      }
+      session.serializedBytes = actualSerializedBytes;
 
       let saved: SavedTraceArtifact | undefined;
       if (saveToDownloads) {
@@ -513,20 +818,32 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
         // Persist to native temp directory so that analysis can run without Downloads permission
         const tempSaved = await saveTraceToNativeTemp(json, filenamePrefix || 'performance_trace');
         if (tempSaved) {
-          saved = { ...tempSaved } as any;
+          saved = tempSaved;
         }
       }
+      json = '';
 
       const publicSaved = toPublicSavedTraceArtifact(saved);
 
-      LAST_RESULTS.set(tabId, {
-        events: session.events,
+      storeLastResult(tabId, {
+        eventCount,
+        observedEventCount: session.observedEventCount,
+        serializedBytes: session.serializedBytes,
+        topEventNames,
         startedAt: session.startedAt,
         endedAt,
+        expiresAt: endedAt + LAST_RESULTS_TTL_MS,
         tabUrl: session.pageUrl || '',
         saved,
         metrics,
+        truncated: session.truncated,
+        truncationReason: session.truncationReason,
+        stopReason: session.stopReason,
       });
+
+      // Raw trace strings are only needed while saving. Keep summaries in LAST_RESULTS.
+      session.serializedEvents.length = 0;
+      session.eventNameCounts.clear();
 
       return {
         content: [
@@ -535,7 +852,7 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
             text: JSON.stringify({
               success: true,
               message: 'The performance trace has been stopped.',
-              eventCount: session.events.length,
+              eventCount,
               saved: publicSaved,
               metrics,
               startedAt: session.startedAt,
@@ -543,6 +860,7 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
               durationMs: endedAt - session.startedAt,
               url: session.pageUrl || '',
               tracingCompleted: stopResult?.completed === true,
+              ...traceLimitMetadata(session),
             }),
           },
         ],
@@ -576,7 +894,7 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
         return createErrorResponse(PERFORMANCE_TRACE_PUBLIC_PAGE_ERROR);
       }
       const tabId = activeTab.id;
-      const result = LAST_RESULTS.get(tabId);
+      const result = getLastResult(tabId);
       if (!result) {
         return {
           content: [
@@ -589,7 +907,7 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
         };
       }
       if (isNonPublicPageUrl(result.tabUrl)) {
-        LAST_RESULTS.delete(tabId);
+        deleteLastResult(tabId);
         return createErrorResponse(
           'Performance traces recorded on non-public pages are not available via public tools',
         );
@@ -636,6 +954,12 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
           if (resp && resp.success) {
             // Best-effort cleanup for temp files (Downloads paths are ignored by native cleaner)
             await cleanupNativeTempFile(fullPath);
+            const publicSaved = toPublicSavedTraceArtifact(result.saved);
+            if (result.saved?.temporary) {
+              result.saved = publicSaved
+                ? { filename: publicSaved.filename, temporary: false }
+                : undefined;
+            }
             return {
               content: [
                 {
@@ -647,9 +971,11 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
                     endedAt: result.endedAt,
                     durationMs: result.endedAt - result.startedAt,
                     metrics: result.metrics || {},
-                    saved: toPublicSavedTraceArtifact(result.saved),
+                    saved: publicSaved,
                     summary: resp.summary,
                     insight: resp.insight,
+                    eventCount: result.eventCount,
+                    ...traceLimitMetadata(result),
                   }),
                 },
               ],
@@ -663,16 +989,6 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
       }
 
       // Lightweight fallback (when no saved file path)
-      const counts = new Map<string, number>();
-      for (const ev of result.events.slice(0, 100000)) {
-        const n = typeof (ev as any)?.name === 'string' ? (ev as any).name : 'unknown';
-        counts.set(n, (counts.get(n) || 0) + 1);
-      }
-      const top = [...counts.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 20)
-        .map(([name, count]) => ({ name, count }));
-
       return {
         content: [
           {
@@ -686,8 +1002,10 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
               endedAt: result.endedAt,
               durationMs: result.endedAt - result.startedAt,
               metrics: result.metrics || {},
-              topEventNames: top,
+              eventCount: result.eventCount,
+              topEventNames: result.topEventNames,
               saved: toPublicSavedTraceArtifact(result.saved),
+              ...traceLimitMetadata(result),
             }),
           },
         ],
