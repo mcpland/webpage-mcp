@@ -234,11 +234,15 @@ export const httpHandler: ActionHandler<'http'> = {
       return failed('VALIDATION_ERROR', `URL exceeds maximum length of ${MAX_URL_LENGTH}`);
     }
 
-    // Validate URL format
+    // Validate URL format and keep workflow requests on public network schemes.
+    let parsedUrl: URL;
     try {
-      new URL(url);
+      parsedUrl = new URL(url);
     } catch {
       return failed('VALIDATION_ERROR', `Invalid URL format: ${url}`);
+    }
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return failed('VALIDATION_ERROR', 'HTTP actions only support http:// and https:// URLs');
     }
 
     // Resolve headers
