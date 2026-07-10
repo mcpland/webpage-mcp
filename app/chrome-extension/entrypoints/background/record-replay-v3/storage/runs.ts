@@ -78,7 +78,7 @@ function runEventRange(runId: RunId): IDBKeyRange {
 
 async function deleteArtifactsByRun(store: IDBObjectStore, runId: RunId): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const request = store.index('runId').openCursor(IDBKeyRange.only(runId));
+    const request = store.index('runId').openKeyCursor(IDBKeyRange.only(runId));
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const cursor = request.result;
@@ -86,7 +86,7 @@ async function deleteArtifactsByRun(store: IDBObjectStore, runId: RunId): Promis
         resolve();
         return;
       }
-      const deleteRequest = cursor.delete();
+      const deleteRequest = store.delete(cursor.primaryKey);
       deleteRequest.onerror = () => reject(deleteRequest.error);
       deleteRequest.onsuccess = () => cursor.continue();
     };
