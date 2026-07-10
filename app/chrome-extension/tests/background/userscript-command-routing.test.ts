@@ -301,6 +301,40 @@ describe('userscript command routing', () => {
     expect((await sendCommand(id, 'enabled')).body.result).toEqual({ data: 'enabled' });
   });
 
+  it('cleans CSS before a userScripts API failure while enabling the emergency switch', async () => {
+    const scriptId = await createScript(
+      'emergency-api-failure',
+      'ISOLATED',
+      `globalThis.__userscript_onCommand__ = () => 'must-not-run';`,
+    );
+    const result = await userscriptTool.execute({
+      action: 'create',
+      args: {
+        name: 'emergency-css',
+        mode: 'css',
+        script: 'body { color: red; }',
+        matches: ['<all_urls>'],
+        allFrames: false,
+      },
+    });
+    expect(result.isError).toBe(false);
+    vi.mocked(chrome.scripting.removeCSS).mockClear();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(chrome.userScripts.getScripts).mockRejectedValueOnce(new Error('API unavailable'));
+    vi.mocked(chrome.userScripts.execute).mockRejectedValue(new Error('API unavailable'));
+
+    storage.userscripts_disabled = true;
+    for (const listener of storageChangeListeners) {
+      listener({ userscripts_disabled: { oldValue: false, newValue: true } }, 'local');
+    }
+
+    await vi.waitFor(() => expect(chrome.scripting.removeCSS).toHaveBeenCalled());
+    await vi.waitFor(() => expect(chrome.userScripts.getScripts).toHaveBeenCalled());
+    vi.mocked(chrome.userScripts.execute).mockClear();
+    expect((await sendCommand(scriptId, 'blocked')).result.isError).toBe(true);
+    expect(chrome.userScripts.execute).not.toHaveBeenCalled();
+  });
+
   it('registers future URL matches without injecting an excluded current tab', async () => {
     const result = await userscriptTool.execute({
       action: 'create',

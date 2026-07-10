@@ -678,13 +678,16 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.storage.onChanged?.addListener((changes, areaName) => {
   if (areaName !== 'local' || !(STORAGE_KEYS.USERSCRIPTS_DISABLED in changes)) return;
   void (async () => {
-    await queueRegisteredUserScriptSynchronization();
     const records = await loadAllRecords();
     const disabled = Boolean(changes[STORAGE_KEYS.USERSCRIPTS_DISABLED]?.newValue);
     if (disabled) {
       await Promise.all(Object.values(records).map((record) => cleanupRecordFromAllTabs(record)));
+      await queueRegisteredUserScriptSynchronization().catch((error) =>
+        console.warn('Failed to unregister disabled user scripts:', error),
+      );
       return;
     }
+    await queueRegisteredUserScriptSynchronization();
     await Promise.all(
       Object.values(records)
         .filter((record) => record.enabled && record.persist)
@@ -1066,6 +1069,14 @@ class UserscriptTool extends BaseBrowserToolExecutor {
     const all = await loadAllRecords();
     const rec = all[id];
     if (!rec) return createErrorResponse('userscript not found');
+    const disabled = Boolean(
+      (await chrome.storage.local.get([STORAGE_KEYS.USERSCRIPTS_DISABLED]))[
+        STORAGE_KEYS.USERSCRIPTS_DISABLED
+      ],
+    );
+    if (disabled || !rec.enabled || !rec.persist) {
+      return createErrorResponse('userscript is not active');
+    }
 
     try {
       if (rec.world !== ExecutionWorld.MAIN) {
