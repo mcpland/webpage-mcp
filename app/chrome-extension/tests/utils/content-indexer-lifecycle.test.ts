@@ -49,6 +49,33 @@ interface TestPage {
   url: string;
 }
 
+const TAB_INVALIDATION_KEY = "semanticPendingTabInvalidations";
+
+function installLocalStorage(initial: Record<string, unknown> = {}) {
+  const state: Record<string, unknown> = { ...initial };
+  chrome.storage.local.get = vi.fn(async (keys?: unknown) => {
+    if (keys == null) return { ...state };
+    const names = Array.isArray(keys)
+      ? keys
+      : typeof keys === "string"
+        ? [keys]
+        : Object.keys((keys as Record<string, unknown>) ?? {});
+    return Object.fromEntries(
+      names
+        .filter((name): name is string => typeof name === "string")
+        .filter((name) => Object.prototype.hasOwnProperty.call(state, name))
+        .map((name) => [name, state[name]]),
+    );
+  }) as typeof chrome.storage.local.get;
+  chrome.storage.local.set = vi.fn(async (items: Record<string, unknown>) => {
+    Object.assign(state, items);
+  });
+  chrome.storage.local.remove = vi.fn(async (keys: string | string[]) => {
+    for (const key of Array.isArray(keys) ? keys : [keys]) delete state[key];
+  });
+  return state;
+}
+
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -128,6 +155,223 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
+  it("persists a cold tab invalidation without loading the model or vector database", async () => {
+    const state = installLocalStorage();
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    indexer.handleTabInvalidationEvent(71);
+
+    await vi.waitFor(() =>
+      expect(state[TAB_INVALIDATION_KEY]).toEqual({
+        schemaVersion: 1,
+        revision: 1,
+        mode: "tabs",
+        entries: [[71, 1]],
+      }),
+    );
+    expect(mocks.initializeEngine).not.toHaveBeenCalled();
+    expect(mocks.getGlobalVectorDatabase).not.toHaveBeenCalled();
+    expect(mocks.initializeVectorDatabase).not.toHaveBeenCalled();
+    expect(mocks.ensureTabDocumentsRemoved).not.toHaveBeenCalled();
+    expect(indexer.getStats().available).toBe(false);
+  });
+
+  it("retries a transient cold journal write without poisoning later work", async () => {
+    const state = installLocalStorage();
+    vi.mocked(chrome.storage.local.set).mockRejectedValueOnce(
+      new Error("transient storage failure"),
+    );
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    indexer.handleTabInvalidationEvent(81);
+
+    await vi.waitFor(() =>
+      expect(state[TAB_INVALIDATION_KEY]).toMatchObject({
+        entries: [[81, 1]],
+      }),
+    );
+    expect(chrome.storage.local.set).toHaveBeenCalledTimes(2);
+    expect(mocks.getGlobalVectorDatabase).not.toHaveBeenCalled();
+
+    await indexer.initialize();
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(81);
+    expect(state).not.toHaveProperty(TAB_INVALIDATION_KEY);
+  });
+
+  it("recovers a cold fail-closed writer when a later event persists every pending tab", async () => {
+    const state = installLocalStorage();
+    vi.mocked(chrome.storage.local.set)
+      .mockRejectedValueOnce(new Error("first storage failure"))
+      .mockRejectedValueOnce(new Error("retry storage failure"));
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    indexer.handleTabInvalidationEvent(82);
+    const blockedMaintenance = indexer.runExclusiveIndexMaintenance(
+      async () => undefined,
+    );
+    await expect(blockedMaintenance).rejects.toThrow(
+      "tab invalidation is still unsafe",
+    );
+    expect(state).not.toHaveProperty(TAB_INVALIDATION_KEY);
+
+    indexer.handleTabInvalidationEvent(83);
+    await vi.waitFor(() =>
+      expect(state[TAB_INVALIDATION_KEY]).toMatchObject({
+        entries: [
+          [82, 2],
+          [83, 1],
+        ],
+      }),
+    );
+
+    await indexer.initialize();
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(82);
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(83);
+    expect(state).not.toHaveProperty(TAB_INVALIDATION_KEY);
+    expect(indexer.getStats().available).toBe(true);
+  });
+
+  it("drains and acknowledges a persisted invalidation before restart hydration", async () => {
+    const state = installLocalStorage({
+      [TAB_INVALIDATION_KEY]: {
+        schemaVersion: 1,
+        revision: 3,
+        mode: "tabs",
+        entries: [[72, 3]],
+      },
+    });
+    mocks.inspectTabPageState.mockResolvedValue({
+      completedPages: [],
+      repairTabIds: [],
+    });
+
+    const indexer = await createIndexer();
+
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(72);
+    expect(state).not.toHaveProperty(TAB_INVALIDATION_KEY);
+    expect(
+      mocks.ensureTabDocumentsRemoved.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.inspectTabPageState.mock.invocationCallOrder[0]);
+    expect(indexer.getStats()).toMatchObject({
+      available: true,
+      indexedPages: 0,
+      isInitialized: true,
+    });
+  });
+
+  it("keeps a newer same-tab generation when an older deletion finishes", async () => {
+    const state = installLocalStorage();
+    const indexer = await createIndexer();
+    const firstRemoval = deferred();
+    const secondRemoval = deferred();
+    mocks.ensureTabDocumentsRemoved
+      .mockReturnValueOnce(firstRemoval.promise)
+      .mockReturnValueOnce(secondRemoval.promise);
+
+    indexer.handleTabInvalidationEvent(73);
+    await vi.waitFor(() =>
+      expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledTimes(1),
+    );
+    indexer.handleTabInvalidationEvent(73);
+    await vi.waitFor(() =>
+      expect(state[TAB_INVALIDATION_KEY]).toMatchObject({
+        revision: 2,
+        entries: [[73, 2]],
+      }),
+    );
+
+    firstRemoval.resolve();
+    await vi.waitFor(() =>
+      expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledTimes(2),
+    );
+    expect(state[TAB_INVALIDATION_KEY]).toMatchObject({
+      entries: [[73, 2]],
+    });
+
+    secondRemoval.resolve();
+    await vi.waitFor(() =>
+      expect(state).not.toHaveProperty(TAB_INVALIDATION_KEY),
+    );
+    await vi.waitFor(() => expect(indexer.getStats().available).toBe(true));
+  });
+
+  it("retains the durable marker and fails closed when tab deletion fails", async () => {
+    const state = installLocalStorage({
+      [TAB_INVALIDATION_KEY]: {
+        schemaVersion: 1,
+        revision: 1,
+        mode: "tabs",
+        entries: [[74, 1]],
+      },
+    });
+    mocks.ensureTabDocumentsRemoved.mockRejectedValueOnce(
+      new Error("tab deletion failed"),
+    );
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    await expect(indexer.initialize()).rejects.toThrow("tab deletion failed");
+
+    expect(state).toHaveProperty(TAB_INVALIDATION_KEY);
+    expect(mocks.inspectTabPageState).not.toHaveBeenCalled();
+    expect(indexer.getStats().available).toBe(false);
+    await expect(indexer.searchContent("unsafe")).rejects.toThrow(
+      "tab invalidation is still unsafe",
+    );
+    expect(mocks.getEmbedding).not.toHaveBeenCalled();
+  });
+
+  it("retains the marker and fails closed when its acknowledgement fails", async () => {
+    const state = installLocalStorage({
+      [TAB_INVALIDATION_KEY]: {
+        schemaVersion: 1,
+        revision: 1,
+        mode: "tabs",
+        entries: [[75, 1]],
+      },
+    });
+    vi.mocked(chrome.storage.local.remove).mockRejectedValueOnce(
+      new Error("journal remove failed"),
+    );
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    await expect(indexer.initialize()).rejects.toThrow("journal remove failed");
+
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(75);
+    expect(state).toHaveProperty(TAB_INVALIDATION_KEY);
+    expect(mocks.inspectTabPageState).not.toHaveBeenCalled();
+    expect(indexer.getStats().available).toBe(false);
+  });
+
+  it("rejects malformed journals before search, extraction, or hydration", async () => {
+    installLocalStorage({
+      [TAB_INVALIDATION_KEY]: {
+        schemaVersion: 99,
+        revision: 1,
+        mode: "tabs",
+        entries: [[76, 1]],
+      },
+    });
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    await expect(indexer.initialize()).rejects.toThrow(
+      "invalidation journal metadata is invalid",
+    );
+    await expect(indexer.indexTabContent(76)).rejects.toThrow(
+      "tab invalidation is still unsafe",
+    );
+    expect(mocks.ensureTabDocumentsRemoved).not.toHaveBeenCalled();
+    expect(mocks.inspectTabPageState).not.toHaveBeenCalled();
+    expect(mocks.getEmbedding).not.toHaveBeenCalled();
+    expect(chrome.tabs.get).not.toHaveBeenCalled();
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
   it("hydrates a completed page after restart and skips same-page extraction", async () => {
     const completedPage = {
       tabId: 12,
@@ -157,6 +401,53 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
     expect(mocks.addDocument).not.toHaveBeenCalled();
     expect(mocks.commitTabPage).not.toHaveBeenCalled();
+  });
+
+  it("does not resurrect a page invalidated during the hydration window", async () => {
+    installLocalStorage();
+    const completedPage = {
+      tabId: 77,
+      pageKey: "https://example.test/window\u0000Window",
+      url: "https://example.test/window",
+      title: "Window",
+      expectedCount: 1,
+    };
+    const hydrationInspection = deferred<{
+      completedPages: (typeof completedPage)[];
+      repairTabIds: number[];
+    }>();
+    mocks.inspectTabPageState
+      .mockResolvedValueOnce({
+        completedPages: [completedPage],
+        repairTabIds: [],
+      })
+      .mockReturnValueOnce(hydrationInspection.promise);
+    const eventRemoval = deferred();
+    mocks.ensureTabDocumentsRemoved.mockReturnValueOnce(eventRemoval.promise);
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    const initialization = indexer.initialize();
+    await vi.waitFor(() =>
+      expect(mocks.inspectTabPageState).toHaveBeenCalledTimes(2),
+    );
+    indexer.handleTabInvalidationEvent(77);
+    hydrationInspection.resolve({
+      completedPages: [completedPage],
+      repairTabIds: [],
+    });
+    await expect(initialization).rejects.toThrow(
+      "tab invalidation was requested",
+    );
+
+    const retry = indexer.initialize();
+    await vi.waitFor(() =>
+      expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(77),
+    );
+    eventRemoval.resolve();
+    await retry;
+    await vi.waitFor(() => expect(indexer.getStats().available).toBe(true));
+    expect(indexer.getStats().indexedPages).toBe(0);
   });
 
   it("durably removes a restored page before indexing and committing its replacement", async () => {
@@ -548,6 +839,40 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(mocks.clearAllVectorData).toHaveBeenCalledOnce();
   });
 
+  it("waits for every shared activity before applying a live tab invalidation", async () => {
+    const state = installLocalStorage();
+    const indexer = await createIndexer();
+    const firstHold = deferred();
+    const secondHold = deferred();
+    const entered = vi.fn();
+    const firstActivity = indexer.runWithIndexActivity(async () => {
+      entered("first");
+      await firstHold.promise;
+    });
+    const secondActivity = indexer.runWithIndexActivity(async () => {
+      entered("second");
+      await secondHold.promise;
+    });
+    await vi.waitFor(() => expect(entered).toHaveBeenCalledTimes(2));
+
+    indexer.handleTabInvalidationEvent(80);
+    await vi.waitFor(() => expect(state).toHaveProperty(TAB_INVALIDATION_KEY));
+    expect(mocks.ensureTabDocumentsRemoved).not.toHaveBeenCalled();
+
+    firstHold.resolve();
+    await firstActivity;
+    expect(mocks.ensureTabDocumentsRemoved).not.toHaveBeenCalled();
+
+    secondHold.resolve();
+    await secondActivity;
+    await vi.waitFor(() =>
+      expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(80),
+    );
+    await vi.waitFor(() =>
+      expect(state).not.toHaveProperty(TAB_INVALIDATION_KEY),
+    );
+  });
+
   it("drains an in-flight addDocument before cleanup and blocks new indexing until cleanup ends", async () => {
     pagesByTab.set(40, {
       url: "https://example.test/in-flight",
@@ -654,6 +979,11 @@ describe("ContentIndexer tab/page lifecycle", () => {
   });
 
   it("registers tab and navigation listeners only once across reinitialization", async () => {
+    const state = installLocalStorage();
+    const { initContentIndexerLifecycleListeners } =
+      await import("@/utils/content-indexer");
+    initContentIndexerLifecycleListeners();
+    initContentIndexerLifecycleListeners();
     const indexer = await createIndexer({ autoIndex: true });
 
     await indexer.reinitialize();
@@ -663,6 +993,33 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(chrome.tabs.onUpdated.addListener).toHaveBeenCalledOnce();
     expect(chrome.tabs.onRemoved.addListener).toHaveBeenCalledOnce();
     expect(chrome.webNavigation.onCommitted.addListener).toHaveBeenCalledOnce();
+
+    const navigationListener = vi.mocked(
+      chrome.webNavigation.onCommitted.addListener,
+    ).mock.calls[0][0];
+    const removedListener = vi.mocked(chrome.tabs.onRemoved.addListener).mock
+      .calls[0][0];
+    navigationListener({
+      tabId: 78,
+      frameId: 2,
+    } as Parameters<typeof navigationListener>[0]);
+    await Promise.resolve();
+    expect(state).not.toHaveProperty(TAB_INVALIDATION_KEY);
+
+    navigationListener({
+      tabId: 78,
+      frameId: 0,
+    } as Parameters<typeof navigationListener>[0]);
+    removedListener(79, { windowId: 1, isWindowClosing: false });
+    await vi.waitFor(() =>
+      expect(state[TAB_INVALIDATION_KEY]).toMatchObject({
+        entries: [
+          [78, 1],
+          [79, expect.any(Number)],
+        ],
+      }),
+    );
+    expect(mocks.getGlobalVectorDatabase).toHaveBeenCalledTimes(2);
   });
 
   it("stops reinitialization after a failed vector reset and remains retryable", async () => {

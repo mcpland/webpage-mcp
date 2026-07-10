@@ -1,31 +1,36 @@
-import { initNativeHostListener } from './native-host';
+import { initNativeHostListener } from "./native-host";
 import {
   initSemanticSimilarityListener,
   initializeSemanticEngineIfCached,
-} from './semantic-similarity';
-import { initStorageManagerListener } from './storage-manager';
-import { cleanupModelCache } from '@/utils/semantic-similarity-engine';
-import { initRecordReplayListeners } from './record-replay';
-import { initElementMarkerListeners } from './element-marker';
-import { initWebEditorListeners } from './web-editor';
-import { initQuickPanelAgentHandler } from './quick-panel/agent-handler';
-import { initQuickPanelCommands } from './quick-panel/commands';
-import { initQuickPanelTabsHandler } from './quick-panel/tabs-handler';
-import { initPrivilegedUiAuthorization } from './privileged-ui-authorization';
-import { bootstrapV3 } from './record-replay-v3/bootstrap';
-import { initScreenshotContextLifecycle } from '@/utils/screenshot-context';
+} from "./semantic-similarity";
+import { initStorageManagerListener } from "./storage-manager";
+import { cleanupModelCache } from "@/utils/semantic-similarity-engine";
+import { initRecordReplayListeners } from "./record-replay";
+import { initElementMarkerListeners } from "./element-marker";
+import { initWebEditorListeners } from "./web-editor";
+import { initQuickPanelAgentHandler } from "./quick-panel/agent-handler";
+import { initQuickPanelCommands } from "./quick-panel/commands";
+import { initQuickPanelTabsHandler } from "./quick-panel/tabs-handler";
+import { initPrivilegedUiAuthorization } from "./privileged-ui-authorization";
+import { bootstrapV3 } from "./record-replay-v3/bootstrap";
+import { initScreenshotContextLifecycle } from "@/utils/screenshot-context";
+import { initContentIndexerLifecycleListeners } from "@/utils/content-indexer";
 
 /**
  * Background script entry point
  * Initializes all background services and listeners
  */
 export default defineBackground(() => {
+  // MV3 may dispatch lifecycle events immediately after worker startup. These
+  // listeners must be registered synchronously before any asynchronous work.
+  initContentIndexerLifecycleListeners();
+
   // Open welcome page on first install
   chrome.runtime.onInstalled.addListener((details) => {
-    if (details.reason === 'install') {
+    if (details.reason === "install") {
       // Open the welcome/onboarding page for new installations
       chrome.tabs.create({
-        url: chrome.runtime.getURL('/welcome.html'),
+        url: chrome.runtime.getURL("/welcome.html"),
       });
     }
   });
@@ -45,7 +50,7 @@ export default defineBackground(() => {
       console.log(`[RR-V3] Bootstrap complete, ownerId: ${runtime.ownerId}`);
     })
     .catch((error) => {
-      console.error('[RR-V3] Bootstrap failed:', error);
+      console.error("[RR-V3] Bootstrap failed:", error);
     });
 
   // Element marker: context menu + CRUD listeners
@@ -63,19 +68,24 @@ export default defineBackground(() => {
   initializeSemanticEngineIfCached()
     .then((initialized) => {
       if (initialized) {
-        console.log('Background: Semantic similarity engine initialized from cache');
+        console.log(
+          "Background: Semantic similarity engine initialized from cache",
+        );
       } else {
         console.log(
-          'Background: Semantic similarity engine initialization skipped (no cache found)',
+          "Background: Semantic similarity engine initialization skipped (no cache found)",
         );
       }
     })
     .catch((error) => {
-      console.warn('Background: Failed to conditionally initialize semantic engine:', error);
+      console.warn(
+        "Background: Failed to conditionally initialize semantic engine:",
+        error,
+      );
     });
 
   // Initial cleanup on startup
   cleanupModelCache().catch((error) => {
-    console.warn('Background: Initial cache cleanup failed:', error);
+    console.warn("Background: Initial cache cleanup failed:", error);
   });
 });

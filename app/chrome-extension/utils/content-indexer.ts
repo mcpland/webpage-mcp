@@ -16,7 +16,116 @@ import {
   PREDEFINED_MODELS,
 } from "./semantic-similarity-engine";
 import { getStoredSemanticModelSelection } from "./semantic-similarity-boundaries";
+import { STORAGE_KEYS } from "@/common/constants";
 import { TOOL_MESSAGE_TYPES } from "@/common/message-types";
+
+const TAB_INVALIDATION_SCHEMA_VERSION = 1;
+const MAX_PENDING_TAB_INVALIDATIONS = 100_000;
+
+interface TabInvalidationJournal {
+  schemaVersion: typeof TAB_INVALIDATION_SCHEMA_VERSION;
+  revision: number;
+  mode: "tabs" | "full-reset";
+  entries: Array<[tabId: number, generation: number]>;
+}
+
+interface PersistedTabInvalidation {
+  tabId: number;
+  generation: number;
+}
+
+let tabInvalidationStorageQueue: Promise<void> = Promise.resolve();
+
+function enqueueTabInvalidationStorageOperation<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  const result = tabInvalidationStorageQueue.then(operation);
+  tabInvalidationStorageQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function parseTabInvalidationJournal(value: unknown): TabInvalidationJournal {
+  if (!isRecord(value)) {
+    throw new Error("Semantic tab invalidation journal is not an object");
+  }
+  const keys = Object.keys(value).sort();
+  if (
+    keys.length !== 4 ||
+    keys[0] !== "entries" ||
+    keys[1] !== "mode" ||
+    keys[2] !== "revision" ||
+    keys[3] !== "schemaVersion" ||
+    value.schemaVersion !== TAB_INVALIDATION_SCHEMA_VERSION ||
+    !Number.isSafeInteger(value.revision) ||
+    (value.revision as number) < 1 ||
+    (value.mode !== "tabs" && value.mode !== "full-reset") ||
+    !Array.isArray(value.entries) ||
+    value.entries.length > MAX_PENDING_TAB_INVALIDATIONS
+  ) {
+    throw new Error("Semantic tab invalidation journal metadata is invalid");
+  }
+
+  if (value.mode === "full-reset" && value.entries.length !== 0) {
+    throw new Error("Full-reset invalidation journal must not contain tabs");
+  }
+
+  const revision = value.revision as number;
+  const entries: Array<[number, number]> = [];
+  let previousTabId = -1;
+  const generations = new Set<number>();
+  for (const entry of value.entries) {
+    if (
+      !Array.isArray(entry) ||
+      entry.length !== 2 ||
+      !isNonNegativeSafeInteger(entry[0]) ||
+      !Number.isSafeInteger(entry[1]) ||
+      entry[1] < 1 ||
+      entry[1] > revision ||
+      entry[0] <= previousTabId ||
+      generations.has(entry[1])
+    ) {
+      throw new Error("Semantic tab invalidation journal entry is invalid");
+    }
+    previousTabId = entry[0];
+    generations.add(entry[1]);
+    entries.push([entry[0], entry[1]]);
+  }
+
+  return {
+    schemaVersion: TAB_INVALIDATION_SCHEMA_VERSION,
+    revision,
+    mode: value.mode,
+    entries,
+  };
+}
+
+function sameTabInvalidationJournal(
+  left: TabInvalidationJournal,
+  right: TabInvalidationJournal,
+): boolean {
+  return (
+    left.schemaVersion === right.schemaVersion &&
+    left.revision === right.revision &&
+    left.mode === right.mode &&
+    left.entries.length === right.entries.length &&
+    left.entries.every(
+      (entry, index) =>
+        entry[0] === right.entries[index]?.[0] &&
+        entry[1] === right.entries[index]?.[1],
+    )
+  );
+}
 
 export interface IndexingOptions {
   autoIndex?: boolean;
@@ -49,7 +158,7 @@ export interface ContentIndexerActivity {
 export type ContentIndexerMaintenance = ContentIndexerActivity;
 
 interface MaintenanceJob<T = unknown> {
-  kind: "index" | "data-cleanup" | "index-recovery";
+  kind: "index" | "data-cleanup" | "index-recovery" | "tab-invalidation";
   operation: (activity: ContentIndexerMaintenance) => Promise<T>;
   resolve: (value: T) => void;
   reject: (error: unknown) => void;
@@ -70,7 +179,7 @@ export class ContentIndexer {
   private tabsRequiringDurableRemoval = new Set<number>();
   /** Serialize index/remove work per tab so navigation cannot race an in-flight index. */
   private tabIndexOperations = new Map<number, Promise<void>>();
-  private tabEventListenersInitialized = false;
+  private autoIndexListenerInitialized = false;
   private readonly options: Required<IndexingOptions>;
   private activeIndexActivities = 0;
   private maintenanceRequested = false;
@@ -78,9 +187,15 @@ export class ContentIndexer {
   private readonly activityWaiters = new Set<() => void>();
   private readonly maintenanceQueue: MaintenanceJob[] = [];
   private failedDataCleanup: Error | null = null;
+  private failedTabInvalidation: Error | null = null;
   private dataCleanupPromise: Promise<void> | null = null;
   private dataCleanupEpoch = 0;
   private persistentStatsKnownEmpty = false;
+  private tabInvalidationJournalKnown = false;
+  private tabInvalidationEpoch = 0;
+  private readonly pendingTabInvalidations = new Map<number, number>();
+  private readonly undurableTabInvalidations = new Map<number, number>();
+  private tabInvalidationDrainPromise: Promise<void> | null = null;
 
   constructor(options?: IndexingOptions) {
     this.options = {
@@ -104,9 +219,15 @@ export class ContentIndexer {
     operation: (activity: ContentIndexerActivity) => Promise<T>,
   ): Promise<T> {
     const requestedCleanupEpoch = this.dataCleanupEpoch;
-    await this.acquireIndexActivity(requestedCleanupEpoch);
+    const requestedTabInvalidationEpoch = this.tabInvalidationEpoch;
+    await this.acquireIndexActivity(
+      requestedCleanupEpoch,
+      requestedTabInvalidationEpoch,
+    );
     try {
-      return await operation(this.createActivityFacade());
+      return await operation(
+        this.createActivityFacade(requestedTabInvalidationEpoch),
+      );
     } finally {
       this.releaseIndexActivity();
     }
@@ -116,7 +237,7 @@ export class ContentIndexer {
   public runExclusiveIndexMaintenance<T>(
     operation: (activity: ContentIndexerMaintenance) => Promise<T>,
   ): Promise<T> {
-    if (this.failedDataCleanup)
+    if (this.failedDataCleanup || this.failedTabInvalidation)
       return Promise.reject(this.cleanupBlockedError());
     return this.enqueueMaintenance("index", operation);
   }
@@ -155,6 +276,7 @@ export class ContentIndexer {
 
   private async acquireIndexActivity(
     requestedCleanupEpoch: number,
+    requestedTabInvalidationEpoch: number,
   ): Promise<void> {
     while (true) {
       if (requestedCleanupEpoch !== this.dataCleanupEpoch) {
@@ -162,7 +284,14 @@ export class ContentIndexer {
           "Semantic index activity was cancelled because data cleanup was requested",
         );
       }
-      if (this.failedDataCleanup) throw this.cleanupBlockedError();
+      if (requestedTabInvalidationEpoch !== this.tabInvalidationEpoch) {
+        throw new Error(
+          "Semantic index activity was cancelled because a tab invalidation was requested",
+        );
+      }
+      if (this.failedDataCleanup || this.failedTabInvalidation) {
+        throw this.cleanupBlockedError();
+      }
       if (!this.maintenanceRequested && !this.maintenanceRunning) {
         this.activeIndexActivities += 1;
         return;
@@ -209,7 +338,10 @@ export class ContentIndexer {
     // still running. Re-check at execution time so a failed cleanup cannot be
     // followed by mutations that recreate data. Only privacy cleanup or an
     // explicit index-recovery retry may run while fail-closed.
-    if (job.kind === "index" && this.failedDataCleanup) {
+    if (
+      job.kind === "index" &&
+      (this.failedDataCleanup || this.failedTabInvalidation)
+    ) {
       job.reject(this.cleanupBlockedError());
       queueMicrotask(() => this.pumpMaintenanceQueue());
       return;
@@ -223,13 +355,20 @@ export class ContentIndexer {
       .then(() => job.operation(this.createActivityFacade()))
       .then(
         (value) => {
-          if (job.kind !== "index") this.failedDataCleanup = null;
+          if (job.kind === "data-cleanup" || job.kind === "index-recovery") {
+            this.failedDataCleanup = null;
+          }
           succeeded = true;
           result = value;
         },
         (error) => {
-          if (job.kind !== "index") {
+          if (job.kind === "data-cleanup" || job.kind === "index-recovery") {
             this.failedDataCleanup =
+              error instanceof Error ? error : new Error(String(error));
+          } else if (job.kind === "tab-invalidation") {
+            // Set this before releasing the maintenance gate so a waiter can
+            // never slip through after an invalidation failed.
+            this.failedTabInvalidation =
               error instanceof Error ? error : new Error(String(error));
           }
           failure = error;
@@ -250,17 +389,397 @@ export class ContentIndexer {
 
   private cleanupBlockedError(): Error {
     return new Error(
-      "Semantic index access is blocked because the last cleanup or reinitialization did not complete. Retry Clear All Data or model reinitialization.",
-      { cause: this.failedDataCleanup ?? undefined },
+      "Semantic index access is blocked because the last cleanup or reinitialization did not complete, or a tab invalidation is still unsafe. Retry Clear All Data or model reinitialization.",
+      {
+        cause:
+          this.failedDataCleanup ?? this.failedTabInvalidation ?? undefined,
+      },
     );
   }
 
-  private createActivityFacade(): ContentIndexerMaintenance {
+  private assertTabInvalidationEpoch(expectedEpoch?: number): void {
+    if (
+      expectedEpoch !== undefined &&
+      expectedEpoch !== this.tabInvalidationEpoch
+    ) {
+      throw new Error(
+        "Semantic index activity was cancelled because a tab invalidation was requested",
+      );
+    }
+  }
+
+  /**
+   * Record a close/navigation synchronously from the MV3 event listener. This
+   * method only mutates memory, starts chrome.storage work, and closes the
+   * maintenance gate; it never initializes the model or vector database.
+   */
+  public handleTabInvalidationEvent(tabId: number): void {
+    if (!isNonNegativeSafeInteger(tabId)) return;
+
+    const localEpoch = ++this.tabInvalidationEpoch;
+    this.indexedPageByTab.delete(tabId);
+    this.tabsRequiringDurableRemoval.add(tabId);
+    this.pendingTabInvalidations.set(tabId, localEpoch);
+    this.undurableTabInvalidations.set(tabId, localEpoch);
+    this.tabInvalidationJournalKnown = false;
+
+    const persisted = this.persistTabInvalidation(tabId, localEpoch);
+    const maintenance = this.enqueueMaintenance(
+      "tab-invalidation",
+      async () => {
+        try {
+          await persisted;
+        } catch {
+          // The shared retry below includes this event and every older write.
+        }
+        // Retry transient or older storage failures while this exclusive job
+        // still owns the gate. A persistent failure remains fail-closed.
+        await this.retryUndurableTabInvalidationWrites();
+        // A cold event must stay cheap. Initialization will drain the durable
+        // journal before it exposes the index.
+        if (this.failedDataCleanup) return;
+        if (!this.isInitialized) {
+          await this.verifyColdTabInvalidationsAreDurable();
+          return;
+        }
+        await this.drainPendingTabInvalidationsInternal();
+      },
+    );
+    void maintenance.catch((error) => {
+      console.error(
+        `ContentIndexer: Failed to persist or apply tab ${tabId} invalidation:`,
+        error,
+      );
+    });
+  }
+
+  private async readTabInvalidationJournal(): Promise<TabInvalidationJournal | null> {
+    const storageKey = STORAGE_KEYS.SEMANTIC_PENDING_TAB_INVALIDATIONS;
+    const result = await chrome.storage.local.get([storageKey]);
+    if (!Object.prototype.hasOwnProperty.call(result, storageKey)) return null;
+    return parseTabInvalidationJournal(result[storageKey]);
+  }
+
+  private async writeAndVerifyTabInvalidationJournal(
+    journal: TabInvalidationJournal,
+  ): Promise<void> {
+    const storageKey = STORAGE_KEYS.SEMANTIC_PENDING_TAB_INVALIDATIONS;
+    await chrome.storage.local.set({ [storageKey]: journal });
+    const stored = await chrome.storage.local.get([storageKey]);
+    if (!Object.prototype.hasOwnProperty.call(stored, storageKey)) {
+      throw new Error("Semantic tab invalidation journal was not retained");
+    }
+    const verified = parseTabInvalidationJournal(stored[storageKey]);
+    if (!sameTabInvalidationJournal(verified, journal)) {
+      throw new Error("Semantic tab invalidation journal readback mismatched");
+    }
+  }
+
+  private async retryUndurableTabInvalidationWrites(): Promise<void> {
+    for (const [tabId, epoch] of [...this.undurableTabInvalidations]) {
+      if (this.undurableTabInvalidations.get(tabId) === epoch) {
+        await this.persistTabInvalidation(tabId, epoch);
+      }
+    }
+  }
+
+  private async verifyColdTabInvalidationsAreDurable(): Promise<void> {
+    const journal = await enqueueTabInvalidationStorageOperation(() =>
+      this.readTabInvalidationJournal(),
+    );
+    if (!journal || this.undurableTabInvalidations.size > 0) {
+      throw new Error("Semantic tab invalidations are not durably persisted");
+    }
+    if (journal.mode === "tabs") {
+      const persistedTabs = new Set(journal.entries.map(([tabId]) => tabId));
+      for (const tabId of this.pendingTabInvalidations.keys()) {
+        if (!persistedTabs.has(tabId)) {
+          throw new Error(
+            `Semantic tab invalidation for tab ${tabId} is not durable`,
+          );
+        }
+      }
+    }
+    this.tabInvalidationJournalKnown = true;
+    // The journal is still pending, but it is safe for a later initialize to
+    // acquire a lease and drain it. Clear only the storage-write failure.
+    this.failedTabInvalidation = null;
+  }
+
+  private persistTabInvalidation(
+    tabId: number,
+    localEpoch: number,
+  ): Promise<PersistedTabInvalidation> {
+    return enqueueTabInvalidationStorageOperation(async () => {
+      const current = await this.readTabInvalidationJournal();
+      if (current?.mode === "full-reset") {
+        if (this.undurableTabInvalidations.get(tabId) === localEpoch) {
+          this.undurableTabInvalidations.delete(tabId);
+        }
+        this.tabInvalidationJournalKnown = true;
+        return { tabId, generation: current.revision };
+      }
+
+      const entries = new Map<number, number>(current?.entries ?? []);
+      const isNewTab = !entries.has(tabId);
+      const currentRevision = current?.revision ?? 0;
+      let next: TabInvalidationJournal;
+      let generation: number;
+      if (
+        currentRevision >= Number.MAX_SAFE_INTEGER ||
+        (isNewTab && entries.size >= MAX_PENDING_TAB_INVALIDATIONS)
+      ) {
+        // A bounded full-reset marker is safer than dropping the new tab ID.
+        // The next initialized operation will clear all derived vectors.
+        generation = Math.max(1, currentRevision);
+        next = {
+          schemaVersion: TAB_INVALIDATION_SCHEMA_VERSION,
+          revision: generation,
+          mode: "full-reset",
+          entries: [],
+        };
+      } else {
+        generation = currentRevision + 1;
+        entries.set(tabId, generation);
+        next = {
+          schemaVersion: TAB_INVALIDATION_SCHEMA_VERSION,
+          revision: generation,
+          mode: "tabs",
+          entries: [...entries.entries()].sort(
+            (left, right) => left[0] - right[0],
+          ),
+        };
+      }
+
+      await this.writeAndVerifyTabInvalidationJournal(next);
+      if (this.undurableTabInvalidations.get(tabId) === localEpoch) {
+        this.undurableTabInvalidations.delete(tabId);
+      }
+      this.tabInvalidationJournalKnown = true;
+      return { tabId, generation };
+    });
+  }
+
+  private acknowledgeTabInvalidation(
+    invalidation: PersistedTabInvalidation,
+  ): Promise<boolean> {
+    return enqueueTabInvalidationStorageOperation(async () => {
+      const current = await this.readTabInvalidationJournal();
+      if (!current) return true;
+      if (current.mode === "full-reset") return false;
+
+      const persistedGeneration = current.entries.find(
+        ([tabId]) => tabId === invalidation.tabId,
+      )?.[1];
+      if (persistedGeneration === undefined) return true;
+      if (persistedGeneration !== invalidation.generation) return false;
+
+      const remaining = current.entries.filter(
+        ([tabId]) => tabId !== invalidation.tabId,
+      );
+      const storageKey = STORAGE_KEYS.SEMANTIC_PENDING_TAB_INVALIDATIONS;
+      if (remaining.length === 0) {
+        await chrome.storage.local.remove([storageKey]);
+        const stored = await chrome.storage.local.get([storageKey]);
+        if (Object.prototype.hasOwnProperty.call(stored, storageKey)) {
+          throw new Error("Semantic tab invalidation journal was not removed");
+        }
+        return true;
+      }
+
+      if (current.revision >= Number.MAX_SAFE_INTEGER) {
+        await this.writeAndVerifyTabInvalidationJournal({
+          schemaVersion: TAB_INVALIDATION_SCHEMA_VERSION,
+          revision: current.revision,
+          mode: "full-reset",
+          entries: [],
+        });
+        return false;
+      }
+
+      await this.writeAndVerifyTabInvalidationJournal({
+        schemaVersion: TAB_INVALIDATION_SCHEMA_VERSION,
+        revision: current.revision + 1,
+        mode: "tabs",
+        entries: remaining,
+      });
+      return true;
+    });
+  }
+
+  private async clearTabInvalidationJournalAfterVectorClear(): Promise<void> {
+    // Capture after the vector clear. Event handlers run synchronously, so an
+    // event after this boundary queues its write after our removal and remains.
+    const coveredEpoch = this.tabInvalidationEpoch;
+    try {
+      await enqueueTabInvalidationStorageOperation(async () => {
+        const storageKey = STORAGE_KEYS.SEMANTIC_PENDING_TAB_INVALIDATIONS;
+        await chrome.storage.local.remove([storageKey]);
+        const stored = await chrome.storage.local.get([storageKey]);
+        if (Object.prototype.hasOwnProperty.call(stored, storageKey)) {
+          throw new Error("Semantic tab invalidation journal was not cleared");
+        }
+      });
+    } catch (error) {
+      this.tabInvalidationJournalKnown = false;
+      this.failedTabInvalidation =
+        error instanceof Error ? error : new Error(String(error));
+      throw error;
+    }
+
+    for (const [tabId, epoch] of this.pendingTabInvalidations) {
+      if (epoch <= coveredEpoch) this.pendingTabInvalidations.delete(tabId);
+    }
+    for (const [tabId, epoch] of this.undurableTabInvalidations) {
+      if (epoch <= coveredEpoch) this.undurableTabInvalidations.delete(tabId);
+    }
+    this.tabsRequiringDurableRemoval.clear();
+    for (const tabId of this.pendingTabInvalidations.keys()) {
+      this.tabsRequiringDurableRemoval.add(tabId);
+    }
+    this.tabInvalidationJournalKnown = true;
+    if (
+      this.pendingTabInvalidations.size === 0 &&
+      this.undurableTabInvalidations.size === 0
+    ) {
+      this.failedTabInvalidation = null;
+    }
+  }
+
+  private drainPendingTabInvalidationsInternal(
+    expectedTabInvalidationEpoch?: number,
+  ): Promise<void> {
+    if (this.tabInvalidationDrainPromise) {
+      return this.tabInvalidationDrainPromise;
+    }
+    const operation = this.performPendingTabInvalidationDrain(
+      expectedTabInvalidationEpoch,
+    );
+    const tracked = operation.finally(() => {
+      if (this.tabInvalidationDrainPromise === tracked) {
+        this.tabInvalidationDrainPromise = null;
+      }
+    });
+    this.tabInvalidationDrainPromise = tracked;
+    return tracked;
+  }
+
+  private async performPendingTabInvalidationDrain(
+    expectedTabInvalidationEpoch?: number,
+  ): Promise<void> {
+    try {
+      // Retry writes that failed in this worker before trusting the durable
+      // snapshot. A malformed existing payload is never overwritten.
+      await this.retryUndurableTabInvalidationWrites();
+
+      for (let pass = 0; pass < 8; pass += 1) {
+        const journalReadEpoch = this.tabInvalidationEpoch;
+        const journal = await enqueueTabInvalidationStorageOperation(() =>
+          this.readTabInvalidationJournal(),
+        );
+        this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
+        this.tabInvalidationJournalKnown = true;
+
+        if (!journal) {
+          if (this.undurableTabInvalidations.size > 0) {
+            continue;
+          }
+          for (const [tabId, epoch] of this.pendingTabInvalidations) {
+            if (epoch <= journalReadEpoch) {
+              this.pendingTabInvalidations.delete(tabId);
+              this.tabsRequiringDurableRemoval.delete(tabId);
+            }
+          }
+          if (this.pendingTabInvalidations.size === 0) {
+            this.failedTabInvalidation = null;
+            return;
+          }
+          continue;
+        }
+
+        if (journal.mode === "full-reset") {
+          this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
+          const { clearAllVectorData } = await import("./vector-database");
+          await clearAllVectorData();
+          this.indexedPageByTab.clear();
+          await this.clearTabInvalidationJournalAfterVectorClear();
+          this.persistentStatsKnownEmpty = true;
+          return;
+        }
+
+        for (const [tabId, generation] of journal.entries) {
+          let localEpoch = this.pendingTabInvalidations.get(tabId);
+          if (localEpoch === undefined) {
+            // Restored durable entries are not new live events. Reuse the
+            // current epoch so startup repair does not cancel itself.
+            localEpoch = this.tabInvalidationEpoch;
+            this.pendingTabInvalidations.set(tabId, localEpoch);
+          }
+          this.indexedPageByTab.delete(tabId);
+          this.tabsRequiringDurableRemoval.add(tabId);
+
+          this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
+          await this.runTabIndexOperation(tabId, async () => {
+            await this.vectorDatabase.ensureTabDocumentsRemoved(tabId);
+          });
+          const acknowledged = await this.acknowledgeTabInvalidation({
+            tabId,
+            generation,
+          });
+          if (
+            acknowledged &&
+            this.pendingTabInvalidations.get(tabId) === localEpoch &&
+            !this.undurableTabInvalidations.has(tabId)
+          ) {
+            this.pendingTabInvalidations.delete(tabId);
+            this.tabsRequiringDurableRemoval.delete(tabId);
+          }
+        }
+
+        const finalReadEpoch = this.tabInvalidationEpoch;
+        const remaining = await enqueueTabInvalidationStorageOperation(() =>
+          this.readTabInvalidationJournal(),
+        );
+        if (!remaining) {
+          for (const [tabId, epoch] of this.pendingTabInvalidations) {
+            if (epoch <= finalReadEpoch) {
+              this.pendingTabInvalidations.delete(tabId);
+              this.tabsRequiringDurableRemoval.delete(tabId);
+            }
+          }
+          if (
+            this.pendingTabInvalidations.size === 0 &&
+            this.undurableTabInvalidations.size === 0
+          ) {
+            this.tabInvalidationJournalKnown = true;
+            this.failedTabInvalidation = null;
+            return;
+          }
+        }
+      }
+
+      throw new Error(
+        "Semantic tab invalidation journal kept changing during drain",
+      );
+    } catch (error) {
+      this.tabInvalidationJournalKnown = false;
+      this.failedTabInvalidation =
+        error instanceof Error ? error : new Error(String(error));
+      throw error;
+    }
+  }
+
+  private createActivityFacade(
+    expectedTabInvalidationEpoch?: number,
+  ): ContentIndexerMaintenance {
     return {
-      initialize: () => this.initializeInternal(),
-      indexTabContent: (tabId) => this.indexTabContentInternal(tabId),
-      searchContent: (query, topK) => this.searchContentInternal(query, topK),
-      removeTabIndex: (tabId) => this.removeTabIndexInternal(tabId),
+      initialize: () => this.initializeInternal(expectedTabInvalidationEpoch),
+      indexTabContent: (tabId) =>
+        this.indexTabContentInternal(tabId, expectedTabInvalidationEpoch),
+      searchContent: (query, topK) =>
+        this.searchContentInternal(query, topK, expectedTabInvalidationEpoch),
+      removeTabIndex: (tabId) =>
+        this.removeTabIndexInternal(tabId, expectedTabInvalidationEpoch),
       clearAllIndexes: () => this.clearAllIndexesInternal(),
       getStats: () => this.getStats(),
       isSemanticEngineReady: () => this.isSemanticEngineReady(),
@@ -309,19 +828,26 @@ export class ContentIndexer {
     return this.runWithIndexActivity((activity) => activity.initialize());
   }
 
-  private async initializeInternal(): Promise<void> {
+  private async initializeInternal(
+    expectedTabInvalidationEpoch?: number,
+  ): Promise<void> {
+    this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
     if (this.isInitialized) return;
     if (this.isInitializing && this.initPromise) return this.initPromise;
 
     this.isInitializing = true;
-    this.initPromise = this._doInitialize().finally(() => {
-      this.isInitializing = false;
-    });
+    this.initPromise = this._doInitialize(expectedTabInvalidationEpoch).finally(
+      () => {
+        this.isInitializing = false;
+      },
+    );
 
     return this.initPromise;
   }
 
-  private async _doInitialize(): Promise<void> {
+  private async _doInitialize(
+    expectedTabInvalidationEpoch?: number,
+  ): Promise<void> {
     try {
       this.persistentStatsKnownEmpty = false;
       // Get current selected model configuration
@@ -337,12 +863,21 @@ export class ContentIndexer {
       });
       await this.vectorDatabase.initialize();
 
+      // A cold worker must apply durable close/navigation tombstones before
+      // inspecting or publishing any persisted page identity.
+      this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
+      await this.drainPendingTabInvalidationsInternal(
+        expectedTabInvalidationEpoch,
+      );
+      this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
+
       // A worker restart may find chunk mappings persisted before the page's
       // final completion commit. Repair every such tab before exposing search,
       // stats, or a duplicate-page cache, then hydrate all completed pages as
       // one snapshot so initialization cannot publish a partial view.
       this.indexedPageByTab.clear();
       const initialInspection = await this.vectorDatabase.inspectTabPageState();
+      this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
       const tabsToRepair = new Set([
         ...this.tabsRequiringDurableRemoval,
         ...initialInspection.repairTabIds,
@@ -357,6 +892,7 @@ export class ContentIndexer {
 
       const repairedInspection =
         await this.vectorDatabase.inspectTabPageState();
+      this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
       if (repairedInspection.repairTabIds.length > 0) {
         throw new Error(
           `Semantic page repair did not complete for tabs ${repairedInspection.repairTabIds.join(", ")}`,
@@ -364,11 +900,16 @@ export class ContentIndexer {
       }
       const hydratedPages = new Map<number, string>();
       for (const page of repairedInspection.completedPages) {
-        hydratedPages.set(page.tabId, page.pageKey);
+        if (
+          !this.pendingTabInvalidations.has(page.tabId) &&
+          !this.tabsRequiringDurableRemoval.has(page.tabId)
+        ) {
+          hydratedPages.set(page.tabId, page.pageKey);
+        }
       }
       this.indexedPageByTab = hydratedPages;
 
-      this.setupTabEventListeners();
+      this.setupAutoIndexListener();
 
       this.isInitialized = true;
     } catch (error) {
@@ -388,7 +929,10 @@ export class ContentIndexer {
     );
   }
 
-  private async indexTabContentInternal(tabId: number): Promise<void> {
+  private async indexTabContentInternal(
+    tabId: number,
+    expectedTabInvalidationEpoch?: number,
+  ): Promise<void> {
     // Check if semantic engine is ready before attempting to index
     if (!this.isSemanticEngineReady() && !this.isSemanticEngineInitializing()) {
       console.log(
@@ -405,8 +949,14 @@ export class ContentIndexer {
         );
         return;
       }
-      await this.initializeInternal();
+      await this.initializeInternal(expectedTabInvalidationEpoch);
     }
+
+    this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
+    await this.drainPendingTabInvalidationsInternal(
+      expectedTabInvalidationEpoch,
+    );
+    this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
 
     return this.runTabIndexOperation(tabId, async () => {
       try {
@@ -546,6 +1096,7 @@ export class ContentIndexer {
   private async searchContentInternal(
     query: string,
     topK: number = 10,
+    expectedTabInvalidationEpoch?: number,
   ): Promise<SearchResult[]> {
     // Check if semantic engine is ready before attempting to search
     if (!this.isSemanticEngineReady() && !this.isSemanticEngineInitializing()) {
@@ -561,8 +1112,14 @@ export class ContentIndexer {
           "ContentIndexer not initialized and semantic engine not ready. Please initialize the semantic engine first.",
         );
       }
-      await this.initializeInternal();
+      await this.initializeInternal(expectedTabInvalidationEpoch);
     }
+
+    this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
+    await this.drainPendingTabInvalidationsInternal(
+      expectedTabInvalidationEpoch,
+    );
+    this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
 
     try {
       const queryEmbedding = await this.semanticEngine.getEmbedding(query);
@@ -611,7 +1168,11 @@ export class ContentIndexer {
     );
   }
 
-  private async removeTabIndexInternal(tabId: number): Promise<void> {
+  private async removeTabIndexInternal(
+    tabId: number,
+    expectedTabInvalidationEpoch?: number,
+  ): Promise<void> {
+    this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
     if (!this.isInitialized) {
       return;
     }
@@ -708,8 +1269,8 @@ export class ContentIndexer {
       // the global reference, so initialization cannot split across old/new
       // dimensions after a partial reset.
       await resetGlobalVectorDatabase();
+      await this.clearTabInvalidationJournalAfterVectorClear();
       this.indexedPageByTab.clear();
-      this.tabsRequiringDurableRemoval.clear();
 
       await activity.initialize();
 
@@ -771,7 +1332,11 @@ export class ContentIndexer {
         (this.isInitialized || this.persistentStatsKnownEmpty) &&
         !this.maintenanceRequested &&
         !this.maintenanceRunning &&
-        !this.failedDataCleanup,
+        !this.failedDataCleanup &&
+        !this.failedTabInvalidation &&
+        this.tabInvalidationJournalKnown &&
+        this.pendingTabInvalidations.size === 0 &&
+        this.undurableTabInvalidations.size === 0,
       indexedPages: this.indexedPageByTab.size,
       isInitialized: this.isInitialized,
       semanticEngineReady: this.isSemanticEngineReady(),
@@ -793,16 +1358,16 @@ export class ContentIndexer {
     // in-memory VectorDatabase has been initialized yet.
     const { clearAllVectorData } = await import("./vector-database");
     await clearAllVectorData();
+    await this.clearTabInvalidationJournalAfterVectorClear();
     this.indexedPageByTab.clear();
-    this.tabsRequiringDurableRemoval.clear();
     this.persistentStatsKnownEmpty = true;
     console.log("ContentIndexer: All indexes cleared");
   }
-  private setupTabEventListeners(): void {
-    if (this.tabEventListenersInitialized) {
+  private setupAutoIndexListener(): void {
+    if (this.autoIndexListenerInitialized) {
       return;
     }
-    this.tabEventListenersInitialized = true;
+    this.autoIndexListenerInitialized = true;
 
     if (this.options.autoIndex) {
       chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
@@ -826,28 +1391,6 @@ export class ContentIndexer {
             );
           });
         }, 2000);
-      });
-    }
-
-    chrome.tabs.onRemoved.addListener((tabId) => {
-      void this.removeTabIndex(tabId).catch((error) => {
-        console.error(
-          `ContentIndexer: Failed to remove closed tab ${tabId}:`,
-          error,
-        );
-      });
-    });
-
-    if (chrome.webNavigation) {
-      chrome.webNavigation.onCommitted.addListener((details) => {
-        if (details.frameId === 0) {
-          void this.removeTabIndex(details.tabId).catch((error) => {
-            console.error(
-              `ContentIndexer: Failed to remove navigated tab ${details.tabId}:`,
-              error,
-            );
-          });
-        }
       });
     }
   }
@@ -906,4 +1449,27 @@ export function getGlobalContentIndexer(): ContentIndexer {
     globalContentIndexer = new ContentIndexer();
   }
   return globalContentIndexer;
+}
+
+let contentIndexerLifecycleListenersInitialized = false;
+
+const handleIndexedTabRemoved: Parameters<
+  typeof chrome.tabs.onRemoved.addListener
+>[0] = (tabId) => {
+  getGlobalContentIndexer().handleTabInvalidationEvent(tabId);
+};
+
+const handleIndexedTabNavigation: Parameters<
+  typeof chrome.webNavigation.onCommitted.addListener
+>[0] = (details) => {
+  if (details.frameId !== 0 || !isNonNegativeSafeInteger(details.tabId)) return;
+  getGlobalContentIndexer().handleTabInvalidationEvent(details.tabId);
+};
+
+/** Register MV3 lifecycle listeners during the background script's first turn. */
+export function initContentIndexerLifecycleListeners(): void {
+  if (contentIndexerLifecycleListenersInitialized) return;
+  contentIndexerLifecycleListenersInitialized = true;
+  chrome.tabs.onRemoved.addListener(handleIndexedTabRemoved);
+  chrome.webNavigation?.onCommitted.addListener(handleIndexedTabNavigation);
 }
