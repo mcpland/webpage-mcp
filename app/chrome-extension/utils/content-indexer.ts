@@ -14,8 +14,13 @@ import {
   SemanticSimilarityEngine,
   SemanticSimilarityEngineProxy,
   PREDEFINED_MODELS,
+  type ModelPreset,
 } from "./semantic-similarity-engine";
-import { getStoredSemanticModelSelection } from "./semantic-similarity-boundaries";
+import {
+  getStoredSemanticModelSelection,
+  validateSemanticModelSelection,
+  type SemanticModelSelection,
+} from "./semantic-similarity-boundaries";
 import {
   SemanticMaintenanceMarkerValidationError,
   armSemanticMaintenance,
@@ -163,7 +168,21 @@ export interface ContentIndexerActivity {
   isSemanticEngineInitializing(): boolean;
 }
 
-export type ContentIndexerMaintenance = ContentIndexerActivity;
+export interface ContentIndexerMaintenance extends ContentIndexerActivity {
+  readonly maintenanceAttemptId?: string;
+  readonly recoveryRequired?: boolean;
+}
+
+export interface ContentIndexerModelTransition {
+  readonly attemptId: string;
+  readonly recoveryRequired: boolean;
+  initializeForModel(
+    selection: SemanticModelSelection<ModelPreset>,
+  ): Promise<void>;
+  reinitializeForModel(
+    selection: SemanticModelSelection<ModelPreset>,
+  ): Promise<void>;
+}
 
 interface MaintenanceJob<T = unknown> {
   kind:
@@ -177,6 +196,7 @@ interface MaintenanceJob<T = unknown> {
   reject: (error: unknown) => void;
   markerPreparation?: Promise<RequiredSemanticMaintenanceMarker>;
   markerAttemptStarted?: boolean;
+  recoveryRequired?: boolean;
 }
 
 type DurableGateState = "unknown" | "clear" | "required";
@@ -190,6 +210,10 @@ export class ContentIndexer {
   private isInitialized = false;
   private isInitializing = false;
   private initPromise: Promise<void> | null = null;
+  private activeModelSelection: SemanticModelSelection<ModelPreset> | null =
+    null;
+  private initializingModelSelection: SemanticModelSelection<ModelPreset> | null =
+    null;
   /** Last successfully indexed page identity for each live tab. */
   private indexedPageByTab = new Map<number, string>();
   /** Tabs whose last partial write could not be durably removed. */
@@ -284,6 +308,33 @@ export class ContentIndexer {
     operation: (activity: ContentIndexerMaintenance) => Promise<T>,
   ): Promise<T> {
     return this.enqueueMaintenance("index-recovery", operation);
+  }
+
+  /**
+   * Hold the durable recovery gate across an entire model activation or switch.
+   * The callback starts only after existing shared work drains and the marker is
+   * durably armed. `recoveryRequired` is captured at the head of the queue, so a
+   * failed cleanup queued before this transition cannot be hidden by a stale
+   * background read.
+   */
+  public runExclusiveModelTransition<T>(
+    operation: (transition: ContentIndexerModelTransition) => Promise<T>,
+  ): Promise<T> {
+    return this.runExclusiveIndexRecovery(async (activity) => {
+      const attemptId = activity.maintenanceAttemptId;
+      if (!attemptId) {
+        throw new Error("Semantic model transition has no maintenance owner");
+      }
+
+      return operation({
+        attemptId,
+        recoveryRequired: activity.recoveryRequired === true,
+        initializeForModel: (selection) =>
+          this.initializeForModelInternal(selection),
+        reinitializeForModel: (selection) =>
+          this.reinitializeForModelInternal(selection),
+      });
+    });
   }
 
   /**
@@ -466,7 +517,13 @@ export class ContentIndexer {
           await this.ensureDurableGateClear();
         }
 
-        const value = await job.operation(this.createActivityFacade());
+        const value = await job.operation(
+          this.createActivityFacade(
+            undefined,
+            marker?.attemptId,
+            job.recoveryRequired,
+          ),
+        );
         if (marker) {
           await completeSemanticMaintenance(marker);
           this.durableGateRevision += 1;
@@ -555,6 +612,26 @@ export class ContentIndexer {
         this.durableGateRequiredKind !== "index-rebuild"
       ) {
         throw this.cleanupBlockedError();
+      }
+    } else if (kind === "index-recovery") {
+      // Capture the gate state only when this job reaches the front of the
+      // maintenance queue. A read error or malformed marker is treated as an
+      // interrupted transition, but index recovery is allowed to take
+      // ownership because it clears the derived vector state before commit.
+      const inMemoryRecoveryRequired = Boolean(
+        this.failedDataCleanup ||
+        this.failedTabInvalidation ||
+        this.durableGateState === "required",
+      );
+      this.durableGateRevision += 1;
+      try {
+        const gate = await readSemanticMaintenanceMarker();
+        job.recoveryRequired =
+          inMemoryRecoveryRequired || gate.state === "required";
+      } catch (error) {
+        job.recoveryRequired = true;
+        this.durableGateError =
+          error instanceof Error ? error : new Error(String(error));
       }
     } else {
       this.durableGateRevision += 1;
@@ -962,8 +1039,12 @@ export class ContentIndexer {
 
   private createActivityFacade(
     expectedTabInvalidationEpoch?: number,
+    maintenanceAttemptId?: string,
+    recoveryRequired?: boolean,
   ): ContentIndexerMaintenance {
     return {
+      maintenanceAttemptId,
+      recoveryRequired,
       initialize: () => this.initializeInternal(expectedTabInvalidationEpoch),
       indexTabContent: (tabId) =>
         this.indexTabContentInternal(tabId, expectedTabInvalidationEpoch),
@@ -981,35 +1062,37 @@ export class ContentIndexer {
   /**
    * Get current selected model configuration
    */
-  private async getCurrentModelConfig() {
-    try {
-      const result = await chrome.storage.local.get([
-        "selectedModel",
-        "selectedVersion",
-      ]);
-      const selection = getStoredSemanticModelSelection(
-        result.selectedModel,
-        result.selectedVersion,
-        PREDEFINED_MODELS,
-        "multilingual-e5-small",
-      );
+  private async getCurrentModelSelection(): Promise<
+    SemanticModelSelection<ModelPreset>
+  > {
+    const result = await chrome.storage.local.get([
+      STORAGE_KEYS.SEMANTIC_MODEL,
+      "selectedVersion",
+    ]);
+    return getStoredSemanticModelSelection(
+      result[STORAGE_KEYS.SEMANTIC_MODEL],
+      result.selectedVersion,
+      PREDEFINED_MODELS,
+      "multilingual-e5-small",
+    );
+  }
 
-      return {
-        modelPreset: selection.modelPreset,
-        dimension: selection.modelDimension,
-        modelVersion: selection.modelVersion,
-      };
-    } catch (error) {
-      console.error(
-        "ContentIndexer: Failed to get current model config, using default:",
-        error,
-      );
-      return {
-        modelPreset: "multilingual-e5-small" as const,
-        dimension: 384,
-        modelVersion: "quantized" as const,
-      };
-    }
+  private normalizeModelSelection(
+    selection: SemanticModelSelection<ModelPreset>,
+  ): SemanticModelSelection<ModelPreset> {
+    return validateSemanticModelSelection(selection, PREDEFINED_MODELS);
+  }
+
+  private modelSelectionsEqual(
+    left: SemanticModelSelection<ModelPreset> | null,
+    right: SemanticModelSelection<ModelPreset>,
+  ): boolean {
+    return Boolean(
+      left &&
+      left.modelPreset === right.modelPreset &&
+      left.modelVersion === right.modelVersion &&
+      left.modelDimension === right.modelDimension,
+    );
   }
 
   /**
@@ -1021,28 +1104,55 @@ export class ContentIndexer {
 
   private async initializeInternal(
     expectedTabInvalidationEpoch?: number,
+    requestedSelection?: SemanticModelSelection<ModelPreset>,
   ): Promise<void> {
     this.assertTabInvalidationEpoch(expectedTabInvalidationEpoch);
-    if (this.isInitialized) return;
-    if (this.isInitializing && this.initPromise) return this.initPromise;
+    const selection = requestedSelection
+      ? this.normalizeModelSelection(requestedSelection)
+      : await this.getCurrentModelSelection();
+    if (this.isInitialized) {
+      if (this.modelSelectionsEqual(this.activeModelSelection, selection)) {
+        return;
+      }
+      throw new Error(
+        "ContentIndexer is initialized for a different semantic model; a model transition must reinitialize it",
+      );
+    }
+    if (this.isInitializing && this.initPromise) {
+      if (
+        this.modelSelectionsEqual(this.initializingModelSelection, selection)
+      ) {
+        return this.initPromise;
+      }
+      throw new Error(
+        "ContentIndexer is already initializing a different semantic model",
+      );
+    }
 
     this.isInitializing = true;
-    this.initPromise = this._doInitialize(expectedTabInvalidationEpoch).finally(
-      () => {
-        this.isInitializing = false;
-      },
-    );
+    this.initializingModelSelection = selection;
+    this.initPromise = this._doInitialize(
+      expectedTabInvalidationEpoch,
+      selection,
+    ).finally(() => {
+      this.isInitializing = false;
+      this.initializingModelSelection = null;
+    });
 
     return this.initPromise;
   }
 
   private async _doInitialize(
-    expectedTabInvalidationEpoch?: number,
+    expectedTabInvalidationEpoch: number | undefined,
+    selection: SemanticModelSelection<ModelPreset>,
   ): Promise<void> {
     try {
       this.persistentStatsKnownEmpty = false;
-      // Get current selected model configuration
-      const engineConfig = await this.getCurrentModelConfig();
+      const engineConfig = {
+        modelPreset: selection.modelPreset,
+        dimension: selection.modelDimension,
+        modelVersion: selection.modelVersion,
+      };
 
       // Use proxy class to reuse engine instance in offscreen
       this.semanticEngine = new SemanticSimilarityEngineProxy(engineConfig);
@@ -1102,10 +1212,12 @@ export class ContentIndexer {
 
       this.setupAutoIndexListener();
 
+      this.activeModelSelection = { ...selection };
       this.isInitialized = true;
     } catch (error) {
       console.error("ContentIndexer: Initialization failed:", error);
       this.indexedPageByTab.clear();
+      this.activeModelSelection = null;
       this.isInitialized = false;
       throw error;
     }
@@ -1448,25 +1560,44 @@ export class ContentIndexer {
    * Reinitialize content indexer (for model switching)
    */
   public reinitialize(): Promise<void> {
-    return this.runExclusiveIndexRecovery(async (activity) => {
-      console.log("ContentIndexer: Reinitializing for model switch...");
-
-      this.isInitialized = false;
-      this.isInitializing = false;
-      this.initPromise = null;
-
-      // Keep the old singleton reachable unless every persistent cleanup step
-      // succeeds. resetGlobalVectorDatabase clears first and only then drops
-      // the global reference, so initialization cannot split across old/new
-      // dimensions after a partial reset.
-      await resetGlobalVectorDatabase();
-      await this.clearTabInvalidationJournalAfterVectorClear();
-      this.indexedPageByTab.clear();
-
-      await activity.initialize();
-
-      console.log("ContentIndexer: Reinitialization completed successfully");
+    return this.runExclusiveIndexRecovery(async () => {
+      const selection = await this.getCurrentModelSelection();
+      await this.reinitializeForModelInternal(selection);
     });
+  }
+
+  private initializeForModelInternal(
+    selection: SemanticModelSelection<ModelPreset>,
+  ): Promise<void> {
+    return this.initializeInternal(
+      undefined,
+      this.normalizeModelSelection(selection),
+    );
+  }
+
+  private async reinitializeForModelInternal(
+    selection: SemanticModelSelection<ModelPreset>,
+  ): Promise<void> {
+    const normalizedSelection = this.normalizeModelSelection(selection);
+    console.log("ContentIndexer: Reinitializing for model switch...");
+
+    this.isInitialized = false;
+    this.isInitializing = false;
+    this.initPromise = null;
+    this.activeModelSelection = null;
+    this.initializingModelSelection = null;
+
+    // Keep the old singleton reachable unless every persistent cleanup step
+    // succeeds. resetGlobalVectorDatabase clears first and only then drops the
+    // global reference, so initialization cannot split across old/new
+    // dimensions after a partial reset.
+    await resetGlobalVectorDatabase();
+    await this.clearTabInvalidationJournalAfterVectorClear();
+    this.indexedPageByTab.clear();
+
+    await this.initializeInternal(undefined, normalizedSelection);
+
+    console.log("ContentIndexer: Reinitialization completed successfully");
   }
 
   /**

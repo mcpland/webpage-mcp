@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getEmbedding: vi.fn(),
   getGlobalVectorDatabase: vi.fn(),
   ensureTabDocumentsRemoved: vi.fn(),
+  engineConfigs: [] as unknown[],
   inspectTabPageState: vi.fn(),
   initializeEngine: vi.fn(),
   initializeVectorDatabase: vi.fn(),
@@ -28,12 +29,20 @@ vi.mock("@/utils/semantic-similarity-engine", () => ({
       modelIdentifier: "test-model",
       dimension: 3,
     },
+    "multilingual-e5-base": {
+      modelIdentifier: "test-base-model",
+      dimension: 6,
+    },
   },
   SemanticSimilarityEngine: class {},
   SemanticSimilarityEngineProxy: class {
     isInitialized = true;
     initialize = mocks.initializeEngine;
     getEmbedding = mocks.getEmbedding;
+
+    constructor(config: unknown) {
+      mocks.engineConfigs.push(config);
+    }
   },
 }));
 
@@ -121,6 +130,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     pagesByTab.clear();
+    mocks.engineConfigs.length = 0;
 
     mocks.addDocument.mockResolvedValue(1);
     mocks.chunkText.mockReturnValue([
@@ -905,7 +915,9 @@ describe("ContentIndexer tab/page lifecycle", () => {
     const state = installLocalStorage();
     const markerRead = deferred<Record<string, unknown>>();
     const storageGet = vi.mocked(chrome.storage.local.get);
-    const defaultGet = storageGet.getMockImplementation()!;
+    const defaultGet = storageGet.getMockImplementation()! as (
+      keys?: unknown,
+    ) => Promise<Record<string, unknown>>;
     storageGet
       .mockImplementationOnce(() => markerRead.promise)
       .mockImplementation(defaultGet);
@@ -1434,5 +1446,129 @@ describe("ContentIndexer tab/page lifecycle", () => {
     ).resolves.toBeUndefined();
     expect(retry).toHaveBeenCalledOnce();
     expect(state[MAINTENANCE_KEY]).toMatchObject({ state: "clear" });
+  });
+
+  it("arms a model transition before its callback and passes an exact model without rereading selection storage", async () => {
+    const state = installLocalStorage({
+      selectedModel: "multilingual-e5-small",
+      selectedVersion: "quantized",
+    });
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+    const observedAttempt = vi.fn();
+
+    await indexer.runExclusiveModelTransition(async (transition) => {
+      observedAttempt(transition.attemptId, transition.recoveryRequired);
+      expect(state[MAINTENANCE_KEY]).toMatchObject({
+        state: "required",
+        kind: "index-recovery",
+        attemptId: transition.attemptId,
+      });
+      await transition.initializeForModel({
+        modelPreset: "multilingual-e5-base",
+        modelVersion: "quantized",
+        modelDimension: 6,
+      });
+    });
+
+    expect(observedAttempt).toHaveBeenCalledWith(expect.any(String), false);
+    expect(mocks.engineConfigs).toContainEqual({
+      modelPreset: "multilingual-e5-base",
+      modelVersion: "quantized",
+      dimension: 6,
+    });
+    expect(mocks.getGlobalVectorDatabase).toHaveBeenLastCalledWith({
+      dimension: 6,
+      efSearch: 50,
+    });
+    expect(
+      vi
+        .mocked(chrome.storage.local.get)
+        .mock.calls.some(
+          ([keys]) =>
+            Array.isArray(keys) &&
+            (keys.includes("selectedModel") ||
+              keys.includes("selectedVersion")),
+        ),
+    ).toBe(false);
+    expect(state[MAINTENANCE_KEY]).toMatchObject({ state: "clear" });
+  });
+
+  it("captures an interrupted marker at the queue head and forces model recovery", async () => {
+    const state = installLocalStorage({
+      [MAINTENANCE_KEY]: requiredMaintenanceMarker(
+        "interrupted-model",
+        "index-recovery",
+      ),
+    });
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+    const observedRecovery = vi.fn();
+
+    await indexer.runExclusiveModelTransition(async (transition) => {
+      observedRecovery(transition.recoveryRequired);
+      await transition.reinitializeForModel({
+        modelPreset: "multilingual-e5-small",
+        modelVersion: "quantized",
+        modelDimension: 3,
+      });
+    });
+
+    expect(observedRecovery).toHaveBeenCalledWith(true);
+    expect(mocks.resetGlobalVectorDatabase).toHaveBeenCalledOnce();
+    expect(state[MAINTENANCE_KEY]).toMatchObject({ state: "clear" });
+  });
+
+  it("waits for shared work before starting model-side effects while the marker is already required", async () => {
+    const state = installLocalStorage();
+    const sharedHold = deferred();
+    const sharedStarted = deferred();
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+    const shared = indexer.runWithIndexActivity(async () => {
+      sharedStarted.resolve();
+      await sharedHold.promise;
+    });
+    await sharedStarted.promise;
+    const transitionCallback = vi.fn(async () => undefined);
+
+    const transition = indexer.runExclusiveModelTransition(transitionCallback);
+    await vi.waitFor(() =>
+      expect(state[MAINTENANCE_KEY]).toMatchObject({
+        state: "required",
+        kind: "index-recovery",
+      }),
+    );
+    expect(transitionCallback).not.toHaveBeenCalled();
+
+    sharedHold.resolve();
+    await shared;
+    await transition;
+    expect(transitionCallback).toHaveBeenCalledOnce();
+  });
+
+  it("propagates selected-model storage failures instead of silently initializing the default dimension", async () => {
+    installLocalStorage();
+    const storageGet = vi.mocked(chrome.storage.local.get);
+    const defaultGet = storageGet.getMockImplementation()! as (
+      keys?: unknown,
+    ) => Promise<Record<string, unknown>>;
+    storageGet.mockImplementation(async (keys?: unknown) => {
+      if (
+        Array.isArray(keys) &&
+        (keys.includes("selectedModel") || keys.includes("selectedVersion"))
+      ) {
+        throw new Error("selected model storage unavailable");
+      }
+      return defaultGet(keys);
+    });
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    await expect(indexer.initialize()).rejects.toThrow(
+      "selected model storage unavailable",
+    );
+    expect(mocks.initializeEngine).not.toHaveBeenCalled();
+    expect(mocks.getGlobalVectorDatabase).not.toHaveBeenCalled();
   });
 });

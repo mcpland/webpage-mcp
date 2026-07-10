@@ -4,8 +4,10 @@ import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
 const semanticMocks = vi.hoisted(() => ({ hasAnyModelCache: vi.fn() }));
 const offscreenMocks = vi.hoisted(() => ({ ensureOffscreenDocument: vi.fn() }));
 const indexerMocks = vi.hoisted(() => ({
+  runExclusiveModelTransition: vi.fn(),
   initialize: vi.fn(),
   reinitialize: vi.fn(),
+  recoveryRequired: false,
 }));
 
 vi.mock("@/utils/semantic-similarity-engine", () => ({
@@ -37,20 +39,78 @@ describe("semantic engine control authorization", () => {
   let storageGet: ReturnType<typeof vi.fn>;
   let storageSet: ReturnType<typeof vi.fn>;
   let runtimeSendMessage: ReturnType<typeof vi.fn>;
+  let persistedStorage: Record<string, any>;
+  let transitionAttempt = 0;
 
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
-    storageGet = vi.fn().mockResolvedValue({
+    transitionAttempt = 0;
+    indexerMocks.recoveryRequired = false;
+    persistedStorage = {
+      selectedModel: "multilingual-e5-small",
+      selectedVersion: "quantized",
       modelState: {
         status: "ready",
         downloadProgress: 100,
         isDownloading: false,
         lastUpdated: 1,
+        errorMessage: "",
+        errorType: "",
       },
+    };
+    storageGet = vi.fn(async (keys: string | string[]) => {
+      const requested = Array.isArray(keys) ? keys : [keys];
+      return Object.fromEntries(
+        requested
+          .filter((key) =>
+            Object.prototype.hasOwnProperty.call(persistedStorage, key),
+          )
+          .map((key) => [key, persistedStorage[key]]),
+      );
     });
-    storageSet = vi.fn().mockResolvedValue(undefined);
-    runtimeSendMessage = vi.fn();
+    storageSet = vi.fn(async (value: Record<string, unknown>) => {
+      Object.assign(persistedStorage, value);
+    });
+    runtimeSendMessage = vi.fn(async (message: any) => {
+      const currentConfig =
+        message.type === "similarityEngineStatus"
+          ? {
+              modelPreset: persistedStorage.selectedModel,
+              modelVersion: persistedStorage.selectedVersion,
+              modelDimension:
+                persistedStorage.selectedModel === "multilingual-e5-base"
+                  ? 768
+                  : 384,
+            }
+          : message.config;
+      return { success: true, isInitialized: true, currentConfig };
+    });
+    indexerMocks.runExclusiveModelTransition.mockImplementation(
+      async (operation: (transition: any) => Promise<unknown>) => {
+        const attemptId = `transition-${++transitionAttempt}`;
+        persistedStorage.semanticCleanupRequired = {
+          schemaVersion: 1,
+          state: "required",
+          attemptId,
+          kind: "index-recovery",
+          startedAt: Date.now(),
+        };
+        const result = await operation({
+          attemptId,
+          recoveryRequired: indexerMocks.recoveryRequired,
+          initializeForModel: indexerMocks.initialize,
+          reinitializeForModel: indexerMocks.reinitialize,
+        });
+        persistedStorage.semanticCleanupRequired = {
+          schemaVersion: 1,
+          state: "clear",
+          attemptId,
+          completedAt: Date.now(),
+        };
+        return result;
+      },
+    );
     vi.stubGlobal("chrome", {
       runtime: {
         id: "test-extension-id",
@@ -107,6 +167,20 @@ describe("semantic engine control authorization", () => {
     };
   }
 
+  function rejectNextStorageWriteMatching(
+    predicate: (value: Record<string, any>) => boolean,
+    error: Error,
+  ): void {
+    let rejected = false;
+    storageSet.mockImplementation(async (value: Record<string, any>) => {
+      if (!rejected && predicate(value)) {
+        rejected = true;
+        throw error;
+      }
+      Object.assign(persistedStorage, value);
+    });
+  }
+
   it.each([
     BACKGROUND_MESSAGE_TYPES.SWITCH_SEMANTIC_MODEL,
     BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS,
@@ -131,12 +205,132 @@ describe("semantic engine control authorization", () => {
       status: { initializationStatus: "ready", downloadProgress: 100 },
     });
     expect(storageGet).toHaveBeenCalledWith(["modelState"]);
+    expect(runtimeSendMessage).toHaveBeenCalledWith({
+      target: "offscreen",
+      type: "similarityEngineStatus",
+    });
   });
 
-  it("only accepts model status updates from the exact offscreen document", async () => {
+  it.each([
+    ["missing", new Error("Receiving end does not exist")],
+    [
+      "not initialized",
+      { success: true, isInitialized: false, currentConfig: null },
+    ],
+    [
+      "config mismatch",
+      {
+        success: true,
+        isInitialized: true,
+        currentConfig: {
+          modelPreset: "multilingual-e5-base",
+          modelVersion: "compressed",
+          modelDimension: 768,
+        },
+      },
+    ],
+  ])(
+    "does not report stored ready when offscreen is %s",
+    async (_label, response) => {
+      if (response instanceof Error) {
+        runtimeSendMessage.mockRejectedValueOnce(response);
+      } else {
+        runtimeSendMessage.mockResolvedValueOnce(response);
+      }
+
+      await expect(
+        dispatch(
+          { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
+          extensionSender(),
+        ),
+      ).resolves.toMatchObject({
+        success: true,
+        status: {
+          initializationStatus: "error",
+          errorMessage: expect.stringMatching(/recovery is required/i),
+        },
+      });
+      expect(offscreenMocks.ensureOffscreenDocument).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not report ready from an explicitly invalid persisted selection", async () => {
+    persistedStorage.selectedModel = "attacker/model";
+    persistedStorage.selectedVersion = "latest";
+
+    await expect(
+      dispatch(
+        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
+        extensionSender(),
+      ),
+    ).resolves.toMatchObject({
+      success: true,
+      status: { initializationStatus: "error" },
+    });
+    expect(runtimeSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the durable gate after offscreen ready verification", async () => {
+    runtimeSendMessage.mockImplementationOnce(async () => {
+      persistedStorage.semanticCleanupRequired = {
+        schemaVersion: 1,
+        state: "required",
+        attemptId: "new-transition",
+        kind: "index-recovery",
+        startedAt: Date.now(),
+      };
+      return {
+        success: true,
+        isInitialized: true,
+        currentConfig: {
+          modelPreset: "multilingual-e5-small",
+          modelVersion: "quantized",
+          modelDimension: 384,
+        },
+      };
+    });
+
+    await expect(
+      dispatch(
+        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
+        extensionSender(),
+      ),
+    ).resolves.toMatchObject({
+      success: true,
+      status: { initializationStatus: "error" },
+    });
+  });
+
+  it("never exposes a stored ready state while durable recovery is required", async () => {
+    persistedStorage.semanticCleanupRequired = {
+      schemaVersion: 1,
+      state: "required",
+      attemptId: "interrupted-attempt",
+      kind: "index-recovery",
+      startedAt: 1,
+    };
+
+    await expect(
+      dispatch(
+        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
+        extensionSender(),
+      ),
+    ).resolves.toMatchObject({
+      success: true,
+      status: {
+        initializationStatus: "error",
+        downloadProgress: 0,
+        isDownloading: false,
+        errorMessage: expect.stringMatching(/recovery is required/i),
+      },
+    });
+  });
+
+  it("only routes model progress updates from the exact offscreen document", async () => {
     const message = {
       type: BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS,
-      modelState: { status: "ready" },
+      attemptId: "transition-1",
+      modelState: { status: "downloading", downloadProgress: 40 },
     };
 
     await expect(dispatch(message, extensionSender())).resolves.toMatchObject({
@@ -147,17 +341,91 @@ describe("semantic engine control authorization", () => {
     });
     expect(storageSet).not.toHaveBeenCalled();
 
-    await expect(dispatch(message, offscreenSender())).resolves.toEqual({
-      success: true,
+    await expect(dispatch(message, offscreenSender())).resolves.toMatchObject({
+      success: false,
+      error: expect.stringMatching(/no longer active/i),
     });
-    expect(storageSet).toHaveBeenCalledWith({
-      modelState: expect.objectContaining({
-        status: "ready",
-        downloadProgress: 0,
-        isDownloading: false,
-        errorMessage: "",
-        errorType: "",
-      }),
+    expect(storageSet).not.toHaveBeenCalled();
+  });
+
+  it("accepts only non-terminal progress owned by the active durable attempt", async () => {
+    let resolveOffscreen!: (response: unknown) => void;
+    runtimeSendMessage.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveOffscreen = resolve)),
+    );
+    const { handleModelSwitch } =
+      await import("@/entrypoints/background/semantic-similarity");
+    const switching = handleModelSwitch(
+      "multilingual-e5-base",
+      "compressed",
+      768,
+    );
+    await vi.waitFor(() => expect(runtimeSendMessage).toHaveBeenCalledTimes(1));
+
+    await expect(
+      dispatch(
+        {
+          type: BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS,
+          attemptId: "transition-1",
+          modelState: { status: "downloading", downloadProgress: 42 },
+        },
+        offscreenSender(),
+      ),
+    ).resolves.toEqual({ success: true });
+    expect(persistedStorage.modelState).toMatchObject({
+      status: "downloading",
+      downloadProgress: 42,
+    });
+    await expect(
+      dispatch(
+        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
+        extensionSender(),
+      ),
+    ).resolves.toMatchObject({
+      success: true,
+      status: {
+        initializationStatus: "downloading",
+        downloadProgress: 42,
+        isDownloading: true,
+      },
+    });
+
+    for (const modelState of [
+      { status: "ready", downloadProgress: 100 },
+      { status: "error", downloadProgress: 0 },
+      { status: "downloading", downloadProgress: 100 },
+    ]) {
+      await expect(
+        dispatch(
+          {
+            type: BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS,
+            attemptId: "transition-1",
+            modelState,
+          },
+          offscreenSender(),
+        ),
+      ).resolves.toMatchObject({ success: false });
+    }
+
+    const requested = runtimeSendMessage.mock.calls[0][0];
+    resolveOffscreen({
+      success: true,
+      isInitialized: true,
+      currentConfig: requested.config,
+    });
+    await expect(switching).resolves.toEqual({ success: true });
+    await expect(
+      dispatch(
+        {
+          type: BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS,
+          attemptId: "transition-1",
+          modelState: { status: "initializing", downloadProgress: 5 },
+        },
+        offscreenSender(),
+      ),
+    ).resolves.toMatchObject({
+      success: false,
+      error: expect.stringMatching(/no longer active/i),
     });
   });
 
@@ -179,11 +447,8 @@ describe("semantic engine control authorization", () => {
   });
 
   it("falls back from invalid stored preset and version before initializing", async () => {
-    storageGet.mockResolvedValue({
-      selectedModel: "attacker/model",
-      selectedVersion: "latest",
-    });
-    runtimeSendMessage.mockResolvedValue({ success: true });
+    persistedStorage.selectedModel = "attacker/model";
+    persistedStorage.selectedVersion = "latest";
 
     const { initializeDefaultSemanticEngine } =
       await import("@/entrypoints/background/semantic-similarity");
@@ -192,21 +457,65 @@ describe("semantic engine control authorization", () => {
     expect(runtimeSendMessage).toHaveBeenCalledWith({
       target: "offscreen",
       type: expect.any(String),
+      attemptId: "transition-1",
       config: {
         modelPreset: "multilingual-e5-small",
         modelVersion: "quantized",
         modelDimension: 384,
       },
     });
+    expect(persistedStorage).toMatchObject({
+      selectedModel: "multilingual-e5-small",
+      selectedVersion: "quantized",
+      modelState: expect.objectContaining({ status: "ready" }),
+    });
+  });
+
+  it("rebuilds the default index when the transition reports interrupted recovery", async () => {
+    indexerMocks.recoveryRequired = true;
+    const { initializeDefaultSemanticEngine } =
+      await import("@/entrypoints/background/semantic-similarity");
+
+    await initializeDefaultSemanticEngine();
+
+    expect(indexerMocks.initialize).not.toHaveBeenCalled();
+    expect(indexerMocks.reinitialize).toHaveBeenCalledWith({
+      modelPreset: "multilingual-e5-small",
+      modelVersion: "quantized",
+      modelDimension: 384,
+    });
+  });
+
+  it("fails closed when the stored default selection cannot be read", async () => {
+    storageGet.mockImplementation(async (keys: string | string[]) => {
+      const requested = Array.isArray(keys) ? keys : [keys];
+      if (requested.includes("selectedModel")) {
+        throw new Error("selection read failed");
+      }
+      return Object.fromEntries(
+        requested
+          .filter((key) =>
+            Object.prototype.hasOwnProperty.call(persistedStorage, key),
+          )
+          .map((key) => [key, persistedStorage[key]]),
+      );
+    });
+    const { initializeDefaultSemanticEngine } =
+      await import("@/entrypoints/background/semantic-similarity");
+
+    await expect(initializeDefaultSemanticEngine()).rejects.toThrow(
+      /selection read failed/i,
+    );
+    expect(runtimeSendMessage).not.toHaveBeenCalled();
+    expect(indexerMocks.initialize).not.toHaveBeenCalled();
+    expect(indexerMocks.reinitialize).not.toHaveBeenCalled();
   });
 
   it("queues a switch until startup default initialization fully settles", async () => {
-    let resolveDefaultOffscreen!: (value: { success: boolean }) => void;
-    const blockedDefaultOffscreen = new Promise<{ success: boolean }>(
-      (resolve) => {
-        resolveDefaultOffscreen = resolve;
-      },
-    );
+    let resolveDefaultOffscreen!: (value: unknown) => void;
+    const blockedDefaultOffscreen = new Promise<unknown>((resolve) => {
+      resolveDefaultOffscreen = resolve;
+    });
     let releaseDefaultIndexer!: () => void;
     const blockedDefaultIndexer = new Promise<void>((resolve) => {
       releaseDefaultIndexer = resolve;
@@ -216,11 +525,17 @@ describe("semantic engine control authorization", () => {
       releaseDefaultReady = resolve;
     });
     let shouldBlockDefaultReady = true;
-    const persistedStorage: Record<string, unknown> = {};
-
     runtimeSendMessage
       .mockImplementationOnce(() => blockedDefaultOffscreen)
-      .mockResolvedValueOnce({ success: true });
+      .mockResolvedValueOnce({
+        success: true,
+        isInitialized: true,
+        currentConfig: {
+          modelPreset: "multilingual-e5-base",
+          modelVersion: "compressed",
+          modelDimension: 768,
+        },
+      });
     indexerMocks.initialize.mockImplementationOnce(() => blockedDefaultIndexer);
     storageSet.mockImplementation(async (value) => {
       if (shouldBlockDefaultReady && value.modelState?.status === "ready") {
@@ -243,6 +558,7 @@ describe("semantic engine control authorization", () => {
     expect(runtimeSendMessage).toHaveBeenNthCalledWith(1, {
       target: "offscreen",
       type: expect.any(String),
+      attemptId: "transition-1",
       config: {
         modelPreset: "multilingual-e5-small",
         modelVersion: "quantized",
@@ -251,7 +567,15 @@ describe("semantic engine control authorization", () => {
     });
     expect(indexerMocks.reinitialize).not.toHaveBeenCalled();
 
-    resolveDefaultOffscreen({ success: true });
+    resolveDefaultOffscreen({
+      success: true,
+      isInitialized: true,
+      currentConfig: {
+        modelPreset: "multilingual-e5-small",
+        modelVersion: "quantized",
+        modelDimension: 384,
+      },
+    });
     await vi.waitFor(() =>
       expect(indexerMocks.initialize).toHaveBeenCalledTimes(1),
     );
@@ -281,6 +605,7 @@ describe("semantic engine control authorization", () => {
     expect(runtimeSendMessage).toHaveBeenNthCalledWith(2, {
       target: "offscreen",
       type: expect.any(String),
+      attemptId: "transition-2",
       config: {
         modelPreset: "multilingual-e5-base",
         modelVersion: "compressed",
@@ -297,8 +622,8 @@ describe("semantic engine control authorization", () => {
     await expect(
       handleModelSwitch("multilingual-e5-base", "compressed", 768),
     ).resolves.toEqual({ success: true });
-    expect(runtimeSendMessage).toHaveBeenCalledTimes(2);
-    expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(1);
+    expect(runtimeSendMessage).toHaveBeenCalledTimes(3);
+    expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(2);
   });
 
   it("reports a rejected default offscreen initialization through the endpoint", async () => {
@@ -322,7 +647,6 @@ describe("semantic engine control authorization", () => {
   });
 
   it("reports default indexer failure without committing the current target", async () => {
-    runtimeSendMessage.mockResolvedValue({ success: true });
     indexerMocks.initialize.mockRejectedValueOnce(
       new Error("default indexer failed"),
     );
@@ -356,11 +680,10 @@ describe("semantic engine control authorization", () => {
   });
 
   it("reports ready persistence failure and leaves the same target retryable", async () => {
-    storageSet
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("default ready persistence failed"));
-    runtimeSendMessage.mockResolvedValue({ success: true });
-
+    rejectNextStorageWriteMatching(
+      (value) => value.modelState?.status === "ready",
+      new Error("default ready persistence failed"),
+    );
     await expect(
       dispatch(
         { type: BACKGROUND_MESSAGE_TYPES.INITIALIZE_SEMANTIC_ENGINE },
@@ -425,6 +748,67 @@ describe("semantic engine control authorization", () => {
     expect(runtimeSendMessage).not.toHaveBeenCalled();
   });
 
+  it("rejects an offscreen success response whose active config differs", async () => {
+    runtimeSendMessage.mockResolvedValueOnce({
+      success: true,
+      isInitialized: true,
+      currentConfig: {
+        modelPreset: "multilingual-e5-small",
+        modelVersion: "quantized",
+        modelDimension: 384,
+      },
+    });
+    const { handleModelSwitch } =
+      await import("@/entrypoints/background/semantic-similarity");
+
+    await expect(
+      handleModelSwitch("multilingual-e5-base", "compressed", 768),
+    ).resolves.toMatchObject({
+      success: false,
+      error: expect.stringMatching(/different model config/i),
+    });
+    expect(indexerMocks.reinitialize).not.toHaveBeenCalled();
+    expect(persistedStorage.modelState.status).toBe("error");
+  });
+
+  it("fails closed when model selection set succeeds but readback differs", async () => {
+    storageSet.mockImplementation(async (value: Record<string, any>) => {
+      Object.assign(persistedStorage, value);
+      if (Object.prototype.hasOwnProperty.call(value, "selectedModel")) {
+        persistedStorage.selectedVersion = "corrupted";
+      }
+    });
+    const { handleModelSwitch } =
+      await import("@/entrypoints/background/semantic-similarity");
+
+    await expect(
+      handleModelSwitch("multilingual-e5-base", "compressed", 768),
+    ).resolves.toMatchObject({
+      success: false,
+      error: expect.stringMatching(/selection readback mismatched/i),
+    });
+    expect(indexerMocks.reinitialize).not.toHaveBeenCalled();
+    expect(persistedStorage.modelState.status).toBe("error");
+  });
+
+  it("persists ready only after the durable transition has cleared", async () => {
+    let readySawClearMarker = false;
+    storageSet.mockImplementation(async (value: Record<string, any>) => {
+      if (value.modelState?.status === "ready") {
+        readySawClearMarker =
+          persistedStorage.semanticCleanupRequired?.state === "clear";
+      }
+      Object.assign(persistedStorage, value);
+    });
+    const { handleModelSwitch } =
+      await import("@/entrypoints/background/semantic-similarity");
+
+    await expect(
+      handleModelSwitch("multilingual-e5-base", "compressed", 768),
+    ).resolves.toEqual({ success: true });
+    expect(readySawClearMarker).toBe(true);
+  });
+
   it.each([
     ["omitted", undefined],
     ["forged target dimension", 768],
@@ -432,7 +816,6 @@ describe("semantic engine control authorization", () => {
   ] as const)(
     "rebuilds and persists a valid switch when previousDimension is %s",
     async (_label, previousDimension) => {
-      runtimeSendMessage.mockResolvedValue({ success: true });
       indexerMocks.reinitialize.mockImplementation(async () => {
         expect(storageSet).toHaveBeenCalledWith({
           selectedModel: "multilingual-e5-base",
@@ -453,6 +836,7 @@ describe("semantic engine control authorization", () => {
       expect(runtimeSendMessage).toHaveBeenCalledWith({
         target: "offscreen",
         type: expect.any(String),
+        attemptId: "transition-1",
         config: {
           modelPreset: "multilingual-e5-base",
           modelVersion: "compressed",
@@ -475,7 +859,6 @@ describe("semantic engine control authorization", () => {
   );
 
   it("fails closed on reinitialization failure and retries the same target", async () => {
-    runtimeSendMessage.mockResolvedValue({ success: true });
     indexerMocks.reinitialize
       .mockRejectedValueOnce(new Error("reinitialize failed"))
       .mockResolvedValueOnce(undefined);
@@ -508,9 +891,26 @@ describe("semantic engine control authorization", () => {
     expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(2);
   });
 
+  it("revalidates an explicit same-target switch when offscreen has disappeared", async () => {
+    const { handleModelSwitch } =
+      await import("@/entrypoints/background/semantic-similarity");
+
+    await expect(
+      handleModelSwitch("multilingual-e5-small", "quantized", 384),
+    ).resolves.toEqual({ success: true });
+    runtimeSendMessage.mockRejectedValueOnce(new Error("offscreen missing"));
+    await expect(
+      handleModelSwitch("multilingual-e5-small", "quantized", 384),
+    ).resolves.toMatchObject({
+      success: false,
+      error: expect.stringMatching(/offscreen missing/i),
+    });
+    expect(runtimeSendMessage).toHaveBeenCalledTimes(2);
+    expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed when the initial status cannot be persisted", async () => {
     storageSet.mockRejectedValueOnce(new Error("status persistence failed"));
-    runtimeSendMessage.mockResolvedValue({ success: true });
     const { handleModelSwitch } =
       await import("@/entrypoints/background/semantic-similarity");
 
@@ -528,10 +928,10 @@ describe("semantic engine control authorization", () => {
   });
 
   it("fails closed when target selection persistence rejects and retries", async () => {
-    storageSet
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("selection persistence failed"));
-    runtimeSendMessage.mockResolvedValue({ success: true });
+    rejectNextStorageWriteMatching(
+      (value) => Object.prototype.hasOwnProperty.call(value, "selectedModel"),
+      new Error("selection persistence failed"),
+    );
     const { handleModelSwitch } =
       await import("@/entrypoints/background/semantic-similarity");
 
@@ -554,11 +954,10 @@ describe("semantic engine control authorization", () => {
   });
 
   it("does not commit ready/current state when ready status persistence rejects", async () => {
-    storageSet
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("ready status persistence failed"));
-    runtimeSendMessage.mockResolvedValue({ success: true });
+    rejectNextStorageWriteMatching(
+      (value) => value.modelState?.status === "ready",
+      new Error("ready status persistence failed"),
+    );
     const { handleModelSwitch } =
       await import("@/entrypoints/background/semantic-similarity");
 
@@ -579,6 +978,29 @@ describe("semantic engine control authorization", () => {
     expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects a ready write whose durable readback differs", async () => {
+    storageSet.mockImplementation(async (value: Record<string, any>) => {
+      Object.assign(persistedStorage, value);
+      if (value.modelState?.status === "ready") {
+        persistedStorage.modelState = {
+          ...persistedStorage.modelState,
+          downloadProgress: 99,
+        };
+      }
+    });
+    const { handleModelSwitch } =
+      await import("@/entrypoints/background/semantic-similarity");
+
+    await expect(
+      handleModelSwitch("multilingual-e5-base", "compressed", 768),
+    ).resolves.toMatchObject({
+      success: false,
+      error: expect.stringMatching(/status readback mismatched/i),
+    });
+    expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(1);
+    expect(persistedStorage.modelState.status).toBe("error");
+  });
+
   it("serializes concurrent targets and continues only after a failed transaction settles", async () => {
     let rejectFirstReinitialize!: (reason?: unknown) => void;
     const firstReinitialize = new Promise<void>((_resolve, reject) => {
@@ -588,15 +1010,12 @@ describe("semantic engine control authorization", () => {
     const blockedErrorStatus = new Promise<void>((resolve) => {
       releaseErrorStatus = resolve;
     });
-    const persistedStorage: Record<string, unknown> = {};
-
     storageSet.mockImplementation(async (value) => {
       if (value.modelState?.status === "error") {
         await blockedErrorStatus;
       }
       Object.assign(persistedStorage, value);
     });
-    runtimeSendMessage.mockResolvedValue({ success: true });
     indexerMocks.reinitialize
       .mockImplementationOnce(() => firstReinitialize)
       .mockResolvedValueOnce(undefined);
@@ -638,6 +1057,7 @@ describe("semantic engine control authorization", () => {
     expect(runtimeSendMessage).toHaveBeenNthCalledWith(1, {
       target: "offscreen",
       type: expect.any(String),
+      attemptId: "transition-1",
       config: {
         modelPreset: "multilingual-e5-base",
         modelVersion: "compressed",
@@ -647,6 +1067,7 @@ describe("semantic engine control authorization", () => {
     expect(runtimeSendMessage).toHaveBeenNthCalledWith(2, {
       target: "offscreen",
       type: expect.any(String),
+      attemptId: "transition-2",
       config: {
         modelPreset: "multilingual-e5-small",
         modelVersion: "quantized",
@@ -659,13 +1080,14 @@ describe("semantic engine control authorization", () => {
       modelState: expect.objectContaining({ status: "ready" }),
     });
 
-    // A third request for the final target must observe the committed in-memory
-    // config and avoid starting another offscreen/index transaction.
+    // An explicit same-target request still runs a complete recovery
+    // transaction; in-memory state is never accepted as proof that offscreen
+    // and the durable index survived together.
     await expect(
       handleModelSwitch("multilingual-e5-small", "quantized", 384),
     ).resolves.toEqual({ success: true });
-    expect(runtimeSendMessage).toHaveBeenCalledTimes(2);
-    expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(2);
+    expect(runtimeSendMessage).toHaveBeenCalledTimes(3);
+    expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(3);
   });
 
   it("normalizes stored status fields before returning them", async () => {

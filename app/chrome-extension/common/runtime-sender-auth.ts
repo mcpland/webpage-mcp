@@ -40,6 +40,21 @@ export function isExtensionRuntimeSender(
   return senderHasExtensionOrigin(sender);
 }
 
+/** The extension's background service worker, excluding every document context. */
+export function isExtensionBackgroundSender(
+  sender: chrome.runtime.MessageSender | undefined,
+): boolean {
+  return Boolean(
+    sender &&
+    sender.id === chrome.runtime.id &&
+    sender.tab === undefined &&
+    sender.url === undefined &&
+    sender.origin === undefined &&
+    sender.documentId === undefined &&
+    sender.documentLifecycle === undefined,
+  );
+}
+
 /** The one extension offscreen document used by the keepalive channel. */
 export function isOffscreenDocumentSender(
   sender: chrome.runtime.MessageSender | undefined,

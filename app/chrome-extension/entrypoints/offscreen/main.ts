@@ -8,10 +8,15 @@ import {
   SendMessageType,
   OFFSCREEN_MESSAGE_TYPES,
   BACKGROUND_MESSAGE_TYPES,
+  type SemanticEngineInitMessage,
+  type SemanticModelProgressMessage,
 } from "@/common/message-types";
 import { handleGifMessage } from "./gif-encoder";
 import { initKeepalive } from "./rr-keepalive";
-import { isExtensionRuntimeSender } from "@/common/runtime-sender-auth";
+import {
+  isExtensionBackgroundSender,
+  isExtensionRuntimeSender,
+} from "@/common/runtime-sender-auth";
 import {
   SEMANTIC_RESOURCE_LIMITS,
   normalizeSemanticModelState,
@@ -37,11 +42,6 @@ interface OffscreenMessage {
   type: SendMessageType | string;
 }
 
-interface SimilarityEngineInitMessage extends OffscreenMessage {
-  type: SendMessageType.SimilarityEngineInit;
-  config: unknown;
-}
-
 interface SimilarityEngineComputeBatchMessage extends OffscreenMessage {
   type: SendMessageType.SimilarityEngineComputeBatch;
   pairs: unknown;
@@ -60,10 +60,6 @@ interface SimilarityEngineGetEmbeddingsBatchMessage extends OffscreenMessage {
   options?: unknown;
 }
 
-interface SimilarityEngineStatusMessage extends OffscreenMessage {
-  type: "similarityEngineStatus";
-}
-
 type MessageResponse = {
   result?: string;
   error?: string;
@@ -78,11 +74,15 @@ type MessageResponse = {
 let activeSemanticRequests = 0;
 let semanticInitializationInFlight = false;
 
-async function withSemanticRequestSlot<T>(operation: () => Promise<T>): Promise<T> {
+async function withSemanticRequestSlot<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
   if (semanticInitializationInFlight) {
     throw new Error("Semantic engine initialization is in progress");
   }
-  if (activeSemanticRequests >= SEMANTIC_RESOURCE_LIMITS.maxConcurrentRequests) {
+  if (
+    activeSemanticRequests >= SEMANTIC_RESOURCE_LIMITS.maxConcurrentRequests
+  ) {
     throw new Error("Too many concurrent semantic engine requests");
   }
   activeSemanticRequests++;
@@ -121,10 +121,21 @@ chrome.runtime.onMessage.addListener(
       switch (message.type) {
         case SendMessageType.SimilarityEngineInit:
         case OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_INIT: {
-          const initMsg = message as SimilarityEngineInitMessage;
-          console.log("Offscreen: Received similarity engine init message:", message.type);
-          handleSimilarityEngineInit(initMsg.config)
-            .then(() => sendResponse({ success: true }))
+          if (!isExtensionBackgroundSender(sender)) {
+            sendResponse({
+              success: false,
+              error:
+                "Semantic engine initialization requires the background worker",
+            });
+            return false;
+          }
+          const initMsg = message as SemanticEngineInitMessage;
+          console.log(
+            "Offscreen: Received similarity engine init message:",
+            message.type,
+          );
+          handleSimilarityEngineInit(initMsg.config, initMsg.attemptId)
+            .then((status) => sendResponse({ success: true, ...status }))
             .catch((error: unknown) =>
               sendResponse({
                 success: false,
@@ -139,7 +150,9 @@ chrome.runtime.onMessage.addListener(
           withSemanticRequestSlot(() =>
             handleComputeSimilarityBatch(computeMsg.pairs, computeMsg.options),
           )
-            .then((similarities) => sendResponse({ success: true, similarities }))
+            .then((similarities) =>
+              sendResponse({ success: true, similarities }),
+            )
             .catch((error: unknown) =>
               sendResponse({
                 success: false,
@@ -151,7 +164,9 @@ chrome.runtime.onMessage.addListener(
 
         case OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_COMPUTE: {
           const embeddingMsg = message as SimilarityEngineGetEmbeddingMessage;
-          withSemanticRequestSlot(() => handleGetEmbedding(embeddingMsg.text, embeddingMsg.options))
+          withSemanticRequestSlot(() =>
+            handleGetEmbedding(embeddingMsg.text, embeddingMsg.options),
+          )
             .then((embedding) => {
               const embeddingArray = Array.from(embedding);
               sendResponse({ success: true, embedding: embeddingArray });
@@ -167,7 +182,9 @@ chrome.runtime.onMessage.addListener(
 
         case OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_BATCH_COMPUTE: {
           const batchMsg = message as SimilarityEngineGetEmbeddingsBatchMessage;
-          withSemanticRequestSlot(() => handleGetEmbeddingsBatch(batchMsg.texts, batchMsg.options))
+          withSemanticRequestSlot(() =>
+            handleGetEmbeddingsBatch(batchMsg.texts, batchMsg.options),
+          )
             .then((embeddings) =>
               sendResponse({
                 success: true,
@@ -197,7 +214,9 @@ chrome.runtime.onMessage.addListener(
 
         default:
           sendResponse({
-            error: safeSemanticErrorMessage(`Unknown message type: ${String(message.type)}`),
+            error: safeSemanticErrorMessage(
+              `Unknown message type: ${String(message.type)}`,
+            ),
           });
       }
     } catch (error) {
@@ -219,34 +238,80 @@ let currentModelConfig: SemanticModelSelection<ModelPreset> | null = null;
 /**
  * Check if engine reinitialization is needed
  */
-function needsReinitialization(newConfig: SemanticModelSelection<ModelPreset>): boolean {
-  if (!similarityEngine || !currentModelConfig) {
+function needsReinitialization(
+  newConfig: SemanticModelSelection<ModelPreset>,
+): boolean {
+  const publishedConfig = currentModelConfig;
+  if (!isPublishedEngineReady() || !publishedConfig) {
     return true;
   }
 
   return (
-    newConfig.modelPreset !== currentModelConfig.modelPreset ||
-    newConfig.modelVersion !== currentModelConfig.modelVersion ||
-    newConfig.modelDimension !== currentModelConfig.modelDimension
+    newConfig.modelPreset !== publishedConfig.modelPreset ||
+    newConfig.modelVersion !== publishedConfig.modelVersion ||
+    newConfig.modelDimension !== publishedConfig.modelDimension
+  );
+}
+
+function isPublishedEngineReady(): boolean {
+  return (
+    similarityEngine?.isInitialized === true && currentModelConfig !== null
   );
 }
 
 /**
  * Progress callback function type
  */
-type ProgressCallback = (progress: { status: string; progress: number; message?: string }) => void;
+type ProgressCallback = (progress: {
+  status: string;
+  progress: number;
+  message?: string;
+}) => void;
+
+function validateSemanticAttemptId(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== "string" || value.length === 0 || value.length > 128) {
+    throw new Error("Semantic initialization attemptId is invalid");
+  }
+  return value;
+}
 
 /**
  * Initialize semantic similarity engine
  */
-async function handleSimilarityEngineInit(config: unknown): Promise<void> {
+async function handleSimilarityEngineInit(
+  config: unknown,
+  rawAttemptId: unknown,
+): Promise<{
+  isInitialized: true;
+  currentConfig: SemanticModelSelection<ModelPreset>;
+}> {
   const selection = validateSemanticModelSelection(config, PREDEFINED_MODELS);
+  const attemptId = validateSemanticAttemptId(rawAttemptId);
+
+  if (!needsReinitialization(selection)) {
+    return {
+      isInitialized: true,
+      currentConfig: { ...selection },
+    };
+  }
+
   if (semanticInitializationInFlight || activeSemanticRequests > 0) {
     throw new Error("Semantic engine is busy");
   }
+  if (!attemptId) {
+    throw new Error(
+      "Semantic initialization attemptId is required when creating or replacing an engine",
+    );
+  }
+
   semanticInitializationInFlight = true;
   try {
-    await performSimilarityEngineInit(selection);
+    await performSimilarityEngineInit(selection, attemptId);
+    return {
+      isInitialized: true,
+      currentConfig: { ...selection },
+    };
   } finally {
     semanticInitializationInFlight = false;
   }
@@ -254,6 +319,7 @@ async function handleSimilarityEngineInit(config: unknown): Promise<void> {
 
 async function performSimilarityEngineInit(
   selection: SemanticModelSelection<ModelPreset>,
+  attemptId: string,
 ): Promise<void> {
   console.log("Offscreen: Initializing semantic similarity engine", {
     modelPreset: selection.modelPreset,
@@ -261,186 +327,154 @@ async function performSimilarityEngineInit(
     modelDimension: selection.modelDimension,
   });
 
-  // Check if reinitialization is needed
-  const needsReinit = needsReinitialization(selection);
-  console.log("Offscreen: Needs reinitialization:", needsReinit);
+  const previousEngine = similarityEngine;
+  similarityEngine = null;
+  currentModelConfig = null;
 
-  if (!needsReinit) {
-    console.log("Offscreen: Using existing engine (no changes detected)");
-    await updateModelStatus("ready", 100);
-    return;
-  }
-
-  // If engine already exists, clean up old instance first (support model switching)
-  if (similarityEngine) {
+  // Do not retain two model instances. The published globals are revoked before
+  // disposal, and a disposal failure prevents construction of the replacement.
+  if (previousEngine) {
     console.log("Offscreen: Cleaning up existing engine for model switch...");
-    try {
-      // Properly call dispose method to clean up all resources
-      await similarityEngine.dispose();
-      console.log("Offscreen: Previous engine disposed successfully");
-    } catch (error) {
-      console.warn("Offscreen: Failed to dispose previous engine:", error);
-    }
-    similarityEngine = null;
-    currentModelConfig = null;
-
-    // Clear vector data in IndexedDB to ensure data consistency
-    try {
-      console.log("Offscreen: Clearing IndexedDB vector data for model switch...");
-      await clearVectorIndexedDB();
-      console.log("Offscreen: IndexedDB vector data cleared successfully");
-    } catch (error) {
-      console.warn("Offscreen: Failed to clear IndexedDB vector data:", error);
-    }
+    await previousEngine.dispose();
+    console.log("Offscreen: Previous engine disposed successfully");
   }
 
+  let candidate: SemanticSimilarityEngine | null = null;
   try {
-    // Update status to initializing
-    await updateModelStatus("initializing", 10);
+    await reportModelProgress(attemptId, "initializing", 10);
 
-    // Create progress callback function
-    const progressCallback: ProgressCallback = async (progress) => {
+    let progressDelivery = Promise.resolve();
+    let progressDeliveryError: unknown = null;
+
+    const progressCallback: ProgressCallback = (progress) => {
       console.log("Offscreen: Progress update:", progress);
-      await updateModelStatus(progress.status, progress.progress);
+      if (
+        progress.status !== "initializing" &&
+        progress.status !== "downloading"
+      ) {
+        return;
+      }
+      if (
+        typeof progress.progress !== "number" ||
+        !Number.isFinite(progress.progress)
+      ) {
+        return;
+      }
+      const boundedProgress = Math.min(
+        99,
+        Math.max(0, Math.round(progress.progress)),
+      );
+      progressDelivery = progressDelivery.then(async () => {
+        if (progressDeliveryError) return;
+        try {
+          await reportModelProgress(
+            attemptId,
+            progress.status as "initializing" | "downloading",
+            boundedProgress,
+          );
+        } catch (error) {
+          progressDeliveryError = error;
+        }
+      });
     };
 
-    // Create engine instance and pass progress callback
-    similarityEngine = new SemanticSimilarityEngine({
+    candidate = new SemanticSimilarityEngine({
       modelPreset: selection.modelPreset,
       modelVersion: selection.modelVersion,
       dimension: selection.modelDimension,
       useLocalFiles: false,
       forceOffscreen: false,
     });
-    console.log("Offscreen: Starting engine initialization with progress tracking...");
+    console.log(
+      "Offscreen: Starting engine initialization with progress tracking...",
+    );
 
-    // Use enhanced initialization method (if progress callback is supported)
-    if (typeof (similarityEngine as any).initializeWithProgress === "function") {
-      await (similarityEngine as any).initializeWithProgress(progressCallback);
-    } else {
-      // Fallback to standard initialization method
-      console.log("Offscreen: Using standard initialization (no progress callback support)");
-      await updateModelStatus("downloading", 30);
-      await similarityEngine.initialize();
-      await updateModelStatus("ready", 100);
+    let initializationError: unknown = null;
+    try {
+      // Use enhanced initialization method (if progress callback is supported)
+      if (typeof (candidate as any).initializeWithProgress === "function") {
+        await (candidate as any).initializeWithProgress(progressCallback);
+      } else {
+        // Fallback to standard initialization method
+        console.log(
+          "Offscreen: Using standard initialization (no progress callback support)",
+        );
+        progressCallback({ status: "downloading", progress: 30 });
+        await candidate.initialize();
+      }
+    } catch (error) {
+      initializationError = error;
+    }
+    // A rejected engine initialization may still have queued progress writes.
+    // Drain them before responding so background can revoke the attempt and
+    // persist its terminal error without a late progress overwrite.
+    await progressDelivery;
+    if (initializationError && progressDeliveryError) {
+      throw new AggregateError(
+        [initializationError, progressDeliveryError],
+        "Semantic engine initialization and progress reporting both failed",
+      );
+    }
+    if (initializationError) throw initializationError;
+    if (progressDeliveryError) throw progressDeliveryError;
+    if (candidate.isInitialized !== true) {
+      throw new Error(
+        "Semantic engine initialization returned without a ready engine",
+      );
     }
 
-    // Save current configuration
-    currentModelConfig = selection;
+    // Publish the fully initialized candidate only after every accepted progress
+    // update has been acknowledged by the owning background transaction.
+    similarityEngine = candidate;
+    currentModelConfig = { ...selection };
 
-    console.log("Offscreen: Semantic similarity engine initialized successfully");
+    console.log(
+      "Offscreen: Semantic similarity engine initialized successfully",
+    );
   } catch (error) {
-    console.error("Offscreen: Failed to initialize semantic similarity engine:", error);
-    // Update status to error
-    const errorMessage = safeSemanticErrorMessage(error, "Unknown initialization error");
-    const errorType = analyzeErrorType(errorMessage);
-    await updateModelStatus("error", 0, errorMessage, errorType);
-    // Clean up failed instance
+    console.error(
+      "Offscreen: Failed to initialize semantic similarity engine:",
+      error,
+    );
     similarityEngine = null;
     currentModelConfig = null;
+    if (candidate) {
+      try {
+        await candidate.dispose();
+      } catch (disposeError) {
+        throw new AggregateError(
+          [error, disposeError],
+          "Semantic engine initialization and candidate disposal both failed",
+        );
+      }
+    }
     throw error;
   }
 }
 
-/**
- * Clear vector data in IndexedDB
- */
-async function clearVectorIndexedDB(): Promise<void> {
-  try {
-    // Clear vector search related IndexedDB databases
-    const dbNames = ["VectorSearchDB", "ContentIndexerDB", "SemanticSimilarityDB"];
-
-    for (const dbName of dbNames) {
-      try {
-        // Try to delete database
-        const deleteRequest = indexedDB.deleteDatabase(dbName);
-        await new Promise<void>((resolve, _reject) => {
-          deleteRequest.onsuccess = () => {
-            console.log(`Offscreen: Successfully deleted database: ${dbName}`);
-            resolve();
-          };
-          deleteRequest.onerror = () => {
-            console.warn(`Offscreen: Failed to delete database: ${dbName}`, deleteRequest.error);
-            resolve(); // Don't block cleanup of other databases
-          };
-          deleteRequest.onblocked = () => {
-            console.warn(`Offscreen: Database deletion blocked: ${dbName}`);
-            resolve(); // Don't block cleanup of other databases
-          };
-        });
-      } catch (error) {
-        console.warn(`Offscreen: Error deleting database ${dbName}:`, error);
-      }
-    }
-  } catch (error) {
-    console.error("Offscreen: Failed to clear vector IndexedDB:", error);
-    throw error;
-  }
-}
-
-// Analyze error type
-function analyzeErrorType(errorMessage: string): "network" | "file" | "unknown" {
-  const message = errorMessage.toLowerCase();
-
-  if (
-    message.includes("network") ||
-    message.includes("fetch") ||
-    message.includes("timeout") ||
-    message.includes("connection") ||
-    message.includes("cors") ||
-    message.includes("failed to fetch")
-  ) {
-    return "network";
-  }
-
-  if (
-    message.includes("corrupt") ||
-    message.includes("invalid") ||
-    message.includes("format") ||
-    message.includes("parse") ||
-    message.includes("decode") ||
-    message.includes("onnx")
-  ) {
-    return "file";
-  }
-
-  return "unknown";
-}
-
-// Helper function to update model status
-async function updateModelStatus(
-  status: unknown,
-  progress: unknown,
-  errorMessage?: unknown,
-  errorType?: unknown,
-) {
-  try {
-    const modelState = normalizeSemanticModelState({
-      status,
-      downloadProgress: progress,
-      lastUpdated: Date.now(),
-      errorMessage,
-      errorType,
-    });
-
-    // In offscreen document, update storage through message passing to background script
-    // because offscreen document may not have direct chrome.storage access
-    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-      await chrome.storage.local.set({ modelState });
-    } else {
-      // If chrome.storage is not available, pass message to background script
-      console.log("Offscreen: chrome.storage not available, sending message to background");
-      try {
-        await chrome.runtime.sendMessage({
-          type: BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS,
-          modelState: modelState,
-        });
-      } catch (messageError) {
-        console.error("Offscreen: Failed to send status update message:", messageError);
-      }
-    }
-  } catch (error) {
-    console.error("Offscreen: Failed to update model status:", error);
+async function reportModelProgress(
+  attemptId: string,
+  status: "initializing" | "downloading",
+  progress: number,
+): Promise<void> {
+  const modelState = normalizeSemanticModelState({
+    status,
+    downloadProgress: Math.min(99, Math.max(0, Math.round(progress))),
+    lastUpdated: Date.now(),
+  });
+  const message: SemanticModelProgressMessage = {
+    type: BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS,
+    attemptId,
+    modelState,
+  };
+  const response = await chrome.runtime.sendMessage(message);
+  if (response?.success !== true) {
+    throw new Error(
+      safeSemanticErrorMessage(
+        response?.error,
+        "Background rejected semantic model progress",
+      ),
+    );
   }
 }
 
@@ -452,12 +486,18 @@ async function handleComputeSimilarityBatch(
   options: unknown = {},
 ): Promise<number[]> {
   const validatedPairs = validateSemanticPairs(pairs);
-  const validatedOptions = validateSemanticOptions(options === undefined ? {} : options);
-  if (!similarityEngine) {
-    throw new Error("Similarity engine not initialized. Please reinitialize the engine.");
+  const validatedOptions = validateSemanticOptions(
+    options === undefined ? {} : options,
+  );
+  if (!isPublishedEngineReady() || !similarityEngine) {
+    throw new Error(
+      "Similarity engine not initialized. Please reinitialize the engine.",
+    );
   }
 
-  console.log(`Offscreen: Computing similarities for ${validatedPairs.length} pairs`);
+  console.log(
+    `Offscreen: Computing similarities for ${validatedPairs.length} pairs`,
+  );
   const similarities = await similarityEngine.computeSimilarityBatch(
     validatedPairs,
     validatedOptions,
@@ -470,17 +510,28 @@ async function handleComputeSimilarityBatch(
 /**
  * Get embedding vector for single text
  */
-async function handleGetEmbedding(text: unknown, options: unknown = {}): Promise<Float32Array> {
+async function handleGetEmbedding(
+  text: unknown,
+  options: unknown = {},
+): Promise<Float32Array> {
   const validatedText = validateSemanticText(text);
-  const validatedOptions = validateSemanticOptions(options === undefined ? {} : options);
-  if (!similarityEngine) {
-    throw new Error("Similarity engine not initialized. Please reinitialize the engine.");
+  const validatedOptions = validateSemanticOptions(
+    options === undefined ? {} : options,
+  );
+  if (!isPublishedEngineReady() || !similarityEngine) {
+    throw new Error(
+      "Similarity engine not initialized. Please reinitialize the engine.",
+    );
   }
 
   const expectedDimension = currentModelConfig?.modelDimension;
-  if (!expectedDimension) throw new Error("Semantic model config is unavailable");
+  if (!expectedDimension)
+    throw new Error("Semantic model config is unavailable");
   console.log("Offscreen: Getting embedding");
-  const embedding = await similarityEngine.getEmbedding(validatedText, validatedOptions);
+  const embedding = await similarityEngine.getEmbedding(
+    validatedText,
+    validatedOptions,
+  );
   validateEmbeddingPayload(embedding, expectedDimension);
   console.log("Offscreen: Embedding computation completed");
 
@@ -495,16 +546,30 @@ async function handleGetEmbeddingsBatch(
   options: unknown = {},
 ): Promise<Float32Array[]> {
   const validatedTexts = validateSemanticTexts(texts);
-  const validatedOptions = validateSemanticOptions(options === undefined ? {} : options);
-  if (!similarityEngine) {
-    throw new Error("Similarity engine not initialized. Please reinitialize the engine.");
+  const validatedOptions = validateSemanticOptions(
+    options === undefined ? {} : options,
+  );
+  if (!isPublishedEngineReady() || !similarityEngine) {
+    throw new Error(
+      "Similarity engine not initialized. Please reinitialize the engine.",
+    );
   }
 
   const expectedDimension = currentModelConfig?.modelDimension;
-  if (!expectedDimension) throw new Error("Semantic model config is unavailable");
-  console.log(`Offscreen: Getting embeddings for ${validatedTexts.length} texts`);
-  const embeddings = await similarityEngine.getEmbeddingsBatch(validatedTexts, validatedOptions);
-  validateEmbeddingsPayload(embeddings, validatedTexts.length, expectedDimension);
+  if (!expectedDimension)
+    throw new Error("Semantic model config is unavailable");
+  console.log(
+    `Offscreen: Getting embeddings for ${validatedTexts.length} texts`,
+  );
+  const embeddings = await similarityEngine.getEmbeddingsBatch(
+    validatedTexts,
+    validatedOptions,
+  );
+  validateEmbeddingsPayload(
+    embeddings,
+    validatedTexts.length,
+    expectedDimension,
+  );
   console.log("Offscreen: Batch embedding computation completed");
 
   return embeddings;
@@ -518,8 +583,8 @@ async function handleGetEngineStatus(): Promise<{
   currentConfig: SemanticModelSelection<ModelPreset> | null;
 }> {
   return {
-    isInitialized: !!similarityEngine,
-    currentConfig: currentModelConfig,
+    isInitialized: isPublishedEngineReady(),
+    currentConfig: isPublishedEngineReady() ? currentModelConfig : null,
   };
 }
 

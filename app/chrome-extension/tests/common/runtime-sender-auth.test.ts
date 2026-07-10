@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  isExtensionBackgroundSender,
   isExtensionPageSender,
   isExtensionRuntimeSender,
   isOffscreenDocumentSender,
@@ -61,5 +62,23 @@ describe("runtime sender authorization", () => {
         tab: { id: 1 } as chrome.tabs.Tab,
       }),
     ).toBe(false);
+  });
+
+  it("distinguishes the background worker from extension documents", () => {
+    expect(isExtensionBackgroundSender({ id: chrome.runtime.id })).toBe(true);
+    expect(
+      isExtensionBackgroundSender({
+        id: chrome.runtime.id,
+        url: `chrome-extension://${chrome.runtime.id}/popup.html`,
+        origin: `chrome-extension://${chrome.runtime.id}`,
+      }),
+    ).toBe(false);
+    expect(
+      isExtensionBackgroundSender({
+        id: chrome.runtime.id,
+        documentId: "offscreen-document",
+      }),
+    ).toBe(false);
+    expect(isExtensionBackgroundSender({ id: "other-extension" })).toBe(false);
   });
 });
