@@ -82,6 +82,13 @@ function getNativeConnectionErrorMessage(): string {
   return "Native host not connected";
 }
 
+function isTrustedNativeControlSender(sender: chrome.runtime.MessageSender): boolean {
+  // Native controls are only used by extension pages and the background
+  // worker. Content scripts have a sender.tab and must not be able to invoke
+  // arbitrary tools, fetch auth material, or forward native payloads.
+  return sender.id === chrome.runtime.id && sender.tab === undefined;
+}
+
 interface PendingNativeRequest {
   resolve: (payload: any) => void;
   reject: (reason?: unknown) => void;
@@ -1351,7 +1358,11 @@ export const initNativeHostListener = () => {
     void ensureNativeConnected("onInstalled").catch(() => {});
   });
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!isTrustedNativeControlSender(sender)) {
+      return false;
+    }
+
     // Allow UI to call tools directly
     if (message && message.type === "call_tool" && message.name) {
       handleCallTool({ name: message.name, args: message.args })

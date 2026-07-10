@@ -144,10 +144,24 @@ describe("native host port lifecycle", () => {
 
     expect(connectNativeHost()).toBe(true);
 
+    const untrustedResponse = vi.fn();
+    expect(
+      runtimeMessageListener!(
+        { type: "call_tool", name: "chrome_read_page", args: {} },
+        {
+          id: "test-extension-id",
+          tab: { id: 7 },
+        } as chrome.runtime.MessageSender,
+        untrustedResponse,
+      ),
+    ).toBe(false);
+    expect(dependencyMocks.handleCallTool).not.toHaveBeenCalled();
+    expect(untrustedResponse).not.toHaveBeenCalled();
+
     const disconnectResponse = vi.fn();
     runtimeMessageListener!(
       { type: "disconnect_native" },
-      {} as chrome.runtime.MessageSender,
+      { id: "test-extension-id" } as chrome.runtime.MessageSender,
       disconnectResponse,
     );
     await vi.waitFor(() => {
