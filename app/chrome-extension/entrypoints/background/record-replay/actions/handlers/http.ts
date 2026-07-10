@@ -29,8 +29,183 @@ import type {
 /** Default timeout for HTTP requests */
 const DEFAULT_HTTP_TIMEOUT_MS = 30000;
 
-/** Maximum URL length */
-const MAX_URL_LENGTH = 8192;
+export const HTTP_ACTION_LIMITS = Object.freeze({
+  maxUrlUtf8Bytes: 8 * 1024,
+  maxTimeoutMs: 60 * 60 * 1000,
+  maxHeaderCount: 64,
+  maxHeaderNameUtf8Bytes: 256,
+  maxHeaderValueUtf8Bytes: 8 * 1024,
+  maxHeadersUtf8Bytes: 32 * 1024,
+  maxFormFieldCount: 64,
+  maxFormFieldNameUtf8Bytes: 256,
+  maxFormFieldValueUtf8Bytes: 64 * 1024,
+  maxFormDataUtf8Bytes: 256 * 1024,
+  maxRequestBodyUtf8Bytes: 256 * 1024,
+  maxResponseBodyBytes: 256 * 1024,
+  maxResponseHeadersUtf8Bytes: 32 * 1024,
+  maxResponseJsonUtf8Bytes: 48 * 1024,
+  maxAssignments: 64,
+  maxAssignmentFieldUtf8Bytes: 256,
+  maxJsonDepth: 64,
+  maxJsonValues: 20_000,
+});
+
+function utf8ByteLength(value: string, stopAfter = Number.MAX_SAFE_INTEGER): number {
+  let bytes = 0;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    bytes +=
+      codePoint <= 0x7f
+        ? 1
+        : codePoint <= 0x7ff
+          ? 2
+          : codePoint <= 0xffff
+            ? 3
+            : 4;
+    if (bytes > stopAfter) return bytes;
+  }
+  return bytes;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validateJsonShape(value: JsonValue): string | null {
+  const stack: Array<{ value: JsonValue; depth: number }> = [{ value, depth: 0 }];
+  let values = 0;
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    values += 1;
+    if (values > HTTP_ACTION_LIMITS.maxJsonValues) {
+      return `JSON response exceeds ${HTTP_ACTION_LIMITS.maxJsonValues} values`;
+    }
+    if (current.depth > HTTP_ACTION_LIMITS.maxJsonDepth) {
+      return `JSON response exceeds depth ${HTTP_ACTION_LIMITS.maxJsonDepth}`;
+    }
+    if (Array.isArray(current.value)) {
+      for (const child of current.value) {
+        stack.push({ value: child, depth: current.depth + 1 });
+      }
+    } else if (isRecord(current.value)) {
+      for (const child of Object.values(current.value)) {
+        stack.push({ value: child as JsonValue, depth: current.depth + 1 });
+      }
+    }
+  }
+  return null;
+}
+
+function normalizeTimeoutMs(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_HTTP_TIMEOUT_MS;
+  }
+  return Math.min(Math.floor(value), HTTP_ACTION_LIMITS.maxTimeoutMs);
+}
+
+function validateResolvedFields(
+  fields: Record<string, string>,
+  limits: {
+    label: string;
+    maxCount: number;
+    maxNameBytes: number;
+    maxValueBytes: number;
+    maxTotalBytes: number;
+  },
+): string | null {
+  const entries = Object.entries(fields);
+  if (entries.length > limits.maxCount) {
+    return `${limits.label} exceeds ${limits.maxCount} entries`;
+  }
+  let totalBytes = 2;
+  for (const [key, value] of entries) {
+    const keyBytes = utf8ByteLength(key, limits.maxNameBytes);
+    if (!key || keyBytes > limits.maxNameBytes) {
+      return `${limits.label} name exceeds ${limits.maxNameBytes} UTF-8 bytes`;
+    }
+    const valueBytes = utf8ByteLength(value, limits.maxValueBytes);
+    if (valueBytes > limits.maxValueBytes) {
+      return `${limits.label} value exceeds ${limits.maxValueBytes} UTF-8 bytes`;
+    }
+    totalBytes += keyBytes + valueBytes + 4;
+    if (totalBytes > limits.maxTotalBytes) {
+      return `${limits.label} exceeds ${limits.maxTotalBytes} UTF-8 bytes in total`;
+    }
+  }
+  return null;
+}
+
+async function readBoundedResponseText(response: Response): Promise<string> {
+  const declaredLength = response.headers.get('content-length');
+  if (declaredLength !== null) {
+    const parsedLength = Number(declaredLength);
+    if (
+      Number.isFinite(parsedLength) &&
+      parsedLength > HTTP_ACTION_LIMITS.maxResponseBodyBytes
+    ) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(
+        `HTTP response body exceeds ${HTTP_ACTION_LIMITS.maxResponseBodyBytes} bytes`,
+      );
+    }
+  }
+
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      const chunk = next.value;
+      totalBytes += chunk.byteLength;
+      if (totalBytes > HTTP_ACTION_LIMITS.maxResponseBodyBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(
+          `HTTP response body exceeds ${HTTP_ACTION_LIMITS.maxResponseBodyBytes} bytes`,
+        );
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function readBoundedResponseHeaders(response: Response): Record<string, string> {
+  const headers: Record<string, string> = {};
+  let totalBytes = 2;
+  let count = 0;
+  let violation: string | null = null;
+  response.headers.forEach((value, key) => {
+    if (violation) return;
+    count += 1;
+    const keyBytes = utf8ByteLength(key, HTTP_ACTION_LIMITS.maxHeaderNameUtf8Bytes);
+    const valueBytes = utf8ByteLength(value, HTTP_ACTION_LIMITS.maxHeaderValueUtf8Bytes);
+    totalBytes += keyBytes + valueBytes + 4;
+    if (
+      count > HTTP_ACTION_LIMITS.maxHeaderCount ||
+      keyBytes > HTTP_ACTION_LIMITS.maxHeaderNameUtf8Bytes ||
+      valueBytes > HTTP_ACTION_LIMITS.maxHeaderValueUtf8Bytes ||
+      totalBytes > HTTP_ACTION_LIMITS.maxResponseHeadersUtf8Bytes
+    ) {
+      violation = `HTTP response headers exceed the ${HTTP_ACTION_LIMITS.maxResponseHeadersUtf8Bytes}-byte budget`;
+      return;
+    }
+    headers[key] = value;
+  });
+  if (violation) throw new Error(violation);
+  return headers;
+}
 
 /**
  * Resolve HTTP headers
@@ -40,15 +215,42 @@ async function resolveHeaders(
   vars: VariableStore,
 ): Promise<{ ok: true; resolved: Record<string, string> } | { ok: false; error: string }> {
   if (!headers) return { ok: true, resolved: {} };
+  if (!isRecord(headers)) return { ok: false, error: 'HTTP headers must be an object' };
+  const headerEntries = Object.entries(headers);
+  if (headerEntries.length > HTTP_ACTION_LIMITS.maxHeaderCount) {
+    return {
+      ok: false,
+      error: `HTTP headers exceeds ${HTTP_ACTION_LIMITS.maxHeaderCount} entries`,
+    };
+  }
 
   const resolved: Record<string, string> = {};
-  for (const [key, resolvable] of Object.entries(headers)) {
+  for (const [key, resolvable] of headerEntries) {
+    if (
+      !key ||
+      utf8ByteLength(key, HTTP_ACTION_LIMITS.maxHeaderNameUtf8Bytes) >
+        HTTP_ACTION_LIMITS.maxHeaderNameUtf8Bytes
+    ) {
+      return {
+        ok: false,
+        error: `HTTP headers name exceeds ${HTTP_ACTION_LIMITS.maxHeaderNameUtf8Bytes} UTF-8 bytes`,
+      };
+    }
     const result = tryResolveString(resolvable, vars);
     if (!result.ok) {
       return { ok: false, error: `Failed to resolve header "${key}": ${result.error}` };
     }
     resolved[key] = result.value;
   }
+
+  const violation = validateResolvedFields(resolved, {
+    label: 'HTTP headers',
+    maxCount: HTTP_ACTION_LIMITS.maxHeaderCount,
+    maxNameBytes: HTTP_ACTION_LIMITS.maxHeaderNameUtf8Bytes,
+    maxValueBytes: HTTP_ACTION_LIMITS.maxHeaderValueUtf8Bytes,
+    maxTotalBytes: HTTP_ACTION_LIMITS.maxHeadersUtf8Bytes,
+  });
+  if (violation) return { ok: false, error: violation };
 
   return { ok: true, resolved };
 }
@@ -61,15 +263,42 @@ async function resolveFormData(
   vars: VariableStore,
 ): Promise<{ ok: true; resolved: Record<string, string> } | { ok: false; error: string }> {
   if (!formData) return { ok: true, resolved: {} };
+  if (!isRecord(formData)) return { ok: false, error: 'HTTP formData must be an object' };
+  const fieldEntries = Object.entries(formData);
+  if (fieldEntries.length > HTTP_ACTION_LIMITS.maxFormFieldCount) {
+    return {
+      ok: false,
+      error: `HTTP form data exceeds ${HTTP_ACTION_LIMITS.maxFormFieldCount} entries`,
+    };
+  }
 
   const resolved: Record<string, string> = {};
-  for (const [key, resolvable] of Object.entries(formData)) {
+  for (const [key, resolvable] of fieldEntries) {
+    if (
+      !key ||
+      utf8ByteLength(key, HTTP_ACTION_LIMITS.maxFormFieldNameUtf8Bytes) >
+        HTTP_ACTION_LIMITS.maxFormFieldNameUtf8Bytes
+    ) {
+      return {
+        ok: false,
+        error: `HTTP form data name exceeds ${HTTP_ACTION_LIMITS.maxFormFieldNameUtf8Bytes} UTF-8 bytes`,
+      };
+    }
     const result = tryResolveString(resolvable, vars);
     if (!result.ok) {
       return { ok: false, error: `Failed to resolve form field "${key}": ${result.error}` };
     }
     resolved[key] = result.value;
   }
+
+  const violation = validateResolvedFields(resolved, {
+    label: 'HTTP form data',
+    maxCount: HTTP_ACTION_LIMITS.maxFormFieldCount,
+    maxNameBytes: HTTP_ACTION_LIMITS.maxFormFieldNameUtf8Bytes,
+    maxValueBytes: HTTP_ACTION_LIMITS.maxFormFieldValueUtf8Bytes,
+    maxTotalBytes: HTTP_ACTION_LIMITS.maxFormDataUtf8Bytes,
+  });
+  if (violation) return { ok: false, error: violation };
 
   return { ok: true, resolved };
 }
@@ -88,6 +317,10 @@ async function resolveBody(
     return { ok: true, contentType: undefined, data: undefined };
   }
 
+  if (!isRecord(body)) {
+    return { ok: false, error: 'HTTP body must be an object' };
+  }
+
   if (body.kind === 'text') {
     const textResult = tryResolveString(body.text, vars);
     if (!textResult.ok) {
@@ -103,6 +336,16 @@ async function resolveBody(
       contentType = ctResult.value;
     }
 
+    if (
+      utf8ByteLength(textResult.value, HTTP_ACTION_LIMITS.maxRequestBodyUtf8Bytes) >
+      HTTP_ACTION_LIMITS.maxRequestBodyUtf8Bytes
+    ) {
+      return {
+        ok: false,
+        error: `HTTP request body exceeds ${HTTP_ACTION_LIMITS.maxRequestBodyUtf8Bytes} UTF-8 bytes`,
+      };
+    }
+
     return { ok: true, contentType, data: textResult.value };
   }
 
@@ -112,10 +355,26 @@ async function resolveBody(
       return { ok: false, error: `Failed to resolve JSON body: ${jsonResult.error}` };
     }
 
+    let data: string;
+    try {
+      data = JSON.stringify(jsonResult.value);
+    } catch {
+      return { ok: false, error: 'HTTP JSON body must be serializable' };
+    }
+    if (
+      utf8ByteLength(data, HTTP_ACTION_LIMITS.maxRequestBodyUtf8Bytes) >
+      HTTP_ACTION_LIMITS.maxRequestBodyUtf8Bytes
+    ) {
+      return {
+        ok: false,
+        error: `HTTP request body exceeds ${HTTP_ACTION_LIMITS.maxRequestBodyUtf8Bytes} UTF-8 bytes`,
+      };
+    }
+
     return {
       ok: true,
       contentType: 'application/json',
-      data: JSON.stringify(jsonResult.value),
+      data,
     };
   }
 
@@ -188,6 +447,70 @@ function applyAssignments(
   }
 }
 
+function validateAssignments(assignments: unknown): string | null {
+  if (assignments === undefined) return null;
+  if (!isRecord(assignments)) return 'HTTP assignments must be an object';
+  const entries = Object.entries(assignments);
+  if (entries.length > HTTP_ACTION_LIMITS.maxAssignments) {
+    return `HTTP assignments exceed ${HTTP_ACTION_LIMITS.maxAssignments} entries`;
+  }
+  for (const [name, path] of entries) {
+    if (
+      !name ||
+      utf8ByteLength(name, HTTP_ACTION_LIMITS.maxAssignmentFieldUtf8Bytes) >
+        HTTP_ACTION_LIMITS.maxAssignmentFieldUtf8Bytes ||
+      typeof path !== 'string' ||
+      utf8ByteLength(path, HTTP_ACTION_LIMITS.maxAssignmentFieldUtf8Bytes) >
+        HTTP_ACTION_LIMITS.maxAssignmentFieldUtf8Bytes
+    ) {
+      return `HTTP assignment names and paths must not exceed ${HTTP_ACTION_LIMITS.maxAssignmentFieldUtf8Bytes} UTF-8 bytes`;
+    }
+  }
+  return null;
+}
+
+function validateResponseBindings(params: {
+  saveAs?: unknown;
+  assign?: unknown;
+  okStatus?: unknown;
+}): string | null {
+  if (
+    params.saveAs !== undefined &&
+    (typeof params.saveAs !== 'string' ||
+      !params.saveAs ||
+      utf8ByteLength(params.saveAs, HTTP_ACTION_LIMITS.maxAssignmentFieldUtf8Bytes) >
+        HTTP_ACTION_LIMITS.maxAssignmentFieldUtf8Bytes)
+  ) {
+    return `HTTP saveAs must be a non-empty string up to ${HTTP_ACTION_LIMITS.maxAssignmentFieldUtf8Bytes} UTF-8 bytes`;
+  }
+  const assignmentViolation = validateAssignments(params.assign);
+  if (assignmentViolation) return assignmentViolation;
+  if (params.okStatus === undefined) return null;
+  if (!isRecord(params.okStatus)) return 'HTTP okStatus must be an object';
+  if (params.okStatus.kind === 'range') {
+    return typeof params.okStatus.min === 'number' &&
+      Number.isInteger(params.okStatus.min) &&
+      typeof params.okStatus.max === 'number' &&
+      Number.isInteger(params.okStatus.max) &&
+      params.okStatus.min >= 100 &&
+      params.okStatus.max <= 599 &&
+      params.okStatus.min <= params.okStatus.max
+      ? null
+      : 'HTTP okStatus range must contain integer status codes between 100 and 599';
+  }
+  if (params.okStatus.kind === 'list') {
+    return Array.isArray(params.okStatus.statuses) &&
+      params.okStatus.statuses.length > 0 &&
+      params.okStatus.statuses.length <= 100 &&
+      params.okStatus.statuses.every(
+        (status) => Number.isInteger(status) && status >= 100 && status <= 599,
+      )
+      ? null
+      : 'HTTP okStatus list must contain 1 to 100 integer status codes between 100 and 599';
+  }
+  return 'HTTP okStatus kind must be "range" or "list"';
+}
+
 export const httpHandler: ActionHandler<'http'> = {
   type: 'http',
 
@@ -230,8 +553,14 @@ export const httpHandler: ActionHandler<'http'> = {
       return failed('VALIDATION_ERROR', 'URL is empty');
     }
 
-    if (url.length > MAX_URL_LENGTH) {
-      return failed('VALIDATION_ERROR', `URL exceeds maximum length of ${MAX_URL_LENGTH}`);
+    if (
+      utf8ByteLength(url, HTTP_ACTION_LIMITS.maxUrlUtf8Bytes) >
+      HTTP_ACTION_LIMITS.maxUrlUtf8Bytes
+    ) {
+      return failed(
+        'VALIDATION_ERROR',
+        `URL exceeds ${HTTP_ACTION_LIMITS.maxUrlUtf8Bytes} UTF-8 bytes`,
+      );
     }
 
     // Validate URL format and keep workflow requests on public network schemes.
@@ -262,6 +591,10 @@ export const httpHandler: ActionHandler<'http'> = {
     if (!formDataResult.ok) {
       return failed('VALIDATION_ERROR', formDataResult.error);
     }
+    const bindingViolation = validateResponseBindings(params);
+    if (bindingViolation) {
+      return failed('VALIDATION_ERROR', bindingViolation);
+    }
 
     // Build request
     const headers: Record<string, string> = { ...headersResult.resolved };
@@ -283,7 +616,7 @@ export const httpHandler: ActionHandler<'http'> = {
     }
 
     // Execute request
-    const timeoutMs = action.policy?.timeout?.ms ?? DEFAULT_HTTP_TIMEOUT_MS;
+    const timeoutMs = normalizeTimeoutMs(action.policy?.timeout?.ms);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -299,33 +632,52 @@ export const httpHandler: ActionHandler<'http'> = {
       }
 
       const response = await fetch(url, fetchOptions);
-      clearTimeout(timeoutId);
 
       // Parse response
-      const responseHeaders: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
-      });
+      const responseHeaders = readBoundedResponseHeaders(response);
+      const responseText = await readBoundedResponseText(response);
 
       let responseBody: JsonValue | string | null = null;
       const contentType = response.headers.get('content-type') || '';
 
       try {
         if (contentType.includes('application/json')) {
-          responseBody = (await response.json()) as JsonValue;
+          responseBody = JSON.parse(responseText) as JsonValue;
+          const shapeViolation = validateJsonShape(responseBody);
+          if (shapeViolation) throw new Error(shapeViolation);
         } else {
-          responseBody = await response.text();
+          responseBody = responseText;
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('JSON response exceeds')) {
+          throw error;
+        }
         responseBody = null;
       }
 
+      const responseUrl = response.url || url;
+      if (
+        utf8ByteLength(responseUrl, HTTP_ACTION_LIMITS.maxUrlUtf8Bytes) >
+        HTTP_ACTION_LIMITS.maxUrlUtf8Bytes
+      ) {
+        throw new Error(`HTTP response URL exceeds ${HTTP_ACTION_LIMITS.maxUrlUtf8Bytes} bytes`);
+      }
+
       const httpResponse: HttpResponse = {
-        url: response.url,
+        url: responseUrl,
         status: response.status,
         headers: responseHeaders,
         body: responseBody,
       };
+      const serializedResponse = JSON.stringify(httpResponse);
+      if (
+        utf8ByteLength(serializedResponse, HTTP_ACTION_LIMITS.maxResponseJsonUtf8Bytes) >
+        HTTP_ACTION_LIMITS.maxResponseJsonUtf8Bytes
+      ) {
+        throw new Error(
+          `HTTP response exceeds ${HTTP_ACTION_LIMITS.maxResponseJsonUtf8Bytes} UTF-8 bytes`,
+        );
+      }
 
       // Check status
       if (!isStatusOk(response.status, params.okStatus)) {
@@ -350,9 +702,7 @@ export const httpHandler: ActionHandler<'http'> = {
         output: { response: httpResponse },
       };
     } catch (e) {
-      clearTimeout(timeoutId);
-
-      if (e instanceof Error && e.name === 'AbortError') {
+      if (controller.signal.aborted || (e instanceof Error && e.name === 'AbortError')) {
         return failed('TIMEOUT', `HTTP request timed out after ${timeoutMs}ms`);
       }
 
@@ -360,6 +710,8 @@ export const httpHandler: ActionHandler<'http'> = {
         'NETWORK_REQUEST_FAILED',
         `HTTP request failed: ${e instanceof Error ? e.message : String(e)}`,
       );
+    } finally {
+      clearTimeout(timeoutId);
     }
   },
 };
