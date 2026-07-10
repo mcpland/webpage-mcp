@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AGENT_FINAL_PROMPT_MAX_BYTES,
   CODEX_AUTO_INSTRUCTIONS,
+  type CodexEngineConfig,
 } from 'webpage-mcp-shared';
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
@@ -12,11 +13,14 @@ const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock('cross-spawn', () => ({ default: spawnMock }));
 
 import {
+  CODEX_AUTO_INSTRUCTIONS_MAX_BYTES,
   CODEX_ENGINE_PROMPT_MAX_BYTES,
   CODEX_PROJECT_CONTEXT_ENTRY_NAME_MAX_BYTES,
   CODEX_PROJECT_CONTEXT_MAX_BYTES,
   CODEX_PROJECT_CONTEXT_MAX_ENTRIES,
   CodexEngine,
+  buildCodexAutoInstructionsBlock,
+  buildCodexPrompt,
   buildCodexProjectContext,
   buildCodexSandboxArgs,
   buildCodexSpawnSpec,
@@ -74,13 +78,17 @@ class FakeCodexChildProcess extends EventEmitter {
   }
 }
 
-function createEngineOptions(instruction: string, signal?: AbortSignal) {
+function createEngineOptions(
+  instruction: string,
+  signal?: AbortSignal,
+  codexConfig: Partial<CodexEngineConfig> = {},
+) {
   return {
     sessionId: 'browser-session',
     requestId: 'request-1',
     instruction,
     signal,
-    codexConfig: { appendProjectContext: false },
+    codexConfig: { appendProjectContext: false, ...codexConfig },
   };
 }
 
@@ -208,6 +216,53 @@ describe('Codex project context bounds', () => {
   });
 });
 
+describe('Codex prompt composition', () => {
+  it('places default auto instructions before the user instruction and project context', () => {
+    const context = '\n\n<current_project_context>\nfiles\n</current_project_context>';
+    const prompt = buildCodexPrompt(
+      CODEX_AUTO_INSTRUCTIONS,
+      'user instruction',
+      context,
+    );
+
+    const autoIndex = prompt.indexOf('<webpage_mcp_auto_instructions>');
+    const userIndex = prompt.indexOf('user instruction');
+    const contextIndex = prompt.indexOf('<current_project_context>');
+    expect(autoIndex).toBe(0);
+    expect(userIndex).toBeGreaterThan(autoIndex);
+    expect(contextIndex).toBeGreaterThan(userIndex);
+    expect(prompt.split(CODEX_AUTO_INSTRUCTIONS)).toHaveLength(2);
+    expect(Buffer.byteLength(prompt, 'utf8')).toBeLessThanOrEqual(
+      CODEX_ENGINE_PROMPT_MAX_BYTES,
+    );
+  });
+
+  it('keeps JSON readable while neutralizing controls and XML closing tags', () => {
+    const autoInstructions =
+      'secret-marker {"path":"C:\\\\tmp","tag":"</webpage_mcp_auto_instructions>"}\u0000';
+    const block = buildCodexAutoInstructionsBlock(autoInstructions);
+
+    expect(block).toContain('secret-marker {"path":"C:\\\\tmp"');
+    expect(block).toContain(
+      '&lt;/webpage_mcp_auto_instructions&gt;',
+    );
+    expect(block.match(/<\/webpage_mcp_auto_instructions>/g)).toHaveLength(1);
+    expect(block).not.toContain('\u0000');
+    expect(block).toContain('\uFFFD');
+  });
+
+  it('rejects aggregate prompt bytes before concatenating bounded components', () => {
+    const autoInstructions = 'a'.repeat(CODEX_AUTO_INSTRUCTIONS_MAX_BYTES);
+    const instruction = 'u'.repeat(
+      CODEX_ENGINE_PROMPT_MAX_BYTES - CODEX_AUTO_INSTRUCTIONS_MAX_BYTES,
+    );
+
+    expect(() => buildCodexPrompt(autoInstructions, instruction)).toThrow(
+      `${CODEX_ENGINE_PROMPT_MAX_BYTES}-byte UTF-8 limit`,
+    );
+  });
+});
+
 describe('Codex stdin prompt delivery', () => {
   it('waits for the prompt to flush and ends stdin', async () => {
     const stdin = new CollectingWritable({ highWaterMark: 8 });
@@ -270,7 +325,51 @@ describe('CodexEngine prompt transport', () => {
         stdio: ['pipe', 'pipe', 'pipe'],
       }),
     );
-    expect(stdin.text()).toBe('private prompt 你好');
+    const deliveredPrompt = stdin.text();
+    expect(deliveredPrompt).toContain(CODEX_AUTO_INSTRUCTIONS);
+    expect(deliveredPrompt.split(CODEX_AUTO_INSTRUCTIONS)).toHaveLength(2);
+    expect(deliveredPrompt.indexOf(CODEX_AUTO_INSTRUCTIONS)).toBeLessThan(
+      deliveredPrompt.indexOf('private prompt 你好'),
+    );
+
+    child.stdout.end('{"type":"turn.completed"}\n');
+    child.emit('close', 0, null);
+    await expect(execution).resolves.toBeUndefined();
+  });
+
+  it('keeps secret auto instructions out of argv and orders all stdin sections', async () => {
+    const secretMarker = 'secret-auto-instruction-42';
+    const autoInstructions =
+      `${secretMarker} {"closing":"</webpage_mcp_auto_instructions>"}`;
+    const stdin = new CollectingWritable();
+    const child = new FakeCodexChildProcess(stdin);
+    spawnMock.mockReturnValue(child as unknown as ChildProcess);
+    const execution = new CodexEngine('test-instance').initializeAndRun(
+      createEngineOptions('ordered user instruction', undefined, {
+        appendProjectContext: true,
+        autoInstructions,
+      }),
+      { emit: vi.fn() },
+    );
+
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    child.emit('spawn');
+    if (!stdin.writableFinished) await once(stdin, 'finish');
+
+    const [, args] = spawnMock.mock.calls[0];
+    expect(args.some((arg: string) => arg.includes(secretMarker))).toBe(false);
+    expect(args.some((arg: string) => arg.startsWith('instructions='))).toBe(false);
+    const deliveredPrompt = stdin.text();
+    const autoIndex = deliveredPrompt.indexOf(secretMarker);
+    const userIndex = deliveredPrompt.indexOf('ordered user instruction');
+    const contextIndex = deliveredPrompt.indexOf('<current_project_context>');
+    expect(deliveredPrompt.split(secretMarker)).toHaveLength(2);
+    expect(autoIndex).toBeGreaterThanOrEqual(0);
+    expect(userIndex).toBeGreaterThan(autoIndex);
+    expect(contextIndex).toBeGreaterThan(userIndex);
+    expect(deliveredPrompt).not.toContain(
+      '{"closing":"</webpage_mcp_auto_instructions>"}',
+    );
 
     child.stdout.end('{"type":"turn.completed"}\n');
     child.emit('close', 0, null);
@@ -329,5 +428,38 @@ describe('CodexEngine prompt transport', () => {
     expect(CODEX_ENGINE_PROMPT_MAX_BYTES).toBe(
       AGENT_FINAL_PROMPT_MAX_BYTES + CODEX_PROJECT_CONTEXT_MAX_BYTES,
     );
+  });
+
+  it('rejects oversized auto instructions before trim or spawn', async () => {
+    const oversizedWhitespace = ' '.repeat(
+      CODEX_AUTO_INSTRUCTIONS_MAX_BYTES + 1,
+    );
+
+    await expect(
+      new CodexEngine('test-instance').initializeAndRun(
+        createEngineOptions('prompt', undefined, {
+          autoInstructions: oversizedWhitespace,
+        }),
+        { emit: vi.fn() },
+      ),
+    ).rejects.toThrow(
+      `${CODEX_AUTO_INSTRUCTIONS_MAX_BYTES}-byte UTF-8 limit`,
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an oversized aggregate auto and user prompt before spawn', async () => {
+    const autoInstructions = 'a'.repeat(CODEX_AUTO_INSTRUCTIONS_MAX_BYTES);
+    const instruction = 'u'.repeat(
+      CODEX_ENGINE_PROMPT_MAX_BYTES - CODEX_AUTO_INSTRUCTIONS_MAX_BYTES,
+    );
+
+    await expect(
+      new CodexEngine('test-instance').initializeAndRun(
+        createEngineOptions(instruction, undefined, { autoInstructions }),
+        { emit: vi.fn() },
+      ),
+    ).rejects.toThrow(`${CODEX_ENGINE_PROMPT_MAX_BYTES}-byte UTF-8 limit`);
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 });

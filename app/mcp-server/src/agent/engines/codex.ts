@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Writable } from 'node:stream';
 import {
+  AGENT_CODEX_AUTO_INSTRUCTIONS_MAX_BYTES,
   AGENT_FINAL_PROMPT_MAX_BYTES,
   CODEX_AUTO_INSTRUCTIONS,
   DEFAULT_CODEX_CONFIG,
@@ -43,6 +44,8 @@ import {
 export const CODEX_PROJECT_CONTEXT_MAX_ENTRIES = 1_000;
 export const CODEX_PROJECT_CONTEXT_ENTRY_NAME_MAX_BYTES = 1_024;
 export const CODEX_PROJECT_CONTEXT_MAX_BYTES = 64 * 1024;
+export const CODEX_AUTO_INSTRUCTIONS_MAX_BYTES =
+  AGENT_CODEX_AUTO_INSTRUCTIONS_MAX_BYTES;
 export const CODEX_ENGINE_PROMPT_MAX_BYTES =
   AGENT_FINAL_PROMPT_MAX_BYTES + CODEX_PROJECT_CONTEXT_MAX_BYTES;
 
@@ -54,6 +57,8 @@ const PROJECT_CONTEXT_TRUNCATION =
   '\nProject directory listing was truncated to configured resource limits.';
 const PROJECT_CONTEXT_SUFFIX =
   '\nWork directly in the current directory. Do not create subdirectories unless specifically requested.\n</current_project_context>';
+const AUTO_INSTRUCTIONS_PREFIX = '<webpage_mcp_auto_instructions>\n';
+const AUTO_INSTRUCTIONS_SUFFIX = '\n</webpage_mcp_auto_instructions>';
 
 interface ProjectContextEntry {
   name: string;
@@ -67,10 +72,64 @@ function compareProjectEntryNames(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function escapeProjectContextName(value: string): string {
+function escapePromptXmlText(value: string): string {
   // Escape ampersands first so the entities introduced for angle brackets are
   // not escaped a second time.
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function sanitizePromptXmlText(value: string): string {
+  return value
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '\uFFFD');
+}
+
+function assertCodexAutoInstructionsLimit(autoInstructions: string): void {
+  const autoInstructionBytes = utf8ByteLength(autoInstructions);
+  if (autoInstructionBytes > CODEX_AUTO_INSTRUCTIONS_MAX_BYTES) {
+    throw new Error(
+      `CodexEngine: autoInstructions exceeds the ${CODEX_AUTO_INSTRUCTIONS_MAX_BYTES}-byte UTF-8 limit`,
+    );
+  }
+}
+
+/** Build the explicit developer-instruction section sent through stdin. */
+export function buildCodexAutoInstructionsBlock(autoInstructions: string): string {
+  assertCodexAutoInstructionsLimit(autoInstructions);
+
+  const escaped = escapePromptXmlText(sanitizePromptXmlText(autoInstructions));
+  return `${AUTO_INSTRUCTIONS_PREFIX}${escaped}${AUTO_INSTRUCTIONS_SUFFIX}`;
+}
+
+function composeCodexPromptParts(
+  autoInstructionsBlock: string,
+  instruction: string,
+  projectContext: string,
+): string {
+  const parts = [autoInstructionsBlock, '\n\n', instruction, projectContext];
+  let promptBytes = 0;
+  for (const part of parts) {
+    promptBytes += utf8ByteLength(part);
+    if (promptBytes > CODEX_ENGINE_PROMPT_MAX_BYTES) {
+      throw new Error(
+        `CodexEngine: prompt exceeds the ${CODEX_ENGINE_PROMPT_MAX_BYTES}-byte UTF-8 limit`,
+      );
+    }
+  }
+  return parts.join('');
+}
+
+/** Compose bounded prompt sections only after their aggregate size is known. */
+export function buildCodexPrompt(
+  autoInstructions: string,
+  instruction: string,
+  projectContext = '',
+): string {
+  return composeCodexPromptParts(
+    buildCodexAutoInstructionsBlock(autoInstructions),
+    instruction,
+    projectContext,
+  );
 }
 
 function boundProjectEntryName(value: string): {
@@ -130,7 +189,7 @@ export async function buildCodexProjectContext(
       /[\u0000-\u001f\u007f]/g,
       '\uFFFD',
     );
-    const escapedName = escapeProjectContextName(sanitizedName);
+    const escapedName = escapePromptXmlText(sanitizedName);
     const boundedName = boundProjectEntryName(escapedName);
     visibleNames.push(boundedName.text);
     if (boundedName.truncated) truncated = true;
@@ -355,10 +414,16 @@ export class CodexEngine implements AgentEngine {
       throw new Error(`CodexEngine: ${configError}`);
     }
 
-    // Ensure autoInstructions has a value
-    if (!resolvedConfig.autoInstructions?.trim()) {
-      resolvedConfig.autoInstructions = CODEX_AUTO_INSTRUCTIONS;
-    }
+    // Validate the configured value before trim can copy or hide an oversized
+    // whitespace prefix. Blank values retain the documented default.
+    assertCodexAutoInstructionsLimit(resolvedConfig.autoInstructions);
+    const normalizedAutoInstructions =
+      resolvedConfig.autoInstructions.trim() || CODEX_AUTO_INSTRUCTIONS;
+    // Validate and escape this component before any project I/O. The aggregate
+    // prompt is checked separately once the optional context is available.
+    const autoInstructionsBlock = buildCodexAutoInstructionsBlock(
+      normalizedAutoInstructions,
+    );
 
     // Resolve project-scoped Webpage MCP toggle (default: enabled)
     const enableWebpageMcp = await (async (): Promise<boolean> => {
@@ -375,16 +440,14 @@ export class CodexEngine implements AgentEngine {
       }
     })();
 
-    // Optionally append project context to the prompt
-    const prompt = resolvedConfig.appendProjectContext
-      ? await this.appendProjectContext(normalizedInstruction, repoPath)
-      : normalizedInstruction;
-    const promptBytes = utf8ByteLength(prompt);
-    if (promptBytes > CODEX_ENGINE_PROMPT_MAX_BYTES) {
-      throw new Error(
-        `CodexEngine: prompt exceeds the ${CODEX_ENGINE_PROMPT_MAX_BYTES}-byte UTF-8 limit`,
-      );
-    }
+    const projectContext = resolvedConfig.appendProjectContext
+      ? await this.loadProjectContext(repoPath)
+      : '';
+    const prompt = composeCodexPromptParts(
+      autoInstructionsBlock,
+      normalizedInstruction,
+      projectContext,
+    );
 
     const spawnSpec = buildCodexSpawnSpec();
     const args: string[] = [
@@ -1073,21 +1136,17 @@ export class CodexEngine implements AgentEngine {
   }
 
   /**
-   * Append project context (file listing) to the prompt.
+   * Load project context (file listing) as an independently bounded section.
    * Aligned with other/cweb implementation.
    */
-  private async appendProjectContext(
-    baseInstruction: string,
-    repoPath: string,
-  ): Promise<string> {
+  private async loadProjectContext(repoPath: string): Promise<string> {
     try {
       const fs = await import('node:fs/promises');
       const directory = await fs.opendir(repoPath);
-      const context = await buildCodexProjectContext(directory);
-      return `${baseInstruction}${context}`;
+      return await buildCodexProjectContext(directory);
     } catch (error) {
-      console.warn('[CodexEngine] Failed to append project context:', error);
-      return baseInstruction;
+      console.warn('[CodexEngine] Failed to load project context:', error);
+      return '';
     }
   }
 
@@ -1116,7 +1175,6 @@ export class CodexEngine implements AgentEngine {
     pushConfig('max_turns', config.maxTurns);
     pushConfig('max_thinking_tokens', config.maxThinkingTokens);
     pushConfig('reasoning_effort', config.reasoningEffort);
-    args.push('-c', `instructions=${JSON.stringify(config.autoInstructions)}`);
 
     return args;
   }
