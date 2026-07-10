@@ -197,6 +197,7 @@ jobs:
       - name: Publish package
         run: |
           VERSION=$(node -p "require('./app/mcp-server/package.json').version")
-          npm publish "artifacts/mcp/webpage-mcp-${VERSION}.tgz" --provenance --access public
+          DIST_TAG=$(node scripts/npm-dist-tag.mjs "$VERSION")
+          npm publish "artifacts/mcp/webpage-mcp-${VERSION}.tgz" --provenance --access public --tag "$DIST_TAG"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}

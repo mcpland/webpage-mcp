@@ -182,7 +182,7 @@ test("release workflow verifies before either publish mutation", async () => {
     "      - name: Reverify release metadata and artifacts",
     npmJob,
   );
-  const npmPublish = workflow.indexOf("npm publish", npmJob);
+  const npmPublish = workflow.indexOf('          npm publish "', npmJob);
 
   assert.ok(
     buildJob >= 0 && artifactPreflight > buildJob,
@@ -228,6 +228,11 @@ test("release workflow verifies before either publish mutation", async () => {
   assert.ok(
     npmPreflight > npmJob && npmPublish > npmPreflight,
     "npm publish must follow preflight",
+  );
+  assert.match(
+    workflow.slice(npmJob, npmPublish + 300),
+    /DIST_TAG=.*npm-dist-tag\.mjs[\s\S]*npm publish[\s\S]*--tag "\$DIST_TAG"/,
+    "npm prereleases must use an explicit semver-derived dist-tag",
   );
   assert.doesNotMatch(
     buildJobBody,
