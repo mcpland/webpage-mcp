@@ -11,6 +11,7 @@ import {
   resolveChromeExtensionPublicKey,
   validateChromeExtensionPublicKey,
 } from "./extension-public-key.mjs";
+import { loadReviewedLegalFiles } from "./legal-notices.mjs";
 import { validateUnifiedReleaseVersion } from "./unified-release-version.mjs";
 
 const RELEASE_PACKAGES = [
@@ -145,14 +146,15 @@ function parseArchiveJson(bytes, description) {
   }
 }
 
-function readTarEntryJson(archive, entryName, description) {
-  let tar;
+function decompressTarArchive(archive, description) {
   try {
-    tar = gunzipSync(archive, { maxOutputLength: MAX_ARCHIVE_BYTES });
+    return gunzipSync(archive, { maxOutputLength: MAX_ARCHIVE_BYTES });
   } catch (error) {
     throw new Error(`Unable to inspect ${description}: ${error.message}`);
   }
+}
 
+function readTarEntry(tar, entryName, description) {
   let found;
   for (let offset = 0; offset + 512 <= tar.length; ) {
     const header = tar.subarray(offset, offset + 512);
@@ -195,13 +197,24 @@ function readTarEntryJson(archive, entryName, description) {
 
     if (fullName === entryName) {
       invariant(!found, `Duplicate ${entryName} in ${description}`);
+      invariant(
+        size > 0 && size <= MAX_ARCHIVE_METADATA_BYTES,
+        `${entryName} in ${description} must be between 1 byte and ${MAX_ARCHIVE_METADATA_BYTES} bytes`,
+      );
       found = Buffer.from(tar.subarray(dataStart, dataEnd));
     }
     offset = dataStart + Math.ceil(size / 512) * 512;
   }
 
   invariant(found, `Missing ${entryName} in ${description}`);
-  return parseArchiveJson(found, description);
+  return found;
+}
+
+function readTarEntryJson(tar, entryName, description) {
+  return parseArchiveJson(
+    readTarEntry(tar, entryName, description),
+    description,
+  );
 }
 
 function findZipEndOfCentralDirectory(archive, description) {
@@ -226,7 +239,7 @@ function crc32(bytes) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function readZipEntryJson(archive, entryName, description) {
+function readZipEntry(archive, entryName, description) {
   const eocdOffset = findZipEndOfCentralDirectory(archive, description);
   invariant(
     archive.readUInt16LE(eocdOffset + 4) === 0 &&
@@ -326,7 +339,69 @@ function readZipEntryJson(archive, entryName, description) {
   );
 
   invariant(found, `Missing ${entryName} in ${description}`);
-  return parseArchiveJson(found, description);
+  return found;
+}
+
+function readZipEntryJson(archive, entryName, description) {
+  return parseArchiveJson(
+    readZipEntry(archive, entryName, description),
+    description,
+  );
+}
+
+async function verifyArtifactLegalFiles({
+  rootDir,
+  mcpTar,
+  extensionArchive,
+}) {
+  const [mcpLegal, extensionLegal] = await Promise.all([
+    loadReviewedLegalFiles({ rootDir, artifactName: "mcp" }),
+    loadReviewedLegalFiles({ rootDir, artifactName: "extension" }),
+  ]);
+  const requiredFiles = [
+    {
+      actual: readTarEntry(
+        mcpTar,
+        mcpLegal.archiveLicense,
+        "npm tarball project LICENSE",
+      ),
+      expected: mcpLegal.license,
+      description: "npm tarball project LICENSE",
+    },
+    {
+      actual: readTarEntry(
+        mcpTar,
+        mcpLegal.archiveNotice,
+        "npm tarball THIRD_PARTY_NOTICES.md",
+      ),
+      expected: mcpLegal.notice,
+      description: "npm tarball THIRD_PARTY_NOTICES.md",
+    },
+    {
+      actual: readZipEntry(
+        extensionArchive,
+        extensionLegal.archiveLicense,
+        "extension zip project LICENSE",
+      ),
+      expected: extensionLegal.license,
+      description: "extension zip project LICENSE",
+    },
+    {
+      actual: readZipEntry(
+        extensionArchive,
+        extensionLegal.archiveNotice,
+        "extension zip THIRD_PARTY_NOTICES.md",
+      ),
+      expected: extensionLegal.notice,
+      description: "extension zip THIRD_PARTY_NOTICES.md",
+    },
+  ];
+  for (const { actual, expected, description } of requiredFiles) {
+    invariant(
+      actual.equals(expected),
+      `${description} does not match the reviewed repository source`,
+    );
+  }
 }
 
 function parseChecksumManifest(source) {
@@ -366,12 +441,14 @@ export async function verifyReleaseArtifacts({
   const mcpPath = join(artifactRoot, mcpRelativePath);
   const extensionPath = join(artifactRoot, extensionRelativePath);
   const mcpArchive = await readBoundedFile(mcpPath, "npm tarball");
+  const mcpTar = decompressTarArchive(mcpArchive, "npm tarball");
   const extensionArchive = await readBoundedFile(
     extensionPath,
     "extension zip",
   );
+  await verifyArtifactLegalFiles({ rootDir, mcpTar, extensionArchive });
   const packedPackage = readTarEntryJson(
-    mcpArchive,
+    mcpTar,
     "package/package.json",
     "npm tarball package/package.json",
   );

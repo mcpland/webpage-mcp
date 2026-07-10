@@ -34,6 +34,8 @@
   },
   "files": [
     "dist",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "!dist/node_path.txt"
   ],
   "engines": {

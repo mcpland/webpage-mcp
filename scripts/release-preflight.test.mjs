@@ -22,6 +22,7 @@ import {
   resolveChromeExtensionPublicKey,
   validateChromeExtensionPublicKey,
 } from "./extension-public-key.mjs";
+import { loadReviewedLegalFiles } from "./legal-notices.mjs";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = "1.2.3";
@@ -67,6 +68,20 @@ async function createReleaseRoot(t, versions = {}) {
     name: "webpage-mcp-connector",
     version: versions.extension ?? VERSION,
   });
+  for (const relativePath of [
+    "LICENSE",
+    "app/mcp-server/LICENSE",
+    "app/mcp-server/THIRD_PARTY_NOTICES.md",
+    "app/chrome-extension/public/LICENSE",
+    "app/chrome-extension/public/THIRD_PARTY_NOTICES.md",
+  ]) {
+    const targetPath = join(rootDir, relativePath);
+    await mkdir(dirname(targetPath), { recursive: true });
+    await writeFile(
+      targetPath,
+      await readFile(join(REPOSITORY_ROOT, relativePath)),
+    );
+  }
   return rootDir;
 }
 
@@ -92,65 +107,85 @@ function writeTarOctal(header, offset, length, value) {
   );
 }
 
-function createTarGzip(name, contents) {
-  const body = Buffer.from(contents);
-  const header = Buffer.alloc(512);
-  writeTarText(header, 0, 100, name);
-  writeTarOctal(header, 100, 8, 0o644);
-  writeTarOctal(header, 108, 8, 0);
-  writeTarOctal(header, 116, 8, 0);
-  writeTarOctal(header, 124, 12, body.length);
-  writeTarOctal(header, 136, 12, 0);
-  header.fill(0x20, 148, 156);
-  header[156] = "0".charCodeAt(0);
-  writeTarText(header, 257, 6, "ustar\0");
-  writeTarText(header, 263, 2, "00");
-  const checksum = header.reduce((sum, byte) => sum + byte, 0);
-  writeTarText(header, 148, 8, `${checksum.toString(8).padStart(6, "0")}\0 `);
-  const padding = Buffer.alloc((512 - (body.length % 512)) % 512);
-  return gzipSync(Buffer.concat([header, body, padding, Buffer.alloc(1024)]));
+function createTarGzip(entries) {
+  const records = [];
+  for (const [name, contents] of Object.entries(entries)) {
+    const body = Buffer.from(contents);
+    const header = Buffer.alloc(512);
+    writeTarText(header, 0, 100, name);
+    writeTarOctal(header, 100, 8, 0o644);
+    writeTarOctal(header, 108, 8, 0);
+    writeTarOctal(header, 116, 8, 0);
+    writeTarOctal(header, 124, 12, body.length);
+    writeTarOctal(header, 136, 12, 0);
+    header.fill(0x20, 148, 156);
+    header[156] = "0".charCodeAt(0);
+    writeTarText(header, 257, 6, "ustar\0");
+    writeTarText(header, 263, 2, "00");
+    const checksum = header.reduce((sum, byte) => sum + byte, 0);
+    writeTarText(
+      header,
+      148,
+      8,
+      `${checksum.toString(8).padStart(6, "0")}\0 `,
+    );
+    const padding = Buffer.alloc((512 - (body.length % 512)) % 512);
+    records.push(header, body, padding);
+  }
+  records.push(Buffer.alloc(1024));
+  return gzipSync(Buffer.concat(records));
 }
 
-function createZip(name, contents) {
-  const body = Buffer.from(contents);
-  const compressed = deflateRawSync(body);
-  const nameBytes = Buffer.from(name);
-  let crc = 0xffffffff;
-  for (const byte of body) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+function createZip(entries) {
+  const localRecords = [];
+  const centralRecords = [];
+  let localOffset = 0;
+  for (const [name, contents] of Object.entries(entries)) {
+    const body = Buffer.from(contents);
+    const compressed = deflateRawSync(body);
+    const nameBytes = Buffer.from(name);
+    let crc = 0xffffffff;
+    for (const byte of body) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit += 1) {
+        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+      }
     }
+    crc = (crc ^ 0xffffffff) >>> 0;
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(compressed.length, 18);
+    local.writeUInt32LE(body.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(compressed.length, 20);
+    central.writeUInt32LE(body.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt32LE(localOffset, 42);
+
+    const localRecord = Buffer.concat([local, nameBytes, compressed]);
+    const centralRecord = Buffer.concat([central, nameBytes]);
+    localRecords.push(localRecord);
+    centralRecords.push(centralRecord);
+    localOffset += localRecord.length;
   }
-  crc = (crc ^ 0xffffffff) >>> 0;
-  const local = Buffer.alloc(30);
-  local.writeUInt32LE(0x04034b50, 0);
-  local.writeUInt16LE(20, 4);
-  local.writeUInt16LE(8, 8);
-  local.writeUInt32LE(crc, 14);
-  local.writeUInt32LE(compressed.length, 18);
-  local.writeUInt32LE(body.length, 22);
-  local.writeUInt16LE(nameBytes.length, 26);
-
-  const central = Buffer.alloc(46);
-  central.writeUInt32LE(0x02014b50, 0);
-  central.writeUInt16LE(20, 4);
-  central.writeUInt16LE(20, 6);
-  central.writeUInt16LE(8, 10);
-  central.writeUInt32LE(crc, 16);
-  central.writeUInt32LE(compressed.length, 20);
-  central.writeUInt32LE(body.length, 24);
-  central.writeUInt16LE(nameBytes.length, 28);
-
-  const localRecord = Buffer.concat([local, nameBytes, compressed]);
-  const centralRecord = Buffer.concat([central, nameBytes]);
+  const centralDirectory = Buffer.concat(centralRecords);
   const end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(1, 8);
-  end.writeUInt16LE(1, 10);
-  end.writeUInt32LE(centralRecord.length, 12);
-  end.writeUInt32LE(localRecord.length, 16);
-  return Buffer.concat([localRecord, centralRecord, end]);
+  end.writeUInt16LE(centralRecords.length, 8);
+  end.writeUInt16LE(centralRecords.length, 10);
+  end.writeUInt32LE(centralDirectory.length, 12);
+  end.writeUInt32LE(localOffset, 16);
+  return Buffer.concat([...localRecords, centralDirectory, end]);
 }
 
 async function createArtifacts(rootDir, overrides = {}) {
@@ -170,20 +205,49 @@ async function createArtifacts(rootDir, overrides = {}) {
       ? {}
       : { key: overrides.extensionKey }),
   });
+  const [mcpLegal, extensionLegal] = await Promise.all([
+    loadReviewedLegalFiles({ rootDir, artifactName: "mcp" }),
+    loadReviewedLegalFiles({ rootDir, artifactName: "extension" }),
+  ]);
+  const mcpEntries = {
+    "package/package.json": await readFile(
+      join(stagingDir, "package/package.json"),
+    ),
+    ...(overrides.omitMcpLicense
+      ? {}
+      : {
+          [mcpLegal.archiveLicense]:
+            overrides.mcpLicense ?? mcpLegal.license,
+        }),
+    ...(overrides.omitMcpNotice
+      ? {}
+      : {
+          [mcpLegal.archiveNotice]: overrides.mcpNotice ?? mcpLegal.notice,
+        }),
+  };
+  const extensionEntries = {
+    "manifest.json": await readFile(join(stagingDir, "manifest.json")),
+    ...(overrides.omitExtensionLicense
+      ? {}
+      : {
+          [extensionLegal.archiveLicense]:
+            overrides.extensionLicense ?? extensionLegal.license,
+        }),
+    ...(overrides.omitExtensionNotice
+      ? {}
+      : {
+          [extensionLegal.archiveNotice]:
+            overrides.extensionNotice ?? extensionLegal.notice,
+        }),
+  };
 
   await writeFile(
     join(artifactsDir, mcpPath),
-    createTarGzip(
-      "package/package.json",
-      await readFile(join(stagingDir, "package/package.json")),
-    ),
+    createTarGzip(mcpEntries),
   );
   await writeFile(
     join(artifactsDir, extensionPath),
-    createZip(
-      "manifest.json",
-      await readFile(join(stagingDir, "manifest.json")),
-    ),
+    createZip(extensionEntries),
   );
 
   const mcpArchive = await readFile(join(artifactsDir, mcpPath));
@@ -466,6 +530,58 @@ test("release artifact verification fails closed", async (t) => {
       );
     },
   );
+
+  await t.test("when either artifact omits a legal file", async (t) => {
+    const npmRoot = await createReleaseRoot(t);
+    const npmArtifacts = await createArtifacts(npmRoot, {
+      omitMcpLicense: true,
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: npmRoot,
+        artifactsDir: npmArtifacts.artifactsDir,
+      }),
+      /Missing package\/LICENSE in npm tarball project LICENSE/,
+    );
+
+    const extensionRoot = await createReleaseRoot(t);
+    const extensionArtifacts = await createArtifacts(extensionRoot, {
+      omitExtensionNotice: true,
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: extensionRoot,
+        artifactsDir: extensionArtifacts.artifactsDir,
+      }),
+      /Missing THIRD_PARTY_NOTICES\.md in extension zip THIRD_PARTY_NOTICES\.md/,
+    );
+  });
+
+  await t.test("when either artifact corrupts a legal file", async (t) => {
+    const npmRoot = await createReleaseRoot(t);
+    const npmArtifacts = await createArtifacts(npmRoot, {
+      mcpNotice: "tampered notices\n",
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: npmRoot,
+        artifactsDir: npmArtifacts.artifactsDir,
+      }),
+      /npm tarball THIRD_PARTY_NOTICES\.md does not match the reviewed repository source/,
+    );
+
+    const extensionRoot = await createReleaseRoot(t);
+    const extensionArtifacts = await createArtifacts(extensionRoot, {
+      extensionLicense: "tampered license\n",
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: extensionRoot,
+        artifactsDir: extensionArtifacts.artifactsDir,
+      }),
+      /extension zip project LICENSE does not match the reviewed repository source/,
+    );
+  });
 
   await t.test("on a corrupt checksum", async (t) => {
     const rootDir = await createReleaseRoot(t);
