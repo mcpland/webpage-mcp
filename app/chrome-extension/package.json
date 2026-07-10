@@ -7,11 +7,8 @@
   "type": "module",
   "scripts": {
     "dev": "wxt",
-    "dev:firefox": "wxt -b firefox",
     "build": "pnpm run verify:ort && wxt build && pnpm run verify:bundle",
-    "build:firefox": "pnpm run verify:ort && wxt build -b firefox",
     "zip": "pnpm run verify:ort && wxt zip && pnpm run verify:bundle && node ./scripts/rename-zip.mjs chrome",
-    "zip:firefox": "pnpm run verify:ort && wxt zip -b firefox && node ./scripts/rename-zip.mjs firefox",
     "verify:ort": "node ./scripts/ort-artifacts.mjs verify",
     "verify:bundle": "node ./scripts/bundle-code-policy.mjs .output/chrome-mv3",
     "copy:ort": "node ./scripts/ort-artifacts.mjs copy",
