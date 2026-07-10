@@ -2,9 +2,28 @@
  * Model Cache Manager
  */
 
+import { listPinnedModelArtifacts } from './model-assets';
+
 const CACHE_NAME = 'onnx-model-cache-v1';
 const CACHE_EXPIRY_DAYS = 30;
 const MAX_CACHE_SIZE_MB = 500;
+const MAX_METADATA_BYTES = 4 * 1024;
+const MAX_METADATA_CHUNKS = 64;
+
+interface PinnedCacheEntry {
+  url: string;
+  size: number;
+}
+
+const PINNED_CACHE_ENTRIES: PinnedCacheEntry[] = [];
+const PINNED_CACHE_ENTRY_BY_URL = new Map<string, PinnedCacheEntry>();
+for (const artifact of listPinnedModelArtifacts()) {
+  for (const url of [artifact.url, artifact.legacyCacheUrl]) {
+    const entry = { url, size: artifact.size };
+    PINNED_CACHE_ENTRIES.push(entry);
+    PINNED_CACHE_ENTRY_BY_URL.set(url, entry);
+  }
+}
 
 export interface CacheMetadata {
   timestamp: number;
@@ -35,6 +54,84 @@ interface CacheEntryDetails {
   size: number;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+async function readBoundedMetadataText(response: Response): Promise<string> {
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null) {
+    const declaredBytes =
+      contentLength.length <= 16 && /^\d+$/.test(contentLength)
+        ? Number(contentLength)
+        : Number.NaN;
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes > MAX_METADATA_BYTES) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error('Model cache metadata exceeds the byte limit');
+    }
+  }
+  if (!response.body) throw new Error('Model cache metadata body is unavailable');
+
+  const reader = response.body.getReader();
+  const bytes = new Uint8Array(MAX_METADATA_BYTES);
+  let byteCount = 0;
+  let chunkCount = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunkCount += 1;
+      if (chunkCount > MAX_METADATA_CHUNKS) {
+        await reader.cancel('Model cache metadata exceeded the chunk limit').catch(() => undefined);
+        throw new Error('Model cache metadata exceeds the chunk limit');
+      }
+      if (
+        !value ||
+        !Number.isSafeInteger(value.byteLength) ||
+        value.byteLength > MAX_METADATA_BYTES - byteCount
+      ) {
+        await reader.cancel('Model cache metadata exceeded the byte limit').catch(() => undefined);
+        throw new Error('Model cache metadata exceeds the byte limit');
+      }
+      bytes.set(value, byteCount);
+      byteCount += value.byteLength;
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, byteCount));
+}
+
+async function readCacheMetadata(
+  response: Response,
+  expectedEntry: PinnedCacheEntry,
+): Promise<CacheMetadata> {
+  const parsed: unknown = JSON.parse(await readBoundedMetadataText(response));
+  if (!isPlainRecord(parsed)) throw new Error('Model cache metadata must be an object');
+  if (
+    typeof parsed.timestamp !== 'number' ||
+    !Number.isSafeInteger(parsed.timestamp) ||
+    parsed.timestamp < 0 ||
+    parsed.timestamp > Date.now() + 86_400_000 ||
+    parsed.modelUrl !== expectedEntry.url ||
+    parsed.size !== expectedEntry.size ||
+    parsed.version !== CACHE_NAME
+  ) {
+    throw new Error('Model cache metadata is invalid');
+  }
+  return {
+    timestamp: parsed.timestamp,
+    modelUrl: expectedEntry.url,
+    size: expectedEntry.size,
+    version: CACHE_NAME,
+  };
+}
+
 export class ModelCacheManager {
   private static instance: ModelCacheManager | null = null;
 
@@ -58,8 +155,8 @@ export class ModelCacheManager {
     return now > expiryTime;
   }
 
-  private isMetadataUrl(url: string): boolean {
-    return url.startsWith('https://cache-metadata.local/');
+  private getPinnedEntry(modelUrl: string): PinnedCacheEntry | null {
+    return PINNED_CACHE_ENTRY_BY_URL.get(modelUrl) ?? null;
   }
 
   private async collectCacheEntries(): Promise<{
@@ -68,27 +165,23 @@ export class ModelCacheManager {
     entryCount: number;
   }> {
     const cache = await caches.open(CACHE_NAME);
-    const keys = await cache.keys();
     const entries: CacheEntryDetails[] = [];
     let totalSize = 0;
     let entryCount = 0;
 
-    for (const request of keys) {
-      if (this.isMetadataUrl(request.url)) continue;
-
-      const response = await cache.match(request);
+    for (const pinnedEntry of PINNED_CACHE_ENTRIES) {
+      const response = await cache.match(pinnedEntry.url);
       if (response) {
-        const blob = await response.blob();
-        const size = blob.size;
+        const size = pinnedEntry.size;
         totalSize += size;
         entryCount++;
 
-        const metadataResponse = await cache.match(this.getCacheMetadataKey(request.url));
+        const metadataResponse = await cache.match(this.getCacheMetadataKey(pinnedEntry.url));
         let timestamp = 0;
 
         if (metadataResponse) {
           try {
-            const metadata: CacheMetadata = await metadataResponse.json();
+            const metadata = await readCacheMetadata(metadataResponse, pinnedEntry);
             timestamp = metadata.timestamp;
           } catch (error) {
             console.warn('Failed to parse cache metadata:', error);
@@ -96,7 +189,7 @@ export class ModelCacheManager {
         }
 
         entries.push({
-          url: request.url,
+          url: pinnedEntry.url,
           timestamp,
           size,
         });
@@ -107,9 +200,16 @@ export class ModelCacheManager {
   }
 
   public async cleanupCacheOnDemand(newDataSize: number = 0): Promise<void> {
+    const maxSizeBytes = MAX_CACHE_SIZE_MB * 1024 * 1024;
+    if (
+      !Number.isSafeInteger(newDataSize) ||
+      newDataSize < 0 ||
+      newDataSize > maxSizeBytes
+    ) {
+      throw new Error('New model cache data exceeds the cache size policy');
+    }
     const cache = await caches.open(CACHE_NAME);
     const { entries, totalSize } = await this.collectCacheEntries();
-    const maxSizeBytes = MAX_CACHE_SIZE_MB * 1024 * 1024;
     const projectedSize = totalSize + newDataSize;
 
     if (projectedSize <= maxSizeBytes) {
@@ -124,19 +224,14 @@ export class ModelCacheManager {
     const validEntries: CacheEntryDetails[] = [];
 
     for (const entry of entries) {
-      const metadataResponse = await cache.match(this.getCacheMetadataKey(entry.url));
-      let isExpired = false;
-
-      if (metadataResponse) {
-        try {
-          const metadata: CacheMetadata = await metadataResponse.json();
-          isExpired = this.isCacheExpired(metadata);
-        } catch (error) {
-          isExpired = true;
-        }
-      } else {
-        isExpired = true;
-      }
+      const isExpired =
+        entry.timestamp <= 0 ||
+        this.isCacheExpired({
+          timestamp: entry.timestamp,
+          modelUrl: entry.url,
+          size: entry.size,
+          version: CACHE_NAME,
+        });
 
       if (isExpired) {
         expiredEntries.push(entry);
@@ -174,6 +269,10 @@ export class ModelCacheManager {
   }
 
   public async storeCacheMetadata(modelUrl: string, size: number): Promise<void> {
+    const pinnedEntry = this.getPinnedEntry(modelUrl);
+    if (!pinnedEntry || size !== pinnedEntry.size) {
+      throw new Error('Cannot store metadata for an unpinned model cache entry');
+    }
     const cache = await caches.open(CACHE_NAME);
     const metadata: CacheMetadata = {
       timestamp: Date.now(),
@@ -182,14 +281,20 @@ export class ModelCacheManager {
       version: CACHE_NAME,
     };
 
-    const metadataResponse = new Response(JSON.stringify(metadata), {
-      headers: { 'Content-Type': 'application/json' },
+    const serializedMetadata = JSON.stringify(metadata);
+    const metadataResponse = new Response(serializedMetadata, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': String(serializedMetadata.length),
+      },
     });
 
     await cache.put(this.getCacheMetadataKey(modelUrl), metadataResponse);
   }
 
   public async getCachedModelData(modelUrl: string): Promise<ArrayBuffer | null> {
+    const pinnedEntry = this.getPinnedEntry(modelUrl);
+    if (!pinnedEntry) return null;
     const cache = await caches.open(CACHE_NAME);
     const cachedResponse = await cache.match(modelUrl);
 
@@ -200,7 +305,7 @@ export class ModelCacheManager {
     const metadataResponse = await cache.match(this.getCacheMetadataKey(modelUrl));
     if (metadataResponse) {
       try {
-        const metadata: CacheMetadata = await metadataResponse.json();
+        const metadata = await readCacheMetadata(metadataResponse, pinnedEntry);
         if (!this.isCacheExpired(metadata)) {
           console.log('Model found in cache and not expired. Loading from cache.');
           return cachedResponse.arrayBuffer();
@@ -222,10 +327,16 @@ export class ModelCacheManager {
   }
 
   public async storeModelData(modelUrl: string, data: ArrayBuffer): Promise<void> {
+    const pinnedEntry = this.getPinnedEntry(modelUrl);
+    if (!pinnedEntry || data.byteLength !== pinnedEntry.size) {
+      throw new Error('Cannot cache an unpinned or incorrectly sized model artifact');
+    }
     await this.cleanupCacheOnDemand(data.byteLength);
 
     const cache = await caches.open(CACHE_NAME);
-    const response = new Response(data);
+    const response = new Response(data, {
+      headers: { 'Content-Length': String(data.byteLength) },
+    });
 
     await cache.put(modelUrl, response);
     await this.storeCacheMetadata(modelUrl, data.byteLength);
@@ -236,42 +347,31 @@ export class ModelCacheManager {
   }
 
   public async deleteCacheEntry(modelUrl: string): Promise<void> {
+    if (!this.getPinnedEntry(modelUrl)) return;
     const cache = await caches.open(CACHE_NAME);
     await cache.delete(modelUrl);
     await cache.delete(this.getCacheMetadataKey(modelUrl));
   }
 
   public async clearAllCache(): Promise<void> {
-    const cache = await caches.open(CACHE_NAME);
-    const keys = await cache.keys();
-
-    for (const request of keys) {
-      await cache.delete(request);
-    }
+    await caches.delete(CACHE_NAME);
 
     console.log('All model cache entries cleared');
   }
 
   public async getCacheStats(): Promise<CacheStats> {
     const { entries, totalSize, entryCount } = await this.collectCacheEntries();
-    const cache = await caches.open(CACHE_NAME);
-
     const cacheEntries: CacheEntry[] = [];
 
     for (const entry of entries) {
-      const metadataResponse = await cache.match(this.getCacheMetadataKey(entry.url));
-      let expired = false;
-
-      if (metadataResponse) {
-        try {
-          const metadata: CacheMetadata = await metadataResponse.json();
-          expired = this.isCacheExpired(metadata);
-        } catch (error) {
-          expired = true;
-        }
-      } else {
-        expired = true;
-      }
+      const expired =
+        entry.timestamp <= 0 ||
+        this.isCacheExpired({
+          timestamp: entry.timestamp,
+          modelUrl: entry.url,
+          size: entry.size,
+          version: CACHE_NAME,
+        });
 
       const age =
         entry.timestamp > 0
@@ -308,6 +408,8 @@ export class ModelCacheManager {
    */
   public async isModelCached(modelUrl: string): Promise<boolean> {
     try {
+      const pinnedEntry = this.getPinnedEntry(modelUrl);
+      if (!pinnedEntry) return false;
       const cache = await caches.open(CACHE_NAME);
       const cachedResponse = await cache.match(modelUrl);
 
@@ -318,7 +420,7 @@ export class ModelCacheManager {
       const metadataResponse = await cache.match(this.getCacheMetadataKey(modelUrl));
       if (metadataResponse) {
         try {
-          const metadata: CacheMetadata = await metadataResponse.json();
+          const metadata = await readCacheMetadata(metadataResponse, pinnedEntry);
           return !this.isCacheExpired(metadata);
         } catch (error) {
           console.warn('Failed to parse cache metadata for cache check:', error);
@@ -341,15 +443,13 @@ export class ModelCacheManager {
   public async hasAnyValidCache(): Promise<boolean> {
     try {
       const cache = await caches.open(CACHE_NAME);
-      const keys = await cache.keys();
-
-      for (const request of keys) {
-        if (this.isMetadataUrl(request.url)) continue;
-
-        const metadataResponse = await cache.match(this.getCacheMetadataKey(request.url));
+      for (const pinnedEntry of PINNED_CACHE_ENTRIES) {
+        const cachedResponse = await cache.match(pinnedEntry.url);
+        if (!cachedResponse) continue;
+        const metadataResponse = await cache.match(this.getCacheMetadataKey(pinnedEntry.url));
         if (metadataResponse) {
           try {
-            const metadata: CacheMetadata = await metadataResponse.json();
+            const metadata = await readCacheMetadata(metadataResponse, pinnedEntry);
             if (!this.isCacheExpired(metadata)) {
               return true; // Found at least one valid cache
             }

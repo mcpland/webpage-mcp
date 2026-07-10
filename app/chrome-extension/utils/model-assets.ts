@@ -90,6 +90,21 @@ export function resolvePinnedModelArtifact(
   };
 }
 
+export function listPinnedModelArtifacts(): PinnedModelArtifact[] {
+  const artifacts: PinnedModelArtifact[] = [];
+  for (const modelIdentifier in PINNED_MODEL_ARTIFACTS) {
+    if (!Object.prototype.hasOwnProperty.call(PINNED_MODEL_ARTIFACTS, modelIdentifier)) continue;
+    const manifest = PINNED_MODEL_ARTIFACTS[modelIdentifier];
+    for (const path in manifest.files) {
+      if (!Object.prototype.hasOwnProperty.call(manifest.files, path)) continue;
+      const prefix = 'onnx/';
+      if (!path.startsWith(prefix) || path.length <= prefix.length) continue;
+      artifacts.push(resolvePinnedModelArtifact(modelIdentifier, path.slice(prefix.length)));
+    }
+  }
+  return artifacts;
+}
+
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
