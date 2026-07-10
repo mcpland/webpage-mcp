@@ -369,12 +369,18 @@ export class AttachmentService {
       const filePath = this.getAttachmentPath(projectId, filename);
       await fs.rm(filePath, { force: true });
       const projectDir = this.getProjectAttachmentsDir(projectId);
+      let directory: Awaited<ReturnType<typeof fs.opendir>> | undefined;
       try {
-        if ((await fs.readdir(projectDir)).length === 0) {
+        directory = await fs.opendir(projectDir);
+        if ((await directory.read()) === null) {
+          await directory.close();
+          directory = undefined;
           await fs.rmdir(projectDir);
         }
       } catch {
         // The directory is non-empty, already gone, or concurrently unavailable.
+      } finally {
+        await directory?.close().catch(() => undefined);
       }
     });
   }

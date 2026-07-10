@@ -201,6 +201,28 @@ describe('bounded attachment inventory service', () => {
     expect((await fs.stat(projectDir)).isDirectory()).toBe(true);
   });
 
+  it('checks project emptiness without materializing every directory entry', async () => {
+    const { rootDir, service } = await createService('attachment-delete-one-', {
+      maxProjectBytes: 1024,
+      maxProjectFiles: 10,
+    });
+    const projectDir = path.join(rootDir, 'project');
+    await fs.mkdir(projectDir, { recursive: true });
+    await Promise.all([
+      fs.writeFile(path.join(projectDir, 'target.png'), 'target'),
+      fs.writeFile(path.join(projectDir, 'keep.png'), 'keep'),
+    ]);
+    const readdirSpy = vi.spyOn(fs, 'readdir');
+
+    await service.deleteAttachment('project', 'target.png');
+
+    expect(readdirSpy).not.toHaveBeenCalled();
+    expect(await fs.readFile(path.join(projectDir, 'keep.png'), 'utf8')).toBe('keep');
+
+    await service.deleteAttachment('project', 'keep.png');
+    await expect(fs.stat(projectDir)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('fails closed when quota enforcement encounters a truncated inventory', async () => {
     const { rootDir, service } = await createService('attachment-quota-scan-limit-', {
       maxProjectBytes: 1024,
