@@ -43,7 +43,6 @@ interface TabConsoleBufferState {
 }
 
 export interface ConsoleBufferReadOptions {
-  pattern?: RegExp;
   onlyErrors?: boolean;
   limit?: number;
   includeExceptions?: boolean;
@@ -79,11 +78,6 @@ function extractHostname(url?: string): string {
 function isErrorLevel(level?: string): boolean {
   const normalized = (level || '').toLowerCase();
   return normalized === 'error' || normalized === 'assert';
-}
-
-function matchesPattern(pattern: RegExp, text: string): boolean {
-  pattern.lastIndex = 0;
-  return pattern.test(text);
 }
 
 function formatConsoleArgs(args: unknown[]): string {
@@ -213,7 +207,7 @@ class ConsoleBuffer {
     const state = this.buffers.get(tabId);
     if (!state) return null;
 
-    const { pattern, onlyErrors = false, limit, includeExceptions = true } = options;
+    const { onlyErrors = false, limit, includeExceptions = true } = options;
 
     const totalBufferedMessages = state.messages.length;
     const totalBufferedExceptions = state.exceptions.length;
@@ -222,9 +216,6 @@ class ConsoleBuffer {
     let messages = state.messages;
     if (onlyErrors) {
       messages = messages.filter((m) => isErrorLevel(m.level));
-    }
-    if (pattern) {
-      messages = messages.filter((m) => matchesPattern(pattern, m.text || ''));
     }
 
     // Sort by time
@@ -244,9 +235,6 @@ class ConsoleBuffer {
     let exceptions: BufferedConsoleException[] = [];
     if (includeExceptions) {
       exceptions = state.exceptions;
-      if (pattern) {
-        exceptions = exceptions.filter((e) => matchesPattern(pattern, e.text || ''));
-      }
       exceptions = [...exceptions].sort((a, b) => a.timestamp - b.timestamp);
     }
 

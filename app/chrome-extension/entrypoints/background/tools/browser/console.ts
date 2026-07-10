@@ -3,6 +3,15 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { consoleBuffer, BufferedConsoleMessage, BufferedConsoleException } from './console-buffer';
+import {
+  measureWorkflowRegexUtf8Bytes,
+  testWorkflowRegex,
+  validateWorkflowRegexPattern,
+  validateWorkflowRegexPatternSize,
+  WORKFLOW_REGEX_BATCH_INPUT_MAX_UTF8_BYTES,
+  WORKFLOW_REGEX_INPUT_MAX_UTF8_BYTES,
+  type WorkflowRegexFailure,
+} from '@/entrypoints/background/record-replay/workflow-regex';
 
 const DEFAULT_MAX_MESSAGES = 100;
 
@@ -68,6 +77,11 @@ interface ConsoleResult {
 
 // Helper function
 
+interface ParsedRegexPattern {
+  source: string;
+  flags: string;
+}
+
 function normalizeLimit(value: unknown, fallback: number): number {
   const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
   return Math.max(0, n);
@@ -83,23 +97,60 @@ function hasDisallowedPublicPageScheme(url: string): boolean {
   return protocol !== 'http' && protocol !== 'https';
 }
 
-function parseRegexPattern(pattern?: string): RegExp | undefined {
-  if (typeof pattern !== 'string') return undefined;
-  const trimmed = pattern.trim();
-  if (!trimmed) return undefined;
-  // Support /pattern/flags syntax
-  const match = trimmed.match(/^\/(.+)\/([gimsuy]*)$/);
-  try {
-    return match ? new RegExp(match[1], match[2]) : new RegExp(trimmed);
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`Invalid regex pattern: ${msg}`);
-  }
+function formatRegexFailure(result: WorkflowRegexFailure): string {
+  return `Console regex rejected (${result.code}): ${result.message}`;
 }
 
-function matchesPattern(pattern: RegExp, text: string): boolean {
-  pattern.lastIndex = 0;
-  return pattern.test(text);
+function hasSupportedRegexFlags(value: string): boolean {
+  for (const flag of value) {
+    if (
+      flag !== 'g' &&
+      flag !== 'i' &&
+      flag !== 'm' &&
+      flag !== 's' &&
+      flag !== 'u' &&
+      flag !== 'y'
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function parseRegexPattern(pattern?: string): ParsedRegexPattern | undefined {
+  if (typeof pattern !== 'string') return undefined;
+  const rawSize = validateWorkflowRegexPatternSize(pattern);
+  if (!rawSize.ok) throw new Error(formatRegexFailure(rawSize));
+  const trimmed = pattern.trim();
+  if (!trimmed) return undefined;
+
+  // Support /pattern/flags syntax
+  let source = trimmed;
+  let flags = '';
+  if (trimmed.startsWith('/')) {
+    const finalSlash = trimmed.lastIndexOf('/');
+    const candidateFlags = finalSlash > 0 ? trimmed.slice(finalSlash + 1) : '';
+    const candidateSource = finalSlash > 0 ? trimmed.slice(1, finalSlash) : '';
+    if (
+      finalSlash > 1 &&
+      hasSupportedRegexFlags(candidateFlags) &&
+      !candidateSource.includes('\n') &&
+      !candidateSource.includes('\r')
+    ) {
+      source = candidateSource;
+      flags = candidateFlags;
+    }
+  }
+
+  const validation = validateWorkflowRegexPattern(source, flags);
+  if (!validation.ok) throw new Error(formatRegexFailure(validation));
+  return { source, flags };
+}
+
+function matchesPattern(pattern: ParsedRegexPattern, text: string): boolean {
+  const result = testWorkflowRegex(pattern.source, text, pattern.flags);
+  if (!result.ok) throw new Error(formatRegexFailure(result));
+  return result.matched;
 }
 
 function sanitizeConsoleUrl(url: unknown): { url?: string | null; urlRedacted?: true } {
@@ -165,21 +216,40 @@ function isErrorLevel(level?: string): boolean {
 
 function applyResultFilters(
   result: ConsoleResult,
-  options: { pattern?: RegExp; onlyErrors?: boolean; includeExceptions: boolean },
+  options: { pattern?: ParsedRegexPattern; onlyErrors?: boolean; includeExceptions: boolean },
 ): ConsoleResult {
   const { pattern, onlyErrors = false, includeExceptions } = options;
+  let matchedInputBytes = 0;
+  const matchesWithinBudget = (text: string): boolean => {
+    if (!pattern) return true;
+    const inputBytes = measureWorkflowRegexUtf8Bytes(
+      text,
+      WORKFLOW_REGEX_INPUT_MAX_UTF8_BYTES,
+    );
+    if (inputBytes === null) return matchesPattern(pattern, text);
+    if (
+      inputBytes >
+      WORKFLOW_REGEX_BATCH_INPUT_MAX_UTF8_BYTES - matchedInputBytes
+    ) {
+      throw new Error(
+        `Console regex rejected (WORKFLOW_REGEX_BATCH_INPUT_TOO_LARGE): cumulative input exceeds ${WORKFLOW_REGEX_BATCH_INPUT_MAX_UTF8_BYTES} UTF-8 bytes.`,
+      );
+    }
+    matchedInputBytes += inputBytes;
+    return matchesPattern(pattern, text);
+  };
 
   let messages = result.messages;
   if (onlyErrors) {
     messages = messages.filter((m) => isErrorLevel(m.level));
   }
   if (pattern) {
-    messages = messages.filter((m) => matchesPattern(pattern, m.text || ''));
+    messages = messages.filter((m) => matchesWithinBudget(m.text || ''));
   }
 
   let exceptions = includeExceptions ? result.exceptions : [];
   if (includeExceptions && pattern) {
-    exceptions = exceptions.filter((e) => matchesPattern(pattern, e.text || ''));
+    exceptions = exceptions.filter((e) => matchesWithinBudget(e.text || ''));
   }
 
   return {
@@ -188,6 +258,18 @@ function applyResultFilters(
     exceptions,
     messageCount: messages.length,
     exceptionCount: exceptions.length,
+  };
+}
+
+function applyMessageLimit(result: ConsoleResult, limit: number): ConsoleResult {
+  const normalizedLimit = normalizeLimit(limit, DEFAULT_MAX_MESSAGES);
+  if (result.messages.length <= normalizedLimit) return result;
+  const messages = result.messages.slice(result.messages.length - normalizedLimit);
+  return {
+    ...result,
+    messages,
+    messageCount: messages.length,
+    messageLimitReached: true,
   };
 }
 
@@ -231,7 +313,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
     let targetTabId: number | undefined;
 
     // Parsing regular expressions
-    let compiledPattern: RegExp | undefined;
+    let compiledPattern: ParsedRegexPattern | undefined;
     try {
       compiledPattern = parseRegexPattern(pattern);
     } catch (e: unknown) {
@@ -308,9 +390,6 @@ class ConsoleTool extends BaseBrowserToolExecutor {
 
         // Read buffer
         const read = consoleBuffer.read(targetTabId, {
-          pattern: compiledPattern,
-          onlyErrors,
-          limit: effectiveLimit,
           includeExceptions,
         });
 
@@ -318,27 +397,9 @@ class ConsoleTool extends BaseBrowserToolExecutor {
           return createErrorResponse('Console buffer is not available for this tab.');
         }
 
-        // Handle clearing requests after reading (mcp-tools.js style to avoid repeated reading)
-        let clearedAfter: { clearedMessages: number; clearedExceptions: number } | null = null;
-        if (clearAfterRead === true) {
-          clearedAfter = consoleBuffer.clear(targetTabId, 'manual');
-        }
-
-        // Build clean summary
-        let clearedSummary = '';
-        if (clearedBefore) {
-          clearedSummary += ` Cleared ${clearedBefore.clearedMessages} messages and ${clearedBefore.clearedExceptions} exceptions before reading.`;
-        }
-        if (clearedAfter) {
-          clearedSummary += ` Cleared ${clearedAfter.clearedMessages} messages and ${clearedAfter.clearedExceptions} exceptions after reading.`;
-        }
-
         const result: ConsoleResult = {
           success: true,
-          message:
-            `Console buffer read for tab ${targetTabId}.` +
-            clearedSummary +
-            ` Returned ${read.messageCount} messages and ${read.exceptionCount} exceptions.`,
+          message: '',
           tabId: targetTabId,
           tabUrl: read.tabUrl || '',
           tabTitle: read.tabTitle || '',
@@ -354,8 +415,32 @@ class ConsoleTool extends BaseBrowserToolExecutor {
           droppedExceptionCount: read.droppedExceptionCount,
         };
 
+        const filtered = applyResultFilters(result, {
+          pattern: compiledPattern,
+          onlyErrors,
+          includeExceptions,
+        });
+        const limited = applyMessageLimit(filtered, effectiveLimit);
+
+        // Clear only after every fallible filter/limit step has succeeded.
+        let clearedAfter: { clearedMessages: number; clearedExceptions: number } | null = null;
+        if (clearAfterRead === true) {
+          clearedAfter = consoleBuffer.clear(targetTabId, 'manual');
+        }
+        let clearedSummary = '';
+        if (clearedBefore) {
+          clearedSummary += ` Cleared ${clearedBefore.clearedMessages} messages and ${clearedBefore.clearedExceptions} exceptions before reading.`;
+        }
+        if (clearedAfter) {
+          clearedSummary += ` Cleared ${clearedAfter.clearedMessages} messages and ${clearedAfter.clearedExceptions} exceptions after reading.`;
+        }
+        limited.message =
+          `Console buffer read for tab ${targetTabId}.` +
+          clearedSummary +
+          ` Returned ${limited.messageCount} messages and ${limited.exceptionCount} exceptions.`;
+
         return {
-          content: [{ type: 'text', text: JSON.stringify(result) }],
+          content: [{ type: 'text', text: JSON.stringify(limited) }],
           isError: false,
         };
       }

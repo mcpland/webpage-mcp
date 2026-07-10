@@ -26,6 +26,7 @@ import type {
   EdgeLabel,
   VariableStore,
 } from '../types';
+import { testWorkflowRegex } from '../../workflow-regex';
 
 /** Default max iterations for while loops */
 const DEFAULT_MAX_ITERATIONS = 1000;
@@ -37,86 +38,109 @@ const DEFAULT_MAX_ITERATIONS = 1000;
 /**
  * Evaluate a condition against variables
  */
-function evaluateCondition(condition: Condition, vars: VariableStore): boolean {
+type ConditionEvaluation =
+  | { ok: true; value: boolean }
+  | { ok: false; error: string };
+
+function evaluated(value: boolean): ConditionEvaluation {
+  return { ok: true, value };
+}
+
+function evaluateCondition(condition: Condition, vars: VariableStore): ConditionEvaluation {
   switch (condition.kind) {
     case 'expr': {
       // Expression evaluation not supported in default resolver
       // Return false for safety
-      return false;
+      return evaluated(false);
     }
 
     case 'compare': {
       const leftResult = tryResolveValue(condition.left, vars);
       const rightResult = tryResolveValue(condition.right, vars);
 
-      if (!leftResult.ok || !rightResult.ok) return false;
+      if (!leftResult.ok || !rightResult.ok) return evaluated(false);
 
       const left = leftResult.value;
       const right = rightResult.value;
 
       switch (condition.op) {
         case 'eq':
-          return left === right;
+          return evaluated(left === right);
         case 'eqi':
-          return String(left).toLowerCase() === String(right).toLowerCase();
+          return evaluated(String(left).toLowerCase() === String(right).toLowerCase());
         case 'neq':
-          return left !== right;
+          return evaluated(left !== right);
         case 'gt':
-          return Number(left) > Number(right);
+          return evaluated(Number(left) > Number(right));
         case 'gte':
-          return Number(left) >= Number(right);
+          return evaluated(Number(left) >= Number(right));
         case 'lt':
-          return Number(left) < Number(right);
+          return evaluated(Number(left) < Number(right));
         case 'lte':
-          return Number(left) <= Number(right);
+          return evaluated(Number(left) <= Number(right));
         case 'contains':
-          return String(left).includes(String(right));
+          return evaluated(String(left).includes(String(right)));
         case 'containsI':
-          return String(left).toLowerCase().includes(String(right).toLowerCase());
+          return evaluated(String(left).toLowerCase().includes(String(right).toLowerCase()));
         case 'notContains':
-          return !String(left).includes(String(right));
+          return evaluated(!String(left).includes(String(right)));
         case 'notContainsI':
-          return !String(left).toLowerCase().includes(String(right).toLowerCase());
+          return evaluated(!String(left).toLowerCase().includes(String(right).toLowerCase()));
         case 'startsWith':
-          return String(left).startsWith(String(right));
+          return evaluated(String(left).startsWith(String(right)));
         case 'endsWith':
-          return String(left).endsWith(String(right));
+          return evaluated(String(left).endsWith(String(right)));
         case 'regex': {
-          try {
-            const regex = new RegExp(String(right));
-            return regex.test(String(left));
-          } catch {
-            return false;
-          }
+          const regexResult = testWorkflowRegex(String(right), String(left));
+          return regexResult.ok
+            ? evaluated(regexResult.matched)
+            : {
+                ok: false,
+                error: `Workflow regex condition rejected (${regexResult.code}): ${regexResult.message}`,
+              };
         }
         default:
-          return false;
+          return evaluated(false);
       }
     }
 
     case 'truthy': {
       const result = tryResolveValue(condition.value, vars);
-      if (!result.ok) return false;
-      return Boolean(result.value);
+      if (!result.ok) return evaluated(false);
+      return evaluated(Boolean(result.value));
     }
 
     case 'falsy': {
       const result = tryResolveValue(condition.value, vars);
-      if (!result.ok) return true;
-      return !result.value;
+      if (!result.ok) return evaluated(true);
+      return evaluated(!result.value);
     }
 
-    case 'not':
-      return !evaluateCondition(condition.condition, vars);
+    case 'not': {
+      const result = evaluateCondition(condition.condition, vars);
+      return result.ok ? evaluated(!result.value) : result;
+    }
 
-    case 'and':
-      return condition.conditions.every((c) => evaluateCondition(c, vars));
+    case 'and': {
+      for (const nested of condition.conditions) {
+        const result = evaluateCondition(nested, vars);
+        if (!result.ok) return result;
+        if (!result.value) return evaluated(false);
+      }
+      return evaluated(true);
+    }
 
-    case 'or':
-      return condition.conditions.some((c) => evaluateCondition(c, vars));
+    case 'or': {
+      for (const nested of condition.conditions) {
+        const result = evaluateCondition(nested, vars);
+        if (!result.ok) return result;
+        if (result.value) return evaluated(true);
+      }
+      return evaluated(false);
+    }
 
     default:
-      return false;
+      return evaluated(false);
   }
 }
 
@@ -158,7 +182,8 @@ export const ifHandler: ActionHandler<'if'> = {
 
     if (params.mode === 'binary') {
       const result = evaluateCondition(params.condition, ctx.vars);
-      const label: EdgeLabel = result
+      if (!result.ok) return failed('VALIDATION_ERROR', result.error);
+      const label: EdgeLabel = result.value
         ? (params.trueLabel ?? 'true')
         : (params.falseLabel ?? 'false');
       return { status: 'success', nextLabel: label };
@@ -167,7 +192,9 @@ export const ifHandler: ActionHandler<'if'> = {
     // Branches mode
     if (params.mode === 'branches') {
       for (const branch of params.branches) {
-        if (evaluateCondition(branch.condition, ctx.vars)) {
+        const result = evaluateCondition(branch.condition, ctx.vars);
+        if (!result.ok) return failed('VALIDATION_ERROR', result.error);
+        if (result.value) {
           return { status: 'success', nextLabel: branch.label };
         }
       }
@@ -262,8 +289,11 @@ export const whileHandler: ActionHandler<'while'> = {
 
     // Check if condition is currently true
     const conditionResult = evaluateCondition(params.condition, ctx.vars);
+    if (!conditionResult.ok) {
+      return failed('VALIDATION_ERROR', conditionResult.error);
+    }
 
-    if (!conditionResult) {
+    if (!conditionResult.value) {
       // Condition is false, don't enter loop
       return { status: 'success' };
     }

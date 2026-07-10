@@ -4,6 +4,7 @@ import type { StepAssert } from "../types";
 import { expandTemplatesDeep } from "../rr-utils";
 import type { ExecCtx, ExecResult, NodeRuntime } from "./types";
 import { resolveNodeTabId } from "./tab-context";
+import { testWorkflowRegex } from "../workflow-regex";
 
 export const assertNode: NodeRuntime<StepAssert> = {
   validate: (step) => {
@@ -85,16 +86,14 @@ export const assertNode: NodeRuntime<StepAssert> = {
             `assert attribute equals failed: ${name} actual=${String(actual)} expected=${String(expected)}`,
           );
       } else if (matches !== undefined && matches !== null) {
-        try {
-          const re = new RegExp(String(matches));
-          if (!re.test(String(actual)))
-            return fail(
-              `assert attribute matches failed: ${name} actual=${String(actual)} regex=${String(matches)}`,
-            );
-        } catch {
+        const regexResult = testWorkflowRegex(String(matches), String(actual));
+        if (!regexResult.ok) {
           return fail(
-            `invalid regex for attribute matches: ${String(matches)}`,
+            `assert attribute regex rejected (${regexResult.code}): ${regexResult.message}`,
           );
+        }
+        if (!regexResult.matched) {
+          return fail("assert attribute matches failed");
         }
       } else {
         if (actual == null)

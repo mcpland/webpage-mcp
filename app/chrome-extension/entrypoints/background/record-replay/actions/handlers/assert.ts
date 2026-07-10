@@ -10,6 +10,12 @@
 
 import { failed, invalid, ok, tryResolveString } from '../registry';
 import type { ActionHandler, Assertion, VariableStore } from '../types';
+import {
+  measureWorkflowRegexUtf8Bytes,
+  testWorkflowRegex,
+  validateWorkflowRegexPattern,
+  WORKFLOW_REGEX_INPUT_MAX_UTF8_BYTES,
+} from '../../workflow-regex';
 
 /** Default timeout for polling assertions (ms) */
 const DEFAULT_ASSERT_TIMEOUT_MS = 5000;
@@ -19,6 +25,7 @@ const POLL_INTERVAL_MS = 200;
 
 /** Maximum attribute name length */
 const MAX_ATTR_NAME_LENGTH = 256;
+const MAX_ASSERTION_SCRIPT_MESSAGE_UTF8_BYTES = 4 * 1024;
 
 /**
  * Validates assertion configuration at build time
@@ -115,11 +122,12 @@ function resolveAssertionParams(
         const matchesResult = tryResolveString(assert.matches, vars);
         if (!matchesResult.ok) return matchesResult;
         matches = matchesResult.value;
-        // Validate regex
-        try {
-          new RegExp(matches);
-        } catch {
-          return { ok: false, error: `Invalid regex pattern: ${matches}` };
+        const regexValidation = validateWorkflowRegexPattern(matches);
+        if (!regexValidation.ok) {
+          return {
+            ok: false,
+            error: `Attribute regex rejected (${regexValidation.code}): ${regexValidation.message}`,
+          };
         }
       }
 
@@ -140,6 +148,13 @@ type ResolvedAssertion =
   | { kind: 'textPresent'; text: string }
   | { kind: 'attribute'; selector: string; attrName: string; equals?: string; matches?: string };
 
+interface AssertionCheckResult {
+  passed: boolean;
+  message?: string;
+  terminal?: boolean;
+  regexInput?: string;
+}
+
 /**
  * Execute assertion check in page context
  */
@@ -147,14 +162,18 @@ async function checkAssertionInPage(
   tabId: number,
   frameId: number | undefined,
   resolved: ResolvedAssertion,
-): Promise<{ passed: boolean; message?: string }> {
+): Promise<AssertionCheckResult> {
   const frameIds = typeof frameId === 'number' ? [frameId] : undefined;
+  const scriptArgs: [ResolvedAssertion, number?] =
+    resolved.kind === 'attribute' && resolved.matches !== undefined
+      ? [resolved, WORKFLOW_REGEX_INPUT_MAX_UTF8_BYTES]
+      : [resolved];
 
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId, frameIds } as chrome.scripting.InjectionTarget,
-      world: 'MAIN',
-      func: (assertion: ResolvedAssertion) => {
+      world: 'ISOLATED',
+      func: (assertion: ResolvedAssertion, regexInputMaxUtf8Bytes?: number) => {
         try {
           switch (assertion.kind) {
             case 'exists': {
@@ -215,11 +234,33 @@ async function checkAssertionInPage(
                 if (attrValue === null) {
                   return { passed: false, message: `Attribute "${assertion.attrName}" not found` };
                 }
-                const regex = new RegExp(assertion.matches);
-                if (regex.test(attrValue)) return { passed: true };
+
+                // Dynamic regexes never execute in the injected page context.
+                // Bound the value before returning it to the background.
+                const inputByteLimit =
+                  typeof regexInputMaxUtf8Bytes === 'number' ? regexInputMaxUtf8Bytes : 0;
+                let utf8Bytes = 0;
+                for (const character of attrValue) {
+                  const codePoint = character.codePointAt(0) ?? 0;
+                  utf8Bytes +=
+                    codePoint <= 0x7f
+                      ? 1
+                      : codePoint <= 0x7ff
+                        ? 2
+                        : codePoint <= 0xffff
+                          ? 3
+                          : 4;
+                  if (utf8Bytes > inputByteLimit) {
+                    return {
+                      passed: false,
+                      terminal: true,
+                      message: `Attribute regex rejected (WORKFLOW_REGEX_INPUT_TOO_LARGE): input exceeds ${inputByteLimit} UTF-8 bytes.`,
+                    };
+                  }
+                }
                 return {
                   passed: false,
-                  message: `Attribute "${assertion.attrName}" value "${attrValue}" does not match pattern "${assertion.matches}"`,
+                  regexInput: attrValue,
                 };
               }
 
@@ -227,18 +268,79 @@ async function checkAssertionInPage(
             }
           }
         } catch (e) {
-          return { passed: false, message: e instanceof Error ? e.message : String(e) };
+          const message = e instanceof Error ? e.message : String(e);
+          return {
+            passed: false,
+            terminal: true,
+            message:
+              message.length <= 1_024
+                ? message
+                : 'Assertion script failed with an oversized error message',
+          };
         }
       },
-      args: [resolved],
+      args: scriptArgs,
     });
 
-    const result = Array.isArray(injected) ? injected[0]?.result : undefined;
-    if (!result || typeof result !== 'object') {
+    const rawResult = Array.isArray(injected)
+      ? (injected[0]?.result as AssertionCheckResult | undefined)
+      : undefined;
+    if (!rawResult || typeof rawResult !== 'object' || typeof rawResult.passed !== 'boolean') {
       return { passed: false, message: 'Assertion script returned invalid result' };
     }
+    const result: AssertionCheckResult = { passed: rawResult.passed };
+    if (rawResult.terminal === true) result.terminal = true;
+    if (rawResult.message !== undefined) {
+      if (
+        typeof rawResult.message !== 'string' ||
+        measureWorkflowRegexUtf8Bytes(
+          rawResult.message,
+          MAX_ASSERTION_SCRIPT_MESSAGE_UTF8_BYTES,
+        ) === null
+      ) {
+        return {
+          passed: false,
+          terminal: true,
+          message: 'Assertion script returned an oversized error message',
+        };
+      }
+      result.message = rawResult.message;
+    }
+    if (typeof rawResult.regexInput === 'string') {
+      if (
+        measureWorkflowRegexUtf8Bytes(
+          rawResult.regexInput,
+          WORKFLOW_REGEX_INPUT_MAX_UTF8_BYTES,
+        ) === null
+      ) {
+        return {
+          passed: false,
+          terminal: true,
+          message: `Attribute regex rejected (WORKFLOW_REGEX_INPUT_TOO_LARGE): input exceeds ${WORKFLOW_REGEX_INPUT_MAX_UTF8_BYTES} UTF-8 bytes.`,
+        };
+      }
+      result.regexInput = rawResult.regexInput;
+    }
 
-    return result as { passed: boolean; message?: string };
+    if (
+      resolved.kind === 'attribute' &&
+      resolved.matches !== undefined &&
+      typeof result.regexInput === 'string'
+    ) {
+      const regexResult = testWorkflowRegex(resolved.matches, result.regexInput);
+      if (!regexResult.ok) {
+        return {
+          passed: false,
+          terminal: true,
+          message: `Attribute regex rejected (${regexResult.code}): ${regexResult.message}`,
+        };
+      }
+      return regexResult.matched
+        ? { passed: true }
+        : { passed: false, message: 'Attribute value does not match the required pattern' };
+    }
+
+    return result;
   } catch (e) {
     return {
       passed: false,
@@ -255,9 +357,9 @@ async function pollAssertion(
   frameId: number | undefined,
   resolved: ResolvedAssertion,
   timeoutMs: number,
-): Promise<{ passed: boolean; message?: string }> {
+): Promise<AssertionCheckResult> {
   const startTime = Date.now();
-  let lastResult: { passed: boolean; message?: string } = {
+  let lastResult: AssertionCheckResult = {
     passed: false,
     message: 'Timeout before first check',
   };
@@ -265,6 +367,7 @@ async function pollAssertion(
   while (Date.now() - startTime < timeoutMs) {
     lastResult = await checkAssertionInPage(tabId, frameId, resolved);
     if (lastResult.passed) return lastResult;
+    if (lastResult.terminal) return lastResult;
 
     // Wait before next poll
     const remaining = timeoutMs - (Date.now() - startTime);

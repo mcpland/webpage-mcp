@@ -1,5 +1,6 @@
 import type { FlowExposedOutput, FlowV3 } from "../domain/flow";
 import type { JsonObject, JsonValue } from "../domain/json";
+import { testWorkflowRegex } from "../../record-replay/workflow-regex";
 import { containsSensitiveValue, isSensitiveKeyName } from "./sensitive";
 
 const REDACTED = "[REDACTED]";
@@ -161,19 +162,26 @@ function validateAgainstSchema(
       });
     }
     if (typeof schema.pattern === "string") {
-      try {
-        if (!new RegExp(schema.pattern).test(value)) {
-          errors.push({
-            code: "OUTPUT_SCHEMA_PATTERN_MISMATCH",
-            path,
-            message: "Output string does not match the required pattern.",
-          });
-        }
-      } catch {
+      const regexResult = testWorkflowRegex(schema.pattern, value);
+      if (!regexResult.ok) {
+        const code =
+          regexResult.code === "WORKFLOW_REGEX_INVALID"
+            ? "OUTPUT_SCHEMA_INVALID_PATTERN"
+            : regexResult.code === "WORKFLOW_REGEX_PATTERN_TOO_LARGE"
+              ? "OUTPUT_SCHEMA_PATTERN_TOO_LARGE"
+              : regexResult.code === "WORKFLOW_REGEX_INPUT_TOO_LARGE"
+                ? "OUTPUT_SCHEMA_PATTERN_INPUT_TOO_LARGE"
+                : "OUTPUT_SCHEMA_UNSAFE_PATTERN";
         errors.push({
-          code: "OUTPUT_SCHEMA_INVALID_PATTERN",
+          code,
           path,
-          message: "Output schema pattern is not a valid regular expression.",
+          message: regexResult.message,
+        });
+      } else if (!regexResult.matched) {
+        errors.push({
+          code: "OUTPUT_SCHEMA_PATTERN_MISMATCH",
+          path,
+          message: "Output string does not match the required pattern.",
         });
       }
     }
