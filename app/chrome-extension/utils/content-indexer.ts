@@ -7,6 +7,7 @@ import { TextChunker } from "./text-chunker";
 import {
   VectorDatabase,
   getGlobalVectorDatabase,
+  resetGlobalVectorDatabase,
   type SearchResult,
 } from "./vector-database";
 import {
@@ -48,7 +49,7 @@ export interface ContentIndexerActivity {
 export type ContentIndexerMaintenance = ContentIndexerActivity;
 
 interface MaintenanceJob<T = unknown> {
-  kind: "index" | "data-cleanup";
+  kind: "index" | "data-cleanup" | "index-recovery";
   operation: (activity: ContentIndexerMaintenance) => Promise<T>;
   resolve: (value: T) => void;
   reject: (error: unknown) => void;
@@ -116,6 +117,17 @@ export class ContentIndexer {
     if (this.failedDataCleanup)
       return Promise.reject(this.cleanupBlockedError());
     return this.enqueueMaintenance("index", operation);
+  }
+
+  /**
+   * Run a fail-closed index rebuild. Unlike normal maintenance, a retry is
+   * allowed after an earlier cleanup/rebuild failure so it can recover the
+   * gate. Privacy cleanup remains an equivalent recovery path.
+   */
+  private runExclusiveIndexRecovery<T>(
+    operation: (activity: ContentIndexerMaintenance) => Promise<T>,
+  ): Promise<T> {
+    return this.enqueueMaintenance("index-recovery", operation);
   }
 
   /**
@@ -193,8 +205,8 @@ export class ContentIndexer {
 
     // A rebuild/reinitialize may have been queued while privacy cleanup was
     // still running. Re-check at execution time so a failed cleanup cannot be
-    // followed by mutations that recreate data. Only a data-cleanup retry may
-    // run while fail-closed.
+    // followed by mutations that recreate data. Only privacy cleanup or an
+    // explicit index-recovery retry may run while fail-closed.
     if (job.kind === "index" && this.failedDataCleanup) {
       job.reject(this.cleanupBlockedError());
       queueMicrotask(() => this.pumpMaintenanceQueue());
@@ -209,12 +221,12 @@ export class ContentIndexer {
       .then(() => job.operation(this.createActivityFacade()))
       .then(
         (value) => {
-          if (job.kind === "data-cleanup") this.failedDataCleanup = null;
+          if (job.kind !== "index") this.failedDataCleanup = null;
           succeeded = true;
           result = value;
         },
         (error) => {
-          if (job.kind === "data-cleanup") {
+          if (job.kind !== "index") {
             this.failedDataCleanup =
               error instanceof Error ? error : new Error(String(error));
           }
@@ -236,7 +248,7 @@ export class ContentIndexer {
 
   private cleanupBlockedError(): Error {
     return new Error(
-      "Semantic index access is blocked because the last data cleanup did not complete. Retry Clear All Data.",
+      "Semantic index access is blocked because the last cleanup or reinitialization did not complete. Retry Clear All Data or model reinitialization.",
       { cause: this.failedDataCleanup ?? undefined },
     );
   }
@@ -609,20 +621,20 @@ export class ContentIndexer {
    * Reinitialize content indexer (for model switching)
    */
   public reinitialize(): Promise<void> {
-    return this.runExclusiveIndexMaintenance(async (activity) => {
+    return this.runExclusiveIndexRecovery(async (activity) => {
       console.log("ContentIndexer: Reinitializing for model switch...");
 
       this.isInitialized = false;
       this.isInitializing = false;
       this.initPromise = null;
 
-      const { clearAllVectorData } = await import("./vector-database");
-      await clearAllVectorData();
+      // Keep the old singleton reachable unless every persistent cleanup step
+      // succeeds. resetGlobalVectorDatabase clears first and only then drops
+      // the global reference, so initialization cannot split across old/new
+      // dimensions after a partial reset.
+      await resetGlobalVectorDatabase();
       this.indexedPageByTab.clear();
 
-      const newEngineConfig = await this.getCurrentModelConfig();
-      this.semanticEngine = new SemanticSimilarityEngineProxy(newEngineConfig);
-      await this.semanticEngine.initialize();
       await activity.initialize();
 
       console.log("ContentIndexer: Reinitialization completed successfully");

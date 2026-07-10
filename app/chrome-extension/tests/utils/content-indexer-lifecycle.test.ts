@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   initializeEngine: vi.fn(),
   initializeVectorDatabase: vi.fn(),
   removeTabDocuments: vi.fn(),
+  resetGlobalVectorDatabase: vi.fn(),
 }));
 
 vi.mock("@/utils/text-chunker", () => ({
@@ -37,6 +38,7 @@ vi.mock("@/utils/vector-database", () => ({
   VectorDatabase: class {},
   clearAllVectorData: mocks.clearAllVectorData,
   getGlobalVectorDatabase: mocks.getGlobalVectorDatabase,
+  resetGlobalVectorDatabase: mocks.resetGlobalVectorDatabase,
 }));
 
 interface TestPage {
@@ -79,6 +81,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
     mocks.initializeEngine.mockResolvedValue(undefined);
     mocks.initializeVectorDatabase.mockResolvedValue(undefined);
     mocks.removeTabDocuments.mockResolvedValue(undefined);
+    mocks.resetGlobalVectorDatabase.mockResolvedValue(undefined);
 
     chrome.storage.local.get = vi.fn().mockResolvedValue({});
     chrome.storage.local.remove = vi.fn().mockResolvedValue(undefined);
@@ -307,11 +310,11 @@ describe("ContentIndexer tab/page lifecycle", () => {
     cleanupFailure.reject(new Error("cleanup failed"));
     await cleanupRejection;
     await expect(queuedRebuild).rejects.toThrow(
-      "last data cleanup did not complete",
+      "last cleanup or reinitialization did not complete",
     );
     expect(rebuildMutation).not.toHaveBeenCalled();
     await expect(indexer.initialize()).rejects.toThrow(
-      "last data cleanup did not complete",
+      "last cleanup or reinitialization did not complete",
     );
 
     await indexer.runExclusiveDataCleanup(async (activity) =>
@@ -366,8 +369,63 @@ describe("ContentIndexer tab/page lifecycle", () => {
 
     await indexer.reinitialize();
 
+    expect(mocks.resetGlobalVectorDatabase).toHaveBeenCalledOnce();
+    expect(mocks.clearAllVectorData).not.toHaveBeenCalled();
     expect(chrome.tabs.onUpdated.addListener).toHaveBeenCalledOnce();
     expect(chrome.tabs.onRemoved.addListener).toHaveBeenCalledOnce();
     expect(chrome.webNavigation.onCommitted.addListener).toHaveBeenCalledOnce();
+  });
+
+  it("stops reinitialization after a failed vector reset and remains retryable", async () => {
+    pagesByTab.set(50, {
+      url: "https://example.test/reinitialize",
+      title: "Reinitialize",
+    });
+    const indexer = await createIndexer();
+    await indexer.indexTabContent(50);
+    const engineInitializations = mocks.initializeEngine.mock.calls.length;
+    const vectorInitializations =
+      mocks.initializeVectorDatabase.mock.calls.length;
+    const databaseLookups = mocks.getGlobalVectorDatabase.mock.calls.length;
+    const embeddingRequests = mocks.getEmbedding.mock.calls.length;
+    mocks.resetGlobalVectorDatabase.mockRejectedValueOnce(
+      new Error("vector reset failed"),
+    );
+
+    await expect(indexer.reinitialize()).rejects.toThrow("vector reset failed");
+
+    expect(indexer.getStats().isInitialized).toBe(false);
+    expect(indexer.getStats().indexedPages).toBe(1);
+    await expect(indexer.initialize()).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+    await expect(indexer.searchContent("blocked search")).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+    expect(mocks.initializeEngine).toHaveBeenCalledTimes(engineInitializations);
+    expect(mocks.initializeVectorDatabase).toHaveBeenCalledTimes(
+      vectorInitializations,
+    );
+    expect(mocks.getGlobalVectorDatabase).toHaveBeenCalledTimes(
+      databaseLookups,
+    );
+    expect(mocks.getEmbedding).toHaveBeenCalledTimes(embeddingRequests);
+
+    await expect(indexer.reinitialize()).resolves.toBeUndefined();
+
+    expect(mocks.resetGlobalVectorDatabase).toHaveBeenCalledTimes(2);
+    expect(mocks.initializeEngine).toHaveBeenCalledTimes(
+      engineInitializations + 1,
+    );
+    expect(mocks.initializeVectorDatabase).toHaveBeenCalledTimes(
+      vectorInitializations + 1,
+    );
+    expect(mocks.getGlobalVectorDatabase).toHaveBeenCalledTimes(
+      databaseLookups + 1,
+    );
+    expect(indexer.getStats()).toMatchObject({
+      indexedPages: 0,
+      isInitialized: true,
+    });
   });
 });

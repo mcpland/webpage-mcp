@@ -2052,18 +2052,21 @@ export async function getGlobalVectorDatabase(
       `VectorDatabase: Dimension changed from ${currentDimension} to ${newDimension}, recreating instance`,
     );
 
-    // Clean up old instance - this will clean up index files and document mappings
-    try {
-      await globalVectorDatabase.clear();
-      console.log(
-        "VectorDatabase: Successfully cleared old instance for dimension change",
-      );
-    } catch (error) {
-      console.warn("VectorDatabase: Error during cleanup:", error);
-    }
+    // Do not construct or publish a replacement until the old instance has
+    // been cleared successfully. On failure the old singleton and its
+    // dimension remain authoritative so callers can retry safely.
+    await globalVectorDatabase.clear();
+    console.log(
+      "VectorDatabase: Successfully cleared old instance for dimension change",
+    );
 
-    globalVectorDatabase = null;
-    currentDimension = null;
+    const replacement = new VectorDatabase(config);
+    globalVectorDatabase = replacement;
+    currentDimension = newDimension;
+    console.log(
+      `VectorDatabase: Created global singleton instance with dimension ${currentDimension}`,
+    );
+    return replacement;
   }
 
   if (!globalVectorDatabase) {

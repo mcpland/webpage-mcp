@@ -139,6 +139,7 @@ import {
   clearIndexedDatabaseStore,
   deleteIndexedDatabase,
   getGlobalVectorDatabase,
+  resetGlobalVectorDatabase,
 } from "@/utils/vector-database";
 
 type MutableDeleteRequest = {
@@ -910,6 +911,65 @@ describe("vector database cleanup", () => {
 
     expect(hnswMocks.readCalls).not.toContain(indexFileName);
     expect(hnswMocks.writeCalls).not.toContain(indexFileName);
+  });
+
+  it("keeps the old global database when a dimension-switch clear fails", async () => {
+    useStatefulChromeStorage();
+    await resetGlobalVectorDatabase();
+    const oldDatabase = await getGlobalVectorDatabase({ dimension: 3 });
+    const clear = vi
+      .spyOn(oldDatabase, "clear")
+      .mockRejectedValueOnce(new Error("old dimension clear failed"));
+    let clearRestored = false;
+
+    try {
+      await expect(getGlobalVectorDatabase({ dimension: 4 })).rejects.toThrow(
+        "old dimension clear failed",
+      );
+
+      expect(clear).toHaveBeenCalledOnce();
+      await expect(getGlobalVectorDatabase({ dimension: 3 })).resolves.toBe(
+        oldDatabase,
+      );
+
+      clear.mockRestore();
+      clearRestored = true;
+      await expect(getGlobalVectorDatabase({ dimension: 4 })).resolves.not.toBe(
+        oldDatabase,
+      );
+    } finally {
+      if (!clearRestored) clear.mockRestore();
+      await resetGlobalVectorDatabase();
+    }
+  });
+
+  it("keeps the old global database when an atomic reset fails", async () => {
+    useStatefulChromeStorage();
+    await resetGlobalVectorDatabase();
+    const oldDatabase = await getGlobalVectorDatabase({ dimension: 3 });
+    const clear = vi
+      .spyOn(oldDatabase, "clear")
+      .mockRejectedValue(new Error("global reset clear failed"));
+
+    try {
+      await expect(resetGlobalVectorDatabase()).rejects.toThrow(
+        "Vector data cleanup did not complete",
+      );
+
+      // The failed reset must preserve currentDimension as well as the object
+      // reference. A different dimension must still attempt to clear the old
+      // singleton rather than silently returning or replacing it.
+      await expect(getGlobalVectorDatabase({ dimension: 4 })).rejects.toThrow(
+        "global reset clear failed",
+      );
+      expect(clear).toHaveBeenCalledTimes(2);
+      await expect(getGlobalVectorDatabase({ dimension: 3 })).resolves.toBe(
+        oldDatabase,
+      );
+    } finally {
+      clear.mockRestore();
+      await resetGlobalVectorDatabase();
+    }
   });
 
   it("clears FILE_DATA, reconciles the in-memory mount, and cannot resurrect an old file", async () => {
