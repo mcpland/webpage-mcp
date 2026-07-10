@@ -204,6 +204,36 @@ describe('createChromeArtifactService', () => {
     expect(artifacts?.[0]?.savedAs).toContain('node-b');
   });
 
+  it('caps zero-byte artifact summaries by total record count', async () => {
+    let now = 10;
+    const store = createIndexedDbArtifactStore(
+      { maxArtifactBytes: 1, maxTotalArtifacts: 2 },
+      () => now,
+    );
+
+    await store.saveScreenshot({
+      runId: 'run-old' as never,
+      nodeId: 'node-a' as never,
+      base64: 'YWJjZA==',
+    });
+    now = 20;
+    await store.saveScreenshot({
+      runId: 'run-middle' as never,
+      nodeId: 'node-a' as never,
+      base64: 'YWJjZA==',
+    });
+    now = 30;
+    await store.saveScreenshot({
+      runId: 'run-new' as never,
+      nodeId: 'node-a' as never,
+      base64: 'YWJjZA==',
+    });
+
+    await expect(store.listByRun('run-old' as never)).resolves.toEqual([]);
+    await expect(store.listByRun('run-middle' as never)).resolves.toHaveLength(1);
+    await expect(store.listByRun('run-new' as never)).resolves.toHaveLength(1);
+  });
+
   it('stores a truncated summary when artifacts exceed the normalized size budget', async () => {
     const store = createIndexedDbArtifactStore(
       { maxTotalBytes: 3, maxArtifactBytes: 10 },
