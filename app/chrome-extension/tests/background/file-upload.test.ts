@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   runtimeSendMessage: vi.fn(),
   runtimeAddListener: vi.fn(),
   runtimeRemoveListener: vi.fn(),
+  fetch: vi.fn(),
 }));
 
 vi.mock('@/utils/cdp-session-manager', () => ({
@@ -65,16 +66,20 @@ describe('fileUploadTool', () => {
     });
     mocks.runtimeSendMessage.mockImplementation(async (message) => {
       const requestId = message?.message?.requestId;
+      const action = message?.message?.payload?.action;
       if (typeof requestId === 'string') {
         queueMicrotask(() => {
           runtimeListeners.forEach((listener) =>
             listener({
               type: 'file_operation_response',
               responseToRequestId: requestId,
-              payload: {
-                success: true,
-                filePath: '/tmp/prepared-upload.txt',
-              },
+              payload:
+                action === 'cleanupFile'
+                  ? { success: true }
+                  : {
+                      success: true,
+                      filePath: '/tmp/prepared-upload.txt',
+                    },
             }),
           );
         });
@@ -95,9 +100,11 @@ describe('fileUploadTool', () => {
         sendMessage: mocks.runtimeSendMessage,
       },
     });
+    vi.stubGlobal('fetch', mocks.fetch);
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.resetModules();
   });
@@ -158,7 +165,10 @@ describe('fileUploadTool', () => {
     const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
 
     expect(result.isError).toBe(false);
-    expect(mocks.runtimeSendMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.runtimeSendMessage).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.runtimeSendMessage.mock.calls.map(([message]) => message.message.payload.action),
+    ).toEqual(['prepareFile', 'cleanupFile']);
     expect(mocks.withSession).toHaveBeenCalledTimes(1);
     expect(mocks.sendCommand).toHaveBeenCalledWith(7, 'DOM.setFileInputFiles', {
       nodeId: 2,
@@ -170,5 +180,148 @@ describe('fileUploadTool', () => {
       fileCount: 1,
       pathRedacted: true,
     });
+  });
+
+  it('cleans up native temporary files when CDP upload fails', async () => {
+    mocks.sendCommand.mockImplementation(async (_tabId, method) => {
+      if (method === 'DOM.getDocument') {
+        return { root: { nodeId: 1 } };
+      }
+      if (method === 'DOM.querySelector') {
+        return { nodeId: 0 };
+      }
+      return {};
+    });
+
+    const result = await fileUploadTool.execute({
+      selector: '#missing-upload',
+      base64Data: 'Zm9v',
+      fileName: 'example.txt',
+      tabId: 7,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(
+      mocks.runtimeSendMessage.mock.calls.map(([message]) => message.message.payload.action),
+    ).toEqual(['prepareFile', 'cleanupFile']);
+    expect(mocks.runtimeSendMessage.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          payload: {
+            action: 'cleanupFile',
+            filePath: '/tmp/prepared-upload.txt',
+          },
+        }),
+      }),
+    );
+  });
+
+  it('rejects base64 payloads larger than the single-file limit without logging their contents', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const maximumBytes = 16 * 1024 * 1024;
+    const oversizedBase64 = 'A'.repeat(Math.ceil(((maximumBytes + 1) * 4) / 3));
+
+    const result = await fileUploadTool.execute({
+      selector: '#upload',
+      base64Data: oversizedBase64,
+      fileName: 'oversized.bin',
+      tabId: 7,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'exceeds the 16 MiB limit',
+    );
+    expect(JSON.stringify(logSpy.mock.calls)).not.toContain(oversizedBase64.slice(0, 1024));
+    expect(mocks.tabsGet).not.toHaveBeenCalled();
+    expect(mocks.runtimeSendMessage).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+
+  it('rejects remote files whose Content-Length exceeds the single-file limit', async () => {
+    mocks.fetch.mockResolvedValueOnce(
+      new Response(new Uint8Array([1]), {
+        status: 200,
+        headers: { 'content-length': String(16 * 1024 * 1024 + 1) },
+      }),
+    );
+
+    const result = await fileUploadTool.execute({
+      selector: '#upload',
+      fileUrl: 'https://files.example/oversized.bin',
+      tabId: 7,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'exceeds the 16 MiB limit',
+    );
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      'https://files.example/oversized.bin',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(mocks.runtimeSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('stops streaming a remote file when its body crosses the single-file limit', async () => {
+    const firstChunk = new Uint8Array(8 * 1024 * 1024);
+    const secondChunk = new Uint8Array(8 * 1024 * 1024 + 1);
+    mocks.fetch.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(firstChunk);
+            controller.enqueue(secondChunk);
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await fileUploadTool.execute({
+      selector: '#upload',
+      fileUrl: 'https://files.example/streamed.bin',
+      tabId: 7,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'exceeds the 16 MiB limit',
+    );
+    expect(mocks.runtimeSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps the remote-file timeout active while consuming the response body', async () => {
+    vi.useFakeTimers();
+    mocks.fetch.mockImplementationOnce(async (_url, options: RequestInit) => {
+      const signal = options.signal as AbortSignal;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            signal.addEventListener(
+              'abort',
+              () => controller.error(new DOMException('Aborted', 'AbortError')),
+              { once: true },
+            );
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const resultPromise = fileUploadTool.execute({
+      selector: '#upload',
+      fileUrl: 'https://files.example/slow.bin',
+      tabId: 7,
+    });
+    await vi.advanceTimersByTimeAsync(30000);
+    const result = await resultPromise;
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+      'timed out after 30000 ms',
+    );
+    expect(mocks.runtimeSendMessage).not.toHaveBeenCalled();
   });
 });
