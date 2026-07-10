@@ -1040,7 +1040,7 @@ describe('session-scoped message boundaries', () => {
     expect(sessions[0]?.preview).toBe('owning project preview text');
   });
 
-  it('resets only messages that belong to the owning project', async () => {
+  it('cancels running executions and resets only messages that belong to the owning project', async () => {
     const workspaceBase = await createTempDir('session-reset-workspace-');
     const dataDir = await createTempDir('session-reset-data-');
     const dbFile = path.join(dataDir, 'agent.db');
@@ -1083,15 +1083,22 @@ describe('session-scoped message boundaries', () => {
       content: 'dirty foreign message',
     });
 
+    const cancelSessionExecutions = vi.fn().mockReturnValue(1);
     const response = await dispatchAgentRpc(
       {
         operation: 'agent.sessions.reset',
         params: { sessionId: session.id },
       },
-      createRpcDeps(),
+      {
+        chatService: {
+          getEngineInfos: () => [],
+          cancelSessionExecutions,
+        } as unknown as AgentChatService,
+      },
     );
 
     expect(response.statusCode).toBe(200);
+    expect(cancelSessionExecutions).toHaveBeenCalledWith(session.id);
     expect(response.json?.deletedMessages).toBe(1);
     expect(await getMessagesByProjectId(projectA.id)).toHaveLength(0);
     expect(await getMessagesByProjectId(projectB.id)).toHaveLength(1);

@@ -514,6 +514,7 @@ export async function dispatchAgentRpc(
           return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
         }
 
+        deps.chatService.cancelSessionExecutions(sessionId);
         await updateSession(sessionId, { engineSessionId: null });
         const deletedMessages = await deleteMessagesBySessionId(sessionId, existing.projectId);
         const updated = await getSession(sessionId);
