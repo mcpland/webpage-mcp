@@ -49,6 +49,72 @@ const TEST_RELEASE_ENVIRONMENT = {
   [EXTENSION_PUBLIC_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
   [REQUIRE_EXTENSION_PUBLIC_KEY_ENV]: "true",
 };
+const MCP_PACKAGE_TEMPLATE = {
+  name: "webpage-mcp",
+  version: VERSION,
+  description: "Webpage MCP server",
+  main: "dist/index.js",
+  bin: {
+    "webpage-mcp": "./dist/cli.js",
+    "webpage-mcp-stdio": "./dist/mcp/mcp-server-stdio.js",
+  },
+  files: ["dist", "LICENSE", "THIRD_PARTY_NOTICES.md", "!dist/node_path.txt"],
+  engines: { node: ">=22.0.0" },
+  license: "MIT",
+  publishConfig: { access: "public", provenance: true },
+  repository: {
+    type: "git",
+    url: "https://github.com/mcpland/webpage-mcp.git",
+    directory: "app/mcp-server",
+  },
+  preferGlobal: true,
+  dependencies: { chalk: "^5.4.1" },
+  scripts: { postinstall: "node dist/scripts/postinstall.js" },
+};
+const EXTENSION_PERMISSIONS = [
+  "nativeMessaging",
+  "tabs",
+  "activeTab",
+  "scripting",
+  "userScripts",
+  "contextMenus",
+  "downloads",
+  "webRequest",
+  "webNavigation",
+  "debugger",
+  "history",
+  "bookmarks",
+  "offscreen",
+  "notifications",
+  "storage",
+  "alarms",
+  "sidePanel",
+];
+
+function createExtensionManifest(overrides = {}) {
+  return {
+    manifest_version: 3,
+    minimum_chrome_version: "135",
+    name: "Webpage MCP Connector",
+    description: "Connect webpages to Webpage MCP",
+    version: VERSION,
+    permissions: EXTENSION_PERMISSIONS,
+    host_permissions: ["<all_urls>"],
+    background: { service_worker: "background.js" },
+    action: { default_popup: "popup.html" },
+    options_ui: { page: "options.html" },
+    side_panel: { default_path: "sidepanel.html" },
+    icons: { 16: "icon/16.png" },
+    default_locale: "en",
+    content_scripts: [
+      {
+        matches: ["<all_urls>"],
+        js: ["content-scripts/content.js"],
+      },
+    ],
+    ...overrides,
+  };
+}
 
 async function writeJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
@@ -61,7 +127,7 @@ async function createReleaseRoot(t, versions = {}) {
   );
   t.after(() => rm(rootDir, { recursive: true, force: true }));
   await writeJson(join(rootDir, "app/mcp-server/package.json"), {
-    name: "webpage-mcp",
+    ...MCP_PACKAGE_TEMPLATE,
     version: versions.mcp ?? VERSION,
   });
   await writeJson(join(rootDir, "app/chrome-extension/package.json"), {
@@ -107,28 +173,35 @@ function writeTarOctal(header, offset, length, value) {
   );
 }
 
+function archiveEntryPairs(entries) {
+  return Array.isArray(entries) ? entries : Object.entries(entries);
+}
+
 function createTarGzip(entries) {
   const records = [];
-  for (const [name, contents] of Object.entries(entries)) {
-    const body = Buffer.from(contents);
+  for (const [name, rawEntry] of archiveEntryPairs(entries)) {
+    const entry =
+      rawEntry !== null &&
+      typeof rawEntry === "object" &&
+      !Buffer.isBuffer(rawEntry) &&
+      Object.hasOwn(rawEntry, "contents")
+        ? rawEntry
+        : { contents: rawEntry };
+    const body = Buffer.from(entry.contents ?? "");
     const header = Buffer.alloc(512);
     writeTarText(header, 0, 100, name);
-    writeTarOctal(header, 100, 8, 0o644);
+    writeTarOctal(header, 100, 8, entry.mode ?? 0o644);
     writeTarOctal(header, 108, 8, 0);
     writeTarOctal(header, 116, 8, 0);
     writeTarOctal(header, 124, 12, body.length);
     writeTarOctal(header, 136, 12, 0);
     header.fill(0x20, 148, 156);
-    header[156] = "0".charCodeAt(0);
+    header[156] = (entry.type ?? "0").charCodeAt(0);
+    if (entry.linkName) writeTarText(header, 157, 100, entry.linkName);
     writeTarText(header, 257, 6, "ustar\0");
     writeTarText(header, 263, 2, "00");
     const checksum = header.reduce((sum, byte) => sum + byte, 0);
-    writeTarText(
-      header,
-      148,
-      8,
-      `${checksum.toString(8).padStart(6, "0")}\0 `,
-    );
+    writeTarText(header, 148, 8, `${checksum.toString(8).padStart(6, "0")}\0 `);
     const padding = Buffer.alloc((512 - (body.length % 512)) % 512);
     records.push(header, body, padding);
   }
@@ -140,9 +213,17 @@ function createZip(entries) {
   const localRecords = [];
   const centralRecords = [];
   let localOffset = 0;
-  for (const [name, contents] of Object.entries(entries)) {
-    const body = Buffer.from(contents);
-    const compressed = deflateRawSync(body);
+  for (const [name, rawEntry] of archiveEntryPairs(entries)) {
+    const entry =
+      rawEntry !== null &&
+      typeof rawEntry === "object" &&
+      !Buffer.isBuffer(rawEntry) &&
+      Object.hasOwn(rawEntry, "contents")
+        ? rawEntry
+        : { contents: rawEntry };
+    const body = Buffer.from(entry.contents ?? "");
+    const method = entry.store ? 0 : 8;
+    const compressed = method === 0 ? body : deflateRawSync(body);
     const nameBytes = Buffer.from(name);
     let crc = 0xffffffff;
     for (const byte of body) {
@@ -155,7 +236,7 @@ function createZip(entries) {
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(8, 8);
+    local.writeUInt16LE(method, 8);
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(compressed.length, 18);
     local.writeUInt32LE(body.length, 22);
@@ -163,13 +244,16 @@ function createZip(entries) {
 
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(entry.unixMode === undefined ? 20 : 0x0314, 4);
     central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(8, 10);
+    central.writeUInt16LE(method, 10);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(compressed.length, 20);
     central.writeUInt32LE(body.length, 24);
     central.writeUInt16LE(nameBytes.length, 28);
+    if (entry.unixMode !== undefined) {
+      central.writeUInt32LE(((entry.unixMode & 0xffff) << 16) >>> 0, 38);
+    }
     central.writeUInt32LE(localOffset, 42);
 
     const localRecord = Buffer.concat([local, nameBytes, compressed]);
@@ -188,68 +272,24 @@ function createZip(entries) {
   return Buffer.concat([...localRecords, centralDirectory, end]);
 }
 
-async function createArtifacts(rootDir, overrides = {}) {
-  const artifactsDir = join(rootDir, "artifacts");
-  const stagingDir = join(rootDir, "staging");
-  const mcpPath = `mcp/webpage-mcp-${VERSION}.tgz`;
-  const extensionPath = `extension/webpage-mcp-connector-${VERSION}-chrome-extension.zip`;
-  await mkdir(join(artifactsDir, "mcp"), { recursive: true });
-  await mkdir(join(artifactsDir, "extension"), { recursive: true });
-  await writeJson(join(stagingDir, "package/package.json"), {
-    name: "webpage-mcp",
-    version: overrides.mcpVersion ?? VERSION,
-  });
-  await writeJson(join(stagingDir, "manifest.json"), {
-    version: overrides.extensionVersion ?? VERSION,
-    ...(overrides.extensionKey === undefined
-      ? {}
-      : { key: overrides.extensionKey }),
-  });
-  const [mcpLegal, extensionLegal] = await Promise.all([
-    loadReviewedLegalFiles({ rootDir, artifactName: "mcp" }),
-    loadReviewedLegalFiles({ rootDir, artifactName: "extension" }),
-  ]);
-  const mcpEntries = {
-    "package/package.json": await readFile(
-      join(stagingDir, "package/package.json"),
-    ),
-    ...(overrides.omitMcpLicense
-      ? {}
-      : {
-          [mcpLegal.archiveLicense]:
-            overrides.mcpLicense ?? mcpLegal.license,
-        }),
-    ...(overrides.omitMcpNotice
-      ? {}
-      : {
-          [mcpLegal.archiveNotice]: overrides.mcpNotice ?? mcpLegal.notice,
-        }),
-  };
-  const extensionEntries = {
-    "manifest.json": await readFile(join(stagingDir, "manifest.json")),
-    ...(overrides.omitExtensionLicense
-      ? {}
-      : {
-          [extensionLegal.archiveLicense]:
-            overrides.extensionLicense ?? extensionLegal.license,
-        }),
-    ...(overrides.omitExtensionNotice
-      ? {}
-      : {
-          [extensionLegal.archiveNotice]:
-            overrides.extensionNotice ?? extensionLegal.notice,
-        }),
-  };
+function unpackFixtureContents(rawEntry) {
+  return rawEntry !== null &&
+    typeof rawEntry === "object" &&
+    !Buffer.isBuffer(rawEntry) &&
+    Object.hasOwn(rawEntry, "contents")
+    ? (rawEntry.contents ?? "")
+    : rawEntry;
+}
 
-  await writeFile(
-    join(artifactsDir, mcpPath),
-    createTarGzip(mcpEntries),
-  );
-  await writeFile(
-    join(artifactsDir, extensionPath),
-    createZip(extensionEntries),
-  );
+async function writeBuildFixture(rootDir, entries) {
+  for (const [name, rawEntry] of archiveEntryPairs(entries)) {
+    const target = join(rootDir, name);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, unpackFixtureContents(rawEntry));
+  }
+}
 
+async function writeArtifactChecksums(artifactsDir, mcpPath, extensionPath) {
   const mcpArchive = await readFile(join(artifactsDir, mcpPath));
   const extensionArchive = await readFile(join(artifactsDir, extensionPath));
   await writeFile(
@@ -257,7 +297,129 @@ async function createArtifacts(rootDir, overrides = {}) {
     `${sha256(extensionArchive)}  ./${extensionPath}\n${sha256(mcpArchive)}  ./${mcpPath}\n`,
     "utf8",
   );
-  return { artifactsDir };
+}
+
+async function createArtifacts(rootDir, overrides = {}) {
+  const artifactsDir = join(rootDir, "artifacts");
+  const extensionBuildDir = join(
+    rootDir,
+    "app/chrome-extension/.output/chrome-mv3",
+  );
+  const mcpPath = `mcp/webpage-mcp-${VERSION}.tgz`;
+  const extensionPath = `extension/webpage-mcp-connector-${VERSION}-chrome-extension.zip`;
+  await mkdir(join(artifactsDir, "mcp"), { recursive: true });
+  await mkdir(join(artifactsDir, "extension"), { recursive: true });
+
+  const sourcePackage = JSON.parse(
+    await readFile(join(rootDir, "app/mcp-server/package.json"), "utf8"),
+  );
+  const packedPackage = {
+    ...sourcePackage,
+    version: overrides.mcpVersion ?? sourcePackage.version,
+    ...(overrides.packedMcpPackage ?? {}),
+  };
+  for (const field of overrides.omitPackedMcpFields ?? [])
+    delete packedPackage[field];
+  const extensionManifest = createExtensionManifest({
+    version: overrides.extensionVersion ?? VERSION,
+    ...(overrides.extensionKey === undefined
+      ? {}
+      : { key: overrides.extensionKey }),
+    ...(overrides.extensionManifest ?? {}),
+  });
+  const [mcpLegal, extensionLegal] = await Promise.all([
+    loadReviewedLegalFiles({ rootDir, artifactName: "mcp" }),
+    loadReviewedLegalFiles({ rootDir, artifactName: "extension" }),
+  ]);
+  const mcpEntries = [
+    ["package/package.json", `${JSON.stringify(packedPackage, null, 2)}\n`],
+    ...(!overrides.omitMcpLicense
+      ? [[mcpLegal.archiveLicense, overrides.mcpLicense ?? mcpLegal.license]]
+      : []),
+    ...(!overrides.omitMcpNotice
+      ? [[mcpLegal.archiveNotice, overrides.mcpNotice ?? mcpLegal.notice]]
+      : []),
+    ...(!overrides.skeletonMcp
+      ? [
+          [
+            "package/dist/index.js",
+            "#!/usr/bin/env node\nmodule.exports = {};\n",
+          ],
+          [
+            "package/dist/cli.js",
+            {
+              contents: "#!/usr/bin/env node\nconsole.log('cli');\n",
+              mode: overrides.mcpCliMode ?? 0o755,
+            },
+          ],
+          [
+            "package/dist/mcp/mcp-server-stdio.js",
+            {
+              contents: "#!/usr/bin/env node\nconsole.log('stdio');\n",
+              mode: overrides.mcpStdioMode ?? 0o755,
+            },
+          ],
+          ["package/dist/native-messaging-host.js", "module.exports = {};\n"],
+          [
+            "package/dist/scripts/native-log-runner.js",
+            "module.exports = {};\n",
+          ],
+          ["package/dist/scripts/postinstall.js", "module.exports = {};\n"],
+          ["package/dist/run_host.sh", "#!/bin/sh\nexec node index.js\n"],
+          ["package/dist/run_host.bat", "@node index.js\r\n"],
+        ]
+      : []),
+    ...archiveEntryPairs(overrides.extraMcpEntries ?? {}),
+  ].filter(([name]) => name !== overrides.omitMcpEntry);
+  const extensionEntries = [
+    ["manifest.json", `${JSON.stringify(extensionManifest, null, 2)}\n`],
+    ...(!overrides.omitExtensionLicense
+      ? [
+          [
+            extensionLegal.archiveLicense,
+            overrides.extensionLicense ?? extensionLegal.license,
+          ],
+        ]
+      : []),
+    ...(!overrides.omitExtensionNotice
+      ? [
+          [
+            extensionLegal.archiveNotice,
+            overrides.extensionNotice ?? extensionLegal.notice,
+          ],
+        ]
+      : []),
+    ...(!overrides.skeletonExtension
+      ? [
+          [
+            "background.js",
+            "chrome.runtime.onInstalled.addListener(() => {});\n",
+          ],
+          ["popup.html", "<!doctype html><title>Popup</title>\n"],
+          ["options.html", "<!doctype html><title>Options</title>\n"],
+          ["sidepanel.html", "<!doctype html><title>Side panel</title>\n"],
+          ["icon/16.png", Buffer.from("fixture-icon")],
+          ["_locales/en/messages.json", '{"name":{"message":"Webpage MCP"}}\n'],
+          ["content-scripts/content.js", "console.log('content');\n"],
+        ]
+      : []),
+    ...archiveEntryPairs(overrides.extraExtensionEntries ?? {}),
+  ].filter(([name]) => name !== overrides.omitExtensionEntry);
+
+  if (!overrides.skipExtensionBuild) {
+    await writeBuildFixture(
+      extensionBuildDir,
+      overrides.extensionBuildEntries ?? extensionEntries,
+    );
+  }
+
+  await writeFile(join(artifactsDir, mcpPath), createTarGzip(mcpEntries));
+  await writeFile(
+    join(artifactsDir, extensionPath),
+    createZip(extensionEntries),
+  );
+  await writeArtifactChecksums(artifactsDir, mcpPath, extensionPath);
+  return { artifactsDir, extensionBuildDir, mcpPath, extensionPath };
 }
 
 test("release metadata requires aligned package and tag versions", async (t) => {
@@ -453,6 +615,7 @@ test("release artifacts must contain matching package metadata and checksums", a
     `extension/webpage-mcp-connector-${VERSION}-chrome-extension.zip`,
     `mcp/webpage-mcp-${VERSION}.tgz`,
   ]);
+  assert.equal(result.extensionBuildCompared, true);
 });
 
 test("formal release artifacts bind the configured public key", async (t) => {
@@ -600,6 +763,229 @@ test("release artifact verification fails closed", async (t) => {
       /SHA-256 mismatch/,
     );
   });
+});
+
+test("release artifacts must contain runnable npm and extension payloads", async (t) => {
+  await t.test("when npm package metadata omits bin", async (t) => {
+    const rootDir = await createReleaseRoot(t);
+    const { artifactsDir } = await createArtifacts(rootDir, {
+      omitPackedMcpFields: ["bin"],
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({ rootDir, artifactsDir }),
+      /package field bin does not match app\/mcp-server\/package\.json/,
+    );
+  });
+
+  await t.test("when an npm bin target is missing", async (t) => {
+    const rootDir = await createReleaseRoot(t);
+    const { artifactsDir } = await createArtifacts(rootDir, {
+      omitMcpEntry: "package/dist/cli.js",
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({ rootDir, artifactsDir }),
+      /Missing package\/dist\/cli\.js in npm tarball/,
+    );
+  });
+
+  await t.test("when an npm bin loses its executable mode", async (t) => {
+    const rootDir = await createReleaseRoot(t);
+    const { artifactsDir } = await createArtifacts(rootDir, {
+      mcpCliMode: 0o644,
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({ rootDir, artifactsDir }),
+      /bin\.webpage-mcp target must be executable/,
+    );
+  });
+
+  await t.test("when the native log runner is missing", async (t) => {
+    const rootDir = await createReleaseRoot(t);
+    const { artifactsDir } = await createArtifacts(rootDir, {
+      omitMcpEntry: "package/dist/scripts/native-log-runner.js",
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({ rootDir, artifactsDir }),
+      /Missing package\/dist\/scripts\/native-log-runner\.js in npm tarball/,
+    );
+  });
+
+  await t.test("when either archive is only a metadata skeleton", async (t) => {
+    const npmRoot = await createReleaseRoot(t);
+    const npmArtifacts = await createArtifacts(npmRoot, { skeletonMcp: true });
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: npmRoot,
+        artifactsDir: npmArtifacts.artifactsDir,
+      }),
+      /Missing package\/dist\/index\.js in npm tarball/,
+    );
+
+    const extensionRoot = await createReleaseRoot(t);
+    const extensionArtifacts = await createArtifacts(extensionRoot, {
+      skeletonExtension: true,
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: extensionRoot,
+        artifactsDir: extensionArtifacts.artifactsDir,
+      }),
+      /Missing background\.js in extension zip/,
+    );
+  });
+});
+
+test("release artifacts reject package, permission, and build-output drift", async (t) => {
+  await t.test(
+    "when packed npm fields differ from the reviewed package",
+    async (t) => {
+      const rootDir = await createReleaseRoot(t);
+      const { artifactsDir } = await createArtifacts(rootDir, {
+        packedMcpPackage: { main: "dist/alternate.js" },
+      });
+      await assert.rejects(
+        verifyReleaseArtifacts({ rootDir, artifactsDir }),
+        /package field main does not match app\/mcp-server\/package\.json/,
+      );
+    },
+  );
+
+  await t.test("when a required extension permission disappears", async (t) => {
+    const rootDir = await createReleaseRoot(t);
+    const { artifactsDir } = await createArtifacts(rootDir, {
+      extensionManifest: {
+        permissions: EXTENSION_PERMISSIONS.filter(
+          (permission) => permission !== "nativeMessaging",
+        ),
+      },
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({ rootDir, artifactsDir }),
+      /missing required permission: nativeMessaging/,
+    );
+  });
+
+  await t.test("when the userScripts permission disappears", async (t) => {
+    const rootDir = await createReleaseRoot(t);
+    const { artifactsDir } = await createArtifacts(rootDir, {
+      extensionManifest: {
+        permissions: EXTENSION_PERMISSIONS.filter(
+          (permission) => permission !== "userScripts",
+        ),
+      },
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({ rootDir, artifactsDir }),
+      /missing required permission: userScripts/,
+    );
+  });
+
+  await t.test("when the minimum Chrome version drifts", async (t) => {
+    const rootDir = await createReleaseRoot(t);
+    const { artifactsDir } = await createArtifacts(rootDir, {
+      extensionManifest: { minimum_chrome_version: "134" },
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({ rootDir, artifactsDir }),
+      /minimum_chrome_version must be exactly "135"/,
+    );
+  });
+
+  await t.test("when an unexpected extension permission appears", async (t) => {
+    const rootDir = await createReleaseRoot(t);
+    const { artifactsDir } = await createArtifacts(rootDir, {
+      extensionManifest: {
+        permissions: [...EXTENSION_PERMISSIONS, "management"],
+      },
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({ rootDir, artifactsDir }),
+      /permissions contain an unexpected permission/,
+    );
+  });
+
+  await t.test(
+    "when the extension ZIP file list differs from the build",
+    async (t) => {
+      const rootDir = await createReleaseRoot(t);
+      const { artifactsDir, extensionBuildDir } =
+        await createArtifacts(rootDir);
+      await writeFile(join(extensionBuildDir, "unexpected.js"), "unexpected\n");
+      await assert.rejects(
+        verifyReleaseArtifacts({ rootDir, artifactsDir }),
+        /ZIP file list does not match build directory/,
+      );
+    },
+  );
+
+  await t.test("when extension ZIP bytes differ from the build", async (t) => {
+    const rootDir = await createReleaseRoot(t);
+    const { artifactsDir, extensionBuildDir } = await createArtifacts(rootDir);
+    await writeFile(join(extensionBuildDir, "background.js"), "tampered\n");
+    await assert.rejects(
+      verifyReleaseArtifacts({ rootDir, artifactsDir }),
+      /ZIP content does not match build directory: background\.js/,
+    );
+  });
+});
+
+test("release archive inventories reject traversal, links, and duplicates", async (t) => {
+  for (const [label, overrides, expected] of [
+    [
+      "tar traversal",
+      { extraMcpEntries: { "package/../escape.js": "escape" } },
+      /unsafe path: package\/\.\.\/escape\.js/,
+    ],
+    [
+      "tar link",
+      {
+        extraMcpEntries: {
+          "package/dist/link.js": {
+            contents: "target.js",
+            type: "2",
+            linkName: "target.js",
+          },
+        },
+      },
+      /tar may not contain links or special entries/,
+    ],
+    [
+      "tar duplicate",
+      { extraMcpEntries: [["package/dist/index.js", "duplicate\n"]] },
+      /Duplicate tar entry/,
+    ],
+    [
+      "ZIP traversal",
+      {
+        extraExtensionEntries: { "../escape.js": "escape" },
+        skipExtensionBuild: true,
+      },
+      /unsafe path: \.\.\/escape\.js/,
+    ],
+    [
+      "ZIP link",
+      {
+        extraExtensionEntries: {
+          link: { contents: "background.js", unixMode: 0o120777 },
+        },
+      },
+      /ZIP may not contain links or special entries/,
+    ],
+    [
+      "ZIP duplicate",
+      { extraExtensionEntries: [["manifest.json", "{}\n"]] },
+      /Duplicate ZIP entry/,
+    ],
+  ]) {
+    await t.test(label, async (t) => {
+      const rootDir = await createReleaseRoot(t);
+      const { artifactsDir } = await createArtifacts(rootDir, overrides);
+      await assert.rejects(
+        verifyReleaseArtifacts({ rootDir, artifactsDir }),
+        expected,
+      );
+    });
+  }
 });
 
 test("release workflow verifies before either publish mutation", async () => {
