@@ -121,7 +121,7 @@ describe('click-helper bounded text summaries', () => {
         nextNodeCalls += 1;
         return inertNode;
       },
-    } as TreeWalker);
+    } as unknown as TreeWalker);
     const listener = loadHelper();
 
     const response = await dispatch(listener, {

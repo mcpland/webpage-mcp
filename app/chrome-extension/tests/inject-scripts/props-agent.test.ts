@@ -64,7 +64,10 @@ describe('props-agent locator resource boundaries', () => {
       '<button class="duplicate"></button><button class="duplicate"></button><button class="duplicate"></button>';
     const nativeMatches = Element.prototype.matches;
     let matchingResults = 0;
-    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (selector: string) {
+    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (
+      this: Element,
+      selector: string,
+    ) {
       const matched = nativeMatches.call(this, selector);
       if (matched) matchingResults += 1;
       return matched;
@@ -146,7 +149,10 @@ describe('props-agent locator resource boundaries', () => {
     document.body.innerHTML = '<button id="target"></button>';
     const nativeMatches = Element.prototype.matches;
     let delayed = false;
-    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (selector: string) {
+    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (
+      this: Element,
+      selector: string,
+    ) {
       if (!delayed) {
         delayed = true;
         const deadline = performance.now() + 275;
