@@ -326,6 +326,7 @@ class RecorderManagerImpl {
       // ignore metadata enrichment errors
     }
     await session.startSession(flow, active.id);
+    recordingNetworkTracker.beginSession();
     broadcastRecordingStateChanged();
 
     // Ensure recorder available and start listening
@@ -395,7 +396,12 @@ class RecorderManagerImpl {
     await new Promise((resolve) => setTimeout(resolve, STOP_BARRIER_GRACE_MS));
 
     // Step 4: Finalize - clear session state and save with barrier metadata
-    const flow = await session.stopSession();
+    let flow: Flow | null;
+    try {
+      flow = await session.stopSession();
+    } finally {
+      recordingNetworkTracker.endSession();
+    }
     broadcastRecordingStateChanged();
     const barrierOk =
       results.length === tabs.length && results.every((r) => r.ok || r.skipped);
@@ -496,6 +502,7 @@ class RecorderManagerImpl {
     }
 
     session.pause();
+    recordingNetworkTracker.pauseSession();
     broadcastRecordingStateChanged();
 
     // Broadcast pause to all active tabs
@@ -520,6 +527,7 @@ class RecorderManagerImpl {
     }
 
     session.resume();
+    recordingNetworkTracker.resumeSession();
     broadcastRecordingStateChanged();
 
     // Broadcast resume to all active tabs
