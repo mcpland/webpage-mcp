@@ -5,6 +5,7 @@
 
 import type { NodeId, RunId } from '../../domain/ids';
 import type { Breakpoint, DebuggerState } from '../../domain/debug';
+import { DEBUG_RESOURCE_LIMITS } from '../../domain/debug-limits';
 
 /**
  * breakpoint manager
@@ -26,6 +27,14 @@ export class BreakpointManager {
    * Add breakpoint
    */
   add(nodeId: NodeId): void {
+    if (
+      !this.breakpoints.has(nodeId) &&
+      this.breakpoints.size >= DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun
+    ) {
+      throw new Error(
+        `Breakpoint limit exceeded (maximum ${DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun})`,
+      );
+    }
     this.breakpoints.set(nodeId, { nodeId, enabled: true });
   }
 
@@ -40,6 +49,11 @@ export class BreakpointManager {
    * Set breakpoint list (replaces all existing breakpoints)
    */
   setAll(nodeIds: NodeId[]): void {
+    if (nodeIds.length > DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun) {
+      throw new Error(
+        `Breakpoint limit exceeded (maximum ${DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun})`,
+      );
+    }
     this.breakpoints.clear();
     for (const nodeId of nodeIds) {
       this.add(nodeId);
@@ -137,6 +151,11 @@ export class BreakpointRegistry {
   getOrCreate(runId: RunId, initialBreakpoints?: NodeId[]): BreakpointManager {
     let manager = this.managers.get(runId);
     if (!manager) {
+      while (this.managers.size >= DEBUG_RESOURCE_LIMITS.maxBreakpointManagers) {
+        const oldestRunId = this.managers.keys().next().value as RunId | undefined;
+        if (!oldestRunId) break;
+        this.managers.delete(oldestRunId);
+      }
       manager = new BreakpointManager(initialBreakpoints);
       this.managers.set(runId, manager);
     }
@@ -162,6 +181,10 @@ export class BreakpointRegistry {
    */
   clear(): void {
     this.managers.clear();
+  }
+
+  getSize(): number {
+    return this.managers.size;
   }
 }
 

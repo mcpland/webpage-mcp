@@ -34,6 +34,10 @@ import {
   isBoundedRpcIdentifier,
   safeRpcResponseRequestId,
 } from "../../domain/rpc-limits";
+import {
+  DEBUG_RESOURCE_LIMITS,
+  findDebugVariableValueViolation,
+} from "../../domain/debug-limits";
 import type {
   FlowBinding,
   FlowExposedOutput,
@@ -661,12 +665,13 @@ export class RpcServer {
 
       // Debug method - route to DebugController
       case "rr_v3.debug": {
-        if (!this.debugController) {
-          throw new Error("DebugController not configured");
-        }
         const cmd = params as unknown as DebuggerCommand;
         if (!cmd || !cmd.type) {
           throw new Error("Invalid debug command");
+        }
+        this.validateDebugCommand(cmd);
+        if (!this.debugController) {
+          throw new Error("DebugController not configured");
         }
         const response = await this.debugController.handle(cmd);
         return response as unknown as JsonValue;
@@ -741,6 +746,32 @@ export class RpcServer {
       });
     } catch (error) {
       throw new Error(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private validateDebugCommand(cmd: DebuggerCommand): void {
+    this.requireRunId(cmd.runId);
+    if (cmd.type === "debug.setBreakpoints") {
+      if (!Array.isArray(cmd.nodeIds)) throw new Error("nodeIds must be an array");
+      if (cmd.nodeIds.length > DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun) {
+        throw new Error(
+          `Breakpoint limit exceeded (maximum ${DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun})`,
+        );
+      }
+      for (const nodeId of cmd.nodeIds) {
+        if (!isBoundedRpcIdentifier(nodeId)) throw new Error("Invalid breakpoint node ID");
+      }
+    } else if (
+      cmd.type === "debug.addBreakpoint" ||
+      cmd.type === "debug.removeBreakpoint"
+    ) {
+      if (!isBoundedRpcIdentifier(cmd.nodeId)) throw new Error("Invalid breakpoint node ID");
+    } else if (cmd.type === "debug.getVar" || cmd.type === "debug.setVar") {
+      if (!isBoundedRpcIdentifier(cmd.name)) throw new Error("Invalid debug variable name");
+      if (cmd.type === "debug.setVar") {
+        const violation = findDebugVariableValueViolation(cmd.value);
+        if (violation) throw new Error(violation);
+      }
     }
   }
 

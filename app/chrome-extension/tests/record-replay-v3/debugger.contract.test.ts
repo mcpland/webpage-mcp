@@ -20,13 +20,17 @@ import {
   FLOW_SCHEMA_VERSION,
   RUN_SCHEMA_VERSION,
   RR_ERROR_CODES,
+  DEBUG_RESOURCE_LIMITS,
   createRRError,
 } from '@/entrypoints/background/record-replay-v3';
 import { InMemoryEventsBus } from '@/entrypoints/background/record-replay-v3/engine/transport/events-bus';
 import { PluginRegistry } from '@/entrypoints/background/record-replay-v3/engine/plugins/registry';
 import { createNotImplementedStoragePort } from '@/entrypoints/background/record-replay-v3/engine/storage/storage-port';
 import { createRunRunnerFactory } from '@/entrypoints/background/record-replay-v3/engine/kernel/runner';
-import { resetBreakpointRegistry } from '@/entrypoints/background/record-replay-v3/engine/kernel/breakpoints';
+import {
+  getBreakpointRegistry,
+  resetBreakpointRegistry,
+} from '@/entrypoints/background/record-replay-v3/engine/kernel/breakpoints';
 import {
   DebugController,
   createRunnerRegistry,
@@ -260,15 +264,82 @@ describe('V3 Debugger contracts', () => {
       if (response.ok && response.state) {
         expect(response.state.status).toBe('detached');
       }
+      expect(
+        (controller as unknown as { sessions: Map<string, unknown> }).sessions.size,
+      ).toBe(0);
+      expect(getBreakpointRegistry().getSize()).toBe(0);
 
+      controller.stop();
+    });
+
+    it('bounds attached sessions and cleans terminal run state', async () => {
+      const bus = new InMemoryEventsBus();
+      const { store: runs, byId: runsById } = createInMemoryRunsStore();
+      for (let index = 0; index <= DEBUG_RESOURCE_LIMITS.maxSessions; index += 1) {
+        runsById.set(`run-${index}`, {
+          schemaVersion: RUN_SCHEMA_VERSION,
+          id: `run-${index}`,
+          flowId: 'flow-1',
+          status: 'running',
+          createdAt: index,
+          updatedAt: index,
+          attempt: 0,
+          maxAttempts: 1,
+          nextSeq: 0,
+        });
+      }
+      const storage = createNotImplementedStoragePort();
+      storage.runs = runs;
+      const controller = new DebugController({
+        storage,
+        events: bus,
+        runners: createRunnerRegistry(),
+      });
+      controller.start();
+
+      for (let index = 0; index <= DEBUG_RESOURCE_LIMITS.maxSessions; index += 1) {
+        await controller.handle({ type: 'debug.attach', runId: `run-${index}` });
+      }
+      const sessions = (controller as unknown as { sessions: Map<string, unknown> }).sessions;
+      expect(sessions.size).toBe(DEBUG_RESOURCE_LIMITS.maxSessions);
+      expect(sessions.has('run-0')).toBe(false);
+      expect(getBreakpointRegistry().getSize()).toBe(
+        DEBUG_RESOURCE_LIMITS.maxBreakpointManagers,
+      );
+
+      await bus.append({ runId: 'run-64', type: 'run.succeeded', tookMs: 1 });
+      expect(sessions.has('run-64')).toBe(false);
+      expect(getBreakpointRegistry().get('run-64')).toBeUndefined();
       controller.stop();
     });
   });
 
   describe('breakpoints', () => {
+    it('rejects oversized breakpoint sets before allocating a manager', async () => {
+      const controller = new DebugController({
+        storage: createNotImplementedStoragePort(),
+        events: new InMemoryEventsBus(),
+        runners: createRunnerRegistry(),
+      });
+      const response = await controller.handle({
+        type: 'debug.setBreakpoints',
+        runId: 'run-overflow',
+        nodeIds: Array.from(
+          { length: DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun + 1 },
+          (_, index) => `node-${index}`,
+        ),
+      });
+      expect(response).toEqual({
+        ok: false,
+        error: `Breakpoint limit exceeded (maximum ${DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun})`,
+      });
+      expect(getBreakpointRegistry().getSize()).toBe(0);
+    });
+
     it('setBreakpoints updates breakpoint list', async () => {
       const bus = new InMemoryEventsBus();
       const { store: runs, byId: runsById } = createInMemoryRunsStore();
+      const { store: flows, byId: flowsById } = createInMemoryFlowsStore();
 
       const runId = 'run-bp';
       runsById.set(runId, {
@@ -285,6 +356,15 @@ describe('V3 Debugger contracts', () => {
 
       const storage = createNotImplementedStoragePort();
       storage.runs = runs;
+      storage.flows = flows;
+      flowsById.set(
+        'flow-1',
+        createFlow(
+          'A',
+          ['A', 'B', 'C'].map((id) => ({ id, kind: 'test', config: {} })),
+          [],
+        ),
+      );
 
       const runners = createRunnerRegistry();
       const controller = new DebugController({ storage, events: bus, runners });
@@ -309,6 +389,7 @@ describe('V3 Debugger contracts', () => {
     it('addBreakpoint adds to existing list', async () => {
       const bus = new InMemoryEventsBus();
       const { store: runs, byId: runsById } = createInMemoryRunsStore();
+      const { store: flows, byId: flowsById } = createInMemoryFlowsStore();
 
       const runId = 'run-bp-add';
       runsById.set(runId, {
@@ -325,6 +406,15 @@ describe('V3 Debugger contracts', () => {
 
       const storage = createNotImplementedStoragePort();
       storage.runs = runs;
+      storage.flows = flows;
+      flowsById.set(
+        'flow-1',
+        createFlow(
+          'A',
+          ['A', 'B'].map((id) => ({ id, kind: 'test', config: {} })),
+          [],
+        ),
+      );
 
       const runners = createRunnerRegistry();
       const controller = new DebugController({ storage, events: bus, runners });
@@ -345,6 +435,7 @@ describe('V3 Debugger contracts', () => {
     it('removeBreakpoint removes from list', async () => {
       const bus = new InMemoryEventsBus();
       const { store: runs, byId: runsById } = createInMemoryRunsStore();
+      const { store: flows, byId: flowsById } = createInMemoryFlowsStore();
 
       const runId = 'run-bp-remove';
       runsById.set(runId, {
@@ -361,6 +452,15 @@ describe('V3 Debugger contracts', () => {
 
       const storage = createNotImplementedStoragePort();
       storage.runs = runs;
+      storage.flows = flows;
+      flowsById.set(
+        'flow-1',
+        createFlow(
+          'A',
+          ['A', 'B'].map((id) => ({ id, kind: 'test', config: {} })),
+          [],
+        ),
+      );
 
       const runners = createRunnerRegistry();
       const controller = new DebugController({ storage, events: bus, runners });
@@ -422,6 +522,26 @@ describe('V3 Debugger contracts', () => {
   });
 
   describe('variables', () => {
+    it('rejects oversized debug variable values before touching a runner', async () => {
+      const controller = new DebugController({
+        storage: createNotImplementedStoragePort(),
+        events: new InMemoryEventsBus(),
+        runners: createRunnerRegistry(),
+      });
+      const response = await controller.handle({
+        type: 'debug.setVar',
+        runId: 'inactive',
+        name: 'huge',
+        value: 'x'.repeat(DEBUG_RESOURCE_LIMITS.maxVariableValueUtf8Bytes + 1),
+      });
+      expect(response.ok).toBe(false);
+      if (!response.ok) {
+        expect(response.error).toContain(
+          `${DEBUG_RESOURCE_LIMITS.maxVariableValueUtf8Bytes}-byte string limit`,
+        );
+      }
+    });
+
     it('getVar returns variable value from active runner', async () => {
       const calls = new Map<string, number>();
       const resolvers = new Map<string, () => void>();

@@ -13,6 +13,11 @@ import type {
   Breakpoint,
 } from '../../domain/debug';
 import { createInitialDebuggerState } from '../../domain/debug';
+import {
+  DEBUG_RESOURCE_LIMITS,
+  findDebugVariableValueViolation,
+} from '../../domain/debug-limits';
+import { findJsonResourceLimitViolation } from '../../domain/json-limits';
 
 import type { StoragePort } from '../storage/storage-port';
 import type { EventsBus } from '../transport/events-bus';
@@ -106,6 +111,7 @@ export class DebugController {
     }
     this.sessions.clear();
     this.listeners.clear();
+    getBreakpointRegistry().clear();
   }
 
   /**
@@ -115,37 +121,37 @@ export class DebugController {
     try {
       switch (cmd.type) {
         case 'debug.attach':
-          return this.handleAttach(cmd.runId);
+          return await this.handleAttach(cmd.runId);
 
         case 'debug.detach':
-          return this.handleDetach(cmd.runId);
+          return await this.handleDetach(cmd.runId);
 
         case 'debug.pause':
-          return this.handlePause(cmd.runId);
+          return await this.handlePause(cmd.runId);
 
         case 'debug.resume':
-          return this.handleResume(cmd.runId);
+          return await this.handleResume(cmd.runId);
 
         case 'debug.stepOver':
-          return this.handleStepOver(cmd.runId);
+          return await this.handleStepOver(cmd.runId);
 
         case 'debug.setBreakpoints':
-          return this.handleSetBreakpoints(cmd.runId, cmd.nodeIds);
+          return await this.handleSetBreakpoints(cmd.runId, cmd.nodeIds);
 
         case 'debug.addBreakpoint':
-          return this.handleAddBreakpoint(cmd.runId, cmd.nodeId);
+          return await this.handleAddBreakpoint(cmd.runId, cmd.nodeId);
 
         case 'debug.removeBreakpoint':
-          return this.handleRemoveBreakpoint(cmd.runId, cmd.nodeId);
+          return await this.handleRemoveBreakpoint(cmd.runId, cmd.nodeId);
 
         case 'debug.getState':
-          return this.handleGetState(cmd.runId);
+          return await this.handleGetState(cmd.runId);
 
         case 'debug.getVar':
-          return this.handleGetVar(cmd.runId, cmd.name);
+          return await this.handleGetVar(cmd.runId, cmd.name);
 
         case 'debug.setVar':
-          return this.handleSetVar(cmd.runId, cmd.name, cmd.value);
+          return await this.handleSetVar(cmd.runId, cmd.name, cmd.value);
 
         default:
           return { ok: false, error: `Unknown debug command: ${(cmd as { type: string }).type}` };
@@ -214,10 +220,10 @@ export class DebugController {
         lastKnownExecution: run.status === 'paused' ? 'paused' : 'running',
         lastKnownNodeId: run.currentNodeId,
       };
-      this.sessions.set(runId, session);
     } else {
       session.attached = true;
     }
+    this.setSession(session);
 
     // Get or create breakpoint manager
     getBreakpointRegistry().getOrCreate(runId, run.debug?.breakpoints);
@@ -228,10 +234,8 @@ export class DebugController {
   }
 
   private async handleDetach(runId: RunId): Promise<DebuggerResponse> {
-    const session = this.sessions.get(runId);
-    if (session) {
-      session.attached = false;
-    }
+    this.sessions.delete(runId);
+    getBreakpointRegistry().remove(runId);
 
     const state = await this.getState(runId);
     this.notifyStateChange(runId, state);
@@ -278,6 +282,7 @@ export class DebugController {
   }
 
   private async handleSetBreakpoints(runId: RunId, nodeIds: NodeId[]): Promise<DebuggerResponse> {
+    await this.validateBreakpointNodes(runId, nodeIds);
     const bpManager = getBreakpointRegistry().getOrCreate(runId);
     bpManager.setAll(nodeIds);
 
@@ -290,7 +295,16 @@ export class DebugController {
   }
 
   private async handleAddBreakpoint(runId: RunId, nodeId: NodeId): Promise<DebuggerResponse> {
+    await this.validateBreakpointNodes(runId, [nodeId]);
     const bpManager = getBreakpointRegistry().getOrCreate(runId);
+    if (
+      !bpManager.hasBreakpoint(nodeId) &&
+      bpManager.getAll().length >= DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun
+    ) {
+      throw new Error(
+        `Breakpoint limit exceeded (maximum ${DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun})`,
+      );
+    }
     bpManager.add(nodeId);
 
     await this.persistBreakpoints(runId, bpManager);
@@ -334,6 +348,20 @@ export class DebugController {
     name: string,
     value: JsonValue,
   ): Promise<DebuggerResponse> {
+    const nameViolation = findJsonResourceLimitViolation(
+      name,
+      {
+        maxUtf8Bytes: DEBUG_RESOURCE_LIMITS.maxVariableNameUtf8Bytes + 2,
+        maxStringUtf8Bytes: DEBUG_RESOURCE_LIMITS.maxVariableNameUtf8Bytes,
+        maxDepth: 1,
+        maxValues: 1,
+      },
+      'debug variable name',
+    );
+    if (nameViolation) return { ok: false, error: nameViolation };
+    const valueViolation = findDebugVariableValueViolation(value);
+    if (valueViolation) return { ok: false, error: valueViolation };
+
     const runner = this.runners.get(runId);
     if (!runner) {
       return {
@@ -360,7 +388,7 @@ export class DebugController {
           attached: false,
           lastKnownExecution: 'paused',
         };
-        this.sessions.set(runId, session);
+        this.setSession(session);
       }
       session.lastKnownExecution = 'paused';
       session.lastPauseReason = event.reason;
@@ -370,24 +398,21 @@ export class DebugController {
         session.lastKnownExecution = 'running';
         session.lastPauseReason = undefined;
       }
-    } else if (event.type === 'run.started') {
-      if (!session) {
-        session = {
-          runId,
-          attached: false,
-          lastKnownExecution: 'running',
-        };
-        this.sessions.set(runId, session);
-      }
     } else if (
       event.type === 'run.succeeded' ||
       event.type === 'run.failed' ||
-      event.type === 'run.canceled'
+      event.type === 'run.canceled' ||
+      event.type === 'run.stopped_at_boundary'
     ) {
-      // Run ended - keep session for querying but mark as not running
-      if (session) {
-        session.lastKnownExecution = 'running'; // Technically ended, but not paused
+      const shouldNotify = session?.attached === true;
+      this.sessions.delete(runId);
+      getBreakpointRegistry().remove(runId);
+      if (shouldNotify) {
+        void this.getState(runId).then((state) => {
+          this.notifyStateChange(runId, state);
+        });
       }
+      return;
     } else if (event.type === 'node.started') {
       if (session) {
         session.lastKnownNodeId = event.nodeId;
@@ -403,6 +428,48 @@ export class DebugController {
   }
 
   // ==================== Helpers ====================
+
+  private setSession(session: DebugSession): void {
+    if (this.sessions.has(session.runId)) {
+      this.sessions.delete(session.runId);
+    }
+    while (this.sessions.size >= DEBUG_RESOURCE_LIMITS.maxSessions) {
+      const oldestRunId = this.sessions.keys().next().value as RunId | undefined;
+      if (!oldestRunId) break;
+      this.sessions.delete(oldestRunId);
+      getBreakpointRegistry().remove(oldestRunId);
+    }
+    this.sessions.set(session.runId, session);
+  }
+
+  private async validateBreakpointNodes(runId: RunId, nodeIds: NodeId[]): Promise<void> {
+    if (!Array.isArray(nodeIds)) {
+      throw new Error('nodeIds must be an array');
+    }
+    if (nodeIds.length > DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun) {
+      throw new Error(
+        `Breakpoint limit exceeded (maximum ${DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun})`,
+      );
+    }
+    const run = await this.storage.runs.get(runId);
+    if (!run) throw new Error(`Run "${runId}" not found`);
+    const flow = await this.storage.flows.get(run.flowId);
+    if (!flow) throw new Error(`Flow "${run.flowId}" not found`);
+    const flowNodeIds = new Set(flow.nodes.map((node) => node.id));
+    const uniqueNodeIds = new Set<NodeId>();
+    for (const nodeId of nodeIds) {
+      if (typeof nodeId !== 'string' || !nodeId) {
+        throw new Error('Breakpoint node IDs must be non-empty strings');
+      }
+      if (!flowNodeIds.has(nodeId)) {
+        throw new Error(`Breakpoint node "${nodeId}" does not exist in flow "${flow.id}"`);
+      }
+      uniqueNodeIds.add(nodeId);
+    }
+    if (uniqueNodeIds.size !== nodeIds.length) {
+      throw new Error('Breakpoint node IDs must be unique');
+    }
+  }
 
   private async persistBreakpoints(runId: RunId, bpManager: BreakpointManager): Promise<void> {
     const breakpoints = bpManager.getEnabled().map((bp) => bp.nodeId);

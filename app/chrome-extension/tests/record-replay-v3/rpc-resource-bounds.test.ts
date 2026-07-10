@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FLOW_RESOURCE_LIMITS,
   EVENT_RESOURCE_LIMITS,
+  DEBUG_RESOURCE_LIMITS,
   RR_V3_RPC_LIMITS,
   RUN_RESOURCE_LIMITS,
   RUN_SCHEMA_VERSION,
@@ -65,6 +66,7 @@ async function call(
     | "rr_v3.listRuns"
     | "rr_v3.getEvents"
     | "rr_v3.deleteRun"
+    | "rr_v3.debug"
     | "rr_v3.startRun",
   params: Record<string, unknown>,
 ): Promise<unknown> {
@@ -249,5 +251,30 @@ describe("RR-V3 RPC resource bounds", () => {
       }),
     ).rejects.toThrow("run request.args.huge exceeds");
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized debug commands at the RPC boundary", async () => {
+    const { server } = createServer();
+    await expect(
+      call(server, "rr_v3.debug", {
+        type: "debug.setBreakpoints",
+        runId: "run-1",
+        nodeIds: Array.from(
+          { length: DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun + 1 },
+          (_, index) => `node-${index}`,
+        ),
+      }),
+    ).rejects.toThrow(`maximum ${DEBUG_RESOURCE_LIMITS.maxBreakpointsPerRun}`);
+
+    await expect(
+      call(server, "rr_v3.debug", {
+        type: "debug.setVar",
+        runId: "run-1",
+        name: "huge",
+        value: "x".repeat(DEBUG_RESOURCE_LIMITS.maxVariableValueUtf8Bytes + 1),
+      }),
+    ).rejects.toThrow(
+      `${DEBUG_RESOURCE_LIMITS.maxVariableValueUtf8Bytes}-byte string limit`,
+    );
   });
 });
