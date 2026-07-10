@@ -9,16 +9,12 @@ import {
   TOOL_SCHEMAS,
   WEBPAGE_MCP_CAPABILITY_VERSION,
   WEBPAGE_MCP_PROTOCOL_VERSION,
-  WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS,
   type WebpageMcpExtensionCapabilities,
   type WebpageMcpWorkflowRunOption,
 } from 'webpage-mcp-shared';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { NativeMessagingHost } from '../native-messaging-host';
-import {
-  isSuccessfulMcpToolResult,
-  shouldRefreshWorkflowToolList,
-} from './tool-list-change';
+import { isSuccessfulMcpToolResult, shouldRefreshWorkflowToolList } from './tool-list-change';
 
 export interface McpToolContext {
   sessionId: string;
@@ -64,10 +60,10 @@ function createMcpAbortError(): Error {
 function isAbortFailure(error: unknown, signal?: AbortSignal): boolean {
   return Boolean(
     signal?.aborted ||
-      (error &&
-        typeof error === 'object' &&
-        'name' in error &&
-        (error as { name?: unknown }).name === 'AbortError'),
+    (error &&
+      typeof error === 'object' &&
+      'name' in error &&
+      (error as { name?: unknown }).name === 'AbortError'),
   );
 }
 
@@ -137,14 +133,12 @@ interface PublishedFlowSideEffects {
 interface PublishedFlow {
   id: string;
   slug: string;
-  revision?: string;
+  revision: string;
   description?: string;
   variables?: PublishedFlowVariable[];
   parameters?: PublishedFlowParameterSchema;
-  exampleArgs?: Record<string, unknown>;
   backgroundSupport?: PublishedFlowBackgroundSupport;
   sideEffects?: PublishedFlowSideEffects;
-  outputs?: Array<Record<string, unknown>>;
   meta?: {
     tool?: {
       description?: string;
@@ -154,7 +148,24 @@ interface PublishedFlow {
 
 const FLOW_TOOL_CACHE_TTL_MS = 10_000;
 const FLOW_TOOL_CACHE_STALE_MS = 5 * 60_000;
-const FLOW_TOOL_CACHE_MAX_SESSIONS = 500;
+export const DYNAMIC_FLOW_LIMITS = Object.freeze({
+  maxCachedSessions: 64,
+  maxConcurrentHandshakes: 16,
+  maxFlows: 64,
+  maxExaminedFlows: 512,
+  maxCapabilityEntries: 256,
+  maxWarnings: 32,
+  maxCollectionEntries: 256,
+  maxObjectEntries: 256,
+  maxExaminedObjectEntries: 512,
+  maxDepth: 16,
+  maxNodesPerResponse: 8_192,
+  maxDescriptorBytesPerResponse: 256 * 1024,
+  maxIdentifierBytes: 256,
+  maxSlugBytes: 64,
+  maxStringBytes: 2 * 1024,
+});
+const FLOW_TOOL_CACHE_MAX_SESSIONS = DYNAMIC_FLOW_LIMITS.maxCachedSessions;
 const SESSION_RUN_OPTION_KEYS = [
   'tabTarget',
   'background',
@@ -166,18 +177,395 @@ const SESSION_RUN_OPTION_KEYS = [
   'tabId',
 ] as const;
 type SessionRunOptionKey = (typeof SESSION_RUN_OPTION_KEYS)[number];
-const DEFAULT_SUPPORTED_RUN_OPTION_KEYS = [
-  ...WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS,
-] as const satisfies ReadonlyArray<SessionRunOptionKey>;
 const WORKFLOW_RUN_TOOL_NAME = 'workflow_run';
 const EXPOSE_LEGACY_FLOW_TOOLS_ENV = 'WEBPAGE_MCP_EXPOSE_LEGACY_FLOW_TOOLS';
 const PUBLIC_TOOL_NAME_SET = new Set<string>(TOOL_SCHEMAS.map((tool) => tool.name));
+interface PublishedFlowsInflight {
+  startedAt: number;
+  promise: Promise<PublishedFlow[]>;
+  invalidated: boolean;
+  forceRefresh: boolean;
+}
 const publishedFlowsCache = new Map<string, { fetchedAt: number; items: PublishedFlow[] }>();
-const publishedFlowsInflight = new Map<string, Promise<PublishedFlow[]>>();
+const publishedFlowsInflight = new Map<string, PublishedFlowsInflight>();
 const extensionCapabilitiesCache = new Map<
   string,
   { fetchedAt: number; capabilities: WebpageMcpExtensionCapabilities }
 >();
+
+interface DescriptorBudget {
+  nodes: number;
+  bytes: number;
+}
+
+interface DescriptorSanitizationState {
+  complete: boolean;
+}
+
+const UNSAFE_DESCRIPTOR_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const PUBLISHED_FLOW_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function utf8ByteLength(value: string): number {
+  return Buffer.byteLength(value, 'utf8');
+}
+
+function jsonCharacterBytes(character: string): number {
+  if (character === '"' || character === '\\') return 2;
+  const codePoint = character.codePointAt(0) ?? 0;
+  if (codePoint <= 0x1f) {
+    return ['\b', '\t', '\n', '\f', '\r'].includes(character) ? 2 : 6;
+  }
+  if (codePoint >= 0xd800 && codePoint <= 0xdfff) return 6;
+  return utf8ByteLength(character);
+}
+
+function boundJsonString(
+  value: string,
+  maximumUtf8Bytes: number,
+  maximumJsonBytes = Number.MAX_SAFE_INTEGER,
+): { value: string; jsonBytes: number; complete: boolean } {
+  let output = '';
+  let utf8Bytes = 0;
+  let jsonBytes = 2;
+  let complete = true;
+  for (const character of value) {
+    const characterUtf8Bytes = utf8ByteLength(character);
+    const characterJsonBytes = jsonCharacterBytes(character);
+    if (
+      utf8Bytes + characterUtf8Bytes > maximumUtf8Bytes ||
+      jsonBytes + characterJsonBytes > maximumJsonBytes
+    ) {
+      complete = false;
+      break;
+    }
+    output += character;
+    utf8Bytes += characterUtf8Bytes;
+    jsonBytes += characterJsonBytes;
+  }
+  return { value: output, jsonBytes, complete };
+}
+
+function consumeDescriptorBudget(budget: DescriptorBudget, bytes: number, nodes = 1): boolean {
+  if (
+    bytes < 0 ||
+    nodes < 0 ||
+    budget.bytes + bytes > DYNAMIC_FLOW_LIMITS.maxDescriptorBytesPerResponse ||
+    budget.nodes + nodes > DYNAMIC_FLOW_LIMITS.maxNodesPerResponse
+  ) {
+    return false;
+  }
+  budget.bytes += bytes;
+  budget.nodes += nodes;
+  return true;
+}
+
+function sanitizeDescriptorString(
+  value: string,
+  budget: DescriptorBudget,
+  maximumBytes = DYNAMIC_FLOW_LIMITS.maxStringBytes,
+  state?: DescriptorSanitizationState,
+): string | undefined {
+  const remaining = DYNAMIC_FLOW_LIMITS.maxDescriptorBytesPerResponse - budget.bytes;
+  const bounded = boundJsonString(value, maximumBytes, remaining);
+  if (!bounded.complete && state) state.complete = false;
+  if (
+    (value.length > 0 && bounded.value.length === 0) ||
+    !consumeDescriptorBudget(budget, bounded.jsonBytes)
+  ) {
+    if (state) state.complete = false;
+    return undefined;
+  }
+  return bounded.value;
+}
+
+function sanitizeDescriptorIdentifier(
+  value: unknown,
+  budget: DescriptorBudget,
+  maximumBytes = DYNAMIC_FLOW_LIMITS.maxIdentifierBytes,
+): string | undefined {
+  const normalized = normalizeBoundedIdentifier(value, maximumBytes);
+  if (!normalized) return undefined;
+  const bounded = boundJsonString(
+    normalized,
+    maximumBytes,
+    DYNAMIC_FLOW_LIMITS.maxDescriptorBytesPerResponse - budget.bytes,
+  );
+  if (!bounded.complete) return undefined;
+  return consumeDescriptorBudget(budget, bounded.jsonBytes) ? normalized : undefined;
+}
+
+function normalizeBoundedIdentifier(
+  value: unknown,
+  maximumBytes = DYNAMIC_FLOW_LIMITS.maxIdentifierBytes,
+): string | undefined {
+  if (typeof value !== 'string' || value.length > maximumBytes) return undefined;
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  return boundJsonString(normalized, maximumBytes).complete ? normalized : undefined;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function sanitizeDescriptorValue(
+  value: unknown,
+  budget: DescriptorBudget,
+  depth = 0,
+  state?: DescriptorSanitizationState,
+): unknown {
+  if (value === null) {
+    if (consumeDescriptorBudget(budget, 4)) return null;
+    if (state) state.complete = false;
+    return undefined;
+  }
+  if (typeof value === 'string') {
+    return sanitizeDescriptorString(value, budget, DYNAMIC_FLOW_LIMITS.maxStringBytes, state);
+  }
+  if (typeof value === 'boolean') {
+    if (consumeDescriptorBudget(budget, value ? 4 : 5)) return value;
+    if (state) state.complete = false;
+    return undefined;
+  }
+  if (typeof value === 'number') {
+    if (Number.isFinite(value) && consumeDescriptorBudget(budget, String(value).length)) {
+      return value;
+    }
+    if (state) state.complete = false;
+    return undefined;
+  }
+  if (depth >= DYNAMIC_FLOW_LIMITS.maxDepth) {
+    if (state) state.complete = false;
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    if (!consumeDescriptorBudget(budget, 2)) {
+      if (state) state.complete = false;
+      return undefined;
+    }
+    if (value.length > DYNAMIC_FLOW_LIMITS.maxCollectionEntries && state) {
+      state.complete = false;
+    }
+    const output: unknown[] = [];
+    const length = Math.min(value.length, DYNAMIC_FLOW_LIMITS.maxCollectionEntries);
+    for (let index = 0; index < length; index += 1) {
+      const item = sanitizeDescriptorValue(value[index], budget, depth + 1, state);
+      if (item !== undefined) {
+        if (output.length > 0 && !consumeDescriptorBudget(budget, 1, 0)) {
+          if (state) state.complete = false;
+          break;
+        }
+        output.push(item);
+      }
+    }
+    return output;
+  }
+
+  if (!isPlainRecord(value) || !consumeDescriptorBudget(budget, 2)) {
+    if (state) state.complete = false;
+    return undefined;
+  }
+  const output: Record<string, unknown> = {};
+  let examined = 0;
+  let accepted = 0;
+  for (const key in value) {
+    if (examined >= DYNAMIC_FLOW_LIMITS.maxExaminedObjectEntries) {
+      if (state) state.complete = false;
+      break;
+    }
+    examined += 1;
+    if (!Object.prototype.hasOwnProperty.call(value, key) || UNSAFE_DESCRIPTOR_KEYS.has(key)) {
+      if (state) state.complete = false;
+      continue;
+    }
+    if (key.length === 0 || key.length > DYNAMIC_FLOW_LIMITS.maxIdentifierBytes) {
+      if (state) state.complete = false;
+      continue;
+    }
+    const boundedKey = boundJsonString(key, DYNAMIC_FLOW_LIMITS.maxIdentifierBytes);
+    if (!boundedKey.complete) {
+      if (state) state.complete = false;
+      continue;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !('value' in descriptor)) {
+      if (state) state.complete = false;
+      continue;
+    }
+    if (accepted >= DYNAMIC_FLOW_LIMITS.maxObjectEntries) {
+      if (state) state.complete = false;
+      break;
+    }
+    const fieldOverhead = boundedKey.jsonBytes + 1 + (accepted > 0 ? 1 : 0);
+    if (!consumeDescriptorBudget(budget, fieldOverhead, 0)) {
+      if (state) state.complete = false;
+      break;
+    }
+    const item = sanitizeDescriptorValue(descriptor.value, budget, depth + 1, state);
+    if (item === undefined) {
+      if (state) state.complete = false;
+      continue;
+    }
+    output[key] = item;
+    accepted += 1;
+  }
+  return output;
+}
+
+function sanitizePublishedParameters(
+  value: unknown,
+  budget: DescriptorBudget,
+): PublishedFlowParameterSchema | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const trialBudget = { ...budget };
+  const state: DescriptorSanitizationState = { complete: true };
+  const sanitized = sanitizeDescriptorValue(value, trialBudget, 1, state);
+  if (!state.complete || !isPlainRecord(sanitized)) return undefined;
+  if (sanitized.type !== 'object' || !isPlainRecord(sanitized.properties)) return undefined;
+  if (!Array.isArray(sanitized.required)) return undefined;
+  budget.bytes = trialBudget.bytes;
+  budget.nodes = trialBudget.nodes;
+  return sanitized as unknown as PublishedFlowParameterSchema;
+}
+
+function getOwnDataValue(record: Record<string, unknown>, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+}
+
+function sanitizePublishedVariable(
+  value: unknown,
+  budget: DescriptorBudget,
+  state?: DescriptorSanitizationState,
+): PublishedFlowVariable | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const name = normalizeBoundedIdentifier(getOwnDataValue(value, 'name'));
+  const key = normalizeBoundedIdentifier(getOwnDataValue(value, 'key'));
+  if (
+    (!name && !key) ||
+    (name && UNSAFE_DESCRIPTOR_KEYS.has(name)) ||
+    (key && UNSAFE_DESCRIPTOR_KEYS.has(key))
+  ) {
+    return undefined;
+  }
+
+  const whitelisted: Record<string, unknown> = {};
+  if (name) whitelisted.name = name;
+  if (key) whitelisted.key = key;
+  for (const field of ['label', 'description']) {
+    const fieldValue = getOwnDataValue(value, field);
+    if (typeof fieldValue === 'string') whitelisted[field] = fieldValue;
+  }
+  for (const field of ['type', 'kind', 'item']) {
+    const fieldValue = normalizeBoundedIdentifier(getOwnDataValue(value, field));
+    if (fieldValue) whitelisted[field] = fieldValue;
+  }
+  for (const field of ['sensitive', 'required']) {
+    const fieldValue = getOwnDataValue(value, field);
+    if (typeof fieldValue === 'boolean') whitelisted[field] = fieldValue;
+  }
+  for (const field of ['default', 'options']) {
+    const fieldValue = getOwnDataValue(value, field);
+    if (fieldValue !== undefined) whitelisted[field] = fieldValue;
+  }
+  const rawRules = getOwnDataValue(value, 'rules');
+  if (isPlainRecord(rawRules)) {
+    const rules: Record<string, unknown> = {};
+    const required = getOwnDataValue(rawRules, 'required');
+    const enumValues = getOwnDataValue(rawRules, 'enum');
+    if (typeof required === 'boolean') rules.required = required;
+    if (Array.isArray(enumValues)) rules.enum = enumValues;
+    if (Object.keys(rules).length > 0) whitelisted.rules = rules;
+  }
+
+  const sanitized = sanitizeDescriptorValue(whitelisted, budget, 2, state);
+  return isPlainRecord(sanitized) ? (sanitized as PublishedFlowVariable) : undefined;
+}
+
+function sanitizePublishedVariables(
+  value: unknown,
+  budget: DescriptorBudget,
+): PublishedFlowVariable[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  if (value.length > DYNAMIC_FLOW_LIMITS.maxCollectionEntries) return undefined;
+  const trialBudget = { ...budget };
+  const state: DescriptorSanitizationState = { complete: true };
+  if (!consumeDescriptorBudget(trialBudget, 2)) return undefined;
+  const output: PublishedFlowVariable[] = [];
+  for (const rawVariable of value) {
+    const variable = sanitizePublishedVariable(rawVariable, trialBudget, state);
+    if (!variable) {
+      state.complete = false;
+      break;
+    }
+    if (output.length > 0 && !consumeDescriptorBudget(trialBudget, 1, 0)) {
+      state.complete = false;
+      break;
+    }
+    output.push(variable);
+  }
+  if (!state.complete) return undefined;
+  budget.bytes = trialBudget.bytes;
+  budget.nodes = trialBudget.nodes;
+  return output;
+}
+
+function sanitizePublishedBackgroundSupport(
+  value: unknown,
+  budget: DescriptorBudget,
+): PublishedFlowBackgroundSupport | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const whitelisted: Record<string, unknown> = {};
+  const supported = getOwnDataValue(value, 'supported');
+  if (typeof supported === 'boolean') whitelisted.supported = supported;
+  for (const field of ['modes', 'caveats']) {
+    const fieldValue = getOwnDataValue(value, field);
+    if (Array.isArray(fieldValue)) {
+      const strings: string[] = [];
+      const length = Math.min(fieldValue.length, DYNAMIC_FLOW_LIMITS.maxCollectionEntries);
+      for (let index = 0; index < length; index += 1) {
+        if (typeof fieldValue[index] === 'string') strings.push(fieldValue[index]);
+      }
+      whitelisted[field] = strings;
+    }
+  }
+  const sanitized = sanitizeDescriptorValue(whitelisted, budget, 1);
+  return isPlainRecord(sanitized) ? (sanitized as PublishedFlowBackgroundSupport) : undefined;
+}
+
+function sanitizePublishedSideEffects(
+  value: unknown,
+  budget: DescriptorBudget,
+): PublishedFlowSideEffects | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const rawSummary = getOwnDataValue(value, 'summary');
+  if (!isPlainRecord(rawSummary)) return undefined;
+  const summary: Record<string, number> = {};
+  for (const field of ['safe', 'idempotent', 'dangerous', 'unknown']) {
+    const fieldValue = getOwnDataValue(rawSummary, field);
+    if (Number.isSafeInteger(fieldValue) && (fieldValue as number) >= 0) {
+      summary[field] = fieldValue as number;
+    }
+  }
+  const sanitized = sanitizeDescriptorValue({ summary }, budget, 1);
+  return isPlainRecord(sanitized) ? (sanitized as PublishedFlowSideEffects) : undefined;
+}
+
+function sanitizePublishedMeta(
+  value: unknown,
+  budget: DescriptorBudget,
+): PublishedFlow['meta'] | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const tool = getOwnDataValue(value, 'tool');
+  if (!isPlainRecord(tool)) return undefined;
+  const description = getOwnDataValue(tool, 'description');
+  if (typeof description !== 'string') return undefined;
+  const sanitized = sanitizeDescriptorValue({ tool: { description } }, budget, 1);
+  return isPlainRecord(sanitized) ? (sanitized as PublishedFlow['meta']) : undefined;
+}
 
 const MCP_SERVER_VERSION = (() => {
   try {
@@ -271,11 +659,7 @@ export function resolveMcpClientCapabilities(
   const cancellation = resolveClientCapabilityBoolean(
     initializeCapabilities,
     'WEBPAGE_MCP_CLIENT_CANCELLATION',
-    [
-      ['cancellation'],
-      ['notifications', 'cancelled'],
-      ['experimental', 'cancellation'],
-    ],
+    [['cancellation'], ['notifications', 'cancelled'], ['experimental', 'cancellation']],
   );
   const structuredErrors = resolveClientCapabilityBoolean(
     initializeCapabilities,
@@ -360,8 +744,9 @@ export function clearDynamicFlowCacheForSession(sessionId: string): void {
   if (!sessionId) {
     return;
   }
+  const inflight = publishedFlowsInflight.get(sessionId);
+  if (inflight) inflight.invalidated = true;
   publishedFlowsCache.delete(sessionId);
-  publishedFlowsInflight.delete(sessionId);
   extensionCapabilitiesCache.delete(sessionId);
 }
 
@@ -369,25 +754,59 @@ function pruneDynamicFlowCaches(now = Date.now()): void {
   for (const [sessionId, cache] of publishedFlowsCache.entries()) {
     if (now - cache.fetchedAt > FLOW_TOOL_CACHE_STALE_MS) {
       publishedFlowsCache.delete(sessionId);
-      publishedFlowsInflight.delete(sessionId);
+    }
+  }
+  for (const [sessionId, cache] of extensionCapabilitiesCache.entries()) {
+    if (now - cache.fetchedAt > FLOW_TOOL_CACHE_STALE_MS) {
       extensionCapabilitiesCache.delete(sessionId);
     }
   }
 
-  if (publishedFlowsCache.size <= FLOW_TOOL_CACHE_MAX_SESSIONS) {
-    return;
-  }
-  const entries = Array.from(publishedFlowsCache.entries()).sort(
-    (a, b) => a[1].fetchedAt - b[1].fetchedAt,
-  );
-  const overflow = publishedFlowsCache.size - FLOW_TOOL_CACHE_MAX_SESSIONS;
-  for (let i = 0; i < overflow; i += 1) {
-    const target = entries[i];
+  const activity = collectDynamicFlowSessionActivity();
+  const settledOldestFirst = Array.from(activity.entries())
+    .filter(([sessionId]) => !publishedFlowsInflight.has(sessionId))
+    .sort((a, b) => a[1] - b[1]);
+  while (activity.size > FLOW_TOOL_CACHE_MAX_SESSIONS) {
+    const target = settledOldestFirst.shift();
     if (!target) break;
     publishedFlowsCache.delete(target[0]);
-    publishedFlowsInflight.delete(target[0]);
     extensionCapabilitiesCache.delete(target[0]);
+    activity.delete(target[0]);
   }
+}
+
+function collectDynamicFlowSessionActivity(): Map<string, number> {
+  const activity = new Map<string, number>();
+  const remember = (sessionId: string, timestamp: number): void => {
+    activity.set(sessionId, Math.max(activity.get(sessionId) ?? 0, timestamp));
+  };
+  for (const [sessionId, cache] of publishedFlowsCache) remember(sessionId, cache.fetchedAt);
+  for (const [sessionId, cache] of extensionCapabilitiesCache) {
+    remember(sessionId, cache.fetchedAt);
+  }
+  for (const [sessionId, inflight] of publishedFlowsInflight) {
+    remember(sessionId, inflight.startedAt);
+  }
+  return activity;
+}
+
+function admitDynamicFlowSession(sessionId: string, now: number): boolean {
+  pruneDynamicFlowCaches(now);
+  const activity = collectDynamicFlowSessionActivity();
+  if (activity.has(sessionId)) return true;
+  if (activity.size < FLOW_TOOL_CACHE_MAX_SESSIONS) return true;
+
+  let oldestSettled: { sessionId: string; timestamp: number } | undefined;
+  for (const [candidate, timestamp] of activity) {
+    if (publishedFlowsInflight.has(candidate)) continue;
+    if (!oldestSettled || timestamp < oldestSettled.timestamp) {
+      oldestSettled = { sessionId: candidate, timestamp };
+    }
+  }
+  if (!oldestSettled) return false;
+  publishedFlowsCache.delete(oldestSettled.sessionId);
+  extensionCapabilitiesCache.delete(oldestSettled.sessionId);
+  return true;
 }
 
 function shouldExposeLegacyDynamicFlowTools(): boolean {
@@ -409,10 +828,41 @@ function createFallbackExtensionCapabilities(
   };
 }
 
-function normalizeStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
-    : [];
+function normalizeStringArray(
+  value: unknown,
+  options: {
+    maximumEntries?: number;
+    maximumBytes?: number;
+    truncate?: boolean;
+  } = {},
+): string[] {
+  if (!Array.isArray(value)) return [];
+  const maximumEntries = options.maximumEntries ?? DYNAMIC_FLOW_LIMITS.maxCapabilityEntries;
+  const maximumBytes = options.maximumBytes ?? DYNAMIC_FLOW_LIMITS.maxIdentifierBytes;
+  const output: string[] = [];
+  const seen = new Set<string>();
+  const examined = Math.min(value.length, maximumEntries * 2);
+  for (let index = 0; index < examined && output.length < maximumEntries; index += 1) {
+    const item = value[index];
+    if (typeof item !== 'string' || item.length === 0) continue;
+    if (!options.truncate && item.length > maximumBytes) continue;
+    const bounded = boundJsonString(item, maximumBytes);
+    if ((!options.truncate && !bounded.complete) || !bounded.value || seen.has(bounded.value)) {
+      continue;
+    }
+    seen.add(bounded.value);
+    output.push(bounded.value);
+  }
+  return output;
+}
+
+function normalizeCapabilityIdentifier(value: unknown, fallback: string): string {
+  if (typeof value !== 'string' || value.length > DYNAMIC_FLOW_LIMITS.maxIdentifierBytes) {
+    return fallback;
+  }
+  const normalized = value.trim();
+  const bounded = boundJsonString(normalized, DYNAMIC_FLOW_LIMITS.maxIdentifierBytes);
+  return normalized && bounded.complete ? normalized : fallback;
 }
 
 function normalizeExtensionCapabilities(value: unknown): WebpageMcpExtensionCapabilities {
@@ -425,31 +875,37 @@ function normalizeExtensionCapabilities(value: unknown): WebpageMcpExtensionCapa
     (option): option is WebpageMcpWorkflowRunOption =>
       (SESSION_RUN_OPTION_KEYS as readonly string[]).includes(option),
   );
-  const supportedTools = normalizeStringArray(raw.supportedTools);
-  const warnings = normalizeStringArray(raw.warnings);
+  const supportedTools = normalizeStringArray(raw.supportedTools).filter((tool) =>
+    PUBLIC_TOOL_NAME_SET.has(tool),
+  );
+  const warnings = normalizeStringArray(raw.warnings, {
+    maximumEntries: DYNAMIC_FLOW_LIMITS.maxWarnings,
+    maximumBytes: DYNAMIC_FLOW_LIMITS.maxStringBytes,
+    truncate: true,
+  });
 
   return {
-    protocolVersion:
-      typeof raw.protocolVersion === 'string' && raw.protocolVersion.trim()
-        ? raw.protocolVersion
-        : WEBPAGE_MCP_PROTOCOL_VERSION,
-    capabilityVersion:
-      typeof raw.capabilityVersion === 'string' && raw.capabilityVersion.trim()
-        ? raw.capabilityVersion
-        : WEBPAGE_MCP_CAPABILITY_VERSION,
-    extensionVersion:
-      typeof raw.extensionVersion === 'string' && raw.extensionVersion.trim()
-        ? raw.extensionVersion
-        : 'unknown',
-    mcpServerVersion:
-      typeof raw.mcpServerVersion === 'string' && raw.mcpServerVersion.trim()
-        ? raw.mcpServerVersion
-        : MCP_SERVER_VERSION,
+    protocolVersion: normalizeCapabilityIdentifier(
+      raw.protocolVersion,
+      WEBPAGE_MCP_PROTOCOL_VERSION,
+    ),
+    capabilityVersion: normalizeCapabilityIdentifier(
+      raw.capabilityVersion,
+      WEBPAGE_MCP_CAPABILITY_VERSION,
+    ),
+    extensionVersion: normalizeCapabilityIdentifier(raw.extensionVersion, 'unknown'),
+    mcpServerVersion: normalizeCapabilityIdentifier(raw.mcpServerVersion, MCP_SERVER_VERSION),
     supportedTools,
     supportedRunOptions,
-    featureFlags: normalizeStringArray(raw.featureFlags),
+    featureFlags: normalizeStringArray(raw.featureFlags, {
+      maximumEntries: 64,
+    }),
     ...(warnings.length > 0 ? { warnings } : {}),
-    ...(typeof raw.generatedAt === 'string' ? { generatedAt: raw.generatedAt } : {}),
+    ...(typeof raw.generatedAt === 'string' &&
+    raw.generatedAt.length <= DYNAMIC_FLOW_LIMITS.maxIdentifierBytes &&
+    boundJsonString(raw.generatedAt, DYNAMIC_FLOW_LIMITS.maxIdentifierBytes).complete
+      ? { generatedAt: raw.generatedAt }
+      : {}),
   };
 }
 
@@ -480,11 +936,6 @@ function getRunOptionKeySet(
       supported.add(option as SessionRunOptionKey);
     }
   }
-  if (supported.size === 0) {
-    for (const option of DEFAULT_SUPPORTED_RUN_OPTION_KEYS) {
-      supported.add(option);
-    }
-  }
   return supported;
 }
 
@@ -493,55 +944,97 @@ function normalizePublishedFlows(response: any): PublishedFlow[] {
     return [];
   }
 
-  return response.items
-    .filter(
-      (item: any) =>
-        item &&
-        typeof item.id === 'string' &&
-        item.id.trim().length > 0 &&
-        typeof item.slug === 'string' &&
-        item.slug.trim().length > 0,
-    )
-    .map((item: any) => ({
-      id: item.id,
-      slug: item.slug,
-      revision: typeof item.revision === 'string' ? item.revision : undefined,
-      description: item.description,
-      variables: Array.isArray(item.variables) ? item.variables : [],
-      parameters:
-        item.parameters && typeof item.parameters === 'object' && !Array.isArray(item.parameters)
-          ? item.parameters
-          : undefined,
-      exampleArgs:
-        item.exampleArgs && typeof item.exampleArgs === 'object' && !Array.isArray(item.exampleArgs)
-          ? item.exampleArgs
-          : undefined,
-      backgroundSupport:
-        item.backgroundSupport &&
-        typeof item.backgroundSupport === 'object' &&
-        !Array.isArray(item.backgroundSupport)
-          ? item.backgroundSupport
-          : undefined,
-      sideEffects:
-        item.sideEffects && typeof item.sideEffects === 'object' && !Array.isArray(item.sideEffects)
-          ? item.sideEffects
-          : undefined,
-      outputs: Array.isArray(item.outputs) ? item.outputs : undefined,
-      meta: item.meta,
-    }));
+  const candidates: Array<{
+    item: Record<string, unknown>;
+    id: string;
+    slug: string;
+    revision: string;
+  }> = [];
+  const seenIds = new Set<string>();
+  const seenSlugs = new Set<string>();
+  const examined = Math.min(response.items.length, DYNAMIC_FLOW_LIMITS.maxExaminedFlows);
+  for (
+    let index = 0;
+    index < examined && candidates.length < DYNAMIC_FLOW_LIMITS.maxFlows;
+    index += 1
+  ) {
+    const item = response.items[index];
+    if (!isPlainRecord(item)) continue;
+    const id = normalizeBoundedIdentifier(getOwnDataValue(item, 'id'));
+    const slug = normalizeBoundedIdentifier(
+      getOwnDataValue(item, 'slug'),
+      DYNAMIC_FLOW_LIMITS.maxSlugBytes,
+    );
+    const rawRevision = getOwnDataValue(item, 'revision');
+    const revision = normalizeBoundedIdentifier(rawRevision);
+    if (
+      !id ||
+      !slug ||
+      !revision ||
+      !PUBLISHED_FLOW_SLUG_PATTERN.test(slug) ||
+      seenIds.has(id) ||
+      seenSlugs.has(slug)
+    ) {
+      continue;
+    }
+    seenIds.add(id);
+    seenSlugs.add(slug);
+    candidates.push({ item, id, slug, revision });
+  }
+
+  // Reserve every runnable identity and revision guard before optional schemas
+  // can consume the shared response budget.
+  const budget: DescriptorBudget = { nodes: 1, bytes: 2 };
+  const output: PublishedFlow[] = [];
+  for (const candidate of candidates) {
+    if (!consumeDescriptorBudget(budget, 128)) break;
+    const id = sanitizeDescriptorIdentifier(candidate.id, budget);
+    const slug = sanitizeDescriptorIdentifier(
+      candidate.slug,
+      budget,
+      DYNAMIC_FLOW_LIMITS.maxSlugBytes,
+    );
+    const revision = sanitizeDescriptorIdentifier(candidate.revision, budget);
+    if (!id || !slug || !revision) break;
+    if (output.length > 0 && !consumeDescriptorBudget(budget, 1, 0)) break;
+    output.push({ id, slug, revision });
+  }
+
+  for (let index = 0; index < output.length; index += 1) {
+    const flow = output[index];
+    const item = candidates[index].item;
+    const rawDescription = getOwnDataValue(item, 'description');
+    if (typeof rawDescription === 'string') {
+      const description = sanitizeDescriptorString(rawDescription, budget);
+      if (description !== undefined) flow.description = description;
+    }
+
+    const parameters = sanitizePublishedParameters(getOwnDataValue(item, 'parameters'), budget);
+    if (parameters) flow.parameters = parameters;
+    else {
+      const variables = sanitizePublishedVariables(getOwnDataValue(item, 'variables'), budget);
+      if (variables) flow.variables = variables;
+    }
+    const backgroundSupport = sanitizePublishedBackgroundSupport(
+      getOwnDataValue(item, 'backgroundSupport'),
+      budget,
+    );
+    if (backgroundSupport) flow.backgroundSupport = backgroundSupport;
+    const sideEffects = sanitizePublishedSideEffects(getOwnDataValue(item, 'sideEffects'), budget);
+    if (sideEffects) flow.sideEffects = sideEffects;
+    const meta = sanitizePublishedMeta(getOwnDataValue(item, 'meta'), budget);
+    if (meta) flow.meta = meta;
+  }
+  return output;
 }
 
-function getPublishedVariableName(variable: PublishedFlowVariable | null | undefined): string | undefined {
+function getPublishedVariableName(
+  variable: PublishedFlowVariable | null | undefined,
+): string | undefined {
   if (!variable) {
     return undefined;
   }
-  if (typeof variable.name === 'string' && variable.name.trim()) {
-    return variable.name.trim();
-  }
-  if (typeof variable.key === 'string' && variable.key.trim()) {
-    return variable.key.trim();
-  }
-  return undefined;
+  return normalizeBoundedIdentifier(variable.name) ?? normalizeBoundedIdentifier(variable.key);
 }
 
 function isPublishedVariableRequired(variable: PublishedFlowVariable): boolean {
@@ -625,7 +1118,10 @@ function buildDynamicToolParameterSchemaFromDescriptor(
   }
 
   const required = Array.isArray(schema.required)
-    ? schema.required.filter((name) => typeof name === 'string' && name in properties)
+    ? schema.required.filter(
+        (name) =>
+          typeof name === 'string' && Object.prototype.hasOwnProperty.call(properties, name),
+      )
     : [];
   return { properties, required };
 }
@@ -673,11 +1169,7 @@ function buildArrayItemSchema(variable: PublishedFlowVariable): Record<string, u
   if (variable.item === 'json') {
     return buildJsonValueSchema();
   }
-  if (
-    variable.item === 'string' ||
-    variable.item === 'number' ||
-    variable.item === 'boolean'
-  ) {
+  if (variable.item === 'string' || variable.item === 'number' || variable.item === 'boolean') {
     return { type: variable.item };
   }
   if (Array.isArray(variable.default) && variable.default.length > 0) {
@@ -691,7 +1183,10 @@ function buildArrayItemSchema(variable: PublishedFlowVariable): Record<string, u
   return { type: 'string' };
 }
 
-function buildVariableSchema(variable: PublishedFlowVariable, variableName: string): Record<string, unknown> {
+function buildVariableSchema(
+  variable: PublishedFlowVariable,
+  variableName: string,
+): Record<string, unknown> {
   const description =
     (typeof variable.label === 'string' && variable.label.trim()) ||
     (typeof variable.description === 'string' && variable.description.trim()) ||
@@ -744,14 +1239,32 @@ async function fetchPublishedFlows(
     return cached.items;
   }
 
-  if (!forceRefresh) {
-    const inflight = publishedFlowsInflight.get(ctx.sessionId);
-    if (inflight) {
-      return waitWithSignal(inflight, ctx.signal);
+  const inflight = publishedFlowsInflight.get(ctx.sessionId);
+  if (inflight) {
+    if (inflight.invalidated || (forceRefresh && !inflight.forceRefresh)) {
+      const refreshed = inflight.promise.then(() =>
+        fetchPublishedFlows(ctx, { forceRefresh: true }),
+      );
+      return waitWithSignal(refreshed, ctx.signal);
     }
+    return waitWithSignal(inflight.promise, ctx.signal);
+  }
+  if (publishedFlowsInflight.size >= DYNAMIC_FLOW_LIMITS.maxConcurrentHandshakes) {
+    throw new Error(
+      `Dynamic flow handshake capacity reached (${DYNAMIC_FLOW_LIMITS.maxConcurrentHandshakes}); retry shortly`,
+    );
+  }
+  if (!admitDynamicFlowSession(ctx.sessionId, now)) {
+    throw new Error('Dynamic flow session capacity reached; retry after another session closes');
   }
 
-  const requestContext = forceRefresh ? ctx : { ...ctx, signal: undefined };
+  const requestContext = { ...ctx, signal: undefined };
+  const requestState: PublishedFlowsInflight = {
+    startedAt: now,
+    invalidated: false,
+    forceRefresh,
+    promise: Promise.resolve([]),
+  };
   const requestPromise = (async () => {
     const response = await sendExtensionRequest(
       requestContext,
@@ -760,14 +1273,13 @@ async function fetchPublishedFlows(
         handshake: {
           protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
           mcpServerVersion: MCP_SERVER_VERSION,
-          clientCapabilities: listSupportedClientCapabilities(
-            getClientCapabilitiesForContext(ctx),
-          ),
+          clientCapabilities: listSupportedClientCapabilities(getClientCapabilitiesForContext(ctx)),
         },
       },
       'rr_list_published_flows',
       20000,
     );
+    if (requestState.invalidated) return [];
     rememberExtensionCapabilities(
       ctx.sessionId,
       normalizeExtensionCapabilities(response?.capabilities),
@@ -779,35 +1291,39 @@ async function fetchPublishedFlows(
     });
     pruneDynamicFlowCaches();
     return items;
-  })()
-    .catch((error) => {
-      if (isAbortFailure(error, requestContext.signal)) {
-        throw error;
-      }
-      rememberExtensionCapabilities(
-        ctx.sessionId,
-        createFallbackExtensionCapabilities('Extension capability handshake failed; using conservative workflow schema.'),
-      );
-      return [];
+  })().catch((error) => {
+    if (requestState.invalidated) return [];
+    if (isAbortFailure(error, requestContext.signal)) {
+      throw error;
+    }
+    rememberExtensionCapabilities(
+      ctx.sessionId,
+      createFallbackExtensionCapabilities(
+        'Extension capability handshake failed; using conservative workflow schema.',
+      ),
+    );
+    publishedFlowsCache.set(ctx.sessionId, {
+      fetchedAt: Date.now(),
+      items: [],
     });
-
-  if (forceRefresh) {
-    return requestPromise;
-  }
+    pruneDynamicFlowCaches();
+    return [];
+  });
 
   const trackedRequest = requestPromise.finally(() => {
-    if (publishedFlowsInflight.get(ctx.sessionId) === trackedRequest) {
+    if (publishedFlowsInflight.get(ctx.sessionId) === requestState) {
       publishedFlowsInflight.delete(ctx.sessionId);
     }
   });
-  publishedFlowsInflight.set(ctx.sessionId, trackedRequest);
+  requestState.promise = trackedRequest;
+  publishedFlowsInflight.set(ctx.sessionId, requestState);
   return waitWithSignal(trackedRequest, ctx.signal);
 }
 
 function splitDynamicFlowArgs(
   args: any,
   flowVariableKeys?: ReadonlySet<string>,
-  runOptionKeys: ReadonlySet<SessionRunOptionKey> = new Set(DEFAULT_SUPPORTED_RUN_OPTION_KEYS),
+  runOptionKeys: ReadonlySet<SessionRunOptionKey> = new Set<SessionRunOptionKey>(),
 ): {
   variables: Record<string, unknown>;
   runOptions: Record<string, unknown>;
@@ -837,7 +1353,8 @@ function getWorkflowSummary(items: PublishedFlow[]): string {
   const workflows = items
     .slice(0, 50)
     .map((item) => {
-      const description = (item.meta && item.meta.tool && item.meta.tool.description) || item.description || '';
+      const description =
+        (item.meta && item.meta.tool && item.meta.tool.description) || item.description || '';
       const sideEffects = item.sideEffects?.summary;
       const effectSummary = sideEffects
         ? ` [side effects: safe ${sideEffects.safe ?? 0}, idempotent ${sideEffects.idempotent ?? 0}, dangerous ${sideEffects.dangerous ?? 0}]`
@@ -878,7 +1395,8 @@ function addWorkflowRunOptionProperties(
     properties.background = {
       type: 'boolean',
       default: false,
-      description: 'Run without activating/focusing target tabs or windows where Chrome APIs allow it.',
+      description:
+        'Run without activating/focusing target tabs or windows where Chrome APIs allow it.',
     };
   }
   if (runOptionKeys.has('refresh')) {
@@ -896,7 +1414,8 @@ function addWorkflowRunOptionProperties(
   if (runOptionKeys.has('startUrl')) {
     properties.startUrl = {
       type: 'string',
-      description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
+      description:
+        'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
     };
   }
 }
@@ -949,7 +1468,10 @@ function filterFlowRunToolForCapabilities(
   if (tool.name !== 'record_replay_flow_run') {
     return tool;
   }
-  const inputSchema = tool.inputSchema as { properties?: Record<string, any>; required?: string[] };
+  const inputSchema = tool.inputSchema as {
+    properties?: Record<string, any>;
+    required?: string[];
+  };
   const baseProperties = inputSchema?.properties || {};
   const runOptionKeys = getRunOptionKeySet(capabilities);
   const properties: Record<string, any> = {};
@@ -973,9 +1495,7 @@ function filterFlowRunToolForCapabilities(
   };
 }
 
-function filterPublicToolsForCapabilities(
-  capabilities: WebpageMcpExtensionCapabilities,
-): Tool[] {
+function filterPublicToolsForCapabilities(capabilities: WebpageMcpExtensionCapabilities): Tool[] {
   const supportedTools = new Set(capabilities.supportedTools);
   return TOOL_SCHEMAS.filter((tool) => supportedTools.has(tool.name)).map((tool) =>
     filterFlowRunToolForCapabilities(tool, capabilities),
@@ -1040,7 +1560,9 @@ async function listDynamicFlowTools(
     const sideEffectDescription = sideEffects
       ? `Side effects: safe ${sideEffects.safe ?? 0}, idempotent ${sideEffects.idempotent ?? 0}, dangerous ${sideEffects.dangerous ?? 0}, unknown ${sideEffects.unknown ?? 0}.`
       : '';
-    const descriptionParts = [descriptionBase, backgroundSupport, sideEffectDescription].filter(Boolean);
+    const descriptionParts = [descriptionBase, backgroundSupport, sideEffectDescription].filter(
+      Boolean,
+    );
     const description =
       reservedVariableNames.length > 0
         ? `${descriptionParts.join(' ')} Reserved dynamic tool parameter names are ignored as flow variables: ${reservedVariableNames.join(', ')}. Use record_replay_flow_run with args for those values.`
@@ -1118,7 +1640,9 @@ export const callToolForContext = async (
   try {
     if (
       !name ||
-      (name !== WORKFLOW_RUN_TOOL_NAME && !name.startsWith('flow.') && !PUBLIC_TOOL_NAME_SET.has(name))
+      (name !== WORKFLOW_RUN_TOOL_NAME &&
+        !name.startsWith('flow.') &&
+        !PUBLIC_TOOL_NAME_SET.has(name))
     ) {
       return {
         content: [
@@ -1141,7 +1665,9 @@ export const callToolForContext = async (
         const items = await fetchPublishedFlows(ctx, { forceRefresh: true });
         const capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
         if (!supportsWorkflowRun(capabilities)) {
-          throw new Error('workflow_run is not supported by the connected extension capability set.');
+          throw new Error(
+            'workflow_run is not supported by the connected extension capability set.',
+          );
         }
         const match = items.find((it) => it.slug === workflow);
         if (!match) {
@@ -1214,7 +1740,9 @@ export const callToolForContext = async (
         const items = await fetchPublishedFlows(ctx, { forceRefresh: true });
         const capabilities = getExtensionCapabilitiesForSession(ctx.sessionId);
         if (!supportsWorkflowRun(capabilities)) {
-          throw new Error(`Dynamic flow tools are not supported by the connected extension capability set.`);
+          throw new Error(
+            `Dynamic flow tools are not supported by the connected extension capability set.`,
+          );
         }
         const match = items.find((it) => it.slug === slug);
         if (!match) throw new Error(`Flow not found for tool ${name}`);
@@ -1243,7 +1771,12 @@ export const callToolForContext = async (
         );
         if (proxyRes.status === 'success') return proxyRes.data;
         return {
-          content: [{ type: 'text', text: `Error calling dynamic flow tool: ${proxyRes.error}` }],
+          content: [
+            {
+              type: 'text',
+              text: `Error calling dynamic flow tool: ${proxyRes.error}`,
+            },
+          ],
           isError: true,
         };
       } catch (err: any) {

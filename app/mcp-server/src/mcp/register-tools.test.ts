@@ -7,6 +7,7 @@ import {
   WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS,
 } from 'webpage-mcp-shared';
 import {
+  DYNAMIC_FLOW_LIMITS,
   callToolForContext,
   clearDynamicFlowCacheForSession,
   listToolsForContext,
@@ -23,12 +24,7 @@ describe('SDK request cancellation', () => {
     const sessionId = 'sdk-cancellation';
     clearDynamicFlowCacheForSession(sessionId);
     const sendRequestToExtensionAndWait = vi.fn(
-      (
-        _payload: unknown,
-        messageType: string,
-        _timeoutMs: number,
-        signal?: AbortSignal,
-      ) => {
+      (_payload: unknown, messageType: string, _timeoutMs: number, signal?: AbortSignal) => {
         if (messageType === 'rr_list_published_flows') {
           return Promise.resolve({
             status: 'success',
@@ -142,12 +138,25 @@ function createContext(
             args[1] === 'rr_list_published_flows' &&
             response &&
             typeof response === 'object' &&
-            !Array.isArray(response) &&
-            !Object.prototype.hasOwnProperty.call(response, 'capabilities')
+            !Array.isArray(response)
           ) {
+            const responseRecord = response as Record<string, unknown>;
+            const items = Array.isArray(responseRecord.items)
+              ? responseRecord.items.map((item, index) =>
+                  item &&
+                  typeof item === 'object' &&
+                  !Array.isArray(item) &&
+                  !Object.prototype.hasOwnProperty.call(item, 'revision')
+                    ? { ...item, revision: `unit-test-revision-${index}` }
+                    : item,
+                )
+              : responseRecord.items;
             return {
-              ...response,
-              capabilities: DEFAULT_TEST_EXTENSION_CAPABILITIES,
+              ...responseRecord,
+              ...(items !== undefined ? { items } : {}),
+              ...(!Object.prototype.hasOwnProperty.call(responseRecord, 'capabilities')
+                ? { capabilities: DEFAULT_TEST_EXTENSION_CAPABILITIES }
+                : {}),
             };
           }
           return response;
@@ -228,6 +237,10 @@ describe('dynamic published flow tools', () => {
     clearDynamicFlowCacheForSession('dynamic-flow-cache-invalidation');
     clearDynamicFlowCacheForSession('dynamic-flow-workflow-refresh');
     clearDynamicFlowCacheForSession('flow-update-schema');
+    clearDynamicFlowCacheForSession('dynamic-flow-resource-bounds');
+    clearDynamicFlowCacheForSession('dynamic-flow-late-invalidation');
+    clearDynamicFlowCacheForSession('dynamic-flow-run-option-fail-closed');
+    clearDynamicFlowCacheForSession('dynamic-flow-force-after-list');
   });
 
   afterEach(() => {
@@ -327,14 +340,309 @@ describe('dynamic published flow tools', () => {
     expect(
       (signupTool?.inputSchema as { properties?: Record<string, any> }).properties?.apiToken,
     ).toBeUndefined();
-    expect((signupTool?.inputSchema as { properties?: Record<string, any> }).properties?.metadata)
-      .toHaveProperty('anyOf');
+    expect(
+      (signupTool?.inputSchema as { properties?: Record<string, any> }).properties?.metadata,
+    ).toHaveProperty('anyOf');
     expect(
       (signupTool?.inputSchema as { properties?: Record<string, any> }).properties?.background,
     ).toMatchObject({
       type: 'boolean',
       default: false,
     });
+  });
+
+  it('bounds and deduplicates untrusted published flow descriptors', async () => {
+    exposeLegacyFlowTools();
+    let deepSchema: Record<string, unknown> = { type: 'string' };
+    for (let depth = 0; depth < DYNAMIC_FLOW_LIMITS.maxDepth + 4; depth += 1) {
+      deepSchema = { nested: deepSchema };
+    }
+    const parameterProperties = Object.fromEntries(
+      Array.from({ length: DYNAMIC_FLOW_LIMITS.maxObjectEntries }, (_, index) => [
+        `field${index}`,
+        index === 0
+          ? {
+              description: 'Sensitive value',
+              anyOf: [
+                { type: 'string' },
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['secretRef'],
+                  properties: {
+                    secretRef: { type: 'string', minLength: 1 },
+                    scope: {
+                      type: 'string',
+                      enum: ['session', 'profile', 'workflow'],
+                    },
+                  },
+                },
+              ],
+            }
+          : { type: 'string', description: `Field ${index}` },
+      ]),
+    );
+    const validItems = Array.from({ length: DYNAMIC_FLOW_LIMITS.maxFlows + 16 }, (_, index) => ({
+      id: `flow-${index}`,
+      slug: `bounded-${index}`,
+      revision: `revision-${index}`,
+      ...(index === 0
+        ? {
+            description: '\u0000'.repeat(DYNAMIC_FLOW_LIMITS.maxStringBytes * 2),
+            parameters: {
+              type: 'object',
+              properties: parameterProperties,
+              required: Object.keys(parameterProperties),
+            },
+            exampleArgs: { ignored: 'x'.repeat(100_000) },
+            outputs: [{ ignored: 'x'.repeat(100_000) }],
+          }
+        : index === 1
+          ? {
+              parameters: {
+                type: 'object',
+                properties: { poison: deepSchema },
+                required: ['poison'],
+              },
+              variables: [{ name: 'fallbackVariable', required: true }],
+            }
+          : index === 2
+            ? {
+                parameters: {
+                  type: 'object',
+                  properties: { safe: { type: 'string' } },
+                  required: ['__proto__', 'constructor', 'safe'],
+                },
+              }
+            : index === 3
+              ? { variables: [{ name: '__proto__', required: true }] }
+              : {}),
+    }));
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'success',
+      items: [
+        {
+          id: 'x'.repeat(DYNAMIC_FLOW_LIMITS.maxIdentifierBytes + 1),
+          slug: 'invalid-id',
+        },
+        { id: 'invalid-slug', slug: 'Not A Tool' },
+        {
+          id: 'invalid-revision',
+          slug: 'invalid-revision',
+          revision: 'x'.repeat(DYNAMIC_FLOW_LIMITS.maxIdentifierBytes + 1),
+        },
+        validItems[0],
+        {
+          id: 'duplicate-id',
+          slug: 'bounded-0',
+          revision: 'duplicate-revision',
+        },
+        {
+          id: 'flow-0',
+          slug: 'duplicate-slug',
+          revision: 'duplicate-revision',
+        },
+        ...validItems.slice(1),
+      ],
+    });
+    const ctx = createContext('dynamic-flow-resource-bounds', sendRequestToExtensionAndWait);
+
+    const tools = await listToolsForContext(ctx);
+    const dynamicTools = tools.filter((tool) => tool.name.startsWith('flow.'));
+    const first = dynamicTools.find((tool) => tool.name === 'flow.bounded-0');
+    const fallback = dynamicTools.find((tool) => tool.name === 'flow.bounded-1');
+    const protectedRequired = dynamicTools.find((tool) => tool.name === 'flow.bounded-2');
+    const unsafeVariable = dynamicTools.find((tool) => tool.name === 'flow.bounded-3');
+    const firstProperties = (first?.inputSchema as { properties?: Record<string, unknown> })
+      .properties;
+    const fallbackSchema = fallback?.inputSchema as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    const protectedSchema = protectedRequired?.inputSchema as {
+      required?: string[];
+    };
+    const unsafeProperties = (
+      unsafeVariable?.inputSchema as {
+        properties?: Record<string, unknown>;
+      }
+    ).properties;
+
+    expect(dynamicTools).toHaveLength(DYNAMIC_FLOW_LIMITS.maxFlows);
+    expect(new Set(dynamicTools.map((tool) => tool.name)).size).toBe(dynamicTools.length);
+    expect(Buffer.byteLength(first?.description ?? '', 'utf8')).toBeLessThanOrEqual(
+      DYNAMIC_FLOW_LIMITS.maxStringBytes,
+    );
+    expect(
+      Object.keys(firstProperties ?? {}).filter((key) => key.startsWith('field')),
+    ).toHaveLength(DYNAMIC_FLOW_LIMITS.maxObjectEntries);
+    expect(firstProperties?.field0).toMatchObject({
+      anyOf: [
+        { type: 'string' },
+        {
+          properties: {
+            scope: { enum: ['session', 'profile', 'workflow'] },
+          },
+        },
+      ],
+    });
+    expect(JSON.stringify(first?.inputSchema)).not.toContain('ignored');
+    expect(Buffer.byteLength(JSON.stringify(first?.inputSchema), 'utf8')).toBeLessThan(
+      DYNAMIC_FLOW_LIMITS.maxDescriptorBytesPerResponse,
+    );
+    expect(fallbackSchema.properties?.poison).toBeUndefined();
+    expect(fallbackSchema.properties?.fallbackVariable).toBeTruthy();
+    expect(fallbackSchema.required).toContain('fallbackVariable');
+    expect(protectedSchema.required).toEqual(['safe']);
+    expect(Object.prototype.hasOwnProperty.call(unsafeProperties, '__proto__')).toBe(false);
+    expect(dynamicTools.find((tool) => tool.name === 'flow.invalid-revision')).toBeUndefined();
+  });
+
+  it('caps simultaneous dynamic flow handshakes across sessions', async () => {
+    let resolveHandshake!: (value: unknown) => void;
+    const handshake = new Promise((resolve) => {
+      resolveHandshake = resolve;
+    });
+    const sendRequestToExtensionAndWait = vi.fn().mockReturnValue(handshake);
+    const pending: Array<Promise<unknown>> = [];
+    const sessionIds: string[] = [];
+    const overflowSessionId = 'dynamic-flow-capacity-overflow';
+    sessionIds.push(overflowSessionId);
+    const handshakeResponse = {
+      status: 'success',
+      items: [],
+      capabilities: DEFAULT_TEST_EXTENSION_CAPABILITIES,
+    };
+    const settledSender = vi.fn().mockResolvedValue(handshakeResponse);
+    try {
+      const settledCount =
+        DYNAMIC_FLOW_LIMITS.maxCachedSessions - DYNAMIC_FLOW_LIMITS.maxConcurrentHandshakes;
+      for (let index = 0; index < settledCount; index += 1) {
+        const sessionId = `dynamic-flow-settled-${index}`;
+        sessionIds.push(sessionId);
+        await listToolsForContext(createContext(sessionId, settledSender));
+      }
+      for (let index = 0; index < DYNAMIC_FLOW_LIMITS.maxConcurrentHandshakes; index += 1) {
+        const sessionId = `dynamic-flow-capacity-${index}`;
+        sessionIds.push(sessionId);
+        pending.push(listToolsForContext(createContext(sessionId, sendRequestToExtensionAndWait)));
+      }
+      await vi.waitFor(() =>
+        expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(
+          DYNAMIC_FLOW_LIMITS.maxConcurrentHandshakes,
+        ),
+      );
+
+      await expect(
+        listToolsForContext(createContext(overflowSessionId, sendRequestToExtensionAndWait)),
+      ).rejects.toThrow('Dynamic flow handshake capacity reached');
+      expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(
+        DYNAMIC_FLOW_LIMITS.maxConcurrentHandshakes,
+      );
+      await expect(
+        listToolsForContext(createContext('dynamic-flow-settled-0', settledSender)),
+      ).resolves.toEqual(expect.any(Array));
+      expect(settledSender).toHaveBeenCalledTimes(settledCount);
+
+      resolveHandshake(handshakeResponse);
+      await Promise.all(pending);
+      await expect(
+        listToolsForContext(createContext(overflowSessionId, sendRequestToExtensionAndWait)),
+      ).resolves.toEqual(expect.any(Array));
+      expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(
+        DYNAMIC_FLOW_LIMITS.maxConcurrentHandshakes + 1,
+      );
+    } finally {
+      resolveHandshake(handshakeResponse);
+      await Promise.allSettled(pending);
+      for (const sessionId of sessionIds) clearDynamicFlowCacheForSession(sessionId);
+    }
+  });
+
+  it('does not repopulate a cleared session from a late flow handshake', async () => {
+    exposeLegacyFlowTools();
+    let resolveFirst!: (value: unknown) => void;
+    const firstHandshake = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockReturnValueOnce(firstHandshake)
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [{ id: 'flow-new', slug: 'new-flow' }],
+      });
+    const sessionId = 'dynamic-flow-late-invalidation';
+    const ctx = createContext(sessionId, sendRequestToExtensionAndWait);
+    const firstList = listToolsForContext(ctx);
+    await vi.waitFor(() => expect(sendRequestToExtensionAndWait).toHaveBeenCalledOnce());
+
+    clearDynamicFlowCacheForSession(sessionId);
+    const queuedRefresh = listToolsForContext(ctx);
+    resolveFirst({
+      status: 'success',
+      items: [{ id: 'flow-stale', slug: 'stale-flow' }],
+      capabilities: DEFAULT_TEST_EXTENSION_CAPABILITIES,
+    });
+    expect((await firstList).find((tool) => tool.name === 'flow.stale-flow')).toBeUndefined();
+
+    const refreshed = await queuedRefresh;
+    expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(2);
+    expect(refreshed.find((tool) => tool.name === 'flow.new-flow')).toBeTruthy();
+    expect(refreshed.find((tool) => tool.name === 'flow.stale-flow')).toBeUndefined();
+  });
+
+  it('queues a force refresh behind an ordinary in-flight flow lookup', async () => {
+    let resolveOrdinary!: (value: unknown) => void;
+    const ordinaryHandshake = new Promise((resolve) => {
+      resolveOrdinary = resolve;
+    });
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockReturnValueOnce(ordinaryHandshake)
+      .mockResolvedValueOnce({
+        status: 'success',
+        items: [{ id: 'flow-new', slug: 'signup', revision: 'revision-new' }],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: 'ran new flow' }],
+          isError: false,
+        },
+      });
+    const sessionId = 'dynamic-flow-force-after-list';
+    const ctx = createContext(sessionId, sendRequestToExtensionAndWait);
+    const ordinaryList = listToolsForContext(ctx);
+    await vi.waitFor(() => expect(sendRequestToExtensionAndWait).toHaveBeenCalledOnce());
+
+    const run = callToolForContext(ctx, 'workflow_run', {
+      workflow: 'signup',
+      args: {},
+    });
+    expect(sendRequestToExtensionAndWait).toHaveBeenCalledOnce();
+    resolveOrdinary({
+      status: 'success',
+      items: [{ id: 'flow-old', slug: 'signup', revision: 'revision-old' }],
+      capabilities: DEFAULT_TEST_EXTENSION_CAPABILITIES,
+    });
+
+    await ordinaryList;
+    await run;
+    expect(sendRequestToExtensionAndWait).toHaveBeenNthCalledWith(
+      3,
+      {
+        name: 'record_replay_flow_run',
+        args: {
+          flowId: 'flow-new',
+          requireRevision: 'revision-new',
+          args: {},
+        },
+        meta: expectedForwardedMeta(sessionId),
+      },
+      NativeMessageType.CALL_TOOL,
+      120000,
+    );
   });
 
   it('uses published descriptor schemas and metadata for legacy dynamic workflow tools', async () => {
@@ -820,6 +1128,50 @@ describe('dynamic published flow tools', () => {
     expect(flowRunInput.properties?.returnLogs).toBeUndefined();
   });
 
+  it('fails closed when the advertised run-option list is empty after bounding', async () => {
+    const sendRequestToExtensionAndWait = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'success',
+        capabilities: {
+          protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
+          capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
+          extensionVersion: 'bounded-test',
+          supportedTools: ['record_replay_flow_run'],
+          supportedRunOptions: [
+            ...Array.from(
+              { length: DYNAMIC_FLOW_LIMITS.maxCapabilityEntries * 2 },
+              (_, index) => `unknown-${index}`,
+            ),
+            'background',
+          ],
+          featureFlags: [],
+        },
+        items: [],
+      })
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: { content: [{ type: 'text', text: 'ok' }], isError: false },
+      });
+    const ctx = createContext('dynamic-flow-run-option-fail-closed', sendRequestToExtensionAndWait);
+
+    await callToolForContext(ctx, 'record_replay_flow_run', {
+      flowId: 'flow-signup',
+      background: true,
+    });
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenNthCalledWith(
+      2,
+      {
+        name: 'record_replay_flow_run',
+        args: { flowId: 'flow-signup' },
+        meta: expectedForwardedMeta('dynamic-flow-run-option-fail-closed'),
+      },
+      NativeMessageType.CALL_TOOL,
+      120000,
+    );
+  });
+
   it('hides extension-backed tools when the capability handshake fails', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockRejectedValue(new Error('extension offline'));
     const ctx = createContext(
@@ -907,6 +1259,7 @@ describe('dynamic published flow tools', () => {
         name: 'record_replay_flow_run',
         args: {
           flowId: 'flow-signup',
+          requireRevision: 'unit-test-revision-0',
           args: {
             email: 'alice@example.com',
           },
@@ -949,7 +1302,10 @@ describe('dynamic published flow tools', () => {
           isError: false,
         },
       });
-    const ctx = createContext('dynamic-flow-workflow-capability-call', sendRequestToExtensionAndWait);
+    const ctx = createContext(
+      'dynamic-flow-workflow-capability-call',
+      sendRequestToExtensionAndWait,
+    );
 
     await callToolForContext(ctx, 'workflow_run', {
       workflow: 'signup',
@@ -966,6 +1322,7 @@ describe('dynamic published flow tools', () => {
         name: 'record_replay_flow_run',
         args: {
           flowId: 'flow-signup',
+          requireRevision: 'unit-test-revision-0',
           args: {
             email: 'alice@example.com',
           },
@@ -1034,7 +1391,12 @@ describe('dynamic published flow tools', () => {
       .mockResolvedValueOnce({
         status: 'success',
         data: {
-          content: [{ type: 'text', text: JSON.stringify({ success: true, published: true }) }],
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ success: true, published: true }),
+            },
+          ],
           isError: false,
         },
       })
@@ -1098,6 +1460,7 @@ describe('dynamic published flow tools', () => {
         name: 'record_replay_flow_run',
         args: {
           flowId: 'flow-signup',
+          requireRevision: 'unit-test-revision-0',
           args: {
             email: 'alice@example.com',
           },
@@ -1215,6 +1578,7 @@ describe('dynamic published flow tools', () => {
         name: 'record_replay_flow_run',
         args: {
           flowId: 'flow-signup',
+          requireRevision: 'unit-test-revision-0',
           args: {
             email: 'alice@example.com',
             attempts: 3,
@@ -1290,7 +1654,8 @@ describe('dynamic published flow tools', () => {
     expect(conflictInput.properties?.email).toMatchObject({ type: 'string' });
     expect(conflictInput.properties?.startUrl).toMatchObject({
       type: 'string',
-      description: 'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
+      description:
+        'Optional start URL to open before running. Only http:// and https:// URLs are allowed.',
     });
     expect(conflictInput.properties?.refresh).toMatchObject({
       type: 'boolean',
@@ -1309,6 +1674,7 @@ describe('dynamic published flow tools', () => {
         name: 'record_replay_flow_run',
         args: {
           flowId: 'flow-conflict',
+          requireRevision: 'unit-test-revision-0',
           args: {
             email: 'alice@example.com',
           },
@@ -1339,7 +1705,12 @@ describe('public tool exposure', () => {
 
     expect(sendRequestToExtensionAndWait).not.toHaveBeenCalled();
     expect(result).toEqual({
-      content: [{ type: 'text', text: 'Error calling tool: Tool not found: chrome_inject_script' }],
+      content: [
+        {
+          type: 'text',
+          text: 'Error calling tool: Tool not found: chrome_inject_script',
+        },
+      ],
       isError: true,
     });
   });
