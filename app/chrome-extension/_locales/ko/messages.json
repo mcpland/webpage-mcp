@@ -2277,6 +2277,70 @@
     "message": "스크립트",
     "description": "Auto-generated localized message"
   },
+  "semanticDataClearButton": {
+    "message": "시맨틱 인덱스 데이터 지우기",
+    "description": "로컬 시맨틱 인덱스 데이터를 지우는 버튼"
+  },
+  "semanticDataClearFailure": {
+    "message": "시맨틱 인덱스 데이터를 완전히 지우지 못했습니다",
+    "description": "시맨틱 인덱스 데이터 정리 실패 상태"
+  },
+  "semanticDataClearSuccess": {
+    "message": "시맨틱 인덱스 데이터를 지웠습니다",
+    "description": "시맨틱 인덱스 데이터 정리 성공 상태"
+  },
+  "semanticDataClearing": {
+    "message": "시맨틱 인덱스 데이터를 지우는 중...",
+    "description": "시맨틱 인덱스 데이터 정리 진행 상태"
+  },
+  "semanticDataConfirm": {
+    "message": "로컬에 저장된 인덱싱된 페이지, 벡터 및 검색 메타데이터를 모두 지우시겠습니까? 모델과 모델 환경설정은 유지됩니다.",
+    "description": "시맨틱 인덱스 데이터 정리 전 확인"
+  },
+  "semanticDataDescription": {
+    "message": "로컬에 저장된 인덱싱된 페이지, 벡터 및 검색 메타데이터를 관리합니다. 다운로드한 모델과 모델 환경설정은 유지됩니다.",
+    "description": "시맨틱 인덱스 데이터 관리 설명"
+  },
+  "semanticDataDocumentsLabel": {
+    "message": "문서",
+    "description": "시맨틱 인덱스 문서 수 레이블"
+  },
+  "semanticDataIndexedPagesLabel": {
+    "message": "인덱싱된 페이지",
+    "description": "시맨틱 인덱스 페이지 수 레이블"
+  },
+  "semanticDataIndexSizeLabel": {
+    "message": "인덱스 크기",
+    "description": "시맨틱 인덱스 크기 레이블"
+  },
+  "semanticDataLoading": {
+    "message": "시맨틱 인덱스 통계를 불러오는 중...",
+    "description": "시맨틱 인덱스 통계 로딩 상태"
+  },
+  "semanticDataRefreshButton": {
+    "message": "통계 새로고침",
+    "description": "시맨틱 인덱스 통계를 새로고침하는 버튼"
+  },
+  "semanticDataSectionTitle": {
+    "message": "시맨틱 인덱스 데이터",
+    "description": "시맨틱 인덱스 데이터 관리 섹션 제목"
+  },
+  "semanticDataStatsFailure": {
+    "message": "시맨틱 인덱스 통계를 사용할 수 없습니다",
+    "description": "시맨틱 인덱스 통계 실패 상태"
+  },
+  "semanticDataStatsLabel": {
+    "message": "시맨틱 인덱스 통계",
+    "description": "시맨틱 인덱스 통계 접근성 레이블"
+  },
+  "semanticDataTabsLabel": {
+    "message": "탭",
+    "description": "시맨틱 인덱스 탭 수 레이블"
+  },
+  "semanticDataUnavailable": {
+    "message": "사용할 수 없음",
+    "description": "사용할 수 없는 시맨틱 인덱스 통계"
+  },
   "semanticEngineInitFailedStatus": {
     "message": "시맨틱 엔진 초기화 실패",
     "description": "시맨틱 엔진 초기화 실패 상태"

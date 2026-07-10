@@ -2277,6 +2277,70 @@
     "message": "スクリプト",
     "description": "Auto-generated localized message"
   },
+  "semanticDataClearButton": {
+    "message": "セマンティックインデックスデータを消去",
+    "description": "ローカルのセマンティックインデックスデータを消去するボタン"
+  },
+  "semanticDataClearFailure": {
+    "message": "セマンティックインデックスデータを完全に消去できませんでした",
+    "description": "セマンティックインデックスデータ消去の失敗状態"
+  },
+  "semanticDataClearSuccess": {
+    "message": "セマンティックインデックスデータを消去しました",
+    "description": "セマンティックインデックスデータ消去の成功状態"
+  },
+  "semanticDataClearing": {
+    "message": "セマンティックインデックスデータを消去しています...",
+    "description": "セマンティックインデックスデータ消去の進行状態"
+  },
+  "semanticDataConfirm": {
+    "message": "ローカルに保存されたインデックス済みページ、ベクトル、検索メタデータをすべて消去しますか？モデルとモデル設定は保持されます。",
+    "description": "セマンティックインデックスデータ消去前の確認"
+  },
+  "semanticDataDescription": {
+    "message": "ローカルに保存されたインデックス済みページ、ベクトル、検索メタデータを管理します。ダウンロード済みモデルとモデル設定は保持されます。",
+    "description": "セマンティックインデックスデータ管理の説明"
+  },
+  "semanticDataDocumentsLabel": {
+    "message": "ドキュメント",
+    "description": "セマンティックインデックスのドキュメント数ラベル"
+  },
+  "semanticDataIndexedPagesLabel": {
+    "message": "インデックス済みページ",
+    "description": "セマンティックインデックスのページ数ラベル"
+  },
+  "semanticDataIndexSizeLabel": {
+    "message": "インデックスサイズ",
+    "description": "セマンティックインデックスのサイズラベル"
+  },
+  "semanticDataLoading": {
+    "message": "セマンティックインデックスの統計を読み込んでいます...",
+    "description": "セマンティックインデックス統計の読み込み状態"
+  },
+  "semanticDataRefreshButton": {
+    "message": "統計を更新",
+    "description": "セマンティックインデックス統計を更新するボタン"
+  },
+  "semanticDataSectionTitle": {
+    "message": "セマンティックインデックスデータ",
+    "description": "セマンティックインデックスデータ管理セクションのタイトル"
+  },
+  "semanticDataStatsFailure": {
+    "message": "セマンティックインデックスの統計を利用できません",
+    "description": "セマンティックインデックス統計の失敗状態"
+  },
+  "semanticDataStatsLabel": {
+    "message": "セマンティックインデックスの統計",
+    "description": "セマンティックインデックス統計のアクセシブルラベル"
+  },
+  "semanticDataTabsLabel": {
+    "message": "タブ",
+    "description": "セマンティックインデックスのタブ数ラベル"
+  },
+  "semanticDataUnavailable": {
+    "message": "利用不可",
+    "description": "利用できないセマンティックインデックス統計"
+  },
   "semanticEngineInitFailedStatus": {
     "message": "セマンティックエンジンの初期化に失敗しました",
     "description": "Auto-generated localized message"

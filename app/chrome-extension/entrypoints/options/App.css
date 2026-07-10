@@ -16,12 +16,84 @@
 }
 
 .create,
-.filters {
+.filters,
+.storage-management,
+.userscript-controls {
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   padding: 12px;
   margin-bottom: 16px;
+}
+
+.userscript-controls {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.userscript-controls h2 {
+  margin: 0;
+}
+
+.storage-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.storage-stats > div {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.storage-stats dt {
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.storage-stats dd {
+  color: #111827;
+  font-size: 18px;
+  font-weight: 600;
+  margin: 4px 0 0;
+}
+
+.storage-actions {
+  align-items: flex-start;
+}
+
+.danger-button {
+  background: #b91c1c;
+}
+
+.danger-button:hover {
+  background: #991b1b;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.storage-status {
+  font-size: 12px;
+  margin: 10px 0 0;
+}
+
+.storage-status-info {
+  color: #1d4ed8;
+}
+
+.storage-status-success {
+  color: #047857;
+}
+
+.storage-status-error {
+  color: #b91c1c;
 }
 
 .grid {
@@ -101,10 +173,18 @@ button:hover {
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .storage-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .storage-stats {
     grid-template-columns: 1fr;
   }
 }

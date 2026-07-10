@@ -2277,6 +2277,70 @@
     "message": "腳本",
     "description": "自動生成的 i18n 文案"
   },
+  "semanticDataClearButton": {
+    "message": "清除語意索引資料",
+    "description": "清除本機語意索引資料的按鈕"
+  },
+  "semanticDataClearFailure": {
+    "message": "無法完整清除語意索引資料",
+    "description": "語意索引資料清理失敗狀態"
+  },
+  "semanticDataClearSuccess": {
+    "message": "語意索引資料已清除",
+    "description": "語意索引資料清理成功狀態"
+  },
+  "semanticDataClearing": {
+    "message": "正在清除語意索引資料...",
+    "description": "語意索引資料清理進度狀態"
+  },
+  "semanticDataConfirm": {
+    "message": "清除本機儲存的全部已索引頁面、向量與搜尋中繼資料？模型與模型偏好設定將保留。",
+    "description": "清除語意索引資料前的確認提示"
+  },
+  "semanticDataDescription": {
+    "message": "管理本機儲存的已索引頁面、向量與搜尋中繼資料。已下載模型與模型偏好設定會保留。",
+    "description": "語意索引資料管理說明"
+  },
+  "semanticDataDocumentsLabel": {
+    "message": "文件",
+    "description": "語意索引文件數量標籤"
+  },
+  "semanticDataIndexedPagesLabel": {
+    "message": "已索引頁面",
+    "description": "語意索引頁面數量標籤"
+  },
+  "semanticDataIndexSizeLabel": {
+    "message": "索引大小",
+    "description": "語意索引大小標籤"
+  },
+  "semanticDataLoading": {
+    "message": "正在載入語意索引統計...",
+    "description": "語意索引統計載入狀態"
+  },
+  "semanticDataRefreshButton": {
+    "message": "重新整理統計",
+    "description": "重新整理語意索引統計的按鈕"
+  },
+  "semanticDataSectionTitle": {
+    "message": "語意索引資料",
+    "description": "語意索引資料管理區標題"
+  },
+  "semanticDataStatsFailure": {
+    "message": "語意索引統計無法使用",
+    "description": "語意索引統計失敗狀態"
+  },
+  "semanticDataStatsLabel": {
+    "message": "語意索引統計",
+    "description": "語意索引統計的無障礙標籤"
+  },
+  "semanticDataTabsLabel": {
+    "message": "分頁",
+    "description": "語意索引分頁數量標籤"
+  },
+  "semanticDataUnavailable": {
+    "message": "無法使用",
+    "description": "無法使用的語意索引統計"
+  },
   "semanticEngineInitFailedStatus": {
     "message": "語意引擎初始化失敗",
     "description": "語意引擎初始化失敗狀態"

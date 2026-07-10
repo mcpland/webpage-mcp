@@ -2277,6 +2277,70 @@
     "message": "脚本",
     "description": "脚本文本标签"
   },
+  "semanticDataClearButton": {
+    "message": "清除语义索引数据",
+    "description": "清除本地语义索引数据的按钮"
+  },
+  "semanticDataClearFailure": {
+    "message": "无法完整清除语义索引数据",
+    "description": "语义索引数据清理失败状态"
+  },
+  "semanticDataClearSuccess": {
+    "message": "语义索引数据已清除",
+    "description": "语义索引数据清理成功状态"
+  },
+  "semanticDataClearing": {
+    "message": "正在清除语义索引数据...",
+    "description": "语义索引数据清理进度状态"
+  },
+  "semanticDataConfirm": {
+    "message": "清除本地存储的全部已索引页面、向量和搜索元数据？模型和模型偏好将保留。",
+    "description": "清除语义索引数据前的确认提示"
+  },
+  "semanticDataDescription": {
+    "message": "管理本地存储的已索引页面、向量和搜索元数据。已下载模型和模型偏好会被保留。",
+    "description": "语义索引数据管理说明"
+  },
+  "semanticDataDocumentsLabel": {
+    "message": "文档",
+    "description": "语义索引文档数量标签"
+  },
+  "semanticDataIndexedPagesLabel": {
+    "message": "已索引页面",
+    "description": "语义索引页面数量标签"
+  },
+  "semanticDataIndexSizeLabel": {
+    "message": "索引大小",
+    "description": "语义索引大小标签"
+  },
+  "semanticDataLoading": {
+    "message": "正在加载语义索引统计...",
+    "description": "语义索引统计加载状态"
+  },
+  "semanticDataRefreshButton": {
+    "message": "刷新统计",
+    "description": "刷新语义索引统计的按钮"
+  },
+  "semanticDataSectionTitle": {
+    "message": "语义索引数据",
+    "description": "语义索引数据管理区标题"
+  },
+  "semanticDataStatsFailure": {
+    "message": "语义索引统计不可用",
+    "description": "语义索引统计失败状态"
+  },
+  "semanticDataStatsLabel": {
+    "message": "语义索引统计",
+    "description": "语义索引统计的无障碍标签"
+  },
+  "semanticDataTabsLabel": {
+    "message": "标签页",
+    "description": "语义索引标签页数量标签"
+  },
+  "semanticDataUnavailable": {
+    "message": "不可用",
+    "description": "不可用的语义索引统计"
+  },
   "semanticEngineInitFailedStatus": {
     "message": "语义引擎初始化失败",
     "description": "语义引擎初始化失败状态"

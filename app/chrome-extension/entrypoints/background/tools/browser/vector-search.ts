@@ -3,17 +3,18 @@
  * Uses vector database for efficient semantic search
  */
 
-import { createErrorResponse, ToolResult } from '@/common/tool-handler';
-import { BaseBrowserToolExecutor } from '../base-browser';
-import { TOOL_NAMES } from 'webpage-mcp-shared';
-import { ContentIndexer } from '@/utils/content-indexer';
-import { LIMITS, ERROR_MESSAGES } from '@/common/constants';
-import type { SearchResult } from '@/utils/vector-database';
-import { hasDisallowedPublicUrlScheme } from './common';
+import { createErrorResponse, ToolResult } from "@/common/tool-handler";
+import { BaseBrowserToolExecutor } from "../base-browser";
+import { TOOL_NAMES } from "webpage-mcp-shared";
 import {
-  measureUtf8Bytes,
-  truncateJsonString,
-} from './bounded-tool-output';
+  ContentIndexer,
+  getGlobalContentIndexer,
+  type ContentIndexerActivity,
+} from "@/utils/content-indexer";
+import { ERROR_MESSAGES } from "@/common/constants";
+import type { SearchResult } from "@/utils/vector-database";
+import { hasDisallowedPublicUrlScheme } from "./common";
+import { measureUtf8Bytes, truncateJsonString } from "./bounded-tool-output";
 
 export const VECTOR_SEARCH_MAX_QUERY_UTF8_BYTES = 4 * 1024;
 export const VECTOR_SEARCH_MAX_CONCURRENCY = 2;
@@ -47,28 +48,28 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
   private contentIndexer: ContentIndexer;
   private isInitialized = false;
   private activeSearches = 0;
-  private readonly searchIdleWaiters = new Set<() => void>();
   private explicitIndexPromise: Promise<void> | null = null;
   private rebuildPromise: Promise<void> | null = null;
 
   constructor(contentIndexer?: ContentIndexer) {
     super();
-    this.contentIndexer =
-      contentIndexer ??
-      new ContentIndexer({
-        autoIndex: false,
-        maxChunksPerPage: LIMITS.MAX_SEARCH_RESULTS,
-        skipDuplicates: true,
-      });
+    this.contentIndexer = contentIndexer ?? getGlobalContentIndexer();
   }
 
-  private async initializeIndexer(): Promise<void> {
+  private async initializeIndexer(
+    activity: ContentIndexerActivity,
+  ): Promise<void> {
     try {
-      await this.contentIndexer.initialize();
+      await activity.initialize();
       this.isInitialized = true;
-      console.log('VectorSearchTabsContentTool: Content indexer initialized successfully');
+      console.log(
+        "VectorSearchTabsContentTool: Content indexer initialized successfully",
+      );
     } catch (error) {
-      console.error('VectorSearchTabsContentTool: Failed to initialize content indexer:', error);
+      console.error(
+        "VectorSearchTabsContentTool: Failed to initialize content indexer:",
+        error,
+      );
       this.isInitialized = false;
     }
   }
@@ -76,7 +77,7 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
   async execute(args: { query: string }): Promise<ToolResult> {
     let searchAcquired = false;
     try {
-      const rawQuery = typeof args?.query === 'string' ? args.query : '';
+      const rawQuery = typeof args?.query === "string" ? args.query : "";
       if (
         measureUtf8Bytes(rawQuery, VECTOR_SEARCH_MAX_QUERY_UTF8_BYTES) >
         VECTOR_SEARCH_MAX_QUERY_UTF8_BYTES
@@ -88,11 +89,14 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
       const query = rawQuery.trim();
       if (!query) {
         return createErrorResponse(
-          ERROR_MESSAGES.INVALID_PARAMETERS + ': Query parameter is required and cannot be empty',
+          ERROR_MESSAGES.INVALID_PARAMETERS +
+            ": Query parameter is required and cannot be empty",
         );
       }
       if (this.rebuildPromise) {
-        return createErrorResponse('Vector index rebuild is in progress. Please retry shortly.');
+        return createErrorResponse(
+          "Vector index rebuild is in progress. Please retry shortly.",
+        );
       }
       if (this.activeSearches >= VECTOR_SEARCH_MAX_CONCURRENCY) {
         return createErrorResponse(
@@ -102,110 +106,120 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
       this.activeSearches += 1;
       searchAcquired = true;
 
-      console.log('VectorSearchTabsContentTool: Starting vector search');
+      console.log("VectorSearchTabsContentTool: Starting vector search");
 
-      // Check semantic engine status
-      if (!this.contentIndexer.isSemanticEngineReady()) {
-        if (this.contentIndexer.isSemanticEngineInitializing()) {
-          return createErrorResponse(
-            'Vector search engine is still initializing (model downloading). Please wait a moment and try again.',
-          );
-        } else {
-          // Try to initialize
-          console.log('VectorSearchTabsContentTool: Initializing content indexer...');
-          await this.initializeIndexer();
+      return await this.contentIndexer.runWithIndexActivity(
+        async (activity) => {
+          // Check semantic engine status
+          if (!activity.isSemanticEngineReady()) {
+            if (activity.isSemanticEngineInitializing()) {
+              return createErrorResponse(
+                "Vector search engine is still initializing (model downloading). Please wait a moment and try again.",
+              );
+            } else {
+              // Try to initialize
+              console.log(
+                "VectorSearchTabsContentTool: Initializing content indexer...",
+              );
+              await this.initializeIndexer(activity);
 
-          // Check semantic engine status again
-          if (!this.contentIndexer.isSemanticEngineReady()) {
-            return createErrorResponse('Failed to initialize vector search engine');
+              // Check semantic engine status again
+              if (!activity.isSemanticEngineReady()) {
+                return createErrorResponse(
+                  "Failed to initialize vector search engine",
+                );
+              }
+            }
           }
-        }
-      }
 
-      // Page text is collected only as a direct consequence of this explicit
-      // tool invocation. Concurrent searches share the same bounded indexing
-      // pass, and ContentIndexer skips pages already indexed in this session.
-      await this.indexCurrentTabsForSearch();
+          // Page text is collected only as a direct consequence of this explicit
+          // tool invocation. Concurrent searches share the same bounded indexing
+          // pass, and ContentIndexer skips pages already indexed in this session.
+          await this.indexCurrentTabsForSearch(activity);
 
-      // Execute vector search, get more results for deduplication
-      const searchResults = await this.contentIndexer.searchContent(
-        query,
-        VECTOR_SEARCH_INTERNAL_RESULTS,
-      );
+          // Execute vector search, get more results for deduplication
+          const searchResults = await activity.searchContent(
+            query,
+            VECTOR_SEARCH_INTERNAL_RESULTS,
+          );
 
-      // Convert search results format
-      const vectorSearchResults = this.convertSearchResults(searchResults);
+          // Convert search results format
+          const vectorSearchResults = this.convertSearchResults(searchResults);
 
-      // Deduplicate by tab, keep only the highest similarity fragment per tab
-      const deduplicatedResults = this.deduplicateByTab(vectorSearchResults);
+          // Deduplicate by tab, keep only the highest similarity fragment per tab
+          const deduplicatedResults =
+            this.deduplicateByTab(vectorSearchResults);
 
-      // Sort by similarity and get top 10 results
-      const topResults = deduplicatedResults
-        .sort((a, b) => b.semanticScore - a.semanticScore)
-        .slice(0, VECTOR_SEARCH_RETURNED_TABS);
+          // Sort by similarity and get top 10 results
+          const topResults = deduplicatedResults
+            .sort((a, b) => b.semanticScore - a.semanticScore)
+            .slice(0, VECTOR_SEARCH_RETURNED_TABS);
 
-      // Get index statistics
-      const stats = this.contentIndexer.getStats();
+          // Get index statistics
+          const stats = activity.getStats();
 
-      const result = {
-        success: true,
-        totalTabsSearched: this.safeCount(stats.totalTabs),
-        matchedTabsCount: topResults.length,
-        vectorSearchEnabled: true,
-        truncated:
-          searchResults.length > VECTOR_SEARCH_INTERNAL_RESULTS ||
-          deduplicatedResults.length > VECTOR_SEARCH_RETURNED_TABS,
-        indexStats: {
-          totalDocuments: this.safeCount(stats.totalDocuments),
-          totalTabs: this.safeCount(stats.totalTabs),
-          indexedPages: this.safeCount(stats.indexedPages),
-          semanticEngineReady: stats.semanticEngineReady === true,
-          semanticEngineInitializing: stats.semanticEngineInitializing === true,
+          const result = {
+            success: true,
+            totalTabsSearched: this.safeCount(stats.totalTabs),
+            matchedTabsCount: topResults.length,
+            vectorSearchEnabled: true,
+            truncated:
+              searchResults.length > VECTOR_SEARCH_INTERNAL_RESULTS ||
+              deduplicatedResults.length > VECTOR_SEARCH_RETURNED_TABS,
+            indexStats: {
+              totalDocuments: this.safeCount(stats.totalDocuments),
+              totalTabs: this.safeCount(stats.totalTabs),
+              indexedPages: this.safeCount(stats.indexedPages),
+              semanticEngineReady: stats.semanticEngineReady === true,
+              semanticEngineInitializing:
+                stats.semanticEngineInitializing === true,
+            },
+            matchedTabs: topResults.map((result) => ({
+              tabId: result.tabId,
+              url: result.url,
+              title: result.title,
+              semanticScore: result.semanticScore,
+              matchedSnippets: [result.matchedSnippet],
+              chunkSource: result.chunkSource,
+              timestamp: result.timestamp,
+            })),
+          };
+
+          console.log(
+            `VectorSearchTabsContentTool: Found ${topResults.length} results with vector search`,
+          );
+
+          let serialized = JSON.stringify(result);
+          while (
+            measureUtf8Bytes(serialized, VECTOR_SEARCH_MAX_OUTPUT_UTF8_BYTES) >
+              VECTOR_SEARCH_MAX_OUTPUT_UTF8_BYTES &&
+            result.matchedTabs.length > 0
+          ) {
+            result.matchedTabs.pop();
+            result.matchedTabsCount = result.matchedTabs.length;
+            result.truncated = true;
+            serialized = JSON.stringify(result);
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: serialized,
+              },
+            ],
+            isError: false,
+          };
         },
-        matchedTabs: topResults.map((result) => ({
-          tabId: result.tabId,
-          url: result.url,
-          title: result.title,
-          semanticScore: result.semanticScore,
-          matchedSnippets: [result.matchedSnippet],
-          chunkSource: result.chunkSource,
-          timestamp: result.timestamp,
-        })),
-      };
-
-      console.log(
-        `VectorSearchTabsContentTool: Found ${topResults.length} results with vector search`,
       );
-
-      let serialized = JSON.stringify(result);
-      while (
-        measureUtf8Bytes(serialized, VECTOR_SEARCH_MAX_OUTPUT_UTF8_BYTES) >
-          VECTOR_SEARCH_MAX_OUTPUT_UTF8_BYTES &&
-        result.matchedTabs.length > 0
-      ) {
-        result.matchedTabs.pop();
-        result.matchedTabsCount = result.matchedTabs.length;
-        result.truncated = true;
-        serialized = JSON.stringify(result);
-      }
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: serialized,
-          },
-        ],
-        isError: false,
-      };
     } catch (error) {
-      console.error('VectorSearchTabsContentTool: Search failed:', error);
+      console.error("VectorSearchTabsContentTool: Search failed:", error);
       const message = truncateJsonString(
         error instanceof Error ? error.message : String(error),
         VECTOR_SEARCH_MAX_ERROR_JSON_BYTES,
       );
       return createErrorResponse(
-        `Vector search failed: ${message || 'Unknown error'}`,
+        `Vector search failed: ${message || "Unknown error"}`,
       );
     } finally {
       if (searchAcquired) this.releaseSearch();
@@ -213,39 +227,34 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
   }
 
   private safeCount(value: unknown): number {
-    return typeof value === 'number' && Number.isFinite(value)
+    return typeof value === "number" && Number.isFinite(value)
       ? Math.max(0, Math.floor(value))
       : 0;
   }
 
   private releaseSearch(): void {
     this.activeSearches = Math.max(0, this.activeSearches - 1);
-    if (this.activeSearches !== 0) return;
-    for (const resolve of this.searchIdleWaiters) resolve();
-    this.searchIdleWaiters.clear();
-  }
-
-  private async waitForSearchesIdle(): Promise<void> {
-    if (this.activeSearches === 0) return;
-    await new Promise<void>((resolve) => this.searchIdleWaiters.add(resolve));
   }
 
   /**
    * Ensure all tabs are indexed
    */
-  private async ensureTabsIndexed(tabIds: number[]): Promise<void> {
+  private async ensureTabsIndexed(
+    tabIds: number[],
+    activity: ContentIndexerActivity,
+  ): Promise<void> {
     let nextIndex = 0;
-    const workerCount = Math.min(
-      VECTOR_REBUILD_MAX_CONCURRENCY,
-      tabIds.length,
-    );
+    const workerCount = Math.min(VECTOR_REBUILD_MAX_CONCURRENCY, tabIds.length);
     const workers = Array.from({ length: workerCount }, async () => {
       while (nextIndex < tabIds.length) {
         const tabId = tabIds[nextIndex++];
         try {
-          await this.contentIndexer.indexTabContent(tabId);
+          await activity.indexTabContent(tabId);
         } catch (error) {
-          console.warn(`VectorSearchTabsContentTool: Failed to index tab ${tabId}:`, error);
+          console.warn(
+            `VectorSearchTabsContentTool: Failed to index tab ${tabId}:`,
+            error,
+          );
         }
       }
     });
@@ -262,11 +271,15 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
     const scanLimit = Math.min(tabs.length, VECTOR_REBUILD_MAX_TAB_SCAN);
     let scannedTabs = 0;
 
-    for (let index = 0; index < scanLimit && tabIds.length < VECTOR_REBUILD_MAX_TABS; index += 1) {
+    for (
+      let index = 0;
+      index < scanLimit && tabIds.length < VECTOR_REBUILD_MAX_TABS;
+      index += 1
+    ) {
       const tab = tabs[index];
       scannedTabs += 1;
       if (
-        typeof tab.id !== 'number' ||
+        typeof tab.id !== "number" ||
         !Number.isSafeInteger(tab.id) ||
         tab.id < 0 ||
         seenTabIds.has(tab.id)
@@ -275,7 +288,10 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
       }
       seenTabIds.add(tab.id);
 
-      const boundedUrl = truncateJsonString(tab.url, VECTOR_SEARCH_MAX_URL_JSON_BYTES);
+      const boundedUrl = truncateJsonString(
+        tab.url,
+        VECTOR_SEARCH_MAX_URL_JSON_BYTES,
+      );
       if (
         !boundedUrl ||
         !/^https?:\/\//i.test(boundedUrl) ||
@@ -289,21 +305,26 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
     return { tabIds, scannedTabs };
   }
 
-  private indexCurrentTabsForSearch(): Promise<void> {
+  private indexCurrentTabsForSearch(
+    activity: ContentIndexerActivity,
+  ): Promise<void> {
     if (this.explicitIndexPromise) return this.explicitIndexPromise;
 
-    const operation = this.performExplicitIndexPass();
+    const operation = this.performExplicitIndexPass(activity);
     const tracked = operation.finally(() => {
-      if (this.explicitIndexPromise === tracked) this.explicitIndexPromise = null;
+      if (this.explicitIndexPromise === tracked)
+        this.explicitIndexPromise = null;
     });
     this.explicitIndexPromise = tracked;
     return tracked;
   }
 
-  private async performExplicitIndexPass(): Promise<void> {
+  private async performExplicitIndexPass(
+    activity: ContentIndexerActivity,
+  ): Promise<void> {
     const tabs = await chrome.tabs.query({});
     const { tabIds, scannedTabs } = this.selectIndexableTabIds(tabs);
-    await this.ensureTabsIndexed(tabIds);
+    await this.ensureTabsIndexed(tabIds, activity);
 
     console.log(
       `VectorSearchTabsContentTool: Explicitly indexed ${tabIds.length} tabs ` +
@@ -314,9 +335,14 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
   /**
    * Convert search results format
    */
-  private convertSearchResults(searchResults: SearchResult[]): VectorSearchResult[] {
+  private convertSearchResults(
+    searchResults: SearchResult[],
+  ): VectorSearchResult[] {
     const results: VectorSearchResult[] = [];
-    const limit = Math.min(searchResults.length, VECTOR_SEARCH_INTERNAL_RESULTS);
+    const limit = Math.min(
+      searchResults.length,
+      VECTOR_SEARCH_INTERNAL_RESULTS,
+    );
     for (let index = 0; index < limit; index += 1) {
       const result = searchResults[index];
       const boundedUrl = truncateJsonString(
@@ -332,7 +358,8 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
           VECTOR_SEARCH_MAX_TITLE_JSON_BYTES,
         ),
         semanticScore:
-          typeof result.similarity === 'number' && Number.isFinite(result.similarity)
+          typeof result.similarity === "number" &&
+          Number.isFinite(result.similarity)
             ? result.similarity
             : 0,
         matchedSnippet: this.extractSnippet(result.document.chunk.text),
@@ -341,7 +368,7 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
           VECTOR_SEARCH_MAX_SOURCE_JSON_BYTES,
         ),
         timestamp:
-          typeof result.document.timestamp === 'number' &&
+          typeof result.document.timestamp === "number" &&
           Number.isFinite(result.document.timestamp)
             ? result.document.timestamp
             : 0,
@@ -353,14 +380,19 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
   /**
    * Deduplicate by tab, keep only the highest similarity fragment per tab
    */
-  private deduplicateByTab(results: VectorSearchResult[]): VectorSearchResult[] {
+  private deduplicateByTab(
+    results: VectorSearchResult[],
+  ): VectorSearchResult[] {
     const tabMap = new Map<number, VectorSearchResult>();
 
     for (const result of results) {
       const existingResult = tabMap.get(result.tabId);
 
       // If this tab has no result yet, or current result has higher similarity, update it
-      if (!existingResult || result.semanticScore > existingResult.semanticScore) {
+      if (
+        !existingResult ||
+        result.semanticScore > existingResult.semanticScore
+      ) {
         tabMap.set(result.tabId, result);
       }
     }
@@ -383,12 +415,12 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
     // Try to truncate at sentence boundary
     const truncated = boundedText.substring(0, maxLength);
     const lastSentenceEnd = Math.max(
-      truncated.lastIndexOf('.'),
-      truncated.lastIndexOf('!'),
-      truncated.lastIndexOf('?'),
-      truncated.lastIndexOf('\u3002'),
-      truncated.lastIndexOf('\uFF01'),
-      truncated.lastIndexOf('\uFF1F'),
+      truncated.lastIndexOf("."),
+      truncated.lastIndexOf("!"),
+      truncated.lastIndexOf("?"),
+      truncated.lastIndexOf("\u3002"),
+      truncated.lastIndexOf("\uFF01"),
+      truncated.lastIndexOf("\uFF1F"),
     );
 
     if (lastSentenceEnd > maxLength * 0.7) {
@@ -396,12 +428,12 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
     }
 
     // If no suitable sentence boundary found, truncate at word boundary
-    const lastSpaceIndex = truncated.lastIndexOf(' ');
+    const lastSpaceIndex = truncated.lastIndexOf(" ");
     if (lastSpaceIndex > maxLength * 0.8) {
-      return truncated.substring(0, lastSpaceIndex) + '...';
+      return truncated.substring(0, lastSpaceIndex) + "...";
     }
 
-    return truncated + '...';
+    return truncated + "...";
   }
 
   /**
@@ -411,10 +443,11 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
     if (!this.isInitialized) {
       // Don't automatically initialize - just return basic stats
       return {
-        totalDocuments: 0,
-        totalTabs: 0,
-        indexSize: 0,
-        indexedPages: 0,
+        available: false,
+        totalDocuments: null,
+        totalTabs: null,
+        indexSize: null,
+        indexedPages: null,
         isInitialized: false,
         semanticEngineReady: false,
         semanticEngineInitializing: false,
@@ -436,40 +469,41 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
     return tracked;
   }
 
-  private async performRebuildIndex(): Promise<void> {
-    await this.waitForSearchesIdle();
-    if (!this.isInitialized) {
-      await this.initializeIndexer();
-    }
+  private performRebuildIndex(): Promise<void> {
+    return this.contentIndexer.runExclusiveIndexMaintenance(
+      async (activity) => {
+        try {
+          if (!this.isInitialized) await this.initializeIndexer(activity);
 
-    try {
-      // Clear existing indexes
-      await this.contentIndexer.clearAllIndexes();
+          await activity.clearAllIndexes();
+          const tabs = await chrome.tabs.query({});
+          const { tabIds: validTabIds, scannedTabs } =
+            this.selectIndexableTabIds(tabs);
+          await this.ensureTabsIndexed(validTabIds, activity);
 
-      const tabs = await chrome.tabs.query({});
-      const { tabIds: validTabIds, scannedTabs } = this.selectIndexableTabIds(tabs);
-
-      await this.ensureTabsIndexed(validTabIds);
-
-      console.log(
-        `VectorSearchTabsContentTool: Rebuilt index for ${validTabIds.length} tabs ` +
-          `(scanned ${scannedTabs}, limits ${VECTOR_REBUILD_MAX_TABS}/${VECTOR_REBUILD_MAX_TAB_SCAN})`,
-      );
-    } catch (error) {
-      console.error('VectorSearchTabsContentTool: Failed to rebuild index:', error);
-      throw error;
-    }
+          console.log(
+            `VectorSearchTabsContentTool: Rebuilt index for ${validTabIds.length} tabs ` +
+              `(scanned ${scannedTabs}, limits ${VECTOR_REBUILD_MAX_TABS}/${VECTOR_REBUILD_MAX_TAB_SCAN})`,
+          );
+        } catch (error) {
+          console.error(
+            "VectorSearchTabsContentTool: Failed to rebuild index:",
+            error,
+          );
+          throw error;
+        }
+      },
+    );
   }
 
   /**
    * Manually index specified tab
    */
   public async indexTab(tabId: number): Promise<void> {
-    if (!this.isInitialized) {
-      await this.initializeIndexer();
-    }
-
-    await this.contentIndexer.indexTabContent(tabId);
+    await this.contentIndexer.runWithIndexActivity(async (activity) => {
+      if (!this.isInitialized) await this.initializeIndexer(activity);
+      await activity.indexTabContent(tabId);
+    });
   }
 
   /**
@@ -480,7 +514,9 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
       return;
     }
 
-    await this.contentIndexer.removeTabIndex(tabId);
+    await this.contentIndexer.runWithIndexActivity((activity) =>
+      activity.removeTabIndex(tabId),
+    );
   }
 }
 

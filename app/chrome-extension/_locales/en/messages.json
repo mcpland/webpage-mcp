@@ -2277,6 +2277,70 @@
     "message": "Script",
     "description": "script textarea label"
   },
+  "semanticDataClearButton": {
+    "message": "Clear semantic index data",
+    "description": "Button that clears locally stored semantic index data"
+  },
+  "semanticDataClearFailure": {
+    "message": "Semantic index data could not be completely cleared",
+    "description": "Semantic index data cleanup failure status"
+  },
+  "semanticDataClearSuccess": {
+    "message": "Semantic index data cleared",
+    "description": "Semantic index data cleanup success status"
+  },
+  "semanticDataClearing": {
+    "message": "Clearing semantic index data...",
+    "description": "Semantic index data cleanup progress status"
+  },
+  "semanticDataConfirm": {
+    "message": "Clear all locally stored indexed pages, vectors, and search metadata? Models and model preferences will be kept.",
+    "description": "Confirmation before clearing semantic index data"
+  },
+  "semanticDataDescription": {
+    "message": "Manage locally stored indexed pages, vectors, and search metadata. Downloaded models and model preferences are kept.",
+    "description": "Description of semantic index data management"
+  },
+  "semanticDataDocumentsLabel": {
+    "message": "Documents",
+    "description": "Semantic index document count label"
+  },
+  "semanticDataIndexedPagesLabel": {
+    "message": "Indexed pages",
+    "description": "Semantic index page count label"
+  },
+  "semanticDataIndexSizeLabel": {
+    "message": "Index size",
+    "description": "Semantic index size label"
+  },
+  "semanticDataLoading": {
+    "message": "Loading semantic index statistics...",
+    "description": "Semantic index statistics loading status"
+  },
+  "semanticDataRefreshButton": {
+    "message": "Refresh statistics",
+    "description": "Button that refreshes semantic index statistics"
+  },
+  "semanticDataSectionTitle": {
+    "message": "Semantic index data",
+    "description": "Semantic index data management section title"
+  },
+  "semanticDataStatsFailure": {
+    "message": "Semantic index statistics are unavailable",
+    "description": "Semantic index statistics failure status"
+  },
+  "semanticDataStatsLabel": {
+    "message": "Semantic index statistics",
+    "description": "Accessible label for semantic index statistics"
+  },
+  "semanticDataTabsLabel": {
+    "message": "Tabs",
+    "description": "Semantic index tab count label"
+  },
+  "semanticDataUnavailable": {
+    "message": "Unavailable",
+    "description": "Unavailable semantic index statistic"
+  },
   "semanticEngineInitFailedStatus": {
     "message": "Semantic Engine Initialization Failed",
     "description": "Semantic engine initialization failed status"

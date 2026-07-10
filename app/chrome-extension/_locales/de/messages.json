@@ -2277,6 +2277,70 @@
     "message": "Skript",
     "description": "Auto-generated localized message"
   },
+  "semanticDataClearButton": {
+    "message": "Semantische Indexdaten löschen",
+    "description": "Schaltfläche zum Löschen lokal gespeicherter semantischer Indexdaten"
+  },
+  "semanticDataClearFailure": {
+    "message": "Die semantischen Indexdaten konnten nicht vollständig gelöscht werden",
+    "description": "Fehlerstatus beim Löschen semantischer Indexdaten"
+  },
+  "semanticDataClearSuccess": {
+    "message": "Semantische Indexdaten gelöscht",
+    "description": "Erfolgsstatus beim Löschen semantischer Indexdaten"
+  },
+  "semanticDataClearing": {
+    "message": "Semantische Indexdaten werden gelöscht...",
+    "description": "Fortschrittsstatus beim Löschen semantischer Indexdaten"
+  },
+  "semanticDataConfirm": {
+    "message": "Alle lokal gespeicherten indizierten Seiten, Vektoren und Suchmetadaten löschen? Modelle und Modelleinstellungen bleiben erhalten.",
+    "description": "Bestätigung vor dem Löschen semantischer Indexdaten"
+  },
+  "semanticDataDescription": {
+    "message": "Verwalten Sie lokal gespeicherte indizierte Seiten, Vektoren und Suchmetadaten. Heruntergeladene Modelle und Modelleinstellungen bleiben erhalten.",
+    "description": "Beschreibung der Verwaltung semantischer Indexdaten"
+  },
+  "semanticDataDocumentsLabel": {
+    "message": "Dokumente",
+    "description": "Beschriftung der Dokumentanzahl im semantischen Index"
+  },
+  "semanticDataIndexedPagesLabel": {
+    "message": "Indizierte Seiten",
+    "description": "Beschriftung der Seitenanzahl im semantischen Index"
+  },
+  "semanticDataIndexSizeLabel": {
+    "message": "Indexgröße",
+    "description": "Beschriftung der semantischen Indexgröße"
+  },
+  "semanticDataLoading": {
+    "message": "Statistiken des semantischen Index werden geladen...",
+    "description": "Ladestatus für Statistiken des semantischen Index"
+  },
+  "semanticDataRefreshButton": {
+    "message": "Statistiken aktualisieren",
+    "description": "Schaltfläche zum Aktualisieren der semantischen Indexstatistiken"
+  },
+  "semanticDataSectionTitle": {
+    "message": "Semantische Indexdaten",
+    "description": "Titel des Verwaltungsbereichs für semantische Indexdaten"
+  },
+  "semanticDataStatsFailure": {
+    "message": "Statistiken des semantischen Index sind nicht verfügbar",
+    "description": "Fehlerstatus für Statistiken des semantischen Index"
+  },
+  "semanticDataStatsLabel": {
+    "message": "Statistiken des semantischen Index",
+    "description": "Barrierefreie Beschriftung für semantische Indexstatistiken"
+  },
+  "semanticDataTabsLabel": {
+    "message": "Tabs",
+    "description": "Beschriftung der Tab-Anzahl im semantischen Index"
+  },
+  "semanticDataUnavailable": {
+    "message": "Nicht verfügbar",
+    "description": "Nicht verfügbare semantische Indexstatistik"
+  },
   "semanticEngineInitFailedStatus": {
     "message": "Initialisierung der semantischen Engine fehlgeschlagen",
     "description": "Semantische Engine Initialisierung fehlgeschlagen Status"
