@@ -10,6 +10,10 @@ import {
   getBrowserConfig,
   detectInstalledBrowsers,
 } from "./browser-config";
+import {
+  createSecureTemporaryManifest,
+  writeManifestAtomically,
+} from "./native-manifest-file";
 
 export const access = promisify(fs.access);
 export const mkdir = promisify(fs.mkdir);
@@ -545,6 +549,10 @@ export function colorText(text: string, color: string): string {
   };
 
   return colors[color] + text + colors.reset;
+}
+
+function quotePosixShellArgument(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
 function toExtensionId(value: string): string | null {
@@ -1344,18 +1352,17 @@ export async function registerWithElevatedPermissions(
 
     // 2. Prepare list contents
     const manifest = await createManifestContent();
+    const manifestContents = JSON.stringify(manifest, null, 2);
     const browsersToRegister = resolveBrowsersForRegistration(targetBrowsers);
 
-    // 4. Create temporary manifest file
-    const tempManifestPath = path.join(os.tmpdir(), `${HOST_NAME}.json`);
-    await writeFile(tempManifestPath, JSON.stringify(manifest, null, 2));
-
-    // 5. Check if you already have administrator rights
+    // 3. Check if you already have administrator rights
     const isRoot = process.getuid && process.getuid() === 0; // Unix/Linux/Mac
     const hasAdminRights = process.platform === "win32" ? isAdmin() : false; // WindowsPlatform detection administrator permissions
     const hasElevatedPermissions = isRoot || hasAdminRights;
 
     if (!hasElevatedPermissions) {
+      const temporaryManifest =
+        createSecureTemporaryManifest(manifestContents);
       console.log(
         colorText(
           "⚠️ Administrator privileges required for system-level installation",
@@ -1385,25 +1392,22 @@ export async function registerWithElevatedPermissions(
           if (os.platform() === "win32") {
             console.log(
               colorText(
-                `  if not exist "${path.dirname(manifestPath)}" mkdir "${path.dirname(manifestPath)}" && copy /Y "${tempManifestPath}" "${manifestPath}"`,
+                `  if not exist "${path.dirname(manifestPath)}" mkdir "${path.dirname(manifestPath)}" && copy /Y "${temporaryManifest.filePath}" "${manifestPath}"`,
                 "cyan",
               ),
             );
           } else {
             console.log(
               colorText(
-                `  sudo mkdir -p "${path.dirname(manifestPath)}"`,
+                `  sudo mkdir -p ${quotePosixShellArgument(path.dirname(manifestPath))}`,
                 "cyan",
               ),
             );
             console.log(
               colorText(
-                `  sudo cp "${tempManifestPath}" "${manifestPath}"`,
+                `  sudo install -m 644 ${quotePosixShellArgument(temporaryManifest.filePath)} ${quotePosixShellArgument(manifestPath)}`,
                 "cyan",
               ),
-            );
-            console.log(
-              colorText(`  sudo chmod 644 "${manifestPath}"`, "cyan"),
             );
           }
         }
@@ -1433,6 +1437,29 @@ export async function registerWithElevatedPermissions(
         ),
       );
 
+      console.log(
+        colorText(
+          "After copying the manifest, remove the private temporary directory:",
+          "blue",
+        ),
+      );
+
+      if (os.platform() === "win32") {
+        console.log(
+          colorText(
+            `  rmdir /S /Q "${temporaryManifest.directory}"`,
+            "cyan",
+          ),
+        );
+      } else {
+        console.log(
+          colorText(
+            `  rm -rf ${quotePosixShellArgument(temporaryManifest.directory)}`,
+            "cyan",
+          ),
+        );
+      }
+
       throw new Error(
         "Administrator privileges required for system-level installation",
       );
@@ -1460,15 +1487,7 @@ export async function registerWithElevatedPermissions(
 
         for (const manifestPath of manifestPaths) {
           try {
-            if (!fs.existsSync(path.dirname(manifestPath))) {
-              fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
-            }
-
-            fs.copyFileSync(tempManifestPath, manifestPath);
-
-            if (os.platform() !== "win32") {
-              fs.chmodSync(manifestPath, "644");
-            }
+            writeManifestAtomically(manifestPath, manifestContents);
 
             writtenPaths.push(manifestPath);
             if (manifestPath === config.systemManifestPath) {
