@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "package": "onnxruntime-web",
+  "version": "1.22.0",
+  "source": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.22.0.tgz",
+  "integrity": "sha512-Ud/+EBo6mhuaQWt/OjaOk0iNWjXqJoeeMFr6xQEERZdIZH2OWpGzuujz7lfuOBjUa6TEE/sc4nb7Da5dNL34fg==",
+  "license": "MIT",
+  "artifacts": [
+    {
+      "source": "dist/ort.min.js",
+      "target": "public/libs/ort.min.js",
+      "bytes": 357641,
+      "sha256": "924e4fcdfdf69acccff3d024d6e1ad3f41ca858d27fc4dd59fc4927dd933e7db"
+    },
+    {
+      "source": "dist/ort-wasm-simd-threaded.mjs",
+      "target": "workers/ort-wasm-simd-threaded.mjs",
+      "bytes": 20856,
+      "sha256": "30dd851d9c00622940500f71ddd2ff8820c5cb65270816080175b958705385a8"
+    },
+    {
+      "source": "dist/ort-wasm-simd-threaded.wasm",
+      "target": "workers/ort-wasm-simd-threaded.wasm",
+      "bytes": 11210254,
+      "sha256": "71aef04959c5c1b6de461b6538e2058e306610034a85aad2742d0c7fd4533fe4"
+    },
+    {
+      "source": "dist/ort-wasm-simd-threaded.jsep.mjs",
+      "target": "workers/ort-wasm-simd-threaded.jsep.mjs",
+      "bytes": 44677,
+      "sha256": "1cbcba8f2c769c1eecbab66a1b1e55ef11704515bf4306373e3db3c37cf6dcd8"
+    },
+    {
+      "source": "dist/ort-wasm-simd-threaded.jsep.wasm",
+      "target": "workers/ort-wasm-simd-threaded.jsep.wasm",
+      "bytes": 21872216,
+      "sha256": "b45970d0632383a057c27ca5b660b216f8e00c17cf8db9f6207b5e4abc839368"
+    }
+  ]
+}
