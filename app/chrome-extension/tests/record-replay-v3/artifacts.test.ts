@@ -113,6 +113,12 @@ describe('createChromeArtifactService', () => {
         }),
       }),
     ]);
+
+    const store = createIndexedDbArtifactStore();
+    const listed = await store.listByRun('run-artifacts' as never);
+    expect(listed[0]).not.toHaveProperty('dataBase64');
+    const persisted = await store.get(listed[0].id);
+    expect(persisted?.dataBase64).toBe('c2NyZWVuc2hvdA==');
   });
 
   it('redacts sensitive filenames before persisting artifacts', async () => {

@@ -4,6 +4,7 @@
  */
 
 import type { NodeId, RunId } from "../domain/ids";
+import { jsonUtf8ByteLength } from "../domain/json-limits";
 import { isSensitiveKeyName } from "../flows/sensitive";
 import { RR_V3_STORES, withTransaction } from "./db";
 
@@ -43,6 +44,8 @@ export interface ArtifactRecord {
   metadata?: Record<string, string | number | boolean | null>;
 }
 
+export type ArtifactMetadataRecord = Omit<ArtifactRecord, "dataBase64">;
+
 export interface ArtifactRetentionPolicy {
   ttlMs: number;
   maxTotalBytes: number;
@@ -65,7 +68,7 @@ export interface SaveScreenshotArtifactInput {
 export interface ArtifactStore {
   saveScreenshot(input: SaveScreenshotArtifactInput): Promise<ArtifactRecord>;
   get(id: string): Promise<ArtifactRecord | null>;
-  listByRun(runId: RunId): Promise<ArtifactRecord[]>;
+  listByRun(runId: RunId): Promise<ArtifactMetadataRecord[]>;
   deleteByRun(runId: RunId): Promise<number>;
   cleanupExpired(now?: number): Promise<number>;
   enforceRetention(): Promise<number>;
@@ -81,6 +84,7 @@ export const DEFAULT_ARTIFACT_RETENTION: ArtifactRetentionPolicy = {
 
 const DEFAULT_SCREENSHOT_REDACTION_WARNING =
   "Screenshot pixel content has low-confidence redaction; binary data is not inlined in MCP debug responses.";
+const MAX_ARTIFACT_METADATA_LIST_UTF8_BYTES = 4 * 1024 * 1024;
 
 function boundedPositiveInteger(
   value: number | undefined,
@@ -281,6 +285,12 @@ function retainedSize(record: ArtifactRecord, maxTotalBytes: number): number {
   return Math.min(maxTotalBytes + 1, Math.floor(record.sizeBytes));
 }
 
+function omitArtifactPayload(record: ArtifactRecord): ArtifactMetadataRecord {
+  const metadata = { ...record } as Partial<ArtifactRecord>;
+  delete metadata.dataBase64;
+  return metadata as ArtifactMetadataRecord;
+}
+
 export function createIndexedDbArtifactStore(
   policyOverrides: Partial<ArtifactRetentionPolicy> = {},
   now: () => number = () => Date.now(),
@@ -455,12 +465,9 @@ export function createIndexedDbArtifactStore(
         async (stores) => {
           const store = stores[RR_V3_STORES.ARTIFACTS];
           const index = store.index("runId");
-          return new Promise<ArtifactRecord[]>((resolve, reject) => {
-            const records: ArtifactRecord[] = [];
-            let encodedCharacters = 0;
-            const maxEncodedCharacters =
-              Math.ceil((policy.maxTotalBytes * 4) / 3) +
-              policy.maxArtifactsPerRun * 4;
+          return new Promise<ArtifactMetadataRecord[]>((resolve, reject) => {
+            const records: ArtifactMetadataRecord[] = [];
+            let aggregateBytes = 2;
             const request = index.openCursor(IDBKeyRange.only(runId));
             request.onsuccess = () => {
               const cursor = request.result;
@@ -468,19 +475,22 @@ export function createIndexedDbArtifactStore(
                 resolve(records.sort((a, b) => a.createdAt - b.createdAt));
                 return;
               }
-              const record = cursor.value as ArtifactRecord;
-              const payloadCharacters =
-                typeof record.dataBase64 === "string"
-                  ? record.dataBase64.length
-                  : 0;
+              const record = omitArtifactPayload(
+                cursor.value as ArtifactRecord,
+              );
+              const recordBytes = jsonUtf8ByteLength(
+                record,
+                MAX_ARTIFACT_METADATA_LIST_UTF8_BYTES,
+              );
+              const addedBytes = recordBytes + (records.length > 0 ? 1 : 0);
               if (
-                payloadCharacters >
-                maxEncodedCharacters - encodedCharacters
+                addedBytes >
+                MAX_ARTIFACT_METADATA_LIST_UTF8_BYTES - aggregateBytes
               ) {
                 resolve(records.sort((a, b) => a.createdAt - b.createdAt));
                 return;
               }
-              encodedCharacters += payloadCharacters;
+              aggregateBytes += addedBytes;
               records.push(record);
               cursor.continue();
             };

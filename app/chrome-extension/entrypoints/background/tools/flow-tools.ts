@@ -21,7 +21,10 @@ import {
 import type { JsonObject } from '../record-replay-v3/domain/json';
 import type { RunEvent, RunRecordV3 } from '../record-replay-v3/domain/events';
 import type { FlowId, NodeId, RunId } from '../record-replay-v3/domain/ids';
-import type { ArtifactRecord } from '../record-replay-v3/storage/artifacts';
+import type {
+  ArtifactMetadataRecord,
+  ArtifactRecord,
+} from '../record-replay-v3/storage/artifacts';
 import {
   RR_ERROR_CODES,
   createResourceLimitExceededError,
@@ -177,6 +180,10 @@ interface WorkflowDebugArtifact {
     | 'truncated'
     | 'artifact_missing';
 }
+
+type DebugArtifactRecord = ArtifactMetadataRecord & {
+  dataBase64?: string;
+};
 
 interface WorkflowRepairRecommendation {
   severity: 'info' | 'warning';
@@ -2749,13 +2756,13 @@ function getDebugMaxEventsPerRun(args: any): number {
 }
 
 function getArtifactProvenance(
-  artifact?: ArtifactRecord,
+  artifact?: DebugArtifactRecord,
 ): NonNullable<ArtifactRecord['provenance']> {
   return artifact?.provenance ?? { source: 'runtimeCapture', trust: 'untrusted' };
 }
 
 function getArtifactRedaction(
-  artifact?: ArtifactRecord,
+  artifact?: DebugArtifactRecord,
 ): NonNullable<ArtifactRecord['redaction']> {
   return (
     artifact?.redaction ?? {
@@ -2768,13 +2775,13 @@ function getArtifactRedaction(
   );
 }
 
-function artifactHasLowConfidenceRedaction(artifact: ArtifactRecord): boolean {
+function artifactHasLowConfidenceRedaction(artifact: DebugArtifactRecord): boolean {
   const redaction = getArtifactRedaction(artifact);
   return redaction.status === 'lowConfidence' || redaction.confidence === 'low';
 }
 
 function sanitizeDebugArtifact(
-  artifact: ArtifactRecord,
+  artifact: DebugArtifactRecord,
   includeData: boolean,
   maxArtifactDataBytes: number,
 ): WorkflowDebugArtifact {
@@ -2803,6 +2810,8 @@ function sanitizeDebugArtifact(
     safe.dataBase64Omitted = 'redaction_low_confidence';
   } else if (artifact.sizeBytes > maxArtifactDataBytes) {
     safe.dataBase64Omitted = 'too_large';
+  } else if (typeof artifact.dataBase64 !== 'string') {
+    safe.dataBase64Omitted = 'artifact_missing';
   } else {
     safe.dataBase64 = artifact.dataBase64;
   }
@@ -2836,14 +2845,27 @@ function buildMissingDebugArtifact(
 }
 
 function buildDebugArtifacts(
-  records: ArtifactRecord[],
+  records: DebugArtifactRecord[],
   events: RunEvent[],
   includeData: boolean,
   maxArtifactDataBytes: number,
 ): WorkflowDebugArtifact[] {
-  const artifacts = records.map((artifact) =>
-    sanitizeDebugArtifact(artifact, includeData, maxArtifactDataBytes),
-  );
+  const artifacts: WorkflowDebugArtifact[] = [];
+  let remainingArtifactDataBytes = maxArtifactDataBytes;
+  for (const record of records) {
+    const artifact = sanitizeDebugArtifact(
+      record,
+      includeData,
+      remainingArtifactDataBytes,
+    );
+    artifacts.push(artifact);
+    if (artifact.dataBase64 !== undefined) {
+      remainingArtifactDataBytes = Math.max(
+        0,
+        remainingArtifactDataBytes - Math.max(0, record.sizeBytes),
+      );
+    }
+  }
   const presentIds = new Set(records.map((artifact) => artifact.id));
   for (const event of events) {
     if (
@@ -3081,16 +3103,41 @@ async function collectDebugRuns(flow: FlowV3, args: any): Promise<WorkflowDebugR
     const filteredEvents = nodeIdFilter
       ? events.filter((event) => 'nodeId' in event && event.nodeId === nodeIdFilter)
       : events;
-    const artifacts = includeArtifacts
-      ? buildDebugArtifacts(
-          (await storage.artifacts.listByRun(run.id)).filter((artifact) =>
-            nodeIdFilter ? artifact.nodeId === nodeIdFilter : true,
-          ),
-          filteredEvents,
-          includeArtifactData,
-          maxArtifactDataBytes,
-        )
-      : undefined;
+    let artifacts: WorkflowDebugArtifact[] | undefined;
+    if (includeArtifacts) {
+      const metadata = (await storage.artifacts.listByRun(run.id)).filter((artifact) =>
+        nodeIdFilter ? artifact.nodeId === nodeIdFilter : true,
+      );
+      let records: DebugArtifactRecord[] = metadata;
+      if (includeArtifactData) {
+        records = [];
+        let remainingArtifactDataBytes = maxArtifactDataBytes;
+        for (const artifact of metadata) {
+          const canLoadPayload =
+            artifact.truncated !== true &&
+            !artifactHasLowConfidenceRedaction(artifact) &&
+            artifact.sizeBytes <= remainingArtifactDataBytes;
+          if (!canLoadPayload) {
+            records.push(artifact);
+            continue;
+          }
+          const fullRecord = await storage.artifacts.get(artifact.id);
+          records.push(fullRecord ?? artifact);
+          if (fullRecord) {
+            remainingArtifactDataBytes = Math.max(
+              0,
+              remainingArtifactDataBytes - Math.max(0, fullRecord.sizeBytes),
+            );
+          }
+        }
+      }
+      artifacts = buildDebugArtifacts(
+        records,
+        filteredEvents,
+        includeArtifactData,
+        maxArtifactDataBytes,
+      );
+    }
     debugRuns.push({
       id: run.id,
       status: run.status,
