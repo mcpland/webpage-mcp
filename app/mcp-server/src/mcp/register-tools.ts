@@ -262,7 +262,7 @@ function consumeDescriptorBudget(budget: DescriptorBudget, bytes: number, nodes 
 function sanitizeDescriptorString(
   value: string,
   budget: DescriptorBudget,
-  maximumBytes = DYNAMIC_FLOW_LIMITS.maxStringBytes,
+  maximumBytes: number = DYNAMIC_FLOW_LIMITS.maxStringBytes,
   state?: DescriptorSanitizationState,
 ): string | undefined {
   const remaining = DYNAMIC_FLOW_LIMITS.maxDescriptorBytesPerResponse - budget.bytes;
@@ -281,7 +281,7 @@ function sanitizeDescriptorString(
 function sanitizeDescriptorIdentifier(
   value: unknown,
   budget: DescriptorBudget,
-  maximumBytes = DYNAMIC_FLOW_LIMITS.maxIdentifierBytes,
+  maximumBytes: number = DYNAMIC_FLOW_LIMITS.maxIdentifierBytes,
 ): string | undefined {
   const normalized = normalizeBoundedIdentifier(value, maximumBytes);
   if (!normalized) return undefined;
@@ -296,7 +296,7 @@ function sanitizeDescriptorIdentifier(
 
 function normalizeBoundedIdentifier(
   value: unknown,
-  maximumBytes = DYNAMIC_FLOW_LIMITS.maxIdentifierBytes,
+  maximumBytes: number = DYNAMIC_FLOW_LIMITS.maxIdentifierBytes,
 ): string | undefined {
   if (typeof value !== 'string' || value.length > maximumBytes) return undefined;
   const normalized = value.trim();
