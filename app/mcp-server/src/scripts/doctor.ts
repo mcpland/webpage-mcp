@@ -816,10 +816,6 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
 
   // Check 6: Manifest checks per browser
   const expectedOrigins = resolveAllowedOrigins();
-  const expectedOriginsWithDetected = resolveAllowedOrigins({ includeDetectedExtensionIds: true });
-  const detectedOnlyOrigins = expectedOriginsWithDetected.filter(
-    (origin) => !expectedOrigins.includes(origin),
-  );
   for (const browser of browsersToCheck) {
     const config = getBrowserConfig(browser);
     const candidates = Array.from(
@@ -883,13 +879,6 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
     if (missingOrigins.length > 0) {
       issues.push(`allowed_origins missing ${missingOrigins.join(', ')}`);
     }
-    if (detectedOnlyOrigins.length > 0) {
-      const hasDetectedOriginMatch = detectedOnlyOrigins.some((origin) => allowedOrigins.includes(origin));
-      if (!hasDetectedOriginMatch) {
-        issues.push('allowed_origins missing detected local extension ID(s)');
-      }
-    }
-
     checks.push({
       id: `manifest.${browser}`,
       title: `${config.displayName} manifest`,
@@ -899,7 +888,6 @@ export async function collectDoctorReport(options: DoctorOptions): Promise<Docto
         path: found,
         expectedWrapperPath: wrapperPath,
         expectedOrigins,
-        detectedExtensionOrigins: detectedOnlyOrigins,
         fix: issues.length === 0 ? undefined : [`${COMMAND_NAME} register --browser ${browser}`],
       },
     });

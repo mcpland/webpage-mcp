@@ -561,9 +561,12 @@ function toOrigin(value: string): string | null {
     return null;
   }
 
-  if (trimmed.startsWith("chrome-extension://")) {
-    const normalized = trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
-    return normalized;
+  const originMatch = trimmed.match(
+    /^chrome-extension:\/\/([a-p]{32})\/?$/i,
+  );
+  if (originMatch?.[1]) {
+    const extensionId = toExtensionId(originMatch[1]);
+    return extensionId ? `chrome-extension://${extensionId}/` : null;
   }
 
   const extensionId = toExtensionId(trimmed);
@@ -581,146 +584,7 @@ function splitEnvList(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
-function detectChromeLikeProfileRoots(): string[] {
-  if (os.platform() === "darwin") {
-    const home = os.homedir();
-    return [
-      path.join(home, "Library", "Application Support", "Google", "Chrome"),
-      path.join(
-        home,
-        "Library",
-        "Application Support",
-        "Google",
-        "Chrome Beta",
-      ),
-      path.join(
-        home,
-        "Library",
-        "Application Support",
-        "Google",
-        "Chrome Canary",
-      ),
-      path.join(
-        home,
-        "Library",
-        "Application Support",
-        "Google",
-        "Chrome for Testing",
-      ),
-      path.join(home, "Library", "Application Support", "Chromium"),
-    ];
-  }
-
-  if (os.platform() === "linux") {
-    const home = os.homedir();
-    return [
-      path.join(home, ".config", "google-chrome"),
-      path.join(home, ".config", "google-chrome-beta"),
-      path.join(home, ".config", "google-chrome-unstable"),
-      path.join(home, ".config", "google-chrome-for-testing"),
-      path.join(home, ".config", "chromium"),
-    ];
-  }
-
-  if (os.platform() === "win32") {
-    const local =
-      process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-    return [
-      path.join(local, "Google", "Chrome", "User Data"),
-      path.join(local, "Google", "Chrome Beta", "User Data"),
-      path.join(local, "Google", "Chrome SxS", "User Data"),
-      path.join(local, "Google", "Chrome for Testing", "User Data"),
-      path.join(local, "Chromium", "User Data"),
-    ];
-  }
-
-  return [];
-}
-
-function detectLocalExtensionIds(): string[] {
-  if (process.env.WEBPAGE_MCP_DISABLE_EXTENSION_ID_DISCOVERY === "1") {
-    return [];
-  }
-
-  const roots = detectChromeLikeProfileRoots().filter((rootPath) =>
-    fs.existsSync(rootPath),
-  );
-  if (roots.length === 0) {
-    return [];
-  }
-
-  const matches = new Set<string>();
-  const profileDirPattern =
-    /^(Default|Profile \d+|Guest Profile|System Profile)$/;
-
-  for (const root of roots) {
-    let entries: string[] = [];
-    try {
-      entries = fs.readdirSync(root);
-    } catch {
-      continue;
-    }
-
-    for (const name of entries) {
-      if (!profileDirPattern.test(name)) {
-        continue;
-      }
-
-      const preferenceFileNames = ["Secure Preferences", "Preferences"];
-      for (const fileName of preferenceFileNames) {
-        const preferencesPath = path.join(root, name, fileName);
-        if (!fs.existsSync(preferencesPath)) {
-          continue;
-        }
-
-        let parsed: any;
-        try {
-          parsed = JSON.parse(fs.readFileSync(preferencesPath, "utf8"));
-        } catch {
-          continue;
-        }
-
-        const settings =
-          parsed?.extensions?.settings &&
-          typeof parsed.extensions.settings === "object"
-            ? (parsed.extensions.settings as Record<string, any>)
-            : null;
-        if (!settings) {
-          continue;
-        }
-
-        for (const [extensionId, data] of Object.entries(settings)) {
-          const normalizedId = toExtensionId(extensionId);
-          if (!normalizedId) {
-            continue;
-          }
-
-          const extensionPath =
-            typeof data?.path === "string" ? data.path.toLowerCase() : "";
-          const manifestName =
-            typeof data?.manifest?.name === "string"
-              ? data.manifest.name.toLowerCase()
-              : "";
-          const isWebpageMcp =
-            extensionPath.includes("webpage-mcp") ||
-            extensionPath.includes("webpage_mcp") ||
-            extensionPath.includes("webpage mcp") ||
-            (manifestName.includes("webpage") && manifestName.includes("mcp"));
-
-          if (isWebpageMcp) {
-            matches.add(normalizedId);
-          }
-        }
-      }
-    }
-  }
-
-  return Array.from(matches.values());
-}
-
-export function resolveAllowedOrigins(options?: {
-  includeDetectedExtensionIds?: boolean;
-}): string[] {
+export function resolveAllowedOrigins(): string[] {
   const origins = new Set<string>([`chrome-extension://${EXTENSION_ID}/`]);
 
   const extensionIds = [
@@ -743,12 +607,6 @@ export function resolveAllowedOrigins(options?: {
       continue;
     }
     origins.add(origin);
-  }
-
-  if (options?.includeDetectedExtensionIds) {
-    for (const extensionId of detectLocalExtensionIds()) {
-      origins.add(`chrome-extension://${extensionId}/`);
-    }
   }
 
   return Array.from(origins.values());
@@ -948,13 +806,9 @@ async function ensureWindowsFilePermissions(
 /**
  * Create Native Messaging host manifest content
  */
-export async function createManifestContent(options?: {
-  includeDetectedExtensionIds?: boolean;
-}): Promise<any> {
+export async function createManifestContent(): Promise<any> {
   const mainPath = await getMainPath();
-  const allowedOrigins = resolveAllowedOrigins({
-    includeDetectedExtensionIds: options?.includeDetectedExtensionIds ?? true,
-  });
+  const allowedOrigins = resolveAllowedOrigins();
 
   return {
     name: HOST_NAME,
@@ -1015,17 +869,13 @@ function verifyWindowsRegistryEntry(
 export async function registerUserLevelHostWithNodePath(
   browsers?: BrowserType[],
 ): Promise<boolean> {
-  return tryRegisterUserLevelHost(browsers, {
-    includeDetectedExtensionIds: true,
-  });
+  return tryRegisterUserLevelHost(browsers);
 }
 
 /**
  * Try registering a user-level Native Messaging host
  */
-export interface TryRegisterUserLevelOptions extends RegistrationLogOptions {
-  includeDetectedExtensionIds?: boolean;
-}
+export type TryRegisterUserLevelOptions = RegistrationLogOptions;
 
 function resolveBrowsersForRegistration(
   targetBrowsers?: BrowserType[],
@@ -1078,9 +928,7 @@ export async function tryRegisterUserLevelHost(
     }
 
     // 3. Create manifest content
-    const manifest = await createManifestContent({
-      includeDetectedExtensionIds: options?.includeDetectedExtensionIds ?? true,
-    });
+    const manifest = await createManifestContent();
 
     let successCount = 0;
     const results: { browser: string; success: boolean; error?: string }[] = [];
@@ -1208,7 +1056,6 @@ export async function tryRegisterUserLevelHost(
 interface ManifestExpectation {
   wrapperPath: string;
   baseOrigins: string[];
-  detectedOrigins: string[];
 }
 
 interface BrowserManifestValidation {
@@ -1297,15 +1144,6 @@ function validateManifest(
   );
   if (missingBaseOrigins.length > 0) {
     issues.push(`allowed_origins missing ${missingBaseOrigins.join(", ")}`);
-  }
-
-  if (expectation.detectedOrigins.length > 0) {
-    const hasDetectedOrigin = expectation.detectedOrigins.some((origin) =>
-      allowedOrigins.includes(origin),
-    );
-    if (!hasDetectedOrigin) {
-      issues.push("allowed_origins missing detected extension ID");
-    }
   }
 
   return issues;
@@ -1434,17 +1272,9 @@ export async function autoBootstrapNativeMessagingForStdio(
     silent: true,
   });
 
-  const baseOrigins = resolveAllowedOrigins();
-  const originsWithDetected = resolveAllowedOrigins({
-    includeDetectedExtensionIds: true,
-  });
-  const detectedOnlyOrigins = originsWithDetected.filter(
-    (origin) => !baseOrigins.includes(origin),
-  );
   const expectation: ManifestExpectation = {
     wrapperPath: runtime.wrapperPath,
-    baseOrigins,
-    detectedOrigins: detectedOnlyOrigins,
+    baseOrigins: resolveAllowedOrigins(),
   };
 
   let manifestResult = validateUserLevelManifests(browsers, expectation);
@@ -1457,7 +1287,6 @@ export async function autoBootstrapNativeMessagingForStdio(
       "[webpage-mcp-stdio] Native Messaging manifest missing or outdated; attempting automatic user-level registration.",
     );
     registrationSucceeded = await tryRegisterUserLevelHost(browsers, {
-      includeDetectedExtensionIds: true,
       output: "stderr",
       silent: true,
     });
