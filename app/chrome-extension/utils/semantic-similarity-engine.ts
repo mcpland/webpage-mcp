@@ -5,6 +5,19 @@ import { SIMDMathEngine } from './simd-math-engine';
 import { OffscreenManager } from './offscreen-manager';
 import { STORAGE_KEYS } from '@/common/constants';
 import { OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
+import {
+  SEMANTIC_RESOURCE_LIMITS,
+  getStoredSemanticModelSelection,
+  validateEmbeddingPayload,
+  validateEmbeddingsPayload,
+  validateSemanticModelSelection,
+  validateSemanticOptions,
+  validateSemanticPairs,
+  validateSemanticText,
+  validateSemanticTexts,
+  validateSimilaritiesPayload,
+  type SemanticModelSelection,
+} from './semantic-similarity-boundaries';
 
 import { ModelCacheManager } from './model-cache-manager';
 import {
@@ -34,6 +47,76 @@ function looksLikeHtmlOrJson(text: string): boolean {
     normalized.startsWith('{') ||
     normalized.startsWith('[')
   );
+}
+
+export async function readPinnedModelResponse(
+  response: Response,
+  expectedBytes: number,
+): Promise<ArrayBuffer> {
+  if (
+    !Number.isSafeInteger(expectedBytes) ||
+    expectedBytes <= 0 ||
+    expectedBytes > SEMANTIC_RESOURCE_LIMITS.maxPinnedModelBytes
+  ) {
+    throw new Error('Pinned model declares an invalid expected size');
+  }
+
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null) {
+    const declaredBytes =
+      contentLength.length <= 32 && /^\d+$/.test(contentLength)
+        ? Number(contentLength)
+        : Number.NaN;
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes !== expectedBytes) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(
+        `Model response size mismatch: expected ${expectedBytes} bytes, got Content-Length ${contentLength}`,
+      );
+    }
+  }
+
+  if (!response.body) {
+    throw new Error('Model response body is unavailable for bounded streaming');
+  }
+
+  const reader = response.body.getReader();
+  const output = new Uint8Array(expectedBytes);
+  let receivedBytes = 0;
+  let chunkCount = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunkCount++;
+      if (chunkCount > SEMANTIC_RESOURCE_LIMITS.maxModelResponseChunks) {
+        await reader
+          .cancel('Model response exceeded the stream chunk limit')
+          .catch(() => undefined);
+        throw new Error('Model response exceeded the stream chunk limit');
+      }
+      if (!(value instanceof Uint8Array)) {
+        throw new Error('Model response returned an invalid stream chunk');
+      }
+      if (value.byteLength > expectedBytes - receivedBytes) {
+        await reader.cancel('Model response exceeded its pinned size').catch(() => undefined);
+        throw new Error(`Model response exceeded the pinned size of ${expectedBytes} bytes`);
+      }
+      output.set(value, receivedBytes);
+      receivedBytes += value.byteLength;
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (receivedBytes !== expectedBytes) {
+    throw new Error(
+      `Model response ended early: expected ${expectedBytes} bytes, got ${receivedBytes}`,
+    );
+  }
+  return output.buffer;
 }
 
 /**
@@ -76,8 +159,9 @@ async function getCachedModelData(artifact: PinnedModelArtifact): Promise<ArrayB
       );
     }
 
-    // 3. Get data and store in cache
-    const arrayBuffer = await response.arrayBuffer();
+    // 3. Stream into a pinned-size allocation. This prevents a compromised CDN or proxy
+    // from making the extension buffer an arbitrarily large response before integrity checks.
+    const arrayBuffer = await readPinnedModelResponse(response, artifact.size);
 
     // Guard against CDN/auth/error pages returned as HTML/JSON with 200 status.
     const probe = decodeProbeText(arrayBuffer);
@@ -163,11 +247,15 @@ export async function isDefaultModelCached(): Promise<boolean> {
   try {
     // Get the default model configuration
     const result = await chrome.storage.local.get([STORAGE_KEYS.SEMANTIC_MODEL]);
-    const defaultModel =
-      (result[STORAGE_KEYS.SEMANTIC_MODEL] as ModelPreset) || 'multilingual-e5-small';
+    const selection = getStoredSemanticModelSelection(
+      result[STORAGE_KEYS.SEMANTIC_MODEL],
+      'quantized',
+      PREDEFINED_MODELS,
+      'multilingual-e5-small',
+    );
 
     // Build the model URL
-    const modelInfo = PREDEFINED_MODELS[defaultModel];
+    const modelInfo = PREDEFINED_MODELS[selection.modelPreset];
     const artifact = resolvePinnedModelArtifact(
       modelInfo.modelIdentifier,
       getOnnxFileNameForVersion('quantized'),
@@ -424,6 +512,36 @@ interface ModelConfig {
   requiresTokenTypeIds?: boolean; // Whether model requires token_type_ids input
 }
 
+function normalizeInternalModelSelection(
+  options: Partial<ModelConfig>,
+): SemanticModelSelection<ModelPreset> {
+  const modelPreset = options.modelPreset ?? 'multilingual-e5-small';
+  const hasKnownPreset =
+    typeof modelPreset === 'string' &&
+    Object.prototype.hasOwnProperty.call(PREDEFINED_MODELS, modelPreset);
+  const modelDimension =
+    options.dimension ??
+    (hasKnownPreset ? PREDEFINED_MODELS[modelPreset as ModelPreset].dimension : -1);
+
+  return validateSemanticModelSelection(
+    {
+      modelPreset,
+      modelVersion: options.modelVersion ?? 'quantized',
+      modelDimension,
+    },
+    PREDEFINED_MODELS,
+  );
+}
+
+const SAFE_ENGINE_OPTION_KEYS = new Set([
+  'modelPreset',
+  'modelVersion',
+  'dimension',
+  'useLocalFiles',
+  'forceOffscreen',
+]);
+const SAFE_PROXY_OPTION_KEYS = new Set(['modelPreset', 'modelVersion', 'dimension']);
+
 interface WorkerMessagePayload {
   modelPath?: string;
   modelData?: ArrayBuffer;
@@ -460,6 +578,13 @@ class EmbeddingMemoryPool {
   private stats = { allocated: 0, reused: 0, released: 0 };
 
   getEmbedding(size: number): Float32Array {
+    if (
+      !Number.isInteger(size) ||
+      size <= 0 ||
+      size > SEMANTIC_RESOURCE_LIMITS.maxEmbeddingDimension
+    ) {
+      throw new Error('Invalid embedding allocation size');
+    }
     const pool = this.pools.get(size);
     if (pool && pool.length > 0) {
       this.stats.reused++;
@@ -514,17 +639,25 @@ interface TokenizedOutput {
  */
 export class SemanticSimilarityEngineProxy {
   private _isInitialized = false;
-  private config: Partial<ModelConfig>;
+  private config: SemanticModelSelection<ModelPreset>;
   private offscreenManager: OffscreenManager;
   private _isEnsuring = false; // Flag to prevent concurrent ensureOffscreenEngineInitialized calls
 
   constructor(config: Partial<ModelConfig> = {}) {
-    this.config = config;
+    let configKeyCount = 0;
+    for (const key in config) {
+      if (!Object.prototype.hasOwnProperty.call(config, key)) continue;
+      configKeyCount++;
+      if (configKeyCount > SAFE_PROXY_OPTION_KEYS.size || !SAFE_PROXY_OPTION_KEYS.has(key)) {
+        throw new Error('Semantic engine proxy config contains unsupported fields');
+      }
+    }
+    this.config = normalizeInternalModelSelection(config);
     this.offscreenManager = OffscreenManager.getInstance();
     console.log('SemanticSimilarityEngineProxy: Proxy created with config:', {
-      modelPreset: config.modelPreset,
-      modelVersion: config.modelVersion,
-      dimension: config.dimension,
+      modelPreset: this.config.modelPreset,
+      modelVersion: this.config.modelVersion,
+      dimension: this.config.modelDimension,
     });
   }
 
@@ -594,8 +727,23 @@ export class SemanticSimilarityEngineProxy {
     try {
       this._isEnsuring = true;
       const status = await this.checkOffscreenEngineStatus();
+      let configMatches = false;
+      if (status.isInitialized) {
+        try {
+          const currentConfig = validateSemanticModelSelection(
+            status.currentConfig,
+            PREDEFINED_MODELS,
+          );
+          configMatches =
+            currentConfig.modelPreset === this.config.modelPreset &&
+            currentConfig.modelVersion === this.config.modelVersion &&
+            currentConfig.modelDimension === this.config.modelDimension;
+        } catch {
+          configMatches = false;
+        }
+      }
 
-      if (!status.isInitialized) {
+      if (!status.isInitialized || !configMatches) {
         console.log(
           'SemanticSimilarityEngineProxy: Engine not initialized in offscreen, initializing...',
         );
@@ -706,6 +854,8 @@ export class SemanticSimilarityEngineProxy {
   }
 
   async getEmbedding(text: string, options: Record<string, any> = {}): Promise<Float32Array> {
+    const validatedText = validateSemanticText(text);
+    const validatedOptions = validateSemanticOptions(options);
     if (!this._isInitialized) {
       await this.initialize();
     }
@@ -716,30 +866,29 @@ export class SemanticSimilarityEngineProxy {
     const response = await this.sendMessageToOffscreen({
       target: 'offscreen',
       type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_COMPUTE,
-      text: text,
-      options: options,
+      text: validatedText,
+      options: validatedOptions,
     });
 
     if (!response || !response.success) {
       throw new Error(response?.error || 'Failed to get embedding from offscreen document');
     }
 
-    if (!response.embedding || !Array.isArray(response.embedding)) {
-      throw new Error('Invalid embedding data received from offscreen document');
-    }
-
-    return new Float32Array(response.embedding);
+    const embedding = validateEmbeddingPayload(response.embedding, this.config.modelDimension);
+    return new Float32Array(embedding);
   }
 
   async getEmbeddingsBatch(
     texts: string[],
     options: Record<string, any> = {},
   ): Promise<Float32Array[]> {
+    const validatedTexts = validateSemanticTexts(texts);
+    const validatedOptions = validateSemanticOptions(options);
     if (!this._isInitialized) {
       await this.initialize();
     }
 
-    if (!texts || texts.length === 0) return [];
+    if (validatedTexts.length === 0) return [];
 
     // Check and ensure engine is initialized before each call
     await this.ensureOffscreenEngineInitialized();
@@ -747,15 +896,20 @@ export class SemanticSimilarityEngineProxy {
     const response = await this.sendMessageToOffscreen({
       target: 'offscreen',
       type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_BATCH_COMPUTE,
-      texts: texts,
-      options: options,
+      texts: validatedTexts,
+      options: validatedOptions,
     });
 
     if (!response || !response.success) {
       throw new Error(response?.error || 'Failed to get embeddings batch from offscreen document');
     }
 
-    return response.embeddings.map((emb: number[]) => new Float32Array(emb));
+    const embeddings = validateEmbeddingsPayload(
+      response.embeddings,
+      validatedTexts.length,
+      this.config.modelDimension,
+    );
+    return embeddings.map((embedding) => new Float32Array(embedding));
   }
 
   async computeSimilarity(
@@ -763,7 +917,12 @@ export class SemanticSimilarityEngineProxy {
     text2: string,
     options: Record<string, any> = {},
   ): Promise<number> {
-    const [embedding1, embedding2] = await this.getEmbeddingsBatch([text1, text2], options);
+    const validatedTexts = validateSemanticTexts([text1, text2]);
+    const validatedOptions = validateSemanticOptions(options);
+    const [embedding1, embedding2] = await this.getEmbeddingsBatch(
+      validatedTexts,
+      validatedOptions,
+    );
     return this.cosineSimilarity(embedding1, embedding2);
   }
 
@@ -771,6 +930,8 @@ export class SemanticSimilarityEngineProxy {
     pairs: { text1: string; text2: string }[],
     options: Record<string, any> = {},
   ): Promise<number[]> {
+    const validatedPairs = validateSemanticPairs(pairs);
+    const validatedOptions = validateSemanticOptions(options);
     if (!this._isInitialized) {
       await this.initialize();
     }
@@ -781,8 +942,8 @@ export class SemanticSimilarityEngineProxy {
     const response = await this.sendMessageToOffscreen({
       target: 'offscreen',
       type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_BATCH_COMPUTE,
-      pairs: pairs,
-      options: options,
+      pairs: validatedPairs,
+      options: validatedOptions,
     });
 
     if (!response || !response.success) {
@@ -791,7 +952,7 @@ export class SemanticSimilarityEngineProxy {
       );
     }
 
-    return response.similarities;
+    return validateSimilaritiesPayload(response.similarities, validatedPairs.length);
   }
 
   private cosineSimilarity(a: Float32Array, b: Float32Array): number {
@@ -907,6 +1068,17 @@ export class SemanticSimilarityEngine {
 
   // Helper function to safely convert tensor data to number array
   private convertTensorDataToNumbers(data: any): number[] {
+    const maxElements = SEMANTIC_RESOURCE_LIMITS.maxBatchTexts * this.config.maxLength;
+    if (
+      data === null ||
+      data === undefined ||
+      typeof data.length !== 'number' ||
+      !Number.isInteger(data.length) ||
+      data.length < 0 ||
+      data.length > maxElements
+    ) {
+      throw new Error('Tokenizer output exceeds the tensor element limit');
+    }
     if (data instanceof BigInt64Array) {
       return Array.from(data, (val: bigint) => Number(val));
     } else if (data instanceof Int32Array) {
@@ -916,92 +1088,87 @@ export class SemanticSimilarityEngine {
     }
   }
 
-  constructor(options: Partial<ModelConfig> = {}) {
-    console.log('SemanticSimilarityEngine: Constructor called with options:', {
-      useLocalFiles: options.useLocalFiles,
-      modelIdentifier: options.modelIdentifier,
-      forceOffscreen: options.forceOffscreen,
-      modelPreset: options.modelPreset,
-      modelVersion: options.modelVersion,
-    });
-
-    // Handle model presets
-    let modelConfig = { ...options };
-    if (options.modelPreset && PREDEFINED_MODELS[options.modelPreset]) {
-      const preset = PREDEFINED_MODELS[options.modelPreset];
-      const modelVersion = options.modelVersion || 'quantized'; // Default to quantized version
-      const baseModelIdentifier = preset.modelIdentifier; // Use base identifier without version suffix
-      const onnxFileName = getOnnxFileNameForVersion(modelVersion); // Get ONNX filename based on version
-
-      // Get model-specific configuration
-      const modelSpecificConfig = (preset as any).modelSpecificConfig || {};
-
-      modelConfig = {
-        ...options,
-        modelIdentifier: baseModelIdentifier, // Use base identifier
-        onnxModelFile: onnxFileName, // Set corresponding version ONNX filename
-        dimension: preset.dimension,
-        modelVersion: modelVersion,
-        requiresTokenTypeIds: modelSpecificConfig.requiresTokenTypeIds !== false, // Default to true unless explicitly set to false
-      };
-      console.log(
-        `SemanticSimilarityEngine: Using model preset "${options.modelPreset}" with version "${modelVersion}":`,
-        preset,
-      );
-      console.log(`SemanticSimilarityEngine: Base model identifier: ${baseModelIdentifier}`);
-      console.log(`SemanticSimilarityEngine: ONNX file for version: ${onnxFileName}`);
-      console.log(
-        `SemanticSimilarityEngine: Requires token_type_ids: ${modelConfig.requiresTokenTypeIds}`,
-      );
+  private validateTokenizedOutput(output: TokenizedOutput, expectedBatchSize: number): void {
+    if (
+      !Number.isInteger(expectedBatchSize) ||
+      expectedBatchSize <= 0 ||
+      expectedBatchSize > SEMANTIC_RESOURCE_LIMITS.maxBatchTexts
+    ) {
+      throw new Error('Invalid tokenizer batch size');
     }
 
-    // Set default configuration - using 2025 recommended default model
+    const validateTensor = (tensor: TransformersTensor | undefined, label: string): void => {
+      if (!tensor || !Array.isArray(tensor.dims) || tensor.dims.length !== 2) {
+        throw new Error(`${label} has invalid dimensions`);
+      }
+      const [batchSize, sequenceLength] = tensor.dims;
+      if (
+        batchSize !== expectedBatchSize ||
+        !Number.isInteger(sequenceLength) ||
+        sequenceLength <= 0 ||
+        sequenceLength > this.config.maxLength
+      ) {
+        throw new Error(`${label} exceeds the tensor dimension limit`);
+      }
+      const expectedElements = batchSize * sequenceLength;
+      if (
+        !tensor.data ||
+        typeof tensor.data.length !== 'number' ||
+        tensor.data.length !== expectedElements
+      ) {
+        throw new Error(`${label} has an invalid element count`);
+      }
+    };
+
+    validateTensor(output.input_ids, 'input_ids');
+    validateTensor(output.attention_mask, 'attention_mask');
+    if (output.token_type_ids) validateTensor(output.token_type_ids, 'token_type_ids');
+  }
+
+  constructor(options: Partial<ModelConfig> = {}) {
+    let optionKeyCount = 0;
+    for (const key in options) {
+      if (!Object.prototype.hasOwnProperty.call(options, key)) continue;
+      optionKeyCount++;
+      if (optionKeyCount > SAFE_ENGINE_OPTION_KEYS.size || !SAFE_ENGINE_OPTION_KEYS.has(key)) {
+        throw new Error('Semantic engine config contains unsupported fields');
+      }
+    }
+    if (options.useLocalFiles !== undefined && options.useLocalFiles !== false) {
+      throw new Error('Semantic engine local-file configuration is not allowed');
+    }
+    if (options.forceOffscreen !== undefined && typeof options.forceOffscreen !== 'boolean') {
+      throw new Error('Semantic engine forceOffscreen must be a boolean');
+    }
+
+    const selection = normalizeInternalModelSelection(options);
+    const preset = PREDEFINED_MODELS[selection.modelPreset];
+    const detectedThreads =
+      typeof navigator !== 'undefined' && Number.isFinite(navigator.hardwareConcurrency)
+        ? Math.floor(navigator.hardwareConcurrency / 2)
+        : 2;
+    const numThreads = Math.min(4, Math.max(1, detectedThreads));
+
     this.config = {
-      ...modelConfig,
-      modelIdentifier: modelConfig.modelIdentifier || 'Xenova/bge-small-en-v1.5',
-      localModelPathPrefix: modelConfig.localModelPathPrefix || 'models/',
-      onnxModelFile: modelConfig.onnxModelFile || 'model.onnx',
-      maxLength: modelConfig.maxLength || 256,
-      cacheSize: modelConfig.cacheSize || 500,
-      numThreads:
-        modelConfig.numThreads ||
-        (typeof navigator !== 'undefined' && navigator.hardwareConcurrency
-          ? Math.max(1, Math.floor(navigator.hardwareConcurrency / 2))
-          : 2),
+      modelIdentifier: preset.modelIdentifier,
+      localModelPathPrefix: 'models/',
+      onnxModelFile: getOnnxFileNameForVersion(selection.modelVersion),
+      maxLength: 256,
+      cacheSize: 500,
+      numThreads,
       executionProviders:
-        modelConfig.executionProviders ||
-        (typeof WebAssembly === 'object' &&
+        typeof WebAssembly === 'object' &&
         WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]))
           ? ['wasm']
-          : ['webgl']),
-      useLocalFiles: (() => {
-        console.log(
-          'SemanticSimilarityEngine: DEBUG - modelConfig.useLocalFiles:',
-          modelConfig.useLocalFiles,
-        );
-        console.log(
-          'SemanticSimilarityEngine: DEBUG - modelConfig.useLocalFiles !== undefined:',
-          modelConfig.useLocalFiles !== undefined,
-        );
-        const result = modelConfig.useLocalFiles !== undefined ? modelConfig.useLocalFiles : true;
-        console.log('SemanticSimilarityEngine: DEBUG - final useLocalFiles value:', result);
-        return result;
-      })(),
-      workerPath: modelConfig.workerPath || 'js/similarity.worker.js', // Will be overridden by WXT's `new URL`
-      concurrentLimit:
-        modelConfig.concurrentLimit ||
-        Math.max(
-          1,
-          modelConfig.numThreads ||
-            (typeof navigator !== 'undefined' && navigator.hardwareConcurrency
-              ? Math.max(1, Math.floor(navigator.hardwareConcurrency / 2))
-              : 2),
-        ),
-      forceOffscreen: modelConfig.forceOffscreen || false,
-      modelPreset: modelConfig.modelPreset || 'bge-small-en-v1.5',
-      dimension: modelConfig.dimension || 384,
-      modelVersion: modelConfig.modelVersion || 'quantized',
-      requiresTokenTypeIds: modelConfig.requiresTokenTypeIds !== false, // Default to true
+          : ['webgl'],
+      useLocalFiles: false,
+      workerPath: 'js/similarity.worker.js',
+      concurrentLimit: Math.min(SEMANTIC_RESOURCE_LIMITS.maxConcurrentRequests, numThreads),
+      forceOffscreen: options.forceOffscreen === true,
+      modelPreset: selection.modelPreset,
+      dimension: selection.modelDimension,
+      modelVersion: selection.modelVersion,
+      requiresTokenTypeIds: preset.modelSpecificConfig.requiresTokenTypeIds !== false,
     } as Required<ModelConfig>;
 
     console.log('SemanticSimilarityEngine: Final config:', {
@@ -1030,6 +1197,10 @@ export class SemanticSimilarityEngine {
     return new Promise((resolve, reject) => {
       if (!this.worker) {
         reject(new Error('Worker is not initialized.'));
+        return;
+      }
+      if (this.pendingMessages.size >= SEMANTIC_RESOURCE_LIMITS.maxConcurrentRequests + 2) {
+        reject(new Error('Too many pending semantic worker messages'));
         return;
       }
       const id = this.nextTokenId++;
@@ -1200,40 +1371,18 @@ export class SemanticSimilarityEngine {
         reportProgress('initializing', 15, 'Setting up offscreen document...');
         await this.ensureOffscreenDocument();
 
-        // Send initialization message to offscreen document
-        console.log('SemanticSimilarityEngine: Sending config to offscreen:', {
-          useLocalFiles: this.config.useLocalFiles,
-          modelIdentifier: this.config.modelIdentifier,
-          localModelPathPrefix: this.config.localModelPathPrefix,
-        });
-
-        // Ensure config object is correctly serialized with all properties explicitly set
         const configToSend = {
-          modelIdentifier: this.config.modelIdentifier,
-          localModelPathPrefix: this.config.localModelPathPrefix,
-          onnxModelFile: this.config.onnxModelFile,
-          maxLength: this.config.maxLength,
-          cacheSize: this.config.cacheSize,
-          numThreads: this.config.numThreads,
-          executionProviders: this.config.executionProviders,
-          useLocalFiles: Boolean(this.config.useLocalFiles), // Force convert to boolean
-          workerPath: this.config.workerPath,
-          concurrentLimit: this.config.concurrentLimit,
-          forceOffscreen: this.config.forceOffscreen,
           modelPreset: this.config.modelPreset,
           modelVersion: this.config.modelVersion,
-          dimension: this.config.dimension,
+          modelDimension: this.config.dimension,
         };
-
-        // Use JSON serialization to ensure data integrity
-        const serializedConfig = JSON.parse(JSON.stringify(configToSend));
 
         reportProgress('initializing', 20, 'Delegating to offscreen document...');
 
         const response = await chrome.runtime.sendMessage({
           target: 'offscreen',
           type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_INIT,
-          config: serializedConfig,
+          config: configToSend,
         });
 
         if (!response || !response.success) {
@@ -1294,61 +1443,16 @@ export class SemanticSimilarityEngine {
         // Use offscreen mode
         await this.ensureOffscreenDocument();
 
-        // Send initialization message to offscreen document
-        console.log('SemanticSimilarityEngine: Sending config to offscreen:', {
-          useLocalFiles: this.config.useLocalFiles,
-          modelIdentifier: this.config.modelIdentifier,
-          localModelPathPrefix: this.config.localModelPathPrefix,
-        });
-
-        // Ensure config object is correctly serialized with all properties explicitly set
         const configToSend = {
-          modelIdentifier: this.config.modelIdentifier,
-          localModelPathPrefix: this.config.localModelPathPrefix,
-          onnxModelFile: this.config.onnxModelFile,
-          maxLength: this.config.maxLength,
-          cacheSize: this.config.cacheSize,
-          numThreads: this.config.numThreads,
-          executionProviders: this.config.executionProviders,
-          useLocalFiles: Boolean(this.config.useLocalFiles), // Force convert to boolean
-          workerPath: this.config.workerPath,
-          concurrentLimit: this.config.concurrentLimit,
-          forceOffscreen: this.config.forceOffscreen,
           modelPreset: this.config.modelPreset,
           modelVersion: this.config.modelVersion,
-          dimension: this.config.dimension,
+          modelDimension: this.config.dimension,
         };
-
-        console.log(
-          'SemanticSimilarityEngine: DEBUG - configToSend.useLocalFiles:',
-          configToSend.useLocalFiles,
-        );
-        console.log(
-          'SemanticSimilarityEngine: DEBUG - typeof configToSend.useLocalFiles:',
-          typeof configToSend.useLocalFiles,
-        );
-
-        console.log('SemanticSimilarityEngine: Explicit config to send:', configToSend);
-        console.log(
-          'SemanticSimilarityEngine: DEBUG - this.config.useLocalFiles value:',
-          this.config.useLocalFiles,
-        );
-        console.log(
-          'SemanticSimilarityEngine: DEBUG - typeof this.config.useLocalFiles:',
-          typeof this.config.useLocalFiles,
-        );
-
-        // Use JSON serialization to ensure data integrity
-        const serializedConfig = JSON.parse(JSON.stringify(configToSend));
-        console.log(
-          'SemanticSimilarityEngine: DEBUG - serializedConfig.useLocalFiles:',
-          serializedConfig.useLocalFiles,
-        );
 
         const response = await chrome.runtime.sendMessage({
           target: 'offscreen',
           type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_INIT,
-          config: serializedConfig, // Use the original configuration and do not force modification of useLocalFiles
+          config: configToSend,
         });
 
         if (!response || !response.success) {
@@ -1359,9 +1463,7 @@ export class SemanticSimilarityEngine {
       } else {
         // Use direct Worker mode
         this._setupWorker();
-        const remoteArtifact = this.config.useLocalFiles
-          ? null
-          : this.resolveRemoteModelArtifact();
+        const remoteArtifact = this.config.useLocalFiles ? null : this.resolveRemoteModelArtifact();
 
         TransformersEnv.allowRemoteModels = !this.config.useLocalFiles;
         TransformersEnv.allowLocalModels = this.config.useLocalFiles;
@@ -1597,9 +1699,7 @@ export class SemanticSimilarityEngine {
         throw new Error('Pinned remote model artifact was not resolved.');
       }
       reportProgress('downloading', 80, 'Loading cached ONNX model...');
-      console.log(
-        `SemanticSimilarityEngine: Getting cached model data from ${remoteArtifact.url}`,
-      );
+      console.log(`SemanticSimilarityEngine: Getting cached model data from ${remoteArtifact.url}`);
 
       // Get model data from cache (may download if not cached)
       const modelData = await getCachedModelData(remoteArtifact);
@@ -1756,18 +1856,30 @@ export class SemanticSimilarityEngine {
     workerOutput: WorkerResponsePayload,
     attentionMaskArray: number[],
   ): Float32Array {
-    if (!workerOutput.data || !workerOutput.dims)
+    if (!workerOutput.data || !Array.isArray(workerOutput.dims) || workerOutput.dims.length !== 3)
       throw new Error('Invalid worker output for embedding extraction.');
+
+    const [batchSize, seqLength, hiddenSize] = workerOutput.dims;
+    if (
+      batchSize !== 1 ||
+      !Number.isInteger(seqLength) ||
+      seqLength <= 0 ||
+      seqLength > this.config.maxLength ||
+      hiddenSize !== this.config.dimension ||
+      attentionMaskArray.length !== seqLength
+    ) {
+      throw new Error('Worker embedding dimensions exceed the configured limits.');
+    }
+    const expectedElements = batchSize * seqLength * hiddenSize;
+    if (workerOutput.data.length !== expectedElements) {
+      throw new Error('Worker embedding element count is invalid.');
+    }
 
     // Optimization: Use Float32Array directly to avoid unnecessary conversions
     const lastHiddenStateData =
       workerOutput.data instanceof Float32Array
         ? workerOutput.data
         : new Float32Array(workerOutput.data);
-
-    const dims = workerOutput.dims;
-    const seqLength = dims[1];
-    const hiddenSize = dims[2];
 
     // Use memory pool to get embedding array
     const embedding = this.memoryPool.getEmbedding(hiddenSize);
@@ -1787,15 +1899,43 @@ export class SemanticSimilarityEngine {
         embedding[i] /= validTokens;
       }
     }
-    return this.normalizeVector(embedding);
+    const normalized = this.normalizeVector(embedding);
+    validateEmbeddingPayload(normalized, this.config.dimension);
+    return normalized;
   }
 
   private _extractBatchEmbeddingsFromWorkerOutput(
     workerOutput: WorkerResponsePayload,
     attentionMasksBatch: number[][],
   ): Float32Array[] {
-    if (!workerOutput.data || !workerOutput.dims)
+    if (!workerOutput.data || !Array.isArray(workerOutput.dims) || workerOutput.dims.length !== 3)
       throw new Error('Invalid worker output for batch embedding extraction.');
+
+    const [batchSize, seqLength, hiddenSize] = workerOutput.dims;
+    if (
+      !Number.isInteger(batchSize) ||
+      batchSize <= 0 ||
+      batchSize > SEMANTIC_RESOURCE_LIMITS.maxBatchTexts ||
+      batchSize !== attentionMasksBatch.length ||
+      !Number.isInteger(seqLength) ||
+      seqLength <= 0 ||
+      seqLength > this.config.maxLength ||
+      hiddenSize !== this.config.dimension
+    ) {
+      throw new Error('Worker batch embedding dimensions exceed the configured limits.');
+    }
+    const expectedElements = batchSize * seqLength * hiddenSize;
+    if (workerOutput.data.length !== expectedElements) {
+      throw new Error('Worker batch embedding element count is invalid.');
+    }
+    for (let index = 0; index < attentionMasksBatch.length; index++) {
+      if (
+        !Array.isArray(attentionMasksBatch[index]) ||
+        attentionMasksBatch[index].length !== seqLength
+      ) {
+        throw new Error('Worker batch attention mask dimensions are invalid.');
+      }
+    }
 
     // Optimization: Use Float32Array directly to avoid unnecessary conversions
     const lastHiddenStateData =
@@ -1803,10 +1943,6 @@ export class SemanticSimilarityEngine {
         ? workerOutput.data
         : new Float32Array(workerOutput.data);
 
-    const dims = workerOutput.dims;
-    const batchSize = dims[0];
-    const seqLength = dims[1];
-    const hiddenSize = dims[2];
     const embeddings: Float32Array[] = [];
 
     for (let b = 0; b < batchSize; b++) {
@@ -1828,7 +1964,9 @@ export class SemanticSimilarityEngine {
           embedding[i] /= validTokens;
         }
       }
-      embeddings.push(this.normalizeVector(embedding));
+      const normalized = this.normalizeVector(embedding);
+      validateEmbeddingPayload(normalized, this.config.dimension);
+      embeddings.push(normalized);
     }
     return embeddings;
   }
@@ -1837,9 +1975,11 @@ export class SemanticSimilarityEngine {
     text: string,
     options: Record<string, any> = {},
   ): Promise<Float32Array> {
+    const validatedText = validateSemanticText(text);
+    const validatedOptions = validateSemanticOptions(options);
     if (!this.isInitialized) await this.initialize();
 
-    const cacheKey = this.getCacheKey(text, options);
+    const cacheKey = this.getCacheKey(validatedText, validatedOptions);
     const cached = this.embeddingCache.get(cacheKey);
     if (cached) {
       this.cacheStats.embedding.hits++;
@@ -1853,36 +1993,19 @@ export class SemanticSimilarityEngine {
       const response = await chrome.runtime.sendMessage({
         target: 'offscreen',
         type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_COMPUTE,
-        text: text,
-        options: options,
+        text: validatedText,
+        options: validatedOptions,
       });
 
       if (!response || !response.success) {
         throw new Error(response?.error || 'Failed to get embedding from offscreen document');
       }
 
-      // Verify response data
-      if (!response.embedding || !Array.isArray(response.embedding)) {
-        throw new Error('Invalid embedding data received from offscreen document');
-      }
-
-      console.log('SemanticSimilarityEngine: Received embedding from offscreen:', {
-        length: response.embedding.length,
-        type: typeof response.embedding,
-        isArray: Array.isArray(response.embedding),
-        firstFewValues: response.embedding.slice(0, 5),
-      });
-
-      const embedding = new Float32Array(response.embedding);
-
-      // Validate converted data
-      console.log('SemanticSimilarityEngine: Converted embedding:', {
-        length: embedding.length,
-        type: typeof embedding,
-        constructor: embedding.constructor.name,
-        isFloat32Array: embedding instanceof Float32Array,
-        firstFewValues: Array.from(embedding.slice(0, 5)),
-      });
+      const validatedEmbedding = validateEmbeddingPayload(
+        response.embedding,
+        this.config.dimension,
+      );
+      const embedding = new Float32Array(validatedEmbedding);
 
       this.embeddingCache.set(cacheKey, embedding);
       this.cacheStats.embedding.size = this.embeddingCache.size;
@@ -1900,7 +2023,8 @@ export class SemanticSimilarityEngine {
 
     const startTime = performance.now();
     try {
-      const tokenized = await this._tokenizeText(text);
+      const tokenized = await this._tokenizeText(validatedText);
+      this.validateTokenizedOutput(tokenized, 1);
 
       const inputIdsData = this.convertTensorDataToNumbers(tokenized.input_ids.data);
       const attentionMaskData = this.convertTensorDataToNumbers(tokenized.attention_mask.data);
@@ -1939,18 +2063,22 @@ export class SemanticSimilarityEngine {
     texts: string[],
     options: Record<string, any> = {},
   ): Promise<Float32Array[]> {
+    const validatedTexts = validateSemanticTexts(texts);
+    const validatedOptions = validateSemanticOptions(options);
     if (!this.isInitialized) await this.initialize();
-    if (!texts || texts.length === 0) return [];
+    if (validatedTexts.length === 0) return [];
 
     // If using offscreen mode, delegate to offscreen document
     if (this.useOffscreen) {
       // Check cache first
-      const results: (Float32Array | undefined)[] = new Array(texts.length).fill(undefined);
+      const results: (Float32Array | undefined)[] = new Array(validatedTexts.length).fill(
+        undefined,
+      );
       const uncachedTexts: string[] = [];
       const uncachedIndices: number[] = [];
 
-      texts.forEach((text, index) => {
-        const cacheKey = this.getCacheKey(text, options);
+      validatedTexts.forEach((text, index) => {
+        const cacheKey = this.getCacheKey(text, validatedOptions);
         const cached = this.embeddingCache.get(cacheKey);
         if (cached) {
           results[index] = cached;
@@ -1972,7 +2100,7 @@ export class SemanticSimilarityEngine {
         target: 'offscreen',
         type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_BATCH_COMPUTE,
         texts: uncachedTexts,
-        options: options,
+        options: validatedOptions,
       });
 
       if (!response || !response.success) {
@@ -1981,8 +2109,14 @@ export class SemanticSimilarityEngine {
         );
       }
 
+      const validatedEmbeddings = validateEmbeddingsPayload(
+        response.embeddings,
+        uncachedTexts.length,
+        this.config.dimension,
+      );
+
       // Put the result back into the corresponding location and cache it
-      response.embeddings.forEach((embeddingArray: number[], batchIndex: number) => {
+      validatedEmbeddings.forEach((embeddingArray, batchIndex) => {
         const embedding = new Float32Array(embeddingArray);
         const originalIndex = uncachedIndices[batchIndex];
         const originalText = uncachedTexts[batchIndex];
@@ -1990,7 +2124,7 @@ export class SemanticSimilarityEngine {
         results[originalIndex] = embedding;
 
         // cache results
-        const cacheKey = this.getCacheKey(originalText, options);
+        const cacheKey = this.getCacheKey(originalText, validatedOptions);
         this.embeddingCache.set(cacheKey, embedding);
       });
 
@@ -2000,12 +2134,12 @@ export class SemanticSimilarityEngine {
       return results as Float32Array[];
     }
 
-    const results: (Float32Array | undefined)[] = new Array(texts.length).fill(undefined);
+    const results: (Float32Array | undefined)[] = new Array(validatedTexts.length).fill(undefined);
     const uncachedTextsMap = new Map<string, number[]>();
     const textsToTokenize: string[] = [];
 
-    texts.forEach((text, index) => {
-      const cacheKey = this.getCacheKey(text, options);
+    validatedTexts.forEach((text, index) => {
+      const cacheKey = this.getCacheKey(text, validatedOptions);
       const cached = this.embeddingCache.get(cacheKey);
       if (cached) {
         results[index] = cached;
@@ -2031,6 +2165,7 @@ export class SemanticSimilarityEngine {
     const startTime = performance.now();
     try {
       const tokenizedBatch = await this._tokenizeText(textsToTokenize);
+      this.validateTokenizedOutput(tokenizedBatch, textsToTokenize.length);
       const workerPayload: WorkerMessagePayload = {
         input_ids: this.convertTensorDataToNumbers(tokenizedBatch.input_ids.data),
         attention_mask: this.convertTensorDataToNumbers(tokenizedBatch.attention_mask.data),
@@ -2063,7 +2198,7 @@ export class SemanticSimilarityEngine {
       );
       batchEmbeddings.forEach((embedding, batchIdx) => {
         const originalText = textsToTokenize[batchIdx];
-        const cacheKey = this.getCacheKey(originalText, options);
+        const cacheKey = this.getCacheKey(originalText, validatedOptions);
         this.embeddingCache.set(cacheKey, embedding);
         const originalResultIndices = uncachedTextsMap.get(originalText)!;
         originalResultIndices.forEach((idx) => {
@@ -2088,14 +2223,15 @@ export class SemanticSimilarityEngine {
     text2: string,
     options: Record<string, any> = {},
   ): Promise<number> {
+    const validatedTexts = validateSemanticTexts([text1, text2]);
+    const validatedOptions = validateSemanticOptions(options);
     if (!this.isInitialized) await this.initialize();
-    this.validateInput(text1, text2);
 
     const simStartTime = performance.now();
-    const [embedding1, embedding2] = await Promise.all([
-      this.getEmbedding(text1, options),
-      this.getEmbedding(text2, options),
-    ]);
+    const [embedding1, embedding2] = await this.getEmbeddingsBatch(
+      validatedTexts,
+      validatedOptions,
+    );
     const similarity = this.cosineSimilarity(embedding1, embedding2);
     console.log('computeSimilarity:', similarity);
     this.performanceStats.totalSimilarityComputations++;
@@ -2109,42 +2245,43 @@ export class SemanticSimilarityEngine {
     pairs: { text1: string; text2: string }[],
     options: Record<string, any> = {},
   ): Promise<number[]> {
+    const validatedPairs = validateSemanticPairs(pairs);
+    const validatedOptions = validateSemanticOptions(options);
     if (!this.isInitialized) await this.initialize();
-    if (!pairs || pairs.length === 0) return [];
+    if (validatedPairs.length === 0) return [];
 
     // If using offscreen mode, delegate to offscreen document
     if (this.useOffscreen) {
       const response = await chrome.runtime.sendMessage({
         target: 'offscreen',
         type: OFFSCREEN_MESSAGE_TYPES.SIMILARITY_ENGINE_BATCH_COMPUTE,
-        pairs: pairs,
-        options: options,
+        pairs: validatedPairs,
+        options: validatedOptions,
       });
 
       if (!response || !response.success) {
         throw new Error(response?.error || 'Failed to compute similarities in offscreen document');
       }
 
-      return response.similarities;
+      return validateSimilaritiesPayload(response.similarities, validatedPairs.length);
     }
 
     // Original logic of direct mode
     const simStartTime = performance.now();
     const uniqueTextsSet = new Set<string>();
-    pairs.forEach((pair) => {
-      this.validateInput(pair.text1, pair.text2);
+    validatedPairs.forEach((pair) => {
       uniqueTextsSet.add(pair.text1);
       uniqueTextsSet.add(pair.text2);
     });
 
     const uniqueTextsArray = Array.from(uniqueTextsSet);
-    const embeddingsArray = await this.getEmbeddingsBatch(uniqueTextsArray, options);
+    const embeddingsArray = await this.getEmbeddingsBatch(uniqueTextsArray, validatedOptions);
     const embeddingMap = new Map<string, Float32Array>();
     uniqueTextsArray.forEach((text, index) => {
       embeddingMap.set(text, embeddingsArray[index]);
     });
 
-    const similarities = pairs.map((pair) => {
+    const similarities = validatedPairs.map((pair) => {
       const emb1 = embeddingMap.get(pair.text1);
       const emb2 = embeddingMap.get(pair.text2);
       if (!emb1 || !emb2) {
@@ -2153,7 +2290,7 @@ export class SemanticSimilarityEngine {
       }
       return this.cosineSimilarity(emb1, emb2);
     });
-    this.performanceStats.totalSimilarityComputations += pairs.length;
+    this.performanceStats.totalSimilarityComputations += validatedPairs.length;
     this.performanceStats.totalSimilarityTime += performance.now() - simStartTime;
     this.performanceStats.averageSimilarityTime =
       this.performanceStats.totalSimilarityTime / this.performanceStats.totalSimilarityComputations;
@@ -2165,16 +2302,25 @@ export class SemanticSimilarityEngine {
     texts2: string[],
     options: Record<string, any> = {},
   ): Promise<number[][]> {
+    const validatedTexts1 = validateSemanticTexts(texts1);
+    const validatedTexts2 = validateSemanticTexts(texts2);
+    const validatedOptions = validateSemanticOptions(options);
+    if (
+      validatedTexts1.length + validatedTexts2.length > SEMANTIC_RESOURCE_LIMITS.maxBatchTexts ||
+      validatedTexts1.length * validatedTexts2.length > SEMANTIC_RESOURCE_LIMITS.maxBatchTexts ** 2
+    ) {
+      throw new Error('Similarity matrix exceeds the resource limit');
+    }
     if (!this.isInitialized) await this.initialize();
-    if (!texts1 || !texts2 || texts1.length === 0 || texts2.length === 0) return [];
+    if (validatedTexts1.length === 0 || validatedTexts2.length === 0) return [];
 
     const simStartTime = performance.now();
-    const allTextsSet = new Set<string>([...texts1, ...texts2]);
-    texts1.forEach((t) => this.validateInput(t, 'valid_dummy'));
-    texts2.forEach((t) => this.validateInput(t, 'valid_dummy'));
+    const allTextsSet = new Set<string>();
+    validatedTexts1.forEach((text) => allTextsSet.add(text));
+    validatedTexts2.forEach((text) => allTextsSet.add(text));
 
     const allTextsArray = Array.from(allTextsSet);
-    const embeddingsArray = await this.getEmbeddingsBatch(allTextsArray, options);
+    const embeddingsArray = await this.getEmbeddingsBatch(allTextsArray, validatedOptions);
     const embeddingMap = new Map<string, Float32Array>();
     allTextsArray.forEach((text, index) => {
       embeddingMap.set(text, embeddingsArray[index]);
@@ -2183,13 +2329,17 @@ export class SemanticSimilarityEngine {
     // Use SIMD-optimized matrix calculations (if available)
     if (this.useSIMD && this.simdMath) {
       try {
-        const embeddings1 = texts1.map((text) => embeddingMap.get(text)!).filter(Boolean);
-        const embeddings2 = texts2.map((text) => embeddingMap.get(text)!).filter(Boolean);
+        const embeddings1 = validatedTexts1.map((text) => embeddingMap.get(text)!).filter(Boolean);
+        const embeddings2 = validatedTexts2.map((text) => embeddingMap.get(text)!).filter(Boolean);
 
-        if (embeddings1.length === texts1.length && embeddings2.length === texts2.length) {
+        if (
+          embeddings1.length === validatedTexts1.length &&
+          embeddings2.length === validatedTexts2.length
+        ) {
           const matrix = await this.simdMath.similarityMatrix(embeddings1, embeddings2);
 
-          this.performanceStats.totalSimilarityComputations += texts1.length * texts2.length;
+          this.performanceStats.totalSimilarityComputations +=
+            validatedTexts1.length * validatedTexts2.length;
           this.performanceStats.totalSimilarityTime += performance.now() - simStartTime;
           this.performanceStats.averageSimilarityTime =
             this.performanceStats.totalSimilarityTime /
@@ -2204,16 +2354,16 @@ export class SemanticSimilarityEngine {
 
     // JavaScript Fallback version
     const matrix: number[][] = [];
-    for (const textA of texts1) {
+    for (const textA of validatedTexts1) {
       const row: number[] = [];
       const embA = embeddingMap.get(textA);
       if (!embA) {
         console.warn(`Embedding not found for text1: "${textA}"`);
-        texts2.forEach(() => row.push(0));
+        validatedTexts2.forEach(() => row.push(0));
         matrix.push(row);
         continue;
       }
-      for (const textB of texts2) {
+      for (const textB of validatedTexts2) {
         const embB = embeddingMap.get(textB);
         if (!embB) {
           console.warn(`Embedding not found for text2: "${textB}"`);
@@ -2224,7 +2374,8 @@ export class SemanticSimilarityEngine {
       }
       matrix.push(row);
     }
-    this.performanceStats.totalSimilarityComputations += texts1.length * texts2.length;
+    this.performanceStats.totalSimilarityComputations +=
+      validatedTexts1.length * validatedTexts2.length;
     this.performanceStats.totalSimilarityTime += performance.now() - simStartTime;
     this.performanceStats.averageSimilarityTime =
       this.performanceStats.totalSimilarityTime / this.performanceStats.totalSimilarityComputations;
@@ -2232,10 +2383,8 @@ export class SemanticSimilarityEngine {
   }
 
   public cosineSimilarity(vecA: Float32Array, vecB: Float32Array): number {
-    if (!vecA || !vecB || vecA.length !== vecB.length) {
-      console.warn('Cosine similarity: Invalid vectors provided.', vecA, vecB);
-      return 0;
-    }
+    validateEmbeddingPayload(vecA, this.config.dimension);
+    validateEmbeddingPayload(vecB, this.config.dimension);
 
     // Use SIMD optimized version if available
     if (this.useSIMD && this.simdMath) {
@@ -2267,10 +2416,8 @@ export class SemanticSimilarityEngine {
 
   // New: Asynchronous SIMD optimized cosine similarity
   public async cosineSimilaritySIMD(vecA: Float32Array, vecB: Float32Array): Promise<number> {
-    if (!vecA || !vecB || vecA.length !== vecB.length) {
-      console.warn('Cosine similarity: Invalid vectors provided.', vecA, vecB);
-      return 0;
-    }
+    validateEmbeddingPayload(vecA, this.config.dimension);
+    validateEmbeddingPayload(vecB, this.config.dimension);
 
     if (this.useSIMD && this.simdMath) {
       try {
@@ -2284,6 +2431,7 @@ export class SemanticSimilarityEngine {
   }
 
   public normalizeVector(vector: Float32Array): Float32Array {
+    validateEmbeddingPayload(vector, this.config.dimension);
     let norm = 0;
     for (let i = 0; i < vector.length; i++) norm += vector[i] * vector[i];
     norm = Math.sqrt(norm);
@@ -2294,19 +2442,8 @@ export class SemanticSimilarityEngine {
   }
 
   public validateInput(text1: string, text2: string | 'valid_dummy'): void {
-    if (typeof text1 !== 'string' || (text2 !== 'valid_dummy' && typeof text2 !== 'string')) {
-      throw new Error('Input must be a string');
-    }
-    if (text1.trim().length === 0 || (text2 !== 'valid_dummy' && text2.trim().length === 0)) {
-      throw new Error('Input text cannot be empty');
-    }
-    const roughCharLimit = this.config.maxLength * 5;
-    if (
-      text1.length > roughCharLimit ||
-      (text2 !== 'valid_dummy' && text2.length > roughCharLimit)
-    ) {
-      console.warn('The input text may be too long and will be truncated by the tokenizer. ');
-    }
+    validateSemanticText(text1, 'text1');
+    if (text2 !== 'valid_dummy') validateSemanticText(text2, 'text2');
   }
 
   private getCacheKey(text: string, _options: Record<string, any> = {}): string {
@@ -2346,6 +2483,9 @@ export class SemanticSimilarityEngine {
   }
 
   private async waitForWorkerSlot(): Promise<void> {
+    if (this.workerTaskQueue.length >= SEMANTIC_RESOURCE_LIMITS.maxWorkerQueue) {
+      throw new Error('Semantic worker queue is full');
+    }
     return new Promise((resolve) => {
       this.workerTaskQueue.push(resolve);
     });

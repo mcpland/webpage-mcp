@@ -9,8 +9,8 @@ import {
   SemanticSimilarityEngine,
   SemanticSimilarityEngineProxy,
   PREDEFINED_MODELS,
-  type ModelPreset,
 } from './semantic-similarity-engine';
+import { getStoredSemanticModelSelection } from './semantic-similarity-boundaries';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 
 export interface IndexingOptions {
@@ -50,33 +50,24 @@ export class ContentIndexer {
   private async getCurrentModelConfig() {
     try {
       const result = await chrome.storage.local.get(['selectedModel', 'selectedVersion']);
-      const selectedModel = (result.selectedModel as ModelPreset) || 'multilingual-e5-small';
-      const selectedVersion =
-        (result.selectedVersion as 'full' | 'quantized' | 'compressed') || 'quantized';
-
-      const modelInfo = PREDEFINED_MODELS[selectedModel];
+      const selection = getStoredSemanticModelSelection(
+        result.selectedModel,
+        result.selectedVersion,
+        PREDEFINED_MODELS,
+        'multilingual-e5-small',
+      );
 
       return {
-        modelPreset: selectedModel,
-        modelIdentifier: modelInfo.modelIdentifier,
-        dimension: modelInfo.dimension,
-        modelVersion: selectedVersion,
-        useLocalFiles: false,
-        maxLength: 256,
-        cacheSize: 1000,
-        forceOffscreen: true,
+        modelPreset: selection.modelPreset,
+        dimension: selection.modelDimension,
+        modelVersion: selection.modelVersion,
       };
     } catch (error) {
       console.error('ContentIndexer: Failed to get current model config, using default:', error);
       return {
         modelPreset: 'multilingual-e5-small' as const,
-        modelIdentifier: 'Xenova/multilingual-e5-small',
         dimension: 384,
         modelVersion: 'quantized' as const,
-        useLocalFiles: false,
-        maxLength: 256,
-        cacheSize: 1000,
-        forceOffscreen: true,
       };
     }
   }
