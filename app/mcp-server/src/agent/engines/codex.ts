@@ -14,6 +14,11 @@ import { validateCodexConfig } from '../session-security';
 import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
 import { createAgentEventDedupKey } from './event-dedupe';
 import {
+  ChildProcessLifecycle,
+  type ChildProcessExit,
+  shouldDetachChildProcess,
+} from './child-process-lifecycle';
+import {
   BoundedAssistantStream,
   BoundedMap,
   BoundedSet,
@@ -215,17 +220,38 @@ export class CodexEngine implements AgentEngine {
         env: this.buildCodexEnv(),
         shell: spawnSpec.shell,
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: shouldDetachChildProcess(),
       });
 
       // State management
       const stderrBuffer: string[] = [];
       let hasCompleted = false;
-      let timedOut = false;
-      let settled = false;
-      let timeoutHandle: NodeJS.Timeout | null = null;
+      let terminalError: Error | null = null;
+      let finishPromise: Promise<void> | null = null;
 
       // Readline interface - declared early to avoid TDZ issues in finish()
       let rl: readline.Interface | null = null;
+      const configuredTimeoutMs = Number.parseInt(
+        process.env.CODEX_ENGINE_TIMEOUT_MS || '',
+        10,
+      );
+      const timeoutMs =
+        Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+          ? configuredTimeoutMs
+          : 15 * 60 * 1000;
+      const processLifecycle = new ChildProcessLifecycle(child, {
+        signal,
+        timeoutMs,
+        abortError: () => new Error('CodexEngine: execution was cancelled'),
+        timeoutError: () => new Error('CodexEngine: execution timed out'),
+        onTerminationRequested: () => {
+          try {
+            rl?.close();
+          } catch {
+            // Closing readline is best-effort; process termination remains authoritative.
+          }
+        },
+      });
 
       // Assistant message state
       let assistantMessageId: string | null = null;
@@ -258,70 +284,103 @@ export class CodexEngine implements AgentEngine {
        * Cleanup and settle the promise (resolve or reject).
        * Waits for temp file cleanup to complete before settling.
        */
-      const finish = async (error?: unknown): Promise<void> => {
-        if (settled) return;
-        settled = true;
-
-        // Always flush the last coalesced snapshot before teardown, then clear
-        // its timer so abort/error paths cannot emit after this run settles.
-        assistantStream?.flushFinal();
-        assistantStream?.cancel();
-
-        // Clear timeout
-        if (timeoutHandle) {
-          clearTimeout(timeoutHandle);
-          timeoutHandle = null;
+      const finish = (error?: unknown): Promise<void> => {
+        const normalizedError =
+          error === undefined
+            ? null
+            : error instanceof Error
+              ? error
+              : new Error(String(error));
+        if (normalizedError && !terminalError) {
+          terminalError = normalizedError;
         }
+        if (normalizedError) {
+          processLifecycle.terminate(normalizedError);
+        }
+        if (finishPromise) return finishPromise;
 
-        // Close readline interface
-        if (rl) {
+        finishPromise = (async () => {
+          let exit: ChildProcessExit | null = null;
           try {
-            rl.close();
-          } catch {
-            // Ignore close errors during cleanup
+            exit = await processLifecycle.completion;
+          } catch (lifecycleError) {
+            if (!terminalError) {
+              terminalError =
+                lifecycleError instanceof Error
+                  ? lifecycleError
+                  : new Error(String(lifecycleError));
+            }
           }
-        }
 
-        // Kill child process if still running
-        if (!child.killed) {
+          if (
+            !terminalError &&
+            exit &&
+            (exit.code !== 0 || exit.signal !== null)
+          ) {
+            const detailParts: string[] = [];
+            if (typeof exit.code === 'number') {
+              detailParts.push(`exit code ${exit.code}`);
+            }
+            if (exit.signal) {
+              detailParts.push(`signal ${exit.signal}`);
+            }
+            const detail =
+              detailParts.length > 0
+                ? detailParts.join(', ')
+                : 'unexpected shutdown';
+            terminalError = new Error(
+              `CodexEngine: process terminated (${detail})`,
+            );
+          }
+
+          // Always flush the last coalesced snapshot before teardown, then clear
+          // its timer so no buffered event can outlive this execution.
           try {
-            child.kill();
-          } catch {
-            // Ignore kill errors during cleanup
+            assistantStream?.flushFinal();
+          } catch (flushError) {
+            if (!terminalError) {
+              terminalError =
+                flushError instanceof Error
+                  ? flushError
+                  : new Error(String(flushError));
+            }
+          } finally {
+            assistantStream?.cancel();
           }
-        }
 
-        // Cleanup temp files after process is killed (wait for completion)
-        await cleanupTempFiles();
+          if (rl) {
+            try {
+              rl.close();
+            } catch {
+              // Ignore close errors during cleanup.
+            }
+          }
 
-        // Settle the promise
-        if (error) {
-          reject(error instanceof Error ? error : new Error(String(error)));
-        } else {
-          resolve();
-        }
+          // The process is now closed (or never spawned), so temporary files
+          // cannot still be in use by Codex.
+          await cleanupTempFiles();
+
+          if (terminalError) {
+            reject(terminalError);
+          } else {
+            resolve();
+          }
+        })();
+
+        return finishPromise;
       };
 
-      // Handle child process error immediately after spawn (e.g., command not found)
-      child.on('error', (error) => {
-        const message =
-          error instanceof Error
-            ? error.message
-            : stderrBuffer.slice(-5).join('\n') || 'Codex CLI failed to start';
-        void finish(new Error(`CodexEngine: ${message}`));
-      });
-
-      // Listen for abort signal to cancel execution
-      const abortHandler = signal
-        ? () => {
-            console.error('[CodexEngine] Execution cancelled via abort signal');
-            void finish(new Error('CodexEngine: execution was cancelled'));
-          }
-        : null;
-
-      if (signal && abortHandler) {
-        signal.addEventListener('abort', abortHandler, { once: true });
-      }
+      // A spawn failure, timeout, cancellation, or ordinary close all converge
+      // on the same idempotent finalizer. Lifecycle rejection occurs only after
+      // the child has closed, except when spawning never created a process.
+      void processLifecycle.completion.then(
+        () => {
+          void finish();
+        },
+        (lifecycleError) => {
+          void finish(lifecycleError);
+        },
+      );
 
       // Collect stderr with bounded buffer
       child.stderr?.on('data', (chunk) => {
@@ -602,56 +661,6 @@ export class CodexEngine implements AgentEngine {
         }
       };
 
-      // Setup timeout
-      const timeoutMs =
-        Number.parseInt(process.env.CODEX_ENGINE_TIMEOUT_MS || '', 10) || 15 * 60 * 1000;
-      timeoutHandle = setTimeout(() => {
-        timedOut = true;
-        // Close readline to exit the loop
-        try {
-          rl.close();
-        } catch {
-          // Ignore
-        }
-        if (!child.killed) {
-          try {
-            child.kill();
-          } catch {
-            // Ignore
-          }
-        }
-      }, timeoutMs);
-      timeoutHandle.unref?.();
-
-      // Cleanup timeout and handle abnormal exit
-      child.on('close', (code: number | null, closeSignal: NodeJS.Signals | null) => {
-        if (timeoutHandle) {
-          clearTimeout(timeoutHandle);
-          timeoutHandle = null;
-        }
-
-        // If already timed out, settled, or completed normally, do nothing
-        if (timedOut || settled || hasCompleted) {
-          return;
-        }
-
-        // Build error detail from exit code and signal
-        const detailParts: string[] = [];
-        if (typeof code === 'number') {
-          detailParts.push(`exit code ${code}`);
-        }
-        if (closeSignal) {
-          detailParts.push(`signal ${closeSignal}`);
-        }
-        const detail = detailParts.length > 0 ? detailParts.join(', ') : 'unexpected shutdown';
-
-        // Emit final assistant message and mark as failed
-        emitAssistant(true);
-        resetAssistantBuffers();
-        hasCompleted = true;
-        void finish(new Error(`CodexEngine: process terminated (${detail})`));
-      });
-
       // Main event processing loop (wrapped in IIFE to handle async properly)
       void (async () => {
         try {
@@ -713,11 +722,6 @@ export class CodexEngine implements AgentEngine {
                 // Non-critical events are ignored
                 break;
             }
-          }
-
-          // Check for timeout after loop exits
-          if (timedOut) {
-            throw new Error('CodexEngine: execution timed out');
           }
 
           // Emit final assistant message if not already completed
