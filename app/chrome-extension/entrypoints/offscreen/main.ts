@@ -7,6 +7,7 @@ import {
 } from "@/common/message-types";
 import { handleGifMessage } from "./gif-encoder";
 import { initKeepalive } from "./rr-keepalive";
+import { isExtensionRuntimeSender } from "@/common/runtime-sender-auth";
 
 // Initialize RR V3 Keepalive
 initKeepalive();
@@ -60,11 +61,16 @@ type MessageResponse = {
 chrome.runtime.onMessage.addListener(
   (
     message: OffscreenMessage,
-    _sender: chrome.runtime.MessageSender,
+    sender: chrome.runtime.MessageSender,
     sendResponse: (response: MessageResponse) => void,
   ) => {
-    if (message.target !== MessageTarget.Offscreen) {
+    if (message?.target !== MessageTarget.Offscreen) {
       return;
+    }
+
+    if (!isExtensionRuntimeSender(sender)) {
+      sendResponse({ success: false, error: "Offscreen controls require an extension context" });
+      return false;
     }
 
     // Handle GIF encoding messages first
