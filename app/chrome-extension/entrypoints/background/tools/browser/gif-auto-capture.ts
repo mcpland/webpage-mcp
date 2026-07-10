@@ -17,6 +17,13 @@ import { OFFSCREEN_MESSAGE_TYPES, MessageTarget } from '@/common/message-types';
 import { offscreenManager } from '@/utils/offscreen-manager';
 import { createImageBitmapFromUrl } from '@/utils/image-utils';
 import {
+  acquireGifCaptureOwner,
+  describeGifCaptureOwner,
+  isGifCaptureOwner,
+  releaseGifCaptureOwner,
+  type GifCaptureOwner,
+} from './gif-capture-owner';
+import {
   pruneActionEventsInPlace,
   renderGifEnhancedOverlays,
   resolveCapturePlanForAction,
@@ -45,6 +52,8 @@ const DEFAULT_WIDTH = 800;
 const DEFAULT_HEIGHT = 600;
 const DEFAULT_FRAME_DELAY_CS = 20; // 20 centiseconds = 200ms per frame
 const DEFAULT_MAX_COLORS = 256;
+const AUTO_CAPTURE_TTL_MS = 5 * 60 * 1000;
+const COMPLETED_CAPTURE_TTL_MS = 5 * 60 * 1000;
 
 // ============================================================================
 // Types
@@ -61,6 +70,7 @@ export interface AutoCaptureConfig {
 }
 
 interface TabCaptureState {
+  owner: GifCaptureOwner;
   tabId: number;
   config: AutoCaptureConfig;
   rendering: ResolvedGifEnhancedRenderingConfig;
@@ -73,6 +83,25 @@ interface TabCaptureState {
   actionEvents: ActionEvent[];
   lastViewportWidth: number;
   lastViewportHeight: number;
+  ttlTimer: ReturnType<typeof setTimeout> | null;
+  stopping: boolean;
+  cacheOnFinish: boolean;
+  lifecyclePromise: Promise<AutoCaptureResult> | null;
+}
+
+export interface AutoCaptureResult {
+  success: boolean;
+  gifData?: Uint8Array;
+  frameCount?: number;
+  durationMs?: number;
+  actions?: ActionMetadata[];
+  error?: string;
+}
+
+interface CompletedAutoCapture {
+  tabId: number;
+  result: AutoCaptureResult;
+  expiresTimer: ReturnType<typeof setTimeout>;
 }
 
 // ============================================================================
@@ -80,6 +109,7 @@ interface TabCaptureState {
 // ============================================================================
 
 const tabStates = new Map<number, TabCaptureState>();
+let completedAutoCapture: CompletedAutoCapture | null = null;
 
 // ============================================================================
 // Utilities
@@ -89,7 +119,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function normalizeActionMetadata(action: ActionMetadata, atMs: number): ActionMetadata {
+function normalizeActionMetadata(
+  action: ActionMetadata,
+  atMs: number,
+): ActionMetadata {
   const normalized: ActionMetadata = {
     ...action,
     timestampMs: atMs,
@@ -134,18 +167,182 @@ async function sendToOffscreen<T extends { success: boolean; error?: string }>(
   return response;
 }
 
+function clearCompletedAutoCapture(): void {
+  if (!completedAutoCapture) return;
+  clearTimeout(completedAutoCapture.expiresTimer);
+  completedAutoCapture = null;
+}
+
+function rememberCompletedAutoCapture(
+  tabId: number,
+  result: AutoCaptureResult,
+): void {
+  clearCompletedAutoCapture();
+  const completed: CompletedAutoCapture = {
+    tabId,
+    result,
+    expiresTimer: setTimeout(() => {
+      if (completedAutoCapture === completed) completedAutoCapture = null;
+    }, COMPLETED_CAPTURE_TTL_MS),
+  };
+  completedAutoCapture = completed;
+}
+
+function takeCompletedAutoCapture(tabId: number): AutoCaptureResult | null {
+  if (!completedAutoCapture || completedAutoCapture.tabId !== tabId)
+    return null;
+  const result = completedAutoCapture.result;
+  clearCompletedAutoCapture();
+  return result;
+}
+
+export function hasCompletedAutoCapture(tabId: number): boolean {
+  return completedAutoCapture?.tabId === tabId;
+}
+
+export function discardCompletedAutoCapture(): void {
+  clearCompletedAutoCapture();
+}
+
+function clearAutoCaptureTtl(state: TabCaptureState): void {
+  if (!state.ttlTimer) return;
+  clearTimeout(state.ttlTimer);
+  state.ttlTimer = null;
+}
+
+function isActiveAutoCaptureState(state: TabCaptureState): boolean {
+  return (
+    tabStates.get(state.tabId) === state &&
+    !state.stopping &&
+    isGifCaptureOwner(state.owner)
+  );
+}
+
+async function resetEncoderBestEffort(): Promise<void> {
+  try {
+    await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_RESET, {});
+  } catch {
+    // Cleanup is best-effort; owner/CDP state must still be released.
+  }
+}
+
+function finalizeAutoCaptureState(
+  state: TabCaptureState,
+  cacheForLater: boolean,
+): Promise<AutoCaptureResult> {
+  state.cacheOnFinish ||= cacheForLater;
+  if (state.lifecyclePromise) return state.lifecyclePromise;
+
+  state.stopping = true;
+  clearAutoCaptureTtl(state);
+  state.lifecyclePromise = (async () => {
+    let encoderFinalized = false;
+    let result: AutoCaptureResult;
+    try {
+      if (state.pendingCapture) await state.pendingCapture;
+
+      const frameCount = state.frameCount;
+      const durationMs = Date.now() - state.startTime;
+      const actions = [...state.actions];
+
+      if (frameCount === 0) {
+        result = {
+          success: false,
+          error: 'No frames captured',
+          frameCount: 0,
+          durationMs,
+          actions,
+        };
+      } else {
+        const response = await sendToOffscreen<{
+          success: boolean;
+          gifData?: number[];
+          byteLength?: number;
+          error?: string;
+        }>(OFFSCREEN_MESSAGE_TYPES.GIF_FINISH, {});
+        encoderFinalized = true;
+
+        result =
+          response.gifData && response.gifData.length > 0
+            ? {
+                success: true,
+                gifData: new Uint8Array(response.gifData),
+                frameCount,
+                durationMs,
+                actions,
+              }
+            : {
+                success: false,
+                error: 'Failed to encode GIF',
+                frameCount,
+                durationMs,
+                actions,
+              };
+      }
+    } catch (error) {
+      result = {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      if (tabStates.get(state.tabId) === state) tabStates.delete(state.tabId);
+      if (!encoderFinalized) await resetEncoderBestEffort();
+      try {
+        await cdpSessionManager.detach(state.tabId, CDP_SESSION_KEY);
+      } catch {
+        // Ignore cleanup errors.
+      }
+      releaseGifCaptureOwner(state.owner);
+    }
+
+    if (state.cacheOnFinish) rememberCompletedAutoCapture(state.tabId, result);
+    return result;
+  })();
+
+  return state.lifecyclePromise;
+}
+
+async function abortAutoCaptureState(state: TabCaptureState): Promise<void> {
+  if (state.lifecyclePromise) {
+    await state.lifecyclePromise.catch(() => undefined);
+    clearCompletedAutoCapture();
+    return;
+  }
+
+  state.stopping = true;
+  clearAutoCaptureTtl(state);
+  if (tabStates.get(state.tabId) === state) tabStates.delete(state.tabId);
+
+  try {
+    if (state.pendingCapture) await state.pendingCapture;
+  } catch {
+    // Ignore an interrupted frame.
+  }
+  await resetEncoderBestEffort();
+  try {
+    await cdpSessionManager.detach(state.tabId, CDP_SESSION_KEY);
+  } catch {
+    // Ignore cleanup errors.
+  }
+  releaseGifCaptureOwner(state.owner);
+}
+
 // ============================================================================
 // Frame Capture
 // ============================================================================
 
-async function captureFrameData(tabId: number, state: TabCaptureState): Promise<Uint8ClampedArray> {
+async function captureFrameData(
+  tabId: number,
+  state: TabCaptureState,
+): Promise<Uint8ClampedArray> {
   const width = state.config.width;
   const height = state.config.height;
   const ctx = state.ctx;
 
   // Get viewport metrics
-  const metrics: { layoutViewport?: { clientWidth: number; clientHeight: number } } =
-    await cdpSessionManager.sendCommand(tabId, 'Page.getLayoutMetrics', {});
+  const metrics: {
+    layoutViewport?: { clientWidth: number; clientHeight: number };
+  } = await cdpSessionManager.sendCommand(tabId, 'Page.getLayoutMetrics', {});
 
   const viewportWidth = metrics.layoutViewport?.clientWidth || width;
   const viewportHeight = metrics.layoutViewport?.clientHeight || height;
@@ -170,7 +367,9 @@ async function captureFrameData(tabId: number, state: TabCaptureState): Promise<
     },
   );
 
-  const imageBitmap = await createImageBitmapFromUrl(`data:image/png;base64,${screenshot.data}`);
+  const imageBitmap = await createImageBitmapFromUrl(
+    `data:image/png;base64,${screenshot.data}`,
+  );
 
   try {
     // Scale to target dimensions
@@ -211,9 +410,15 @@ export async function startAutoCapture(
   tabId: number,
   config?: Partial<AutoCaptureConfig>,
 ): Promise<{ success: boolean; error?: string }> {
-  if (tabStates.has(tabId)) {
-    return { success: false, error: 'Auto-capture already active for this tab' };
+  const acquisition = acquireGifCaptureOwner('auto_capture', tabId);
+  if (!acquisition.ok) {
+    return {
+      success: false,
+      error: describeGifCaptureOwner(acquisition.owner),
+    };
   }
+  const owner = acquisition.owner;
+  clearCompletedAutoCapture();
 
   const finalConfig: AutoCaptureConfig = {
     width: config?.width ?? DEFAULT_WIDTH,
@@ -225,11 +430,15 @@ export async function startAutoCapture(
     enhancedRendering: config?.enhancedRendering,
   };
 
+  let attached = false;
+  let encoderTouched = false;
   try {
     // Attach CDP session
     await cdpSessionManager.attach(tabId, CDP_SESSION_KEY);
+    attached = true;
 
     // Reset offscreen encoder
+    encoderTouched = true;
     await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_RESET, {});
 
     // Create canvas
@@ -244,9 +453,12 @@ export async function startAutoCapture(
     }
 
     const state: TabCaptureState = {
+      owner,
       tabId,
       config: finalConfig,
-      rendering: resolveGifEnhancedRenderingConfig(finalConfig.enhancedRendering),
+      rendering: resolveGifEnhancedRenderingConfig(
+        finalConfig.enhancedRendering,
+      ),
       frameCount: 0,
       startTime: Date.now(),
       canvas,
@@ -256,18 +468,30 @@ export async function startAutoCapture(
       actionEvents: [],
       lastViewportWidth: finalConfig.width,
       lastViewportHeight: finalConfig.height,
+      ttlTimer: null,
+      stopping: false,
+      cacheOnFinish: false,
+      lifecyclePromise: null,
     };
 
     tabStates.set(tabId, state);
+    state.ttlTimer = setTimeout(() => {
+      void finalizeAutoCaptureState(state, true).catch((error) => {
+        console.error('[GIF Auto-Capture] TTL cleanup failed:', error);
+      });
+    }, AUTO_CAPTURE_TTL_MS);
 
     return { success: true };
   } catch (error) {
-    // Cleanup on failure
-    try {
-      await cdpSessionManager.detach(tabId, CDP_SESSION_KEY);
-    } catch {
-      // Ignore
+    if (encoderTouched) await resetEncoderBestEffort();
+    if (attached) {
+      try {
+        await cdpSessionManager.detach(tabId, CDP_SESSION_KEY);
+      } catch {
+        // Ignore
+      }
     }
+    releaseGifCaptureOwner(owner);
 
     return {
       success: false,
@@ -290,75 +514,22 @@ export async function stopAutoCapture(tabId: number): Promise<{
 }> {
   const state = tabStates.get(tabId);
   if (!state) {
+    const completed = takeCompletedAutoCapture(tabId);
+    if (completed) return completed;
     return { success: false, error: 'No auto-capture active for this tab' };
   }
 
-  try {
-    // Wait for any pending capture
-    if (state.pendingCapture) {
-      await state.pendingCapture;
-    }
-
-    const frameCount = state.frameCount;
-    const durationMs = Date.now() - state.startTime;
-    const actions = [...state.actions];
-
-    if (frameCount === 0) {
-      return {
-        success: false,
-        error: 'No frames captured',
-        frameCount: 0,
-        durationMs,
-        actions,
-      };
-    }
-
-    // Finalize GIF
-    const response = await sendToOffscreen<{
-      success: boolean;
-      gifData?: number[];
-      byteLength?: number;
-      error?: string;
-    }>(OFFSCREEN_MESSAGE_TYPES.GIF_FINISH, {});
-
-    if (!response.gifData || response.gifData.length === 0) {
-      return {
-        success: false,
-        error: 'Failed to encode GIF',
-        frameCount,
-        durationMs,
-        actions,
-      };
-    }
-
-    return {
-      success: true,
-      gifData: new Uint8Array(response.gifData),
-      frameCount,
-      durationMs,
-      actions,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  } finally {
-    // Cleanup
-    tabStates.delete(tabId);
-    try {
-      await cdpSessionManager.detach(tabId, CDP_SESSION_KEY);
-    } catch {
-      // Ignore
-    }
-  }
+  const result = await finalizeAutoCaptureState(state, false);
+  clearCompletedAutoCapture();
+  return result;
 }
 
 /**
  * Check if auto-capture is active for a tab.
  */
 export function isAutoCaptureActive(tabId: number): boolean {
-  return tabStates.has(tabId);
+  const state = tabStates.get(tabId);
+  return !!state && isActiveAutoCaptureState(state);
 }
 
 /**
@@ -372,7 +543,7 @@ export function getAutoCaptureStatus(tabId: number): {
   enhancedRenderingEnabled?: boolean;
 } {
   const state = tabStates.get(tabId);
-  if (!state) {
+  if (!state || !isActiveAutoCaptureState(state)) {
     return { active: false };
   }
 
@@ -399,13 +570,14 @@ export async function captureFrameOnAction(
   immediate = false,
 ): Promise<{ success: boolean; frameNumber?: number; error?: string }> {
   const state = tabStates.get(tabId);
-  if (!state) {
+  if (!state || !isActiveAutoCaptureState(state)) {
     // No auto-capture active - silently succeed (tools shouldn't fail because recording isn't active)
     return { success: true };
   }
 
   // Check frame limit
   if (state.frameCount >= state.config.maxFrames) {
+    await finalizeAutoCaptureState(state, true);
     return { success: false, error: 'Max frame limit reached' };
   }
 
@@ -420,7 +592,7 @@ export async function captureFrameOnAction(
 
   // Verify state still exists (might have been stopped while awaiting)
   const currentState = tabStates.get(tabId);
-  if (!currentState) {
+  if (!currentState || !isActiveAutoCaptureState(currentState)) {
     return { success: true };
   }
 
@@ -448,15 +620,17 @@ export async function captureFrameOnAction(
 
     for (let i = 0; i < plan.frames; i++) {
       const activeState = tabStates.get(tabId);
-      if (!activeState) return;
+      if (!activeState || !isActiveAutoCaptureState(activeState)) return;
 
       if (activeState.frameCount >= activeState.config.maxFrames) return;
 
       try {
         const frameData = await captureFrameData(tabId, activeState);
+        if (!isActiveAutoCaptureState(activeState)) return;
 
         // Use animation delay for intermediate frames, regular delay for final frame
-        const delayCs = i < plan.frames - 1 ? plan.delayCs : activeState.config.frameDelayCs;
+        const delayCs =
+          i < plan.frames - 1 ? plan.delayCs : activeState.config.frameDelayCs;
 
         await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
           imageData: Array.from(frameData),
@@ -466,10 +640,15 @@ export async function captureFrameOnAction(
           maxColors: activeState.config.maxColors,
         });
 
-        activeState.frameCount += 1;
+        if (
+          tabStates.get(tabId) === activeState &&
+          isGifCaptureOwner(activeState.owner)
+        ) {
+          activeState.frameCount += 1;
+        }
       } catch (error) {
         console.error('[GIF Auto-Capture] Frame capture failed:', error);
-        return;
+        throw error;
       }
 
       // Wait between animation frames
@@ -483,7 +662,14 @@ export async function captureFrameOnAction(
 
   try {
     await capturePromise;
-    return { success: true, frameNumber: state.frameCount };
+    const frameNumber = state.frameCount;
+    if (
+      isActiveAutoCaptureState(state) &&
+      frameNumber >= state.config.maxFrames
+    ) {
+      await finalizeAutoCaptureState(state, true);
+    }
+    return { success: true, frameNumber };
   } catch (error) {
     return {
       success: false,
@@ -513,11 +699,20 @@ export async function captureInitialFrame(
 export async function clearAllAutoCapture(): Promise<void> {
   const tabIds = Array.from(tabStates.keys());
   for (const tabId of tabIds) {
-    try {
-      await stopAutoCapture(tabId);
-    } catch {
-      // Ignore errors during cleanup
-      tabStates.delete(tabId);
-    }
+    const state = tabStates.get(tabId);
+    if (state) await abortAutoCaptureState(state);
   }
+  clearCompletedAutoCapture();
 }
+
+export async function cleanupAutoCaptureForTab(tabId: number): Promise<void> {
+  const state = tabStates.get(tabId);
+  if (state) await abortAutoCaptureState(state);
+  if (completedAutoCapture?.tabId === tabId) clearCompletedAutoCapture();
+}
+
+chrome.tabs?.onRemoved?.addListener((tabId) => {
+  void cleanupAutoCaptureForTab(tabId).catch((error) => {
+    console.error('[GIF Auto-Capture] tab-close cleanup failed:', error);
+  });
+});

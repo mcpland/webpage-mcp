@@ -12,7 +12,16 @@ vi.mock('@/utils/image-utils', () => ({
   })),
 }));
 
-import { gifRecorderTool } from '@/entrypoints/background/tools/browser/gif-recorder';
+import {
+  cleanupGifRecorderForTab,
+  gifRecorderTool,
+} from '@/entrypoints/background/tools/browser/gif-recorder';
+import {
+  cleanupAutoCaptureForTab,
+  isAutoCaptureActive,
+  startAutoCapture,
+} from '@/entrypoints/background/tools/browser/gif-auto-capture';
+import { getGifCaptureOwner } from '@/entrypoints/background/tools/browser/gif-capture-owner';
 import { OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
@@ -27,6 +36,21 @@ function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
     active: true,
     ...overrides,
   } as chrome.tabs.Tab;
+}
+
+function responsePayload(result: {
+  content: Array<{ text?: string }>;
+}): Record<string, any> {
+  return JSON.parse(String(result.content[0]?.text || '{}'));
+}
+
+function mockTabResolution(): void {
+  vi.spyOn(gifRecorderTool as any, 'resolveTargetTab').mockImplementation(
+    async (...args: unknown[]) => {
+      const tabId = typeof args[0] === 'number' ? args[0] : 7;
+      return makeTab({ id: tabId });
+    },
+  );
 }
 
 describe('gifRecorderTool', () => {
@@ -103,9 +127,229 @@ describe('gifRecorderTool', () => {
     );
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    try {
+      await gifRecorderTool.execute({ action: 'clear' });
+    } catch {
+      // Best-effort isolation if a test intentionally breaks startup.
+    }
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('rejects a second auto capture on another tab while preserving the first owner', async () => {
+    mockTabResolution();
+
+    const first = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 7,
+    });
+    const second = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 8,
+    });
+
+    expect(first.isError).toBe(false);
+    expect(second.isError).toBe(true);
+    expect(responsePayload(second as any).error).toContain(
+      'auto-capture GIF capture is already active on tab 7',
+    );
+    expect(getGifCaptureOwner()).toEqual({ mode: 'auto_capture', tabId: 7 });
+    expect(isAutoCaptureActive(7)).toBe(true);
+    expect(isAutoCaptureActive(8)).toBe(false);
+  });
+
+  it('rejects auto capture on another tab while fixed-FPS capture owns the encoder', async () => {
+    mockTabResolution();
+
+    const fixed = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      fps: 1,
+      durationMs: 5_000,
+      width: 10,
+      height: 10,
+    });
+    const auto = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 8,
+    });
+
+    expect(fixed.isError).toBe(false);
+    expect(auto.isError).toBe(true);
+    expect(responsePayload(auto as any).error).toContain(
+      'fixed-FPS GIF capture is already active on tab 7',
+    );
+    expect(getGifCaptureOwner()).toEqual({ mode: 'fixed_fps', tabId: 7 });
+  });
+
+  it('rejects fixed-FPS capture on another tab while auto capture owns the encoder', async () => {
+    mockTabResolution();
+
+    const auto = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 7,
+    });
+    const fixed = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 8,
+      width: 10,
+      height: 10,
+    });
+
+    expect(auto.isError).toBe(false);
+    expect(fixed.isError).toBe(true);
+    expect(responsePayload(fixed as any).error).toContain(
+      'auto-capture GIF capture is already active on tab 7',
+    );
+    expect(getGifCaptureOwner()).toEqual({ mode: 'auto_capture', tabId: 7 });
+  });
+
+  it('rolls back the owner when startup fails so another mode can start', async () => {
+    mockTabResolution();
+    vi.mocked(cdpSessionManager.attach)
+      .mockRejectedValueOnce(new Error('attach failed'))
+      .mockResolvedValue(undefined);
+
+    const failed = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 7,
+    });
+    expect(failed.isError).toBe(true);
+    expect(getGifCaptureOwner()).toBeNull();
+
+    const next = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 8,
+      width: 10,
+      height: 10,
+    });
+    expect(next.isError).toBe(false);
+    expect(getGifCaptureOwner()).toEqual({ mode: 'fixed_fps', tabId: 8 });
+  });
+
+  it('releases auto capture state, encoder, and CDP when its tab closes', async () => {
+    mockTabResolution();
+    const started = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 7,
+    });
+    expect(started.isError).toBe(false);
+
+    await cleanupAutoCaptureForTab(7);
+    await cleanupGifRecorderForTab(7);
+
+    expect(getGifCaptureOwner()).toBeNull();
+    expect(isAutoCaptureActive(7)).toBe(false);
+    expect(cdpSessionManager.detach).toHaveBeenCalledWith(
+      7,
+      'gif-auto-capture',
+    );
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: OFFSCREEN_MESSAGE_TYPES.GIF_RESET }),
+    );
+
+    const next = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 8,
+      width: 10,
+      height: 10,
+    });
+    expect(next.isError).toBe(false);
+  });
+
+  it('releases fixed-FPS state, encoder, and CDP when its tab closes', async () => {
+    mockTabResolution();
+    const started = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      width: 10,
+      height: 10,
+    });
+    expect(started.isError).toBe(false);
+
+    await cleanupGifRecorderForTab(7);
+
+    expect(getGifCaptureOwner()).toBeNull();
+    expect(cdpSessionManager.detach).toHaveBeenCalledWith(7, 'gif-recorder');
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: OFFSCREEN_MESSAGE_TYPES.GIF_RESET }),
+    );
+
+    const next = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 8,
+      width: 10,
+      height: 10,
+    });
+    expect(next.isError).toBe(false);
+  });
+
+  it('finalizes and releases auto capture when maxFrames is reached', async () => {
+    mockTabResolution();
+
+    const started = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 7,
+      maxFrames: 1,
+      width: 10,
+      height: 10,
+    });
+
+    expect(started.isError).toBe(false);
+    expect(responsePayload(started as any).isRecording).toBe(false);
+    expect(getGifCaptureOwner()).toBeNull();
+    expect(isAutoCaptureActive(7)).toBe(false);
+
+    const stop = await gifRecorderTool.execute({ action: 'stop' });
+    expect(stop.isError).toBe(false);
+    expect(responsePayload(stop as any)).toMatchObject({
+      mode: 'auto_capture',
+      frameCount: 1,
+    });
+  });
+
+  it('finalizes and releases fixed-FPS capture when maxFrames is reached', async () => {
+    vi.useFakeTimers();
+    mockTabResolution();
+
+    const started = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      fps: 30,
+      durationMs: 5_000,
+      maxFrames: 1,
+      width: 10,
+      height: 10,
+    });
+    expect(started.isError).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(40);
+
+    expect(getGifCaptureOwner()).toBeNull();
+    expect(cdpSessionManager.detach).toHaveBeenCalledWith(7, 'gif-recorder');
+  });
+
+  it('releases an idle auto capture after its absolute TTL', async () => {
+    vi.useFakeTimers();
+
+    const started = await startAutoCapture(7, {
+      width: 10,
+      height: 10,
+      maxFrames: 10,
+    });
+    expect(started.success).toBe(true);
+    expect(getGifCaptureOwner()).toEqual({ mode: 'auto_capture', tabId: 7 });
+
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1_000);
+
+    expect(getGifCaptureOwner()).toBeNull();
+    expect(isAutoCaptureActive(7)).toBe(false);
+    expect(cdpSessionManager.detach).toHaveBeenCalledWith(
+      7,
+      'gif-auto-capture',
+    );
   });
 
   it('rejects file URL tabs before starting GIF recording', async () => {

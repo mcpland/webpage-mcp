@@ -33,9 +33,20 @@ import {
   getAutoCaptureStatus,
   captureFrameOnAction,
   captureInitialFrame,
+  clearAllAutoCapture,
+  discardCompletedAutoCapture,
+  hasCompletedAutoCapture,
   type ActionMetadata,
   type GifEnhancedRenderingConfig,
 } from './gif-auto-capture';
+import {
+  acquireGifCaptureOwner,
+  describeGifCaptureOwner,
+  getGifCaptureOwner,
+  isGifCaptureOwner,
+  releaseGifCaptureOwner,
+  type GifCaptureOwner,
+} from './gif-capture-owner';
 import { getResolvedViewportCoordinates } from './target-resolution';
 
 // ============================================================================
@@ -49,6 +60,7 @@ const DEFAULT_WIDTH = 800;
 const DEFAULT_HEIGHT = 600;
 const DEFAULT_MAX_COLORS = 256;
 const CDP_SESSION_KEY = 'gif-recorder';
+const FIXED_CAPTURE_TTL_GRACE_MS = 15_000;
 
 // ============================================================================
 // Types
@@ -87,6 +99,7 @@ interface GifRecorderParams {
 }
 
 interface RecordingState {
+  owner: GifCaptureOwner;
   isRecording: boolean;
   isStopping: boolean;
   tabId: number;
@@ -101,6 +114,7 @@ interface RecordingState {
   frameCount: number;
   startTime: number;
   captureTimer: ReturnType<typeof setTimeout> | null;
+  ttlTimer: ReturnType<typeof setTimeout> | null;
   captureInProgress: Promise<void> | null;
   canvas: OffscreenCanvas;
   ctx: OffscreenCanvasRenderingContext2D;
@@ -218,6 +232,60 @@ async function sendToOffscreen<TResponse extends OffscreenResponseBase>(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+function isActiveFixedState(state: RecordingState): boolean {
+  return (
+    recordingState === state &&
+    state.isRecording &&
+    !state.isStopping &&
+    isGifCaptureOwner(state.owner)
+  );
+}
+
+function clearFixedTimers(state: RecordingState): void {
+  if (state.captureTimer) {
+    clearTimeout(state.captureTimer);
+    state.captureTimer = null;
+  }
+  if (state.ttlTimer) {
+    clearTimeout(state.ttlTimer);
+    state.ttlTimer = null;
+  }
+}
+
+async function resetFixedEncoderBestEffort(): Promise<void> {
+  try {
+    await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_RESET, {});
+  } catch {
+    // Owner/CDP cleanup must continue even if the offscreen document is gone.
+  }
+}
+
+async function discardFixedRecording(state: RecordingState): Promise<void> {
+  if (recordingState !== state) return;
+  if (stopPromise) {
+    await stopPromise.catch(() => undefined);
+    return;
+  }
+
+  state.isRecording = false;
+  state.isStopping = true;
+  clearFixedTimers(state);
+  recordingState = null;
+
+  try {
+    await state.captureInProgress;
+  } catch {
+    // Ignore an interrupted frame.
+  }
+  await resetFixedEncoderBestEffort();
+  try {
+    await cdpSessionManager.detach(state.tabId, CDP_SESSION_KEY);
+  } catch {
+    // Ignore cleanup errors.
+  }
+  releaseGifCaptureOwner(state.owner);
+}
+
 // ============================================================================
 // Frame Capture
 // ============================================================================
@@ -276,6 +344,8 @@ async function captureAndEncodeFrame(state: RecordingState): Promise<void> {
     state.ctx,
   );
 
+  if (!isActiveFixedState(state)) return;
+
   await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
     imageData: Array.from(frameData),
     width: state.width,
@@ -284,13 +354,13 @@ async function captureAndEncodeFrame(state: RecordingState): Promise<void> {
     maxColors: state.maxColors,
   });
 
-  if (recordingState === state && state.isRecording && !state.isStopping) {
+  if (recordingState === state && isGifCaptureOwner(state.owner)) {
     state.frameCount += 1;
   }
 }
 
 async function captureTick(state: RecordingState): Promise<void> {
-  if (recordingState !== state || !state.isRecording || state.isStopping) {
+  if (!isActiveFixedState(state)) {
     return;
   }
 
@@ -313,7 +383,7 @@ async function captureTick(state: RecordingState): Promise<void> {
     }
   }
 
-  if (recordingState !== state || !state.isRecording || state.isStopping) {
+  if (!isActiveFixedState(state)) {
     return;
   }
 
@@ -345,21 +415,22 @@ async function startRecording(
   maxColors: number,
   filename?: string,
 ): Promise<GifResult> {
-  if (
-    stopPromise ||
-    recordingState?.isRecording ||
-    recordingState?.isStopping
-  ) {
+  const acquisition = acquireGifCaptureOwner('fixed_fps', tabId);
+  if (!acquisition.ok) {
     return {
       success: false,
       action: 'start',
-      error: 'Recording already in progress',
+      error: describeGifCaptureOwner(acquisition.owner),
     };
   }
+  const owner = acquisition.owner;
 
+  let attached = false;
   try {
     await cdpSessionManager.attach(tabId, CDP_SESSION_KEY);
+    attached = true;
   } catch (error) {
+    releaseGifCaptureOwner(owner);
     return {
       success: false,
       action: 'start',
@@ -384,6 +455,7 @@ async function startRecording(
     const frameDelayCs = Math.max(1, Math.round(100 / fps));
 
     const state: RecordingState = {
+      owner,
       isRecording: true,
       isStopping: false,
       tabId,
@@ -398,6 +470,7 @@ async function startRecording(
       frameCount: 0,
       startTime: Date.now(),
       captureTimer: null,
+      ttlTimer: null,
       captureInProgress: null,
       canvas,
       ctx,
@@ -414,6 +487,11 @@ async function startRecording(
         console.error('GIF recorder tick error:', error);
       });
     }, frameIntervalMs);
+    state.ttlTimer = setTimeout(() => {
+      void discardFixedRecording(state).catch((error) => {
+        console.error('GIF recorder TTL cleanup failed:', error);
+      });
+    }, durationMs + FIXED_CAPTURE_TTL_GRACE_MS);
 
     return {
       success: true,
@@ -422,12 +500,19 @@ async function startRecording(
       isRecording: true,
     };
   } catch (error) {
-    recordingState = null;
-    try {
-      await cdpSessionManager.detach(tabId, CDP_SESSION_KEY);
-    } catch {
-      // ignore
+    if (recordingState?.owner === owner) {
+      clearFixedTimers(recordingState);
+      recordingState = null;
     }
+    await resetFixedEncoderBestEffort();
+    if (attached) {
+      try {
+        await cdpSessionManager.detach(tabId, CDP_SESSION_KEY);
+      } catch {
+        // ignore
+      }
+    }
+    releaseGifCaptureOwner(owner);
     return {
       success: false,
       action: 'start',
@@ -456,14 +541,11 @@ async function stopRecording(): Promise<GifResult> {
     const state = recordingState!;
     const tabId = state.tabId;
 
-    // Stop capture timer
-    if (state.captureTimer) {
-      clearTimeout(state.captureTimer);
-      state.captureTimer = null;
-    }
+    clearFixedTimers(state);
 
     state.isStopping = true;
     state.isRecording = false;
+    let encoderFinalized = false;
 
     try {
       await state.captureInProgress;
@@ -479,6 +561,9 @@ async function stopRecording(): Promise<GifResult> {
         state.height,
         state.ctx,
       );
+      if (!isGifCaptureOwner(state.owner)) {
+        throw new Error('GIF capture owner changed while stopping');
+      }
       await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
         imageData: Array.from(frameData),
         width: state.width,
@@ -520,6 +605,7 @@ async function stopRecording(): Promise<GifResult> {
         gifData?: number[];
         byteLength?: number;
       }>(OFFSCREEN_MESSAGE_TYPES.GIF_FINISH, {});
+      encoderFinalized = true;
 
       if (!response.gifData || response.gifData.length === 0) {
         return {
@@ -582,12 +668,14 @@ async function stopRecording(): Promise<GifResult> {
         error: error instanceof Error ? error.message : String(error),
       };
     } finally {
+      if (!encoderFinalized) await resetFixedEncoderBestEffort();
       try {
         await cdpSessionManager.detach(tabId, CDP_SESSION_KEY);
       } catch {
         // ignore
       }
-      recordingState = null;
+      if (recordingState === state) recordingState = null;
+      releaseGifCaptureOwner(state.owner);
     }
   })();
 
@@ -743,6 +831,8 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
 
           if (result.success) {
             result.mode = 'fixed_fps';
+            autoCaptureMetadata = null;
+            discardCompletedAutoCapture();
           }
 
           return this.buildResponse(result);
@@ -829,14 +919,25 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
           };
 
           // Capture initial frame
-          await captureInitialFrame(tab.id);
+          const initialCapture = await captureInitialFrame(tab.id);
+          if (!initialCapture.success) {
+            await clearAllAutoCapture();
+            autoCaptureMetadata = null;
+            return this.buildResponse({
+              success: false,
+              action: 'auto_start',
+              tabId: tab.id,
+              error:
+                initialCapture.error || 'Failed to capture initial GIF frame',
+            });
+          }
 
           return this.buildResponse({
             success: true,
             action: 'auto_start',
             tabId: tab.id,
             mode: 'auto_capture',
-            isRecording: true,
+            isRecording: isAutoCaptureActive(tab.id),
           });
         }
 
@@ -890,9 +991,17 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
 
         case 'stop': {
           // Stop either mode
-          // Check auto-capture first
-          const autoTab = autoCaptureMetadata?.tabId;
-          if (autoTab !== undefined && isAutoCaptureActive(autoTab)) {
+          const owner = getGifCaptureOwner();
+          const autoTab =
+            owner?.mode === 'auto_capture'
+              ? owner.tabId
+              : autoCaptureMetadata?.tabId;
+          const shouldStopAuto =
+            owner?.mode === 'auto_capture' ||
+            (!owner &&
+              autoTab !== undefined &&
+              hasCompletedAutoCapture(autoTab));
+          if (autoTab !== undefined && shouldStopAuto) {
             const stopResult = await stopAutoCapture(autoTab);
             const filename = autoCaptureMetadata?.filename;
             autoCaptureMetadata = null;
@@ -967,9 +1076,12 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
         }
 
         case 'status': {
-          // Check auto-capture status first
-          const autoTab = autoCaptureMetadata?.tabId;
-          if (autoTab !== undefined && isAutoCaptureActive(autoTab)) {
+          const owner = getGifCaptureOwner();
+          const autoTab =
+            owner?.mode === 'auto_capture'
+              ? owner.tabId
+              : autoCaptureMetadata?.tabId;
+          if (autoTab !== undefined && owner?.mode === 'auto_capture') {
             const status = getAutoCaptureStatus(autoTab);
             return this.buildResponse({
               success: true,
@@ -980,6 +1092,19 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
               frameCount: status.frameCount,
               durationMs: status.durationMs,
               actionsCount: status.actionsCount,
+            });
+          }
+          if (
+            !owner &&
+            autoTab !== undefined &&
+            hasCompletedAutoCapture(autoTab)
+          ) {
+            return this.buildResponse({
+              success: true,
+              action: 'status',
+              tabId: autoTab,
+              isRecording: false,
+              mode: 'auto_capture',
             });
           }
 
@@ -997,38 +1122,19 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
           let clearedFixedFps = false;
           let clearedCache = false;
 
-          // Stop auto-capture if active
+          const owner = getGifCaptureOwner();
           const autoTab = autoCaptureMetadata?.tabId;
-          if (autoTab !== undefined && isAutoCaptureActive(autoTab)) {
-            await stopAutoCapture(autoTab);
-            autoCaptureMetadata = null;
-            clearedAuto = true;
-          }
+          clearedAuto =
+            owner?.mode === 'auto_capture' ||
+            (autoTab !== undefined && hasCompletedAutoCapture(autoTab));
+          await clearAllAutoCapture();
+          autoCaptureMetadata = null;
 
           // Stop fixed-FPS recording if active or stopping
           if (recordingState) {
-            // Cancel timer and cleanup without waiting for finish
-            if (recordingState.captureTimer) {
-              clearTimeout(recordingState.captureTimer);
-              recordingState.captureTimer = null;
-            }
-            try {
-              await recordingState.captureInProgress;
-            } catch {
-              // ignore
-            }
-            try {
-              await cdpSessionManager.detach(
-                recordingState.tabId,
-                CDP_SESSION_KEY,
-              );
-            } catch {
-              // ignore
-            }
             const wasRecording =
               recordingState.isRecording || recordingState.isStopping;
-            recordingState = null;
-            stopPromise = null; // Clear any pending stop promise
+            await discardFixedRecording(recordingState);
             if (wasRecording) {
               clearedFixedFps = true;
             }
@@ -1347,6 +1453,18 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
     };
   }
 }
+
+export async function cleanupGifRecorderForTab(tabId: number): Promise<void> {
+  if (autoCaptureMetadata?.tabId === tabId) autoCaptureMetadata = null;
+  const state = recordingState;
+  if (state?.tabId === tabId) await discardFixedRecording(state);
+}
+
+chrome.tabs?.onRemoved?.addListener((tabId) => {
+  void cleanupGifRecorderForTab(tabId).catch((error) => {
+    console.error('GIF recorder tab-close cleanup failed:', error);
+  });
+});
 
 export const gifRecorderTool = new GifRecorderTool();
 
