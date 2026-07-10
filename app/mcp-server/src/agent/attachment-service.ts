@@ -404,10 +404,9 @@ export class AttachmentService {
     const dirPath = this.getProjectAttachmentsDir(projectId);
 
     try {
-      // Get stats before deletion
-      const stats = await this.getProjectStats(projectId, dirPath);
-
-      if (!stats.exists) {
+      await fs.stat(dirPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
         return {
           projectId,
           dirPath,
@@ -416,6 +415,12 @@ export class AttachmentService {
           removedBytes: 0,
         };
       }
+      throw error;
+    }
+
+    try {
+      // Statistics are best effort; deletion itself is authoritative.
+      const stats = await this.getProjectStats(projectId, dirPath);
 
       // Remove directory and all contents
       await fs.rm(dirPath, { recursive: true, force: true });
@@ -433,13 +438,8 @@ export class AttachmentService {
       };
     } catch (error) {
       console.error(`[AttachmentService] Failed to cleanup project ${projectId}:`, error);
-      return {
-        projectId,
-        dirPath,
-        existed: false,
-        removedFiles: 0,
-        removedBytes: 0,
-      };
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to cleanup attachments for project ${projectId}: ${reason}`);
     }
   }
 

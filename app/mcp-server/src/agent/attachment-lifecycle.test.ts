@@ -17,7 +17,12 @@ async function createTempDir(prefix: string): Promise<string> {
 
 async function loadAgentModules() {
   vi.resetModules();
-  const [{ upsertProject, deleteProject }, { attachmentService }, { dispatchAgentRpc }, { closeDb }] =
+  const [
+    { upsertProject, deleteProject, getProject },
+    { attachmentService },
+    { dispatchAgentRpc },
+    { closeDb },
+  ] =
     await Promise.all([
       import("./project-service"),
       import("./attachment-service"),
@@ -25,7 +30,14 @@ async function loadAgentModules() {
       import("./db/client"),
     ]);
 
-  return { upsertProject, deleteProject, attachmentService, dispatchAgentRpc, closeDb };
+  return {
+    upsertProject,
+    deleteProject,
+    getProject,
+    attachmentService,
+    dispatchAgentRpc,
+    closeDb,
+  };
 }
 
 function createRpcDeps(): { chatService: AgentChatService } {
@@ -91,6 +103,51 @@ describe("project attachment lifecycle", () => {
 
     expect(await attachmentService.attachmentExists(project.id, saved.filename)).toBe(false);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "keeps the project when attachment deletion fails",
+    async () => {
+      const workspaceBase = await createTempDir("attachment-failure-workspace-");
+      const dataDir = await createTempDir("attachment-failure-data-");
+      const dbFile = path.join(dataDir, "agent.db");
+      const projectRoot = path.join(workspaceBase, "project-root");
+      await fs.mkdir(projectRoot, { recursive: true });
+
+      process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+      process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+      process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+      const { upsertProject, deleteProject, getProject, attachmentService } =
+        await loadAgentModules();
+      const project = await upsertProject({
+        name: "Attachment Cleanup Failure",
+        rootPath: projectRoot,
+        allowCreate: true,
+      });
+      const saved = await attachmentService.saveAttachment({
+        projectId: project.id,
+        messageId: "msg-failure",
+        index: 0,
+        attachment: {
+          type: "image",
+          name: "failure.png",
+          mimeType: "image/png",
+          dataBase64: Buffer.from("failure-data").toString("base64"),
+        },
+      });
+      const projectAttachmentDir = path.dirname(saved.absolutePath);
+
+      await fs.chmod(projectAttachmentDir, 0o000);
+      try {
+        await expect(deleteProject(project.id)).rejects.toThrow(
+          `Failed to cleanup attachments for project ${project.id}`,
+        );
+        await expect(getProject(project.id)).resolves.toBeDefined();
+      } finally {
+        await fs.chmod(projectAttachmentDir, 0o700);
+      }
+    },
+  );
 
   it("rejects attachment reads for deleted projects even if orphaned files still exist", async () => {
     const workspaceBase = await createTempDir("attachment-read-workspace-");
