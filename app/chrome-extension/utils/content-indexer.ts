@@ -66,6 +66,8 @@ export class ContentIndexer {
   private initPromise: Promise<void> | null = null;
   /** Last successfully indexed page identity for each live tab. */
   private indexedPageByTab = new Map<number, string>();
+  /** Tabs whose last partial write could not be durably removed. */
+  private tabsRequiringDurableRemoval = new Set<number>();
   /** Serialize index/remove work per tab so navigation cannot race an in-flight index. */
   private tabIndexOperations = new Map<number, Promise<void>>();
   private tabEventListenersInitialized = false;
@@ -385,19 +387,26 @@ export class ContentIndexer {
         }
 
         const pageKey = `${tab.url}\u0000${tab.title || ""}`;
-        const indexedPageKey = this.indexedPageByTab.get(tabId);
-        if (this.options.skipDuplicates && indexedPageKey === pageKey) {
+        let indexedPageKey = this.indexedPageByTab.get(tabId);
+        if (
+          this.options.skipDuplicates &&
+          indexedPageKey === pageKey &&
+          !this.tabsRequiringDurableRemoval.has(tabId)
+        ) {
           console.log(
             `ContentIndexer: Skipping tab ${tabId} - already indexed`,
           );
           return;
         }
 
-        // The navigation listener normally removes the previous page first. This
-        // fallback also keeps the tab index coherent if that event was missed.
-        if (indexedPageKey && indexedPageKey !== pageKey) {
-          await this.vectorDatabase.removeTabDocuments(tabId);
+        // Retry a failed partial-page removal before any later early return.
+        // Otherwise a now-empty page (or a same-page duplicate) could leave
+        // stale private chunks behind for the lifetime of this worker.
+        if (this.tabsRequiringDurableRemoval.has(tabId)) {
+          await this.vectorDatabase.ensureTabDocumentsRemoved(tabId);
+          this.tabsRequiringDurableRemoval.delete(tabId);
           this.indexedPageByTab.delete(tabId);
+          indexedPageKey = undefined;
         }
 
         console.log(
@@ -425,8 +434,25 @@ export class ContentIndexer {
           );
         }
 
-        for (const chunk of chunksToIndex) {
-          try {
+        if (chunksToIndex.length === 0) {
+          console.log(
+            `ContentIndexer: No indexable chunks generated for tab ${tabId}`,
+          );
+          return;
+        }
+
+        // Do not discard the last known-good page until the replacement has
+        // produced non-empty chunks. Once writing starts, clear the old page
+        // durably so this tab contains either the complete new page or nothing.
+        if (indexedPageKey) {
+          this.tabsRequiringDurableRemoval.add(tabId);
+          await this.vectorDatabase.ensureTabDocumentsRemoved(tabId);
+          this.tabsRequiringDurableRemoval.delete(tabId);
+          this.indexedPageByTab.delete(tabId);
+        }
+
+        try {
+          for (const chunk of chunksToIndex) {
             const embedding = await this.semanticEngine.getEmbedding(
               chunk.text,
             );
@@ -440,12 +466,20 @@ export class ContentIndexer {
             console.log(
               `ContentIndexer: Indexed chunk ${chunk.index} with label ${label}`,
             );
-          } catch (error) {
-            console.error(
-              `ContentIndexer: Failed to index chunk ${chunk.index}:`,
-              error,
+          }
+        } catch (error) {
+          this.indexedPageByTab.delete(tabId);
+          this.tabsRequiringDurableRemoval.add(tabId);
+          try {
+            await this.vectorDatabase.ensureTabDocumentsRemoved(tabId);
+            this.tabsRequiringDurableRemoval.delete(tabId);
+          } catch (cleanupFailure) {
+            throw new AggregateError(
+              [error, cleanupFailure],
+              `ContentIndexer: Failed to index tab ${tabId} and remove partial chunks`,
             );
           }
+          throw error;
         }
 
         this.indexedPageByTab.set(tabId, pageKey);
@@ -455,6 +489,7 @@ export class ContentIndexer {
         );
       } catch (error) {
         console.error(`ContentIndexer: Failed to index tab ${tabId}:`, error);
+        throw error;
       }
     });
   }
@@ -546,7 +581,9 @@ export class ContentIndexer {
 
     return this.runTabIndexOperation(tabId, async () => {
       try {
-        await this.vectorDatabase.removeTabDocuments(tabId);
+        this.tabsRequiringDurableRemoval.add(tabId);
+        await this.vectorDatabase.ensureTabDocumentsRemoved(tabId);
+        this.tabsRequiringDurableRemoval.delete(tabId);
         this.indexedPageByTab.delete(tabId);
 
         console.log(`ContentIndexer: Removed index for tab ${tabId}`);
@@ -555,6 +592,7 @@ export class ContentIndexer {
           `ContentIndexer: Failed to remove index for tab ${tabId}:`,
           error,
         );
+        throw error;
       }
     });
   }
@@ -634,6 +672,7 @@ export class ContentIndexer {
       // dimensions after a partial reset.
       await resetGlobalVectorDatabase();
       this.indexedPageByTab.clear();
+      this.tabsRequiringDurableRemoval.clear();
 
       await activity.initialize();
 
@@ -718,6 +757,7 @@ export class ContentIndexer {
     const { clearAllVectorData } = await import("./vector-database");
     await clearAllVectorData();
     this.indexedPageByTab.clear();
+    this.tabsRequiringDurableRemoval.clear();
     this.persistentStatsKnownEmpty = true;
     console.log("ContentIndexer: All indexes cleared");
   }

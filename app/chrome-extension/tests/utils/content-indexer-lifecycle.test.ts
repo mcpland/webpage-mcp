@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   clearVectorDatabase: vi.fn(),
   getEmbedding: vi.fn(),
   getGlobalVectorDatabase: vi.fn(),
+  ensureTabDocumentsRemoved: vi.fn(),
   initializeEngine: vi.fn(),
   initializeVectorDatabase: vi.fn(),
   removeTabDocuments: vi.fn(),
@@ -61,6 +62,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
   const vectorDatabase = {
     addDocument: mocks.addDocument,
     clear: mocks.clearVectorDatabase,
+    ensureTabDocumentsRemoved: mocks.ensureTabDocumentsRemoved,
     getStats: vi.fn(() => ({ totalDocuments: 0, totalTabs: 0, indexSize: 0 })),
     initialize: mocks.initializeVectorDatabase,
     removeTabDocuments: mocks.removeTabDocuments,
@@ -78,6 +80,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
     mocks.clearVectorDatabase.mockResolvedValue(undefined);
     mocks.getEmbedding.mockResolvedValue(new Float32Array([1, 0, 0]));
     mocks.getGlobalVectorDatabase.mockResolvedValue(vectorDatabase);
+    mocks.ensureTabDocumentsRemoved.mockResolvedValue(undefined);
     mocks.initializeEngine.mockResolvedValue(undefined);
     mocks.initializeVectorDatabase.mockResolvedValue(undefined);
     mocks.removeTabDocuments.mockResolvedValue(undefined);
@@ -144,6 +147,121 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(indexer.getStats().indexedPages).toBe(2);
   });
 
+  it("does not mark a page indexed when it produces no chunks", async () => {
+    pagesByTab.set(3, { url: "https://example.test/empty", title: "Empty" });
+    mocks.chunkText.mockReturnValueOnce([]);
+    const indexer = await createIndexer();
+
+    await indexer.indexTabContent(3);
+
+    expect(mocks.addDocument).not.toHaveBeenCalled();
+    expect(mocks.ensureTabDocumentsRemoved).not.toHaveBeenCalled();
+    expect(indexer.getStats().indexedPages).toBe(0);
+  });
+
+  it("removes partial chunks, propagates an embedding failure, and can retry", async () => {
+    pagesByTab.set(4, {
+      url: "https://example.test/embedding-retry",
+      title: "Embedding retry",
+    });
+    mocks.chunkText.mockReturnValue([
+      { text: "first", source: "content", index: 0, wordCount: 1 },
+      { text: "second", source: "content", index: 1, wordCount: 1 },
+    ]);
+    mocks.getEmbedding.mockRejectedValueOnce(new Error("embedding failed"));
+    const indexer = await createIndexer();
+
+    await expect(indexer.indexTabContent(4)).rejects.toThrow(
+      "embedding failed",
+    );
+
+    expect(mocks.addDocument).not.toHaveBeenCalled();
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledOnce();
+    expect(indexer.getStats().indexedPages).toBe(0);
+
+    await expect(indexer.indexTabContent(4)).resolves.toBeUndefined();
+    expect(mocks.addDocument).toHaveBeenCalledTimes(2);
+    expect(indexer.getStats().indexedPages).toBe(1);
+  });
+
+  it("removes an earlier successful chunk when a later add fails and can retry", async () => {
+    pagesByTab.set(5, {
+      url: "https://example.test/add-retry",
+      title: "Add retry",
+    });
+    mocks.chunkText.mockReturnValue([
+      { text: "first", source: "content", index: 0, wordCount: 1 },
+      { text: "second", source: "content", index: 1, wordCount: 1 },
+    ]);
+    mocks.addDocument
+      .mockResolvedValueOnce(1)
+      .mockRejectedValueOnce(new Error("second add failed"));
+    const indexer = await createIndexer();
+
+    await expect(indexer.indexTabContent(5)).rejects.toThrow(
+      "second add failed",
+    );
+
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledOnce();
+    expect(indexer.getStats().indexedPages).toBe(0);
+
+    await expect(indexer.indexTabContent(5)).resolves.toBeUndefined();
+    expect(mocks.addDocument).toHaveBeenCalledTimes(4);
+    expect(indexer.getStats().indexedPages).toBe(1);
+  });
+
+  it("aggregates a chunk failure with failure to remove the partial page", async () => {
+    pagesByTab.set(6, {
+      url: "https://example.test/cleanup-failure",
+      title: "Cleanup failure",
+    });
+    mocks.chunkText.mockReturnValue([
+      { text: "first", source: "content", index: 0, wordCount: 1 },
+      { text: "second", source: "content", index: 1, wordCount: 1 },
+    ]);
+    mocks.addDocument
+      .mockResolvedValueOnce(1)
+      .mockRejectedValueOnce(new Error("second add failed"));
+    mocks.ensureTabDocumentsRemoved.mockRejectedValueOnce(
+      new Error("partial cleanup failed"),
+    );
+    const indexer = await createIndexer();
+
+    await expect(indexer.indexTabContent(6)).rejects.toThrow(
+      "remove partial chunks",
+    );
+    expect(indexer.getStats().indexedPages).toBe(0);
+
+    mocks.chunkText.mockReturnValueOnce([]);
+    await expect(indexer.indexTabContent(6)).resolves.toBeUndefined();
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledTimes(2);
+    expect(mocks.addDocument).toHaveBeenCalledTimes(2);
+    expect(indexer.getStats().indexedPages).toBe(0);
+
+    await expect(indexer.indexTabContent(6)).resolves.toBeUndefined();
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledTimes(2);
+    expect(mocks.addDocument).toHaveBeenCalledTimes(4);
+    expect(indexer.getStats().indexedPages).toBe(1);
+  });
+
+  it("keeps the old page until a replacement has non-empty chunks", async () => {
+    pagesByTab.set(7, { url: "https://example.test/old", title: "Old" });
+    const indexer = await createIndexer();
+    await indexer.indexTabContent(7);
+    pagesByTab.set(7, { url: "https://example.test/new", title: "New" });
+    mocks.chunkText.mockReturnValueOnce([]);
+
+    await indexer.indexTabContent(7);
+
+    expect(mocks.ensureTabDocumentsRemoved).not.toHaveBeenCalled();
+    expect(indexer.getStats().indexedPages).toBe(1);
+
+    await indexer.indexTabContent(7);
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(7);
+    expect(mocks.addDocument).toHaveBeenCalledTimes(2);
+    expect(indexer.getStats().indexedPages).toBe(1);
+  });
+
   it("allows the same page to be indexed after its old tab closes and it reopens", async () => {
     const page = { url: "https://example.test/reopen", title: "Reopen me" };
     pagesByTab.set(10, page);
@@ -155,7 +273,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
     pagesByTab.set(11, page);
     await indexer.indexTabContent(11);
 
-    expect(mocks.removeTabDocuments).toHaveBeenCalledWith(10);
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(10);
     expect(mocks.addDocument.mock.calls.map(([tabId]) => tabId)).toEqual([
       10, 11,
     ]);
@@ -177,7 +295,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
     await indexer.indexTabContent(20);
 
     expect(mocks.addDocument).toHaveBeenCalledTimes(3);
-    expect(mocks.removeTabDocuments).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledTimes(2);
     expect(indexer.getStats().indexedPages).toBe(1);
   });
 

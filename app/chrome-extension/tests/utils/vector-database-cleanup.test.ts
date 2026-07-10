@@ -6,12 +6,28 @@ const hnswMocks = vi.hoisted(() => {
   const syncCalls: boolean[] = [];
   const writeCalls: string[] = [];
   const readCalls: string[] = [];
+  const addedLabels: number[] = [];
+  const deletedLabels: number[] = [];
   const pendingWriteSyncs: Array<() => void> = [];
   const instances: Array<{ count: number; fileName?: string }> = [];
   let populateSnapshot: Map<string, number> | null = null;
   let syncShouldSucceed = true;
   let synced = true;
   let autoCompleteWriteSync = true;
+  let vectorFloatDeleteCalls = 0;
+  let writeFailuresRemaining = 0;
+
+  class VectorFloat {
+    private readonly values: number[] = [];
+
+    push_back(value: number) {
+      this.values.push(value);
+    }
+
+    delete() {
+      vectorFloatDeleteCalls += 1;
+    }
+  }
 
   class HierarchicalNSW {
     count = 0;
@@ -32,7 +48,8 @@ const hnswMocks = vi.hoisted(() => {
       return this.count;
     }
 
-    addPoint() {
+    addPoint(_vector: unknown, label: number) {
+      addedLabels.push(label);
       this.count += 1;
     }
 
@@ -46,7 +63,9 @@ const hnswMocks = vi.hoisted(() => {
       return [];
     }
 
-    markDelete() {}
+    markDelete(label: number) {
+      deletedLabels.push(label);
+    }
 
     async readIndex(fileName: string) {
       readCalls.push(fileName);
@@ -56,6 +75,10 @@ const hnswMocks = vi.hoisted(() => {
 
     writeIndex(fileName: string) {
       writeCalls.push(fileName);
+      if (writeFailuresRemaining > 0) {
+        writeFailuresRemaining -= 1;
+        throw new Error("index write failed");
+      }
       files.add(fileName);
       fileCounts.set(fileName, this.count);
       synced = false;
@@ -93,6 +116,8 @@ const hnswMocks = vi.hoisted(() => {
   };
 
   return {
+    addedLabels,
+    deletedLabels,
     fileCounts,
     files,
     instances,
@@ -106,9 +131,13 @@ const hnswMocks = vi.hoisted(() => {
       autoCompleteWriteSync = true;
       pendingWriteSyncs.length = 0;
       populateSnapshot = null;
+      writeFailuresRemaining = 0;
     },
     setAutoCompleteWriteSync(value: boolean) {
       autoCompleteWriteSync = value;
+    },
+    setWriteFailures(value: number) {
+      writeFailuresRemaining = value;
     },
     completeNextWriteSync() {
       pendingWriteSyncs.shift()?.();
@@ -120,6 +149,13 @@ const hnswMocks = vi.hoisted(() => {
     },
     syncCalls,
     writeCalls,
+    VectorFloat,
+    getVectorFloatDeleteCalls() {
+      return vectorFloatDeleteCalls;
+    },
+    resetVectorFloatDeleteCalls() {
+      vectorFloatDeleteCalls = 0;
+    },
     HierarchicalNSW,
   };
 });
@@ -130,6 +166,7 @@ vi.mock("hnswlib-wasm-static", () => ({
   loadHnswlib: vi.fn(async () => ({
     EmscriptenFileSystemManager: hnswMocks.manager,
     HierarchicalNSW: hnswMocks.HierarchicalNSW,
+    VectorFloat: hnswMocks.VectorFloat,
   })),
 }));
 
@@ -238,6 +275,37 @@ async function getVectorMappingRecord(indexFileName: string): Promise<any> {
   return result;
 }
 
+async function abortNextVectorMappingWrite() {
+  const database = await openVectorMappingDatabase();
+  const prototype = Object.getPrototypeOf(database) as IDBDatabase;
+  database.close();
+  const originalTransaction = prototype.transaction;
+  let armed = true;
+  const transactionSpy = vi
+    .spyOn(prototype, "transaction")
+    .mockImplementation(function (
+      this: IDBDatabase,
+      storeNames: string | Iterable<string>,
+      mode?: IDBTransactionMode,
+      options?: IDBTransactionOptions,
+    ) {
+      const transaction = originalTransaction.call(
+        this,
+        storeNames,
+        mode,
+        options,
+      );
+      const names =
+        typeof storeNames === "string" ? [storeNames] : Array.from(storeNames);
+      if (armed && mode === "readwrite" && names.includes("documentMappings")) {
+        armed = false;
+        queueMicrotask(() => transaction.abort());
+      }
+      return transaction;
+    });
+  return transactionSpy;
+}
+
 function createMappingPayload({
   dimension,
   indexFileName,
@@ -282,12 +350,15 @@ afterEach(() => {
   chrome.storage.local.set = originalStorageSet;
   chrome.storage.local.remove = originalStorageRemove;
   vi.clearAllMocks();
+  hnswMocks.addedLabels.length = 0;
+  hnswMocks.deletedLabels.length = 0;
   hnswMocks.fileCounts.clear();
   hnswMocks.files.clear();
   hnswMocks.instances.length = 0;
   hnswMocks.readCalls.length = 0;
   hnswMocks.syncCalls.length = 0;
   hnswMocks.writeCalls.length = 0;
+  hnswMocks.resetVectorFloatDeleteCalls();
   hnswMocks.resetSyncState();
 });
 
@@ -687,7 +758,256 @@ describe("vector database cleanup", () => {
         { text: "current content", source: "content", index: 0, wordCount: 2 },
         new Float32Array([0.1, 0.2, 0.3]),
       ),
-    ).rejects.toThrow("fallback cleanup failed");
+    ).rejects.toThrow("rollback did not complete");
+    expect(database.getStats().totalDocuments).toBe(0);
+    expect(hnswMocks.deletedLabels).toEqual([0]);
+    expect(hnswMocks.getVectorFloatDeleteCalls()).toBe(1);
+  });
+
+  it("serializes a concurrent add behind rollback after an aborted mapping transaction", async () => {
+    const indexFileName = `add-rollback-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    const transactionSpy = await abortNextVectorMappingWrite();
+    const statefulSet = chrome.storage.local.set;
+    let rejectFallbackOnce = true;
+    chrome.storage.local.set = vi.fn(async (values) => {
+      if (rejectFallbackOnce) {
+        rejectFallbackOnce = false;
+        throw new Error("fallback write failed");
+      }
+      await statefulSet(values);
+    }) as typeof chrome.storage.local.set;
+
+    try {
+      const failedAdd = database.addDocument(
+        7,
+        "https://example.test/failed",
+        "Failed",
+        { text: "failed chunk", source: "content", index: 0, wordCount: 2 },
+        new Float32Array([1, 0, 0]),
+      );
+      const succeedingAdd = database.addDocument(
+        8,
+        "https://example.test/success",
+        "Success",
+        { text: "success chunk", source: "content", index: 0, wordCount: 2 },
+        new Float32Array([0, 1, 0]),
+      );
+
+      await expect(failedAdd).rejects.toThrow("Failed to save vector mappings");
+      await expect(succeedingAdd).resolves.toBe(1);
+
+      expect(hnswMocks.addedLabels).toEqual([0, 1]);
+      expect(hnswMocks.deletedLabels).toEqual([0]);
+      expect(hnswMocks.getVectorFloatDeleteCalls()).toBe(2);
+      expect(
+        hnswMocks.writeCalls.filter((name) => name === indexFileName),
+      ).toHaveLength(3);
+      expect(database.getStats()).toMatchObject({
+        totalDocuments: 1,
+        totalTabs: 1,
+      });
+      await expect(
+        getVectorMappingRecord(indexFileName),
+      ).resolves.toMatchObject({
+        revision: 3,
+        nextLabel: 2,
+        documents: [[1, expect.objectContaining({ tabId: 8 })]],
+        tabDocuments: [[8, [1]]],
+      });
+    } finally {
+      transactionSpy.mockRestore();
+    }
+  });
+
+  it("rolls back an added point after the initial index write fails without reusing its label", async () => {
+    const indexFileName = `index-write-rollback-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    hnswMocks.setWriteFailures(1);
+
+    await expect(
+      database.addDocument(
+        7,
+        "https://example.test/failed",
+        "Failed",
+        { text: "failed chunk", source: "content", index: 0, wordCount: 2 },
+        new Float32Array([1, 0, 0]),
+      ),
+    ).rejects.toThrow("index write failed");
+
+    expect(hnswMocks.deletedLabels).toEqual([0]);
+    expect(database.getStats().totalDocuments).toBe(0);
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      revision: 1,
+      nextLabel: 1,
+      documents: [],
+      tabDocuments: [],
+    });
+
+    await expect(
+      database.addDocument(
+        8,
+        "https://example.test/retry",
+        "Retry",
+        { text: "retry chunk", source: "content", index: 0, wordCount: 2 },
+        new Float32Array([0, 1, 0]),
+      ),
+    ).resolves.toBe(1);
+  });
+
+  it("aggregates index and mapping failures during rollback and permits a forced retry", async () => {
+    const indexFileName = `rollback-failures-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    hnswMocks.setWriteFailures(2);
+    const transactionSpy = await abortNextVectorMappingWrite();
+    chrome.storage.local.set = vi.fn(async () => {
+      throw new Error("rollback fallback failed");
+    }) as typeof chrome.storage.local.set;
+
+    try {
+      let failure: unknown;
+      try {
+        await database.addDocument(
+          7,
+          "https://example.test/failed",
+          "Failed",
+          { text: "failed chunk", source: "content", index: 0, wordCount: 2 },
+          new Float32Array([1, 0, 0]),
+        );
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect((failure as AggregateError).message).toContain(
+        "rollback did not complete",
+      );
+      expect(
+        (failure as AggregateError).errors.map((error) => String(error)),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("persist rolled-back vector index"),
+          expect.stringContaining("persist rolled-back vector mappings"),
+        ]),
+      );
+      expect(database.getStats().totalDocuments).toBe(0);
+      expect(hnswMocks.deletedLabels).toEqual([0]);
+    } finally {
+      transactionSpy.mockRestore();
+    }
+
+    useStatefulChromeStorage();
+    await expect(
+      database.ensureTabDocumentsRemoved(7),
+    ).resolves.toBeUndefined();
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      nextLabel: 1,
+      documents: [],
+      tabDocuments: [],
+    });
+  });
+
+  it("marks every tab vector deleted and durably persists an empty mapping", async () => {
+    const indexFileName = `remove-tab-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "first", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "second", source: "content", index: 1, wordCount: 1 },
+      new Float32Array([0, 1, 0]),
+    );
+    hnswMocks.deletedLabels.length = 0;
+    const writesBeforeRemoval = hnswMocks.writeCalls.length;
+
+    await database.removeTabDocuments(7);
+
+    expect(hnswMocks.deletedLabels).toEqual([0, 1]);
+    expect(hnswMocks.writeCalls).toHaveLength(writesBeforeRemoval + 1);
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      revision: 3,
+      nextLabel: 2,
+      documents: [],
+      tabDocuments: [],
+    });
+
+    // A repeated ordinary removal is also a durable retry, not an in-memory
+    // no-op, because a prior persistence attempt may have failed.
+    await database.removeTabDocuments(7);
+    expect(hnswMocks.writeCalls).toHaveLength(writesBeforeRemoval + 2);
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      revision: 4,
+      nextLabel: 2,
+      documents: [],
+      tabDocuments: [],
+    });
+  });
+
+  it("retries a tab removal after its mapping transaction and fallback both fail", async () => {
+    const indexFileName = `remove-retry-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    hnswMocks.deletedLabels.length = 0;
+    const transactionSpy = await abortNextVectorMappingWrite();
+    const statefulSet = chrome.storage.local.set;
+    let rejectFallbackOnce = true;
+    chrome.storage.local.set = vi.fn(async (values) => {
+      if (rejectFallbackOnce) {
+        rejectFallbackOnce = false;
+        throw new Error("remove fallback failed");
+      }
+      await statefulSet(values);
+    }) as typeof chrome.storage.local.set;
+
+    try {
+      await expect(database.removeTabDocuments(7)).rejects.toThrow(
+        "not durably removed",
+      );
+      expect(database.getStats().totalDocuments).toBe(0);
+      expect(hnswMocks.deletedLabels).toEqual([0]);
+
+      await expect(
+        database.ensureTabDocumentsRemoved(7),
+      ).resolves.toBeUndefined();
+      expect(hnswMocks.deletedLabels).toEqual([0]);
+      await expect(
+        getVectorMappingRecord(indexFileName),
+      ).resolves.toMatchObject({
+        revision: 3,
+        nextLabel: 1,
+        documents: [],
+        tabDocuments: [],
+      });
+    } finally {
+      transactionSpy.mockRestore();
+    }
   });
 
   it.each([

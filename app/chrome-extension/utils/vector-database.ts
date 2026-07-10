@@ -810,6 +810,7 @@ export class VectorDatabase {
   private nextLabel = 0;
   private mappingRevision = 0;
   private mappingSaveQueue: Promise<void> = Promise.resolve();
+  private mutationQueue: Promise<void> = Promise.resolve();
 
   private readonly config: VectorDatabaseConfig;
 
@@ -834,6 +835,15 @@ export class VectorDatabase {
       enableAutoCleanup: this.config.enableAutoCleanup,
       maxRetentionDays: this.config.maxRetentionDays,
     });
+  }
+
+  private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.mutationQueue.then(operation);
+    this.mutationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private initializeEmptyIndex(): void {
@@ -1106,17 +1116,21 @@ export class VectorDatabase {
       await this.initialize();
     }
 
-    const documentId = this.generateDocumentId(tabId, chunk.index);
-    const document: VectorDocument = {
-      id: documentId,
-      tabId,
-      url,
-      title,
-      chunk,
-      embedding,
-      timestamp: Date.now(),
-    };
+    return this.enqueueMutation(() =>
+      this.addDocumentInternal(tabId, url, title, chunk, embedding),
+    );
+  }
 
+  private async addDocumentInternal(
+    tabId: number,
+    url: string,
+    title: string,
+    chunk: TextChunk,
+    embedding: Float32Array,
+  ): Promise<number> {
+    const documentId = this.generateDocumentId(tabId, chunk.index);
+    let label: number | null = null;
+    let pointAdded = false;
     try {
       // Validate vector data
       if (!embedding || embedding.length !== this.config.dimension) {
@@ -1155,8 +1169,8 @@ export class VectorDatabase {
         cleanEmbedding = new Float32Array(embedding);
       }
 
-      // Use current nextLabel as label
-      const label = this.nextLabel++;
+      // Labels are never reused, including after a failed write or rollback.
+      label = this.nextLabel++;
 
       console.log(
         `VectorDatabase: Adding document with label ${label}, embedding dimension: ${embedding.length}`,
@@ -1176,56 +1190,61 @@ export class VectorDatabase {
         },
       );
 
-      // Method 1: Try using VectorFloat constructor (if available)
-      let vectorToAdd;
-      try {
-        // Check if VectorFloat constructor exists
-        if (globalHnswlib && globalHnswlib.VectorFloat) {
+      // Method 1: Try using VectorFloat constructor (if available). Embind
+      // allocations must be released on success and every failure path.
+      if (globalHnswlib && globalHnswlib.VectorFloat) {
+        let vectorToAdd: any = null;
+        try {
           console.log("VectorDatabase: Using VectorFloat constructor");
           vectorToAdd = new globalHnswlib.VectorFloat();
-          // Add elements to VectorFloat one by one
           for (let i = 0; i < cleanEmbedding.length; i++) {
             vectorToAdd.push_back(cleanEmbedding[i]);
           }
-        } else {
-          // Method 2: Use plain JS array (fallback)
-          console.log("VectorDatabase: Using plain JS array as fallback");
-          vectorToAdd = Array.from(cleanEmbedding);
+          this.index.addPoint(vectorToAdd, label, false);
+          pointAdded = true;
+        } catch (vectorError) {
+          console.error(
+            "VectorDatabase: VectorFloat approach failed, trying alternatives:",
+            vectorError,
+          );
+        } finally {
+          if (vectorToAdd && typeof vectorToAdd.delete === "function") {
+            vectorToAdd.delete();
+          }
         }
+      }
 
-        // Call addPoint with constructed vector
-        this.index.addPoint(vectorToAdd, label, false);
-
-        // Clean up VectorFloat object (if manually created)
-        if (vectorToAdd && typeof vectorToAdd.delete === "function") {
-          vectorToAdd.delete();
-        }
-      } catch (vectorError) {
-        console.error(
-          "VectorDatabase: VectorFloat approach failed, trying alternatives:",
-          vectorError,
-        );
-
-        // Method 3: Try passing Float32Array directly
+      if (!pointAdded) {
+        // Method 2: Try passing Float32Array directly.
         try {
           console.log("VectorDatabase: Trying Float32Array directly");
           this.index.addPoint(cleanEmbedding, label, false);
+          pointAdded = true;
         } catch (float32Error) {
           console.error(
             "VectorDatabase: Float32Array approach failed:",
             float32Error,
           );
 
-          // Method 4: Last resort - use spread operator
+          // Method 3: Last resort - use a plain array.
           console.log("VectorDatabase: Trying spread operator as last resort");
           this.index.addPoint([...cleanEmbedding], label, false);
+          pointAdded = true;
         }
       }
       console.log(
         `VectorDatabase: ✅ Successfully added document with label ${label}`,
       );
 
-      // Store document mapping
+      const document: VectorDocument = {
+        id: documentId,
+        tabId,
+        url,
+        title,
+        chunk,
+        embedding: cleanEmbedding,
+        timestamp: Date.now(),
+      };
       this.documents.set(label, document);
 
       // Update tab document mapping
@@ -1256,8 +1275,62 @@ export class VectorDatabase {
         isFloat32Array: embedding instanceof Float32Array,
         firstFewValues: embedding ? Array.from(embedding.slice(0, 5)) : null,
       });
+      if (pointAdded && label !== null) {
+        await this.rollbackAddedDocument(label, tabId, error);
+      }
       throw error;
     }
+  }
+
+  private async rollbackAddedDocument(
+    label: number,
+    tabId: number,
+    originalError: unknown,
+  ): Promise<void> {
+    this.removeLabelFromMappings(label, tabId);
+    const rollbackFailures: Error[] = [];
+
+    try {
+      this.index.markDelete(label);
+    } catch (error) {
+      rollbackFailures.push(
+        cleanupError(`mark vector ${label} deleted`, error),
+      );
+    }
+
+    try {
+      await this.saveIndex();
+    } catch (error) {
+      rollbackFailures.push(
+        cleanupError("persist rolled-back vector index", error),
+      );
+    }
+
+    try {
+      await this.saveDocumentMappings();
+    } catch (error) {
+      rollbackFailures.push(
+        cleanupError("persist rolled-back vector mappings", error),
+      );
+    }
+
+    if (rollbackFailures.length > 0) {
+      throw new AggregateError(
+        [
+          cleanupError("original vector add failure", originalError),
+          ...rollbackFailures,
+        ],
+        `Vector add for label ${label} failed and rollback did not complete`,
+      );
+    }
+  }
+
+  private removeLabelFromMappings(label: number, tabId: number): void {
+    this.documents.delete(label);
+    const labels = this.tabDocuments.get(tabId);
+    if (!labels) return;
+    labels.delete(label);
+    if (labels.size === 0) this.tabDocuments.delete(tabId);
   }
 
   /**
@@ -1481,29 +1554,106 @@ export class VectorDatabase {
       await this.initialize();
     }
 
-    const documentLabels = this.tabDocuments.get(tabId);
-    if (!documentLabels) {
-      return;
+    return this.enqueueMutation(() =>
+      this.removeTabDocumentsInternal(tabId, true),
+    );
+  }
+
+  /**
+   * Force a durable tab deletion even when an earlier attempt already removed
+   * the in-memory labels. This is the completion boundary for persisted
+   * invalidation/tombstone callers.
+   */
+  public async ensureTabDocumentsRemoved(tabId: number): Promise<void> {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    return this.enqueueMutation(() =>
+      this.removeTabDocumentsInternal(tabId, true),
+    );
+  }
+
+  private async removeTabDocumentsInternal(
+    tabId: number,
+    forcePersistence: boolean,
+  ): Promise<void> {
+    const documentLabels = Array.from(this.tabDocuments.get(tabId) ?? []);
+    if (documentLabels.length === 0 && !forcePersistence) return;
+
+    const failures: Error[] = [];
+    for (const label of documentLabels) {
+      try {
+        this.index.markDelete(label);
+        this.removeLabelFromMappings(label, tabId);
+      } catch (error) {
+        failures.push(cleanupError(`mark vector ${label} deleted`, error));
+      }
     }
 
     try {
-      // Remove documents from mapping (hnswlib-wasm doesn't support direct deletion, only mark as deleted)
-      for (const label of documentLabels) {
-        this.documents.delete(label);
-      }
-
-      // Clean up tab mapping
-      this.tabDocuments.delete(tabId);
-
-      // Save changes
-      await this.saveDocumentMappings();
-
-      console.log(
-        `VectorDatabase: Removed ${documentLabels.size} documents for tab ${tabId}`,
-      );
+      await this.saveIndex();
     } catch (error) {
-      console.error("VectorDatabase: Failed to remove tab documents:", error);
-      throw error;
+      failures.push(cleanupError("persist tab-deleted vector index", error));
+    }
+
+    let persistedMappingRevision: number | null = null;
+    try {
+      persistedMappingRevision = await this.saveDocumentMappings();
+    } catch (error) {
+      failures.push(cleanupError("persist tab-deleted vector mappings", error));
+    }
+
+    if (
+      persistedMappingRevision !== null &&
+      (forcePersistence || !this.tabDocuments.has(tabId))
+    ) {
+      try {
+        await this.verifyTabAbsentFromPersistedMappings(
+          tabId,
+          persistedMappingRevision,
+        );
+      } catch (error) {
+        failures.push(cleanupError("verify durable tab deletion", error));
+      }
+    }
+
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `Vector documents for tab ${tabId} were not durably removed`,
+      );
+    }
+
+    console.log(
+      `VectorDatabase: Removed ${documentLabels.length} documents for tab ${tabId}`,
+    );
+  }
+
+  private async verifyTabAbsentFromPersistedMappings(
+    tabId: number,
+    expectedRevision: number,
+  ): Promise<void> {
+    const lookup = await this.lookupDocumentMappings();
+    if (lookup.status !== "found") {
+      throw new Error(
+        lookup.status === "invalid"
+          ? `Persisted vector mappings are invalid: ${lookup.reason}`
+          : "Persisted vector mappings are missing",
+      );
+    }
+    if (lookup.value.revision !== expectedRevision) {
+      throw new Error(
+        `Persisted vector mapping revision ${lookup.value.revision} does not match ${expectedRevision}`,
+      );
+    }
+    if (
+      lookup.value.documents.some(([, document]) => document.tabId === tabId) ||
+      lookup.value.tabDocuments.some(
+        ([persistedTabId]) => persistedTabId === tabId,
+      )
+    ) {
+      throw new Error(`Persisted vector mappings still contain tab ${tabId}`);
     }
   }
 
@@ -1891,7 +2041,7 @@ export class VectorDatabase {
     await persistHnswIndex(this.index, this.config.indexFileName);
   }
 
-  private saveDocumentMappings(): Promise<void> {
+  private saveDocumentMappings(): Promise<number> {
     const snapshot: Pick<
       PersistedVectorMappings,
       "documents" | "tabDocuments" | "nextLabel"
@@ -1916,7 +2066,10 @@ export class VectorDatabase {
     const operation = this.mappingSaveQueue
       .catch(() => undefined)
       .then(() => this.persistDocumentMappingsSnapshot(snapshot));
-    this.mappingSaveQueue = operation;
+    this.mappingSaveQueue = operation.then(
+      () => undefined,
+      () => undefined,
+    );
     return operation;
   }
 
@@ -1925,7 +2078,7 @@ export class VectorDatabase {
       PersistedVectorMappings,
       "documents" | "tabDocuments" | "nextLabel"
     >,
-  ): Promise<void> {
+  ): Promise<number> {
     const revision = this.mappingRevision + 1;
     if (!Number.isSafeInteger(revision)) {
       throw new Error("Vector mapping revision is exhausted");
@@ -1971,7 +2124,7 @@ export class VectorDatabase {
       // after the primary commit so an invalid or stale copy cannot make the
       // next startup ambiguous.
       await this.removeDocumentMappingBackup();
-      return;
+      return revision;
     }
 
     const storageKey = `hnswlib_document_mappings_${this.config.indexFileName}`;
@@ -1993,6 +2146,7 @@ export class VectorDatabase {
       console.log(
         "VectorDatabase: Document mappings saved to chrome.storage.local (fallback)",
       );
+      return revision;
     } catch (storageError) {
       throw new AggregateError(
         [indexedDbError, storageError],
