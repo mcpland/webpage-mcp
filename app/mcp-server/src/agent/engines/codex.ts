@@ -67,6 +67,12 @@ function compareProjectEntryNames(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function escapeProjectContextName(value: string): string {
+  // Escape ampersands first so the entities introduced for angle brackets are
+  // not escaped a second time.
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function boundProjectEntryName(value: string): {
   text: string;
   truncated: boolean;
@@ -83,7 +89,14 @@ function boundProjectEntryName(value: string): {
     .subarray(0, prefixBytes)
     .toString('utf8')
     .replace(/\uFFFD$/, '');
-  return { text: `${prefix}${marker}`, truncated: true };
+  // The escaped input only contains &amp;, &lt;, and &gt; entities. If the
+  // byte boundary lands inside one, remove that incomplete entity so the
+  // surrounding XML-like prompt remains structurally well formed.
+  const lastAmpersand = prefix.lastIndexOf('&');
+  const lastSemicolon = prefix.lastIndexOf(';');
+  const entitySafePrefix =
+    lastAmpersand > lastSemicolon ? prefix.slice(0, lastAmpersand) : prefix;
+  return { text: `${entitySafePrefix}${marker}`, truncated: true };
 }
 
 /**
@@ -111,13 +124,14 @@ export async function buildCodexProjectContext(
       continue;
     }
 
-    // Control characters in a filename must not be able to create new prompt
-    // instructions. Bound after sanitizing because U+FFFD uses three UTF-8 bytes.
+    // Control and XML structure characters in a filename must not be able to
+    // create prompt instructions. Apply the byte limit to the escaped form.
     const sanitizedName = entry.name.replace(
       /[\u0000-\u001f\u007f]/g,
       '\uFFFD',
     );
-    const boundedName = boundProjectEntryName(sanitizedName);
+    const escapedName = escapeProjectContextName(sanitizedName);
+    const boundedName = boundProjectEntryName(escapedName);
     visibleNames.push(boundedName.text);
     if (boundedName.truncated) truncated = true;
   }
