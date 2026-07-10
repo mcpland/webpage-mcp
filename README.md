@@ -1,3 +1,12 @@
+---
+type: repo-overview
+title: Webpage MCP
+description: Browser-native MCP server, Chrome connector, workflows, and local Agent tooling.
+owner: NEEDS_OWNER
+status: proposed
+tags: [mcp, chrome-extension, browser-automation]
+---
+
 <p align="center">
   <img src="logo.png" alt="Webpage MCP" width="160" />
 </p>
@@ -328,7 +337,7 @@ Important:
 
 ## Additional Capabilities
 
-- **AI Agent Chat Sidepanel** — Built-in sidepanel for chatting with AI agents (Claude Code CLI, OpenAI Codex CLI) directly from Chrome, with project management, session history, and streaming output
+- **Agent Setup Sidepanel** — Select the workspace and Agent session used by Quick Panel and Web Editor; new Claude and Codex sessions use constrained defaults, while bypass/full-access modes require an explicit risk confirmation
 - **Record, Replay, and Publish** — Record browser actions, replay them as automated flows, publish reusable flows, and expose them as dynamic MCP tools (`flow.<slug>`)
 - **Triggerable Browser Workflows** — Launch flows from URL matches, DOM appearance, intervals, one-time schedules, keyboard commands, and context-menu actions
 - **Web Editor** — Visual in-page DOM editor overlay with a property panel, transaction system, undo/redo, and structured apply-to-code handoff (`Cmd+Shift+E`)
@@ -375,7 +384,7 @@ pnpm build:wasm           # Build and copy to extension
 # Chrome extension tests (Vitest)
 cd app/chrome-extension && pnpm test
 
-# MCP server tests (Jest)
+# MCP server tests (Vitest)
 cd app/mcp-server && pnpm test
 ```
 
@@ -513,6 +522,18 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 - Manual npm publish available via `workflow_dispatch` with `publish_npm=true`
 
 </details>
+
+---
+
+## Verification
+
+- Native/stdio packaging and registration helpers: `pnpm --filter webpage-mcp test`; the stable runtime dependency contract is covered by `app/mcp-server/src/scripts/stable-runtime-dependencies.test.ts`. End-to-end startup bootstrap across installed browser profiles is `Verification: Missing` and remains a manual `doctor` check.
+- Agent project/session selection and missing-selection routing: `pnpm --filter webpage-mcp-connector exec vitest run tests/utils/agent-selection.test.ts tests/background/sidepanel-utils.test.ts tests/background/quick-panel-agent-handler.test.ts`.
+- Safe session defaults and explicit dangerous-mode confirmation: `app/mcp-server/src/agent/session-security.test.ts` via `pnpm --filter webpage-mcp test`.
+- Localized extension strings: `pnpm --filter webpage-mcp-connector i18n:check`.
+- Release artifact and npm channel rules: `pnpm test:release`.
+
+Human review is still required for the unresolved documentation owner (`NEEDS_OWNER`) and for installed-browser bootstrap behavior on each supported operating system.
 
 ---
 

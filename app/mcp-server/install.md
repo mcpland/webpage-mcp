@@ -1,33 +1,64 @@
+---
+type: runbook
+title: Webpage MCP Installation and Native Host Registration
+description: Install, register, verify, and repair the local Native Messaging runtime.
+owner: NEEDS_OWNER
+status: proposed
+tags: [installation, native-messaging, troubleshooting]
+---
+
 # Webpage MCP Installation Guide
 
-This document details the installation and registration process for Webpage MCP.
+This document covers installation and Native Messaging registration. The normal MCP client entry is `webpage-mcp-stdio`; it validates the stable runtime and user-level manifests on every startup before connecting to Chrome's native bridge.
 
 ## Installation Overview
 
-The installation and registration process for Webpage MCP is as follows:
+Package-manager binaries come from the `bin` entries in `package.json`; the postinstall script does not copy executables into a global bin directory.
 
 ```
-npm install -g webpage-mcp
-└─ postinstall.js
-   ├─ Copy executable to npm_prefix/bin   ← Always writable (user or root permissions)
-   ├─ Attempt user-level registration     ← No sudo needed, succeeds in most cases
-   └─ If failed ➜ Prompt user to run webpage-mcp register --system
-      └─ Requires manual execution with admin privileges
+Install or npx resolution
+├─ Package manager exposes webpage-mcp / webpage-mcp-stdio bins
+├─ postinstall
+│  ├─ Verify/fix packaged executable permissions
+│  ├─ Global, non-elevated install → attempt user-level registration
+│  └─ Local/npx install → print manual recovery guidance
+└─ webpage-mcp-stdio startup
+   ├─ Prepare a stable runtime copy and runtime dependencies
+   ├─ Validate user-level browser manifests
+   ├─ Auto-register missing or outdated user-level manifests
+   └─ Run lightweight diagnostics, then connect over stdio/local IPC
 ```
 
-The flow chart above shows the complete process from global installation to final registration.
+System-level registration is a fallback and always requires explicit `--system` plus administrator/root privileges.
 
 ## Detailed Installation Steps
 
-### 1. Global Installation
+### 1. Configure the MCP stdio entry (recommended)
+
+Global installation is not required. Configure the MCP client to resolve the published package with npx:
+
+```json
+{
+  "mcpServers": {
+    "webpage-mcp": {
+      "command": "npx",
+      "args": ["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"]
+    }
+  }
+}
+```
+
+Starting the MCP client runs the bootstrap shown above. Chrome must be open, the connector extension must be enabled, and both processes must use the same `WEBPAGE_MCP_NATIVE_SOCKET` value when that variable is customized.
+
+### 2. Optional global CLI installation
 
 ```bash
 npm install -g webpage-mcp
 ```
 
-After installation, the system will automatically attempt to register the Native Messaging host in the user directory. This does not require admin privileges and is the recommended installation method.
+A global, non-elevated install attempts user-level Native Messaging registration during postinstall. Elevated installs deliberately skip user-level registration because it would target the administrator's home directory. Regardless of install mode, `webpage-mcp-stdio` validates and repairs user-level registration again at startup.
 
-### 2. User-Level Registration
+### 3. User-Level Registration
 
 User-level registration creates manifest files at the following locations:
 
@@ -44,19 +75,19 @@ Manifest File Locations
    └─ Linux:   /etc/opt/chrome/native-messaging-hosts/
 ```
 
-If automatic registration fails, or you want to register manually, run:
+If startup bootstrap cannot register the current extension ID, copy the exact command from the extension popup/welcome page, or run:
 
 ```bash
-webpage-mcp register
+npx -y webpage-mcp@latest register --browser chrome --extension-id <extension_id>
 ```
 
 **Recommended: Run the diagnostic tool to check for issues:**
 
 ```bash
-webpage-mcp doctor
+npx -y webpage-mcp@latest doctor
 ```
 
-### 3. System-Level Registration
+### 4. System-Level Registration
 
 If user-level registration fails (e.g., due to permission issues), you can try system-level registration. System-level registration requires admin privileges, and we provide two convenient ways to accomplish this.
 
@@ -96,6 +127,11 @@ sudo webpage-mcp register
 
 ```
 Registration Process
+├─ Startup Bootstrap (webpage-mcp-stdio)
+│  ├─ Validate stable runtime and user-level manifests
+│  ├─ Register only when a manifest is missing/outdated
+│  └─ Report doctor-lite issues to stderr without exposing an HTTP service
+│
 ├─ User-Level Registration (webpage-mcp register)
 │  ├─ Get user-level manifest path
 │  ├─ Create user directory
@@ -158,7 +194,7 @@ manifest.json
 Verify Installation
 ├─ Check Manifest File
 │  ├─ File exists → Check if content is correct
-│  └─ File does not exist → Reinstall
+│  └─ File does not exist → Run doctor --fix or register
 │
 ├─ Check Chrome Extension
 │  ├─ Extension installed → Check extension permissions
@@ -182,9 +218,10 @@ After installation, you can verify the installation was successful through the f
    - Ensure the extension is properly installed
    - Ensure the extension has `nativeMessaging` permission
 
-3. Try connecting to the local service via the extension
-   - Use the extension's test feature to attempt connection
-   - Check Chrome's extension logs for error messages
+3. Verify the extension/native bridge
+   - Start the configured `webpage-mcp-stdio` MCP entry
+   - Refresh connection status in the extension popup
+   - Run `npx -y webpage-mcp@latest doctor` and inspect the extension service-worker logs if connection still fails
 
 ## Troubleshooting
 
@@ -261,9 +298,9 @@ If you encounter problems during installation, try the following steps:
    pnpm list -g webpage-mcp
 
    # Set execution permissions (replace with actual path)
-   chmod +x /path/to/node_modules/webpage-mcp/run_host.sh
-   chmod +x /path/to/node_modules/webpage-mcp/index.js
-   chmod +x /path/to/node_modules/webpage-mcp/cli.js
+   chmod +x /path/to/node_modules/webpage-mcp/dist/run_host.sh
+   chmod +x /path/to/node_modules/webpage-mcp/dist/index.js
+   chmod +x /path/to/node_modules/webpage-mcp/dist/cli.js
    ```
 
    **Windows Platform**:
@@ -320,9 +357,9 @@ If you encounter problems during installation, try the following steps:
    - Use `webpage-mcp register --system` command
    - Or run directly with admin privileges
 
-6. Check console error messages
+6. Collect diagnostics
    - Detailed error messages usually indicate the problem
-   - Add `--verbose` parameter for more log information
+   - Run `npx -y webpage-mcp@latest report --copy` to collect a redacted report
 
 If the problem persists, please submit an issue to the project repository with the following information:
 
@@ -331,3 +368,12 @@ If the problem persists, please submit an issue to the project repository with t
 - Installation command
 - Error messages
 - Solutions you have tried
+
+## Verification
+
+- Published bin and postinstall behavior: `app/mcp-server/package.json` and `app/mcp-server/src/scripts/postinstall.ts`; verify with `pnpm --filter webpage-mcp build` and package preflight in `pnpm test:release`.
+- Startup runtime/manifest bootstrap: `app/mcp-server/src/mcp/mcp-server-stdio.ts` and `app/mcp-server/src/scripts/utils.ts`; stable dependency behavior is covered by `pnpm --filter webpage-mcp exec vitest run src/scripts/stable-runtime-dependencies.test.ts`.
+- Manifest path/contents: `pnpm --filter webpage-mcp exec vitest run src/scripts/native-manifest-file.test.ts` plus the manual `doctor` command on each target operating system.
+- CLI registration and repair commands: static command wiring in `app/mcp-server/src/cli.ts`; installed-browser end-to-end registration remains `Verification: Missing` and requires manual Chrome/Chromium checks.
+
+Human review is required to assign the unresolved runbook owner (`NEEDS_OWNER`) and to verify user/system registration on Windows, macOS, and Linux before treating this runbook as accepted.
