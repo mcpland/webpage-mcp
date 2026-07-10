@@ -2,6 +2,11 @@
 
 This extension uses WXT with React-based entrypoints.
 
+The native bridge is local, but Agent providers, model downloads, and browser
+network tools can create external data flows. Review the repository
+[privacy and data-flow boundaries](../../README.md#privacy-and-data-flows)
+before enabling the extension on sensitive pages.
+
 ## Stable extension identity
 
 Chrome's manifest `key` field accepts a public key only. Never provide a PEM

@@ -48,22 +48,43 @@ The **Webpage MCP Connector** (Chrome extension) exposes real browser capabiliti
 
 Webpage MCP is best understood as a browser-native workflow layer for Chrome, not just a page-control bridge. Recent Chrome releases have made [Chrome DevTools MCP capable of connecting to active browser sessions](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session), which makes protocol-level control of existing tabs much easier. Webpage MCP complements that model by focusing on what DevTools MCP does not try to be: Chrome extension APIs, saved workflows, in-browser operator UI, semantic cross-tab memory, and page-to-code editing flows.
 
+## Privacy and Data Flows
+
+Webpage MCP has no hosted Webpage MCP relay: the extension-to-native-host bridge and MCP transport stay on the local machine. That local transport boundary does **not** mean all data processed through the product always stays local. Browser content can leave the machine when a connected AI client, a configured Agent engine, a browser/network tool, or the semantic-model downloader contacts an external service.
+
+| Surface                                                 | Data that may be processed                                                                                                   | Destination and trigger                                                                                                                                                                                                                                                |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MCP browser tools                                       | Page text, accessibility data, screenshots, console/network data, history, bookmarks, files, and tool results                | Sent over the local bridge to the connected MCP client when a tool is invoked. The client may then send that data to its configured model provider under that provider's retention and privacy terms.                                                                  |
+| Quick Panel and Web Editor Agent                        | The instruction plus relevant page URL, selected text, element metadata, screenshots/attachments, or structured edit context | Passed through the native host to the user-selected Claude or Codex engine when the user starts an Agent action. Those engines may call Anthropic, OpenAI, or a configured compatible endpoint; their own authentication, network, and retention policies apply.       |
+| Semantic search                                         | Indexed tab text and generated embeddings                                                                                    | Inference and the vector index run locally. On first use, pinned model artifacts are downloaded from Hugging Face and cached after size and SHA-256 verification; tab content is not uploaded to Hugging Face for embedding inference.                                 |
+| Navigation, requests, workflows, uploads, and downloads | URLs, request bodies, files, cookies available to the browser context, and workflow inputs                                   | Sent to the requested website or endpoint when the corresponding tool/workflow runs. These operations can have real external side effects.                                                                                                                             |
+| Local persistence and diagnostics                       | Agent projects, sessions, messages, image attachments, extension IndexedDB/Cache Storage, and bounded native-host logs       | Stored locally in the Chrome profile and, by default, under `~/.webpage-mcp-agent` plus the platform log directory. A generated diagnostic report can include redacted log excerpts; review it before sharing and use `--include-logs none` when logs are unnecessary. |
+
+The extension requests broad capabilities including `<all_urls>`, `history`, `bookmarks`, `debugger`, `webRequest`, `downloads`, and `scripting` because its advertised tools operate across the user's live browser profile. Treat an enabled MCP client or Agent session as a privileged browser operator: use trusted clients/providers, keep Agent sandbox/permission settings constrained, avoid sensitive pages when the task does not require them, and inspect high-impact workflow actions before running them.
+
+### Privacy verification
+
+- Permissions and host access are owned by [`wxt.config.ts`](app/chrome-extension/wxt.config.ts); changes are visible in the generated manifest during release verification.
+- Quick Panel context forwarding and resource bounds are covered by [`quick-panel-agent-handler.test.ts`](app/chrome-extension/tests/background/quick-panel-agent-handler.test.ts) and [`quick-panel-agent-bounds.test.ts`](app/chrome-extension/tests/background/quick-panel-agent-bounds.test.ts).
+- Remote model provenance, integrity, and cache policy are covered by [`model-asset-integrity.test.ts`](app/chrome-extension/tests/security/model-asset-integrity.test.ts) and [`model-cache-manager-security.test.ts`](app/chrome-extension/tests/utils/model-cache-manager-security.test.ts).
+- Private native Agent storage and log redaction boundaries are covered by [`storage-permissions.test.ts`](app/mcp-server/src/agent/storage-permissions.test.ts) and [`claude-secret-logging.test.ts`](app/mcp-server/src/agent/engines/claude-secret-logging.test.ts).
+
 ## Core Features
 
-|                         | Feature                       | Description                                                                                              |
-| ----------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| :grinning:              | **Chatbot/Model Agnostic**    | Let any LLM, chatbot client, or agent automate your browser                                              |
-| :star:                  | **Use Your Original Browser** | Seamlessly integrate with your existing browser environment (configs, login states, etc.)                |
-| :computer:              | **Fully Local**               | Pure local MCP server ensuring user privacy                                                              |
-| :electric_plug:         | **Native Stdio Transport**    | Native Messaging + stdio only (no localhost HTTP port)                                                   |
-| :racing_car:            | **Cross-Tab**                 | Cross-tab context support                                                                                |
-| :control_knobs:         | **Workflow Runtime**          | Record, publish, trigger, and replay flows; expose saved browser workflows as MCP tools                  |
-| :speech_balloon:        | **In-Browser Agent UX**       | Built-in sidepanel, Quick Panel, element picker, and workflow views keep the agent inside Chrome         |
-| :building_construction: | **Apply-to-Code Web Editor**  | Visual in-page editing with transactions, undo/redo, and structured apply payloads for coding agents     |
-| :brain:                 | **Semantic Search**           | Built-in vector database for intelligent browser tab content discovery                                   |
-| :mag:                   | **Smart Content Analysis**    | AI-powered text extraction and similarity matching                                                       |
-| :globe_with_meridians:  | **20+ Tools**                 | Screenshots, network monitoring, interactive operations, bookmark management, browsing history, and more |
-| :rocket:                | **SIMD-Accelerated AI**       | Custom WebAssembly SIMD optimization for 4-8x faster vector operations                                   |
+|                         | Feature                       | Description                                                                                                                              |
+| ----------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| :grinning:              | **Chatbot/Model Agnostic**    | Let any LLM, chatbot client, or agent automate your browser                                                                              |
+| :star:                  | **Use Your Original Browser** | Seamlessly integrate with your existing browser environment (configs, login states, etc.)                                                |
+| :computer:              | **Local Bridge and Storage**  | Native/stdio transport and product-owned state stay local; configured AI providers and explicit network tools remain external data flows |
+| :electric_plug:         | **Native Stdio Transport**    | Native Messaging + stdio only (no localhost HTTP port)                                                                                   |
+| :racing_car:            | **Cross-Tab**                 | Cross-tab context support                                                                                                                |
+| :control_knobs:         | **Workflow Runtime**          | Record, publish, trigger, and replay flows; expose saved browser workflows as MCP tools                                                  |
+| :speech_balloon:        | **In-Browser Agent UX**       | Built-in sidepanel, Quick Panel, element picker, and workflow views keep the agent inside Chrome                                         |
+| :building_construction: | **Apply-to-Code Web Editor**  | Visual in-page editing with transactions, undo/redo, and structured apply payloads for coding agents                                     |
+| :brain:                 | **Semantic Search**           | Built-in vector database for intelligent browser tab content discovery                                                                   |
+| :mag:                   | **Smart Content Analysis**    | AI-powered text extraction and similarity matching                                                                                       |
+| :globe_with_meridians:  | **20+ Tools**                 | Screenshots, network monitoring, interactive operations, bookmark management, browsing history, and more                                 |
+| :rocket:                | **SIMD-Accelerated AI**       | Custom WebAssembly SIMD optimization for 4-8x faster vector operations                                                                   |
 
 ## Comparison with Similar Projects
 
