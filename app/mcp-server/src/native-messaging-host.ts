@@ -114,6 +114,9 @@ export class NativeMessagingHost {
   private ipcCredential: NativeIpcCredential | null = null;
   private ipcSocketIdentity: UnixSocketIdentity | null = null;
   private ipcSocketPath: string | null = null;
+  private messageHandlingCleanup: (() => void) | null = null;
+  private processShutdownRequested = false;
+  private shutdownPromise: Promise<void> | null = null;
   private static readonly AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
 
   public constructor(private readonly messageWriter = new NativeMessageWriter(stdout)) {}
@@ -148,6 +151,14 @@ export class NativeMessagingHost {
         .join('; ');
       throw new Error(`Failed to stop one or more MCP server instances: ${details}`);
     }
+  }
+
+  /** Release every native-host resource. Safe to call more than once. */
+  public shutdown(): Promise<void> {
+    if (!this.shutdownPromise) {
+      this.shutdownPromise = this.performShutdown();
+    }
+    return this.shutdownPromise;
   }
 
   private async setupIpcServer(): Promise<void> {
@@ -561,25 +572,33 @@ export class NativeMessagingHost {
           framingFailed = true;
           stdin.removeListener('readable', onReadable);
           this.sendError(error instanceof Error ? error.message : String(error));
-          this.cleanup();
+          this.requestProcessShutdown(1);
           break;
         }
       }
     };
 
+    const onEnd = (): void => {
+      if (!framingFailed) {
+        this.requestProcessShutdown(0);
+      }
+    };
+
+    const onError = (): void => {
+      if (!framingFailed) {
+        this.requestProcessShutdown(1);
+      }
+    };
+
     stdin.on('readable', onReadable);
-
-    stdin.on('end', () => {
-      if (!framingFailed) {
-        this.cleanup();
-      }
-    });
-
-    stdin.on('error', () => {
-      if (!framingFailed) {
-        this.cleanup();
-      }
-    });
+    stdin.on('end', onEnd);
+    stdin.on('error', onError);
+    this.messageHandlingCleanup = () => {
+      stdin.removeListener('readable', onReadable);
+      stdin.removeListener('end', onEnd);
+      stdin.removeListener('error', onError);
+      this.messageHandlingCleanup = null;
+    };
   }
 
   private getOrCreateServer(instanceId: string): Server {
@@ -1238,23 +1257,42 @@ export class NativeMessagingHost {
     });
   }
 
-  /**
-   * Clean up resources
-   */
-  private cleanup(): void {
+  private requestProcessShutdown(exitCode: number): void {
+    if (this.processShutdownRequested) return;
+    this.processShutdownRequested = true;
+    void this.shutdown().then(
+      () => process.exit(exitCode),
+      (error) => {
+        console.error(
+          `[mcp-server] shutdown failed: ${error instanceof Error ? error.stack || error.message : String(error)}`,
+        );
+        process.exit(1);
+      },
+    );
+  }
+
+  private async performShutdown(): Promise<void> {
+    this.messageHandlingCleanup?.();
+
     // Reject all pending requests
     this.pendingRequests.forEach((pending) => {
       clearTimeout(pending.timeoutId);
       pending.reject(new Error('Native host is shutting down or Chrome disconnected.'));
     });
     this.pendingRequests.clear();
-    fileHandler.dispose();
+
+    const cleanupErrors: unknown[] = [];
+    try {
+      fileHandler.dispose();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
 
     for (const [subscriptionId, subscription] of this.streamSubscriptions.entries()) {
       try {
         subscription.dispose();
-      } catch {
-        // ignore cleanup failures
+      } catch (error) {
+        cleanupErrors.push(error);
       }
       this.streamSubscriptions.delete(subscriptionId);
     }
@@ -1262,20 +1300,34 @@ export class NativeMessagingHost {
     for (const socket of Array.from(this.ipcSockets)) {
       try {
         socket.destroy();
-      } catch {
-        // ignore
+      } catch (error) {
+        cleanupErrors.push(error);
       }
       this.ipcSockets.delete(socket);
     }
 
-    if (this.ipcServer) {
-      try {
-        this.ipcServer.close();
-      } catch {
-        // ignore
+    const ipcServer = this.ipcServer;
+    this.ipcServer = null;
+    const closeIpcServer = new Promise<void>((resolve, reject) => {
+      if (!ipcServer) {
+        resolve();
+        return;
       }
-      this.ipcServer = null;
-    }
+      try {
+        ipcServer.close((error) => {
+          const code =
+            error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+          if (!error || code === 'ERR_SERVER_NOT_RUNNING') resolve();
+          else reject(error);
+        });
+      } catch (error) {
+        const code =
+          error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+        if (code === 'ERR_SERVER_NOT_RUNNING') resolve();
+        else reject(error);
+      }
+    });
+
     if (this.ipcCredential) {
       removeNativeIpcCredential(this.ipcCredential);
       this.ipcCredential = null;
@@ -1290,13 +1342,17 @@ export class NativeMessagingHost {
     this.ipcSocketPath = null;
     this.ipcSocketIdentity = null;
 
-    this.stopServers()
-      .then(() => {
-        process.exit(0);
-      })
-      .catch(() => {
-        process.exit(1);
-      });
+    const results = await Promise.allSettled([closeIpcServer, this.stopServers()]);
+    for (const result of results) {
+      if (result.status === 'rejected') cleanupErrors.push(result.reason);
+    }
+
+    if (cleanupErrors.length > 0) {
+      const details = cleanupErrors
+        .map((error) => (error instanceof Error ? error.message : String(error)))
+        .join('; ');
+      throw new Error(`Native host shutdown encountered cleanup failures: ${details}`);
+    }
   }
 }
 

@@ -117,4 +117,48 @@ describe('NativeMessagingHost outbound requests', () => {
       },
     });
   });
+
+  it('releases pending work, subscriptions, and servers exactly once during shutdown', async () => {
+    const output = new CollectingWritable();
+    const host = new NativeMessagingHost(new NativeMessageWriter(output));
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const dispose = vi.fn();
+    (
+      host as unknown as {
+        servers: Map<string, { stop: typeof stop }>;
+        streamSubscriptions: Map<
+          string,
+          { subscriptionId: string; instanceId: string; sessionId: string; dispose: typeof dispose }
+        >;
+      }
+    ).servers.set(DEFAULT_MCP_INSTANCE_ID, { stop });
+    (
+      host as unknown as {
+        streamSubscriptions: Map<
+          string,
+          { subscriptionId: string; instanceId: string; sessionId: string; dispose: typeof dispose }
+        >;
+      }
+    ).streamSubscriptions.set('subscription-1', {
+      subscriptionId: 'subscription-1',
+      instanceId: DEFAULT_MCP_INSTANCE_ID,
+      sessionId: 'session-1',
+      dispose,
+    });
+
+    const pending = host.sendRequestToExtensionAndWait(
+      { query: 'wait forever' },
+      'request_data',
+      30_000,
+    );
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(1));
+
+    const firstShutdown = host.shutdown();
+    await expect(pending).rejects.toThrow('Native host is shutting down');
+    await expect(firstShutdown).resolves.toBeUndefined();
+    await expect(host.shutdown()).resolves.toBeUndefined();
+
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledOnce();
+  });
 });

@@ -63,6 +63,29 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform === 'win32')('NativeMessagingHost socket ownership', () => {
+  it('removes its socket and credential during idempotent shutdown', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'webpage-mcp-host-shutdown-'));
+    tempDirs.push(root);
+    const socketPath = path.join(root, 'native.sock');
+    const authDir = path.join(root, 'auth');
+    process.env.WEBPAGE_MCP_NATIVE_SOCKET = socketPath;
+    process.env.WEBPAGE_MCP_NATIVE_AUTH_DIR = authDir;
+
+    const host = new NativeMessagingHost();
+    await bridgeState(host).setupIpcServer();
+    const credential = readNativeIpcCredential(socketPath, authDir);
+    expect(fs.existsSync(socketPath)).toBe(true);
+    expect(fs.existsSync(credential.filePath)).toBe(true);
+
+    await host.shutdown();
+    await host.shutdown();
+
+    expect(fs.existsSync(socketPath)).toBe(false);
+    expect(fs.existsSync(credential.filePath)).toBe(false);
+    expect(bridgeState(host).ipcServer).toBeNull();
+    expect(bridgeState(host).ipcCredential).toBeNull();
+  });
+
   it('does not replace a running host or overwrite its bridge credential', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'webpage-mcp-host-socket-'));
     tempDirs.push(root);

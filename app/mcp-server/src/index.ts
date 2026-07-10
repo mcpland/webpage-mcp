@@ -2,24 +2,35 @@
 import serverInstance from "./server";
 import nativeMessagingHostInstance from "./native-messaging-host";
 
-const exitWithError = (label: string, error: unknown): never => {
+const reportError = (label: string, error: unknown): void => {
   const message =
     error instanceof Error ? error.stack || error.message : String(error);
   console.error(`[mcp-server] ${label}: ${message}`);
-  process.exit(1);
 };
 
 let shutdownStarted = false;
-const shutdown = async (exitCode: number): Promise<void> => {
+let requestedExitCode = 0;
+const shutdown = async (
+  exitCode: number,
+  errorLabel?: string,
+  error?: unknown,
+): Promise<void> => {
+  requestedExitCode = Math.max(requestedExitCode, exitCode);
+  if (errorLabel) reportError(errorLabel, error);
   if (shutdownStarted) return;
   shutdownStarted = true;
 
   try {
-    await nativeMessagingHostInstance.stopServers();
-    process.exit(exitCode);
+    await nativeMessagingHostInstance.shutdown();
   } catch (error) {
-    exitWithError("shutdown failed", error);
+    requestedExitCode = 1;
+    reportError("shutdown failed", error);
   }
+  process.exit(requestedExitCode);
+};
+
+const exitWithError = (label: string, error: unknown): void => {
+  void shutdown(1, label, error);
 };
 
 try {
