@@ -924,6 +924,7 @@ export class VectorDatabase {
   private mappingRevision = 0;
   private mappingSaveQueue: Promise<void> = Promise.resolve();
   private mutationQueue: Promise<void> = Promise.resolve();
+  private unsafeMutationState: Error | null = null;
 
   private readonly config: VectorDatabaseConfig;
 
@@ -957,6 +958,15 @@ export class VectorDatabase {
       () => undefined,
     );
     return result;
+  }
+
+  private assertSafeMutationState(): void {
+    if (this.unsafeMutationState) {
+      throw new Error(
+        "Vector database access is blocked because a prior mutation could not restore its active-label invariant",
+        { cause: this.unsafeMutationState },
+      );
+    }
   }
 
   private initializeEmptyIndex(): void {
@@ -994,6 +1004,122 @@ export class VectorDatabase {
 
     this.nextLabel = mappingData.nextLabel;
     this.mappingRevision = Math.max(this.mappingRevision, mappingData.revision);
+  }
+
+  private inspectHnswActiveLabels(): {
+    activeLabels: Set<number>;
+    deletedLabels: Set<number>;
+    usedLabels: Set<number>;
+  } {
+    let rawUsedLabels: unknown;
+    let rawDeletedLabels: unknown;
+    let rawCurrentCount: unknown;
+    try {
+      rawUsedLabels = this.index.getUsedLabels();
+      rawDeletedLabels = this.index.getDeletedLabels();
+      rawCurrentCount = this.index.getCurrentCount();
+    } catch (error) {
+      throw cleanupError("inspect HNSW label state", error);
+    }
+
+    if (!Array.isArray(rawUsedLabels)) {
+      throw new Error("HNSW used labels are not an array");
+    }
+    if (!Array.isArray(rawDeletedLabels)) {
+      throw new Error("HNSW deleted labels are not an array");
+    }
+    if (!isNonNegativeSafeInteger(rawCurrentCount)) {
+      throw new Error("HNSW current count is not a non-negative safe integer");
+    }
+
+    const parseLabels = (values: unknown[], collection: string) => {
+      const labels = new Set<number>();
+      for (const value of values) {
+        if (!isNonNegativeSafeInteger(value) || value > MAX_HNSW_LABEL) {
+          throw new Error(`${collection} contains an invalid HNSW label`);
+        }
+        if (labels.has(value)) {
+          throw new Error(`${collection} contains a duplicate HNSW label`);
+        }
+        labels.add(value);
+      }
+      return labels;
+    };
+
+    const usedLabels = parseLabels(rawUsedLabels, "HNSW used labels");
+    const deletedLabels = parseLabels(rawDeletedLabels, "HNSW deleted labels");
+    if (rawCurrentCount !== usedLabels.size) {
+      throw new Error(
+        `HNSW current count ${rawCurrentCount} does not match ${usedLabels.size} used labels`,
+      );
+    }
+    for (const label of deletedLabels) {
+      if (!usedLabels.has(label)) {
+        throw new Error(`HNSW deleted label ${label} is not a used label`);
+      }
+    }
+
+    const activeLabels = new Set(
+      [...usedLabels].filter((label) => !deletedLabels.has(label)),
+    );
+    return { activeLabels, deletedLabels, usedLabels };
+  }
+
+  private assertActiveLabelInvariant(
+    documentLabels: Iterable<number>,
+    nextLabel: number,
+  ): void {
+    if (!isNonNegativeSafeInteger(nextLabel) || nextLabel > MAX_HNSW_LABEL) {
+      throw new Error("Next HNSW label is invalid");
+    }
+
+    const { activeLabels, usedLabels } = this.inspectHnswActiveLabels();
+    const mappedLabels = new Set<number>();
+    for (const label of documentLabels) {
+      if (
+        !isNonNegativeSafeInteger(label) ||
+        label > MAX_HNSW_LABEL ||
+        mappedLabels.has(label)
+      ) {
+        throw new Error(
+          "Document mappings contain invalid or duplicate labels",
+        );
+      }
+      mappedLabels.add(label);
+    }
+
+    if (
+      activeLabels.size !== mappedLabels.size ||
+      [...activeLabels].some((label) => !mappedLabels.has(label)) ||
+      [...mappedLabels].some((label) => !activeLabels.has(label))
+    ) {
+      throw new Error(
+        "Active HNSW labels do not exactly match document mappings",
+      );
+    }
+
+    if (usedLabels.size > 0) {
+      let maxUsedLabel = -1;
+      for (const label of usedLabels)
+        maxUsedLabel = Math.max(maxUsedLabel, label);
+      if (nextLabel <= maxUsedLabel) {
+        throw new Error(
+          `Next HNSW label ${nextLabel} does not exceed used label ${maxUsedLabel}`,
+        );
+      }
+    }
+  }
+
+  private activeLabelInvariantFailure(
+    documentLabels: Iterable<number>,
+    nextLabel: number,
+  ): string | null {
+    try {
+      this.assertActiveLabelInvariant(documentLabels, nextLabel);
+      return null;
+    } catch (error) {
+      return errorMessage(error);
+    }
   }
 
   private async lookupDocumentMappings(): Promise<PersistedVectorMappingsLookup> {
@@ -1111,18 +1237,48 @@ export class VectorDatabase {
     console.warn(
       `VectorDatabase: Refusing to load persisted index; replacing it with an empty current-dimension index (${reason})`,
     );
-    this.initializeEmptyIndex();
-    this.mappingRevision = 0;
+    try {
+      this.initializeEmptyIndex();
+      this.mappingRevision = 0;
 
-    await IndexedDBHelper.deleteData(this.config.indexFileName);
-    await this.removeDocumentMappingBackup();
-    await persistHnswIndex(this.index, this.config.indexFileName);
-    await this.saveDocumentMappings();
+      await IndexedDBHelper.deleteData(this.config.indexFileName);
+      await this.removeDocumentMappingBackup();
+      await persistHnswIndex(this.index, this.config.indexFileName);
+      const persistedMappingRevision = await this.saveDocumentMappings();
 
-    if (this.index.getCurrentCount() !== 0 || this.documents.size !== 0) {
-      throw new Error(
-        "Vector index reset did not produce a verified empty state",
-      );
+      this.assertActiveLabelInvariant(this.documents.keys(), this.nextLabel);
+      if (
+        this.documents.size !== 0 ||
+        this.tabDocuments.size !== 0 ||
+        this.completedTabPages.size !== 0 ||
+        this.nextLabel !== 0
+      ) {
+        throw new Error(
+          "Vector index reset did not produce a verified empty state",
+        );
+      }
+      await this.verifyPersistedEmptyMappings(persistedMappingRevision);
+      this.unsafeMutationState = null;
+    } catch (error) {
+      const failure = cleanupError("replace unsafe vector state", error);
+      this.unsafeMutationState = failure;
+      throw failure;
+    }
+  }
+
+  private async verifyPersistedEmptyMappings(
+    expectedRevision: number,
+  ): Promise<void> {
+    const lookup = await this.lookupDocumentMappings();
+    if (
+      lookup.status !== "found" ||
+      lookup.value.revision !== expectedRevision ||
+      lookup.value.documents.length !== 0 ||
+      lookup.value.tabDocuments.length !== 0 ||
+      lookup.value.completedTabPages.length !== 0 ||
+      lookup.value.nextLabel !== 0
+    ) {
+      throw new Error("Persisted vector reset state did not verify as empty");
     }
   }
 
@@ -1184,15 +1340,13 @@ export class VectorDatabase {
             `index read failed: ${errorMessage(loadFailure)}`,
           );
         } else {
-          const indexCount = this.index.getCurrentCount();
-          const mappingCount = mappingLookup.value.documents.length;
-          if (
-            (indexCount > 0 && mappingCount === 0) ||
-            mappingCount > indexCount ||
-            mappingLookup.value.nextLabel < indexCount
-          ) {
+          const invariantFailure = this.activeLabelInvariantFailure(
+            mappingLookup.value.documents.map(([label]) => label),
+            mappingLookup.value.nextLabel,
+          );
+          if (invariantFailure) {
             await this.replaceUnsafePersistedIndexWithEmpty(
-              `index count ${indexCount} is inconsistent with ${mappingCount} document mappings and next label ${mappingLookup.value.nextLabel}`,
+              `HNSW active-label invariant failed: ${invariantFailure}`,
             );
           } else {
             this.applyDocumentMappings(mappingLookup.value);
@@ -1250,6 +1404,7 @@ export class VectorDatabase {
     chunk: TextChunk,
     embedding: Float32Array,
   ): Promise<number> {
+    this.assertSafeMutationState();
     const documentId = this.generateDocumentId(tabId, chunk.index);
     let label: number | null = null;
     let pointAdded = false;
@@ -1389,6 +1544,31 @@ export class VectorDatabase {
         await this.checkAndPerformAutoCleanup();
       }
 
+      const invariantFailure = this.activeLabelInvariantFailure(
+        this.documents.keys(),
+        this.nextLabel,
+      );
+      if (invariantFailure) {
+        // Recovery now owns the whole derived index. Do not run the ordinary
+        // single-label rollback against the replacement index in the catch
+        // path below.
+        pointAdded = false;
+        const invariantError = new Error(
+          `Vector add violated the active-label invariant: ${invariantFailure}`,
+        );
+        try {
+          await this.replaceUnsafePersistedIndexWithEmpty(
+            invariantError.message,
+          );
+        } catch (resetError) {
+          throw new AggregateError(
+            [invariantError, resetError],
+            `Vector add for label ${label} left an unsafe state that could not be reset`,
+          );
+        }
+        throw invariantError;
+      }
+
       console.log(
         `VectorDatabase: Successfully added document ${documentId} with label ${label}`,
       );
@@ -1442,13 +1622,37 @@ export class VectorDatabase {
     }
 
     if (rollbackFailures.length > 0) {
-      throw new AggregateError(
+      const failure = new AggregateError(
         [
           cleanupError("original vector add failure", originalError),
           ...rollbackFailures,
         ],
         `Vector add for label ${label} failed and rollback did not complete`,
       );
+      this.unsafeMutationState = failure;
+      throw failure;
+    }
+
+    const invariantFailure = this.activeLabelInvariantFailure(
+      this.documents.keys(),
+      this.nextLabel,
+    );
+    if (invariantFailure) {
+      try {
+        await this.replaceUnsafePersistedIndexWithEmpty(
+          `vector add rollback left an unsafe active-label state: ${invariantFailure}`,
+        );
+      } catch (resetError) {
+        const failure = new AggregateError(
+          [
+            cleanupError("original vector add failure", originalError),
+            resetError,
+          ],
+          `Vector add for label ${label} failed and its unsafe rollback state could not be reset`,
+        );
+        this.unsafeMutationState = failure;
+        throw failure;
+      }
     }
   }
 
@@ -1482,6 +1686,7 @@ export class VectorDatabase {
     topK: number,
   ): Promise<SearchResult[]> {
     try {
+      this.assertSafeMutationState();
       // Validate query vector
       if (!queryEmbedding || queryEmbedding.length !== this.config.dimension) {
         throw new Error(
@@ -1795,6 +2000,29 @@ export class VectorDatabase {
       );
     }
 
+    const invariantFailure = this.activeLabelInvariantFailure(
+      this.documents.keys(),
+      this.nextLabel,
+    );
+    if (invariantFailure) {
+      // A force retry can encounter an HNSW point that was never represented
+      // by the current mappings (for example after an interrupted cross-store
+      // write). Never acknowledge the tombstone while such active vectors
+      // remain. Replacing the whole derived index is the safe recovery.
+      await this.replaceUnsafePersistedIndexWithEmpty(
+        `tab ${tabId} deletion left an unsafe active-label state: ${invariantFailure}`,
+      );
+      console.warn(
+        `VectorDatabase: Reset the complete vector index while removing tab ${tabId}`,
+      );
+      return;
+    }
+
+    // A forced deletion is an explicit recovery path for an earlier rollback
+    // failure. Reaching this boundary means index, mappings, readback, and the
+    // active-label invariant all agree again.
+    this.unsafeMutationState = null;
+
     console.log(
       `VectorDatabase: Removed ${documentLabels.length} documents for tab ${tabId}`,
     );
@@ -1850,6 +2078,7 @@ export class VectorDatabase {
     url: string,
     title: string,
   ): Promise<void> {
+    this.assertSafeMutationState();
     const labels = Array.from(this.tabDocuments.get(tabId) ?? []).sort(
       (left, right) => left - right,
     );
@@ -1956,6 +2185,7 @@ export class VectorDatabase {
   }
 
   private inspectTabPageStateInternal(): TabPageStateInspection {
+    this.assertSafeMutationState();
     const completedPages: CompletedTabPageIdentity[] = [];
     const repairTabs = new Set<number>();
     const allTabIds = new Set([
@@ -2031,7 +2261,7 @@ export class VectorDatabase {
       totalDocuments: this.documents.size,
       totalTabs: this.tabDocuments.size,
       indexSize: this.calculateStorageSize(),
-      isInitialized: this.isInitialized,
+      isInitialized: this.isInitialized && this.unsafeMutationState === null,
     };
   }
 
@@ -2231,10 +2461,26 @@ export class VectorDatabase {
     }
 
     if (failures.length > 0) {
-      throw new AggregateError(
+      const failure = new AggregateError(
         failures,
         "Vector database clear did not complete",
       );
+      this.unsafeMutationState = failure;
+      throw failure;
+    }
+
+    try {
+      if (this.isInitialized) {
+        this.assertActiveLabelInvariant(this.documents.keys(), this.nextLabel);
+      }
+      this.unsafeMutationState = null;
+    } catch (error) {
+      const failure = cleanupError(
+        "verify active-label invariant after vector clear",
+        error,
+      );
+      this.unsafeMutationState = failure;
+      throw failure;
     }
 
     console.log(
@@ -2533,9 +2779,15 @@ export class VectorDatabase {
   }
 
   public async loadDocumentMappings(): Promise<void> {
-    if (!globalHnswlib) {
+    if (!globalHnswlib || !this.index) {
       throw new Error("HNSW module is not initialized");
     }
+
+    return this.enqueueMutation(() => this.loadDocumentMappingsInternal());
+  }
+
+  private async loadDocumentMappingsInternal(): Promise<void> {
+    this.assertSafeMutationState();
 
     const lookup = await this.lookupDocumentMappings();
     if (lookup.status !== "found") {
@@ -2545,14 +2797,18 @@ export class VectorDatabase {
           : "Persisted vector mappings are missing",
       );
     }
-    if (
-      this.index.getCurrentCount() > 0 &&
-      lookup.value.documents.length === 0
-    ) {
-      throw new Error(
-        "Vector index contains vectors without document mappings",
+
+    const invariantFailure = this.activeLabelInvariantFailure(
+      lookup.value.documents.map(([label]) => label),
+      lookup.value.nextLabel,
+    );
+    if (invariantFailure) {
+      await this.replaceUnsafePersistedIndexWithEmpty(
+        `mapping reload failed the HNSW active-label invariant: ${invariantFailure}`,
       );
+      return;
     }
+
     this.applyDocumentMappings(lookup.value);
     console.log(
       `VectorDatabase: Loaded ${this.documents.size} document mappings, next label: ${this.nextLabel}`,

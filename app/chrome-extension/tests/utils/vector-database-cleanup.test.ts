@@ -1,8 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const hnswMocks = vi.hoisted(() => {
+  type LabelSnapshot = {
+    currentCount?: unknown;
+    deletedLabels: unknown;
+    inspectionError?: Error;
+    usedLabels: unknown;
+  };
+
   const files = new Set<string>();
   const fileCounts = new Map<string, number>();
+  const fileLabelSnapshots = new Map<string, LabelSnapshot>();
   const syncCalls: boolean[] = [];
   const writeCalls: string[] = [];
   const readCalls: string[] = [];
@@ -14,10 +22,11 @@ const hnswMocks = vi.hoisted(() => {
   }> = [];
   const pendingWriteSyncs: Array<() => void> = [];
   const instances: Array<{ count: number; fileName?: string }> = [];
-  let populateSnapshot: Map<string, number> | null = null;
+  let populateSnapshot: Map<string, number | LabelSnapshot> | null = null;
   let syncShouldSucceed = true;
   let synced = true;
   let autoCompleteWriteSync = true;
+  let markDeleteFailuresRemaining = 0;
   let vectorFloatDeleteCalls = 0;
   let searchFailuresRemaining = 0;
   let writeFailuresRemaining = 0;
@@ -39,6 +48,7 @@ const hnswMocks = vi.hoisted(() => {
     readonly fileName?: string;
     private labels: number[] = [];
     private readonly deleted = new Set<number>();
+    private inspectionSnapshot: LabelSnapshot | null = null;
 
     constructor(_space: string, _dimension: number, fileName?: string) {
       this.fileName = fileName;
@@ -49,12 +59,37 @@ const hnswMocks = vi.hoisted(() => {
       this.count = 0;
       this.labels = [];
       this.deleted.clear();
+      this.inspectionSnapshot = null;
     }
 
     setEfSearch() {}
 
     getCurrentCount() {
+      if (this.inspectionSnapshot?.inspectionError) {
+        throw this.inspectionSnapshot.inspectionError;
+      }
+      if (this.inspectionSnapshot?.currentCount !== undefined) {
+        return this.inspectionSnapshot.currentCount;
+      }
       return this.count;
+    }
+
+    getUsedLabels() {
+      if (this.inspectionSnapshot?.inspectionError) {
+        throw this.inspectionSnapshot.inspectionError;
+      }
+      return this.inspectionSnapshot
+        ? this.inspectionSnapshot.usedLabels
+        : [...this.labels];
+    }
+
+    getDeletedLabels() {
+      if (this.inspectionSnapshot?.inspectionError) {
+        throw this.inspectionSnapshot.inspectionError;
+      }
+      return this.inspectionSnapshot
+        ? this.inspectionSnapshot.deletedLabels
+        : [...this.deleted];
     }
 
     addPoint(_vector: unknown, label: number) {
@@ -90,6 +125,10 @@ const hnswMocks = vi.hoisted(() => {
     }
 
     markDelete(label: number) {
+      if (markDeleteFailuresRemaining > 0) {
+        markDeleteFailuresRemaining -= 1;
+        throw new Error("mark delete failed");
+      }
       deletedLabels.push(label);
       this.deleted.add(label);
     }
@@ -98,11 +137,45 @@ const hnswMocks = vi.hoisted(() => {
       readCalls.push(fileName);
       if (!files.has(fileName)) throw new Error("missing index");
       this.count = fileCounts.get(fileName) ?? 0;
-      this.labels = Array.from(
-        { length: this.count },
-        (_value, index) => index,
-      );
+      this.inspectionSnapshot = fileLabelSnapshots.get(fileName) ?? null;
+      const usedLabels = this.inspectionSnapshot?.usedLabels;
+      this.labels = Array.isArray(usedLabels)
+        ? usedLabels.filter(
+            (label): label is number => typeof label === "number",
+          )
+        : Array.from({ length: this.count }, (_value, index) => index);
+      const deletedLabels = this.inspectionSnapshot?.deletedLabels;
       this.deleted.clear();
+      if (Array.isArray(deletedLabels)) {
+        for (const label of deletedLabels) {
+          if (typeof label === "number") this.deleted.add(label);
+        }
+      }
+      const normalUsedLabels =
+        Array.isArray(usedLabels) &&
+        usedLabels.every(
+          (label) =>
+            Number.isSafeInteger(label) && label >= 0 && label <= 0xffffffff,
+        ) &&
+        new Set(usedLabels).size === usedLabels.length;
+      const normalDeletedLabels =
+        Array.isArray(deletedLabels) &&
+        deletedLabels.every(
+          (label) =>
+            Number.isSafeInteger(label) &&
+            label >= 0 &&
+            label <= 0xffffffff &&
+            this.labels.includes(label),
+        ) &&
+        new Set(deletedLabels).size === deletedLabels.length;
+      if (
+        !this.inspectionSnapshot?.inspectionError &&
+        normalUsedLabels &&
+        normalDeletedLabels &&
+        this.inspectionSnapshot?.currentCount === usedLabels.length
+      ) {
+        this.inspectionSnapshot = null;
+      }
     }
 
     writeIndex(fileName: string) {
@@ -113,6 +186,11 @@ const hnswMocks = vi.hoisted(() => {
       }
       files.add(fileName);
       fileCounts.set(fileName, this.count);
+      fileLabelSnapshots.set(fileName, {
+        currentCount: this.count,
+        deletedLabels: [...this.deleted],
+        usedLabels: [...this.labels],
+      });
       synced = false;
       const complete = () => {
         synced = syncShouldSucceed;
@@ -134,10 +212,29 @@ const hnswMocks = vi.hoisted(() => {
         if (populate && synced) {
           files.clear();
           fileCounts.clear();
+          fileLabelSnapshots.clear();
           if (populateSnapshot) {
-            for (const [fileName, count] of populateSnapshot) {
+            for (const [fileName, value] of populateSnapshot) {
+              const snapshot: LabelSnapshot =
+                typeof value === "number"
+                  ? {
+                      currentCount: value,
+                      deletedLabels: [],
+                      usedLabels: Array.from(
+                        { length: value },
+                        (_entry, index) => index,
+                      ),
+                    }
+                  : value;
+              const count =
+                typeof snapshot.currentCount === "number"
+                  ? snapshot.currentCount
+                  : Array.isArray(snapshot.usedLabels)
+                    ? snapshot.usedLabels.length
+                    : 0;
               files.add(fileName);
               fileCounts.set(fileName, count);
+              fileLabelSnapshots.set(fileName, snapshot);
             }
             populateSnapshot = null;
           }
@@ -151,6 +248,7 @@ const hnswMocks = vi.hoisted(() => {
     addedLabels,
     deletedLabels,
     fileCounts,
+    fileLabelSnapshots,
     files,
     instances,
     manager,
@@ -161,6 +259,7 @@ const hnswMocks = vi.hoisted(() => {
       syncShouldSucceed = true;
       synced = true;
       autoCompleteWriteSync = true;
+      markDeleteFailuresRemaining = 0;
       pendingWriteSyncs.length = 0;
       searchCalls.length = 0;
       searchFailuresRemaining = 0;
@@ -176,13 +275,16 @@ const hnswMocks = vi.hoisted(() => {
     setSearchFailures(value: number) {
       searchFailuresRemaining = value;
     },
+    setMarkDeleteFailures(value: number) {
+      markDeleteFailuresRemaining = value;
+    },
     completeNextWriteSync() {
       pendingWriteSyncs.shift()?.();
     },
     pendingWriteSyncs,
     readCalls,
     searchCalls,
-    setPopulateSnapshot(entries: Array<[string, number]>) {
+    setPopulateSnapshot(entries: Array<[string, number | LabelSnapshot]>) {
       populateSnapshot = new Map(entries);
     },
     syncCalls,
@@ -405,6 +507,7 @@ afterEach(() => {
   hnswMocks.addedLabels.length = 0;
   hnswMocks.deletedLabels.length = 0;
   hnswMocks.fileCounts.clear();
+  hnswMocks.fileLabelSnapshots.clear();
   hnswMocks.files.clear();
   hnswMocks.instances.length = 0;
   hnswMocks.readCalls.length = 0;
@@ -1407,6 +1510,108 @@ describe("vector database cleanup", () => {
     ).resolves.toBe(1);
   });
 
+  it("resets and rejects an add whose persisted HNSW gains an active orphan", async () => {
+    const indexFileName = `add-invariant-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    hnswMocks.setAutoCompleteWriteSync(false);
+
+    const add = database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    await vi.waitFor(() => expect(hnswMocks.pendingWriteSyncs).toHaveLength(1));
+    const index = hnswMocks.instances.at(-1) as unknown as {
+      addPoint(vector: number[], label: number): void;
+    };
+    index.addPoint([0, 1, 0], 9);
+    hnswMocks.completeNextWriteSync();
+
+    await vi.waitFor(() => expect(hnswMocks.pendingWriteSyncs).toHaveLength(1));
+    hnswMocks.completeNextWriteSync();
+    await expect(add).rejects.toThrow("active-label invariant");
+
+    expect(database.getStats()).toMatchObject({
+      isInitialized: true,
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+    expect(hnswMocks.fileLabelSnapshots.get(indexFileName)).toMatchObject({
+      currentCount: 0,
+      deletedLabels: [],
+      usedLabels: [],
+    });
+  });
+
+  it("blocks ordinary access after rollback cannot delete an active point and lets clear recover", async () => {
+    const indexFileName = `unsafe-rollback-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    const transactionSpy = await abortNextVectorMappingWrite();
+    const statefulSet = chrome.storage.local.set;
+    let rejectFallbackOnce = true;
+    chrome.storage.local.set = vi.fn(async (values) => {
+      if (rejectFallbackOnce) {
+        rejectFallbackOnce = false;
+        throw new Error("initial mapping fallback failed");
+      }
+      await statefulSet(values);
+    }) as typeof chrome.storage.local.set;
+    hnswMocks.setMarkDeleteFailures(1);
+
+    try {
+      await expect(
+        database.addDocument(
+          7,
+          "https://example.test/page",
+          "Page",
+          { text: "private", source: "content", index: 0, wordCount: 1 },
+          new Float32Array([1, 0, 0]),
+        ),
+      ).rejects.toThrow("rollback did not complete");
+    } finally {
+      transactionSpy.mockRestore();
+    }
+
+    expect(database.getStats().isInitialized).toBe(false);
+    await expect(database.search(new Float32Array([1, 0, 0]))).rejects.toThrow(
+      "access is blocked",
+    );
+    await expect(
+      database.commitTabPage(7, "https://example.test/page", "Page"),
+    ).rejects.toThrow("access is blocked");
+    await expect(
+      database.addDocument(
+        8,
+        "https://example.test/blocked",
+        "Blocked",
+        { text: "blocked", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([0, 1, 0]),
+      ),
+    ).rejects.toThrow("access is blocked");
+
+    await expect(database.clear()).resolves.toBeUndefined();
+    expect(database.getStats()).toMatchObject({
+      isInitialized: true,
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+    await expect(
+      database.addDocument(
+        8,
+        "https://example.test/recovered",
+        "Recovered",
+        { text: "recovered", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([0, 1, 0]),
+      ),
+    ).resolves.toBe(0);
+  });
+
   it("aggregates index and mapping failures during rollback and permits a forced retry", async () => {
     const indexFileName = `rollback-failures-${crypto.randomUUID()}.dat`;
     useStatefulChromeStorage();
@@ -1506,6 +1711,115 @@ describe("vector database cleanup", () => {
       revision: 4,
       nextLabel: 2,
       documents: [],
+      tabDocuments: [],
+    });
+  });
+
+  it("resets the complete index instead of acknowledging a same-worker active orphan", async () => {
+    const indexFileName = `active-orphan-recovery-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    const index = hnswMocks.instances.at(-1) as unknown as {
+      addPoint(vector: number[], label: number): void;
+    };
+    index.addPoint([1, 0, 0], 9);
+    const writesBeforeRecovery = hnswMocks.writeCalls.length;
+
+    await expect(
+      database.ensureTabDocumentsRemoved(77),
+    ).resolves.toBeUndefined();
+
+    expect(hnswMocks.writeCalls.length).toBeGreaterThanOrEqual(
+      writesBeforeRecovery + 2,
+    );
+    expect(database.getStats()).toMatchObject({
+      isInitialized: true,
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+    expect(hnswMocks.fileLabelSnapshots.get(indexFileName)).toMatchObject({
+      currentCount: 0,
+      deletedLabels: [],
+      usedLabels: [],
+    });
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      completedTabPages: [],
+      documents: [],
+      nextLabel: 0,
+      tabDocuments: [],
+    });
+  });
+
+  it("does not acknowledge orphan recovery when the replacement mappings fail to persist", async () => {
+    const indexFileName = `active-orphan-reset-failure-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    const index = hnswMocks.instances.at(-1) as unknown as {
+      addPoint(vector: number[], label: number): void;
+    };
+    index.addPoint([1, 0, 0], 9);
+
+    const statefulRemove = chrome.storage.local.remove;
+    let removalCalls = 0;
+    chrome.storage.local.remove = vi.fn(async (keys: string | string[]) => {
+      removalCalls += 1;
+      // The first call finalizes the deletion mapping, the second clears the
+      // old backup, and the third finalizes the replacement mapping. Failing
+      // that last boundary must keep the caller from acknowledging recovery.
+      if (removalCalls === 3) {
+        throw new Error("replacement mapping cleanup failed");
+      }
+      await statefulRemove(keys);
+    }) as typeof chrome.storage.local.remove;
+
+    await expect(database.ensureTabDocumentsRemoved(77)).rejects.toThrow(
+      "replace unsafe vector state",
+    );
+    expect(database.getStats().isInitialized).toBe(false);
+    await expect(database.search(new Float32Array([1, 0, 0]))).rejects.toThrow(
+      "access is blocked",
+    );
+
+    chrome.storage.local.remove = statefulRemove;
+    await expect(database.clear()).resolves.toBeUndefined();
+    expect(database.getStats()).toMatchObject({
+      isInitialized: true,
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+  });
+
+  it("does not let the public mapping reload bypass the active-label invariant", async () => {
+    const indexFileName = `mapping-reload-invariant-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    const index = hnswMocks.instances.at(-1) as unknown as {
+      addPoint(vector: number[], label: number): void;
+    };
+    index.addPoint([1, 0, 0], 9);
+    await putVectorMappingRecord(
+      indexFileName,
+      createMappingPayload({ dimension: 3, indexFileName }),
+    );
+
+    await expect(database.loadDocumentMappings()).resolves.toBeUndefined();
+
+    expect(database.getStats()).toMatchObject({
+      isInitialized: true,
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+    expect(hnswMocks.fileLabelSnapshots.get(indexFileName)).toMatchObject({
+      currentCount: 0,
+      deletedLabels: [],
+      usedLabels: [],
+    });
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      documents: [],
+      nextLabel: 0,
       tabDocuments: [],
     });
   });
@@ -1676,6 +1990,231 @@ describe("vector database cleanup", () => {
       });
     },
   );
+
+  it.each([
+    {
+      name: "an extra live label",
+      mapping: () => {
+        const mapping = createMappingPayload({
+          dimension: 3,
+          indexFileName: "placeholder",
+        });
+        mapping.nextLabel = 2;
+        return mapping;
+      },
+      snapshot: {
+        currentCount: 2,
+        deletedLabels: [],
+        usedLabels: [0, 1],
+      },
+    },
+    {
+      name: "a different live label than the mapped document",
+      mapping: () => {
+        const mapping = createMappingPayload({
+          dimension: 3,
+          indexFileName: "placeholder",
+        });
+        mapping.nextLabel = 2;
+        return mapping;
+      },
+      snapshot: {
+        currentCount: 1,
+        deletedLabels: [],
+        usedLabels: [1],
+      },
+    },
+    {
+      name: "a mapped completion whose HNSW label is deleted",
+      mapping: () => null,
+      snapshot: {
+        currentCount: 1,
+        deletedLabels: [0],
+        usedLabels: [0],
+      },
+    },
+  ])(
+    "resets persisted state with $name before hydrating page mappings",
+    async ({ mapping: createCustomMapping, snapshot }) => {
+      const indexFileName = `active-mismatch-${crypto.randomUUID()}.dat`;
+      const mapping =
+        createCustomMapping() ??
+        createMappingPayload({ dimension: 3, indexFileName });
+      mapping.indexFileName = indexFileName;
+      await putVectorMappingRecord(indexFileName, mapping);
+      useStatefulChromeStorage();
+      hnswMocks.setPopulateSnapshot([[indexFileName, snapshot]]);
+
+      const database = new VectorDatabase({ dimension: 3, indexFileName });
+      await database.initialize();
+
+      expect(database.getStats()).toMatchObject({
+        totalDocuments: 0,
+        totalTabs: 0,
+      });
+      await expect(database.inspectTabPageState()).resolves.toEqual({
+        completedPages: [],
+        repairTabIds: [],
+      });
+      expect(hnswMocks.fileLabelSnapshots.get(indexFileName)).toMatchObject({
+        currentCount: 0,
+        deletedLabels: [],
+        usedLabels: [],
+      });
+    },
+  );
+
+  it("resets a deleted orphan whose next label could reactivate it", async () => {
+    const indexFileName = `deleted-stale-label-${crypto.randomUUID()}.dat`;
+    const mapping = createMappingPayload({
+      dimension: 3,
+      indexFileName,
+      withDocument: false,
+    });
+    mapping.nextLabel = 7;
+    await putVectorMappingRecord(indexFileName, mapping);
+    useStatefulChromeStorage();
+    hnswMocks.setPopulateSnapshot([
+      [
+        indexFileName,
+        {
+          currentCount: 1,
+          deletedLabels: [7],
+          usedLabels: [7],
+        },
+      ],
+    ]);
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    expect(hnswMocks.fileLabelSnapshots.get(indexFileName)).toMatchObject({
+      currentCount: 0,
+      deletedLabels: [],
+      usedLabels: [],
+    });
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      documents: [],
+      nextLabel: 0,
+    });
+  });
+
+  it.each([
+    {
+      name: "used labels are not an array",
+      snapshot: {
+        currentCount: 1,
+        deletedLabels: [],
+        usedLabels: "invalid",
+      },
+    },
+    {
+      name: "used labels contain a duplicate",
+      snapshot: {
+        currentCount: 2,
+        deletedLabels: [],
+        usedLabels: [0, 0],
+      },
+    },
+    {
+      name: "deleted labels contain a duplicate",
+      snapshot: {
+        currentCount: 1,
+        deletedLabels: [0, 0],
+        usedLabels: [0],
+      },
+    },
+    {
+      name: "a deleted label is not used",
+      snapshot: {
+        currentCount: 1,
+        deletedLabels: [1],
+        usedLabels: [0],
+      },
+    },
+    {
+      name: "the current count differs from used labels",
+      snapshot: {
+        currentCount: 2,
+        deletedLabels: [],
+        usedLabels: [0],
+      },
+    },
+    {
+      name: "a used label is outside uint32",
+      snapshot: {
+        currentCount: 1,
+        deletedLabels: [],
+        usedLabels: [0x1_0000_0000],
+      },
+    },
+    {
+      name: "the HNSW inspection API throws",
+      snapshot: {
+        currentCount: 1,
+        deletedLabels: [],
+        inspectionError: new Error("label API failed"),
+        usedLabels: [0],
+      },
+    },
+  ])("safely resets when $name", async ({ snapshot }) => {
+    const indexFileName = `malformed-labels-${crypto.randomUUID()}.dat`;
+    await putVectorMappingRecord(
+      indexFileName,
+      createMappingPayload({ dimension: 3, indexFileName }),
+    );
+    useStatefulChromeStorage();
+    hnswMocks.setPopulateSnapshot([[indexFileName, snapshot]]);
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    expect(database.getStats().totalDocuments).toBe(0);
+    expect(hnswMocks.fileLabelSnapshots.get(indexFileName)).toMatchObject({
+      currentCount: 0,
+      deletedLabels: [],
+      usedLabels: [],
+    });
+  });
+
+  it("accepts deleted tombstones when active labels are empty and nextLabel is monotonic", async () => {
+    const indexFileName = `valid-deleted-label-${crypto.randomUUID()}.dat`;
+    const mapping = createMappingPayload({
+      dimension: 3,
+      indexFileName,
+      withDocument: false,
+    });
+    mapping.nextLabel = 8;
+    await putVectorMappingRecord(indexFileName, mapping);
+    useStatefulChromeStorage();
+    hnswMocks.setPopulateSnapshot([
+      [
+        indexFileName,
+        {
+          currentCount: 1,
+          deletedLabels: [7],
+          usedLabels: [7],
+        },
+      ],
+    ]);
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    expect(hnswMocks.readCalls).toContain(indexFileName);
+    expect(hnswMocks.writeCalls).not.toContain(indexFileName);
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+    await expect(database.search(new Float32Array([1, 0, 0]))).resolves.toEqual(
+      [],
+    );
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      documents: [],
+      nextLabel: 8,
+    });
+  });
 
   it("refuses an index with vectors when all durable mappings are absent", async () => {
     const indexFileName = `missing-${crypto.randomUUID()}.dat`;
