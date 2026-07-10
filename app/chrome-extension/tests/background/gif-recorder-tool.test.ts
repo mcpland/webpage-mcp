@@ -17,6 +17,7 @@ import {
   gifRecorderTool,
 } from '@/entrypoints/background/tools/browser/gif-recorder';
 import {
+  captureFrameOnAction,
   cleanupAutoCaptureForTab,
   isAutoCaptureActive,
   startAutoCapture,
@@ -106,6 +107,7 @@ describe('gifRecorderTool', () => {
     (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
       async (message) => {
         switch (message?.type) {
+          case OFFSCREEN_MESSAGE_TYPES.GIF_START:
           case OFFSCREEN_MESSAGE_TYPES.GIF_RESET:
           case OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME:
             return { success: true };
@@ -242,6 +244,11 @@ describe('gifRecorderTool', () => {
         (message) => message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
       );
     expect(addFrameMessage).toMatchObject({
+      recordingId: expect.stringMatching(/^gif_[0-9a-f]{32}$/),
+      sequence: 0,
+      operationId: expect.stringMatching(
+        /^gif_[0-9a-f]{32}:frame:0$/,
+      ),
       protocolVersion: 2,
       frameEncoding: 'png',
       frameBase64: expect.any(String),
@@ -250,6 +257,9 @@ describe('gifRecorderTool', () => {
       height: 10,
     });
     expect(addFrameMessage).not.toHaveProperty('imageData');
+    expect(addFrameMessage.operationId).toBe(
+      `${addFrameMessage.recordingId}:frame:${addFrameMessage.sequence}`,
+    );
   });
 
   it('sends auto-capture frames as bounded protocol-v2 base64 instead of number arrays', async () => {
@@ -271,6 +281,11 @@ describe('gifRecorderTool', () => {
         (message) => message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
       );
     expect(addFrameMessage).toMatchObject({
+      recordingId: expect.stringMatching(/^gif_[0-9a-f]{32}$/),
+      sequence: 0,
+      operationId: expect.stringMatching(
+        /^gif_[0-9a-f]{32}:frame:0$/,
+      ),
       protocolVersion: 2,
       frameEncoding: 'png',
       frameBase64: expect.any(String),
@@ -279,6 +294,152 @@ describe('gifRecorderTool', () => {
       height: 10,
     });
     expect(addFrameMessage).not.toHaveProperty('imageData');
+    expect(addFrameMessage.operationId).toBe(
+      `${addFrameMessage.recordingId}:frame:${addFrameMessage.sequence}`,
+    );
+  });
+
+  it('serializes concurrent auto-capture actions onto unique frame sequences', async () => {
+    const started = await startAutoCapture(7, {
+      width: 10,
+      height: 10,
+      captureDelayMs: 0,
+      maxFrames: 10,
+    });
+
+    const results = await Promise.all([
+      captureFrameOnAction(7, undefined, true),
+      captureFrameOnAction(7, undefined, true),
+      captureFrameOnAction(7, undefined, true),
+    ]);
+    const addMessages = (
+      chrome.runtime.sendMessage as ReturnType<typeof vi.fn>
+    ).mock.calls
+      .map(([message]) => message)
+      .filter(
+        (message) => message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
+      );
+
+    expect(started.success).toBe(true);
+    expect(results).toEqual([
+      { success: true, frameNumber: 1 },
+      { success: true, frameNumber: 2 },
+      { success: true, frameNumber: 3 },
+    ]);
+    expect(addMessages.map((message) => message.sequence)).toEqual([0, 1, 2]);
+    expect(
+      new Set(addMessages.map((message) => message.operationId)).size,
+    ).toBe(3);
+    for (const message of addMessages) {
+      expect(message.operationId).toBe(
+        `${message.recordingId}:frame:${message.sequence}`,
+      );
+    }
+  });
+
+  it('retries a lost ADD_FRAME response with the exact same idempotency envelope', async () => {
+    mockTabResolution();
+    let addAttempts = 0;
+    (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (message) => {
+        if (message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME) {
+          addAttempts += 1;
+          if (addAttempts === 1) throw new Error('response channel closed');
+        }
+        return { success: true };
+      },
+    );
+
+    const result = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      width: 10,
+      height: 10,
+    });
+    const addMessages = (
+      chrome.runtime.sendMessage as ReturnType<typeof vi.fn>
+    ).mock.calls
+      .map(([message]) => message)
+      .filter(
+        (message) => message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
+      );
+
+    expect(result.isError).toBe(false);
+    expect(addMessages).toHaveLength(2);
+    expect(addMessages[1]).toBe(addMessages[0]);
+    expect(addMessages[0]).toMatchObject({
+      sequence: 0,
+      operationId: `${addMessages[0].recordingId}:frame:0`,
+    });
+  });
+
+  it('does not retry an explicit offscreen frame failure', async () => {
+    mockTabResolution();
+    (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (message) =>
+        message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME
+          ? { success: false, error: 'frame rejected' }
+          : { success: true },
+    );
+
+    const result = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      width: 10,
+      height: 10,
+    });
+    const addCalls = (
+      chrome.runtime.sendMessage as ReturnType<typeof vi.fn>
+    ).mock.calls.filter(
+      ([message]) => message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(responsePayload(result as any).error).toContain('frame rejected');
+    expect(addCalls).toHaveLength(1);
+  });
+
+  it('retries a lost FINISH response with the same terminal operation ID', async () => {
+    mockTabResolution();
+    let finishAttempts = 0;
+    (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (message) => {
+        if (message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_FINISH) {
+          finishAttempts += 1;
+          if (finishAttempts === 1) throw new Error('response channel closed');
+          return {
+            success: true,
+            protocolVersion: 2,
+            gifBase64: 'AQID',
+            byteLength: 3,
+          };
+        }
+        return { success: true };
+      },
+    );
+
+    const start = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      width: 10,
+      height: 10,
+    });
+    const stop = await gifRecorderTool.execute({ action: 'stop' });
+    const finishMessages = (
+      chrome.runtime.sendMessage as ReturnType<typeof vi.fn>
+    ).mock.calls
+      .map(([message]) => message)
+      .filter(
+        (message) => message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_FINISH,
+      );
+
+    expect(start.isError).toBe(false);
+    expect(stop.isError).toBe(false);
+    expect(finishMessages).toHaveLength(2);
+    expect(finishMessages[1]).toBe(finishMessages[0]);
+    expect(finishMessages[0].operationId).toBe(
+      `${finishMessages[0].recordingId}:finish`,
+    );
   });
 
   it('rolls back the owner when startup fails so another mode can start', async () => {

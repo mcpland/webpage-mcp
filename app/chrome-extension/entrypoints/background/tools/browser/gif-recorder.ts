@@ -21,8 +21,13 @@ import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import {
   MessageTarget,
   OFFSCREEN_MESSAGE_TYPES,
-  OffscreenMessageType,
+  type OffscreenMessageType,
 } from '@/common/message-types';
+import {
+  createGifFrameOperationId,
+  createGifOperationId,
+  createGifRecordingId,
+} from '@/common/gif-encoder-protocol';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { offscreenManager } from '@/utils/offscreen-manager';
 import { createImageBitmapFromUrl } from '@/utils/image-utils';
@@ -110,6 +115,7 @@ interface GifRecorderParams {
 
 interface RecordingState {
   owner: GifCaptureOwner;
+  recordingId: string;
   isRecording: boolean;
   isStopping: boolean;
   tabId: number;
@@ -207,7 +213,21 @@ const EXPORT_CACHE_LIFETIME_MS = 5 * 60 * 1000;
 // Offscreen Document Communication
 // ============================================================================
 
-type OffscreenResponseBase = { success: boolean; error?: string };
+type OffscreenResponseBase = {
+  success: boolean;
+  error?: string;
+  recordingId?: string;
+  operationId?: string;
+};
+
+function isIdempotentGifOperation(type: OffscreenMessageType): boolean {
+  return (
+    type === OFFSCREEN_MESSAGE_TYPES.GIF_START ||
+    type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME ||
+    type === OFFSCREEN_MESSAGE_TYPES.GIF_FINISH ||
+    type === OFFSCREEN_MESSAGE_TYPES.GIF_RESET
+  );
+}
 
 async function sendToOffscreen<TResponse extends OffscreenResponseBase>(
   type: OffscreenMessageType,
@@ -215,31 +235,53 @@ async function sendToOffscreen<TResponse extends OffscreenResponseBase>(
 ): Promise<TResponse> {
   await offscreenManager.ensureOffscreenDocument();
 
+  const message = {
+    target: MessageTarget.Offscreen,
+    type,
+    ...payload,
+  };
+  const maxAttempts = isIdempotentGifOperation(type) ? 3 : 1;
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let response: TResponse | undefined;
     try {
-      const response = (await chrome.runtime.sendMessage({
-        target: MessageTarget.Offscreen,
-        type,
-        ...payload,
-      })) as TResponse | undefined;
-
-      if (!response) {
-        throw new Error('No response received from offscreen document');
-      }
-      if (!response.success) {
-        throw new Error(response.error || 'Unknown offscreen error');
-      }
-
-      return response;
+      response = (await chrome.runtime.sendMessage(message)) as
+        | TResponse
+        | undefined;
     } catch (error) {
       lastError = error;
-      if (attempt < 3) {
+      if (attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
         continue;
       }
       throw error;
     }
+
+    if (!response) {
+      lastError = new Error('No response received from offscreen document');
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+        continue;
+      }
+      throw lastError;
+    }
+    // Explicit encoder failures are deterministic and must not be retried.
+    if (!response.success) {
+      throw new Error(response.error || 'Unknown offscreen error');
+    }
+    if (
+      response.recordingId !== undefined &&
+      response.recordingId !== payload.recordingId
+    ) {
+      throw new Error('Offscreen GIF response recordingId mismatch');
+    }
+    if (
+      response.operationId !== undefined &&
+      response.operationId !== payload.operationId
+    ) {
+      throw new Error('Offscreen GIF response operationId mismatch');
+    }
+    return response;
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
@@ -265,9 +307,12 @@ function clearFixedTimers(state: RecordingState): void {
   }
 }
 
-async function resetFixedEncoderBestEffort(): Promise<void> {
+async function resetFixedEncoderBestEffort(recordingId: string): Promise<void> {
   try {
-    await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_RESET, {});
+    await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_RESET, {
+      recordingId,
+      operationId: createGifOperationId(recordingId, 'reset'),
+    });
   } catch {
     // Owner/CDP cleanup must continue even if the offscreen document is gone.
   }
@@ -290,7 +335,7 @@ async function discardFixedRecording(state: RecordingState): Promise<void> {
   } catch {
     // Ignore an interrupted frame.
   }
-  await resetFixedEncoderBestEffort();
+  await resetFixedEncoderBestEffort(state.recordingId);
   try {
     await cdpSessionManager.detach(state.tabId, CDP_SESSION_KEY);
   } catch {
@@ -367,7 +412,11 @@ async function captureAndEncodeFrame(state: RecordingState): Promise<void> {
       frame.inputBytes,
     );
     try {
+      const sequence = state.frameCount;
       await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
+        recordingId: state.recordingId,
+        sequence,
+        operationId: createGifFrameOperationId(state.recordingId, sequence),
         protocolVersion: 2,
         frameBase64: frame.frameBase64,
         frameEncoding: frame.frameEncoding,
@@ -478,6 +527,7 @@ async function startRecording(
     };
   }
   const owner = acquisition.owner;
+  const recordingId = createGifRecordingId();
 
   let attached = false;
   try {
@@ -493,7 +543,10 @@ async function startRecording(
   }
 
   try {
-    await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_RESET, {});
+    await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_START, {
+      recordingId,
+      operationId: createGifOperationId(recordingId, 'start'),
+    });
 
     if (typeof OffscreenCanvas === 'undefined') {
       throw new Error('OffscreenCanvas not available in this context');
@@ -510,6 +563,7 @@ async function startRecording(
 
     const state: RecordingState = {
       owner,
+      recordingId,
       isRecording: true,
       isStopping: false,
       tabId,
@@ -561,7 +615,7 @@ async function startRecording(
       clearFixedTimers(recordingState);
       recordingState = null;
     }
-    await resetFixedEncoderBestEffort();
+    await resetFixedEncoderBestEffort(recordingId);
     if (attached) {
       try {
         await cdpSessionManager.detach(tabId, CDP_SESSION_KEY);
@@ -629,7 +683,11 @@ async function stopRecording(): Promise<GifResult> {
           state.height,
           frame.inputBytes,
         );
+        const sequence = state.frameCount;
         await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
+          recordingId: state.recordingId,
+          sequence,
+          operationId: createGifFrameOperationId(state.recordingId, sequence),
           protocolVersion: 2,
           frameBase64: frame.frameBase64,
           frameEncoding: frame.frameEncoding,
@@ -658,7 +716,7 @@ async function stopRecording(): Promise<GifResult> {
     try {
       if (frameCount <= 0) {
         try {
-          await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_RESET, {});
+          await resetFixedEncoderBestEffort(state.recordingId);
         } catch {
           // ignore
         }
@@ -677,7 +735,10 @@ async function stopRecording(): Promise<GifResult> {
         gifBase64?: string;
         gifData?: number[];
         byteLength?: number;
-      }>(OFFSCREEN_MESSAGE_TYPES.GIF_FINISH, {});
+      }>(OFFSCREEN_MESSAGE_TYPES.GIF_FINISH, {
+        recordingId: state.recordingId,
+        operationId: createGifOperationId(state.recordingId, 'finish'),
+      });
       encoderFinalized = true;
       const gifBytes = decodeGifFinishPayload(response);
 
@@ -730,7 +791,9 @@ async function stopRecording(): Promise<GifResult> {
         error: error instanceof Error ? error.message : String(error),
       };
     } finally {
-      if (!encoderFinalized) await resetFixedEncoderBestEffort();
+      if (!encoderFinalized) {
+        await resetFixedEncoderBestEffort(state.recordingId);
+      }
       try {
         await cdpSessionManager.detach(tabId, CDP_SESSION_KEY);
       } catch {
@@ -1200,13 +1263,6 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             if (wasRecording) {
               clearedFixedFps = true;
             }
-          }
-
-          // Reset offscreen encoder
-          try {
-            await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_RESET, {});
-          } catch {
-            // ignore
           }
 
           // Clear cached GIF

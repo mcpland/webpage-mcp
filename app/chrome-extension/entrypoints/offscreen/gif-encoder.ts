@@ -9,6 +9,13 @@
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
 import { MessageTarget, OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
 import {
+  GIF_ENCODER_PROTOCOL_LIMITS,
+  createGifFrameOperationId,
+  createGifOperationId,
+  requireGifOperationId,
+  requireGifRecordingId,
+} from '@/common/gif-encoder-protocol';
+import {
   GIF_TRANSPORT_LIMITS,
   assertGifOutputBytes,
   assertPngDimensions,
@@ -23,6 +30,9 @@ import {
 
 interface GifEncoderState extends GifBudgetSnapshot {
   encoder: ReturnType<typeof GIFEncoder> | null;
+  recordingId: string | null;
+  startOperationId: string | null;
+  processedFrameOperationIds: Set<string>;
   width: number;
   height: number;
   isInitialized: boolean;
@@ -31,6 +41,7 @@ interface GifEncoderState extends GifBudgetSnapshot {
 interface GifMessageRecord extends Record<string, unknown> {
   target: MessageTarget;
   type:
+    | typeof OFFSCREEN_MESSAGE_TYPES.GIF_START
     | typeof OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME
     | typeof OFFSCREEN_MESSAGE_TYPES.GIF_FINISH
     | typeof OFFSCREEN_MESSAGE_TYPES.GIF_RESET;
@@ -43,6 +54,21 @@ export interface GifMessageResponse {
   frameCount?: number;
   gifBase64?: string;
   byteLength?: number;
+  recordingId?: string;
+  operationId?: string;
+}
+
+interface TerminalResponseCache {
+  recordingId: string;
+  operationId: string;
+  response: GifMessageResponse;
+  createdAt: number;
+}
+
+interface ResetTombstone {
+  recordingId: string;
+  operationId: string;
+  createdAt: number;
 }
 
 interface DecodedFrame {
@@ -56,6 +82,9 @@ interface DecodedFrame {
 
 const state: GifEncoderState = {
   encoder: null,
+  recordingId: null,
+  startOperationId: null,
+  processedFrameOperationIds: new Set(),
   width: 0,
   height: 0,
   frameCount: 0,
@@ -65,6 +94,8 @@ const state: GifEncoderState = {
 };
 
 let operationQueue: Promise<void> = Promise.resolve();
+let terminalResponseCache: TerminalResponseCache | null = null;
+let resetTombstone: ResetTombstone | null = null;
 
 function resetEncoder(): void {
   if (state.encoder) {
@@ -81,6 +112,27 @@ function resetEncoder(): void {
   state.totalPixels = 0;
   state.totalInputBytes = 0;
   state.isInitialized = false;
+}
+
+function clearActiveRecording(): void {
+  state.recordingId = null;
+  state.startOperationId = null;
+  state.processedFrameOperationIds.clear();
+}
+
+function discardActiveRecording(): void {
+  resetEncoder();
+  clearActiveRecording();
+}
+
+function pruneExpiredOperationCaches(): void {
+  const cutoff = Date.now() - GIF_ENCODER_PROTOCOL_LIMITS.terminalResponseTtlMs;
+  if (terminalResponseCache && terminalResponseCache.createdAt < cutoff) {
+    terminalResponseCache = null;
+  }
+  if (resetTombstone && resetTombstone.createdAt < cutoff) {
+    resetTombstone = null;
+  }
 }
 
 function initializeEncoder(width: number, height: number): void {
@@ -276,7 +328,7 @@ async function addFrame(message: GifMessageRecord): Promise<number> {
     });
     assertGifOutputBytes(state.encoder.bytesView().byteLength);
   } catch (error) {
-    resetEncoder();
+    discardActiveRecording();
     throw error;
   }
 
@@ -284,6 +336,166 @@ async function addFrame(message: GifMessageRecord): Promise<number> {
   state.totalPixels = nextBudget.totalPixels;
   state.totalInputBytes = nextBudget.totalInputBytes;
   return state.frameCount;
+}
+
+function readRecordingEnvelope(
+  message: GifMessageRecord,
+  operation: 'start' | 'finish' | 'reset',
+): { recordingId: string; operationId: string } {
+  const recordingId = requireGifRecordingId(message.recordingId);
+  const operationId = requireGifOperationId(
+    message.operationId,
+    createGifOperationId(recordingId, operation),
+  );
+  return { recordingId, operationId };
+}
+
+function startRecording(message: GifMessageRecord): GifMessageResponse {
+  pruneExpiredOperationCaches();
+  const { recordingId, operationId } = readRecordingEnvelope(message, 'start');
+
+  if (state.recordingId === recordingId) {
+    if (state.startOperationId !== operationId) {
+      throw new Error('GIF start operation does not match the active recording');
+    }
+    return {
+      success: true,
+      recordingId,
+      operationId,
+      frameCount: state.frameCount,
+    };
+  }
+  if (terminalResponseCache?.recordingId === recordingId) {
+    throw new Error('GIF recording has already finished');
+  }
+  if (resetTombstone?.recordingId === recordingId) {
+    throw new Error('GIF recording has already been reset');
+  }
+
+  // A new recording is the authoritative bounded generation boundary. It
+  // discards any orphaned encoder state left by a previous worker instance.
+  discardActiveRecording();
+  terminalResponseCache = null;
+  resetTombstone = null;
+  state.recordingId = recordingId;
+  state.startOperationId = operationId;
+  return { success: true, recordingId, operationId, frameCount: 0 };
+}
+
+async function addFrameOperation(
+  message: GifMessageRecord,
+): Promise<GifMessageResponse> {
+  pruneExpiredOperationCaches();
+  const recordingId = requireGifRecordingId(message.recordingId);
+  const sequence = readInteger(
+    message.sequence,
+    'GIF frame sequence',
+    0,
+    GIF_ENCODER_PROTOCOL_LIMITS.maxFrameSequence,
+  );
+  const operationId = requireGifOperationId(
+    message.operationId,
+    createGifFrameOperationId(recordingId, sequence),
+  );
+
+  if (state.recordingId !== recordingId) {
+    throw new Error('GIF recordingId does not match the active recording');
+  }
+  if (state.processedFrameOperationIds.has(operationId)) {
+    if (sequence >= state.frameCount) {
+      throw new Error('GIF frame deduplication state is inconsistent');
+    }
+    return {
+      success: true,
+      recordingId,
+      operationId,
+      frameCount: sequence + 1,
+    };
+  }
+  if (sequence !== state.frameCount) {
+    throw new Error(
+      `GIF frame sequence ${sequence} is out of order; expected ${state.frameCount}`,
+    );
+  }
+
+  const frameCount = await addFrame(message);
+  if (frameCount !== sequence + 1) {
+    discardActiveRecording();
+    throw new Error('GIF encoder frame count is inconsistent');
+  }
+  state.processedFrameOperationIds.add(operationId);
+  return { success: true, recordingId, operationId, frameCount };
+}
+
+function finishRecording(message: GifMessageRecord): GifMessageResponse {
+  pruneExpiredOperationCaches();
+  const { recordingId, operationId } = readRecordingEnvelope(
+    message,
+    'finish',
+  );
+  if (
+    terminalResponseCache?.recordingId === recordingId &&
+    terminalResponseCache.operationId === operationId
+  ) {
+    return { ...terminalResponseCache.response };
+  }
+  if (state.recordingId !== recordingId) {
+    throw new Error('GIF recordingId does not match the active recording');
+  }
+
+  try {
+    const { bytes, frameCount } = finishEncoding();
+    const response: GifMessageResponse = {
+      success: true,
+      protocolVersion: 2,
+      recordingId,
+      operationId,
+      frameCount,
+      gifBase64: encodeBytesToBase64(
+        bytes,
+        GIF_TRANSPORT_LIMITS.maxOutputBytes,
+        'Encoded GIF output',
+      ),
+      byteLength: bytes.byteLength,
+    };
+    terminalResponseCache = {
+      recordingId,
+      operationId,
+      response,
+      createdAt: Date.now(),
+    };
+    resetTombstone = null;
+    clearActiveRecording();
+    return response;
+  } catch (error) {
+    discardActiveRecording();
+    throw error;
+  }
+}
+
+function resetRecording(message: GifMessageRecord): GifMessageResponse {
+  pruneExpiredOperationCaches();
+  const { recordingId, operationId } = readRecordingEnvelope(message, 'reset');
+
+  if (state.recordingId !== null) {
+    if (state.recordingId !== recordingId) {
+      throw new Error('GIF recordingId does not match the active recording');
+    }
+    discardActiveRecording();
+    terminalResponseCache = null;
+  } else if (terminalResponseCache?.recordingId === recordingId) {
+    terminalResponseCache = null;
+  } else if (
+    resetTombstone?.recordingId === recordingId &&
+    resetTombstone.operationId === operationId
+  ) {
+    return { success: true, recordingId, operationId };
+  } else {
+    throw new Error('GIF recordingId does not match any active recording');
+  }
+
+  resetTombstone = { recordingId, operationId, createdAt: Date.now() };
+  return { success: true, recordingId, operationId };
 }
 
 function finishEncoding(): { bytes: Uint8Array; frameCount: number } {
@@ -309,6 +521,7 @@ function isGifMessage(message: unknown): message is GifMessageRecord {
   if (candidate.target !== MessageTarget.Offscreen) return false;
   return (
     candidate.type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME ||
+    candidate.type === OFFSCREEN_MESSAGE_TYPES.GIF_START ||
     candidate.type === OFFSCREEN_MESSAGE_TYPES.GIF_FINISH ||
     candidate.type === OFFSCREEN_MESSAGE_TYPES.GIF_RESET
   );
@@ -318,27 +531,17 @@ async function processGifMessage(
   message: GifMessageRecord,
 ): Promise<GifMessageResponse> {
   switch (message.type) {
-    case OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME:
-      return { success: true, frameCount: await addFrame(message) };
+    case OFFSCREEN_MESSAGE_TYPES.GIF_START:
+      return startRecording(message);
 
-    case OFFSCREEN_MESSAGE_TYPES.GIF_FINISH: {
-      const { bytes, frameCount } = finishEncoding();
-      return {
-        success: true,
-        protocolVersion: 2,
-        frameCount,
-        gifBase64: encodeBytesToBase64(
-          bytes,
-          GIF_TRANSPORT_LIMITS.maxOutputBytes,
-          'Encoded GIF output',
-        ),
-        byteLength: bytes.byteLength,
-      };
-    }
+    case OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME:
+      return addFrameOperation(message);
+
+    case OFFSCREEN_MESSAGE_TYPES.GIF_FINISH:
+      return finishRecording(message);
 
     case OFFSCREEN_MESSAGE_TYPES.GIF_RESET:
-      resetEncoder();
-      return { success: true };
+      return resetRecording(message);
   }
 }
 

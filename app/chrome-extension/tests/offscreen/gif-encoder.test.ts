@@ -23,7 +23,19 @@ import {
   type GifMessageResponse,
 } from '@/entrypoints/offscreen/gif-encoder';
 import { MessageTarget, OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
+import {
+  GIF_ENCODER_PROTOCOL_LIMITS,
+  createGifFrameOperationId,
+  createGifOperationId,
+} from '@/common/gif-encoder-protocol';
 import { GIF_TRANSPORT_LIMITS } from '@/common/gif-transport';
+
+let recordingOrdinal = 0;
+let recordingId = '';
+
+function makeRecordingId(ordinal: number): string {
+  return `gif_${ordinal.toString(16).padStart(32, '0')}`;
+}
 
 function pngBytes(width: number, height: number): Uint8Array {
   const bytes = new Uint8Array(24);
@@ -50,11 +62,46 @@ function readBlobBytes(blob: Blob): Promise<Uint8Array> {
   });
 }
 
-function version2Frame(width = 1, height = 1): Record<string, unknown> {
+function startMessage(id = recordingId): Record<string, unknown> {
+  return {
+    target: MessageTarget.Offscreen,
+    type: OFFSCREEN_MESSAGE_TYPES.GIF_START,
+    recordingId: id,
+    operationId: createGifOperationId(id, 'start'),
+  };
+}
+
+function finishMessage(id = recordingId): Record<string, unknown> {
+  return {
+    target: MessageTarget.Offscreen,
+    type: OFFSCREEN_MESSAGE_TYPES.GIF_FINISH,
+    recordingId: id,
+    operationId: createGifOperationId(id, 'finish'),
+  };
+}
+
+function resetMessage(id = recordingId): Record<string, unknown> {
+  return {
+    target: MessageTarget.Offscreen,
+    type: OFFSCREEN_MESSAGE_TYPES.GIF_RESET,
+    recordingId: id,
+    operationId: createGifOperationId(id, 'reset'),
+  };
+}
+
+function version2Frame(
+  width = 1,
+  height = 1,
+  sequence = 0,
+  id = recordingId,
+): Record<string, unknown> {
   const bytes = pngBytes(width, height);
   return {
     target: MessageTarget.Offscreen,
     type: OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
+    recordingId: id,
+    sequence,
+    operationId: createGifFrameOperationId(id, sequence),
     protocolVersion: 2,
     frameEncoding: 'png',
     frameBase64: toBase64(bytes),
@@ -74,6 +121,7 @@ function dispatch(message: unknown): Promise<GifMessageResponse> {
 
 describe('offscreen GIF encoder', () => {
   beforeEach(async () => {
+    recordingId = makeRecordingId(++recordingOrdinal);
     gifencMocks.encoder.bytesView.mockReturnValue(new Uint8Array([71, 73, 70]));
     vi.stubGlobal(
       'createImageBitmap',
@@ -105,23 +153,18 @@ describe('offscreen GIF encoder', () => {
         }
       },
     );
-    await dispatch({
-      target: MessageTarget.Offscreen,
-      type: OFFSCREEN_MESSAGE_TYPES.GIF_RESET,
-    });
+    await dispatch(startMessage());
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
 
   it('accepts protocol-v2 PNG frames and returns bounded gifBase64', async () => {
     const add = await dispatch(version2Frame());
-    const finish = await dispatch({
-      target: MessageTarget.Offscreen,
-      type: OFFSCREEN_MESSAGE_TYPES.GIF_FINISH,
-    });
+    const finish = await dispatch(finishMessage());
 
     expect(add).toMatchObject({ success: true, frameCount: 1 });
     expect(finish).toMatchObject({
@@ -134,10 +177,105 @@ describe('offscreen GIF encoder', () => {
     expect(finish).not.toHaveProperty('gifData');
   });
 
+  it('deduplicates a retried frame operation without decoding or writing twice', async () => {
+    const frame = version2Frame();
+    const first = await dispatch(frame);
+    const retried = await dispatch(frame);
+
+    expect(retried).toEqual(first);
+    expect(gifencMocks.encoder.writeFrame).toHaveBeenCalledOnce();
+    expect(createImageBitmap).toHaveBeenCalledOnce();
+  });
+
+  it('keeps start and reset retries idempotent while rejecting stale generations', async () => {
+    expect((await dispatch(version2Frame())).success).toBe(true);
+    expect(await dispatch(startMessage())).toMatchObject({
+      success: true,
+      recordingId,
+      frameCount: 1,
+    });
+
+    expect((await dispatch(resetMessage())).success).toBe(true);
+    expect((await dispatch(resetMessage())).success).toBe(true);
+
+    const nextRecordingId = makeRecordingId(++recordingOrdinal);
+    expect((await dispatch(startMessage(nextRecordingId))).success).toBe(true);
+    expect((await dispatch(version2Frame(1, 1, 0, recordingId))).success).toBe(
+      false,
+    );
+    expect((await dispatch(resetMessage(recordingId))).success).toBe(false);
+    expect(
+      (await dispatch(version2Frame(1, 1, 0, nextRecordingId))).success,
+    ).toBe(true);
+  });
+
+  it('returns the cached terminal response for duplicate finish operations', async () => {
+    await dispatch(version2Frame());
+
+    const first = await dispatch(finishMessage());
+    const retried = await dispatch(finishMessage());
+
+    expect(retried).toEqual(first);
+    expect(gifencMocks.encoder.finish).toHaveBeenCalledOnce();
+  });
+
+  it('clears terminal state on a new recording and fails stale operations closed', async () => {
+    const staleFrame = version2Frame();
+    await dispatch(staleFrame);
+    await dispatch(finishMessage());
+
+    const nextRecordingId = makeRecordingId(++recordingOrdinal);
+    expect((await dispatch(startMessage(nextRecordingId))).success).toBe(true);
+
+    expect((await dispatch(staleFrame)).success).toBe(false);
+    expect((await dispatch(finishMessage())).success).toBe(false);
+    expect((await dispatch(resetMessage())).success).toBe(false);
+    expect(gifencMocks.encoder.finish).toHaveBeenCalledOnce();
+  });
+
+  it('expires the single cached finish response after its bounded TTL', async () => {
+    const now = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    await dispatch(version2Frame());
+    expect((await dispatch(finishMessage())).success).toBe(true);
+
+    nowSpy.mockReturnValue(
+      now + GIF_ENCODER_PROTOCOL_LIMITS.terminalResponseTtlMs + 1,
+    );
+    const expired = await dispatch(finishMessage());
+
+    expect(expired.success).toBe(false);
+    expect(gifencMocks.encoder.finish).toHaveBeenCalledOnce();
+    nowSpy.mockRestore();
+  });
+
+  it('rejects invalid identifiers, operation IDs, and out-of-order sequences', async () => {
+    const malformed = version2Frame();
+    malformed.recordingId = 'gif_short';
+    const malformedResponse = await dispatch(malformed);
+
+    const wrongOperation = version2Frame();
+    wrongOperation.operationId = `${recordingId}:frame:1`;
+    const operationResponse = await dispatch(wrongOperation);
+
+    const outOfOrder = await dispatch(version2Frame(1, 1, 1));
+
+    expect(malformedResponse.success).toBe(false);
+    expect(malformedResponse.error).toContain('recordingId');
+    expect(operationResponse.success).toBe(false);
+    expect(operationResponse.error).toContain('operationId');
+    expect(outOfOrder.success).toBe(false);
+    expect(outOfOrder.error).toContain('out of order');
+    expect(gifencMocks.encoder.writeFrame).not.toHaveBeenCalled();
+  });
+
   it('accepts a strictly bounded legacy imageData frame', async () => {
     const response = await dispatch({
       target: MessageTarget.Offscreen,
       type: OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
+      recordingId,
+      sequence: 0,
+      operationId: createGifFrameOperationId(recordingId, 0),
       imageData: [0, 1, 2, 255],
       width: 1,
       height: 1,
@@ -164,6 +302,9 @@ describe('offscreen GIF encoder', () => {
     const response = await dispatch({
       target: MessageTarget.Offscreen,
       type: OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
+      recordingId,
+      sequence: 0,
+      operationId: createGifFrameOperationId(recordingId, 0),
       imageData: [0, 1, 2],
       width: 1,
       height: 1,
@@ -192,19 +333,27 @@ describe('offscreen GIF encoder', () => {
   });
 
   it('enforces the cumulative pixel budget in the offscreen boundary', async () => {
-    const fullFrame = version2Frame(
-      GIF_TRANSPORT_LIMITS.maxWidth,
-      GIF_TRANSPORT_LIMITS.maxHeight,
-    );
     const allowedFrames = Math.floor(
       GIF_TRANSPORT_LIMITS.maxTotalPixels / GIF_TRANSPORT_LIMITS.maxFramePixels,
     );
 
     for (let index = 0; index < allowedFrames; index += 1) {
-      const response = await dispatch(fullFrame);
+      const response = await dispatch(
+        version2Frame(
+          GIF_TRANSPORT_LIMITS.maxWidth,
+          GIF_TRANSPORT_LIMITS.maxHeight,
+          index,
+        ),
+      );
       expect(response.success).toBe(true);
     }
-    const rejected = await dispatch(fullFrame);
+    const rejected = await dispatch(
+      version2Frame(
+        GIF_TRANSPORT_LIMITS.maxWidth,
+        GIF_TRANSPORT_LIMITS.maxHeight,
+        allowedFrames,
+      ),
+    );
 
     expect(rejected.success).toBe(false);
     expect(rejected.error).toContain('cumulative pixel limit');
@@ -212,22 +361,37 @@ describe('offscreen GIF encoder', () => {
   });
 
   it('enforces the hard frame-count budget for legacy callers too', async () => {
-    const legacyFrame = {
+    for (let index = 0; index < GIF_TRANSPORT_LIMITS.maxFrames; index += 1) {
+      expect(
+        (
+          await dispatch({
+            target: MessageTarget.Offscreen,
+            type: OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
+            recordingId,
+            sequence: index,
+            operationId: createGifFrameOperationId(recordingId, index),
+            imageData: [0, 1, 2, 255],
+            width: 1,
+            height: 1,
+            delay: 20,
+          })
+        ).success,
+      ).toBe(true);
+    }
+    const rejected = await dispatch({
       target: MessageTarget.Offscreen,
       type: OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
+      recordingId,
+      sequence: GIF_TRANSPORT_LIMITS.maxFrames,
+      operationId: `${recordingId}:frame:${GIF_TRANSPORT_LIMITS.maxFrames}`,
       imageData: [0, 1, 2, 255],
       width: 1,
       height: 1,
       delay: 20,
-    };
-
-    for (let index = 0; index < GIF_TRANSPORT_LIMITS.maxFrames; index += 1) {
-      expect((await dispatch(legacyFrame)).success).toBe(true);
-    }
-    const rejected = await dispatch(legacyFrame);
+    });
 
     expect(rejected.success).toBe(false);
-    expect(rejected.error).toContain('frame limit');
+    expect(rejected.error).toContain('sequence');
     expect(gifencMocks.encoder.writeFrame).toHaveBeenCalledTimes(
       GIF_TRANSPORT_LIMITS.maxFrames,
     );
@@ -235,11 +399,8 @@ describe('offscreen GIF encoder', () => {
 
   it('rejects dimension changes without silently replacing the encoder', async () => {
     expect((await dispatch(version2Frame(1, 1))).success).toBe(true);
-    const changed = await dispatch(version2Frame(2, 1));
-    const finish = await dispatch({
-      target: MessageTarget.Offscreen,
-      type: OFFSCREEN_MESSAGE_TYPES.GIF_FINISH,
-    });
+    const changed = await dispatch(version2Frame(2, 1, 1));
+    const finish = await dispatch(finishMessage());
 
     expect(changed.success).toBe(false);
     expect(changed.error).toContain('dimensions changed');
@@ -257,10 +418,7 @@ describe('offscreen GIF encoder', () => {
         byteLength: GIF_TRANSPORT_LIMITS.maxOutputBytes + 1,
       } as unknown as Uint8Array);
 
-    const finish = await dispatch({
-      target: MessageTarget.Offscreen,
-      type: OFFSCREEN_MESSAGE_TYPES.GIF_FINISH,
-    });
+    const finish = await dispatch(finishMessage());
 
     expect(finish.success).toBe(false);
     expect(finish.error).toContain('byte limit');
@@ -268,8 +426,12 @@ describe('offscreen GIF encoder', () => {
     expect(gifencMocks.encoder.finish).toHaveBeenCalledOnce();
     expect(gifencMocks.encoder.reset).toHaveBeenCalled();
 
+    const nextRecordingId = makeRecordingId(++recordingOrdinal);
+    expect((await dispatch(startMessage(nextRecordingId))).success).toBe(true);
     gifencMocks.encoder.bytesView.mockReturnValue(new Uint8Array([71, 73, 70]));
-    expect((await dispatch(version2Frame())).success).toBe(true);
+    expect((await dispatch(version2Frame(1, 1, 0, nextRecordingId))).success).toBe(
+      true,
+    );
   });
 
   it('resets immediately when encoded output crosses the limit while adding a frame', async () => {
