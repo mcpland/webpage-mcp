@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { TriggerSpec } from '@/entrypoints/background/record-replay-v3/domain/triggers';
 import { DOM_TRIGGER_LIMITS } from '@/entrypoints/background/record-replay-v3/domain/dom-trigger-policy';
+import { TRIGGER_RESOURCE_LIMITS } from '@/entrypoints/background/record-replay-v3/domain/trigger-limits';
 import {
   closeRrV3Db,
   deleteRrV3Db,
@@ -260,6 +261,42 @@ describe('TriggerStore CRUD', () => {
           args: { updated: true },
         }),
       ).resolves.toBeUndefined();
+    });
+
+    it('rejects oversized trigger args before persistence', async () => {
+      const store = createTriggersStore();
+      const trigger = {
+        ...createManualTrigger('trigger-oversized', 'flow-1'),
+        args: {
+          payload: 'x'.repeat(TRIGGER_RESOURCE_LIMITS.maxStringUtf8Bytes + 1),
+        },
+      } satisfies TriggerSpec;
+
+      await expect(store.save(trigger)).rejects.toThrow(
+        `${TRIGGER_RESOURCE_LIMITS.maxStringUtf8Bytes}-byte string limit`,
+      );
+      await expect(store.get(trigger.id)).resolves.toBeNull();
+    });
+
+    it('bounds URL match rules and persisted identifiers', async () => {
+      const store = createTriggersStore();
+      const tooManyRules = {
+        ...createUrlTrigger('trigger-rules', 'flow-1'),
+        match: Array.from(
+          { length: TRIGGER_RESOURCE_LIMITS.maxUrlMatchRules + 1 },
+          () => ({ kind: 'domain' as const, value: 'example.com' }),
+        ),
+      } satisfies TriggerSpec;
+      await expect(store.save(tooManyRules)).rejects.toThrow(
+        `at most ${TRIGGER_RESOURCE_LIMITS.maxUrlMatchRules} rules`,
+      );
+
+      const oversizedId = `t${'x'.repeat(TRIGGER_RESOURCE_LIMITS.maxIdentifierUtf8Bytes)}`;
+      await expect(
+        store.save(createManualTrigger(oversizedId, 'flow-1')),
+      ).rejects.toThrow(
+        `${TRIGGER_RESOURCE_LIMITS.maxIdentifierUtf8Bytes}-byte string limit`,
+      );
     });
   });
 
