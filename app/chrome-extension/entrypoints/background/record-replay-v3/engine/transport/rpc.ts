@@ -17,6 +17,7 @@ export type RpcMethod =
   // Query method
   | "rr_v3.listRuns"
   | "rr_v3.getRun"
+  | "rr_v3.deleteRun"
   | "rr_v3.getEvents"
   | "rr_v3.listArtifacts"
   | "rr_v3.getArtifact"

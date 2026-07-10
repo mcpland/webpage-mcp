@@ -16,7 +16,23 @@ import type {
   TriggerId,
 } from "../../domain/ids";
 import type { DebuggerCommand } from "../../domain/debug";
-import type { RunEvent } from "../../domain/events";
+import { isTerminalStatus, type RunEvent } from "../../domain/events";
+import {
+  EVENT_RESOURCE_LIMITS,
+  normalizeEventListOptions as normalizeEventStorageListOptions,
+  type EventListOptions,
+} from "../../domain/event-limits";
+import {
+  RUN_RESOURCE_LIMITS,
+  findRunResourceLimitViolation,
+  normalizeRunListOptions as normalizeRunStorageListOptions,
+  type RunListOptions,
+} from "../../domain/run-limits";
+import {
+  RR_V3_RPC_LIMITS,
+  findRpcRequestEnvelopeViolation,
+  isBoundedRpcIdentifier,
+} from "../../domain/rpc-limits";
 import type {
   FlowBinding,
   FlowExposedOutput,
@@ -269,6 +285,10 @@ export class RpcServer {
   private async handleEnqueueRun(
     params: JsonObject | undefined,
   ): Promise<JsonValue> {
+    const resourceViolation = findRunResourceLimitViolation(params ?? {});
+    if (resourceViolation) {
+      throw new Error(resourceViolation.replace(/^run/, "run request"));
+    }
     let resolvedTabId =
       typeof params?.tabId === "number" ? params.tabId : undefined;
     const rawExecution = params?.execution as ExecutionFlags | undefined;
@@ -420,30 +440,43 @@ export class RpcServer {
     request: RpcRequest,
     conn: PortConnection,
   ): Promise<JsonValue> {
+    const envelopeViolation = findRpcRequestEnvelopeViolation(request);
+    if (envelopeViolation) {
+      throw new Error(envelopeViolation);
+    }
     const { method, params } = request;
 
     switch (method) {
       case "rr_v3.listRuns": {
-        const runs = await this.storage.runs.list();
+        const runs = await this.storage.runs.list(
+          this.normalizeRunListOptions(params),
+        );
         return runs as unknown as JsonValue;
       }
 
       case "rr_v3.getRun": {
-        const runId = params?.runId as RunId | undefined;
-        if (!runId) throw new Error("runId is required");
+        const runId = this.requireRunId(params?.runId);
         const run = await this.storage.runs.get(runId);
         return run as unknown as JsonValue;
       }
 
+      case "rr_v3.deleteRun": {
+        const runId = this.requireRunId(params?.runId);
+        const run = await this.storage.runs.get(runId);
+        if (!run) return { deleted: false, runId };
+        if (!isTerminalStatus(run.status)) {
+          throw new Error(`Cannot delete non-terminal run "${runId}" with status "${run.status}"`);
+        }
+        await this.storage.runs.delete(runId);
+        return { deleted: true, runId };
+      }
+
       case "rr_v3.getEvents": {
-        const runId = params?.runId as RunId | undefined;
-        if (!runId) throw new Error("runId is required");
-        const fromSeq = params?.fromSeq as number | undefined;
-        const limit = params?.limit as number | undefined;
-        const events = await this.storage.events.list(runId, {
-          fromSeq,
-          limit,
-        });
+        const runId = this.requireRunId(params?.runId);
+        const events = await this.storage.events.list(
+          runId,
+          this.normalizeEventListOptions(params),
+        );
         return events as unknown as JsonValue;
       }
 
@@ -614,6 +647,59 @@ export class RpcServer {
 
       default:
         throw new Error(`Unknown method: ${method}`);
+    }
+  }
+
+  private requireRunId(value: unknown): RunId {
+    if (!isBoundedRpcIdentifier(value)) {
+      throw new Error(
+        `runId is required and must not exceed ${RR_V3_RPC_LIMITS.maxIdentifierUtf8Bytes} UTF-8 bytes`,
+      );
+    }
+    return value as RunId;
+  }
+
+  private normalizeRunListOptions(
+    params: JsonObject | undefined,
+  ): RunListOptions {
+    if (params?.limit === 0) {
+      throw new Error(
+        `limit must be an integer between 1 and ${RUN_RESOURCE_LIMITS.maxListLimit}`,
+      );
+    }
+    try {
+      return normalizeRunStorageListOptions({
+        offset: params?.offset as number | undefined,
+        limit: params?.limit as number | undefined,
+        flowId: params?.flowId as string | undefined,
+        status: params?.status as RunListOptions["status"],
+      });
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private normalizeEventListOptions(
+    params: JsonObject | undefined,
+  ): EventListOptions {
+    const limit = params?.limit ?? RR_V3_RPC_LIMITS.defaultEventListLimit;
+    if (
+      typeof limit !== "number" ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > EVENT_RESOURCE_LIMITS.maxListLimit
+    ) {
+      throw new Error(
+        `limit must be an integer between 1 and ${EVENT_RESOURCE_LIMITS.maxListLimit}`,
+      );
+    }
+    try {
+      return normalizeEventStorageListOptions({
+        fromSeq: params?.fromSeq as number | undefined,
+        limit,
+      });
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : String(error));
     }
   }
 
