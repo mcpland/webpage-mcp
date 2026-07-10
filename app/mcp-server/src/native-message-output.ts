@@ -32,6 +32,15 @@ interface QueuedWrite {
   frame: Buffer;
   resolve: () => void;
   reject: (error: Error) => void;
+  coalesceKey?: string;
+  terminal: boolean;
+}
+
+export interface NativeMessageSendOptions {
+  /** Replace an older queued (not yet active) frame with the same logical key. */
+  coalesceKey?: string;
+  /** Preserve this frame by evicting stale coalescible frames when necessary. */
+  terminal?: boolean;
 }
 
 function encodeNativeMessage(message: unknown, maximumMessageBytes: number): Buffer {
@@ -94,7 +103,7 @@ export class NativeMessageWriter {
     output.on('close', this.handleOutputClose);
   }
 
-  public send(message: unknown): Promise<void> {
+  public send(message: unknown, options: NativeMessageSendOptions = {}): Promise<void> {
     let frame: Buffer;
     try {
       frame = encodeNativeMessage(message, this.maximumMessageBytes);
@@ -105,20 +114,88 @@ export class NativeMessageWriter {
     if (this.terminalError) {
       return Promise.reject(this.terminalError);
     }
-    if (this.queuedBytes + frame.length > this.maximumQueuedBytes) {
+
+    const coalesceKey = options.coalesceKey?.trim() || undefined;
+    const terminal = options.terminal === true;
+    const matchingIndex = coalesceKey
+      ? this.queue.findIndex((item) => item.coalesceKey === coalesceKey)
+      : -1;
+    const matching = matchingIndex >= 0 ? this.queue[matchingIndex] : undefined;
+
+    // A late intermediate update cannot supersede an already queued final.
+    if (matching?.terminal && !terminal) return Promise.resolve();
+
+    const replacedBytes = matching?.frame.length ?? 0;
+    // Every non-terminal producer observes the reserve. Request/response
+    // frames are never evicted; they simply cannot consume the bytes reserved
+    // for the final assistant snapshot and terminal status.
+    const capacity = terminal
+      ? this.maximumQueuedBytes
+      : this.maximumQueuedBytes - this.terminalReserveBytes();
+    const projectedBytes = this.queuedBytes - replacedBytes + frame.length;
+
+    if (projectedBytes > capacity && terminal) {
+      this.evictCoalescibleFrames(projectedBytes - capacity, matchingIndex);
+    }
+
+    if (this.queuedBytes - replacedBytes + frame.length > capacity) {
       return Promise.reject(
         new NativeMessageOutputError(
           'OUTPUT_QUEUE_FULL',
-          `Native message output queue would exceed ${this.maximumQueuedBytes} bytes`,
+          `Native message output queue would exceed ${capacity} bytes`,
         ),
       );
     }
 
     return new Promise<void>((resolve, reject) => {
-      this.queue.push({ frame, resolve, reject });
-      this.queuedBytes += frame.length;
+      if (matching) {
+        // The older frame is intentionally superseded and will never write.
+        // Resolve it now so callback storage cannot grow with token count.
+        matching.resolve();
+        this.queuedBytes += frame.length - matching.frame.length;
+        matching.frame = frame;
+        matching.terminal = terminal;
+        matching.resolve = resolve;
+        matching.reject = reject;
+      } else {
+        this.queue.push({
+          frame,
+          resolve,
+          reject,
+          coalesceKey,
+          terminal,
+        });
+        this.queuedBytes += frame.length;
+      }
       this.pump();
     });
+  }
+
+  private terminalReserveBytes(): number {
+    // Default configuration reserves one maximum-sized Chrome frame. For
+    // deliberately tiny test/custom queues, reserve at most half the queue.
+    return Math.min(this.maximumMessageBytes + 4, Math.floor(this.maximumQueuedBytes / 2));
+  }
+
+  private evictCoalescibleFrames(requiredBytes: number, excludedIndex: number): void {
+    let releasedBytes = 0;
+    for (let index = 0; index < this.queue.length && releasedBytes < requiredBytes; ) {
+      if (index === excludedIndex) {
+        index += 1;
+        continue;
+      }
+      const item = this.queue[index];
+      if (!item.coalesceKey || item.terminal) {
+        index += 1;
+        continue;
+      }
+
+      this.queue.splice(index, 1);
+      this.queuedBytes -= item.frame.length;
+      releasedBytes += item.frame.length;
+      item.resolve();
+      if (index < excludedIndex) excludedIndex -= 1;
+    }
   }
 
   private readonly handleOutputError = (error: Error): void => {

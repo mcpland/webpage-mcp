@@ -9,10 +9,23 @@ import {
   type CodexEngineConfig,
 } from 'webpage-mcp-shared';
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
-import type { AgentMessage, RealtimeEvent } from '../types';
 import { getProject } from '../project-service';
 import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
 import { createAgentEventDedupKey } from './event-dedupe';
+import {
+  BoundedAssistantStream,
+  BoundedMap,
+  BoundedSet,
+  STREAM_ACTIVE_COMMAND_MAX_ENTRIES,
+  STREAM_ASSISTANT_TEXT_MAX_BYTES,
+  STREAM_DEDUPE_MAX_ENTRIES,
+  STREAM_THINKING_TEXT_MAX_BYTES,
+  STREAM_TOOL_CONTENT_MAX_BYTES,
+  STREAM_TOOL_FIELD_MAX_BYTES,
+  boundStreamText,
+  createBoundedAgentMessage,
+  type AssistantStreamSnapshot,
+} from './stream-output';
 
 type TodoListPhase = 'started' | 'update' | 'completed';
 
@@ -209,12 +222,13 @@ export class CodexEngine implements AgentEngine {
       let rl: readline.Interface | null = null;
 
       // Assistant message state
-      let assistantBuffer = '';
       let assistantMessageId: string | null = null;
       let assistantCreatedAt: string | null = null;
-      const streamedToolHashes = new Set<string>();
-      const activeCommands = new Map<string, { command?: string }>();
-      const thinkingSegments: string[] = [];
+      const streamedToolHashes = new BoundedSet<string>(STREAM_DEDUPE_MAX_ENTRIES);
+      const activeCommands = new BoundedMap<string, { command?: string }>(
+        STREAM_ACTIVE_COMMAND_MAX_ENTRIES,
+      );
+      let assistantStream: BoundedAssistantStream | null = null;
 
       /**
        * Cleanup temporary files created for image attachments.
@@ -241,6 +255,11 @@ export class CodexEngine implements AgentEngine {
       const finish = async (error?: unknown): Promise<void> => {
         if (settled) return;
         settled = true;
+
+        // Always flush the last coalesced snapshot before teardown, then clear
+        // its timer so abort/error paths cannot emit after this run settles.
+        assistantStream?.flushFinal();
+        assistantStream?.cancel();
 
         // Clear timeout
         if (timeoutHandle) {
@@ -315,39 +334,19 @@ export class CodexEngine implements AgentEngine {
       rl = readline.createInterface({ input: child.stdout });
 
       /**
-       * Build the assistant message payload, combining thinking and agent content.
-       */
-      const buildAssistantPayload = (): string => {
-        const trimmedAssistant = assistantBuffer.trim();
-        const thinkingContent = thinkingSegments
-          .map((segment) => segment.trim())
-          .filter((segment) => segment.length > 0)
-          .map((segment) => `<thinking>${segment}</thinking>`)
-          .join('\n\n');
-
-        const parts: string[] = [];
-        if (thinkingContent) {
-          parts.push(thinkingContent);
-        }
-        if (trimmedAssistant) {
-          parts.push(trimmedAssistant);
-        }
-        return parts.join('\n\n').trim();
-      };
-
-      /**
        * Reset assistant buffers after emitting a final message.
        */
       const resetAssistantBuffers = (): void => {
-        assistantBuffer = '';
-        thinkingSegments.length = 0;
+        assistantStream?.reset();
         assistantMessageId = null;
         assistantCreatedAt = null;
       };
 
-      // Helper: emit assistant message
-      const emitAssistant = (isFinal: boolean): void => {
-        const content = buildAssistantPayload();
+      const emitAssistantSnapshot = (
+        snapshot: AssistantStreamSnapshot,
+        isFinal: boolean,
+      ): void => {
+        const content = snapshot.content;
         if (!content) return;
 
         if (!assistantMessageId) {
@@ -357,20 +356,35 @@ export class CodexEngine implements AgentEngine {
           assistantCreatedAt = new Date().toISOString();
         }
 
-        const message: AgentMessage = {
-          id: assistantMessageId,
-          sessionId,
-          role: 'assistant',
-          content,
-          messageType: 'chat',
-          cliSource: this.name,
-          requestId,
-          isStreaming: !isFinal,
-          isFinal,
-          createdAt: assistantCreatedAt,
-        };
+        const message = createBoundedAgentMessage(
+          {
+            id: assistantMessageId,
+            sessionId,
+            role: 'assistant',
+            content,
+            messageType: 'chat',
+            cliSource: this.name,
+            requestId,
+            isStreaming: !isFinal,
+            isFinal,
+            createdAt: assistantCreatedAt,
+          },
+          {
+            contentMaximumBytes:
+              STREAM_ASSISTANT_TEXT_MAX_BYTES + STREAM_THINKING_TEXT_MAX_BYTES,
+            truncation: snapshot.truncation,
+          },
+        );
 
         ctx.emit({ type: 'message', data: message });
+      };
+
+      assistantStream = new BoundedAssistantStream(emitAssistantSnapshot);
+
+      // Helper retained for terminal event handlers. Intermediate snapshots are
+      // queued by appendAssistant/appendThinking and coalesced by the stream.
+      const emitAssistant = (isFinal: boolean): void => {
+        if (isFinal) assistantStream?.flushFinal();
       };
 
       // Helper: emit tool message with deduplication
@@ -383,13 +397,7 @@ export class CodexEngine implements AgentEngine {
         const trimmed = content.trim();
         if (!trimmed) return;
 
-        const hash = createAgentEventDedupKey(
-          `${messageType}:${trimmed}:${JSON.stringify(metadata)}:${sessionId}:${requestId || ''}`,
-        );
-        if (streamedToolHashes.has(hash)) return;
-        streamedToolHashes.add(hash);
-
-        const message: AgentMessage = {
+        const message = createBoundedAgentMessage({
           id: randomUUID(),
           sessionId,
           role: 'tool',
@@ -401,7 +409,12 @@ export class CodexEngine implements AgentEngine {
           isFinal: !isStreaming,
           createdAt: new Date().toISOString(),
           metadata: { cli_type: 'codex', ...metadata },
-        };
+        });
+        const hash = createAgentEventDedupKey(
+          `${messageType}:${message.content}:${JSON.stringify(message.metadata)}:${sessionId}:${requestId || ''}`,
+        );
+        if (streamedToolHashes.has(hash)) return;
+        streamedToolHashes.add(hash);
 
         ctx.emit({ type: 'message', data: message });
       };
@@ -409,7 +422,10 @@ export class CodexEngine implements AgentEngine {
       // Event handlers for specific item types
       const emitCommandStart = (item: Record<string, unknown>): void => {
         const id = this.pickFirstString(item.id) ?? randomUUID();
-        const command = this.pickFirstString(item.command);
+        const rawCommand = this.pickFirstString(item.command);
+        const command = rawCommand
+          ? boundStreamText(rawCommand, STREAM_TOOL_FIELD_MAX_BYTES).text
+          : undefined;
         activeCommands.set(id, { command });
         dispatchToolMessage(
           command ? `Running: ${command}` : 'Running command',
@@ -430,8 +446,13 @@ export class CodexEngine implements AgentEngine {
         if (id) {
           activeCommands.delete(id);
         }
-        const command = this.pickFirstString(item.command) ?? tracked?.command;
-        const output = this.pickFirstString(item.aggregated_output) ?? '';
+        const rawCommand = this.pickFirstString(item.command);
+        const command = rawCommand
+          ? boundStreamText(rawCommand, STREAM_TOOL_FIELD_MAX_BYTES).text
+          : tracked?.command;
+        const rawOutput = this.pickFirstString(item.aggregated_output) ?? '';
+        const outputSnapshot = boundStreamText(rawOutput, STREAM_TOOL_CONTENT_MAX_BYTES);
+        const output = outputSnapshot.text;
         const exitCode = typeof item.exit_code === 'number' ? item.exit_code : undefined;
         const status = this.pickFirstString(item.status);
         const isError = status === 'failed' || (typeof exitCode === 'number' && exitCode !== 0);
@@ -450,6 +471,16 @@ export class CodexEngine implements AgentEngine {
             exitCode,
             status,
             output,
+            truncated: outputSnapshot.truncated || undefined,
+            truncation: outputSnapshot.truncated
+              ? [
+                  {
+                    field: 'toolOutput',
+                    originalBytes: outputSnapshot.originalBytes,
+                    retainedBytes: outputSnapshot.retainedBytes,
+                  },
+                ]
+              : undefined,
             is_error: isError || undefined,
           },
           'tool_result',
@@ -514,14 +545,12 @@ export class CodexEngine implements AgentEngine {
         if (type === 'agent_message') {
           const text = this.pickFirstString(record.text);
           if (text) {
-            assistantBuffer += text;
-            emitAssistant(false);
+            assistantStream?.appendAssistant(text);
           }
         } else if (type === 'reasoning') {
           const text = this.pickFirstString(record.text);
           if (text) {
-            thinkingSegments.push(text);
-            emitAssistant(false);
+            assistantStream?.appendThinking(text);
           }
         } else if (type === 'todo_list') {
           emitTodoListUpdate(record, 'update');
@@ -545,24 +574,22 @@ export class CodexEngine implements AgentEngine {
             break;
           case 'agent_message': {
             const text = this.pickFirstString(record.text);
-            if (text) assistantBuffer = text;
+            if (text) assistantStream?.replaceAssistant(text);
             emitAssistant(true);
             resetAssistantBuffers();
             break;
           }
           case 'reasoning': {
             const text = this.pickFirstString(record.text);
-            if (text) {
-              thinkingSegments.push(text);
-              emitAssistant(false);
+            if (text && !assistantStream?.thinkingEndsWith(text)) {
+              assistantStream?.appendThinking(text);
             }
             break;
           }
           default: {
             const text = this.pickFirstString(record.text);
             if (text) {
-              thinkingSegments.push(text);
-              emitAssistant(false);
+              assistantStream?.appendThinking(text);
             }
             break;
           }

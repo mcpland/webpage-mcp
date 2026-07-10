@@ -44,6 +44,7 @@ import { NativeDirectiveQueue } from './native-directive-queue';
 import {
   isNativeMessageEncodingError,
   NativeMessageWriter,
+  type NativeMessageSendOptions,
 } from './native-message-output';
 import { resolveInstanceId } from './instance-id';
 
@@ -67,6 +68,43 @@ const IPC_MAX_PENDING_REQUESTS = 16;
 const IPC_PAUSE_HIGH_WATERMARK = 8;
 const IPC_RESUME_LOW_WATERMARK = 4;
 const NATIVE_MAX_PENDING_DIRECTIVES = 64;
+
+function agentStreamCoalesceKey(...parts: string[]): string {
+  // JSON tuple encoding prevents delimiter collisions between subscription IDs
+  // and message IDs while keeping keys deterministic and easy to inspect.
+  return JSON.stringify(['agent-stream', ...parts]);
+}
+
+function getAgentStreamSendOptions(
+  subscriptionId: string,
+  event: RealtimeEvent,
+): NativeMessageSendOptions {
+  switch (event.type) {
+    case 'message':
+      return {
+        coalesceKey: agentStreamCoalesceKey(subscriptionId, 'message', event.data.id),
+        // Assistant completion is the cumulative snapshot the UI and storage
+        // must converge on. Tool messages remain evictable under backpressure.
+        terminal: event.data.role === 'assistant' && event.data.isFinal === true,
+      };
+    case 'status':
+      return {
+        coalesceKey: agentStreamCoalesceKey(subscriptionId, 'status'),
+        terminal: ['completed', 'error', 'cancelled'].includes(event.data.status),
+      };
+    case 'error':
+      return {
+        coalesceKey: agentStreamCoalesceKey(subscriptionId, 'error'),
+        terminal: true,
+      };
+    case 'usage':
+      return { coalesceKey: agentStreamCoalesceKey(subscriptionId, 'usage') };
+    case 'heartbeat':
+      return { coalesceKey: agentStreamCoalesceKey(subscriptionId, 'heartbeat') };
+    case 'connected':
+      return { coalesceKey: agentStreamCoalesceKey(subscriptionId, 'connected') };
+  }
+}
 
 function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
   if (!raw || typeof raw !== 'object') {
@@ -906,15 +944,18 @@ export class NativeMessagingHost {
     }
 
     const dispose = server.subscribeAgentEvents(sessionId, (event: RealtimeEvent) => {
-      this.sendMessage({
-        type: NativeMessageType.AGENT_STREAM_EVENT,
-        payload: {
-          subscriptionId,
-          instanceId,
-          sessionId,
-          event,
+      this.sendMessage(
+        {
+          type: NativeMessageType.AGENT_STREAM_EVENT,
+          payload: {
+            subscriptionId,
+            instanceId,
+            sessionId,
+            event,
+          },
         },
-      });
+        getAgentStreamSendOptions(subscriptionId, event),
+      );
     });
 
     this.streamSubscriptions.set(subscriptionId, {
@@ -932,15 +973,18 @@ export class NativeMessagingHost {
         timestamp: new Date().toISOString(),
       },
     };
-    this.sendMessage({
-      type: NativeMessageType.AGENT_STREAM_EVENT,
-      payload: {
-        subscriptionId,
-        instanceId,
-        sessionId,
-        event: connectedEvent,
+    this.sendMessage(
+      {
+        type: NativeMessageType.AGENT_STREAM_EVENT,
+        payload: {
+          subscriptionId,
+          instanceId,
+          sessionId,
+          event: connectedEvent,
+        },
       },
-    });
+      getAgentStreamSendOptions(subscriptionId, connectedEvent),
+    );
 
     this.sendRequestResponse(requestId, {
       success: true,
@@ -1224,8 +1268,8 @@ export class NativeMessagingHost {
   /**
    * Send message to Chrome extension
    */
-  public sendMessage(message: any): void {
-    void this.messageWriter.send(message).catch((error) => {
+  public sendMessage(message: any, options: NativeMessageSendOptions = {}): void {
+    void this.messageWriter.send(message, options).catch((error) => {
       const responseToRequestId =
         message && typeof message === 'object' && typeof message.responseToRequestId === 'string'
           ? message.responseToRequestId

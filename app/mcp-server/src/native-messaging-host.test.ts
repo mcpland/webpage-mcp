@@ -6,6 +6,7 @@ import {
   NativeMessageWriter,
 } from './native-message-output';
 import { NativeMessagingHost } from './native-messaging-host';
+import type { RealtimeEvent } from './agent/types';
 
 class FailingWritable extends Writable {
   public _write(
@@ -27,6 +28,30 @@ class CollectingWritable extends Writable {
   ): void {
     this.chunks.push(Buffer.from(chunk));
     callback();
+  }
+}
+
+class ControlledWritable extends Writable {
+  public readonly chunks: Buffer[] = [];
+  private readonly completions: Array<(error?: Error | null) => void> = [];
+
+  public constructor() {
+    super({ highWaterMark: 1 });
+  }
+
+  public completeNext(error?: Error): void {
+    const complete = this.completions.shift();
+    if (!complete) throw new Error('No pending write');
+    complete(error);
+  }
+
+  public _write(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.chunks.push(Buffer.from(chunk));
+    this.completions.push(callback);
   }
 }
 
@@ -116,6 +141,94 @@ describe('NativeMessagingHost outbound requests', () => {
         },
       },
     });
+  });
+
+  it('coalesces queued stream snapshots and preserves the final under backpressure', async () => {
+    const output = new ControlledWritable();
+    const host = new NativeMessagingHost(new NativeMessageWriter(output));
+    let listener: ((event: RealtimeEvent) => void) | undefined;
+    const subscribeAgentEvents = vi.fn(
+      (_sessionId: string, callback: (event: RealtimeEvent) => void) => {
+        listener = callback;
+        return vi.fn();
+      },
+    );
+    (
+      host as unknown as {
+        servers: Map<
+          string,
+          {
+            isRunning: boolean;
+            subscribeAgentEvents: typeof subscribeAgentEvents;
+          }
+        >;
+        handleAgentStreamSubscribe: (message: unknown) => Promise<void>;
+      }
+    ).servers.set(DEFAULT_MCP_INSTANCE_ID, {
+      isRunning: true,
+      subscribeAgentEvents,
+    });
+
+    await (
+      host as unknown as {
+        handleAgentStreamSubscribe: (message: unknown) => Promise<void>;
+      }
+    ).handleAgentStreamSubscribe({
+      requestId: 'subscribe-pressure',
+      payload: { sessionId: 'session-pressure' },
+    });
+
+    expect(listener).toBeTypeOf('function');
+    for (let index = 1; index <= 1_000; index++) {
+      listener?.({
+        type: 'message',
+        data: {
+          id: 'assistant-1',
+          sessionId: 'session-pressure',
+          role: 'assistant',
+          content: `snapshot-${index}`,
+          messageType: 'chat',
+          isStreaming: true,
+          isFinal: false,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      });
+    }
+    listener?.({
+      type: 'message',
+      data: {
+        id: 'assistant-1',
+        sessionId: 'session-pressure',
+        role: 'assistant',
+        content: 'final-snapshot',
+        messageType: 'chat',
+        isStreaming: false,
+        isFinal: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+
+    // Connected is active and the subscription response is non-stream traffic;
+    // neither may be evicted by stream coalescing.
+    expect(output.chunks).toHaveLength(1);
+    output.completeNext();
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(2));
+    output.completeNext();
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(3));
+    output.completeNext();
+
+    const decoded = output.chunks.map(decodeFrame);
+    expect(decoded[1]).toMatchObject({ responseToRequestId: 'subscribe-pressure' });
+    expect(decoded[2]).toMatchObject({
+      type: NativeMessageType.AGENT_STREAM_EVENT,
+      payload: {
+        event: {
+          type: 'message',
+          data: { content: 'final-snapshot', isFinal: true },
+        },
+      },
+    });
+    expect(decoded).toHaveLength(3);
   });
 
   it('releases pending work, subscriptions, and servers exactly once during shutdown', async () => {

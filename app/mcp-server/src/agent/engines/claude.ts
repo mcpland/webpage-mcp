@@ -6,6 +6,21 @@ import type { AgentMessage, RealtimeEvent } from '../types';
 import { getProject } from '../project-service';
 import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
 import { createAgentEventDedupKey } from './event-dedupe';
+import {
+  BoundedAssistantStream,
+  BoundedMap,
+  BoundedSet,
+  BoundedTextAccumulator,
+  STREAM_ASSISTANT_TEXT_MAX_BYTES,
+  STREAM_DEDUPE_MAX_ENTRIES,
+  STREAM_PENDING_TOOL_INPUT_MAX_BYTES,
+  STREAM_PENDING_TOOL_MAX_ENTRIES,
+  STREAM_THINKING_TEXT_MAX_BYTES,
+  STREAM_TOOL_FIELD_MAX_BYTES,
+  boundStreamText,
+  createBoundedAgentMessage,
+  type AssistantStreamSnapshot,
+} from './stream-output';
 
 // Images are provided to Claude Code via local file paths referenced in the prompt text.
 // Claude Code CLI reads images from local paths, so we write base64 images to temp files and reference them.
@@ -114,26 +129,28 @@ export class ClaudeEngine implements AgentEngine {
 
     // State management
     const stderrBuffer: string[] = [];
-    let assistantBuffer = '';
     let assistantMessageId: string | null = null;
     let assistantCreatedAt: string | null = null;
     let lastAssistantEmitted: { content: string; isFinal: boolean } | null = null;
-    const streamedToolHashes = new Set<string>();
+    const streamedToolHashes = new BoundedSet<string>(STREAM_DEDUPE_MAX_ENTRIES);
 
     // Tool input accumulation for streaming tool_use blocks
     // Key: content block index, Value: { toolName, toolId, inputJson }
-    const pendingToolInputs = new Map<
+    const pendingToolInputs = new BoundedMap<
       number,
-      { toolName: string; toolId: string; inputJsonParts: string[] }
-    >();
+      { toolName: string; toolId: string; inputJson: BoundedTextAccumulator }
+    >(STREAM_PENDING_TOOL_MAX_ENTRIES);
     let currentContentBlockIndex = -1;
 
     /**
      * Emit assistant message to the stream.
      * Includes deduplication to prevent multiple identical final emissions.
      */
-    const emitAssistant = (isFinal: boolean): void => {
-      const content = assistantBuffer.trim();
+    const emitAssistantSnapshot = (
+      snapshot: AssistantStreamSnapshot,
+      isFinal: boolean,
+    ): void => {
+      const content = snapshot.content;
       if (!content) return;
 
       // Deduplicate: skip if same content and isFinal state was already emitted
@@ -153,20 +170,33 @@ export class ClaudeEngine implements AgentEngine {
         assistantCreatedAt = new Date().toISOString();
       }
 
-      const message: AgentMessage = {
-        id: assistantMessageId,
-        sessionId,
-        role: 'assistant',
-        content,
-        messageType: 'chat',
-        cliSource: this.name,
-        requestId,
-        isStreaming: !isFinal,
-        isFinal,
-        createdAt: assistantCreatedAt,
-      };
+      const message = createBoundedAgentMessage(
+        {
+          id: assistantMessageId,
+          sessionId,
+          role: 'assistant',
+          content,
+          messageType: 'chat',
+          cliSource: this.name,
+          requestId,
+          isStreaming: !isFinal,
+          isFinal,
+          createdAt: assistantCreatedAt,
+        },
+        {
+          contentMaximumBytes:
+            STREAM_ASSISTANT_TEXT_MAX_BYTES + STREAM_THINKING_TEXT_MAX_BYTES,
+          truncation: snapshot.truncation,
+        },
+      );
 
       ctx.emit({ type: 'message', data: message });
+    };
+
+    const assistantStream = new BoundedAssistantStream(emitAssistantSnapshot);
+
+    const emitAssistant = (isFinal: boolean): void => {
+      if (isFinal) assistantStream.flushFinal();
     };
 
     /**
@@ -181,13 +211,7 @@ export class ClaudeEngine implements AgentEngine {
       const trimmed = content.trim();
       if (!trimmed) return;
 
-      const hash = createAgentEventDedupKey(
-        `${messageType}:${trimmed}:${JSON.stringify(metadata)}:${sessionId}:${requestId || ''}`,
-      );
-      if (streamedToolHashes.has(hash)) return;
-      streamedToolHashes.add(hash);
-
-      const message: AgentMessage = {
+      const message = createBoundedAgentMessage({
         id: randomUUID(),
         sessionId,
         role: 'tool',
@@ -199,7 +223,12 @@ export class ClaudeEngine implements AgentEngine {
         isFinal: !isStreaming,
         createdAt: new Date().toISOString(),
         metadata: { cli_type: 'claude', ...metadata },
-      };
+      });
+      const hash = createAgentEventDedupKey(
+        `${messageType}:${message.content}:${JSON.stringify(message.metadata)}:${sessionId}:${requestId || ''}`,
+      );
+      if (streamedToolHashes.has(hash)) return;
+      streamedToolHashes.add(hash);
 
       ctx.emit({ type: 'message', data: message });
     };
@@ -784,8 +813,11 @@ export class ClaudeEngine implements AgentEngine {
 
           switch (eventType) {
             case 'message_start': {
-              // Reset assistant state for new message
-              assistantBuffer = '';
+              // Flush a prior message even if the SDK omitted message_stop,
+              // then reset state for the new message.
+              if (assistantStream.hasContent()) assistantStream.flushFinal();
+              assistantStream.reset();
+              pendingToolInputs.clear();
               assistantMessageId = randomUUID();
               assistantCreatedAt = new Date().toISOString();
               lastAssistantEmitted = null;
@@ -799,16 +831,42 @@ export class ClaudeEngine implements AgentEngine {
               currentContentBlockIndex = blockIndex;
 
               if (contentBlock && contentBlock.type === 'tool_use') {
-                const toolName = this.pickFirstString(contentBlock.name) || 'tool';
-                const toolId = this.pickFirstString(contentBlock.id) || '';
+                const toolName = boundStreamText(
+                  this.pickFirstString(contentBlock.name) || 'tool',
+                  STREAM_TOOL_FIELD_MAX_BYTES,
+                ).text;
+                const toolId = boundStreamText(
+                  this.pickFirstString(contentBlock.id) || '',
+                  STREAM_TOOL_FIELD_MAX_BYTES,
+                ).text;
 
                 // Store pending tool input for accumulation
                 // Don't emit message here - wait for content_block_stop with complete input
-                pendingToolInputs.set(blockIndex, {
+                const evicted = pendingToolInputs.set(blockIndex, {
                   toolName,
                   toolId,
-                  inputJsonParts: [],
+                  inputJson: new BoundedTextAccumulator(STREAM_PENDING_TOOL_INPUT_MAX_BYTES),
                 });
+                if (evicted) {
+                  dispatchToolMessage(
+                    `Using tool: ${evicted.value.toolName}\n\n… [tool input omitted]`,
+                    {
+                      toolName: evicted.value.toolName,
+                      tool_name: evicted.value.toolName,
+                      toolId: evicted.value.toolId,
+                      truncated: true,
+                      truncation: [
+                        {
+                          field: 'pendingTools',
+                          originalEntries: pendingToolInputs.size + 1,
+                          retainedEntries: pendingToolInputs.size,
+                        },
+                      ],
+                    },
+                    'tool_use',
+                    false,
+                  );
+                }
               } else if (contentBlock && contentBlock.type === 'tool_result') {
                 // Handle tool_result in content_block_start
                 const metadata = this.buildToolResultMetadata(contentBlock);
@@ -837,10 +895,11 @@ export class ClaudeEngine implements AgentEngine {
                 pendingToolInputs.delete(blockIndex);
 
                 // Parse the accumulated JSON
-                const fullJsonStr = pending.inputJsonParts.join('');
+                const inputSnapshot = pending.inputJson.snapshot();
+                const fullJsonStr = inputSnapshot.text;
                 let input: Record<string, unknown> = {};
                 try {
-                  if (fullJsonStr) {
+                  if (fullJsonStr && !inputSnapshot.truncated) {
                     input = JSON.parse(fullJsonStr);
                   }
                 } catch (e) {
@@ -857,6 +916,16 @@ export class ClaudeEngine implements AgentEngine {
                   id: pending.toolId,
                   input,
                 });
+                if (inputSnapshot.truncated) {
+                  metadata.truncated = true;
+                  metadata.truncation = [
+                    {
+                      field: 'toolInput',
+                      originalBytes: inputSnapshot.originalBytes,
+                      retainedBytes: inputSnapshot.retainedBytes,
+                    },
+                  ];
+                }
 
                 // Build informative content
                 let content = `Using tool: ${pending.toolName}`;
@@ -866,7 +935,12 @@ export class ClaudeEngine implements AgentEngine {
                 else if (input.query) content = `Searching: ${input.query}`;
 
                 // Emit final tool_use message with complete metadata
-                dispatchToolMessage(content, metadata, 'tool_use', false);
+                dispatchToolMessage(
+                  inputSnapshot.truncated ? `${content}\n\n… [tool input truncated]` : content,
+                  metadata,
+                  'tool_use',
+                  false,
+                );
               }
 
               // Check if this block was a tool_result
@@ -897,8 +971,23 @@ export class ClaudeEngine implements AgentEngine {
               if (delta && typeof delta === 'object' && delta.type === 'input_json_delta') {
                 const partialJson = delta.partial_json as string | undefined;
                 if (partialJson && pendingToolInputs.has(blockIndex)) {
-                  pendingToolInputs.get(blockIndex)!.inputJsonParts.push(partialJson);
+                  pendingToolInputs.get(blockIndex)!.inputJson.append(partialJson);
                 }
+                break;
+              }
+
+              if (
+                delta &&
+                typeof delta === 'object' &&
+                (delta.type === 'thinking_delta' || typeof delta.thinking === 'string')
+              ) {
+                const thinkingChunk =
+                  typeof delta.thinking === 'string'
+                    ? delta.thinking
+                    : typeof delta.text === 'string'
+                      ? delta.text
+                      : '';
+                if (thinkingChunk) assistantStream.appendThinking(thinkingChunk);
                 break;
               }
 
@@ -918,8 +1007,7 @@ export class ClaudeEngine implements AgentEngine {
               }
 
               if (textChunk) {
-                assistantBuffer += textChunk;
-                emitAssistant(false);
+                assistantStream.appendAssistant(textChunk);
               }
               break;
             }
@@ -944,7 +1032,7 @@ export class ClaudeEngine implements AgentEngine {
           // Fallback for non-streaming assistant messages
           const content = this.extractMessageContent(message);
           if (content) {
-            assistantBuffer = content;
+            assistantStream.replaceAssistant(content);
             emitAssistant(true);
           }
         } else if (message.type === 'result') {
@@ -1022,8 +1110,8 @@ export class ClaudeEngine implements AgentEngine {
 
           // Extract content from successful result
           const resultContent = this.extractMessageContent(message);
-          if (resultContent && resultContent !== assistantBuffer.trim()) {
-            assistantBuffer = resultContent;
+          if (resultContent) {
+            assistantStream.replaceAssistant(resultContent);
             emitAssistant(true);
           }
         } else if (message.type === 'system') {
@@ -1152,7 +1240,7 @@ export class ClaudeEngine implements AgentEngine {
             },
           };
 
-          ctx.emit({ type: 'message', data: authSystemMessage });
+          ctx.emit({ type: 'message', data: createBoundedAgentMessage(authSystemMessage) });
         } else if (message.type === 'tool_progress') {
           // Handle tool progress - SDK fields: tool_use_id, tool_name, parent_tool_use_id, elapsed_time_seconds
           const record = message as unknown as Record<string, unknown>;
@@ -1195,13 +1283,13 @@ export class ClaudeEngine implements AgentEngine {
               },
             };
 
-            ctx.emit({ type: 'message', data: progressMessage });
+            ctx.emit({ type: 'message', data: createBoundedAgentMessage(progressMessage) });
           }
         }
       }
 
       // Ensure final message is emitted
-      if (assistantBuffer.trim()) {
+      if (assistantStream.hasContent()) {
         emitAssistant(true);
       }
 
@@ -1238,6 +1326,10 @@ export class ClaudeEngine implements AgentEngine {
       const errorMessage = this.classifyError(message, stderrBuffer);
       throw new Error(`ClaudeEngine: ${errorMessage}`);
     } finally {
+      // Preserve the last accumulated state on success, error, and abort, and
+      // guarantee no coalescing timer survives the engine execution.
+      assistantStream.flushFinal();
+      assistantStream.cancel();
       // Always cleanup temp files, even on error
       await cleanupTempFiles();
     }

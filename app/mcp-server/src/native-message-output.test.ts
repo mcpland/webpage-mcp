@@ -62,6 +62,73 @@ describe('NativeMessageWriter', () => {
     expect(output.chunks.map(decodeFrame)).toEqual([{ order: 1 }, { order: 2 }]);
   });
 
+  it('coalesces queued snapshots by key and releases superseded producers immediately', async () => {
+    const output = new ControlledWritable();
+    const writer = new NativeMessageWriter(output);
+
+    const active = writer.send({ order: 'active' });
+    const firstSnapshot = writer.send(
+      { order: 'stale', content: 'a'.repeat(1_000) },
+      { coalesceKey: 'session-1:message-1' },
+    );
+    const latestSnapshot = writer.send(
+      { order: 'latest', content: 'b'.repeat(1_000) },
+      { coalesceKey: 'session-1:message-1' },
+    );
+
+    await firstSnapshot;
+    expect(output.chunks).toHaveLength(1);
+    output.completeNext();
+    await active;
+
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(2));
+    output.completeNext();
+    await latestSnapshot;
+
+    expect(output.chunks.map(decodeFrame)).toEqual([
+      { order: 'active' },
+      { order: 'latest', content: 'b'.repeat(1_000) },
+    ]);
+  });
+
+  it('reserves queue space and evicts stale stream frames for a final snapshot', async () => {
+    const output = new ControlledWritable();
+    const writer = new NativeMessageWriter(output, 256, 600);
+
+    const active = writer.send({ order: 'active', content: 'a'.repeat(50) });
+    const stale = writer.send(
+      { order: 'stale', content: 's'.repeat(200) },
+      { coalesceKey: 'session-1:message-1' },
+    );
+    const priorTerminal = writer.send(
+      { order: 'prior-terminal', content: 't'.repeat(200) },
+      { coalesceKey: 'session-1:status', terminal: true },
+    );
+    const final = writer.send(
+      { order: 'final', content: 'f'.repeat(120) },
+      { coalesceKey: 'session-1:message-2', terminal: true },
+    );
+
+    // Eviction is an intentional successful coalescing outcome, not a write
+    // failure for the producer that submitted the stale frame.
+    await stale;
+
+    output.completeNext();
+    await active;
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(2));
+    output.completeNext();
+    await priorTerminal;
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(3));
+    output.completeNext();
+    await final;
+
+    expect(output.chunks.map(decodeFrame)).toEqual([
+      { order: 'active', content: 'a'.repeat(50) },
+      { order: 'prior-terminal', content: 't'.repeat(200) },
+      { order: 'final', content: 'f'.repeat(120) },
+    ]);
+  });
+
   it('accepts exactly 1 MiB but rejects larger and unserializable messages before writing', async () => {
     const output = new ControlledWritable();
     const writer = new NativeMessageWriter(output);
