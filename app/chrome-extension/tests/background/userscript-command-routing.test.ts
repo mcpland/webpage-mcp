@@ -278,4 +278,49 @@ describe('userscript command routing', () => {
     await vi.waitFor(() => expect(registeredScripts.has(id)).toBe(true));
     expect((await sendCommand(id, 'enabled')).body.result).toEqual({ data: 'enabled' });
   });
+
+  it('registers future URL matches without injecting an excluded current tab', async () => {
+    const result = await userscriptTool.execute({
+      action: 'create',
+      args: {
+        name: 'future-match',
+        world: 'ISOLATED',
+        script: `globalThis.__userscript_onCommand__ = () => 'unexpected';`,
+        matches: ['https://other.example/*'],
+        allFrames: false,
+      },
+    });
+    const body = parseResult(result);
+
+    expect(result.isError).toBe(false);
+    expect(body.status).toBe('queued');
+    expect(body.warnings).toContain('Current tab does not match the userscript URL rules');
+    expect(registeredScripts.has(body.id)).toBe(true);
+    expect(chrome.userScripts.execute).not.toHaveBeenCalled();
+    expect((await sendCommand(body.id, 'blocked')).result.isError).toBe(true);
+  });
+
+  it('does not reapply a saved script after persistence is turned off', async () => {
+    (globalThis as any).__userscriptRoutingCalls = { first: 0 };
+    const id = await createScript(
+      'non-persistent-update',
+      'ISOLATED',
+      `globalThis.__userscript_onCommand__ = () => {
+        globalThis.__userscriptRoutingCalls.first += 1;
+        return 'unexpected';
+      };`,
+    );
+
+    await userscriptTool.execute({ action: 'update', args: { id, persist: false } });
+    expect(registeredScripts.has(id)).toBe(false);
+    expect((await sendCommand(id, 'after-update')).result.isError).toBe(true);
+
+    await userscriptTool.execute({ action: 'disable', args: { id } });
+    vi.mocked(chrome.userScripts.execute).mockClear();
+    await userscriptTool.execute({ action: 'enable', args: { id } });
+
+    expect(registeredScripts.has(id)).toBe(false);
+    expect(chrome.userScripts.execute).not.toHaveBeenCalled();
+    expect((await sendCommand(id, 'after-enable')).result.isError).toBe(true);
+  });
 });

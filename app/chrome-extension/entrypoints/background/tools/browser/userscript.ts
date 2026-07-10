@@ -507,6 +507,7 @@ async function applyRecordToTab(record: UserscriptRecord, tabId: number): Promis
 }
 
 async function applyRecordToMatchingTabs(record: UserscriptRecord): Promise<void> {
+  if (!record.persist) return;
   const tabs = await chrome.tabs.query({}).catch(() => [] as chrome.tabs.Tab[]);
   await Promise.all(
     tabs.map(async (tab) => {
@@ -633,7 +634,7 @@ chrome.storage.onChanged?.addListener((changes, areaName) => {
     }
     await Promise.all(
       Object.values(records)
-        .filter((record) => record.enabled)
+        .filter((record) => record.enabled && record.persist)
         .map((record) => applyRecordToMatchingTabs(record)),
     );
   })().catch((error) => console.warn('Failed to apply userscript emergency state:', error));
@@ -774,43 +775,52 @@ class UserscriptTool extends BaseBrowserToolExecutor {
 
     // Apply to current tab immediately if matches
     let applied = false;
+    const matchesCurrentUrl = recordMatchesUrl(record, currentUrl);
     const t0 = performance.now();
     try {
       if (emergency) {
         applied = false;
-      } else if (mode === 'once') {
-        // Once: CDP evaluate in page
-        await cdpSessionManager.withSession(active.id!, 'userscript_once', async () => {
-          const expression = `(function(){try{return (function(){${record.script}\n})()}catch(e){return {__error:String(e&&e.message||e)}}})()`;
-          const result: any = await cdpSessionManager.sendCommand(active.id!, 'Runtime.evaluate', {
-            expression,
-            returnByValue: true,
-            awaitPromise: true,
-          });
-          if (result?.result?.value?.__error) {
-            throw new Error(result.result.value.__error);
-          }
-        });
-        applied = true;
-      } else if (sourceType === 'CSS') {
-        await insertCssToTab(active.id!, record.script, record.allFrames);
-        setActiveInjection(active.id!, id, {
-          kind: 'css',
-          source: record.script,
-          allFrames: record.allFrames,
-        });
-        applied = true;
       } else {
-        if (record.persist) {
+        if (record.persist && isJavaScriptRecord(record)) {
           await upsertRegisteredUserScript(toRegisteredUserScript(record));
         }
-        await injectJsPersistent(active.id!, id, record.script, record.world, record.allFrames);
-        setActiveInjection(active.id!, id, {
-          kind: 'js',
-          world: record.world,
-          allFrames: record.allFrames,
-        });
-        applied = true;
+        if (matchesCurrentUrl) {
+          if (mode === 'once') {
+            // Once: CDP evaluate in page
+            await cdpSessionManager.withSession(active.id!, 'userscript_once', async () => {
+              const expression = `(function(){try{return (function(){${record.script}\n})()}catch(e){return {__error:String(e&&e.message||e)}}})()`;
+              const result: any = await cdpSessionManager.sendCommand(
+                active.id!,
+                'Runtime.evaluate',
+                {
+                  expression,
+                  returnByValue: true,
+                  awaitPromise: true,
+                },
+              );
+              if (result?.result?.value?.__error) {
+                throw new Error(result.result.value.__error);
+              }
+            });
+            applied = true;
+          } else if (sourceType === 'CSS') {
+            await insertCssToTab(active.id!, record.script, record.allFrames);
+            setActiveInjection(active.id!, id, {
+              kind: 'css',
+              source: record.script,
+              allFrames: record.allFrames,
+            });
+            applied = true;
+          } else {
+            await injectJsPersistent(active.id!, id, record.script, record.world, record.allFrames);
+            setActiveInjection(active.id!, id, {
+              kind: 'js',
+              world: record.world,
+              allFrames: record.allFrames,
+            });
+            applied = true;
+          }
+        }
       }
     } catch (e) {
       if (record.persist) {
@@ -836,7 +846,10 @@ class UserscriptTool extends BaseBrowserToolExecutor {
         fallbacksTried: [],
         cspBlocked: false,
       },
-      warnings: emergency ? ['USERSCRIPTS_DISABLED is ON, injection skipped'] : [],
+      warnings: [
+        ...(emergency ? ['USERSCRIPTS_DISABLED is ON, injection skipped'] : []),
+        ...(!matchesCurrentUrl ? ['Current tab does not match the userscript URL rules'] : []),
+      ],
       metrics: { injectMs: Math.round(performance.now() - t0) },
     };
 
@@ -907,8 +920,8 @@ class UserscriptTool extends BaseBrowserToolExecutor {
           STORAGE_KEYS.USERSCRIPTS_DISABLED
         ],
       );
-      if (!disabled) {
-        if (rec.persist && isJavaScriptRecord(rec)) {
+      if (!disabled && rec.persist) {
+        if (isJavaScriptRecord(rec)) {
           await upsertRegisteredUserScript(toRegisteredUserScript(rec));
         }
         await applyRecordToMatchingTabs(rec);
@@ -953,8 +966,8 @@ class UserscriptTool extends BaseBrowserToolExecutor {
         STORAGE_KEYS.USERSCRIPTS_DISABLED
       ],
     );
-    if (rec.enabled && !disabled) {
-      if (rec.persist && isJavaScriptRecord(rec)) {
+    if (rec.enabled && !disabled && rec.persist) {
+      if (isJavaScriptRecord(rec)) {
         await upsertRegisteredUserScript(toRegisteredUserScript(rec));
       }
       await applyRecordToMatchingTabs(rec);
