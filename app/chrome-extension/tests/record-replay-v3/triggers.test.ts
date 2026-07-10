@@ -280,13 +280,16 @@ describe('TriggerStore CRUD', () => {
 
     it('bounds URL match rules and persisted identifiers', async () => {
       const store = createTriggersStore();
-      const tooManyRules = {
-        ...createUrlTrigger('trigger-rules', 'flow-1'),
+      const tooManyRules: Extract<TriggerSpec, { kind: 'url' }> = {
+        id: 'trigger-rules' as never,
+        kind: 'url',
+        enabled: true,
+        flowId: 'flow-1' as never,
         match: Array.from(
           { length: TRIGGER_RESOURCE_LIMITS.maxUrlMatchRules + 1 },
           () => ({ kind: 'domain' as const, value: 'example.com' }),
         ),
-      } satisfies TriggerSpec;
+      };
       await expect(store.save(tooManyRules)).rejects.toThrow(
         `at most ${TRIGGER_RESOURCE_LIMITS.maxUrlMatchRules} rules`,
       );
