@@ -55,6 +55,19 @@ export function describeClaudeAuthTokenConfiguration(
   return authToken ? '[ClaudeEngine] ANTHROPIC_AUTH_TOKEN is configured' : null;
 }
 
+/**
+ * Resolve the Claude SDK filesystem setting sources without trusting the repository.
+ *
+ * Project and local sources can load repository-controlled `.claude/settings*.json`
+ * files, including command hooks. Until the application has a persisted project
+ * trust decision, keep them disabled. A user's global settings may be loaded only
+ * when the session explicitly opts in to the `user` source.
+ */
+export function resolveClaudeSettingSources(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.includes('user') ? ['user'] : [];
+}
+
 // Images are provided to Claude Code via local file paths referenced in the prompt text.
 // Claude Code CLI reads images from local paths, so we write base64 images to temp files and reference them.
 
@@ -458,36 +471,9 @@ export class ClaudeEngine implements AgentEngine {
         }
       })();
 
-      // Resolve setting sources
-      // SDK isolation mode: settingSources=[] prevents loading any filesystem settings
-      // Default behavior: include 'project' to load CLAUDE.md
-      const resolvedSettingSources = (() => {
-        const allowedSettingSources = new Set(['user', 'project', 'local']);
-        const raw = optionsRecord?.settingSources;
-
-        // Check for explicit isolation mode (empty array)
-        if (Array.isArray(raw) && raw.length === 0) {
-          console.error('[ClaudeEngine] Isolation mode enabled: settingSources=[]');
-          return [];
-        }
-
-        // Parse provided sources
-        if (Array.isArray(raw)) {
-          const sources: string[] = [];
-          for (const entry of raw) {
-            if (typeof entry === 'string' && allowedSettingSources.has(entry)) {
-              sources.push(entry);
-            }
-          }
-          // If valid sources were provided, use them as-is (trust user config)
-          if (sources.length > 0) {
-            return sources;
-          }
-        }
-
-        // Default: include 'project' to load CLAUDE.md
-        return ['project'];
-      })();
+      // Fail closed: do not load repository-controlled settings or hooks. The
+      // user's global settings are the only supported explicit filesystem source.
+      const resolvedSettingSources = resolveClaudeSettingSources(optionsRecord?.settingSources);
 
       // Resolve system prompt from session config
       const resolvedSystemPrompt = (() => {
@@ -545,7 +531,7 @@ export class ClaudeEngine implements AgentEngine {
         // Enable streaming: emit stream_event with content_block_delta for real-time UI updates
         // Without this, SDK only outputs aggregated assistant/result messages
         includePartialMessages: true,
-        // Load CLAUDE.md / .claude/settings.json from the project root
+        // Empty by default. Project/local sources stay disabled until project trust exists.
         settingSources: resolvedSettingSources,
         // Custom system prompt if provided
         systemPrompt: resolvedSystemPrompt,
