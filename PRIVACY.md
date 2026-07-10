@@ -88,8 +88,11 @@ perform the requested action and apply their own privacy practices.
 ### Model artifacts
 
 Semantic search performs embedding inference and vector indexing locally.
-Pinned tokenizer and model artifacts are downloaded from Hugging Face when
-needed and cached after integrity verification. Page content is not sent to
+Tokenizer and configuration files and ONNX model binaries are downloaded from
+Hugging Face at immutable commit revisions when needed. Downloaded ONNX binaries
+are additionally checked against a checked-in expected size and SHA-256 digest
+before being cached. Tokenizer and configuration files are revision-pinned but
+do not have a separate Webpage MCP SHA-256 manifest. Page content is not sent to
 Hugging Face for embedding inference. The artifact request necessarily exposes
 ordinary connection metadata, such as the device IP address, to the artifact
 host.
@@ -142,11 +145,11 @@ secrets or unrelated personal data in public issue reports.
 
 Webpage MCP limits the native bridge to local Native Messaging, local IPC, and
 stdio; uses private permissions for product-owned native files; bounds native
-logs and protocol payloads; verifies downloaded model artifacts; and validates
-release artifacts. These controls reduce risk but cannot make browser automation
-risk-free. A connected client or Agent can act with broad browser permissions,
-and a user-configured provider or endpoint receives whatever the user sends to
-it.
+logs and protocol payloads; pins remote semantic assets to immutable revisions;
+verifies downloaded ONNX binaries; and validates release artifacts. These
+controls reduce risk but cannot make browser automation risk-free. A connected
+client or Agent can act with broad browser permissions, and a user-configured
+provider or endpoint receives whatever the user sends to it.
 
 Users should connect only trusted MCP clients and providers, keep Agent sandbox
 and permission settings constrained, avoid sensitive pages when they are not
@@ -204,6 +207,10 @@ sensitive information in a public issue.
   [`app/mcp-server/src/scripts/native-log-policy.ts`](app/mcp-server/src/scripts/native-log-policy.ts).
 - Semantic data deletion is implemented in
   [`app/chrome-extension/entrypoints/background/storage-manager.ts`](app/chrome-extension/entrypoints/background/storage-manager.ts).
+- Semantic asset revision and ONNX integrity boundaries are defined in
+  [`app/chrome-extension/utils/model-assets.ts`](app/chrome-extension/utils/model-assets.ts)
+  and covered by
+  [`app/chrome-extension/tests/security/model-asset-integrity.test.ts`](app/chrome-extension/tests/security/model-asset-integrity.test.ts).
 - Diagnostic disclosure and redaction behavior is covered by
   [`app/mcp-server/src/scripts/report-privacy.test.ts`](app/mcp-server/src/scripts/report-privacy.test.ts).
 - Human review is required before changing the Chrome Web Store privacy fields
