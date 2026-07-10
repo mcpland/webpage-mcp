@@ -8,6 +8,11 @@
  */
 import { randomUUID } from 'node:crypto';
 import { eq, desc, and, asc } from 'drizzle-orm';
+import {
+  DEFAULT_CLAUDE_PERMISSION_MODE,
+  type ClaudePermissionMode,
+  type CodexEngineConfig,
+} from 'webpage-mcp-shared';
 import { getDb, sessions, messages, type SessionRow } from './db';
 import type { EngineName } from './engines/types';
 import { sanitizeAgentMessageForPublicRead } from './public-message-sanitizer';
@@ -49,7 +54,7 @@ export interface SessionOptionsConfig {
    * Optional Codex-specific configuration overrides.
    * Only applicable when using CodexEngine.
    */
-  codexConfig?: Partial<import('webpage-mcp-shared').CodexEngineConfig>;
+  codexConfig?: Partial<CodexEngineConfig>;
 }
 
 /**
@@ -126,7 +131,7 @@ export interface CreateSessionOptions {
   engineSessionId?: string;
   name?: string;
   model?: string;
-  permissionMode?: string;
+  permissionMode?: ClaudePermissionMode;
   allowDangerouslySkipPermissions?: boolean;
   systemPromptConfig?: SystemPromptConfig;
   optionsConfig?: SessionOptionsConfig;
@@ -139,7 +144,7 @@ export interface UpdateSessionInput {
   engineSessionId?: string | null;
   name?: string | null;
   model?: string | null;
-  permissionMode?: string | null;
+  permissionMode?: ClaudePermissionMode | null;
   allowDangerouslySkipPermissions?: boolean | null;
   systemPromptConfig?: SystemPromptConfig | null;
   optionsConfig?: SessionOptionsConfig | null;
@@ -201,15 +206,15 @@ export async function createSession(
   const db = getDb();
   const now = new Date().toISOString();
 
-  // Resolve permission mode - AgentChat defaults to bypassPermissions for headless operation
-  const resolvedPermissionMode = options.permissionMode?.trim() || 'bypassPermissions';
+  // Claude can progress headlessly with acceptEdits; Codex uses a neutral
+  // placeholder because its real permission boundary is codexConfig.sandboxMode.
+  const resolvedPermissionMode =
+    options.permissionMode?.trim() ||
+    (engineName === 'codex' ? 'default' : DEFAULT_CLAUDE_PERMISSION_MODE);
 
-  // SDK requires allowDangerouslySkipPermissions=true when using bypassPermissions mode
-  // If explicitly provided, use that value; otherwise infer from permission mode
+  // Never infer the dangerous bypass acknowledgement from the selected mode.
   const resolvedAllowDangerouslySkipPermissions =
-    typeof options.allowDangerouslySkipPermissions === 'boolean'
-      ? options.allowDangerouslySkipPermissions
-      : resolvedPermissionMode === 'bypassPermissions';
+    options.allowDangerouslySkipPermissions === true;
 
   const sessionData = {
     id: options.id?.trim() || randomUUID(),
@@ -405,7 +410,7 @@ export async function updateSession(sessionId: string, updates: UpdateSessionInp
   }
 
   if (updates.permissionMode !== undefined) {
-    updateData.permissionMode = updates.permissionMode?.trim() || 'bypassPermissions';
+    updateData.permissionMode = updates.permissionMode?.trim() || DEFAULT_CLAUDE_PERMISSION_MODE;
   }
 
   if (updates.allowDangerouslySkipPermissions !== undefined) {

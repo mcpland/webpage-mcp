@@ -10,6 +10,7 @@ import {
 } from 'webpage-mcp-shared';
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
 import { getProject } from '../project-service';
+import { validateCodexConfig } from '../session-security';
 import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
 import { createAgentEventDedupKey } from './event-dedupe';
 import {
@@ -113,6 +114,11 @@ export class CodexEngine implements AgentEngine {
       ...DEFAULT_CODEX_CONFIG,
       ...(codexConfig ?? {}),
     };
+
+    const configError = validateCodexConfig(resolvedConfig);
+    if (configError) {
+      throw new Error(`CodexEngine: ${configError}`);
+    }
 
     // Ensure autoInstructions has a value
     if (!resolvedConfig.autoInstructions?.trim()) {

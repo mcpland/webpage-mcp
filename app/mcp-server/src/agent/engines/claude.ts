@@ -4,6 +4,7 @@ import { DEFAULT_MCP_INSTANCE_ID } from 'webpage-mcp-shared';
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
 import type { AgentMessage, RealtimeEvent } from '../types';
 import { getProject } from '../project-service';
+import { resolveClaudePermissionSettings } from '../session-security';
 import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
 import { createAgentEventDedupKey } from './event-dedupe';
 import {
@@ -474,54 +475,11 @@ export class ClaudeEngine implements AgentEngine {
       // SDK treats options.env as a complete replacement, so we must merge with process.env.
       const claudeEnv = await this.buildClaudeEnv();
 
-      // Resolve permission mode from session config or use default
-      // SDK default is 'default', but AgentChat defaults to 'bypassPermissions' for headless operation
-      const allowedPermissionModes = new Set([
-        'default',
-        'acceptEdits',
-        'bypassPermissions',
-        'plan',
-        'dontAsk',
-      ]);
-      const normalizedPermissionMode =
-        typeof permissionMode === 'string' ? permissionMode.trim() : '';
-
-      let resolvedPermissionMode: string;
-      if (normalizedPermissionMode === '') {
-        // No permission mode specified - use AgentChat default for headless operation
-        resolvedPermissionMode = 'bypassPermissions';
-      } else if (allowedPermissionModes.has(normalizedPermissionMode)) {
-        // Valid permission mode - use as specified
-        resolvedPermissionMode = normalizedPermissionMode;
-      } else {
-        // Invalid permission mode - fall back to SDK default and warn
-        console.error(
-          `[ClaudeEngine] Invalid permissionMode "${normalizedPermissionMode}", falling back to SDK default "default"`,
-        );
-        resolvedPermissionMode = 'default';
-      }
-
-      // allowDangerouslySkipPermissions must be true when using bypassPermissions mode
-      // SDK requirement: bypass mode requires explicit acknowledgment via allowDangerouslySkipPermissions=true
-      const resolvedAllowDangerouslySkipPermissions = (() => {
-        const explicitValue =
-          typeof allowDangerouslySkipPermissions === 'boolean'
-            ? allowDangerouslySkipPermissions
-            : undefined;
-
-        if (resolvedPermissionMode === 'bypassPermissions') {
-          // Force true for bypassPermissions mode - SDK requirement
-          if (explicitValue === false) {
-            console.error(
-              '[ClaudeEngine] Warning: allowDangerouslySkipPermissions=false is incompatible with bypassPermissions mode, forcing to true',
-            );
-          }
-          return true;
-        }
-
-        // For non-bypass modes, use explicit value or default to false
-        return explicitValue ?? false;
-      })();
+      // Resolve permission settings without inferring the dangerous bypass acknowledgement.
+      const {
+        permissionMode: resolvedPermissionMode,
+        allowDangerouslySkipPermissions: resolvedAllowDangerouslySkipPermissions,
+      } = resolveClaudePermissionSettings(permissionMode, allowDangerouslySkipPermissions);
 
       // Parse optionsConfig for additional SDK options
       const optionsRecord =
@@ -627,7 +585,7 @@ export class ClaudeEngine implements AgentEngine {
         cwd: repoPath,
         additionalDirectories: [repoPath],
         model: resolvedModel,
-        // Permission settings are session-configurable (defaults preserve previous behavior)
+        // Permission settings are session-configurable and validated before SDK execution.
         permissionMode: resolvedPermissionMode,
         allowDangerouslySkipPermissions: resolvedAllowDangerouslySkipPermissions,
         // Enable streaming: emit stream_event with content_block_delta for real-time UI updates

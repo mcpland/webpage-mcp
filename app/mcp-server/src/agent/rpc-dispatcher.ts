@@ -34,6 +34,7 @@ import {
   sanitizeSessionForPublicRead,
 } from './public-session-sanitizer';
 import { validateAgentAttachments } from './attachment-limits';
+import { validateSessionSecurityConfig } from './session-security';
 import { sanitizeProjectForPublicRead } from './public-project-sanitizer';
 import { getProject } from './project-service';
 import { getDefaultWorkspaceDir, getDefaultProjectRoot } from './storage';
@@ -418,6 +419,14 @@ export async function dispatchAgentRpc(
           });
         }
 
+        const securityConfigError = validateSessionSecurityConfig({
+          engineName: payload.engineName,
+          input: payload,
+        });
+        if (securityConfigError) {
+          return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: securityConfigError });
+        }
+
         const project = await getProject(projectId);
         if (!project) {
           return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
@@ -468,6 +477,18 @@ export async function dispatchAgentRpc(
         const existing = await getSession(sessionId);
         if (!existing) {
           return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
+        }
+
+        if (existing.engineName === 'claude' || existing.engineName === 'codex') {
+          const securityConfigError = validateSessionSecurityConfig({
+            engineName: existing.engineName,
+            input: updates,
+            existing,
+            update: true,
+          });
+          if (securityConfigError) {
+            return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: securityConfigError });
+          }
         }
 
         await updateSession(sessionId, updates);

@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   engine_session_id TEXT,
   name TEXT,
   model TEXT,
-  permission_mode TEXT NOT NULL DEFAULT 'bypassPermissions',
+  permission_mode TEXT NOT NULL DEFAULT 'acceptEdits',
   allow_dangerously_skip_permissions TEXT,
   system_prompt_config TEXT,
   options_config TEXT,

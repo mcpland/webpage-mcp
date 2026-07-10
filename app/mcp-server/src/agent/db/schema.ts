@@ -70,9 +70,9 @@ export const sessions = sqliteTable(
      */
     model: text(),
     /**
-     * Permission mode: default, acceptEdits, bypassPermissions, plan, dontAsk.
+     * Claude permission mode: default, acceptEdits, bypassPermissions, plan, delegate, dontAsk.
      */
-    permissionMode: text('permission_mode').notNull().default('bypassPermissions'),
+    permissionMode: text('permission_mode').notNull().default('acceptEdits'),
     /**
      * Whether to allow bypassing interactive permission prompts.
      * Stored as '1' (true) or null (false).

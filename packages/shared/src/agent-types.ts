@@ -184,6 +184,33 @@ export type AgentSystemPromptConfig =
 export type AgentToolsConfig = string[] | { type: 'preset'; preset: 'claude_code' };
 
 /**
+ * Permission modes supported by the Claude Agent SDK.
+ *
+ * `acceptEdits` is the safe non-interactive default used by AgentChat. The
+ * fully permissive `bypassPermissions` mode additionally requires an explicit
+ * `allowDangerouslySkipPermissions: true` acknowledgement.
+ */
+export const CLAUDE_PERMISSION_MODES = [
+  'default',
+  'acceptEdits',
+  'bypassPermissions',
+  'plan',
+  'delegate',
+  'dontAsk',
+] as const;
+
+export type ClaudePermissionMode = (typeof CLAUDE_PERMISSION_MODES)[number];
+
+export const DEFAULT_CLAUDE_PERMISSION_MODE: ClaudePermissionMode = 'acceptEdits';
+
+export function isClaudePermissionMode(value: unknown): value is ClaudePermissionMode {
+  return (
+    typeof value === 'string' &&
+    (CLAUDE_PERMISSION_MODES as readonly string[]).includes(value)
+  );
+}
+
+/**
  * Session options configuration.
  */
 export interface AgentSessionOptionsConfig {
@@ -268,7 +295,9 @@ export interface CreateAgentSessionInput {
   engineName: AgentCliPreference;
   name?: string;
   model?: string;
-  permissionMode?: string;
+  /** Claude permission mode; Codex accepts only the neutral `default` value. */
+  permissionMode?: ClaudePermissionMode;
+  /** Required for Claude bypass; Codex accepts only `false`. */
   allowDangerouslySkipPermissions?: boolean;
   systemPromptConfig?: AgentSystemPromptConfig;
   optionsConfig?: AgentSessionOptionsConfig;
@@ -280,7 +309,9 @@ export interface CreateAgentSessionInput {
 export interface UpdateAgentSessionInput {
   name?: string | null;
   model?: string | null;
-  permissionMode?: string | null;
+  /** Claude permission mode; Codex accepts only the neutral `default` value. */
+  permissionMode?: ClaudePermissionMode | null;
+  /** Required for Claude bypass; Codex accepts only `false` or null. */
   allowDangerouslySkipPermissions?: boolean | null;
   systemPromptConfig?: AgentSystemPromptConfig | null;
   optionsConfig?: AgentSessionOptionsConfig | null;
@@ -311,14 +342,35 @@ export interface AgentStoredMessage {
 /**
  * Sandbox mode for Codex CLI execution.
  */
-export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+export const CODEX_SANDBOX_MODES = [
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+] as const;
+
+export type CodexSandboxMode = (typeof CODEX_SANDBOX_MODES)[number];
+
+export function isCodexSandboxMode(value: unknown): value is CodexSandboxMode {
+  return (
+    typeof value === 'string' && (CODEX_SANDBOX_MODES as readonly string[]).includes(value)
+  );
+}
 
 /**
  * Reasoning effort for Codex models.
  * - low/medium/high: supported by all models
  * - xhigh: only supported by gpt-5.2 and gpt-5.1-codex-max
  */
-export type CodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export const CODEX_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
+
+export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORTS)[number];
+
+export function isCodexReasoningEffort(value: unknown): value is CodexReasoningEffort {
+  return (
+    typeof value === 'string' &&
+    (CODEX_REASONING_EFFORTS as readonly string[]).includes(value)
+  );
+}
 
 /**
  * Configuration options for Codex Engine.
@@ -333,8 +385,14 @@ export interface CodexEngineConfig {
   enableWebSearch: boolean;
   /** Use experimental streamable shell tool. Default: true */
   useStreamableShell: boolean;
-  /** Sandbox mode for command execution. Default: 'danger-full-access' */
+  /** Sandbox mode for command execution. Default: 'workspace-write' */
   sandboxMode: CodexSandboxMode;
+  /**
+   * Explicit acknowledgement required for `danger-full-access`.
+   * This flag is validated by AgentChat and is never forwarded to the CLI.
+   * Default: false.
+   */
+  dangerouslyAllowFullAccess: boolean;
   /** Maximum number of turns. Default: 20 */
   maxTurns: number;
   /** Maximum thinking tokens. Default: 4096 */
@@ -367,7 +425,8 @@ export const DEFAULT_CODEX_CONFIG: CodexEngineConfig = {
   includePlanTool: true,
   enableWebSearch: true,
   useStreamableShell: true,
-  sandboxMode: 'danger-full-access',
+  sandboxMode: 'workspace-write',
+  dangerouslyAllowFullAccess: false,
   maxTurns: 20,
   maxThinkingTokens: 4096,
   reasoningEffort: 'medium',
