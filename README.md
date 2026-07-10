@@ -528,6 +528,12 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 
 ## CI/CD
 
+Chrome Web Store submission and rollout are manual external steps. Before every
+upload, review submission, or rollout, complete the
+[Chrome Web Store release and privacy checklist](docs/CHROME_WEB_STORE_RELEASE.md);
+the repository workflow does not validate Developer Dashboard fields or the
+live store listing.
+
 <details>
 <summary><strong>GitHub Actions workflows</strong></summary>
 
