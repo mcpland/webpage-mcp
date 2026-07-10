@@ -41,12 +41,15 @@ import { openDirectoryPicker } from './directory-picker';
 import type { EngineName } from './engines/types';
 import { attachmentService } from './attachment-service';
 import { openProjectDirectory, openFileInVSCode } from './open-project';
-import type {
-  AgentRpcRequestPayload,
-  AttachmentCleanupRequest,
-  AttachmentCleanupResponse,
-  AttachmentStatsResponse,
-  OpenProjectTarget,
+import {
+  AGENT_ATTACHMENT_MAX_BYTES,
+  AGENT_ATTACHMENT_RPC_CHUNK_BYTES,
+  AGENT_ATTACHMENT_RPC_INLINE_BYTES,
+  type AgentRpcRequestPayload,
+  type AttachmentCleanupRequest,
+  type AttachmentCleanupResponse,
+  type AttachmentStatsResponse,
+  type OpenProjectTarget,
 } from 'webpage-mcp-shared';
 
 const VALID_OPEN_TARGETS: readonly OpenProjectTarget[] = ['vscode', 'terminal'];
@@ -116,12 +119,21 @@ function noContentResponse(): RpcDispatchResponse {
   };
 }
 
-function binaryResponse(buffer: Buffer, contentType: string): RpcDispatchResponse {
+function binaryResponse(
+  buffer: Buffer,
+  contentType: string,
+  options: {
+    statusCode?: number;
+    headers?: Record<string, unknown>;
+  } = {},
+): RpcDispatchResponse {
   return {
-    statusCode: HTTP_STATUS.OK,
+    statusCode: options.statusCode ?? HTTP_STATUS.OK,
     headers: {
       'content-type': contentType,
+      'content-length': String(buffer.length),
       'cache-control': 'public, max-age=31536000, immutable',
+      ...options.headers,
     },
     body: '',
     json: null,
@@ -954,6 +966,37 @@ export async function dispatchAgentRpc(
       case 'agent.attachments.get': {
         const projectId = readParam(params, 'projectId');
         const filename = readParam(params, 'filename');
+        const rawOffset = readQueryValue(query, 'offset');
+        const rawLimit = readQueryValue(query, 'limit');
+        const hasOffset = rawOffset !== undefined;
+        const hasLimit = rawLimit !== undefined;
+
+        if (hasOffset !== hasLimit) {
+          return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
+            error: 'attachment offset and limit must be provided together',
+          });
+        }
+
+        let offset = 0;
+        let maxBytes = AGENT_ATTACHMENT_RPC_INLINE_BYTES;
+        if (hasOffset && hasLimit) {
+          const requestedOffset = readNumber(rawOffset);
+          const requestedLimit = readNumber(rawLimit);
+          if (
+            requestedOffset === undefined ||
+            !Number.isSafeInteger(requestedOffset) ||
+            requestedOffset < 0 ||
+            requestedLimit === undefined ||
+            !Number.isSafeInteger(requestedLimit) ||
+            requestedLimit <= 0
+          ) {
+            return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
+              error: 'attachment offset must be a non-negative safe integer and limit must be positive',
+            });
+          }
+          offset = requestedOffset;
+          maxBytes = Math.min(requestedLimit, AGENT_ATTACHMENT_RPC_CHUNK_BYTES);
+        }
 
         try {
           const project = await getProject(projectId);
@@ -961,7 +1004,41 @@ export async function dispatchAgentRpc(
             return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
           }
 
-          const buffer = await attachmentService.readAttachment(projectId, filename);
+          const chunk = await attachmentService.readAttachmentChunk(
+            projectId,
+            filename,
+            offset,
+            maxBytes,
+            AGENT_ATTACHMENT_MAX_BYTES,
+          );
+
+          if (chunk.totalBytes > AGENT_ATTACHMENT_MAX_BYTES) {
+            return jsonResponse(HTTP_STATUS.PAYLOAD_TOO_LARGE, {
+              error: `Attachment exceeds the ${AGENT_ATTACHMENT_MAX_BYTES}-byte limit`,
+              code: 'ATTACHMENT_TOO_LARGE',
+              totalBytes: chunk.totalBytes,
+              maxBytes: AGENT_ATTACHMENT_MAX_BYTES,
+            });
+          }
+
+          if (!hasOffset && chunk.totalBytes > AGENT_ATTACHMENT_RPC_INLINE_BYTES) {
+            return jsonResponse(HTTP_STATUS.PAYLOAD_TOO_LARGE, {
+              error: 'Attachment requires ranged transfer',
+              code: 'ATTACHMENT_RANGE_REQUIRED',
+              totalBytes: chunk.totalBytes,
+              maxChunkBytes: AGENT_ATTACHMENT_RPC_CHUNK_BYTES,
+            });
+          }
+
+          if (hasOffset && offset >= chunk.totalBytes) {
+            const response = jsonResponse(HTTP_STATUS.RANGE_NOT_SATISFIABLE, {
+              error: 'Attachment range is not satisfiable',
+              code: 'ATTACHMENT_RANGE_NOT_SATISFIABLE',
+              totalBytes: chunk.totalBytes,
+            });
+            response.headers['content-range'] = `bytes */${chunk.totalBytes}`;
+            return response;
+          }
 
           const ext = filename.split('.').pop()?.toLowerCase();
           let contentType = 'application/octet-stream';
@@ -983,7 +1060,18 @@ export async function dispatchAgentRpc(
               break;
           }
 
-          return binaryResponse(buffer, contentType);
+          if (hasOffset) {
+            const end = offset + chunk.buffer.length - 1;
+            return binaryResponse(chunk.buffer, contentType, {
+              statusCode: HTTP_STATUS.PARTIAL_CONTENT,
+              headers: {
+                'accept-ranges': 'bytes',
+                'content-range': `bytes ${offset}-${end}/${chunk.totalBytes}`,
+              },
+            });
+          }
+
+          return binaryResponse(chunk.buffer, contentType);
         } catch (error) {
           const message = normalizeError(error);
           if (message.includes('Invalid') || message.includes('traversal')) {

@@ -52,6 +52,12 @@ export interface AttachmentStats {
   projects: AttachmentProjectStats[];
 }
 
+export interface AttachmentReadChunk {
+  buffer: Buffer;
+  offset: number;
+  totalBytes: number;
+}
+
 export interface CleanupAttachmentsInput {
   /** If omitted, cleanup all project dirs under root */
   projectIds?: string[];
@@ -524,11 +530,67 @@ export class AttachmentService {
   }
 
   /**
-   * Read an attachment file.
+   * Read a bounded attachment range without loading the whole file first.
    */
-  async readAttachment(projectId: string, filename: string): Promise<Buffer> {
+  async readAttachmentChunk(
+    projectId: string,
+    filename: string,
+    offset: number,
+    maxBytes: number,
+    maxTotalBytes: number,
+  ): Promise<AttachmentReadChunk> {
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new RangeError('Attachment offset must be a non-negative safe integer');
+    }
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+      throw new RangeError('Attachment maxBytes must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(maxTotalBytes) || maxTotalBytes <= 0) {
+      throw new RangeError('Attachment maxTotalBytes must be a positive safe integer');
+    }
+
     const filePath = this.getAttachmentPath(projectId, filename);
-    return fs.readFile(filePath);
+    const handle = await fs.open(filePath, 'r');
+    try {
+      const stats = await handle.stat();
+      if (!stats.isFile()) {
+        throw new Error('Attachment is not a regular file');
+      }
+      if (!Number.isSafeInteger(stats.size) || stats.size < 0) {
+        throw new Error('Attachment size is invalid');
+      }
+      if (stats.size > maxTotalBytes) {
+        return {
+          buffer: Buffer.alloc(0),
+          offset,
+          totalBytes: stats.size,
+        };
+      }
+
+      const bytesToRead = Math.min(maxBytes, Math.max(0, stats.size - offset));
+      const buffer = Buffer.allocUnsafe(bytesToRead);
+      let bytesRead = 0;
+      while (bytesRead < bytesToRead) {
+        const result = await handle.read(
+          buffer,
+          bytesRead,
+          bytesToRead - bytesRead,
+          offset + bytesRead,
+        );
+        if (result.bytesRead === 0) {
+          break;
+        }
+        bytesRead += result.bytesRead;
+      }
+
+      return {
+        buffer: bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead),
+        offset,
+        totalBytes: stats.size,
+      };
+    } finally {
+      await handle.close();
+    }
   }
 }
 

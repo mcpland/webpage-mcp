@@ -1,7 +1,7 @@
-import type { AgentAttachment } from 'webpage-mcp-shared';
+import { AGENT_ATTACHMENT_MAX_BYTES, type AgentAttachment } from 'webpage-mcp-shared';
 
 export const MAX_AGENT_ATTACHMENTS_PER_REQUEST = 4;
-export const MAX_AGENT_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+export const MAX_AGENT_ATTACHMENT_BYTES = AGENT_ATTACHMENT_MAX_BYTES;
 const MAX_AGENT_ATTACHMENT_BASE64_LENGTH = Math.ceil(MAX_AGENT_ATTACHMENT_BYTES / 3) * 4;
 export const MAX_AGENT_ATTACHMENTS_TOTAL_BYTES = 20 * 1024 * 1024;
 export const MAX_AGENT_ATTACHMENT_NAME_LENGTH = 255;

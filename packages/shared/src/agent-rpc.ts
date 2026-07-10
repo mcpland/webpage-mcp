@@ -35,6 +35,21 @@ export const AGENT_RPC_OPERATIONS = [
   'agent.attachments.deleteAll',
 ] as const;
 
+/** Maximum persisted attachment size accepted by the agent APIs. */
+export const AGENT_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Raw attachment bytes per ranged RPC response. Base64 plus the native
+ * messaging envelope remains comfortably below Chrome's 1 MiB output limit.
+ */
+export const AGENT_ATTACHMENT_RPC_CHUNK_BYTES = 512 * 1024;
+
+/**
+ * Largest attachment that may use the legacy one-response RPC shape. The
+ * extra headroom is reserved for Base64 expansion and the JSON envelope.
+ */
+export const AGENT_ATTACHMENT_RPC_INLINE_BYTES = 700 * 1024;
+
 export type AgentRpcOperation = (typeof AGENT_RPC_OPERATIONS)[number] | (string & {});
 
 export interface AgentRpcRequestPayload {

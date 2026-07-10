@@ -1,5 +1,6 @@
 import { Writable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
+import { AGENT_ATTACHMENT_RPC_CHUNK_BYTES } from 'webpage-mcp-shared';
 import {
   CHROME_NATIVE_MESSAGE_MAX_OUTBOUND_BYTES,
   NativeMessageOutputError,
@@ -81,6 +82,39 @@ describe('NativeMessageWriter', () => {
       code: 'SERIALIZATION_FAILED',
     });
     expect(output.chunks).toHaveLength(1);
+  });
+
+  it('keeps ranged attachment responses within Chrome\'s native message budget', async () => {
+    const output = new ControlledWritable();
+    const writer = new NativeMessageWriter(output);
+    const responseEnvelope = (rawBytes: number) => ({
+      responseToRequestId: 'agent-rpc-attachment-test',
+      payload: {
+        ok: true,
+        statusCode: 206,
+        headers: {
+          'content-type': 'image/png',
+          'content-length': String(rawBytes),
+          'content-range': `bytes 0-${rawBytes - 1}/${rawBytes}`,
+        },
+        body: '',
+        json: null,
+        isBinary: true,
+        base64Body: Buffer.alloc(rawBytes).toString('base64'),
+      },
+    });
+
+    const accepted = writer.send(responseEnvelope(AGENT_ATTACHMENT_RPC_CHUNK_BYTES));
+    expect(output.chunks).toHaveLength(1);
+    expect(output.chunks[0].length - 4).toBeLessThan(CHROME_NATIVE_MESSAGE_MAX_OUTBOUND_BYTES);
+    output.completeNext();
+    await accepted;
+
+    await expect(
+      writer.send(responseEnvelope(768 * 1024)),
+    ).rejects.toMatchObject<NativeMessageOutputError>({
+      code: 'MESSAGE_TOO_LARGE',
+    });
   });
 
   it('rejects the active and queued writes after an output error', async () => {
