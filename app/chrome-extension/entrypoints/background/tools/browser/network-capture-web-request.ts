@@ -358,6 +358,10 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
     this.captureData.delete(tabId);
     this.requestCounters.delete(tabId);
 
+    // Listener ownership is shared by all captures. Only the cleanup that
+    // removes the final capture may release the global webRequest listeners.
+    this.removeListeners();
+
     console.log(`NetworkCaptureV2: Cleaned up all resources for tab ${tabId}`);
   }
 
@@ -699,9 +703,6 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
 
       // Sort by time
       processedRequests.sort((a, b) => (a.requestTime || 0) - (b.requestTime || 0));
-
-      // Remove listeners
-      this.removeListeners();
 
       // Prepare result data
       const resultData = {
