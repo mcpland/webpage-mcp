@@ -51,6 +51,12 @@ const SSE_CONNECT_TIMEOUT_MS = 3000;
 /** Safety timeout for entire request lifecycle (15 minutes) */
 const REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
 
+/** One panel document can own only one long-lived request at a time. */
+const MAX_ACTIVE_REQUESTS_PER_DOCUMENT = 1;
+
+/** Global safety bound for MV3 timers, keepalives, listeners, and subscriptions. */
+const MAX_ACTIVE_REQUESTS = 32;
+
 /** Flag indicating SSE connection timed out but we should continue */
 const SSE_TIMEOUT = Symbol('SSE_TIMEOUT');
 
@@ -503,6 +509,23 @@ function isRequestStillActive(request: ActiveRequest): boolean {
   return activeRequests.has(request.requestId) && !request.abortController.signal.aborted;
 }
 
+function hasDocumentRequest(tabId: number, frameId: number, documentId: string): boolean {
+  let count = 0;
+  for (const request of activeRequests.values()) {
+    if (
+      request.tabId === tabId &&
+      request.frameId === frameId &&
+      request.documentId === documentId
+    ) {
+      count += 1;
+      if (count >= MAX_ACTIVE_REQUESTS_PER_DOCUMENT) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * Main orchestration function for starting a Quick Panel AI request.
  *
@@ -649,6 +672,22 @@ async function handleSendToAI(
       success: false,
       error:
         'No Agent session selected. Open Agent Setup, select or create a session, then try again.',
+    };
+  }
+
+  // Check immediately before allocating a timer, keepalive, and native
+  // subscription. The UI is single-flight by design; duplicate sends from the
+  // same document are rejected instead of accumulating 15-minute resources.
+  if (hasDocumentRequest(tabId, frameId, documentId)) {
+    return {
+      success: false,
+      error: 'Quick Panel already has an active request for this document.',
+    };
+  }
+  if (activeRequests.size >= MAX_ACTIVE_REQUESTS) {
+    return {
+      success: false,
+      error: 'Quick Panel has reached the active request limit. Cancel a request and try again.',
     };
   }
 

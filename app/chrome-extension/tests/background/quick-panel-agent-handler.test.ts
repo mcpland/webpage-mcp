@@ -198,6 +198,118 @@ describe('Quick Panel agent handler', () => {
     expect(nativeHostMocks.subscribeAgentStream).not.toHaveBeenCalled();
   });
 
+  it('allows only one active request per originating document', async () => {
+    let requestListener: RequestListener | undefined;
+    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
+      (listener) => {
+        if (!requestListener) requestListener = listener as RequestListener;
+      },
+    );
+
+    const { initQuickPanelAgentHandler } = await import(
+      '@/entrypoints/background/quick-panel/agent-handler'
+    );
+    initQuickPanelAgentHandler();
+
+    const sender = {
+      tab: { id: 7, windowId: 3 },
+      frameId: 0,
+      documentId: 'document-a',
+    } as chrome.runtime.MessageSender;
+    const firstResponse = vi.fn();
+    const secondResponse = vi.fn();
+
+    requestListener!(
+      {
+        type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
+        authorizationToken: 'first-token',
+        payload: { instruction: 'First request' },
+      },
+      sender,
+      firstResponse,
+    );
+    await vi.waitFor(() => {
+      expect(firstResponse).toHaveBeenCalledWith({
+        success: true,
+        requestId: expect.any(String),
+        sessionId: 'session-123',
+      });
+    });
+
+    requestListener!(
+      {
+        type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
+        authorizationToken: 'second-token',
+        payload: { instruction: 'Second request' },
+      },
+      sender,
+      secondResponse,
+    );
+
+    await vi.waitFor(() => {
+      expect(secondResponse).toHaveBeenCalledWith({
+        success: false,
+        error: 'Quick Panel already has an active request for this document.',
+      });
+    });
+    expect(keepaliveMocks.acquireKeepalive).toHaveBeenCalledOnce();
+  });
+
+  it('rejects work above the global active request budget', async () => {
+    let requestListener: RequestListener | undefined;
+    let tabRemovedListener: ((tabId: number) => void) | undefined;
+    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
+      (listener) => {
+        if (!requestListener) requestListener = listener as RequestListener;
+      },
+    );
+    (globalThis.chrome.tabs.onRemoved.addListener as ReturnType<typeof vi.fn>).mockImplementation(
+      (listener) => {
+        tabRemovedListener = listener as (tabId: number) => void;
+      },
+    );
+
+    const { initQuickPanelAgentHandler } = await import(
+      '@/entrypoints/background/quick-panel/agent-handler'
+    );
+    initQuickPanelAgentHandler();
+
+    const responses: Array<ReturnType<typeof vi.fn>> = [];
+    for (let index = 0; index < 33; index += 1) {
+      const sendResponse = vi.fn();
+      responses.push(sendResponse);
+      requestListener!(
+        {
+          type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
+          authorizationToken: `token-${index}`,
+          payload: { instruction: `Request ${index}` },
+        },
+        {
+          tab: { id: 7, windowId: 3 },
+          frameId: index,
+          documentId: `document-${index}`,
+        } as chrome.runtime.MessageSender,
+        sendResponse,
+      );
+    }
+
+    await vi.waitFor(() => {
+      expect(responses[31]).toHaveBeenCalledWith({
+        success: true,
+        requestId: expect.any(String),
+        sessionId: 'session-123',
+      });
+      expect(responses[32]).toHaveBeenCalledWith({
+        success: false,
+        error:
+          'Quick Panel has reached the active request limit. Cancel a request and try again.',
+      });
+    });
+    expect(keepaliveMocks.acquireKeepalive).toHaveBeenCalledTimes(32);
+
+    tabRemovedListener?.(7);
+  });
+
   it('unsubscribes when cancellation wins the subscription race', async () => {
     let requestListener: RequestListener | undefined;
     (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
