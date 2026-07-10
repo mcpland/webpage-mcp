@@ -48,7 +48,17 @@ vi.mock('./attachment-service', () => ({
 
 import { AgentChatService } from './chat-service';
 
-describe('AgentChatService legacy session migration', () => {
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+describe('AgentChatService', () => {
   const legacySession: AgentSession = {
     id: 'legacy-db-session',
     projectId: 'project-1',
@@ -535,5 +545,269 @@ describe('AgentChatService legacy session migration', () => {
     );
     expect(streamedMessages).not.toContain('Inspect this image');
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('never starts the engine when a user message without attachments cannot be persisted', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const run = vi.fn();
+    const service = new AgentChatService({
+      engines: [{ name: 'claude', supportsMcp: true, initializeAndRun: run }],
+      streamManager: new AgentStreamManager(),
+    });
+    messageServiceMocks.createMessage.mockRejectedValueOnce(new Error('database unavailable'));
+
+    await expect(
+      service.handleAct(legacySession.id, {
+        instruction: 'This must be durable before execution',
+        dbSessionId: legacySession.id,
+      }),
+    ).rejects.toThrow('Failed to persist user message: database unavailable');
+
+    expect(run).not.toHaveBeenCalled();
+    expect(service.getRunningExecutions()).toHaveLength(0);
+  });
+
+  it.each(['delete', 'reset'] as const)(
+    'waits for deferred preparation before a session %s mutation',
+    async (operation) => {
+      legacySession.engineName = 'claude';
+      legacySession.engineSessionId = undefined;
+      legacySession.model = undefined;
+      const sessionLookup = deferred<AgentSession | undefined>();
+      sessionServiceMocks.getSession.mockImplementationOnce(() => sessionLookup.promise);
+      const run = vi.fn();
+      const service = new AgentChatService({
+        engines: [{ name: 'claude', supportsMcp: true, initializeAndRun: run }],
+        streamManager: new AgentStreamManager(),
+      });
+      const actPromise = service.handleAct(legacySession.id, {
+        instruction: 'Still preparing',
+        dbSessionId: legacySession.id,
+        requestId: `prepare-before-${operation}`,
+      });
+      const actExpectation = expect(actPromise).rejects.toThrow(
+        'Execution cancelled during preparation',
+      );
+      const mutation = vi.fn().mockResolvedValue(operation);
+      const lifecyclePromise = service.withSessionLifecycleMutation(legacySession.id, mutation);
+
+      expect(mutation).not.toHaveBeenCalled();
+      await expect(
+        service.handleAct(legacySession.id, {
+          instruction: 'Must be rejected by the tombstone',
+          dbSessionId: legacySession.id,
+          requestId: `blocked-during-${operation}`,
+        }),
+      ).rejects.toThrow('Session lifecycle mutation in progress');
+
+      sessionLookup.resolve(legacySession);
+      await actExpectation;
+      await expect(lifecyclePromise).resolves.toBe(operation);
+      expect(mutation).toHaveBeenCalledOnce();
+      expect(run).not.toHaveBeenCalled();
+      expect(messageServiceMocks.createMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('waits for a deferred attachment save before deleting its project', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const savedAttachment = deferred<{
+      absolutePath: string;
+      filename: string;
+      metadata: { filename: string };
+    }>();
+    attachmentServiceMocks.saveAttachment.mockImplementationOnce(() => savedAttachment.promise);
+    const run = vi.fn();
+    const service = new AgentChatService({
+      engines: [{ name: 'claude', supportsMcp: true, initializeAndRun: run }],
+      streamManager: new AgentStreamManager(),
+    });
+    const actPromise = service.handleAct(legacySession.id, {
+      instruction: 'Prepare an image',
+      projectId: legacySession.projectId,
+      dbSessionId: legacySession.id,
+      requestId: 'save-before-project-delete',
+      attachments: [
+        {
+          type: 'image',
+          name: 'deferred.png',
+          mimeType: 'image/png',
+          dataBase64: 'ZGVmZXJyZWQ=',
+        },
+      ],
+    });
+    const actExpectation = expect(actPromise).rejects.toThrow(
+      'Failed to save attachments: Execution cancelled during preparation',
+    );
+    await vi.waitFor(() => expect(attachmentServiceMocks.saveAttachment).toHaveBeenCalledOnce());
+
+    const mutation = vi.fn().mockResolvedValue('deleted');
+    const deletePromise = service.withProjectLifecycleMutation(
+      legacySession.projectId,
+      async () => [legacySession.id],
+      mutation,
+    );
+    expect(mutation).not.toHaveBeenCalled();
+    await expect(
+      service.handleAct(legacySession.id, {
+        instruction: 'Must be rejected by the project tombstone',
+        projectId: legacySession.projectId,
+        dbSessionId: legacySession.id,
+        requestId: 'blocked-during-project-delete',
+      }),
+    ).rejects.toThrow('Project lifecycle mutation in progress');
+
+    savedAttachment.resolve({
+      absolutePath: '/private/deferred.png',
+      filename: 'deferred.png',
+      metadata: { filename: 'deferred.png' },
+    });
+    await actExpectation;
+    await expect(deletePromise).resolves.toBe('deleted');
+    expect(attachmentServiceMocks.deleteAttachment).toHaveBeenCalledWith(
+      legacySession.projectId,
+      'deferred.png',
+    );
+    expect(mutation).toHaveBeenCalledOnce();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('waits for deferred user-message persistence before resetting the session', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const persistence = deferred<void>();
+    messageServiceMocks.createMessage.mockImplementationOnce(() => persistence.promise);
+    const run = vi.fn();
+    const service = new AgentChatService({
+      engines: [{ name: 'claude', supportsMcp: true, initializeAndRun: run }],
+      streamManager: new AgentStreamManager(),
+    });
+    const actPromise = service.handleAct(legacySession.id, {
+      instruction: 'Persist before reset',
+      dbSessionId: legacySession.id,
+      requestId: 'persist-before-reset',
+    });
+    const actExpectation = expect(actPromise).rejects.toThrow(
+      'Failed to persist user message: Execution cancelled during preparation',
+    );
+    await vi.waitFor(() => expect(messageServiceMocks.createMessage).toHaveBeenCalledOnce());
+
+    const reset = vi.fn().mockResolvedValue('reset');
+    const resetPromise = service.withSessionLifecycleMutation(legacySession.id, reset);
+    expect(reset).not.toHaveBeenCalled();
+
+    persistence.resolve();
+    await actExpectation;
+    await expect(resetPromise).resolves.toBe('reset');
+    expect(reset).toHaveBeenCalledOnce();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('waits for an aborted engine to settle before deleting the session', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const engineRelease = deferred<void>();
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options) {
+        engineSignal = options.signal;
+        await engineRelease.promise;
+      },
+    };
+    const service = new AgentChatService({
+      engines: [engine],
+      streamManager: new AgentStreamManager(),
+    });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Keep the engine alive until cleanup',
+      dbSessionId: legacySession.id,
+      requestId: 'engine-before-delete',
+    });
+    await vi.waitFor(() => expect(engineSignal).toBeDefined());
+
+    const deleteSession = vi.fn().mockResolvedValue('deleted');
+    const deletePromise = service.withSessionLifecycleMutation(legacySession.id, deleteSession);
+    expect(engineSignal?.aborted).toBe(true);
+    expect(deleteSession).not.toHaveBeenCalled();
+
+    engineRelease.resolve();
+    await expect(deletePromise).resolves.toBe('deleted');
+    expect(deleteSession).toHaveBeenCalledOnce();
+    expect(service.getRunningExecutions()).toHaveLength(0);
+  });
+
+  it('drains late assistant persistence before session history is deleted', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const assistantPersistence = deferred<void>();
+    const ordering: string[] = [];
+    messageServiceMocks.createMessage
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(async () => {
+        await assistantPersistence.promise;
+        ordering.push('assistant persisted');
+      });
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'late-assistant-persistence',
+            sessionId: legacySession.id,
+            role: 'assistant',
+            content: 'Persist me before reset removes history',
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId: 'late-persistence-request',
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date().toISOString(),
+          },
+        });
+        await new Promise<void>((resolve) => {
+          if (options.signal?.aborted) {
+            resolve();
+            return;
+          }
+          options.signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      },
+    };
+    const service = new AgentChatService({
+      engines: [engine],
+      streamManager: new AgentStreamManager(),
+    });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Generate a persisted reply',
+      dbSessionId: legacySession.id,
+      requestId: 'late-persistence-request',
+    });
+    await vi.waitFor(() => expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(2));
+
+    const deleteHistory = vi.fn(async () => {
+      ordering.push('history deleted');
+      return 'deleted';
+    });
+    const resetPromise = service.withSessionLifecycleMutation(legacySession.id, deleteHistory);
+    expect(deleteHistory).not.toHaveBeenCalled();
+
+    assistantPersistence.resolve();
+    await expect(resetPromise).resolves.toBe('deleted');
+    expect(ordering).toEqual(['assistant persisted', 'history deleted']);
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(2);
+    expect(service.getRunningExecutions()).toHaveLength(0);
   });
 });

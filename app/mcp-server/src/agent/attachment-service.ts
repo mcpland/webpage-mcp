@@ -456,7 +456,9 @@ export class AttachmentService {
         continue;
       }
 
-      const result = await this.cleanupProject(projectId);
+      const result = await this.withProjectWriteLock(projectId, () =>
+        this.cleanupProject(projectId),
+      );
       results.push(result);
       totalRemovedFiles += result.removedFiles;
       totalRemovedBytes += result.removedBytes;

@@ -23,6 +23,14 @@ function attachment(contents: string, name: string) {
   };
 }
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 afterEach(async () => {
   process.env.WEBPAGE_MCP_AGENT_DATA_DIR = originalAgentDataDir;
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
@@ -71,5 +79,35 @@ describe('project attachment quotas', () => {
         attachment: attachment('two', 'second.png'),
       }),
     ).rejects.toThrow('Project attachment file limit (1) reached');
+  });
+
+  it('serializes project cleanup behind an in-flight save', async () => {
+    const service = await createService({ maxProjectBytes: 100, maxProjectFiles: 10 });
+    const lockEntered = deferred();
+    const releaseLock = deferred();
+    const lockAccess = service as unknown as {
+      withProjectWriteLock<T>(projectId: string, task: () => Promise<T>): Promise<T>;
+    };
+    const blocker = lockAccess.withProjectWriteLock('project-1', async () => {
+      lockEntered.resolve();
+      await releaseLock.promise;
+    });
+    await lockEntered.promise;
+
+    const savePromise = service.saveAttachment({
+      projectId: 'project-1',
+      messageId: 'message-during-cleanup',
+      index: 0,
+      attachment: attachment('saved-before-cleanup', 'race.png'),
+    });
+    const cleanupPromise = service.cleanupAttachments({ projectIds: ['project-1'] });
+    releaseLock.resolve();
+
+    const saved = await savePromise;
+    const cleanup = await cleanupPromise;
+    await blocker;
+
+    expect(cleanup.removedFiles).toBe(1);
+    expect(await service.attachmentExists('project-1', saved.filename)).toBe(false);
   });
 });

@@ -125,8 +125,14 @@ export interface RunningExecution {
   requestId: string;
   sessionId: string;
   engineName: EngineName;
+  /** Project scope, attached before any project-scoped side effect is allowed. */
+  projectId?: string;
+  /** Database session scope when the request uses persisted sessions. */
+  dbSessionId?: string;
   abortController: AbortController;
   startedAt: Date;
+  /** Resolves after preparation, the engine, and all spawned persistence work are quiescent. */
+  settled: Promise<void>;
   /** Cancellation tombstone retained until the engine has actually settled. */
   cancelled?: boolean;
 }

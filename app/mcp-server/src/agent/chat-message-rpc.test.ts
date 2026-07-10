@@ -48,6 +48,16 @@ function createRpcDeps(): { chatService: AgentChatService } {
     chatService: {
       getEngineInfos: () => [{ name: 'claude' }],
       cancelSessionExecutions: () => 0,
+      withSessionLifecycleMutation: async (_sessionId: string, mutation: () => Promise<unknown>) =>
+        mutation(),
+      withProjectLifecycleMutation: async (
+        _projectId: string,
+        resolveSessionIds: () => Promise<string[]>,
+        mutation: () => Promise<unknown>,
+      ) => {
+        await resolveSessionIds();
+        return mutation();
+      },
     } as AgentChatService,
   };
 }
@@ -845,7 +855,9 @@ describe('agent.sessions.delete', () => {
       allowCreate: true,
     });
     const session = await createSession(project.id, 'codex' as any);
-    const cancelSessionExecutions = vi.fn().mockReturnValue(1);
+    const withSessionLifecycleMutation = vi.fn(
+      async (_sessionId: string, mutation: () => Promise<unknown>) => mutation(),
+    );
 
     const response = await dispatchAgentRpc(
       {
@@ -855,13 +867,13 @@ describe('agent.sessions.delete', () => {
       {
         chatService: {
           getEngineInfos: () => [],
-          cancelSessionExecutions,
+          withSessionLifecycleMutation,
         } as unknown as AgentChatService,
       },
     );
 
     expect(response.statusCode).toBe(204);
-    expect(cancelSessionExecutions).toHaveBeenCalledWith(session.id);
+    expect(withSessionLifecycleMutation).toHaveBeenCalledWith(session.id, expect.any(Function));
   });
 
   it('returns Session not found when deleting a missing session', async () => {
@@ -910,9 +922,18 @@ describe('agent.projects.delete', () => {
       rootPath: projectRoot,
       allowCreate: true,
     });
-    const sessionA = await createSession(project.id, 'claude' as any);
-    const sessionB = await createSession(project.id, 'codex' as any);
-    const cancelSessionExecutions = vi.fn().mockReturnValue(1);
+    await createSession(project.id, 'claude' as any);
+    await createSession(project.id, 'codex' as any);
+    const withProjectLifecycleMutation = vi.fn(
+      async (
+        _projectId: string,
+        resolveSessionIds: () => Promise<string[]>,
+        mutation: () => Promise<unknown>,
+      ) => {
+        await resolveSessionIds();
+        return mutation();
+      },
+    );
 
     const response = await dispatchAgentRpc(
       {
@@ -922,15 +943,17 @@ describe('agent.projects.delete', () => {
       {
         chatService: {
           getEngineInfos: () => [{ name: 'claude' }, { name: 'codex' }],
-          cancelSessionExecutions,
+          withProjectLifecycleMutation,
         } as unknown as AgentChatService,
       },
     );
 
     expect(response.statusCode).toBe(204);
-    expect(cancelSessionExecutions).toHaveBeenCalledTimes(2);
-    expect(cancelSessionExecutions).toHaveBeenCalledWith(sessionA.id);
-    expect(cancelSessionExecutions).toHaveBeenCalledWith(sessionB.id);
+    expect(withProjectLifecycleMutation).toHaveBeenCalledWith(
+      project.id,
+      expect.any(Function),
+      expect.any(Function),
+    );
     expect(await getSessionsByProject(project.id)).toHaveLength(0);
   });
 
@@ -1138,7 +1161,9 @@ describe('session-scoped message boundaries', () => {
       content: 'dirty foreign message',
     });
 
-    const cancelSessionExecutions = vi.fn().mockReturnValue(1);
+    const withSessionLifecycleMutation = vi.fn(
+      async (_sessionId: string, mutation: () => Promise<unknown>) => mutation(),
+    );
     const response = await dispatchAgentRpc(
       {
         operation: 'agent.sessions.reset',
@@ -1147,13 +1172,13 @@ describe('session-scoped message boundaries', () => {
       {
         chatService: {
           getEngineInfos: () => [],
-          cancelSessionExecutions,
+          withSessionLifecycleMutation,
         } as unknown as AgentChatService,
       },
     );
 
     expect(response.statusCode).toBe(200);
-    expect(cancelSessionExecutions).toHaveBeenCalledWith(session.id);
+    expect(withSessionLifecycleMutation).toHaveBeenCalledWith(session.id, expect.any(Function));
     expect(response.json?.deletedMessages).toBe(1);
     expect(await getMessagesByProjectId(projectA.id)).toHaveLength(0);
     expect(await getMessagesByProjectId(projectB.id)).toHaveLength(1);

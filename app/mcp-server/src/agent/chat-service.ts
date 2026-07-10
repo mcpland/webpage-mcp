@@ -29,6 +29,18 @@ export interface AgentChatServiceOptions {
   defaultEngineName?: EngineName;
 }
 
+type ExecutionPhase = 'preparing' | 'running' | 'settled';
+
+interface ExecutionRecord extends RunningExecution {
+  phase: ExecutionPhase;
+  scopeReady: Promise<void>;
+  resolveScopeReady: () => void;
+  resolveSettled: () => void;
+  scopeResolved: boolean;
+  pendingPersistence: Set<Promise<void>>;
+  settling?: Promise<void>;
+}
+
 function executionKey(sessionId: string, requestId: string): string {
   return `${sessionId}::${requestId}`;
 }
@@ -92,11 +104,12 @@ export class AgentChatService {
   private readonly defaultEngineName: EngineName;
 
   /**
-   * Registry of currently running executions, keyed by sessionId + requestId.
+   * Registry of all executions, including preparation, keyed by sessionId + requestId.
    */
-  private readonly runningExecutions = new Map<string, RunningExecution>();
-  /** Keys being prepared before their engine is registered in runningExecutions. */
-  private readonly reservedExecutionKeys = new Set<string>();
+  private readonly runningExecutions = new Map<string, ExecutionRecord>();
+  /** Lifecycle tombstones reject new work until the destructive mutation completes. */
+  private readonly mutatingProjects = new Set<string>();
+  private readonly mutatingSessions = new Set<string>();
 
   constructor(options: AgentChatServiceOptions) {
     this.streamManager = options.streamManager;
@@ -131,11 +144,21 @@ export class AgentChatService {
     const engineInstruction = buildInstructionWithContext(trimmed, payload.context);
 
     const requestId = payload.requestId || randomUUID();
-    const runningKey = executionKey(sessionId, requestId);
+    const execution = this.reserveExecution(sessionId, requestId, payload);
 
-    return this.withExecutionReservation(runningKey, () =>
-      this.handleReservedAct(sessionId, payload, trimmed, engineInstruction, requestId, runningKey),
-    );
+    try {
+      return await this.handleReservedAct(
+        sessionId,
+        payload,
+        trimmed,
+        engineInstruction,
+        requestId,
+        execution,
+      );
+    } catch (error) {
+      await this.settleExecution(execution);
+      throw error;
+    }
   }
 
   private async handleReservedAct(
@@ -144,18 +167,20 @@ export class AgentChatService {
     trimmed: string,
     engineInstruction: string,
     requestId: string,
-    runningKey: string,
+    execution: ExecutionRecord,
   ): Promise<{ requestId: string }> {
-    let projectId = payload.projectId;
+    let projectId = execution.projectId;
     // Normalize empty string to undefined
     const rawDbSessionId =
       typeof payload.dbSessionId === 'string' ? payload.dbSessionId.trim() : '';
     const dbSessionId = rawDbSessionId || undefined;
+    execution.dbSessionId = dbSessionId;
 
     // Load session from database if dbSessionId is provided
     let dbSession: AgentSession | undefined;
     if (dbSessionId) {
       dbSession = await getSession(dbSessionId);
+      this.ensureExecutionActive(execution);
       if (!dbSession) {
         throw new Error(`Session not found for id: ${dbSessionId}`);
       }
@@ -174,7 +199,10 @@ export class AgentChatService {
       throw new Error('projectId is required. Please select or create a project first.');
     }
 
+    this.associateExecutionProject(execution, projectId);
+
     const project = await getProject(projectId);
+    this.ensureExecutionActive(execution);
     if (!project) {
       throw new Error(`Project not found for id: ${projectId}`);
     }
@@ -208,6 +236,7 @@ export class AgentChatService {
           projectPreferredCli,
         );
         await updateSessionEngineName(dbSession.id, engineName);
+        this.ensureExecutionActive(execution);
         dbSession.engineName = engineName;
         dbSession.engineSessionId = undefined;
         dbSession.model = undefined;
@@ -261,6 +290,7 @@ export class AgentChatService {
               index: i,
             });
             savedAttachments.push(saved);
+            this.ensureExecutionActive(execution);
           }
 
           // Build metadata array for message persistence
@@ -320,9 +350,11 @@ export class AgentChatService {
       // Persist user message into project history for later reload.
       try {
         await touchProjectActivity(projectId);
+        this.ensureExecutionActive(execution);
         // Update session activity timestamp so it appears at top of session list
         if (dbSessionId) {
           await touchSessionActivity(dbSessionId);
+          this.ensureExecutionActive(execution);
         }
         await persistAgentMessage({
           projectId,
@@ -337,6 +369,7 @@ export class AgentChatService {
           metadata: userMessageMetadata,
           upsertById: true,
         });
+        this.ensureExecutionActive(execution);
       } catch (error) {
         console.error('[AgentChatService] Failed to persist user message:', error);
         if (savedAttachments.length > 0) {
@@ -345,8 +378,13 @@ export class AgentChatService {
             `Failed to persist message attachments: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
+        throw new Error(
+          `Failed to persist user message: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
+
+    this.ensureExecutionActive(execution);
 
     this.streamManager.publish({ type: 'message', data: userMessage });
 
@@ -360,15 +398,7 @@ export class AgentChatService {
       },
     });
 
-    const abortController = new AbortController();
-    const execution: RunningExecution = {
-      requestId,
-      sessionId,
-      engineName,
-      abortController,
-      startedAt: new Date(),
-      cancelled: false,
-    };
+    execution.engineName = engineName;
 
     const ctx: EngineExecutionContext = {
       emit: (event: RealtimeEvent) => {
@@ -417,22 +447,23 @@ export class AgentChatService {
             return;
           }
 
-          void persistAgentMessage({
-            projectId,
-            role: msg.role,
-            messageType: msg.messageType,
-            content,
-            metadata: msg.metadata,
-            sessionId: persistedSessionId,
-            conversationId: undefined,
-            cliSource: msg.cliSource,
-            requestId: persistedRequestId,
-            id: msg.id,
-            createdAt: msg.createdAt,
-            upsertById: true,
-          }).catch((error) => {
-            console.error('[AgentChatService] Failed to persist agent message:', error);
-          });
+          this.trackPersistence(
+            execution,
+            persistAgentMessage({
+              projectId,
+              role: msg.role,
+              messageType: msg.messageType,
+              content,
+              metadata: msg.metadata,
+              sessionId: persistedSessionId,
+              conversationId: undefined,
+              cliSource: msg.cliSource,
+              requestId: persistedRequestId,
+              id: msg.id,
+              createdAt: msg.createdAt,
+              upsertById: true,
+            }).then(() => undefined),
+          );
         }
       },
       // Callback to persist Claude session ID when SDK returns system/init message
@@ -483,9 +514,8 @@ export class AgentChatService {
       codexConfig: engineName === 'codex' ? dbSession?.optionsConfig?.codexConfig : undefined,
     };
 
-    // Register only after request preparation succeeds. The reservation above
-    // prevents duplicate side effects while this work is in progress.
-    this.runningExecutions.set(runningKey, execution);
+    this.ensureExecutionActive(execution);
+    execution.phase = 'running';
 
     // Fire-and-forget execution to keep HTTP handler fast.
     void this.runEngine(engine, engineOptions, ctx, execution);
@@ -506,7 +536,7 @@ export class AgentChatService {
 
     // Keep an identity tombstone until the old engine settles. This prevents
     // immediate requestId reuse from being confused with late events/finally.
-    execution.cancelled = true;
+    this.cancelExecutionRecord(execution);
 
     // Emit cancelled status
     this.streamManager.publish({
@@ -519,9 +549,6 @@ export class AgentChatService {
       },
     });
 
-    // Abort the execution after the registry has been cleared.
-    execution.abortController.abort();
-
     return true;
   }
 
@@ -532,9 +559,8 @@ export class AgentChatService {
   cancelSessionExecutions(sessionId: string): number {
     let cancelled = 0;
     for (const execution of this.runningExecutions.values()) {
-      if (execution.sessionId === sessionId && !execution.cancelled) {
-        execution.cancelled = true;
-        execution.abortController.abort();
+      if (this.executionMatchesSession(execution, sessionId) && !execution.cancelled) {
+        this.cancelExecutionRecord(execution);
         cancelled++;
       }
     }
@@ -573,10 +599,84 @@ export class AgentChatService {
   }
 
   /**
+   * Hold a session tombstone while destructive session state is changed.
+   * Preparation, engine execution, and spawned persistence must all settle first.
+   */
+  async withSessionLifecycleMutation<T>(
+    sessionId: string,
+    mutation: () => Promise<T>,
+  ): Promise<T> {
+    if (this.mutatingSessions.has(sessionId)) {
+      throw new Error(`Session lifecycle mutation already in progress: ${sessionId}`);
+    }
+
+    this.mutatingSessions.add(sessionId);
+    try {
+      await this.cancelAndAwaitExecutions((execution) =>
+        this.executionMatchesSession(execution, sessionId),
+      );
+      return await mutation();
+    } finally {
+      this.mutatingSessions.delete(sessionId);
+    }
+  }
+
+  /**
+   * Hold a project tombstone while destructive project state is changed.
+   * Session ids are resolved under the tombstone so session-only requests cannot escape it.
+   */
+  async withProjectLifecycleMutation<T>(
+    projectId: string,
+    resolveSessionIds: () => Promise<string[]>,
+    mutation: () => Promise<T>,
+  ): Promise<T> {
+    if (this.mutatingProjects.has(projectId)) {
+      throw new Error(`Project lifecycle mutation already in progress: ${projectId}`);
+    }
+
+    this.mutatingProjects.add(projectId);
+    const unresolvedScopes = Array.from(this.runningExecutions.values())
+      .filter((execution) => !execution.scopeResolved)
+      .map((execution) => execution.scopeReady);
+    const protectedSessionIds: string[] = [];
+
+    try {
+      const [sessionIds] = await Promise.all([
+        resolveSessionIds(),
+        Promise.allSettled(unresolvedScopes),
+      ]);
+      const uniqueSessionIds = Array.from(new Set(sessionIds.filter(Boolean)));
+      for (const sessionId of uniqueSessionIds) {
+        if (this.mutatingSessions.has(sessionId)) {
+          throw new Error(`Session lifecycle mutation already in progress: ${sessionId}`);
+        }
+        this.mutatingSessions.add(sessionId);
+        protectedSessionIds.push(sessionId);
+      }
+
+      const sessionIdSet = new Set(uniqueSessionIds);
+      await this.cancelAndAwaitExecutions(
+        (execution) =>
+          execution.projectId === projectId ||
+          sessionIdSet.has(execution.sessionId) ||
+          (execution.dbSessionId !== undefined && sessionIdSet.has(execution.dbSessionId)),
+      );
+      return await mutation();
+    } finally {
+      for (const sessionId of protectedSessionIds) {
+        this.mutatingSessions.delete(sessionId);
+      }
+      this.mutatingProjects.delete(projectId);
+    }
+  }
+
+  /**
    * Get list of running executions for diagnostics.
    */
   getRunningExecutions(): RunningExecution[] {
-    return Array.from(this.runningExecutions.values()).filter((execution) => !execution.cancelled);
+    return Array.from(this.runningExecutions.values()).filter(
+      (execution) => !execution.cancelled && execution.phase !== 'settled',
+    );
   }
 
   private resolveEngineName(preference?: EngineName, projectPreferredCli?: EngineName): EngineName {
@@ -589,9 +689,11 @@ export class AgentChatService {
     return this.defaultEngineName;
   }
 
-  private isExecutionCurrent(execution: RunningExecution): boolean {
+  private isExecutionCurrent(execution: ExecutionRecord): boolean {
     return (
       !execution.cancelled &&
+      execution.phase !== 'settled' &&
+      !this.isExecutionScopeMutating(execution) &&
       this.runningExecutions.get(executionKey(execution.sessionId, execution.requestId)) ===
         execution
     );
@@ -613,29 +715,200 @@ export class AgentChatService {
     }
   }
 
-  private async withExecutionReservation<T>(key: string, task: () => Promise<T>): Promise<T> {
-    if (this.reservedExecutionKeys.has(key) || this.runningExecutions.has(key)) {
+  private reserveExecution(
+    sessionId: string,
+    requestId: string,
+    payload: AgentActRequest,
+  ): ExecutionRecord {
+    const key = executionKey(sessionId, requestId);
+    if (this.runningExecutions.has(key)) {
       throw new Error('requestId is already active for this session');
     }
 
-    this.reservedExecutionKeys.add(key);
-    try {
-      return await task();
-    } finally {
-      this.reservedExecutionKeys.delete(key);
+    const projectId =
+      typeof payload.projectId === 'string' && payload.projectId.trim().length > 0
+        ? payload.projectId.trim()
+        : undefined;
+    const dbSessionId =
+      typeof payload.dbSessionId === 'string' && payload.dbSessionId.trim().length > 0
+        ? payload.dbSessionId.trim()
+        : undefined;
+    this.assertLifecycleAllowsExecution(sessionId, dbSessionId, projectId);
+
+    let resolveScopeReady!: () => void;
+    const scopeReady = new Promise<void>((resolve) => {
+      resolveScopeReady = resolve;
+    });
+    let resolveSettled!: () => void;
+    const settled = new Promise<void>((resolve) => {
+      resolveSettled = resolve;
+    });
+
+    const execution: ExecutionRecord = {
+      requestId,
+      sessionId,
+      engineName: this.defaultEngineName,
+      projectId,
+      dbSessionId,
+      abortController: new AbortController(),
+      startedAt: new Date(),
+      settled,
+      cancelled: false,
+      phase: 'preparing',
+      scopeReady,
+      resolveScopeReady,
+      resolveSettled,
+      scopeResolved: projectId !== undefined,
+      pendingPersistence: new Set(),
+    };
+
+    this.runningExecutions.set(key, execution);
+    if (execution.scopeResolved) {
+      execution.resolveScopeReady();
     }
+    return execution;
+  }
+
+  private assertLifecycleAllowsExecution(
+    sessionId: string,
+    dbSessionId: string | undefined,
+    projectId: string | undefined,
+  ): void {
+    if (
+      this.mutatingSessions.has(sessionId) ||
+      (dbSessionId !== undefined && this.mutatingSessions.has(dbSessionId))
+    ) {
+      throw new Error('Session lifecycle mutation in progress');
+    }
+    if (projectId !== undefined && this.mutatingProjects.has(projectId)) {
+      throw new Error('Project lifecycle mutation in progress');
+    }
+    // A session-only request cannot prove that it belongs to a different project yet.
+    if (projectId === undefined && this.mutatingProjects.size > 0) {
+      throw new Error('Project lifecycle mutation in progress');
+    }
+  }
+
+  private associateExecutionProject(execution: ExecutionRecord, projectId: string): void {
+    execution.projectId = projectId;
+    if (!execution.scopeResolved) {
+      execution.scopeResolved = true;
+      execution.resolveScopeReady();
+    }
+    this.ensureExecutionActive(execution);
+  }
+
+  private ensureExecutionActive(execution: ExecutionRecord): void {
+    if (
+      execution.cancelled ||
+      execution.abortController.signal.aborted ||
+      execution.phase === 'settled'
+    ) {
+      throw new Error('Execution cancelled during preparation');
+    }
+    if (this.isExecutionScopeMutating(execution)) {
+      this.cancelExecutionRecord(execution);
+      throw new Error('Execution scope lifecycle mutation in progress');
+    }
+  }
+
+  private isExecutionScopeMutating(execution: ExecutionRecord): boolean {
+    return (
+      this.mutatingSessions.has(execution.sessionId) ||
+      (execution.dbSessionId !== undefined && this.mutatingSessions.has(execution.dbSessionId)) ||
+      (execution.projectId !== undefined && this.mutatingProjects.has(execution.projectId))
+    );
+  }
+
+  private executionMatchesSession(execution: ExecutionRecord, sessionId: string): boolean {
+    return execution.sessionId === sessionId || execution.dbSessionId === sessionId;
+  }
+
+  private cancelExecutionRecord(execution: ExecutionRecord): void {
+    if (execution.cancelled) {
+      return;
+    }
+    execution.cancelled = true;
+    execution.abortController.abort();
+  }
+
+  private async cancelAndAwaitExecutions(
+    predicate: (execution: ExecutionRecord) => boolean,
+  ): Promise<number> {
+    const executions = Array.from(this.runningExecutions.values()).filter(predicate);
+    let cancelled = 0;
+    const cancelledBySession = new Map<string, number>();
+    for (const execution of executions) {
+      if (!execution.cancelled) {
+        this.cancelExecutionRecord(execution);
+        cancelled++;
+        cancelledBySession.set(
+          execution.sessionId,
+          (cancelledBySession.get(execution.sessionId) ?? 0) + 1,
+        );
+      }
+    }
+    for (const [sessionId, count] of cancelledBySession) {
+      this.streamManager.publish({
+        type: 'status',
+        data: {
+          sessionId,
+          status: 'cancelled',
+          message: `Cancelled ${count} running execution(s)`,
+        },
+      });
+    }
+    await Promise.all(executions.map((execution) => execution.settled));
+    return cancelled;
+  }
+
+  private trackPersistence(execution: ExecutionRecord, operation: Promise<void>): void {
+    const tracked = operation.catch((error) => {
+      console.error('[AgentChatService] Failed to persist agent message:', error);
+    });
+    execution.pendingPersistence.add(tracked);
+    void tracked.finally(() => {
+      execution.pendingPersistence.delete(tracked);
+    });
+  }
+
+  private async settleExecution(execution: ExecutionRecord): Promise<void> {
+    if (execution.phase === 'settled') {
+      return;
+    }
+    if (execution.settling) {
+      return execution.settling;
+    }
+
+    execution.settling = (async () => {
+      if (!execution.scopeResolved) {
+        execution.scopeResolved = true;
+        execution.resolveScopeReady();
+      }
+      while (execution.pendingPersistence.size > 0) {
+        await Promise.all(Array.from(execution.pendingPersistence));
+      }
+      execution.phase = 'settled';
+      const key = executionKey(execution.sessionId, execution.requestId);
+      if (this.runningExecutions.get(key) === execution) {
+        this.runningExecutions.delete(key);
+      }
+      execution.resolveSettled();
+    })();
+
+    return execution.settling;
   }
 
   private async runEngine(
     engine: AgentEngine,
     options: EngineInitOptions,
     ctx: EngineExecutionContext,
-    execution: RunningExecution,
+    execution: ExecutionRecord,
   ): Promise<void> {
     const { sessionId, requestId, abortController } = execution;
     try {
       // Check if already aborted before starting
-      if (abortController.signal.aborted) {
+      if (!this.isExecutionCurrent(execution)) {
         return;
       }
 
@@ -657,7 +930,7 @@ export class AgentChatService {
       await engine.initializeAndRun(optionsWithSignal, ctx);
 
       // Only emit completed if not aborted
-      if (!abortController.signal.aborted) {
+      if (this.isExecutionCurrent(execution)) {
         this.streamManager.publish({
           type: 'status',
           data: {
@@ -669,7 +942,7 @@ export class AgentChatService {
       }
     } catch (error) {
       // Check if this was an abort error
-      if (abortController.signal.aborted) {
+      if (!this.isExecutionCurrent(execution)) {
         // Already handled by cancelExecution, just return
         return;
       }
@@ -692,11 +965,7 @@ export class AgentChatService {
         },
       });
     } finally {
-      // Do not let an old execution delete a newer execution that reused the key.
-      const key = executionKey(sessionId, requestId);
-      if (this.runningExecutions.get(key) === execution) {
-        this.runningExecutions.delete(key);
-      }
+      await this.settleExecution(execution);
     }
   }
 

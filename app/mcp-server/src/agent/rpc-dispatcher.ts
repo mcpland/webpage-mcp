@@ -314,16 +314,18 @@ export async function dispatchAgentRpc(
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'project id is required' });
         }
-        const project = await getProject(projectId);
-        if (!project) {
-          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
-        }
-        const sessions = await getSessionsByProject(projectId);
-        for (const session of sessions) {
-          deps.chatService.cancelSessionExecutions(session.id);
-        }
-        await deleteProject(projectId);
-        return noContentResponse();
+        return deps.chatService.withProjectLifecycleMutation(
+          projectId,
+          async () => (await getSessionsByProject(projectId)).map((session) => session.id),
+          async () => {
+            const project = await getProject(projectId);
+            if (!project) {
+              return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
+            }
+            await deleteProject(projectId);
+            return noContentResponse();
+          },
+        );
       }
 
       case 'agent.projects.validatePath': {
@@ -503,13 +505,14 @@ export async function dispatchAgentRpc(
         if (!sessionId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'sessionId is required' });
         }
-        const existing = await getSession(sessionId);
-        if (!existing) {
-          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
-        }
-        deps.chatService.cancelSessionExecutions(sessionId);
-        await deleteSession(sessionId);
-        return noContentResponse();
+        return deps.chatService.withSessionLifecycleMutation(sessionId, async () => {
+          const existing = await getSession(sessionId);
+          if (!existing) {
+            return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
+          }
+          await deleteSession(sessionId);
+          return noContentResponse();
+        });
       }
 
       case 'agent.sessions.history': {
@@ -553,22 +556,23 @@ export async function dispatchAgentRpc(
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'sessionId is required' });
         }
 
-        const existing = await getSession(sessionId);
-        if (!existing) {
-          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
-        }
+        return deps.chatService.withSessionLifecycleMutation(sessionId, async () => {
+          const existing = await getSession(sessionId);
+          if (!existing) {
+            return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Session not found' });
+          }
 
-        deps.chatService.cancelSessionExecutions(sessionId);
-        await updateSession(sessionId, { engineSessionId: null });
-        const deletedMessages = await deleteMessagesBySessionId(sessionId, existing.projectId);
-        const updated = await getSession(sessionId);
+          await updateSession(sessionId, { engineSessionId: null });
+          const deletedMessages = await deleteMessagesBySessionId(sessionId, existing.projectId);
+          const updated = await getSession(sessionId);
 
-        return jsonResponse(HTTP_STATUS.OK, {
-          success: true,
-          sessionId,
-          deletedMessages,
-          clearedEngineSessionId: Boolean(existing.engineSessionId),
-          session: updated ? sanitizeSessionForPublicRead(updated) : null,
+          return jsonResponse(HTTP_STATUS.OK, {
+            success: true,
+            sessionId,
+            deletedMessages,
+            clearedEngineSessionId: Boolean(existing.engineSessionId),
+            session: updated ? sanitizeSessionForPublicRead(updated) : null,
+          });
         });
       }
 
@@ -886,7 +890,10 @@ export async function dispatchAgentRpc(
           }));
         } catch (error) {
           const message = normalizeError(error);
-          if (message === 'requestId is already active for this session') {
+          if (
+            message === 'requestId is already active for this session' ||
+            message.includes('lifecycle mutation in progress')
+          ) {
             return jsonResponse(HTTP_STATUS.CONFLICT, { error: message });
           }
           throw error;
