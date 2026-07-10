@@ -172,6 +172,7 @@ test("release workflow verifies before either publish mutation", async () => {
     buildJob,
   );
   const githubJob = workflow.indexOf("  publish-github-release:");
+  const buildJobBody = workflow.slice(buildJob, githubJob);
   const githubPublish = workflow.indexOf(
     "uses: softprops/action-gh-release@v2",
     githubJob,
@@ -186,6 +187,31 @@ test("release workflow verifies before either publish mutation", async () => {
   assert.ok(
     buildJob >= 0 && artifactPreflight > buildJob,
     "build job must run artifact preflight",
+  );
+  assert.match(
+    buildJobBody,
+    /ENFORCE_COVERAGE:\s*["']true["']/,
+    "release tests must enforce production coverage thresholds",
+  );
+  assert.match(
+    buildJobBody,
+    /pnpm test:workspace/,
+    "release tests must include cross-platform workspace scripts",
+  );
+  assert.match(
+    buildJobBody,
+    /cargo test --manifest-path packages\/wasm-simd\/Cargo\.toml --locked/,
+    "release verification must run locked Rust tests",
+  );
+  assert.match(
+    buildJobBody,
+    /pnpm verify:wasm/,
+    "release verification must rebuild and compare committed WASM artifacts",
+  );
+  assert.ok(
+    buildJobBody.indexOf("pnpm verify:wasm") <
+      buildJobBody.indexOf("Pack MCP npm package"),
+    "WASM verification must finish before release artifacts are packed",
   );
   assert.ok(
     githubJob > artifactPreflight,
@@ -204,7 +230,7 @@ test("release workflow verifies before either publish mutation", async () => {
     "npm publish must follow preflight",
   );
   assert.doesNotMatch(
-    workflow.slice(buildJob, githubJob),
+    buildJobBody,
     /action-gh-release|npm publish/,
     "build and verification must not mutate a release",
   );
