@@ -106,6 +106,83 @@ jobs:
       - name: Build
         run: pnpm build
 
+  verify-macos-native-registration:
+    name: macOS Native Registration Smoke (Node 24)
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Pack MCP npm package
+        run: |
+          mkdir -p "$RUNNER_TEMP/webpage-mcp-pack"
+          pnpm --dir app/mcp-server pack --pack-destination "$RUNNER_TEMP/webpage-mcp-pack"
+
+      # This exercises package installation, native manifest registration, and
+      # doctor validation. A real Chrome extension/native handshake remains a
+      # separate manual release check.
+      - name: Install, register, and diagnose native host in isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ORIGINAL_HOME="$HOME"
+          SMOKE_ROOT="$(mktemp -d "$RUNNER_TEMP/webpage-mcp-native-registration.XXXXXX")"
+          trap 'rm -rf "$SMOKE_ROOT"' EXIT
+
+          export HOME="$SMOKE_ROOT/home"
+          export npm_config_prefix="$SMOKE_ROOT/npm-prefix"
+          export npm_config_cache="$SMOKE_ROOT/npm-cache"
+          export npm_config_userconfig="$SMOKE_ROOT/npmrc"
+          mkdir -p "$HOME" "$npm_config_prefix" "$npm_config_cache"
+
+          if [ "$HOME" = "$ORIGINAL_HOME" ]; then
+            echo "Refusing to run native registration against the runner user's real HOME"
+            exit 1
+          fi
+          case "$HOME" in
+            "$RUNNER_TEMP"/*) ;;
+            *)
+              echo "Isolated HOME must stay beneath RUNNER_TEMP: $HOME"
+              exit 1
+              ;;
+          esac
+
+          node --input-type=module -e \
+            'import assert from "node:assert/strict"; import os from "node:os"; assert.equal(os.homedir(), process.env.HOME);'
+
+          PACKAGE_VERSION="$(node -p "require('./app/mcp-server/package.json').version")"
+          PACKAGE_TGZ="$RUNNER_TEMP/webpage-mcp-pack/webpage-mcp-${PACKAGE_VERSION}.tgz"
+          test -f "$PACKAGE_TGZ"
+
+          npm install --global --foreground-scripts "$PACKAGE_TGZ"
+          CLI="$npm_config_prefix/bin/webpage-mcp"
+          test -x "$CLI"
+
+          "$CLI" register --browser chrome --force
+          DOCTOR_REPORT="$SMOKE_ROOT/doctor.json"
+          "$CLI" doctor --json --browser chrome > "$DOCTOR_REPORT"
+
+          export SMOKE_ROOT ORIGINAL_HOME DOCTOR_REPORT
+          node scripts/verify-macos-native-registration-smoke.mjs
+
   wasm-artifacts:
     name: Rebuild and verify WASM artifacts
     runs-on: ubuntu-latest

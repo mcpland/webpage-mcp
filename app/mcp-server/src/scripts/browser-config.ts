@@ -26,6 +26,11 @@ export interface BrowserConfig {
   systemRegistryKey?: string; // Windows only
 }
 
+export interface BrowserPathContext {
+  platform?: NodeJS.Platform;
+  homeDirectory?: string;
+}
+
 function uniquePaths(paths: string[]): string[] {
   const seen = new Set<string>();
   const ordered: string[] = [];
@@ -38,10 +43,11 @@ function uniquePaths(paths: string[]): string[] {
   return ordered;
 }
 
-function getAdditionalUserManifestPaths(browser: BrowserType): string[] {
-  const platform = os.platform();
-  const home = os.homedir();
-
+function getAdditionalUserManifestPaths(
+  browser: BrowserType,
+  platform: NodeJS.Platform,
+  home: string,
+): string[] {
   if (browser !== BrowserType.CHROME) {
     return [];
   }
@@ -107,9 +113,10 @@ function getAdditionalUserManifestPaths(browser: BrowserType): string[] {
   return [];
 }
 
-function getAdditionalSystemManifestPaths(browser: BrowserType): string[] {
-  const platform = os.platform();
-
+function getAdditionalSystemManifestPaths(
+  browser: BrowserType,
+  platform: NodeJS.Platform,
+): string[] {
   if (browser !== BrowserType.CHROME) {
     return [];
   }
@@ -153,11 +160,13 @@ function getAdditionalSystemManifestPaths(browser: BrowserType): string[] {
 /**
  * Get the user-level manifest path for a specific browser
  */
-function getUserManifestPathForBrowser(browser: BrowserType): string {
-  const platform = os.platform();
-
+function getUserManifestPathForBrowser(
+  browser: BrowserType,
+  platform: NodeJS.Platform,
+  homeDirectory: string,
+): string {
   if (platform === 'win32') {
-    const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    const appData = process.env.APPDATA || path.join(homeDirectory, 'AppData', 'Roaming');
     switch (browser) {
       case BrowserType.CHROME:
         return path.join(appData, 'Google', 'Chrome', 'NativeMessagingHosts', `${HOST_NAME}.json`);
@@ -167,11 +176,10 @@ function getUserManifestPathForBrowser(browser: BrowserType): string {
         return path.join(appData, 'Google', 'Chrome', 'NativeMessagingHosts', `${HOST_NAME}.json`);
     }
   } else if (platform === 'darwin') {
-    const home = os.homedir();
     switch (browser) {
       case BrowserType.CHROME:
         return path.join(
-          home,
+          homeDirectory,
           'Library',
           'Application Support',
           'Google',
@@ -181,7 +189,7 @@ function getUserManifestPathForBrowser(browser: BrowserType): string {
         );
       case BrowserType.CHROMIUM:
         return path.join(
-          home,
+          homeDirectory,
           'Library',
           'Application Support',
           'Chromium',
@@ -190,7 +198,7 @@ function getUserManifestPathForBrowser(browser: BrowserType): string {
         );
       default:
         return path.join(
-          home,
+          homeDirectory,
           'Library',
           'Application Support',
           'Google',
@@ -201,21 +209,26 @@ function getUserManifestPathForBrowser(browser: BrowserType): string {
     }
   } else {
     // Linux
-    const home = os.homedir();
     switch (browser) {
       case BrowserType.CHROME:
         return path.join(
-          home,
+          homeDirectory,
           '.config',
           'google-chrome',
           'NativeMessagingHosts',
           `${HOST_NAME}.json`,
         );
       case BrowserType.CHROMIUM:
-        return path.join(home, '.config', 'chromium', 'NativeMessagingHosts', `${HOST_NAME}.json`);
+        return path.join(
+          homeDirectory,
+          '.config',
+          'chromium',
+          'NativeMessagingHosts',
+          `${HOST_NAME}.json`,
+        );
       default:
         return path.join(
-          home,
+          homeDirectory,
           '.config',
           'google-chrome',
           'NativeMessagingHosts',
@@ -228,9 +241,10 @@ function getUserManifestPathForBrowser(browser: BrowserType): string {
 /**
  * Get the system-level manifest path for a specific browser
  */
-function getSystemManifestPathForBrowser(browser: BrowserType): string {
-  const platform = os.platform();
-
+function getSystemManifestPathForBrowser(
+  browser: BrowserType,
+  platform: NodeJS.Platform,
+): string {
   if (platform === 'win32') {
     const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
     switch (browser) {
@@ -296,8 +310,11 @@ function getSystemManifestPathForBrowser(browser: BrowserType): string {
 /**
  * Get Windows registry keys for a browser
  */
-function getRegistryKeys(browser: BrowserType): { user: string; system: string } | undefined {
-  if (os.platform() !== 'win32') return undefined;
+function getRegistryKeys(
+  browser: BrowserType,
+  platform: NodeJS.Platform,
+): { user: string; system: string } | undefined {
+  if (platform !== 'win32') return undefined;
 
   const browserPaths: Record<BrowserType, { user: string; system: string }> = {
     [BrowserType.CHROME]: {
@@ -316,17 +333,22 @@ function getRegistryKeys(browser: BrowserType): { user: string; system: string }
 /**
  * Get browser configuration
  */
-export function getBrowserConfig(browser: BrowserType): BrowserConfig {
-  const registryKeys = getRegistryKeys(browser);
-  const userManifestPath = getUserManifestPathForBrowser(browser);
-  const systemManifestPath = getSystemManifestPathForBrowser(browser);
+export function getBrowserConfig(
+  browser: BrowserType,
+  context: BrowserPathContext = {},
+): BrowserConfig {
+  const platform = context.platform ?? os.platform();
+  const homeDirectory = context.homeDirectory ?? os.homedir();
+  const registryKeys = getRegistryKeys(browser, platform);
+  const userManifestPath = getUserManifestPathForBrowser(browser, platform, homeDirectory);
+  const systemManifestPath = getSystemManifestPathForBrowser(browser, platform);
   const userManifestPaths = uniquePaths([
     userManifestPath,
-    ...getAdditionalUserManifestPaths(browser),
+    ...getAdditionalUserManifestPaths(browser, platform, homeDirectory),
   ]);
   const systemManifestPaths = uniquePaths([
     systemManifestPath,
-    ...getAdditionalSystemManifestPaths(browser),
+    ...getAdditionalSystemManifestPaths(browser, platform),
   ]);
 
   return {
