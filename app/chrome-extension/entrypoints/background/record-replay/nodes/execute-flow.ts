@@ -1,5 +1,10 @@
 import type { ExecCtx, ExecResult, NodeRuntime } from "./types";
 import { resolveNodeTabId } from "./tab-context";
+import {
+  boundedRetryCount,
+  boundedRetryDelay,
+  boundedRetryInterval,
+} from "../engine/policies/retry-limits";
 
 export const executeFlowNode: NodeRuntime<any> = {
   validate: (step) => {
@@ -46,16 +51,15 @@ export const executeFlowNode: NodeRuntime<any> = {
     const stepsToRun: any[] = order.map((n) => mapDagNodeToStep(n as any));
     for (const st of stepsToRun) {
       const t0 = Date.now();
-      const maxRetries = Math.max(0, (st as any).retry?.count ?? 0);
-      const baseInterval = Math.max(0, (st as any).retry?.intervalMs ?? 0);
+      const maxRetries = boundedRetryCount((st as any).retry?.count);
+      const baseInterval = boundedRetryInterval((st as any).retry?.intervalMs);
       let attempt = 0;
       const doDelay = async (i: number) => {
-        const delay =
-          baseInterval > 0
-            ? (st as any).retry?.backoff === "exp"
-              ? baseInterval * Math.pow(2, i)
-              : baseInterval
-            : 0;
+        const delay = boundedRetryDelay(
+          baseInterval,
+          i,
+          (st as any).retry?.backoff,
+        );
         if (delay > 0) await new Promise((r) => setTimeout(r, delay));
       };
       while (true) {

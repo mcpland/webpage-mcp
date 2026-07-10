@@ -1,5 +1,11 @@
 // engine/policies/retry.ts — unified retry/backoff policy
 
+import {
+  boundedRetryCount,
+  boundedRetryDelay,
+  boundedRetryInterval,
+} from './retry-limits';
+
 export type BackoffKind = 'none' | 'exp';
 
 export interface RetryOptions {
@@ -13,9 +19,9 @@ export async function withRetry<T>(
   onRetry?: (attempt: number, err: any) => Promise<void> | void,
   opts?: RetryOptions,
 ): Promise<T> {
-  const max = Math.max(0, Number(opts?.count ?? 0));
-  const base = Math.max(0, Number(opts?.intervalMs ?? 0));
-  const backoff = (opts?.backoff || 'none') as BackoffKind;
+  const max = boundedRetryCount(opts?.count);
+  const base = boundedRetryInterval(opts?.intervalMs);
+  const backoff: BackoffKind = opts?.backoff === 'exp' ? 'exp' : 'none';
   let attempt = 0;
   while (true) {
     try {
@@ -23,7 +29,7 @@ export async function withRetry<T>(
     } catch (e) {
       if (attempt >= max) throw e;
       if (onRetry) await onRetry(attempt, e);
-      const delay = base > 0 ? (backoff === 'exp' ? base * Math.pow(2, attempt) : base) : 0;
+      const delay = boundedRetryDelay(base, attempt, backoff);
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
       attempt += 1;
     }

@@ -35,6 +35,10 @@ import {
   normalizeWorkflowNodeSideEffectProfile,
   workflowSideEffectAllowsRetry,
 } from 'webpage-mcp-shared';
+import {
+  boundedRetryCount,
+  boundedRetryDelay,
+} from '../engine/policies/retry-limits';
 
 // ================================
 // type definition
@@ -315,15 +319,13 @@ function shouldRetry(policy: RetryPolicy | undefined, error: ActionError | undef
 }
 
 function computeRetryDelayMs(policy: RetryPolicy, retryIndex: number): number {
-  const base = Math.max(0, Math.floor(policy.intervalMs));
   const backoff = policy.backoff ?? 'none';
-
-  let delay = base;
-  if (backoff === 'linear') delay = base * (retryIndex + 1);
-  if (backoff === 'exp') delay = base * Math.pow(2, retryIndex);
-
-  const capped =
-    policy.maxIntervalMs !== undefined ? Math.min(delay, Math.max(0, policy.maxIntervalMs)) : delay;
+  const capped = boundedRetryDelay(
+    policy.intervalMs,
+    retryIndex,
+    backoff,
+    policy.maxIntervalMs,
+  );
   if ((policy.jitter ?? 'none') === 'full') return Math.floor(Math.random() * capped);
   return capped;
 }
@@ -528,7 +530,7 @@ export class ActionRegistry {
         ? requestedRetryPolicy
         : undefined;
     const timeoutPolicy = action.policy?.timeout;
-    const maxAttempts = 1 + Math.max(0, Math.floor(retryPolicy?.retries ?? 0));
+    const maxAttempts = 1 + boundedRetryCount(retryPolicy?.retries);
     if (requestedRetryPolicy && !retryPolicy) {
       try {
         ctx.log(
