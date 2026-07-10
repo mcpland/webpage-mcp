@@ -137,4 +137,22 @@ describe('inject-bridge request lifecycle', () => {
     });
     expect(removeListener).toHaveBeenCalledWith(messageListener);
   });
+
+  it('does not expose USER_SCRIPT commands to page DOM events', () => {
+    const sendResponse = vi.fn();
+    const handled = messageListener!(
+      {
+        action: 'userscript:command',
+        payload: { secret: 'private' },
+        scriptId: 'script-a',
+        targetWorld: 'USER_SCRIPT',
+      },
+      {} as chrome.runtime.MessageSender,
+      sendResponse,
+    );
+
+    expect(handled).toBeUndefined();
+    expect(executeRequests).toEqual([]);
+    expect(sendResponse).not.toHaveBeenCalled();
+  });
 });

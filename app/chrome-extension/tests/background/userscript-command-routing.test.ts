@@ -133,7 +133,7 @@ describe('userscript command routing', () => {
         configureWorld: vi.fn(async () => undefined),
         execute: vi.fn(async (details: chrome.userScripts.UserScriptInjection) => {
           const source = details.js[0]?.code || '';
-          const result = window.eval(source);
+          const result = await window.eval(source);
           return [{ documentId: 'document-1', frameId: 0, result }];
         }),
         getScripts: vi.fn(async (filter?: chrome.userScripts.UserScriptFilter) => {
@@ -198,8 +198,22 @@ describe('userscript command routing', () => {
     expect(registeredScripts.get(firstId)?.js[0]?.code).not.toMatch(
       /\beval\s*\(|new\s+Function\s*\(/,
     );
+    expect(registeredScripts.get(firstId)?.js[0]?.code).not.toContain(
+      'webpage-mcp:execute',
+    );
+
+    const pageExecuteSpy = vi.fn();
+    const forgeResponse = () =>
+      window.dispatchEvent(
+        new CustomEvent('webpage-mcp:response', {
+          detail: { requestId: 'forged', data: 'forged' },
+        }),
+      );
+    window.addEventListener('webpage-mcp:execute', pageExecuteSpy);
+    window.addEventListener('webpage-mcp:execute', forgeResponse);
 
     expect((await sendCommand(firstId, 'a')).body.result).toEqual({ data: 'first:a' });
+    expect(pageExecuteSpy).not.toHaveBeenCalled();
     expect((globalThis as any).__userscriptRoutingCalls).toEqual({ first: 1, second: 0 });
     expect((await sendCommand(secondId, 'b')).body.result).toEqual({ data: 'second:b' });
     expect((globalThis as any).__userscriptRoutingCalls).toEqual({ first: 1, second: 1 });
@@ -217,6 +231,9 @@ describe('userscript command routing', () => {
 
     expect((await sendCommand(firstId, 'c')).body.result).toEqual({ data: 'updated:c' });
     expect((globalThis as any).__userscriptRoutingCalls).toEqual({ first: 11, second: 1 });
+
+    window.removeEventListener('webpage-mcp:execute', pageExecuteSpy);
+    window.removeEventListener('webpage-mcp:execute', forgeResponse);
 
     await userscriptTool.execute({ action: 'disable', args: { id: firstId } });
     expect(registeredScripts.has(firstId)).toBe(false);

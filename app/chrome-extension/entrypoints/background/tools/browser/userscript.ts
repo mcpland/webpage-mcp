@@ -330,7 +330,9 @@ if (!(registry instanceof Map)) {
   registry = new Map();
   root[registryName] = registry;
 }
-registry.get(id)?.();
+const previousEntry = registry.get(id);
+if (typeof previousEntry === 'function') previousEntry();
+else previousEntry?.dispose?.();
 const previousDescriptor = Object.getOwnPropertyDescriptor(root, handlerName);
 let handler;
 try {
@@ -344,6 +346,23 @@ ${code}
   else Reflect.deleteProperty(root, handlerName);
 }
 `;
+  const registryDisposal = `
+  const entry = registry.get(id);
+  if (entry?.dispose === dispose || entry === dispose) registry.delete(id);
+`;
+
+  const isolatedDispose = `
+const dispose = () => {
+${registryDisposal}
+};
+registry.set(id, { dispose, handler });
+`;
+
+  if (world !== ExecutionWorld.MAIN) {
+    return `(function () {${setup}
+${isolatedDispose}
+})()`;
+  }
 
   return `(function () {${setup}
 const eventHandler = (event) => {
@@ -367,9 +386,33 @@ const eventHandler = (event) => {
 window.addEventListener('webpage-mcp:execute', eventHandler);
 const dispose = () => {
   window.removeEventListener('webpage-mcp:execute', eventHandler);
-  if (registry.get(id) === dispose) registry.delete(id);
+${registryDisposal}
 };
-registry.set(id, dispose);
+registry.set(id, { dispose, handler });
+})()`;
+}
+
+function buildUserScriptCommandSource(scriptId: string, payload: unknown): string {
+  let serializedPayload: string | undefined;
+  try {
+    serializedPayload = JSON.stringify(payload ?? null);
+  } catch {
+    throw new Error('Userscript command payload must be JSON serializable');
+  }
+  if (serializedPayload === undefined) {
+    throw new Error('Userscript command payload must be JSON serializable');
+  }
+  serializedPayload = serializedPayload.replaceAll('\u2028', '\\u2028').replaceAll('\u2029', '\\u2029');
+  return `(async function () {
+const registry = globalThis[${JSON.stringify(ISOLATED_USERSCRIPT_REGISTRY)}];
+const entry = registry?.get(${JSON.stringify(scriptId)});
+const handler = entry?.handler;
+if (typeof handler !== 'function') throw new Error('No active USER_SCRIPT handler found');
+try {
+  return { data: await handler('userscript:command', ${serializedPayload}, ${JSON.stringify(scriptId)}) };
+} catch (error) {
+  return { error: String(error?.message || error) };
+}
 })()`;
 }
 
@@ -414,7 +457,9 @@ async function disposeJsFromTab(
     world: toUserScriptWorld(world),
     code: `(function () {
 const registry = globalThis[${JSON.stringify(registryName)}];
-registry?.get(${JSON.stringify(scriptId)})?.();
+const entry = registry?.get(${JSON.stringify(scriptId)});
+if (typeof entry === 'function') entry();
+else entry?.dispose?.();
 })()`,
   });
 }
@@ -1023,6 +1068,24 @@ class UserscriptTool extends BaseBrowserToolExecutor {
     if (!rec) return createErrorResponse('userscript not found');
 
     try {
+      if (rec.world !== ExecutionWorld.MAIN) {
+        const results = await executeUserScript({
+          tabId: tab.id,
+          frameIds: [0],
+          world: 'USER_SCRIPT',
+          code: buildUserScriptCommandSource(id, payload),
+        });
+        if (results.length === 0) throw new Error('Chrome returned no userscript command result');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ ok: true, result: results[0].result }),
+            },
+          ],
+          isError: false,
+        };
+      }
       await chrome.scripting.executeScript({
         target: { tabId: tab.id, frameIds: [0] },
         files: ['inject-scripts/inject-bridge.js'],
@@ -1034,7 +1097,7 @@ class UserscriptTool extends BaseBrowserToolExecutor {
           action: 'userscript:command',
           payload,
           scriptId: id,
-          targetWorld: rec.world === 'MAIN' ? 'MAIN' : 'USER_SCRIPT',
+          targetWorld: 'MAIN',
         },
         { frameId: 0 },
       );

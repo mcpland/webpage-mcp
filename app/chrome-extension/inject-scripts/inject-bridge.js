@@ -39,12 +39,13 @@
       return true;
     }
 
-    // --- Execution Command for MAIN or USER_SCRIPT world ---
-    if (request.targetWorld === 'MAIN' || request.targetWorld === 'USER_SCRIPT') {
+    // --- Execution Command for MAIN world ---
+    // USER_SCRIPT stays isolated and is invoked directly through chrome.userScripts.execute.
+    if (request.targetWorld === 'MAIN') {
       const requestId = `req-${Date.now()}-${Math.random()}`;
       const timeoutId = window.setTimeout(() => {
         settlePendingRequest(requestId, {
-          error: `${request.targetWorld} world userscript request timed out after ${REQUEST_TIMEOUT_MS}ms.`,
+          error: `MAIN world userscript request timed out after ${REQUEST_TIMEOUT_MS}ms.`,
         });
       }, REQUEST_TIMEOUT_MS);
       pendingRequests.set(requestId, { sendResponse, timeoutId });
