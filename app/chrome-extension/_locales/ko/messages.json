@@ -2813,6 +2813,18 @@
     "message": "환영합니다 - 웹페이지-mcp-서버",
     "description": "Auto-generated localized message"
   },
+  "welcomePrivacyLink": {
+    "message": "개인정보처리방침 읽기",
+    "description": "Webpage MCP 개인정보처리방침 링크"
+  },
+  "welcomePrivacySummary": {
+    "message": "Webpage MCP는 Native Messaging 및 MCP 브리지를 통해 브라우저 데이터를 로컬에서 처리합니다. 도구 또는 Agent 기능을 실행하면 연결된 MCP 클라이언트나 사용자가 구성한 AI 제공업체가 해당 작업에 필요한 페이지 콘텐츠, 스크린샷, 방문 기록, 북마크 또는 네트워크 데이터를 받을 수 있습니다.",
+    "description": "최초 설치 시 로컬 및 외부 데이터 흐름 안내"
+  },
+  "welcomePrivacyTitle": {
+    "message": "데이터가 어디로 전송되는지 확인하세요",
+    "description": "최초 설치 개인정보 공개 제목"
+  },
   "welcomeRegisterHostDesc": {
     "message": "먼저 이 명령을 실행하세요. 현재 확장 ID로 Native Messaging 매니페스트를 작성하여 Chrome이 로컬 호스트 프로세스를 시작할 수 있게 합니다.",
     "description": "Auto-generated localized message"

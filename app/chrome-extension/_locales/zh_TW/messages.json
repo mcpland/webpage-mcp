@@ -2813,6 +2813,18 @@
     "message": "歡迎 - Webpage MCP Connector",
     "description": "自動生成的 i18n 文案"
   },
+  "welcomePrivacyLink": {
+    "message": "閱讀隱私權政策",
+    "description": "Webpage MCP 隱私權政策連結"
+  },
+  "welcomePrivacySummary": {
+    "message": "Webpage MCP 透過本機 Native Messaging 和 MCP 橋接處理瀏覽器資料。當您呼叫工具或 Agent 功能時，已連線的 MCP 用戶端或您設定的 AI 服務供應商可能會接收完成該操作所需的頁面內容、螢幕截圖、瀏覽記錄、書籤或網路資料。",
+    "description": "首次安裝時說明本機和外部資料流"
+  },
+  "welcomePrivacyTitle": {
+    "message": "了解您的資料流向",
+    "description": "首次安裝隱私權揭露標題"
+  },
   "welcomeRegisterHostDesc": {
     "message": "請先執行此命令。它會使用目前擴充功能 ID 寫入 Native Messaging 資訊清單，讓 Chrome 可啟動本機主機程序。",
     "description": "自動生成的 i18n 文案"

@@ -50,6 +50,9 @@ Webpage MCP is best understood as a browser-native workflow layer for Chrome, no
 
 ## Privacy and Data Flows
 
+[Read the full Webpage MCP Privacy Policy](PRIVACY.md) before connecting an MCP
+client, enabling Agent features, or using the extension on sensitive pages.
+
 Webpage MCP has no hosted Webpage MCP relay: the extension-to-native-host bridge and MCP transport stay on the local machine. That local transport boundary does **not** mean all data processed through the product always stays local. Browser content can leave the machine when a connected AI client, a configured Agent engine, a browser/network tool, or the semantic-model downloader contacts an external service.
 
 | Surface                                                 | Data that may be processed                                                                                                   | Destination and trigger                                                                                                                                                                                                                                                |

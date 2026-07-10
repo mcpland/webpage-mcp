@@ -2813,6 +2813,18 @@
     "message": "Welcome - Webpage MCP Connector",
     "description": "Auto-generated i18n message"
   },
+  "welcomePrivacyLink": {
+    "message": "Read the Privacy Policy",
+    "description": "Link to the Webpage MCP privacy policy"
+  },
+  "welcomePrivacySummary": {
+    "message": "Webpage MCP processes browser data locally through its Native Messaging and MCP bridge. When you invoke a tool or Agent feature, the connected MCP client or your configured AI provider may receive page content, screenshots, browsing history, bookmarks, or network data needed for that action.",
+    "description": "First-install disclosure of local and external data flows"
+  },
+  "welcomePrivacyTitle": {
+    "message": "Know where your data goes",
+    "description": "First-install privacy disclosure heading"
+  },
   "welcomeRegisterHostDesc": {
     "message": "Run this command first. It writes the Native Messaging manifest with your current extension ID so Chrome can launch the local host process.",
     "description": "Auto-generated i18n message"

@@ -2813,6 +2813,18 @@
     "message": "欢迎 - Webpage MCP Connector",
     "description": "自动生成的 i18n 文案"
   },
+  "welcomePrivacyLink": {
+    "message": "阅读隐私政策",
+    "description": "Webpage MCP 隐私政策链接"
+  },
+  "welcomePrivacySummary": {
+    "message": "Webpage MCP 通过本机 Native Messaging 和 MCP 桥接处理浏览器数据。当您调用工具或 Agent 功能时，已连接的 MCP 客户端或您配置的 AI 服务提供商可能会接收完成该操作所需的页面内容、屏幕截图、浏览历史记录、书签或网络数据。",
+    "description": "首次安装时说明本地和外部数据流"
+  },
+  "welcomePrivacyTitle": {
+    "message": "了解您的数据流向",
+    "description": "首次安装隐私披露标题"
+  },
   "welcomeRegisterHostDesc": {
     "message": "首先运行此命令。它会使用您当前的扩展 ID 写入本机消息传递清单，以便 Chrome 可以启动本地主机进程。",
     "description": "自动生成的 i18n 文案"

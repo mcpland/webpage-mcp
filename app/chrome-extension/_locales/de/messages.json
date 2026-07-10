@@ -2813,6 +2813,18 @@
     "message": "Willkommen – Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
+  "welcomePrivacyLink": {
+    "message": "Datenschutzerklärung lesen",
+    "description": "Link zur Datenschutzerklärung von Webpage MCP"
+  },
+  "welcomePrivacySummary": {
+    "message": "Webpage MCP verarbeitet Browserdaten lokal über seine Native-Messaging- und MCP-Verbindung. Wenn Sie ein Tool oder eine Agent-Funktion aufrufen, kann der verbundene MCP-Client oder Ihr konfigurierter KI-Anbieter die für diese Aktion erforderlichen Seiteninhalte, Screenshots, den Browserverlauf, Lesezeichen oder Netzwerkdaten erhalten.",
+    "description": "Hinweis bei der Erstinstallation zu lokalen und externen Datenflüssen"
+  },
+  "welcomePrivacyTitle": {
+    "message": "Wohin Ihre Daten gelangen",
+    "description": "Überschrift des Datenschutzhinweises bei der Erstinstallation"
+  },
   "welcomeRegisterHostDesc": {
     "message": "Führen Sie diesen Befehl zuerst aus. Er schreibt das Native-Messaging-Manifest mit Ihrer aktuellen Erweiterungs-ID, damit Chrome den lokalen Hostprozess starten kann.",
     "description": "Auto-generated localized message"

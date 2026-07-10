@@ -116,6 +116,31 @@
   padding: 24px;
 }
 
+.welcome-privacy-card {
+  padding: 20px 24px;
+  background: var(--ac-accent-subtle);
+  border-color: var(--ac-accent);
+}
+
+.welcome-privacy-link {
+  display: inline-block;
+  color: var(--ac-link);
+  font-family: var(--ac-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.welcome-privacy-link:hover {
+  color: var(--ac-link-hover);
+}
+
+.welcome-privacy-link:focus-visible {
+  outline: 2px solid var(--ac-focus-ring);
+  outline-offset: 3px;
+}
+
 /* =============================================
    Typography helpers
    ============================================= */

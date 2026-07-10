@@ -2813,6 +2813,18 @@
     "message": "ようこそ - Webpage MCP Connector",
     "description": "Auto-generated localized message"
   },
+  "welcomePrivacyLink": {
+    "message": "プライバシーポリシーを読む",
+    "description": "Webpage MCP プライバシーポリシーへのリンク"
+  },
+  "welcomePrivacySummary": {
+    "message": "Webpage MCP は、Native Messaging と MCP のブリッジを介してブラウザデータをローカルで処理します。ツールや Agent 機能を実行すると、接続済みの MCP クライアントまたは設定した AI プロバイダーに、その操作に必要なページ内容、スクリーンショット、閲覧履歴、ブックマーク、ネットワークデータが送信される場合があります。",
+    "description": "初回インストール時のローカルおよび外部データフローの説明"
+  },
+  "welcomePrivacyTitle": {
+    "message": "データの送信先を確認",
+    "description": "初回インストール時のプライバシー開示見出し"
+  },
   "welcomeRegisterHostDesc": {
     "message": "まずこのコマンドを実行してください。現在の拡張機能 ID で Native Messaging マニフェストを書き込み、Chrome がローカルホストプロセスを起動できるようにします。",
     "description": "Auto-generated localized message"

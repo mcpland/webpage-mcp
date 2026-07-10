@@ -5,6 +5,9 @@ import { getMessage } from "@/utils/i18n";
 import "../sidepanel/styles/connector-theme.css";
 import "./App.css";
 
+export const PRIVACY_POLICY_URL =
+  "https://github.com/mcpland/webpage-mcp/blob/main/PRIVACY.md";
+
 const STATIC_COMMANDS = {
   stdioCommand: "npx -y -p webpage-mcp@latest webpage-mcp-stdio",
   mcpConfig: `{
@@ -26,7 +29,11 @@ type CommandKey = StaticCommandKey | "register";
 const DIAGNOSTICS = [
   { labelKey: "welcomeDoctorLabel", fallback: "Doctor", key: "doctor" },
   { labelKey: "welcomeAutoFixLabel", fallback: "Auto-fix", key: "fix" },
-] as const satisfies ReadonlyArray<{ labelKey: string; fallback: string; key: CommandKey }>;
+] as const satisfies ReadonlyArray<{
+  labelKey: string;
+  fallback: string;
+  key: CommandKey;
+}>;
 
 function copyColor(copiedKey: CommandKey | null, key: CommandKey): string {
   return copiedKey === key ? "var(--ac-success)" : "var(--ac-text-muted)";
@@ -51,7 +58,9 @@ export default function WelcomeApp() {
     [registerCommand],
   );
   const copyLabel = (key: CommandKey): string =>
-    copiedKey === key ? t("popupCopiedShort", "Copied") : t("welcomeCopyButton", "Copy");
+    copiedKey === key
+      ? t("popupCopiedShort", "Copied")
+      : t("welcomeCopyButton", "Copy");
 
   const copyCommand = async (key: CommandKey): Promise<void> => {
     try {
@@ -121,6 +130,33 @@ export default function WelcomeApp() {
 
         <main className="welcome-main">
           <div className="welcome-main-inner">
+            <section
+              className="welcome-card welcome-privacy-card"
+              aria-labelledby="welcome-privacy-title"
+              data-testid="privacy-disclosure"
+            >
+              <h2
+                id="welcome-privacy-title"
+                className="welcome-title welcome-title-xl"
+              >
+                {t("welcomePrivacyTitle", "Know where your data goes")}
+              </h2>
+              <p className="welcome-muted welcome-text-sm welcome-mt-2">
+                {t(
+                  "welcomePrivacySummary",
+                  "Webpage MCP processes browser data locally through its Native Messaging and MCP bridge. When you invoke a tool or Agent feature, the connected MCP client or your configured AI provider may receive page content, screenshots, browsing history, bookmarks, or network data needed for that action.",
+                )}
+              </p>
+              <a
+                className="welcome-privacy-link welcome-mt-3"
+                href={PRIVACY_POLICY_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t("welcomePrivacyLink", "Read the Privacy Policy")}
+              </a>
+            </section>
+
             {/* MCP Server Setup — primary card */}
             <section className="welcome-card welcome-card--primary welcome-card-body">
               <h2 className="welcome-title welcome-title-xl">
@@ -145,7 +181,9 @@ export default function WelcomeApp() {
                 </p>
 
                 <div className="welcome-command-row welcome-mt-3">
-                  <code className="welcome-code welcome-code-sm">{commands.stdioCommand}</code>
+                  <code className="welcome-code welcome-code-sm">
+                    {commands.stdioCommand}
+                  </code>
                   <button
                     type="button"
                     className="welcome-copy-btn"
@@ -194,7 +232,10 @@ export default function WelcomeApp() {
               <summary className="welcome-details-summary">
                 <div className="welcome-details-summary-text">
                   <div className="welcome-title welcome-title-sm">
-                    {t("welcomeManualRegistrationTitle", "Manual Registration (fallback)")}
+                    {t(
+                      "welcomeManualRegistrationTitle",
+                      "Manual Registration (fallback)",
+                    )}
                   </div>
                   <div className="welcome-muted welcome-text-xs welcome-truncate">
                     {t(
@@ -214,7 +255,9 @@ export default function WelcomeApp() {
                 </p>
 
                 <div className="welcome-command-row">
-                  <code className="welcome-code welcome-code-sm">{commands.register}</code>
+                  <code className="welcome-code welcome-code-sm">
+                    {commands.register}
+                  </code>
                   <button
                     type="button"
                     className="welcome-copy-btn"
@@ -227,7 +270,9 @@ export default function WelcomeApp() {
 
                 <div className="welcome-alt-row welcome-muted welcome-text-xs">
                   {t("welcomeCurrentExtensionId", "Current extension ID:")}{" "}
-                  <code className="welcome-code welcome-code-inline">{extensionId}</code>
+                  <code className="welcome-code welcome-code-inline">
+                    {extensionId}
+                  </code>
                 </div>
               </div>
             </details>
@@ -265,12 +310,17 @@ export default function WelcomeApp() {
 
                   <div className="welcome-diagnostics-list">
                     {DIAGNOSTICS.map((item) => (
-                      <div key={item.key} className="welcome-command-row welcome-command-row--compact">
+                      <div
+                        key={item.key}
+                        className="welcome-command-row welcome-command-row--compact"
+                      >
                         <div className="welcome-command-info">
                           <div className="welcome-mono welcome-subtle welcome-command-label">
                             {t(item.labelKey, item.fallback)}
                           </div>
-                          <code className="welcome-code welcome-code-xs">{commands[item.key]}</code>
+                          <code className="welcome-code welcome-code-xs">
+                            {commands[item.key]}
+                          </code>
                         </div>
                         <button
                           type="button"
@@ -286,7 +336,10 @@ export default function WelcomeApp() {
                 </div>
 
                 <div className="welcome-report-card">
-                  <div className="welcome-title-sm" style={{ color: "var(--ac-danger)" }}>
+                  <div
+                    className="welcome-title-sm"
+                    style={{ color: "var(--ac-danger)" }}
+                  >
                     {t("welcomeReportIssueTitle", "Report an issue")}
                   </div>
                   <p className="welcome-muted welcome-text-sm welcome-mt-1">
@@ -297,7 +350,9 @@ export default function WelcomeApp() {
                   </p>
 
                   <div className="welcome-command-row welcome-command-row--compact welcome-mt-3">
-                    <code className="welcome-code welcome-code-xs">{commands.report}</code>
+                    <code className="welcome-code welcome-code-xs">
+                      {commands.report}
+                    </code>
                     <button
                       type="button"
                       className="welcome-copy-btn"
@@ -322,7 +377,10 @@ export default function WelcomeApp() {
                     className="welcome-button"
                     onClick={() => void openDocs()}
                   >
-                    {t("welcomeOpenTroubleshootingDocs", "Open troubleshooting docs")}
+                    {t(
+                      "welcomeOpenTroubleshootingDocs",
+                      "Open troubleshooting docs",
+                    )}
                   </button>
                 </div>
               </div>
