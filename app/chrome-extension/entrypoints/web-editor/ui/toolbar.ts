@@ -14,6 +14,7 @@
  */
 
 import type { StructureOperationData } from '@/common/web-editor-types';
+import { isTrustedPrivilegedUiEvent } from '@/utils/privileged-ui-authorization';
 import { Disposer } from '../utils/disposables';
 import { installFloatingDrag, type FloatingPosition } from './floating-drag';
 import {
@@ -73,8 +74,10 @@ export interface ToolbarOptions {
    * Use null to indicate the toolbar is in its default docked position.
    */
   onPositionChange?: (position: FloatingPosition | null) => void;
-  /** Called when Apply button is clicked */
-  onApply?: () => void | ApplyResult | Promise<void | ApplyResult>;
+  /** Mint a short-lived authorization after a trusted Apply activation. */
+  authorizeApply?: () => Promise<string>;
+  /** Called when Apply is authorized by the background worker. */
+  onApply?: (authorizationToken: string) => void | ApplyResult | Promise<void | ApplyResult>;
   /**
    * Pre-flight check to block Apply.
    * Return a non-empty string to disable the Apply button and show as tooltip.
@@ -661,7 +664,8 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
     const blockReason = options.getApplyBlockReason?.();
     const isBlocked = !!blockReason;
 
-    applyBtn.disabled = applying || undoCount <= 0 || !options.onApply || isBlocked;
+    applyBtn.disabled =
+      applying || undoCount <= 0 || !options.onApply || !options.authorizeApply || isBlocked;
     applyBtn.textContent = applying ? 'Applying…' : 'Apply';
     applyBtn.title = isBlocked ? blockReason : '';
 
@@ -709,16 +713,18 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
   // Event Handlers
   // ==========================================================================
 
-  async function handleApply(): Promise<void> {
+  async function handleApply(activationEvent: Event): Promise<void> {
     if (applyBtn.disabled) return;
-    if (!options.onApply) return;
+    if (!options.onApply || !options.authorizeApply) return;
+    if (!isTrustedPrivilegedUiEvent(activationEvent)) return;
 
     applying = true;
     renderButtons();
     setStatus('applying', 'Sending…');
 
     try {
-      const resultOrPromise = options.onApply();
+      const authorizationToken = await options.authorizeApply();
+      const resultOrPromise = options.onApply(authorizationToken);
       const result = isPromiseLike(resultOrPromise) ? await resultOrPromise : resultOrPromise;
       const applyResult = isApplyResult(result) ? result : undefined;
       setStatus('success', formatStatusMessage('Sent', applyResult));
@@ -733,8 +739,9 @@ export function createToolbar(options: ToolbarOptions): Toolbar {
 
   // Apply button
   disposer.listen(applyBtn, 'click', (event) => {
+    if (!isTrustedPrivilegedUiEvent(event)) return;
     event.preventDefault();
-    void handleApply();
+    void handleApply(event);
   });
 
   // Grip click toggles collapsed state (drag uses delayed activation, so short clicks pass through)

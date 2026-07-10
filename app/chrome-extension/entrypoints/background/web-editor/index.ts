@@ -1,4 +1,4 @@
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { BACKGROUND_MESSAGE_TYPES, PRIVILEGED_UI_ACTIONS } from '@/common/message-types';
 import {
   WEB_EDITOR_ACTIONS,
   type ElementChangeSummary,
@@ -15,6 +15,7 @@ import {
   subscribeAgentStream,
   unsubscribeAgentStream,
 } from '../native-host';
+import { consumePrivilegedUiAuthorization } from '../privileged-ui-authorization';
 
 const CONTEXT_MENU_ID = 'web_editor_toggle';
 const COMMAND_KEY = 'toggle_web_editor';
@@ -1175,10 +1176,30 @@ export function initWebEditorListeners(): void {
       // Phase 1.5: Handle APPLY_BATCH from web-editor toolbar
       // =======================================================================
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY_BATCH) {
-        const payload = normalizeApplyBatchPayload(message.payload);
         (async () => {
           const senderTabId = (_sender as chrome.runtime.MessageSender)?.tab?.id;
           const senderWindowId = (_sender as chrome.runtime.MessageSender)?.tab?.windowId;
+
+          if (typeof senderTabId !== 'number') {
+            sendResponse({ success: false, error: 'Web Editor request must originate from a tab.' });
+            return;
+          }
+
+          if (
+            !consumePrivilegedUiAuthorization(
+              message?.authorizationToken,
+              PRIVILEGED_UI_ACTIONS.WEB_EDITOR_APPLY,
+              _sender as chrome.runtime.MessageSender,
+            )
+          ) {
+            sendResponse({
+              success: false,
+              error: 'Web Editor authorization is missing or expired.',
+            });
+            return;
+          }
+
+          const payload = normalizeApplyBatchPayload(message.payload);
 
           const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
 
@@ -1424,10 +1445,31 @@ export function initWebEditorListeners(): void {
       }
 
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY) {
-        const payload = normalizeApplyPayload(message.payload);
         (async () => {
-          const senderTabId = (_sender as any)?.tab?.id;
-          const senderWindowId = (_sender as any)?.tab?.windowId;
+          const sender = _sender as chrome.runtime.MessageSender;
+          const senderTabId = sender.tab?.id;
+          const senderWindowId = sender.tab?.windowId;
+
+          if (typeof senderTabId !== 'number') {
+            sendResponse({ success: false, error: 'Web Editor request must originate from a tab.' });
+            return;
+          }
+
+          if (
+            !consumePrivilegedUiAuthorization(
+              message?.authorizationToken,
+              PRIVILEGED_UI_ACTIONS.WEB_EDITOR_APPLY,
+              sender,
+            )
+          ) {
+            sendResponse({
+              success: false,
+              error: 'Web Editor authorization is missing or expired.',
+            });
+            return;
+          }
+
+          const payload = normalizeApplyPayload(message.payload);
 
           const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
           const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();

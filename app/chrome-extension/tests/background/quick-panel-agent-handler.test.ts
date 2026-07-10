@@ -15,9 +15,20 @@ const keepaliveMocks = vi.hoisted(() => ({
   acquireKeepalive: vi.fn(() => vi.fn()),
 }));
 
+const authorizationMocks = vi.hoisted(() => ({
+  consumePrivilegedUiAuthorization: vi.fn(() => true),
+}));
+
 vi.mock('@/entrypoints/background/native-host', () => nativeHostMocks);
 vi.mock('@/entrypoints/background/utils/sidepanel', () => sidepanelMocks);
 vi.mock('@/entrypoints/background/keepalive-manager', () => keepaliveMocks);
+vi.mock('@/entrypoints/background/privileged-ui-authorization', () => authorizationMocks);
+
+type RequestListener = (
+  message: unknown,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (value: unknown) => void,
+) => boolean;
 
 describe('Quick Panel agent handler', () => {
   beforeEach(() => {
@@ -45,10 +56,11 @@ describe('Quick Panel agent handler', () => {
       }
       return { ok: true, statusCode: 200, json: {}, body: '' };
     });
+    authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValue(true);
   });
 
   it('forwards page context in the act payload', async () => {
-    let requestListener: ((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (value: unknown) => void) => boolean) | undefined;
+    let requestListener: RequestListener | undefined;
     (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
       (listener) => {
         if (!requestListener) {
@@ -68,6 +80,7 @@ describe('Quick Panel agent handler', () => {
     const handled = requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
+        authorizationToken: 'one-time-token',
         payload: {
           instruction: 'Review this page',
           context: {
@@ -114,5 +127,38 @@ describe('Quick Panel agent handler', () => {
         elementInfo: { role: 'button', label: 'Save' },
       },
     });
+  });
+
+  it('rejects Agent work without a valid document-bound authorization', async () => {
+    let requestListener: RequestListener | undefined;
+    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
+      (listener) => {
+        requestListener = listener as RequestListener;
+      },
+    );
+    authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValue(false);
+
+    const { initQuickPanelAgentHandler } = await import(
+      '@/entrypoints/background/quick-panel/agent-handler'
+    );
+    initQuickPanelAgentHandler();
+
+    const sendResponse = vi.fn();
+    requestListener!(
+      {
+        type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
+        payload: { instruction: 'Read local secrets' },
+      },
+      { id: chrome.runtime.id, tab: { id: 7 }, frameId: 0 } as chrome.runtime.MessageSender,
+      sendResponse,
+    );
+
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledWith({
+        success: false,
+        error: 'Quick Panel authorization is missing or expired.',
+      });
+    });
+    expect(nativeHostMocks.requestAgentRpcFetch).not.toHaveBeenCalled();
   });
 });

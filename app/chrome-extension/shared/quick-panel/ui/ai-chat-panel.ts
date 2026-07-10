@@ -19,9 +19,17 @@ import type {
   RealtimeEvent,
 } from 'webpage-mcp-shared';
 
-import type { QuickPanelAIContext, QuickPanelSendToAIPayload } from '@/common/message-types';
+import {
+  PRIVILEGED_UI_ACTIONS,
+  type QuickPanelAIContext,
+  type QuickPanelSendToAIPayload,
+} from '@/common/message-types';
 import type { QuickPanelAgentBridge } from '../core/agent-bridge';
 import { Disposer } from '@/entrypoints/web-editor/utils/disposables';
+import {
+  authorizePrivilegedUiAction,
+  isTrustedPrivilegedUiEvent,
+} from '@/utils/privileged-ui-authorization';
 import {
   createQuickPanelMessageRenderer,
   type QuickPanelMessageRenderer,
@@ -621,9 +629,10 @@ export function mountQuickPanelAiChatPanel(
   // Request Lifecycle
   // --------------------------------------------------------
 
-  async function sendCurrentInput(): Promise<void> {
+  async function sendCurrentInput(activationEvent: Event): Promise<void> {
     if (disposed) return;
     if (state.sending || state.streaming || state.cancelling) return;
+    if (!isTrustedPrivilegedUiEvent(activationEvent)) return;
 
     const instruction = dom.textarea.value.trim();
     if (!instruction) return;
@@ -643,13 +652,32 @@ export function mountQuickPanelAiChatPanel(
     const context = await resolveContext();
     if (disposed) return;
 
+    // Mint the capability immediately before use so slow context providers do
+    // not consume its short validity window.
+    let authorizationToken: string;
+    try {
+      authorizationToken = await authorizePrivilegedUiAction(
+        PRIVILEGED_UI_ACTIONS.QUICK_PANEL_SEND,
+      );
+    } catch (error) {
+      const errorMsg = truncateText(
+        error instanceof Error ? error.message : String(error),
+        MAX_ERROR_DISPLAY_CHARS,
+      );
+      dom.textarea.value = savedInput;
+      resizeTextarea();
+      setState({ sending: false, errorMessage: errorMsg });
+      showBanner('error', errorMsg);
+      return;
+    }
+
     const payload: QuickPanelSendToAIPayload = {
       instruction,
       context: context ?? undefined,
     };
 
     // Send to agent
-    const result = await agentBridge.sendToAI(payload);
+    const result = await agentBridge.sendToAI(payload, authorizationToken);
     if (disposed) return;
 
     if (!result.success) {
@@ -860,13 +888,14 @@ export function mountQuickPanelAiChatPanel(
   disposer.listen(dom.closeBtn, 'click', () => close());
 
   // Unified action button handler: send or stop based on current state
-  disposer.listen(dom.actionBtn, 'click', () => {
+  disposer.listen(dom.actionBtn, 'click', (event: MouseEvent) => {
     if (disposed) return;
+    if (!isTrustedPrivilegedUiEvent(event)) return;
     const action = dom.actionBtn.dataset.action;
     if (action === 'stop') {
       void cancelCurrentRequest();
     } else {
-      void sendCurrentInput();
+      void sendCurrentInput(event);
     }
   });
 
@@ -888,8 +917,9 @@ export function mountQuickPanelAiChatPanel(
 
     // Enter sends, Shift+Enter inserts newline
     if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
+      if (!isTrustedPrivilegedUiEvent(ev)) return;
       ev.preventDefault();
-      void sendCurrentInput();
+      void sendCurrentInput(ev);
     }
   });
 

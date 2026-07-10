@@ -258,7 +258,9 @@ export function mountQuickPanelShadowHost(
   setImportantStyle(host, 'isolation', 'isolate');
 
   // Create shadow root
-  const shadowRoot = host.attachShadow({ mode: 'open' });
+  // Closed mode is a confidentiality boundary: the host page must not be able
+  // to inspect prompts, Agent replies, or obtain references to action controls.
+  const shadowRoot = host.attachShadow({ mode: 'closed' });
 
   // Inject styles
   const styleEl = document.createElement('style');

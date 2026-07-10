@@ -91,6 +91,7 @@ export const BACKGROUND_MESSAGE_TYPES = {
   // Web editor props - open source file in VSCode
   WEB_EDITOR_OPEN_SOURCE: 'web_editor_open_source',
   // Quick Panel <-> AgentChat integration
+  PRIVILEGED_UI_AUTHORIZE: 'privileged_ui_authorize',
   QUICK_PANEL_SEND_TO_AI: 'quick_panel_send_to_ai',
   QUICK_PANEL_CANCEL_AI: 'quick_panel_cancel_ai',
   AGENT_RPC_FETCH: 'agent_rpc_fetch',
@@ -199,6 +200,31 @@ export type OffscreenMessageType =
 export type ContentMessageType = (typeof CONTENT_MESSAGE_TYPES)[keyof typeof CONTENT_MESSAGE_TYPES];
 export type ToolMessageType = (typeof TOOL_MESSAGE_TYPES)[keyof typeof TOOL_MESSAGE_TYPES];
 
+// ============================================================
+// Privileged in-page UI authorization
+// ============================================================
+
+/**
+ * Agent-backed actions exposed by in-page extension UI. Each action requires a
+ * short-lived, one-time capability issued to the originating document.
+ */
+export const PRIVILEGED_UI_ACTIONS = {
+  QUICK_PANEL_SEND: 'quick_panel_send',
+  WEB_EDITOR_APPLY: 'web_editor_apply',
+} as const;
+
+export type PrivilegedUiAction =
+  (typeof PRIVILEGED_UI_ACTIONS)[keyof typeof PRIVILEGED_UI_ACTIONS];
+
+export interface PrivilegedUiAuthorizeMessage {
+  type: typeof BACKGROUND_MESSAGE_TYPES.PRIVILEGED_UI_AUTHORIZE;
+  payload: { action: PrivilegedUiAction };
+}
+
+export type PrivilegedUiAuthorizeResponse =
+  | { success: true; authorizationToken: string }
+  | { success: false; error: string };
+
 // Legacy enum for backward compatibility (will be deprecated)
 export enum SendMessageType {
   // Screenshot related message types
@@ -264,6 +290,8 @@ export type QuickPanelSendToAIResponse =
  */
 export interface QuickPanelSendToAIMessage {
   type: typeof BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI;
+  /** One-time document-bound authorization for this Agent action. */
+  authorizationToken: string;
   payload: QuickPanelSendToAIPayload;
 }
 

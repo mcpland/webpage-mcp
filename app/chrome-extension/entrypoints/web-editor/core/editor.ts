@@ -16,7 +16,8 @@ import type {
   WebEditorTxChangeAction,
   WebEditorApi,
 } from '@/common/web-editor-types';
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { BACKGROUND_MESSAGE_TYPES, PRIVILEGED_UI_ACTIONS } from '@/common/message-types';
+import { authorizePrivilegedUiAction } from '@/utils/privileged-ui-authorization';
 import { WEB_EDITOR_VERSION, WEB_EDITOR_LOG_PREFIX } from '../constants';
 import { mountShadowHost, type ShadowHostManager } from '../ui/shadow-host';
 import { createToolbar, type Toolbar } from '../ui/toolbar';
@@ -712,7 +713,9 @@ export function createWebEditor(): WebEditorApi {
    * Phase 2.10: On failure, automatically attempts to undo the transaction
    * to revert DOM changes. The transaction moves to redo stack so user can retry.
    */
-  async function applyLatestTransaction(): Promise<{ requestId?: string; sessionId?: string }> {
+  async function applyLatestTransaction(
+    authorizationToken: string,
+  ): Promise<{ requestId?: string; sessionId?: string }> {
     const tm = state.transactionManager;
     if (!tm) {
       throw new Error('Transaction manager not ready');
@@ -754,7 +757,7 @@ export function createWebEditor(): WebEditorApi {
       err instanceof Error && ROLLBACK_MARKERS.some((m) => err.message.includes(m));
 
     try {
-      const resp = await sendTransactionToAgent(tx);
+      const resp = await sendTransactionToAgent(tx, authorizationToken);
       const r = resp as {
         success?: unknown;
         requestId?: unknown;
@@ -798,7 +801,9 @@ export function createWebEditor(): WebEditorApi {
    * Phase 1.4: Aggregates the undo stack by element and sends a single batch request.
    * Unlike applyLatestTransaction, this does NOT auto-rollback on failure.
    */
-  async function applyAllTransactions(): Promise<{ requestId?: string; sessionId?: string }> {
+  async function applyAllTransactions(
+    authorizationToken: string,
+  ): Promise<{ requestId?: string; sessionId?: string }> {
     const tm = state.transactionManager;
     if (!tm) {
       throw new Error('Transaction manager not ready');
@@ -854,6 +859,7 @@ export function createWebEditor(): WebEditorApi {
 
       const resp = await chrome.runtime.sendMessage({
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY_BATCH,
+        authorizationToken,
         payload,
       });
 
@@ -1320,6 +1326,8 @@ export function createWebEditor(): WebEditorApi {
             }
           }
         },
+        authorizeApply: () =>
+          authorizePrivilegedUiAction(PRIVILEGED_UI_ACTIONS.WEB_EDITOR_APPLY),
         onApply: applyAllTransactions,
         onUndo: () => state.transactionManager?.undo(),
         onRedo: () => state.transactionManager?.redo(),

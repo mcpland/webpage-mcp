@@ -16,7 +16,7 @@
  * const bridge = new QuickPanelAgentBridge();
  *
  * // Send a message and subscribe to events
- * const result = await bridge.sendToAI({ instruction: 'Hello' });
+ * const result = await bridge.sendToAI({ instruction: 'Hello' }, authorizationToken);
  * if (result.success) {
  *   const unsubscribe = bridge.onRequestEvent(result.requestId, (event) => {
  *     console.log('Received event:', event);
@@ -198,7 +198,10 @@ export class QuickPanelAgentBridge {
    * @param payload - The instruction and optional context
    * @returns Promise resolving to success with requestId/sessionId, or failure with error
    */
-  async sendToAI(payload: QuickPanelSendToAIPayload): Promise<QuickPanelSendToAIResponse> {
+  async sendToAI(
+    payload: QuickPanelSendToAIPayload,
+    authorizationToken: string,
+  ): Promise<QuickPanelSendToAIResponse> {
     if (this.disposed) {
       return { success: false, error: 'Bridge is disposed' };
     }
@@ -206,6 +209,7 @@ export class QuickPanelAgentBridge {
     try {
       const response = await chrome.runtime.sendMessage({
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
+        authorizationToken,
         payload,
       });
 

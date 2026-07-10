@@ -3523,7 +3523,9 @@ export function mountShadowHost(options: ShadowHostOptions = {}): ShadowHostMana
   setImportantStyle(host, 'isolation', 'isolate');
 
   // Create shadow root
-  const shadowRoot = host.attachShadow({ mode: 'open' });
+  // Agent replies and privileged controls must not be inspectable or callable
+  // through the host page's DOM APIs.
+  const shadowRoot = host.attachShadow({ mode: 'closed' });
 
   // Add styles
   const styleEl = document.createElement('style');

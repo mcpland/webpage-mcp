@@ -18,6 +18,7 @@ import { NativeMessageType } from 'webpage-mcp-shared';
 
 import {
   BACKGROUND_MESSAGE_TYPES,
+  PRIVILEGED_UI_ACTIONS,
   TOOL_MESSAGE_TYPES,
   type QuickPanelAIEventMessage,
   type QuickPanelCancelAIMessage,
@@ -25,6 +26,7 @@ import {
   type QuickPanelSendToAIMessage,
   type QuickPanelSendToAIResponse,
 } from '@/common/message-types';
+import { consumePrivilegedUiAuthorization } from '../privileged-ui-authorization';
 import { acquireKeepalive } from '../keepalive-manager';
 import { openAgentChatSidepanel } from '../utils/sidepanel';
 import {
@@ -605,6 +607,16 @@ async function handleSendToAI(
 
   if (typeof tabId !== 'number') {
     return { success: false, error: 'Quick Panel request must originate from a tab.' };
+  }
+
+  if (
+    !consumePrivilegedUiAuthorization(
+      message?.authorizationToken,
+      PRIVILEGED_UI_ACTIONS.QUICK_PANEL_SEND,
+      sender,
+    )
+  ) {
+    return { success: false, error: 'Quick Panel authorization is missing or expired.' };
   }
 
   const instruction = normalizeString(message?.payload?.instruction).trim();

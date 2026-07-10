@@ -11,6 +11,7 @@ import { initWebEditorListeners } from './web-editor';
 import { initQuickPanelAgentHandler } from './quick-panel/agent-handler';
 import { initQuickPanelCommands } from './quick-panel/commands';
 import { initQuickPanelTabsHandler } from './quick-panel/tabs-handler';
+import { initPrivilegedUiAuthorization } from './privileged-ui-authorization';
 import { bootstrapV3 } from './record-replay-v3/bootstrap';
 
 /**
@@ -32,6 +33,8 @@ export default defineBackground(() => {
   initNativeHostListener();
   initSemanticSimilarityListener();
   initStorageManagerListener();
+  // One-time document-bound grants for Agent-backed in-page UI actions.
+  initPrivilegedUiAuthorization();
   // Record & Replay compatibility listener backed by RR-V3 storage/runtime
   initRecordReplayListeners();
 

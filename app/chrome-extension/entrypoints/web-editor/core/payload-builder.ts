@@ -423,13 +423,17 @@ export function buildApplyPayload(
 /**
  * Send Apply payload to background script
  */
-export async function sendApplyPayload(payload: ApplyPayload): Promise<unknown> {
+export async function sendApplyPayload(
+  payload: ApplyPayload,
+  authorizationToken: string,
+): Promise<unknown> {
   if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
     throw new Error('Chrome runtime API not available');
   }
 
   return chrome.runtime.sendMessage({
     type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY,
+    authorizationToken,
     payload,
   });
 }
@@ -439,11 +443,12 @@ export async function sendApplyPayload(payload: ApplyPayload): Promise<unknown> 
  */
 export async function sendTransactionToAgent(
   tx: Transaction,
+  authorizationToken: string,
   options: BuildPayloadOptions = {},
 ): Promise<unknown> {
   const payload = buildApplyPayload(tx, options);
   if (!payload) {
     throw new Error('Unable to build payload from transaction');
   }
-  return sendApplyPayload(payload);
+  return sendApplyPayload(payload, authorizationToken);
 }
