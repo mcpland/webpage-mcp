@@ -102,16 +102,6 @@ export default defineConfig({
         description: "__MSG_commandToggleQuickPanelDesc__",
       },
     },
-    web_accessible_resources: [
-      {
-        resources: [
-          "/models/*", // Allow access to all files under public/models/
-          "/workers/*", // Allow access to worker files
-          "/inject-scripts/*", // Allow helper files injected by content scripts
-        ],
-        matches: ["<all_urls>"],
-      },
-    ],
     // Note: The following security policies block dev server resource loading in development,
     // only enabled in production, development uses WXT default policies.
     ...(IS_DEV
