@@ -236,11 +236,14 @@
      * Steps can be upserted in place (same id, updated fields) during fill debouncing.
      * Uses smart diffing to minimize DOM operations while ensuring fill values are accurate.
      */
-    applyTimelineUpdate(steps) {
+    applyTimelineUpdate(steps, reportedTotal) {
       try {
         if (window !== window.top) return;
-        const list = Array.isArray(steps) ? steps : [];
-        const total = list.length;
+        const list = Array.isArray(steps) ? steps.slice(-CONFIG.UI_MAX_STEPS) : [];
+        const total =
+          Number.isSafeInteger(reportedTotal) && reportedTotal >= list.length
+            ? reportedTotal
+            : list.length;
         // Ensure UI exists
         if (!this._timeline) this.ensure();
         if (!this._timeline) return;
@@ -250,8 +253,8 @@
         }
 
         // Calculate the window of steps to display (last N steps)
-        const windowStart = Math.max(0, total - CONFIG.UI_MAX_STEPS);
-        const windowSteps = list.slice(windowStart);
+        const windowStart = Math.max(0, total - list.length);
+        const windowSteps = list;
 
         // Get current displayed step IDs
         const currentItems = this._timeline.children;
@@ -1164,6 +1167,9 @@
       }
       // Top window: optionally insert a switchFrame if this step originated from an iframe message
       this.sessionBuffer.steps.push(step);
+      while (this.sessionBuffer.steps.length > CONFIG.LOCAL_MAX_STEPS) {
+        this.sessionBuffer.steps.shift();
+      }
       this.sessionBuffer.meta.updatedAt = new Date().toISOString();
       this.batch.push(step);
 
@@ -1519,6 +1525,7 @@
     _addVariable(key, sensitive, defVal) {
       if (!this.sessionBuffer.variables) this.sessionBuffer.variables = [];
       if (this.sessionBuffer.variables.find((v) => v.key === key)) return;
+      if (this.sessionBuffer.variables.length >= CONFIG.LOCAL_MAX_VARIABLES) return;
       this.sessionBuffer.variables.push({
         key,
         sensitive: !!sensitive,
@@ -2254,7 +2261,7 @@
         }
         // Replace entire timeline to avoid divergence across tabs
         const steps = Array.isArray(request.steps) ? request.steps : [];
-        rec.ui.applyTimelineUpdate(steps);
+        rec.ui.applyTimelineUpdate(steps, request.totalSteps);
         sendResponse({ ok: true });
         return true;
       }

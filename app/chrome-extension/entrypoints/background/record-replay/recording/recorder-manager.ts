@@ -262,6 +262,11 @@ class RecorderManagerImpl {
 
   async init(): Promise<void> {
     if (this.initialized) return;
+    session.setLimitHandler((reason) => {
+      void this.stop().catch((error) => {
+        console.warn(`RecorderManager: automatic stop failed after ${reason} limit`, error);
+      });
+    });
     initBrowserEventListeners(session);
     initContentMessageHandler(session);
     recordingNetworkTracker.init();

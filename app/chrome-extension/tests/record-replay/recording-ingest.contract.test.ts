@@ -92,6 +92,33 @@ describe('Recorder ingest protocol', () => {
     );
   });
 
+  it('reports a session budget rejection explicitly without acknowledging the event', () => {
+    const mock = createSessionMock();
+    mock.appendSteps.mockReturnValue({
+      accepted: 0,
+      truncated: true,
+      reason: 'payload_bytes',
+    });
+    const handler = createRecorderEventMessageHandler(mock.session as any);
+    const sendResponse = vi.fn();
+
+    handler(
+      {
+        type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
+        payload: { kind: 'steps', steps: [createClickStep('s1')] },
+        meta: createMeta(),
+      },
+      createSender(),
+      sendResponse,
+    );
+
+    expect(sendResponse).toHaveBeenCalledWith({
+      ok: false,
+      code: 'RECORDING_LIMIT',
+      error: 'recording limit reached: payload_bytes',
+    });
+  });
+
   it('deduplicates repeated eventId from same source', () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);

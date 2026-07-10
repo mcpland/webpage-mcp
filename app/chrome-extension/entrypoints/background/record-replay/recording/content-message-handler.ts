@@ -197,32 +197,49 @@ function buildStepFromFlowById(session: RecordingSessionManager, stepId: string)
   return null;
 }
 
-type PayloadApplyResult = { ok: true } | { ok: false; error: string };
+type PayloadApplyResult = { ok: true } | { ok: false; error: string; code?: string };
 
 function appendValidatedSteps(
   steps: Step[],
   session: RecordingSessionManager,
   senderTabId?: number,
   lastStepByTab?: Map<number, string>,
-): void {
-  if (steps.length === 0) return;
+): PayloadApplyResult {
+  if (steps.length === 0) return { ok: true };
   if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
     const requests = recordingNetworkTracker.takeRecent(senderTabId);
     const previousStepId = lastStepByTab.get(senderTabId);
     if (previousStepId && requests.length > 0) {
       const previousStep = buildStepFromFlowById(session, previousStepId);
       if (previousStep) {
-        session.appendSteps([patchStepWithNetworkContext(previousStep, requests)]);
+        const networkPatch = session.appendSteps([
+          patchStepWithNetworkContext(previousStep, requests),
+        ]);
+        if (networkPatch?.truncated) {
+          return {
+            ok: false,
+            code: 'RECORDING_LIMIT',
+            error: `recording limit reached: ${networkPatch.reason ?? 'unknown'}`,
+          };
+        }
       }
     }
   }
-  session.appendSteps(steps);
+  const appendResult = session.appendSteps(steps);
+  if (appendResult?.truncated) {
+    return {
+      ok: false,
+      code: 'RECORDING_LIMIT',
+      error: `recording limit reached: ${appendResult.reason ?? 'unknown'}`,
+    };
+  }
   if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
     const lastStep = steps[steps.length - 1];
     if (lastStep && typeof lastStep.id === 'string' && lastStep.id) {
       lastStepByTab.set(senderTabId, lastStep.id);
     }
   }
+  return { ok: true };
 }
 
 function applyPayload(
@@ -239,14 +256,22 @@ function applyPayload(
         : [];
     const steps = sanitizeRecorderSteps(rawSteps);
     if (!steps.ok) return steps;
-    appendValidatedSteps(steps.value, session, senderTabId, lastStepByTab);
-    return { ok: true };
+    return appendValidatedSteps(steps.value, session, senderTabId, lastStepByTab);
   }
 
   if (payload.kind === 'variables') {
     const variables = sanitizeRecorderVariables(payload.variables);
     if (!variables.ok) return variables;
-    if (variables.value.length > 0) session.appendVariables(variables.value);
+    if (variables.value.length > 0) {
+      const appendResult = session.appendVariables(variables.value);
+      if (appendResult?.truncated) {
+        return {
+          ok: false,
+          code: 'RECORDING_LIMIT',
+          error: `recording limit reached: ${appendResult.reason ?? 'unknown'}`,
+        };
+      }
+    }
     return { ok: true };
   }
 
@@ -255,8 +280,18 @@ function applyPayload(
     if (!steps.ok) return steps;
     const variables = sanitizeRecorderVariables(payload.variables ?? []);
     if (!variables.ok) return variables;
-    appendValidatedSteps(steps.value, session, senderTabId, lastStepByTab);
-    if (variables.value.length > 0) session.appendVariables(variables.value);
+    const stepResult = appendValidatedSteps(steps.value, session, senderTabId, lastStepByTab);
+    if (!stepResult.ok) return stepResult;
+    if (variables.value.length > 0) {
+      const appendResult = session.appendVariables(variables.value);
+      if (appendResult?.truncated) {
+        return {
+          ok: false,
+          code: 'RECORDING_LIMIT',
+          error: `recording limit reached: ${appendResult.reason ?? 'unknown'}`,
+        };
+      }
+    }
     return { ok: true };
   }
 
@@ -487,7 +522,12 @@ export function createRecorderEventMessageHandler(
                   ? { ok: false, error: 'failed to compose iframe step' }
                   : composed;
               } else {
-                appendValidatedSteps([composed.step], session, source.tabId, lastStepByTab);
+                result = appendValidatedSteps(
+                  [composed.step],
+                  session,
+                  source.tabId,
+                  lastStepByTab,
+                );
               }
             }
           }
@@ -499,7 +539,7 @@ export function createRecorderEventMessageHandler(
       if (!result.ok) {
         sendResponse({
           ok: false,
-          code: 'INVALID_PAYLOAD',
+          code: result.code ?? 'INVALID_PAYLOAD',
           error: result.error,
         });
         return true;

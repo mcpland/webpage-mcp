@@ -198,4 +198,37 @@ describe('recorder iframe ingest boundary', () => {
 
     expect(sendMessage).not.toHaveBeenCalled();
   });
+
+  it('renders a bounded timeline window using the background total', () => {
+    const originalAttachShadow = Element.prototype.attachShadow;
+    const recorderShadow: { current: ShadowRoot | null } = { current: null };
+    const attachSpy = vi
+      .spyOn(Element.prototype, 'attachShadow')
+      .mockImplementation(function (this: Element, init: ShadowRootInit) {
+        const shadow = originalAttachShadow.call(this, init);
+        recorderShadow.current = shadow;
+        return shadow;
+      });
+    const { listener } = loadRecorder();
+    activeListener = listener;
+
+    listener(
+      {
+        action: 'rr_timeline_update',
+        steps: [
+          { id: 'step-99', type: 'click' },
+          { id: 'step-100', type: 'click' },
+        ],
+        totalSteps: 100,
+      },
+      {} as chrome.runtime.MessageSender,
+      vi.fn(),
+    );
+
+    const items = recorderShadow.current?.querySelectorAll('ol > li');
+    expect(items).toHaveLength(2);
+    expect(items?.[0]?.firstElementChild?.textContent).toBe('99.');
+    expect(items?.[1]?.firstElementChild?.textContent).toBe('100.');
+    attachSpy.mockRestore();
+  });
 });

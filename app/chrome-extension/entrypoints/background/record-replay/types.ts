@@ -125,6 +125,15 @@ export interface Flow {
       stoppedAt?: string;
       durationMs?: number;
       stepCount?: number;
+      truncated?: boolean;
+      truncationReason?:
+        | 'node_count'
+        | 'payload_bytes'
+        | 'variable_count'
+        | 'duration'
+        | 'step_rate';
+      truncatedAt?: string;
+      truncationLimit?: number;
       parameterSuggestions?: Array<{
         nodeId: string;
         kind: 'fill' | 'navigate';

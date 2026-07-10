@@ -10,6 +10,8 @@
     SCROLL_DEBOUNCE_MS: 350,
     SENSITIVE_INPUT_TYPES: new Set(['password']),
     UI_MAX_STEPS: 30,
+    LOCAL_MAX_STEPS: 100,
+    LOCAL_MAX_VARIABLES: 256,
     // Maximum time to hold flush while user is typing (prevents unbounded batch accumulation)
     MAX_TYPING_HOLD_MS: 1500,
   };
