@@ -7,6 +7,7 @@ import type { RunId } from '../domain/ids';
 import type { RunRecordV3 } from '../domain/events';
 import { RUN_SCHEMA_VERSION, isTerminalStatus } from '../domain/events';
 import {
+  RUN_RESOURCE_LIMITS,
   findRunResourceLimitViolation,
   normalizeRunListOptions,
   resolveRunRetentionPolicy,
@@ -44,6 +45,22 @@ export function validateRunRecord(record: RunRecordV3): void {
   }
   if (!record.status) {
     throw createRRError(RR_ERROR_CODES.VALIDATION_ERROR, 'Run status is required');
+  }
+  if (
+    !Number.isSafeInteger(record.maxAttempts) ||
+    record.maxAttempts < 1 ||
+    record.maxAttempts > RUN_RESOURCE_LIMITS.maxAttempts
+  ) {
+    throw createRRError(
+      RR_ERROR_CODES.VALIDATION_ERROR,
+      `Run maxAttempts must be an integer between 1 and ${RUN_RESOURCE_LIMITS.maxAttempts}`,
+    );
+  }
+  if (!Number.isSafeInteger(record.attempt) || record.attempt < 0) {
+    throw createRRError(
+      RR_ERROR_CODES.VALIDATION_ERROR,
+      'Run attempt must be a non-negative safe integer',
+    );
   }
 }
 

@@ -52,6 +52,13 @@ describe("V3 run storage bounds", () => {
     ).rejects.toThrow(
       `${RUN_RESOURCE_LIMITS.maxStringUtf8Bytes}-byte string limit`,
     );
+    await expect(
+      runs.save(
+        createRun("too-many-attempts", 2, {
+          maxAttempts: RUN_RESOURCE_LIMITS.maxAttempts + 1,
+        }),
+      ),
+    ).rejects.toThrow(`${RUN_RESOURCE_LIMITS.maxAttempts}`);
   });
 
   it("lists newest runs in bounded filtered pages", async () => {

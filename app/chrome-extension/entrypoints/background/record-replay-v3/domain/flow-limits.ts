@@ -11,6 +11,11 @@ export const FLOW_RESOURCE_LIMITS = Object.freeze({
   maxStringUtf8Bytes: 256 * 1024,
   maxJsonDepth: 64,
   maxJsonValues: 200_000,
+  maxRunTimeoutMs: 24 * 60 * 60 * 1000,
+  maxNodeTimeoutMs: 60 * 60 * 1000,
+  maxRetries: 10,
+  maxRetryIntervalMs: 10 * 60 * 1000,
+  maxRetryErrorCodes: 64,
 });
 
 export interface FlowListOptions {
@@ -33,6 +38,135 @@ export function normalizeFlowListOptions(options: FlowListOptions = {}): {
   return { offset, limit };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function finiteIntegerViolation(
+  value: unknown,
+  path: string,
+  minimum: number,
+  maximum: number,
+): string | null {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= minimum &&
+    value <= maximum
+    ? null
+    : `${path} must be an integer between ${minimum} and ${maximum}`;
+}
+
+function findRetryPolicyViolation(value: unknown, path: string): string | null {
+  if (!isRecord(value)) return `${path} must be an object`;
+  if (value.retries !== undefined) {
+    const violation = finiteIntegerViolation(
+      value.retries,
+      `${path}.retries`,
+      0,
+      FLOW_RESOURCE_LIMITS.maxRetries,
+    );
+    if (violation) return violation;
+  }
+  for (const field of ["intervalMs", "maxIntervalMs"] as const) {
+    if (value[field] === undefined) continue;
+    const violation = finiteIntegerViolation(
+      value[field],
+      `${path}.${field}`,
+      0,
+      FLOW_RESOURCE_LIMITS.maxRetryIntervalMs,
+    );
+    if (violation) return violation;
+  }
+  if (
+    Array.isArray(value.retryOn) &&
+    value.retryOn.length > FLOW_RESOURCE_LIMITS.maxRetryErrorCodes
+  ) {
+    return `${path}.retryOn exceeds the ${FLOW_RESOURCE_LIMITS.maxRetryErrorCodes}-item limit`;
+  }
+  return null;
+}
+
+function findOnErrorPolicyViolation(
+  value: unknown,
+  path: string,
+): string | null {
+  if (!isRecord(value)) return `${path} must be an object`;
+  if (value.kind === "retry" && value.override !== undefined) {
+    return findRetryPolicyViolation(value.override, `${path}.override`);
+  }
+  return null;
+}
+
+function findNodePolicyViolation(value: unknown, path: string): string | null {
+  if (!isRecord(value)) return `${path} must be an object`;
+  if (value.timeout !== undefined) {
+    if (!isRecord(value.timeout)) return `${path}.timeout must be an object`;
+    const violation = finiteIntegerViolation(
+      value.timeout.ms,
+      `${path}.timeout.ms`,
+      1,
+      FLOW_RESOURCE_LIMITS.maxNodeTimeoutMs,
+    );
+    if (violation) return violation;
+  }
+  if (value.retry !== undefined) {
+    const violation = findRetryPolicyViolation(value.retry, `${path}.retry`);
+    if (violation) return violation;
+  }
+  if (value.onError !== undefined) {
+    const violation = findOnErrorPolicyViolation(
+      value.onError,
+      `${path}.onError`,
+    );
+    if (violation) return violation;
+  }
+  return null;
+}
+
+function findExecutionPolicyViolation(
+  flow: Record<string, unknown>,
+): string | null {
+  if (flow.policy !== undefined) {
+    if (!isRecord(flow.policy)) return "flow.policy must be an object";
+    if (flow.policy.runTimeoutMs !== undefined) {
+      const violation = finiteIntegerViolation(
+        flow.policy.runTimeoutMs,
+        "flow.policy.runTimeoutMs",
+        1,
+        FLOW_RESOURCE_LIMITS.maxRunTimeoutMs,
+      );
+      if (violation) return violation;
+    }
+    if (flow.policy.defaultNodePolicy !== undefined) {
+      const violation = findNodePolicyViolation(
+        flow.policy.defaultNodePolicy,
+        "flow.policy.defaultNodePolicy",
+      );
+      if (violation) return violation;
+    }
+    if (flow.policy.unsupportedNodePolicy !== undefined) {
+      const violation = findOnErrorPolicyViolation(
+        flow.policy.unsupportedNodePolicy,
+        "flow.policy.unsupportedNodePolicy",
+      );
+      if (violation) return violation;
+    }
+  }
+
+  if (Array.isArray(flow.nodes)) {
+    for (let index = 0; index < flow.nodes.length; index += 1) {
+      const node = flow.nodes[index];
+      if (!isRecord(node) || node.policy === undefined) continue;
+      const violation = findNodePolicyViolation(
+        node.policy,
+        `flow.nodes[${index}].policy`,
+      );
+      if (violation) return violation;
+    }
+  }
+  return null;
+}
+
 export function findFlowResourceLimitViolation(value: unknown): string | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return "flow must be an object";
@@ -45,6 +179,11 @@ export function findFlowResourceLimitViolation(value: unknown): string | null {
   ) {
     return `flow.nodes exceeds the ${FLOW_RESOURCE_LIMITS.maxNodes}-node limit`;
   }
+
+  const executionViolation = findExecutionPolicyViolation(
+    value as Record<string, unknown>,
+  );
+  if (executionViolation) return executionViolation;
   if (
     Array.isArray(flow.edges) &&
     flow.edges.length > FLOW_RESOURCE_LIMITS.maxEdges

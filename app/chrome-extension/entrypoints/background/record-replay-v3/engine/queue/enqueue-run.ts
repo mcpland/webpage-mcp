@@ -19,6 +19,7 @@ import type { EventsBus } from '../transport/events-bus';
 import type { RunScheduler } from './scheduler';
 import type { RunQueueProfile } from './queue';
 import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
+import { RUN_RESOURCE_LIMITS } from '../../domain/run-limits';
 import {
   RR_ERROR_CODES,
   createRRError,
@@ -231,7 +232,10 @@ export async function enqueueRun(
 
   // Parameter verification
   const priority = validateInt(input.priority, 0, 'priority');
-  const maxAttempts = validateInt(input.maxAttempts, 1, 'maxAttempts', { min: 1 });
+  const maxAttempts = validateInt(input.maxAttempts, 1, 'maxAttempts', {
+    min: 1,
+    max: RUN_RESOURCE_LIMITS.maxAttempts,
+  });
 
   // Verify Flow exists
   const flow = await deps.storage.flows.get(flowId);

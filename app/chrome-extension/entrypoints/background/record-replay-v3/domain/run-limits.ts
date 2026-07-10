@@ -8,6 +8,7 @@ export const RUN_RESOURCE_LIMITS = Object.freeze({
   maxStringUtf8Bytes: 128 * 1024,
   maxJsonDepth: 32,
   maxJsonValues: 20_000,
+  maxAttempts: 10,
   terminalTtlMs: 30 * 24 * 60 * 60 * 1000,
   maxPruneRunsPerWrite: 50,
   defaultListLimit: 50,

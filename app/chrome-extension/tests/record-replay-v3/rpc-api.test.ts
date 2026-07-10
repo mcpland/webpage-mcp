@@ -24,6 +24,7 @@ import { RpcServer } from "@/entrypoints/background/record-replay-v3/engine/tran
 import type { TriggerManager } from "@/entrypoints/background/record-replay-v3/engine/triggers/trigger-manager";
 import type { TriggerSpec } from "@/entrypoints/background/record-replay-v3/domain/triggers";
 import { DOM_TRIGGER_LIMITS } from "@/entrypoints/background/record-replay-v3/domain/dom-trigger-policy";
+import { RUN_RESOURCE_LIMITS } from "@/entrypoints/background/record-replay-v3/domain/run-limits";
 import type { ArtifactRecord } from "@/entrypoints/background/record-replay-v3/storage/artifacts";
 import { tryAcquireFlowWriteLock } from "@/entrypoints/background/record-replay-v3/flows/write-lock";
 import { calculateWorkflowRevision } from "@/entrypoints/background/record-replay-v3/flows/publish";
@@ -731,6 +732,25 @@ describe("V3 RPC Queue Management APIs", () => {
           { subscriptions: new Set() },
         ),
       ).rejects.toThrow("maxAttempts must be >= 1");
+    });
+
+    it("rejects maxAttempts above the execution limit", async () => {
+      const flow = createTestFlow("flow-1");
+      getInternal(storage).flowsMap.set(flow.id, flow);
+
+      await expect(
+        (server as unknown as { handleRequest: Function }).handleRequest(
+          {
+            method: "rr_v3.enqueueRun",
+            params: {
+              flowId: "flow-1",
+              maxAttempts: RUN_RESOURCE_LIMITS.maxAttempts + 1,
+            },
+            requestId: "req-max-attempts",
+          },
+          { subscriptions: new Set() },
+        ),
+      ).rejects.toThrow(`maxAttempts must be <= ${RUN_RESOURCE_LIMITS.maxAttempts}`);
     });
 
     it("persists startNodeId in RunRecord when provided", async () => {

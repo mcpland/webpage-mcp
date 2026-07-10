@@ -87,6 +87,30 @@ describe("V3 flow storage bounds", () => {
     expect(await store.get(flow.id)).toBeNull();
   });
 
+  it("rejects retry and timeout policies that can create unbounded execution", async () => {
+    const store = createFlowsStore();
+    const retryFlow = createFlow("retry-overflow");
+    retryFlow.policy = {
+      defaultNodePolicy: {
+        retry: {
+          retries: FLOW_RESOURCE_LIMITS.maxRetries + 1,
+          intervalMs: 0,
+        },
+      },
+    };
+    await expect(store.save(retryFlow)).rejects.toThrow(
+      `flow.policy.defaultNodePolicy.retry.retries must be an integer between 0 and ${FLOW_RESOURCE_LIMITS.maxRetries}`,
+    );
+
+    const timeoutFlow = createFlow("timeout-overflow");
+    timeoutFlow.nodes[0].policy = {
+      timeout: { ms: FLOW_RESOURCE_LIMITS.maxNodeTimeoutMs + 1 },
+    };
+    await expect(store.save(timeoutFlow)).rejects.toThrow(
+      `flow.nodes[0].policy.timeout.ms must be an integer between 1 and ${FLOW_RESOURCE_LIMITS.maxNodeTimeoutMs}`,
+    );
+  });
+
   it("supports bounded newest-first pagination without getAll", async () => {
     const store = createFlowsStore();
     await store.save(createFlow("old", "2026-01-01T00:00:00.000Z"));

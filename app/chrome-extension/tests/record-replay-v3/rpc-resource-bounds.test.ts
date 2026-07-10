@@ -95,4 +95,29 @@ describe("RR-V3 RPC resource bounds", () => {
       `offset must be an integer between 0 and ${FLOW_RESOURCE_LIMITS.maxStoredFlows}`,
     );
   });
+
+  it("rejects oversized execution policies before storage lookup", async () => {
+    const { server, get } = createServer();
+
+    await expect(
+      call(server, "rr_v3.saveFlow", {
+        flow: {
+          id: "retry-overflow",
+          name: "Retry overflow",
+          entryNodeId: "node-1",
+          nodes: [{ id: "node-1", kind: "navigate", config: {} }],
+          edges: [],
+          policy: {
+            defaultNodePolicy: {
+              retry: {
+                retries: FLOW_RESOURCE_LIMITS.maxRetries + 1,
+                intervalMs: 0,
+              },
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow(`${FLOW_RESOURCE_LIMITS.maxRetries}`);
+    expect(get).not.toHaveBeenCalled();
+  });
 });
