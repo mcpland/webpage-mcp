@@ -32,6 +32,7 @@ import {
   RR_V3_RPC_LIMITS,
   findRpcRequestEnvelopeViolation,
   isBoundedRpcIdentifier,
+  safeRpcResponseRequestId,
 } from "../../domain/rpc-limits";
 import type {
   FlowBinding,
@@ -102,6 +103,7 @@ import {
   createRpcEventMessage,
   type RpcRequest,
 } from "./rpc";
+import { isExtensionPageSender } from "@/common/runtime-sender-auth";
 
 /**
  * RPC Server Configuration
@@ -125,6 +127,7 @@ export interface RpcServerConfig {
 interface PortConnection {
   port: chrome.runtime.Port;
   subscriptions: Set<RunId | null>; // null means subscribe to all
+  inFlight: number;
 }
 
 const SIDE_EFFECT_CATEGORIES = new Set<
@@ -215,11 +218,20 @@ export class RpcServer {
    */
   private handleConnect = (port: chrome.runtime.Port): void => {
     if (port.name !== RR_V3_PORT_NAME) return;
+    if (!isExtensionPageSender(port.sender)) {
+      port.disconnect();
+      return;
+    }
+    if (this.connections.size >= RR_V3_RPC_LIMITS.maxConnections) {
+      port.disconnect();
+      return;
+    }
 
     const connId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const connection: PortConnection = {
       port,
       subscriptions: new Set(),
+      inFlight: 0,
     };
 
     this.connections.set(connId, connection);
@@ -240,12 +252,26 @@ export class RpcServer {
     const conn = this.connections.get(connId);
     if (!conn) return;
 
+    const responseRequestId = safeRpcResponseRequestId(msg.requestId);
+    if (conn.inFlight >= RR_V3_RPC_LIMITS.maxInFlightPerConnection) {
+      conn.port.postMessage(
+        createRpcResponseErr(
+          responseRequestId,
+          "Too many in-flight RR-V3 requests",
+        ),
+      );
+      return;
+    }
+    conn.inFlight += 1;
+
     try {
       const result = await this.handleRequest(msg, conn);
-      conn.port.postMessage(createRpcResponseOk(msg.requestId, result));
+      conn.port.postMessage(createRpcResponseOk(responseRequestId, result));
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
-      conn.port.postMessage(createRpcResponseErr(msg.requestId, error));
+      conn.port.postMessage(createRpcResponseErr(responseRequestId, error));
+    } finally {
+      conn.inFlight = Math.max(0, conn.inFlight - 1);
     }
   };
 
@@ -607,13 +633,28 @@ export class RpcServer {
       }
 
       case "rr_v3.subscribe": {
-        const runId = (params?.runId as RunId | undefined) ?? null;
+        const runId =
+          params?.runId === undefined || params.runId === null
+            ? null
+            : this.requireRunId(params.runId);
+        if (
+          !conn.subscriptions.has(runId) &&
+          conn.subscriptions.size >=
+            RR_V3_RPC_LIMITS.maxSubscriptionsPerConnection
+        ) {
+          throw new Error(
+            `subscription limit exceeded (maximum ${RR_V3_RPC_LIMITS.maxSubscriptionsPerConnection})`,
+          );
+        }
         conn.subscriptions.add(runId);
         return { subscribed: true, runId };
       }
 
       case "rr_v3.unsubscribe": {
-        const runId = (params?.runId as RunId | undefined) ?? null;
+        const runId =
+          params?.runId === undefined || params.runId === null
+            ? null
+            : this.requireRunId(params.runId);
         conn.subscriptions.delete(runId);
         return { unsubscribed: true, runId };
       }

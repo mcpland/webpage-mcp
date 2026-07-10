@@ -1,0 +1,50 @@
+function extensionLocation(): { root: string; origin: string } | null {
+  const root = chrome.runtime.getURL("");
+  if (typeof root !== "string" || !root.startsWith("chrome-extension://"))
+    return null;
+  const normalizedRoot = root.endsWith("/") ? root : `${root}/`;
+  return { root: normalizedRoot, origin: normalizedRoot.slice(0, -1) };
+}
+
+function senderHasExtensionOrigin(
+  sender: chrome.runtime.MessageSender,
+): boolean {
+  const expected = extensionLocation();
+  if (!expected) return false;
+  if (sender.origin !== undefined && sender.origin !== expected.origin)
+    return false;
+  if (sender.url !== undefined && !sender.url.startsWith(expected.root))
+    return false;
+  return sender.origin === expected.origin || typeof sender.url === "string";
+}
+
+/** Privileged extension pages only; content scripts always carry sender.tab. */
+export function isExtensionPageSender(
+  sender: chrome.runtime.MessageSender | undefined,
+): boolean {
+  return Boolean(
+    sender &&
+    sender.id === chrome.runtime.id &&
+    sender.tab === undefined &&
+    senderHasExtensionOrigin(sender),
+  );
+}
+
+/** Same-extension runtime context, including a background service worker without a URL. */
+export function isExtensionRuntimeSender(
+  sender: chrome.runtime.MessageSender | undefined,
+): boolean {
+  if (!sender || sender.id !== chrome.runtime.id || sender.tab !== undefined)
+    return false;
+  if (sender.url === undefined && sender.origin === undefined) return true;
+  return senderHasExtensionOrigin(sender);
+}
+
+/** The one extension offscreen document used by the keepalive channel. */
+export function isOffscreenDocumentSender(
+  sender: chrome.runtime.MessageSender | undefined,
+): boolean {
+  if (!isExtensionPageSender(sender) || !sender?.url) return false;
+  const actual = sender.url.split(/[?#]/, 1)[0];
+  return actual === chrome.runtime.getURL("offscreen.html");
+}

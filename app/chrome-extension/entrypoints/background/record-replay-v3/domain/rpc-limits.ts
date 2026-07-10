@@ -14,6 +14,7 @@ export const RR_V3_RPC_LIMITS = Object.freeze({
   defaultEventListLimit: 100,
   maxConnections: 16,
   maxSubscriptionsPerConnection: 64,
+  maxInFlightPerConnection: 8,
 });
 
 function plainStringUtf8Bytes(value: string, maxBytes: number): number {
@@ -67,4 +68,12 @@ export function isBoundedRpcIdentifier(value: unknown): value is string {
     plainStringUtf8Bytes(value, RR_V3_RPC_LIMITS.maxIdentifierUtf8Bytes) <=
       RR_V3_RPC_LIMITS.maxIdentifierUtf8Bytes
   );
+}
+
+export function safeRpcResponseRequestId(value: unknown): string {
+  if (typeof value !== "string" || !value) return "";
+  return plainStringUtf8Bytes(value, RR_V3_RPC_LIMITS.maxRequestIdUtf8Bytes) <=
+    RR_V3_RPC_LIMITS.maxRequestIdUtf8Bytes
+    ? value
+    : "";
 }
