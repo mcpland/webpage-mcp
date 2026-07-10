@@ -84,7 +84,9 @@ Notes:
 
 - `register --force` is kept for compatibility; registration is idempotent.
 - `register --system` requires admin/sudo privileges.
-- `report` is intended for issue submission and troubleshooting.
+- `report` is intended for issue submission and troubleshooting. Native-host
+  logs are excluded by default; use `--include-logs tail` or `full` only when
+  needed, and review the redacted report before sharing it.
 
 ## Local Development (this monorepo)
 

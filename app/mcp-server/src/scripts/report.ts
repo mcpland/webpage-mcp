@@ -28,6 +28,7 @@ const MAX_LOG_FILES = 6;
 const MAX_FULL_LOG_BYTES = 1024 * 1024;
 
 type IncludeLogsMode = 'none' | 'tail' | 'full';
+export const DEFAULT_INCLUDE_LOGS_MODE: IncludeLogsMode = 'none';
 
 export interface ReportOptions {
   json?: boolean;
@@ -164,10 +165,13 @@ function safeExecVersion(command: string): VersionResult {
   }
 }
 
-function parseIncludeLogsMode(raw: unknown): IncludeLogsMode {
+export function parseIncludeLogsMode(raw: unknown): IncludeLogsMode {
+  if (raw === undefined || raw === null || raw === '') {
+    return DEFAULT_INCLUDE_LOGS_MODE;
+  }
   const v = typeof raw === 'string' ? raw.toLowerCase() : '';
   if (v === 'none' || v === 'tail' || v === 'full') return v;
-  return 'tail';
+  throw new Error('Invalid include-logs mode. Use none, tail, or full.');
 }
 
 function parsePositiveInt(raw: unknown, fallback: number): number {

@@ -9,7 +9,7 @@ import {
 } from './scripts/utils';
 import { BrowserType, parseBrowserType, detectInstalledBrowsers } from './scripts/browser-config';
 import { runDoctor } from './scripts/doctor';
-import { runReport } from './scripts/report';
+import { DEFAULT_INCLUDE_LOGS_MODE, runReport } from './scripts/report';
 
 program
   .version(require('../package.json').version)
@@ -171,7 +171,11 @@ program
   .option('--output <file>', 'Write report to file instead of stdout')
   .option('--copy', 'Copy report to clipboard')
   .option('--no-redact', 'Disable redaction of usernames/paths/tokens')
-  .option('--include-logs <mode>', 'Include wrapper logs: none | tail | full', 'tail')
+  .option(
+    '--include-logs <mode>',
+    'Include wrapper logs: none | tail | full (explicit opt-in)',
+    DEFAULT_INCLUDE_LOGS_MODE,
+  )
   .option('--log-lines <n>', 'Lines to include when --include-logs=tail', '200')
   .option('-b, --browser <browser>', 'Target browser (chrome, chromium, or all)')
   .action(async (options) => {
