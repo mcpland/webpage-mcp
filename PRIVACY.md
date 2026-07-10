@@ -105,11 +105,15 @@ host.
 ### Support and diagnostics
 
 Diagnostic reports stay local unless the user chooses to copy, save, or share
-them. Reports redact common secrets and paths by default, and native-host logs
-are opt-in, but automated redaction cannot guarantee removal of every sensitive
-value. Users must review a report before sharing it. Information voluntarily
-submitted through a public issue or support email is received and retained by
-the corresponding GitHub or email service.
+them. The registered native-host wrapper automatically creates local wrapper
+and stderr logs when Chrome launches the registered host. A diagnostic report
+can list redacted log-file metadata, but it omits log contents by default; tail
+or full log contents are included only when the user explicitly selects that
+`--include-logs` mode. Reports redact common secrets and paths by default, but
+automated redaction cannot guarantee removal of every sensitive value. Users
+must review a report before sharing it. Information voluntarily submitted
+through a public issue or support email is received and retained by the
+corresponding GitHub or email service.
 
 ## Local storage and retention
 
@@ -135,9 +139,11 @@ the corresponding GitHub or email service.
   engine-managed records follow the engine's retention and deletion controls.
   Deleting `~/.webpage-mcp-agent`, a Webpage MCP project, or a Webpage MCP
   session does not delete them.
-- Native-host logs are stored in the platform log directory with restrictive
-  file permissions, per-file size limits, and bounded rotation. They are not
-  uploaded automatically.
+- Normal registered native-host launches automatically create wrapper and
+  stderr logs in the platform log directory. The files use restrictive
+  permissions, per-file byte limits, and bounded per-family retention. They are
+  not automatically redacted and can contain paths or other diagnostic data,
+  but they are not uploaded automatically.
 - Files downloaded, exported, or copied by a user-invoked action or a previously
   enabled workflow or trigger remain in the destination selected by Chrome, the
   user, or the workflow until removed there.
@@ -194,8 +200,8 @@ Users can:
   longer needed;
 - use Claude Code or Agent SDK controls and Codex CLI controls to manage
   engine-maintained session data separately from Webpage MCP data;
-- generate diagnostics without logs and review or edit a report before sharing
-  it; and
+- keep log contents out of diagnostic reports with the default
+  `--include-logs=none` mode and review or edit a report before sharing it; and
 - use the controls offered by each connected provider or website for data that
   service retains.
 
@@ -226,7 +232,9 @@ sensitive information in a public issue.
   [`app/chrome-extension/wxt.config.ts`](app/chrome-extension/wxt.config.ts).
 - Local Agent storage boundaries are defined in
   [`app/mcp-server/src/agent/storage.ts`](app/mcp-server/src/agent/storage.ts),
-  and native log retention is defined in
+  native log capture is implemented in
+  [`app/mcp-server/src/scripts/native-log-runner.ts`](app/mcp-server/src/scripts/native-log-runner.ts),
+  and native log limits and retention are defined in
   [`app/mcp-server/src/scripts/native-log-policy.ts`](app/mcp-server/src/scripts/native-log-policy.ts).
 - External engine session behavior follows the invocation options in
   [`app/mcp-server/src/agent/engines/claude.ts`](app/mcp-server/src/agent/engines/claude.ts)
@@ -243,7 +251,10 @@ sensitive information in a public issue.
   [`app/chrome-extension/utils/model-assets.ts`](app/chrome-extension/utils/model-assets.ts)
   and covered by
   [`app/chrome-extension/tests/security/model-asset-integrity.test.ts`](app/chrome-extension/tests/security/model-asset-integrity.test.ts).
-- Diagnostic disclosure and redaction behavior is covered by
+- Diagnostic log-content defaults, disclosure, and redaction behavior are
+  defined in
+  [`app/mcp-server/src/scripts/report.ts`](app/mcp-server/src/scripts/report.ts)
+  and covered by
   [`app/mcp-server/src/scripts/report-privacy.test.ts`](app/mcp-server/src/scripts/report-privacy.test.ts).
 - Human review is required before changing the Chrome Web Store privacy fields
   or marking this policy `accepted`.
