@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { deflateRawSync, gzipSync } from "node:zlib";
 
 import {
   verifyReleaseArtifacts,
@@ -40,6 +40,80 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+function writeTarText(header, offset, length, value) {
+  header.write(value, offset, Math.min(length, Buffer.byteLength(value)), "utf8");
+}
+
+function writeTarOctal(header, offset, length, value) {
+  writeTarText(
+    header,
+    offset,
+    length,
+    `${value.toString(8).padStart(length - 1, "0")}\0`,
+  );
+}
+
+function createTarGzip(name, contents) {
+  const body = Buffer.from(contents);
+  const header = Buffer.alloc(512);
+  writeTarText(header, 0, 100, name);
+  writeTarOctal(header, 100, 8, 0o644);
+  writeTarOctal(header, 108, 8, 0);
+  writeTarOctal(header, 116, 8, 0);
+  writeTarOctal(header, 124, 12, body.length);
+  writeTarOctal(header, 136, 12, 0);
+  header.fill(0x20, 148, 156);
+  header[156] = "0".charCodeAt(0);
+  writeTarText(header, 257, 6, "ustar\0");
+  writeTarText(header, 263, 2, "00");
+  const checksum = header.reduce((sum, byte) => sum + byte, 0);
+  writeTarText(header, 148, 8, `${checksum.toString(8).padStart(6, "0")}\0 `);
+  const padding = Buffer.alloc((512 - (body.length % 512)) % 512);
+  return gzipSync(Buffer.concat([header, body, padding, Buffer.alloc(1024)]));
+}
+
+function createZip(name, contents) {
+  const body = Buffer.from(contents);
+  const compressed = deflateRawSync(body);
+  const nameBytes = Buffer.from(name);
+  let crc = 0xffffffff;
+  for (const byte of body) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  crc = (crc ^ 0xffffffff) >>> 0;
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(8, 8);
+  local.writeUInt32LE(crc, 14);
+  local.writeUInt32LE(compressed.length, 18);
+  local.writeUInt32LE(body.length, 22);
+  local.writeUInt16LE(nameBytes.length, 26);
+
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(8, 10);
+  central.writeUInt32LE(crc, 16);
+  central.writeUInt32LE(compressed.length, 20);
+  central.writeUInt32LE(body.length, 24);
+  central.writeUInt16LE(nameBytes.length, 28);
+
+  const localRecord = Buffer.concat([local, nameBytes, compressed]);
+  const centralRecord = Buffer.concat([central, nameBytes]);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(centralRecord.length, 12);
+  end.writeUInt32LE(localRecord.length, 16);
+  return Buffer.concat([localRecord, centralRecord, end]);
+}
+
 async function createArtifacts(rootDir, overrides = {}) {
   const artifactsDir = join(rootDir, "artifacts");
   const stagingDir = join(rootDir, "staging");
@@ -55,19 +129,20 @@ async function createArtifacts(rootDir, overrides = {}) {
     version: overrides.extensionVersion ?? VERSION,
   });
 
-  execFileSync("tar", [
-    "-czf",
+  await writeFile(
     join(artifactsDir, mcpPath),
-    "-C",
-    stagingDir,
-    "package/package.json",
-  ]);
-  execFileSync("zip", [
-    "-q",
-    "-j",
+    createTarGzip(
+      "package/package.json",
+      await readFile(join(stagingDir, "package/package.json")),
+    ),
+  );
+  await writeFile(
     join(artifactsDir, extensionPath),
-    join(stagingDir, "manifest.json"),
-  ]);
+    createZip(
+      "manifest.json",
+      await readFile(join(stagingDir, "manifest.json")),
+    ),
+  );
 
   const mcpArchive = await readFile(join(artifactsDir, mcpPath));
   const extensionArchive = await readFile(join(artifactsDir, extensionPath));

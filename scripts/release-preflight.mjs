@@ -1,6 +1,6 @@
 import console from "node:console";
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { gunzipSync, inflateRawSync } from "node:zlib";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import process from "node:process";
@@ -128,28 +128,202 @@ async function readBoundedFile(path, description) {
   return readFile(path);
 }
 
-function readArchiveJson(command, args, description) {
-  const result = spawnSync(command, args, {
-    encoding: "utf8",
-    maxBuffer: MAX_ARCHIVE_METADATA_BYTES,
-    windowsHide: true,
-  });
-  if (result.error) {
-    throw new Error(
-      `Unable to inspect ${description} with ${command}: ${result.error.message}`,
-    );
-  }
+function parseArchiveJson(bytes, description) {
   invariant(
-    result.status === 0,
-    `Unable to inspect ${description}: ${result.stderr.trim() || `${command} exited with status ${result.status}`}`,
+    bytes.length > 0 && bytes.length <= MAX_ARCHIVE_METADATA_BYTES,
+    `${description} must be between 1 byte and ${MAX_ARCHIVE_METADATA_BYTES} bytes`,
   );
   try {
-    return JSON.parse(result.stdout);
+    return JSON.parse(bytes.toString("utf8"));
   } catch (error) {
     throw new Error(
       `Invalid embedded JSON in ${description}: ${error.message}`,
     );
   }
+}
+
+function readTarEntryJson(archive, entryName, description) {
+  let tar;
+  try {
+    tar = gunzipSync(archive, { maxOutputLength: MAX_ARCHIVE_BYTES });
+  } catch (error) {
+    throw new Error(`Unable to inspect ${description}: ${error.message}`);
+  }
+
+  let found;
+  for (let offset = 0; offset + 512 <= tar.length; ) {
+    const header = tar.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+
+    const readField = (start, length) =>
+      header
+        .subarray(start, start + length)
+        .toString("utf8")
+        .replace(/\0.*$/s, "")
+        .trim();
+    const name = readField(0, 100);
+    const prefix = readField(345, 155);
+    const fullName = prefix ? `${prefix}/${name}` : name;
+    const checksumField = readField(148, 8);
+    invariant(
+      /^[0-7]+$/.test(checksumField),
+      `Invalid tar header checksum in ${description}`,
+    );
+    let checksum = 0;
+    for (let index = 0; index < header.length; index += 1) {
+      checksum += index >= 148 && index < 156 ? 0x20 : header[index];
+    }
+    invariant(
+      checksum === Number.parseInt(checksumField, 8),
+      `Tar header checksum mismatch in ${description}: ${fullName}`,
+    );
+    const sizeField = readField(124, 12);
+    invariant(
+      /^[0-7]+$/.test(sizeField),
+      `Invalid tar entry size in ${description}: ${sizeField}`,
+    );
+    const size = Number.parseInt(sizeField, 8);
+    const dataStart = offset + 512;
+    const dataEnd = dataStart + size;
+    invariant(
+      Number.isSafeInteger(size) && dataEnd <= tar.length,
+      `Truncated tar entry in ${description}: ${fullName}`,
+    );
+
+    if (fullName === entryName) {
+      invariant(!found, `Duplicate ${entryName} in ${description}`);
+      found = Buffer.from(tar.subarray(dataStart, dataEnd));
+    }
+    offset = dataStart + Math.ceil(size / 512) * 512;
+  }
+
+  invariant(found, `Missing ${entryName} in ${description}`);
+  return parseArchiveJson(found, description);
+}
+
+function findZipEndOfCentralDirectory(archive, description) {
+  invariant(archive.length >= 22, `${description} is not a valid ZIP archive`);
+  const minimumOffset = Math.max(0, archive.length - 65_557);
+  for (let offset = archive.length - 22; offset >= minimumOffset; offset -= 1) {
+    if (archive.readUInt32LE(offset) !== 0x06054b50) continue;
+    const commentLength = archive.readUInt16LE(offset + 20);
+    if (offset + 22 + commentLength === archive.length) return offset;
+  }
+  throw new Error(`Unable to inspect ${description}: ZIP directory is missing`);
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function readZipEntryJson(archive, entryName, description) {
+  const eocdOffset = findZipEndOfCentralDirectory(archive, description);
+  invariant(
+    archive.readUInt16LE(eocdOffset + 4) === 0 &&
+      archive.readUInt16LE(eocdOffset + 6) === 0,
+    `${description} may not be a multi-disk ZIP archive`,
+  );
+  const entryCount = archive.readUInt16LE(eocdOffset + 10);
+  const centralSize = archive.readUInt32LE(eocdOffset + 12);
+  const centralOffset = archive.readUInt32LE(eocdOffset + 16);
+  invariant(
+    entryCount !== 0xffff &&
+      centralSize !== 0xffffffff &&
+      centralOffset !== 0xffffffff &&
+      centralOffset + centralSize <= eocdOffset,
+    `${description} uses unsupported ZIP64 or invalid directory metadata`,
+  );
+
+  let offset = centralOffset;
+  let found;
+  for (let index = 0; index < entryCount; index += 1) {
+    invariant(
+      offset + 46 <= archive.length && archive.readUInt32LE(offset) === 0x02014b50,
+      `Invalid ZIP central directory in ${description}`,
+    );
+    const flags = archive.readUInt16LE(offset + 8);
+    const method = archive.readUInt16LE(offset + 10);
+    const expectedCrc = archive.readUInt32LE(offset + 16);
+    const compressedSize = archive.readUInt32LE(offset + 20);
+    const uncompressedSize = archive.readUInt32LE(offset + 24);
+    const nameLength = archive.readUInt16LE(offset + 28);
+    const extraLength = archive.readUInt16LE(offset + 30);
+    const commentLength = archive.readUInt16LE(offset + 32);
+    const localOffset = archive.readUInt32LE(offset + 42);
+    const nextOffset = offset + 46 + nameLength + extraLength + commentLength;
+    invariant(nextOffset <= archive.length, `Truncated ZIP directory in ${description}`);
+    const name = archive.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
+
+    if (name === entryName) {
+      invariant(!found, `Duplicate ${entryName} in ${description}`);
+      invariant((flags & 0x1) === 0, `${description} may not contain encrypted metadata`);
+      invariant(
+        compressedSize !== 0xffffffff && uncompressedSize !== 0xffffffff &&
+        uncompressedSize > 0 && uncompressedSize <= MAX_ARCHIVE_METADATA_BYTES,
+        `${description} metadata exceeds the ${MAX_ARCHIVE_METADATA_BYTES}-byte limit`,
+      );
+      invariant(
+        localOffset + 30 <= archive.length && archive.readUInt32LE(localOffset) === 0x04034b50,
+        `Invalid local ZIP header for ${entryName}`,
+      );
+      const localNameLength = archive.readUInt16LE(localOffset + 26);
+      const localExtraLength = archive.readUInt16LE(localOffset + 28);
+      const localFlags = archive.readUInt16LE(localOffset + 6);
+      const localMethod = archive.readUInt16LE(localOffset + 8);
+      const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+      const dataEnd = dataStart + compressedSize;
+      invariant(dataEnd <= archive.length, `Truncated ZIP entry for ${entryName}`);
+      invariant(
+        localFlags === flags && localMethod === method,
+        `ZIP directory disagrees with local header for ${entryName}`,
+      );
+      invariant(
+        archive
+          .subarray(localOffset + 30, localOffset + 30 + localNameLength)
+          .equals(Buffer.from(entryName)),
+        `ZIP local header name mismatch for ${entryName}`,
+      );
+      const compressed = archive.subarray(dataStart, dataEnd);
+      if (method === 0) {
+        found = Buffer.from(compressed);
+      } else if (method === 8) {
+        try {
+          found = inflateRawSync(compressed, {
+            maxOutputLength: MAX_ARCHIVE_METADATA_BYTES,
+          });
+        } catch (error) {
+          throw new Error(`Unable to inspect ${description}: ${error.message}`);
+        }
+      } else {
+        throw new Error(`Unsupported ZIP compression method ${method} in ${description}`);
+      }
+      invariant(
+        found.length === uncompressedSize,
+        `ZIP entry size mismatch for ${entryName} in ${description}`,
+      );
+      invariant(
+        crc32(found) === expectedCrc,
+        `ZIP entry CRC mismatch for ${entryName} in ${description}`,
+      );
+    }
+
+    offset = nextOffset;
+  }
+
+  invariant(
+    offset === centralOffset + centralSize,
+    `ZIP directory size mismatch in ${description}`,
+  );
+
+  invariant(found, `Missing ${entryName} in ${description}`);
+  return parseArchiveJson(found, description);
 }
 
 function parseChecksumManifest(source) {
@@ -192,9 +366,9 @@ export async function verifyReleaseArtifacts({
     extensionPath,
     "extension zip",
   );
-  const packedPackage = readArchiveJson(
-    "tar",
-    ["-xOf", mcpPath, "package/package.json"],
+  const packedPackage = readTarEntryJson(
+    mcpArchive,
+    "package/package.json",
     "npm tarball package/package.json",
   );
   invariant(
@@ -206,9 +380,9 @@ export async function verifyReleaseArtifacts({
     `npm tarball version ${String(packedPackage.version)} does not match release version ${metadata.version}`,
   );
 
-  const extensionManifest = readArchiveJson(
-    "unzip",
-    ["-p", extensionPath, "manifest.json"],
+  const extensionManifest = readZipEntryJson(
+    extensionArchive,
+    "manifest.json",
     "extension zip manifest.json",
   );
   invariant(
