@@ -66,12 +66,90 @@ const ATTACHMENT_ROOT_DISPLAY_PATH = 'attachments';
 const DEFAULT_PROJECT_MESSAGE_LIMIT = 50;
 const DEFAULT_SESSION_HISTORY_LIMIT = 100;
 const MAX_MESSAGE_PAGE_LIMIT = 500;
+export const AGENT_RPC_JSON_RESPONSE_MAX_BYTES = 700 * 1024;
+
+interface MessagePagePagination {
+  limit: number;
+  offset: number;
+  count: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+}
 
 function normalizeMessagePageLimit(value: number | undefined, fallback: number): number {
   if (typeof value !== 'number' || value <= 0) {
     return fallback;
   }
   return Math.min(Math.floor(value), MAX_MESSAGE_PAGE_LIMIT);
+}
+
+function jsonUtf8Bytes(value: unknown): number {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new TypeError('RPC response payload is not JSON serializable');
+  }
+  return Buffer.byteLength(serialized, 'utf8');
+}
+
+/**
+ * Fit a message page to the native RPC response budget using the exact JSON
+ * representation of every item. JSON string escaping can make the wire size
+ * substantially larger than the messages' raw UTF-8 content.
+ */
+function createBoundedMessagePage<T>(options: {
+  messages: readonly T[];
+  totalCount: number;
+  limit: number;
+  offset: number;
+  buildPayload: (messages: readonly T[], pagination: MessagePagePagination) => unknown;
+}): unknown {
+  const selected: T[] = [];
+  let selectedItemBytes = 0;
+
+  for (const message of options.messages) {
+    const nextCount = selected.length + 1;
+    const nextHasMore = options.offset + nextCount < options.totalCount;
+    const pagination: MessagePagePagination = {
+      limit: options.limit,
+      offset: options.offset,
+      count: nextCount,
+      hasMore: nextHasMore,
+      nextOffset: nextHasMore ? options.offset + nextCount : null,
+    };
+    const skeletonBytes = jsonUtf8Bytes(options.buildPayload([], pagination));
+    const messageBytes = jsonUtf8Bytes(message);
+    const arrayContentsBytes = selectedItemBytes + messageBytes + selected.length;
+
+    // Replacing the skeleton's [] with the serialized items adds exactly the
+    // item bytes plus one comma per item after the first.
+    if (skeletonBytes + arrayContentsBytes > AGENT_RPC_JSON_RESPONSE_MAX_BYTES) {
+      break;
+    }
+
+    selected.push(message);
+    selectedItemBytes += messageBytes;
+  }
+
+  if (options.messages.length > 0 && selected.length === 0) {
+    throw new RangeError('A stored message exceeds the Agent RPC response byte budget');
+  }
+
+  const hasMore = options.offset + selected.length < options.totalCount;
+  const pagination: MessagePagePagination = {
+    limit: options.limit,
+    offset: options.offset,
+    count: selected.length,
+    hasMore,
+    nextOffset: hasMore ? options.offset + selected.length : null,
+  };
+  const payload = options.buildPayload(selected, pagination);
+
+  // Keep this invariant adjacent to the returned value so future envelope
+  // fields cannot silently invalidate the sizing calculation above.
+  if (jsonUtf8Bytes(payload) > AGENT_RPC_JSON_RESPONSE_MAX_BYTES) {
+    throw new RangeError('Agent RPC response exceeds its JSON byte budget');
+  }
+  return payload;
 }
 
 function toPublicAttachmentDirPath(projectId: string): string {
@@ -105,12 +183,24 @@ export interface RpcDispatchDependencies {
 }
 
 function jsonResponse(statusCode: number, payload: unknown): RpcDispatchResponse {
+  const successful = statusCode >= 200 && statusCode < 300;
+  const errorMessage =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).error
+      : undefined;
   return {
     statusCode,
     headers: {
       'content-type': 'application/json; charset=utf-8',
     },
-    body: JSON.stringify(payload),
+    // Native responses carry structured data in `json`. Keeping a second
+    // serialized copy in `body` can push otherwise valid pages over Chrome's
+    // 1 MiB native-message limit. Error callers still rely on a readable body.
+    body: successful
+      ? ''
+      : typeof errorMessage === 'string' && errorMessage.trim()
+        ? errorMessage
+        : JSON.stringify(payload),
     json: payload,
     isBinary: false,
     base64Body: null,
@@ -544,18 +634,20 @@ export async function dispatchAgentRpc(
           getMessagesCountBySessionId(sessionId, session.projectId),
         ]);
 
-        return jsonResponse(HTTP_STATUS.OK, {
-          success: true,
-          sessionId,
+        const payload = createBoundedMessagePage({
           messages,
           totalCount,
-          pagination: {
-            limit: safeLimit,
-            offset: safeOffset,
-            count: messages.length,
-            hasMore: safeOffset + messages.length < totalCount,
-          },
+          limit: safeLimit,
+          offset: safeOffset,
+          buildPayload: (pageMessages, pagination) => ({
+            success: true,
+            sessionId,
+            messages: pageMessages,
+            totalCount,
+            pagination,
+          }),
         });
+        return jsonResponse(HTTP_STATUS.OK, payload);
       }
 
       case 'agent.sessions.reset': {
@@ -752,17 +844,19 @@ export async function dispatchAgentRpc(
           getMessagesCountByProjectId(projectId),
         ]);
 
-        return jsonResponse(HTTP_STATUS.OK, {
-          success: true,
-          data: messages,
+        const payload = createBoundedMessagePage({
+          messages,
           totalCount,
-          pagination: {
-            limit: safeLimit,
-            offset: safeOffset,
-            count: messages.length,
-            hasMore: safeOffset + messages.length < totalCount,
-          },
+          limit: safeLimit,
+          offset: safeOffset,
+          buildPayload: (pageMessages, pagination) => ({
+            success: true,
+            data: pageMessages,
+            totalCount,
+            pagination,
+          }),
         });
+        return jsonResponse(HTTP_STATUS.OK, payload);
       }
 
       case 'agent.chat.messages.create': {
