@@ -40,6 +40,7 @@ import {
   type McpClientCapabilityFallback,
 } from './mcp/register-tools';
 import { NativeMessageFrameDecoder } from './native-message-framing';
+import { NativeDirectiveQueue } from './native-directive-queue';
 import {
   isNativeMessageEncodingError,
   NativeMessageWriter,
@@ -65,6 +66,7 @@ const IPC_MAX_IN_FLIGHT_REQUESTS = 4;
 const IPC_MAX_PENDING_REQUESTS = 16;
 const IPC_PAUSE_HIGH_WATERMARK = 8;
 const IPC_RESUME_LOW_WATERMARK = 4;
+const NATIVE_MAX_PENDING_DIRECTIVES = 64;
 
 function normalizeInstanceId(raw: unknown): string {
   if (typeof raw === 'string') {
@@ -541,6 +543,15 @@ export class NativeMessagingHost {
 
   private setupMessageHandling(): void {
     const decoder = new NativeMessageFrameDecoder();
+    const directiveQueue = new NativeDirectiveQueue<any>(
+      NATIVE_MAX_PENDING_DIRECTIVES,
+      (message) => this.handleMessage(message),
+      (error) => {
+        this.sendError(
+          `Failed to handle directive message: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      },
+    );
     let framingFailed = false;
 
     const onReadable = () => {
@@ -548,11 +559,12 @@ export class NativeMessagingHost {
       while ((chunk = stdin.read()) !== null) {
         try {
           decoder.write(chunk, (messageBuffer) => {
-            try {
-              const message = JSON.parse(messageBuffer.toString());
+            const message = JSON.parse(messageBuffer.toString());
+            if (message?.responseToRequestId) {
+              // Extension responses unblock active directives and must never wait behind them.
               void this.handleMessage(message);
-            } catch (error: any) {
-              this.sendError(`Failed to parse message: ${error.message}`);
+            } else {
+              directiveQueue.enqueue(message);
             }
           });
         } catch (error) {
