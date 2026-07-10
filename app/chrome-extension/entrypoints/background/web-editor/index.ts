@@ -5,9 +5,6 @@ import {
   WEB_EDITOR_ACTIONS,
   type ElementChangeSummary,
   type WebEditorApplyBatchPayload,
-  type WebEditorHighlightElementPayload,
-  type WebEditorRevertElementPayload,
-  type WebEditorCancelExecutionPayload,
   type WebEditorCancelExecutionResponse,
 } from '@/common/web-editor-types';
 import { openAgentSetupSidepanel } from '../utils/sidepanel';
@@ -29,7 +26,13 @@ import {
   normalizeApplyPayload,
   normalizeBoundedIdentifier,
   normalizeBoundedPageUrl,
+  normalizeCancelExecutionPayload,
+  normalizeClearSelectionPayload,
+  normalizeHighlightPayload,
+  normalizeOpenSourcePayload,
+  normalizeRevertPayload,
   normalizeSelectionChangedPayload,
+  normalizeStatusQueryMessage,
   normalizeStoredExcludedKeys,
   normalizeTxChangedPayload,
   type NormalizedWebEditorApplyPayload,
@@ -343,10 +346,6 @@ const WEB_EDITOR_SCRIPT_PATH = 'web-editor.js';
 
 /** Script path for Phase 7 props agent (MAIN world) */
 const PROPS_AGENT_SCRIPT_PATH = 'inject-scripts/props-agent.js';
-
-function normalizeString(value: unknown): string {
-  return typeof value === 'string' ? value : '';
-}
 
 /**
  * Build a batch prompt for multiple element changes.
@@ -851,29 +850,15 @@ export function initWebEditorListeners(): void {
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE) {
         (async () => {
           try {
-            const payload = message.payload as { debugSource?: unknown } | undefined;
-            const debugSource = payload?.debugSource;
-
-            if (!debugSource || typeof debugSource !== 'object') {
-              return sendResponse({
-                success: false,
-                error: 'debugSource is required',
-              });
-            }
-
-            const rec = debugSource as Record<string, unknown>;
-            const file = typeof rec.file === 'string' ? rec.file.trim() : '';
-            if (!file) {
-              return sendResponse({
-                success: false,
-                error: 'debugSource.file is required',
-              });
-            }
+            const source = normalizeOpenSourcePayload(message.payload);
 
             const stored = await chrome.storage.local.get(['agent-selected-project-id']);
-            const projectId = stored['agent-selected-project-id'];
+            const projectId = normalizeBoundedIdentifier(
+              stored['agent-selected-project-id'],
+              'selected Agent project ID',
+            );
 
-            if (!projectId || typeof projectId !== 'string') {
+            if (!projectId) {
               const senderTabId = (_sender as chrome.runtime.MessageSender)?.tab?.id;
               const senderWindowId = (_sender as chrome.runtime.MessageSender)?.tab?.windowId;
               if (typeof senderTabId === 'number') {
@@ -885,21 +870,15 @@ export function initWebEditorListeners(): void {
               });
             }
 
-            // Prepare line/column
-            const lineRaw = Number(rec.line);
-            const columnRaw = Number(rec.column);
-            const line = Number.isFinite(lineRaw) && lineRaw > 0 ? lineRaw : undefined;
-            const column = Number.isFinite(columnRaw) && columnRaw > 0 ? columnRaw : undefined;
-
             // Call mcp-server to open file (server will validate project and path)
             const openResp = await requestAgentRpcFetch({
               operation: 'agent.projects.openFile',
               params: { projectId },
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                filePath: file,
-                line,
-                column,
+                filePath: source.file,
+                line: source.line,
+                column: source.column,
               }),
             });
 
@@ -1031,13 +1010,7 @@ export function initWebEditorListeners(): void {
       // =======================================================================
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CLEAR_SELECTION) {
         (async () => {
-          const payload = message.payload as { tabId?: number } | undefined;
-          const targetTabId = payload?.tabId;
-
-          if (typeof targetTabId !== 'number' || targetTabId <= 0) {
-            sendResponse({ success: false, error: 'Invalid tabId' });
-            return;
-          }
+          const { tabId: targetTabId } = normalizeClearSelectionPayload(message.payload);
 
           // Forward to content script (web-editor)
           try {
@@ -1197,7 +1170,7 @@ export function initWebEditorListeners(): void {
           }
 
           const json: any = resp.json || {};
-          const requestId = normalizeString(json?.requestId).trim() || undefined;
+          const requestId = normalizeBoundedIdentifier(json?.requestId, 'Agent request ID');
 
           if (requestId) {
             rememberExecutionOwner(requestId, sessionId, _sender as chrome.runtime.MessageSender);
@@ -1219,20 +1192,9 @@ export function initWebEditorListeners(): void {
       // Phase 1.8: Handle HIGHLIGHT_ELEMENT from sidepanel chips hover
       // =======================================================================
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_HIGHLIGHT_ELEMENT) {
-        const payload = message.payload as WebEditorHighlightElementPayload | undefined;
         (async () => {
-          // Validate payload
-          const tabId = payload?.tabId;
-          if (typeof tabId !== 'number' || !Number.isFinite(tabId) || tabId <= 0) {
-            sendResponse({ success: false, error: 'Invalid tabId' });
-            return;
-          }
-
-          const mode = payload?.mode;
-          if (mode !== 'hover' && mode !== 'clear') {
-            sendResponse({ success: false, error: 'Invalid mode' });
-            return;
-          }
+          const payload = normalizeHighlightPayload(message.payload);
+          const { tabId, mode } = payload;
 
           // Clear mode: forward directly without locator/selector validation
           // This prevents overlay residue when sidepanel unmounts
@@ -1252,26 +1214,7 @@ export function initWebEditorListeners(): void {
             return;
           }
 
-          // Hover mode: validate and forward locator
-          const locator = payload?.locator;
-          if (!locator || typeof locator !== 'object') {
-            sendResponse({ success: false, error: 'Invalid locator' });
-            return;
-          }
-
-          // Extract best selector for fallback highlighting
-          const selectors = Array.isArray(locator.selectors) ? locator.selectors : [];
-          const primarySelector = selectors.find(
-            (s): s is string => typeof s === 'string' && s.trim().length > 0,
-          );
-
-          if (!primarySelector) {
-            sendResponse({
-              success: false,
-              error: 'No valid selector in locator',
-            });
-            return;
-          }
+          const { locator, primarySelector } = payload;
 
           // Forward to web-editor content script
           try {
@@ -1304,20 +1247,8 @@ export function initWebEditorListeners(): void {
       // Phase 2: Handle REVERT_ELEMENT from sidepanel chips
       // =======================================================================
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_REVERT_ELEMENT) {
-        const payload = message.payload as WebEditorRevertElementPayload | undefined;
         (async () => {
-          // Validate payload
-          const tabId = payload?.tabId;
-          if (typeof tabId !== 'number' || !Number.isFinite(tabId) || tabId <= 0) {
-            sendResponse({ success: false, error: 'Invalid tabId' });
-            return;
-          }
-
-          const elementKey = payload?.elementKey;
-          if (typeof elementKey !== 'string' || !elementKey.trim()) {
-            sendResponse({ success: false, error: 'Invalid elementKey' });
-            return;
-          }
+          const { tabId, elementKey } = normalizeRevertPayload(message.payload);
 
           // Forward to web-editor content script (frameId: 0 for main frame only)
           try {
@@ -1419,7 +1350,7 @@ export function initWebEditorListeners(): void {
           }
 
           const json: any = resp.json || {};
-          const requestId = normalizeString(json?.requestId).trim() || undefined;
+          const requestId = normalizeBoundedIdentifier(json?.requestId, 'Agent request ID');
 
           if (requestId) {
             rememberExecutionOwner(requestId, sessionId, sender);
@@ -1437,13 +1368,7 @@ export function initWebEditorListeners(): void {
         return true;
       }
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_STATUS_QUERY) {
-        const { requestId } = message;
-        if (!requestId || typeof requestId !== 'string') {
-          sendResponse({ success: false, error: 'requestId is required' });
-          return false;
-        }
-
-        const sessionId = normalizeString(message.sessionId).trim();
+        const { requestId, sessionId } = normalizeStatusQueryMessage(message);
         const owner = getExecutionOwner(requestId);
         if (!owner || !isExecutionOwner(owner, sessionId, _sender)) {
           sendResponse({
@@ -1476,26 +1401,8 @@ export function initWebEditorListeners(): void {
       // Cancel Execution: Handle WEB_EDITOR_CANCEL_EXECUTION from toolbar/sidepanel
       // =======================================================================
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CANCEL_EXECUTION) {
-        const payload = message.payload as WebEditorCancelExecutionPayload | undefined;
         (async () => {
-          // Validate payload
-          const sessionId = payload?.sessionId?.trim();
-          const requestId = payload?.requestId?.trim();
-
-          if (!sessionId) {
-            sendResponse({
-              success: false,
-              error: 'sessionId is required',
-            } as WebEditorCancelExecutionResponse);
-            return;
-          }
-          if (!requestId) {
-            sendResponse({
-              success: false,
-              error: 'requestId is required',
-            } as WebEditorCancelExecutionResponse);
-            return;
-          }
+          const { sessionId, requestId } = normalizeCancelExecutionPayload(message.payload);
 
           if (
             !consumePrivilegedUiAuthorization(

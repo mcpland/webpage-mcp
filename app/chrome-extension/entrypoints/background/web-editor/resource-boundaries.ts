@@ -3,6 +3,8 @@ import type {
   ElementChangeSummary,
   ElementLocator,
   WebEditorApplyBatchPayload,
+  WebEditorCancelExecutionPayload,
+  WebEditorRevertElementPayload,
   WebEditorSelectionChangedPayload,
   WebEditorTxChangedPayload,
 } from '@/common/web-editor-types';
@@ -12,6 +14,9 @@ export const WEB_EDITOR_RESOURCE_LIMITS = {
   applyBatchPayloadBytes: 1024 * 1024,
   txSessionPayloadBytes: 512 * 1024,
   selectionSessionPayloadBytes: 128 * 1024,
+  openSourcePayloadBytes: 32 * 1024,
+  highlightPayloadBytes: 128 * 1024,
+  simpleRoutePayloadBytes: 8 * 1024,
   payloadDepth: 20,
   payloadValues: 20_000,
   containerEntries: 512,
@@ -99,6 +104,22 @@ export interface NormalizedWebEditorApplyPayload {
   debugSource?: WebEditorDebugSource;
   operation?: WebEditorStyleOperation;
 }
+
+export interface NormalizedOpenSourcePayload {
+  file: string;
+  line?: number;
+  column?: number;
+}
+
+export type NormalizedHighlightPayload =
+  | { tabId: number; mode: 'clear' }
+  | {
+      tabId: number;
+      mode: 'hover';
+      elementKey: string;
+      locator: ElementLocator;
+      primarySelector: string;
+    };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -312,6 +333,13 @@ export function normalizeBoundedPageUrl(
   return boundedString(value, path, WEB_EDITOR_RESOURCE_LIMITS.pageUrlBytes, {
     required,
   });
+}
+
+export function normalizePositiveTabId(value: unknown, path = 'payload.tabId'): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(path === 'payload.tabId' ? 'Invalid tabId' : `${path} is invalid`);
+  }
+  return value;
 }
 
 function boundedStringArray(
@@ -879,6 +907,106 @@ export function normalizeSelectionChangedPayload(
     maxBytes: WEB_EDITOR_RESOURCE_LIMITS.selectionSessionPayloadBytes,
   });
   return payload;
+}
+
+export function normalizeOpenSourcePayload(raw: unknown): NormalizedOpenSourcePayload {
+  assertJsonWithinLimits(raw, 'payload', {
+    maxBytes: WEB_EDITOR_RESOURCE_LIMITS.openSourcePayloadBytes,
+  });
+  const record = requireRecord(raw, 'payload');
+  const debugSource = requireRecord(record.debugSource, 'payload.debugSource');
+  const file = boundedString(
+    debugSource.file,
+    'payload.debugSource.file',
+    WEB_EDITOR_RESOURCE_LIMITS.fileBytes,
+    { required: true },
+  )!;
+  const line =
+    debugSource.line === undefined
+      ? undefined
+      : normalizeNonNegativeInteger(debugSource.line, 'payload.debugSource.line');
+  const column =
+    debugSource.column === undefined
+      ? undefined
+      : normalizeNonNegativeInteger(debugSource.column, 'payload.debugSource.column');
+  return {
+    file,
+    ...(line !== undefined && line > 0 ? { line } : {}),
+    ...(column !== undefined && column > 0 ? { column } : {}),
+  };
+}
+
+export function normalizeHighlightPayload(raw: unknown): NormalizedHighlightPayload {
+  assertJsonWithinLimits(raw, 'payload', {
+    maxBytes: WEB_EDITOR_RESOURCE_LIMITS.highlightPayloadBytes,
+  });
+  const record = requireRecord(raw, 'payload');
+  const tabId = normalizePositiveTabId(record.tabId);
+  if (record.mode === 'clear') return { tabId, mode: 'clear' };
+  if (record.mode !== 'hover') throw new Error('Invalid mode');
+  const elementKey = normalizeBoundedIdentifier(record.elementKey, 'payload.elementKey', true)!;
+  const locator = normalizeElementLocator(record.locator, 'payload.locator');
+  const primarySelector = locator.selectors[0];
+  if (!primarySelector) throw new Error('No valid selector in locator');
+  return { tabId, mode: 'hover', elementKey, locator, primarySelector };
+}
+
+export function normalizeRevertPayload(raw: unknown): WebEditorRevertElementPayload {
+  assertJsonWithinLimits(raw, 'payload', {
+    maxBytes: WEB_EDITOR_RESOURCE_LIMITS.simpleRoutePayloadBytes,
+    maxDepth: 4,
+    maxValues: 16,
+    maxContainerEntries: 8,
+  });
+  const record = requireRecord(raw, 'payload');
+  return {
+    tabId: normalizePositiveTabId(record.tabId),
+    elementKey: normalizeBoundedIdentifier(record.elementKey, 'payload.elementKey', true)!,
+  };
+}
+
+export function normalizeClearSelectionPayload(raw: unknown): { tabId: number } {
+  assertJsonWithinLimits(raw, 'payload', {
+    maxBytes: WEB_EDITOR_RESOURCE_LIMITS.simpleRoutePayloadBytes,
+    maxDepth: 3,
+    maxValues: 8,
+    maxContainerEntries: 4,
+  });
+  const record = requireRecord(raw, 'payload');
+  return { tabId: normalizePositiveTabId(record.tabId) };
+}
+
+export function normalizeStatusQueryMessage(raw: unknown): {
+  requestId: string;
+  sessionId: string;
+} {
+  assertJsonWithinLimits(raw, 'message', {
+    maxBytes: WEB_EDITOR_RESOURCE_LIMITS.simpleRoutePayloadBytes,
+    maxDepth: 3,
+    maxValues: 12,
+    maxContainerEntries: 8,
+  });
+  const record = requireRecord(raw, 'message');
+  return {
+    requestId: normalizeBoundedIdentifier(record.requestId, 'requestId', true)!,
+    sessionId: normalizeBoundedIdentifier(record.sessionId, 'sessionId', true)!,
+  };
+}
+
+export function normalizeCancelExecutionPayload(raw: unknown): WebEditorCancelExecutionPayload {
+  assertJsonWithinLimits(raw, 'payload', {
+    maxBytes: WEB_EDITOR_RESOURCE_LIMITS.simpleRoutePayloadBytes,
+    maxDepth: 3,
+    maxValues: 8,
+    maxContainerEntries: 4,
+  });
+  const record = requireRecord(raw, 'payload');
+  const sessionId = normalizeBoundedIdentifier(record.sessionId, 'sessionId', true)!;
+  const requestId = normalizeBoundedIdentifier(record.requestId, 'requestId', true)!;
+  return {
+    sessionId,
+    requestId,
+  };
 }
 
 /** Incrementally enforces the final prompt budget before retaining each line. */
