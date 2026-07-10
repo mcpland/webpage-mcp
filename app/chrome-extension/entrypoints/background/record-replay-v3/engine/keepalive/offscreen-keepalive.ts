@@ -12,17 +12,18 @@
  * - When the reference count drops to zero, keepalive must fully stop (no ping loop, no Port, no reconnect).
  */
 
-import { offscreenManager } from '@/utils/offscreen-manager';
+import { offscreenManager } from "@/utils/offscreen-manager";
 import {
   RR_V3_KEEPALIVE_PORT_NAME,
   type KeepaliveMessage,
-} from '@/common/rr-v3-keepalive-protocol';
+} from "@/common/rr-v3-keepalive-protocol";
+import { isOffscreenDocumentSender } from "@/common/runtime-sender-auth";
 
 // ==================== Runtime Control Protocol ====================
 
-const KEEPALIVE_CONTROL_MESSAGE_TYPE = 'rr_v3_keepalive.control' as const;
+const KEEPALIVE_CONTROL_MESSAGE_TYPE = "rr_v3_keepalive.control" as const;
 
-type KeepaliveControlCommand = 'start' | 'stop';
+type KeepaliveControlCommand = "start" | "stop";
 
 interface KeepaliveControlMessage {
   type: typeof KEEPALIVE_CONTROL_MESSAGE_TYPE;
@@ -58,7 +59,7 @@ export interface KeepaliveController {
  */
 export interface OffscreenKeepaliveOptions {
   /** Logger. */
-  logger?: Pick<Console, 'debug' | 'info' | 'warn' | 'error'>;
+  logger?: Pick<Console, "debug" | "info" | "warn" | "error">;
 }
 
 // ==================== Factory ====================
@@ -80,7 +81,9 @@ export function createOffscreenKeepaliveController(
 export function createNotImplementedKeepaliveController(): KeepaliveController {
   return {
     acquire: () => {
-      console.warn('[KeepaliveController] Not implemented, returning no-op release');
+      console.warn(
+        "[KeepaliveController] Not implemented, returning no-op release",
+      );
       return () => {};
     },
     isActive: () => false,
@@ -104,7 +107,7 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
   // Used to serialize async operations to avoid races.
   private syncPromise: Promise<void> = Promise.resolve();
 
-  private readonly logger: Pick<Console, 'debug' | 'info' | 'warn' | 'error'>;
+  private readonly logger: Pick<Console, "debug" | "info" | "warn" | "error">;
 
   constructor(options: OffscreenKeepaliveOptions) {
     this.logger = options.logger ?? console;
@@ -119,7 +122,9 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
     const count = this.refs.get(tag) ?? 0;
     this.refs.set(tag, count + 1);
 
-    this.logger.debug(`[OffscreenKeepalive] acquire(${tag}), totalRefs=${this.totalRefs}`);
+    this.logger.debug(
+      `[OffscreenKeepalive] acquire(${tag}), totalRefs=${this.totalRefs}`,
+    );
 
     // Start keepalive when the first reference is acquired.
     if (this.totalRefs === 1) {
@@ -142,7 +147,9 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
         this.refs.set(tag, currentCount - 1);
       }
 
-      this.logger.debug(`[OffscreenKeepalive] release(${tag}), totalRefs=${this.totalRefs}`);
+      this.logger.debug(
+        `[OffscreenKeepalive] release(${tag}), totalRefs=${this.totalRefs}`,
+      );
 
       // Stop keepalive when the reference count drops to zero.
       if (this.totalRefs === 0) {
@@ -162,7 +169,7 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
   releaseAll(): void {
     if (this.totalRefs === 0) return;
 
-    this.logger.debug('[OffscreenKeepalive] releaseAll()');
+    this.logger.debug("[OffscreenKeepalive] releaseAll()");
     this.refs.clear();
     this.totalRefs = 0;
     this.scheduleSync();
@@ -189,7 +196,7 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
       })
       .then(() => this.syncOnce())
       .catch((e) => {
-        this.logger.warn('[OffscreenKeepalive] sync failed:', e);
+        this.logger.warn("[OffscreenKeepalive] sync failed:", e);
       });
   }
 
@@ -211,14 +218,14 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
       }
 
       // Send start command via runtime message (works even if Port is not connected).
-      await this.sendRuntimeControl('start');
+      await this.sendRuntimeControl("start");
       // Also send via Port if connected.
       this.sendStartCommand();
     } else {
       // Send stop via Port first (if connected).
       this.sendStopCommand();
       // Then send via runtime message to ensure Offscreen stops.
-      await this.sendRuntimeControl('stop');
+      await this.sendRuntimeControl("stop");
       await this.teardown();
     }
   }
@@ -238,15 +245,17 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
   private ensureConnectionListener(): void {
     if (this.connectionListenerRegistered) return;
 
-    if (typeof chrome === 'undefined' || !chrome.runtime?.onConnect) {
-      this.logger.warn('[OffscreenKeepalive] chrome.runtime.onConnect not available');
+    if (typeof chrome === "undefined" || !chrome.runtime?.onConnect) {
+      this.logger.warn(
+        "[OffscreenKeepalive] chrome.runtime.onConnect not available",
+      );
       return;
     }
 
     chrome.runtime.onConnect.addListener(this.handleConnect);
     this.connectionListenerRegistered = true;
 
-    this.logger.debug('[OffscreenKeepalive] Connection listener registered');
+    this.logger.debug("[OffscreenKeepalive] Connection listener registered");
   }
 
   /**
@@ -254,9 +263,16 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
    */
   private handleConnect = (port: chrome.runtime.Port): void => {
     if (port.name !== RR_V3_KEEPALIVE_PORT_NAME) return;
+    if (!isOffscreenDocumentSender(port.sender)) {
+      port.disconnect();
+      return;
+    }
 
-    this.logger.debug('[OffscreenKeepalive] Offscreen connected');
+    this.logger.debug("[OffscreenKeepalive] Offscreen connected");
 
+    if (this.offscreenPort && this.offscreenPort !== port) {
+      this.disconnectPort();
+    }
     // Store Port reference.
     this.offscreenPort = port;
 
@@ -265,7 +281,7 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
 
     // Listen to disconnect.
     port.onDisconnect.addListener(() => {
-      this.logger.debug('[OffscreenKeepalive] Offscreen disconnected');
+      this.logger.debug("[OffscreenKeepalive] Offscreen disconnected");
       if (this.offscreenPort === port) {
         this.offscreenPort = null;
       }
@@ -282,10 +298,10 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
    */
   private handlePortMessage = (msg: unknown): void => {
     const m = msg as Partial<KeepaliveMessage> | null;
-    if (!m || typeof m !== 'object') return;
+    if (!m || typeof m !== "object") return;
 
-    if (m.type === 'keepalive.ping') {
-      this.logger.debug('[OffscreenKeepalive] Received ping, sending pong');
+    if (m.type === "keepalive.ping") {
+      this.logger.debug("[OffscreenKeepalive] Received ping, sending pong");
       this.sendPong();
     }
   };
@@ -305,7 +321,7 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
       // Port may already be disconnected.
     }
 
-    this.logger.debug('[OffscreenKeepalive] Port disconnected');
+    this.logger.debug("[OffscreenKeepalive] Port disconnected");
   }
 
   /**
@@ -315,15 +331,15 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
     if (!this.offscreenPort) return;
 
     const msg: KeepaliveMessage = {
-      type: 'keepalive.start',
+      type: "keepalive.start",
       timestamp: Date.now(),
     };
 
     try {
       this.offscreenPort.postMessage(msg);
-      this.logger.debug('[OffscreenKeepalive] Sent start command via Port');
+      this.logger.debug("[OffscreenKeepalive] Sent start command via Port");
     } catch (e) {
-      this.logger.warn('[OffscreenKeepalive] Failed to send start command:', e);
+      this.logger.warn("[OffscreenKeepalive] Failed to send start command:", e);
     }
   }
 
@@ -334,15 +350,15 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
     if (!this.offscreenPort) return;
 
     const msg: KeepaliveMessage = {
-      type: 'keepalive.stop',
+      type: "keepalive.stop",
       timestamp: Date.now(),
     };
 
     try {
       this.offscreenPort.postMessage(msg);
-      this.logger.debug('[OffscreenKeepalive] Sent stop command via Port');
+      this.logger.debug("[OffscreenKeepalive] Sent stop command via Port");
     } catch (e) {
-      this.logger.warn('[OffscreenKeepalive] Failed to send stop command:', e);
+      this.logger.warn("[OffscreenKeepalive] Failed to send stop command:", e);
     }
   }
 
@@ -353,14 +369,14 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
     if (!this.offscreenPort) return;
 
     const msg: KeepaliveMessage = {
-      type: 'keepalive.pong',
+      type: "keepalive.pong",
       timestamp: Date.now(),
     };
 
     try {
       this.offscreenPort.postMessage(msg);
     } catch (e) {
-      this.logger.warn('[OffscreenKeepalive] Failed to send pong:', e);
+      this.logger.warn("[OffscreenKeepalive] Failed to send pong:", e);
     }
   }
 
@@ -368,9 +384,13 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
    * Send a runtime control command to Offscreen.
    * This is the control plane used to start/stop keepalive even when the Port is not connected.
    */
-  private async sendRuntimeControl(command: KeepaliveControlCommand): Promise<void> {
-    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
-      this.logger.warn('[OffscreenKeepalive] chrome.runtime.sendMessage not available');
+  private async sendRuntimeControl(
+    command: KeepaliveControlCommand,
+  ): Promise<void> {
+    if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+      this.logger.warn(
+        "[OffscreenKeepalive] chrome.runtime.sendMessage not available",
+      );
       return;
     }
 
@@ -380,21 +400,25 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
     };
 
     // Retry with delays for start command (Offscreen document may not be ready yet).
-    const delaysMs = command === 'start' ? [0, 50, 200] : [0];
+    const delaysMs = command === "start" ? [0, 50, 200] : [0];
     for (const delayMs of delaysMs) {
       if (delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
       try {
         await chrome.runtime.sendMessage(msg);
-        this.logger.debug(`[OffscreenKeepalive] Sent runtime ${command} command`);
+        this.logger.debug(
+          `[OffscreenKeepalive] Sent runtime ${command} command`,
+        );
         return;
       } catch {
         // Best-effort: Offscreen document may not be ready yet.
       }
     }
 
-    this.logger.warn(`[OffscreenKeepalive] Failed to send runtime ${command} command`);
+    this.logger.warn(
+      `[OffscreenKeepalive] Failed to send runtime ${command} command`,
+    );
   }
 }
 
