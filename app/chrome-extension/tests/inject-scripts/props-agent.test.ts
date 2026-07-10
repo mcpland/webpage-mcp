@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createPropsBridge } from '@/entrypoints/web-editor/core/props-bridge';
 
 const REQUEST_EVENT = 'web-editor-props:request';
 const RESPONSE_EVENT = 'web-editor-props:response';
@@ -36,6 +37,44 @@ function request(locator: Record<string, unknown>): any {
   window.removeEventListener(RESPONSE_EVENT, onResponse);
   if (!response) throw new Error('Props agent did not respond');
   return response;
+}
+
+function attachReactProps(target: Element, props: Record<string, unknown>): void {
+  function TestComponent() {}
+  const fiber = {
+    tag: 0,
+    type: TestComponent,
+    memoizedProps: props,
+    return: null,
+  };
+  const renderer = {
+    version: '18.3.0',
+    overrideProps: vi.fn(),
+    findFiberByHostInstance: vi.fn(() => fiber),
+  };
+  (window as any)[REACT_HOOK_KEY] = {
+    inject: vi.fn(() => 1),
+    renderers: new Map([[1, renderer]]),
+  };
+  Object.defineProperty(target, '__reactFiber$test', {
+    configurable: true,
+    enumerable: true,
+    value: fiber,
+  });
+}
+
+function countSerializedNodes(value: unknown): number {
+  if (!value || typeof value !== 'object') return 0;
+  let count = 1;
+  if (Array.isArray(value)) {
+    for (const item of value) count += countSerializedNodes(item);
+    return count;
+  }
+  for (const key in value) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+    count += countSerializedNodes((value as Record<string, unknown>)[key]);
+  }
+  return count;
 }
 
 describe('props-agent locator resource boundaries', () => {
@@ -78,7 +117,10 @@ describe('props-agent locator resource boundaries', () => {
 
     const response = request({ selectors: ['.duplicate'] });
 
-    expect(response).toMatchObject({ success: false, error: 'Target element not found' });
+    expect(response).toMatchObject({
+      success: false,
+      error: 'Target element not found',
+    });
     expect(matchingResults).toBe(2);
     expect(documentQueryAll).not.toHaveBeenCalled();
     expect(shadowQueryAll).not.toHaveBeenCalled();
@@ -92,7 +134,10 @@ describe('props-agent locator resource boundaries', () => {
 
     const response = request({ selectors: ['#unique-target'] });
 
-    expect(response).toMatchObject({ success: false, error: 'Not a React component' });
+    expect(response).toMatchObject({
+      success: false,
+      error: 'Not a React component',
+    });
   });
 
   it('shares a 12,000-element budget across selector candidates', () => {
@@ -109,7 +154,10 @@ describe('props-agent locator resource boundaries', () => {
 
     const response = request({ selectors: ['#late-target', 'button'] });
 
-    expect(response).toMatchObject({ success: false, error: 'Target element not found' });
+    expect(response).toMatchObject({
+      success: false,
+      error: 'Target element not found',
+    });
     expect(matches.mock.calls.length).toBeLessThanOrEqual(12_000);
   });
 
@@ -141,7 +189,10 @@ describe('props-agent locator resource boundaries', () => {
       selectors: ['#shadow-target'],
     });
 
-    expect(response).toMatchObject({ success: false, error: 'Not a React component' });
+    expect(response).toMatchObject({
+      success: false,
+      error: 'Not a React component',
+    });
     expect(shadowQueryAll).not.toHaveBeenCalled();
   });
 
@@ -166,6 +217,133 @@ describe('props-agent locator resource boundaries', () => {
 
     const response = request({ selectors: ['#target'] });
 
-    expect(response).toMatchObject({ success: false, error: 'Target element not found' });
+    expect(response).toMatchObject({
+      success: false,
+      error: 'Target element not found',
+    });
+  });
+
+  it('applies one global node budget across a branching props graph', () => {
+    const buildTree = (depth: number): Record<string, unknown> => {
+      if (depth === 0) return { value: 'leaf' };
+      const node: Record<string, unknown> = {};
+      for (let index = 0; index < 8; index++) node[`child-${index}`] = buildTree(depth - 1);
+      return node;
+    };
+    const target = document.createElement('button');
+    document.body.append(target);
+    attachReactProps(target, { tree: buildTree(4) });
+    loadAgent();
+
+    const response = request({
+      selectors: ['button'],
+      path: [],
+      fingerprint: 'button',
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.data.props.truncated).toBe(true);
+    expect(countSerializedNodes(response.data.props)).toBeLessThan(4_100);
+    expect(new TextEncoder().encode(JSON.stringify(response)).byteLength).toBeLessThanOrEqual(
+      256 * 1024,
+    );
+  });
+
+  it('enumerates only the bounded prop keys without Object.keys snapshots', () => {
+    const props: Record<string, unknown> = {};
+    for (let index = 0; index < 5_000; index++) props[`prop-${index}`] = index;
+    const target = document.createElement('button');
+    document.body.append(target);
+    attachReactProps(target, props);
+    const objectKeys = vi.spyOn(Object, 'keys');
+    loadAgent();
+
+    const response = request({
+      selectors: ['button'],
+      path: [],
+      fingerprint: 'button',
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.data.props.entries).toHaveLength(100);
+    expect(response.data.props.truncated).toBe(true);
+    expect(objectKeys).not.toHaveBeenCalled();
+  });
+
+  it('stops serializing strings at the global byte budget', () => {
+    const props: Record<string, unknown> = {};
+    for (let index = 0; index < 100; index++) {
+      props[`prop-${index}`] = Array.from({ length: 50 }, () => 'x'.repeat(1_500));
+    }
+    const target = document.createElement('button');
+    document.body.append(target);
+    attachReactProps(target, props);
+    loadAgent();
+
+    const response = request({
+      selectors: ['button'],
+      path: [],
+      fingerprint: 'button',
+    });
+    const encoded = new TextEncoder().encode(JSON.stringify(response));
+
+    expect(response.success).toBe(true);
+    expect(response.data.props.truncated).toBe(true);
+    expect(encoded.byteLength).toBeLessThanOrEqual(256 * 1024);
+  });
+
+  it('marks the props result truncated after the global serialization deadline', () => {
+    const props: Record<string, unknown> = {};
+    Object.defineProperty(props, 'slow', {
+      enumerable: true,
+      get() {
+        const deadline = performance.now() + 125;
+        while (performance.now() < deadline) {
+          // Simulate a hostile prop getter that blocks the page world.
+        }
+        return 'late';
+      },
+    });
+    const target = document.createElement('button');
+    document.body.append(target);
+    attachReactProps(target, props);
+    loadAgent();
+
+    const response = request({
+      selectors: ['button'],
+      path: [],
+      fingerprint: 'button',
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.data.props.truncated).toBe(true);
+    expect(response.data.props.entries[0].value).toMatchObject({
+      kind: 'unknown',
+      type: 'resource_limit',
+    });
+  });
+
+  it('round-trips a bounded serialized response through the isolated-world bridge', async () => {
+    const target = document.createElement('button');
+    target.id = 'target';
+    document.body.append(target);
+    attachReactProps(target, { label: 'Save', nested: { enabled: true } });
+    loadAgent();
+    const bridge = createPropsBridge();
+
+    const result = await bridge.read({
+      selectors: ['#target'],
+      fingerprint: 'button|id=target',
+      path: [],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        framework: 'react',
+        props: { entries: [{ key: 'label' }, { key: 'nested' }] },
+      },
+    });
+    bridge.dispose();
   });
 });

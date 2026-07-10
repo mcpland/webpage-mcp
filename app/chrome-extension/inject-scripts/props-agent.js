@@ -45,6 +45,17 @@
     maxDepth: 128,
     maxDurationMs: 250,
   });
+  const TRANSPORT_LIMITS = Object.freeze({
+    maxRequestIdBytes: 128,
+    maxRequestBytes: 64 * 1024,
+    maxResponseBytes: 256 * 1024,
+    maxErrorBytes: 4 * 1024,
+    maxPropPathEntries: 32,
+    maxPropPathBytes: 4 * 1024,
+    maxPropSegmentBytes: 512,
+    maxValueBytes: 16 * 1024,
+  });
+  const SUPPORTED_OPERATIONS = new Set(['probe', 'read', 'write', 'reset', 'cleanup']);
   const NATIVE_ELEMENT_MATCHES = Element.prototype.matches;
 
   /** @type {'READY' | 'HOOK_PRESENT_NO_RENDERERS' | 'RENDERERS_NO_EDITING' | 'HOOK_MISSING'} */
@@ -60,6 +71,10 @@
     maxEntries: 100,
     maxArrayLength: 50,
     maxStringLength: 1500,
+    maxKeyBytes: 512,
+    maxNodes: 2000,
+    maxBytes: 192 * 1024,
+    maxDurationMs: 100,
   });
 
   // =============================================================================
@@ -96,6 +111,21 @@
     return bytes;
   }
 
+  function truncateUtf8(value, maxBytes, maxCodeUnits = maxBytes) {
+    const input = safeString(value);
+    let output = '';
+    let bytes = 0;
+    let codeUnits = 0;
+    for (const character of input) {
+      const characterBytes = utf8BytesForCodePoint(character.codePointAt(0) || 0);
+      if (bytes + characterBytes > maxBytes || codeUnits + character.length > maxCodeUnits) break;
+      output += character;
+      bytes += characterBytes;
+      codeUnits += character.length;
+    }
+    return output;
+  }
+
   function logWarn(...args) {
     try {
       console.warn(LOG_PREFIX, ...args);
@@ -111,7 +141,21 @@
   const Transport = {
     dispatchResponse(detail) {
       try {
-        window.dispatchEvent(new CustomEvent(EVENT_NAME.RESPONSE, { detail }));
+        let response = detail;
+        const encoded = JSON.stringify(detail);
+        if (
+          typeof encoded !== 'string' ||
+          utf8ByteLength(encoded, TRANSPORT_LIMITS.maxResponseBytes) >
+            TRANSPORT_LIMITS.maxResponseBytes
+        ) {
+          response = this.createResponse(
+            truncateUtf8(detail?.requestId, TRANSPORT_LIMITS.maxRequestIdBytes),
+            false,
+            undefined,
+            'Props response exceeded the resource limit',
+          );
+        }
+        window.dispatchEvent(new CustomEvent(EVENT_NAME.RESPONSE, { detail: response }));
       } catch (err) {
         logWarn('Failed to dispatch response:', err);
       }
@@ -124,7 +168,9 @@
         success: Boolean(success),
       };
       if (data !== undefined) response.data = data;
-      if (error !== undefined) response.error = safeString(error);
+      if (error !== undefined) {
+        response.error = truncateUtf8(error, TRANSPORT_LIMITS.maxErrorBytes);
+      }
       return response;
     },
 
@@ -134,15 +180,61 @@
 
       const requestId = typeof detail.requestId === 'string' ? detail.requestId : '';
       const op = typeof detail.op === 'string' ? detail.op : '';
-      if (!requestId || !op) return null;
+      if (
+        !requestId ||
+        utf8ByteLength(requestId, TRANSPORT_LIMITS.maxRequestIdBytes) >
+          TRANSPORT_LIMITS.maxRequestIdBytes ||
+        !SUPPORTED_OPERATIONS.has(op)
+      ) {
+        return null;
+      }
 
-      return {
+      const locator =
+        detail.locator === undefined ? undefined : Locator.copyLocatorEnvelope(detail.locator);
+      if (detail.locator !== undefined && !locator) return null;
+      if ((op === 'read' || op === 'write' || op === 'reset') && !locator) return null;
+
+      let payload;
+      if (op === 'write') {
+        if (!isObject(detail.payload)) return null;
+        const propPath = normalizePropPath(detail.payload.propPath);
+        if (!propPath) return null;
+        const propValue = detail.payload.propValue;
+        const decodedValue = decodeIncomingValue(propValue);
+        if (!Serializer.isEditablePrimitive(decodedValue)) return null;
+        if (
+          typeof decodedValue === 'string' &&
+          utf8ByteLength(decodedValue, TRANSPORT_LIMITS.maxValueBytes) >
+            TRANSPORT_LIMITS.maxValueBytes
+        ) {
+          return null;
+        }
+        payload = {
+          propPath,
+          propValue: decodedValue === undefined ? { $we: 'undefined' } : decodedValue,
+        };
+      }
+
+      const request = {
         v: PROTOCOL_VERSION,
         requestId,
         op,
-        locator: detail.locator,
-        payload: detail.payload,
+        locator,
+        payload,
       };
+      try {
+        const encoded = JSON.stringify(request);
+        if (
+          typeof encoded !== 'string' ||
+          utf8ByteLength(encoded, TRANSPORT_LIMITS.maxRequestBytes) >
+            TRANSPORT_LIMITS.maxRequestBytes
+        ) {
+          return null;
+        }
+      } catch {
+        return null;
+      }
+      return request;
     },
   };
 
@@ -276,20 +368,78 @@
       return output;
     },
 
+    normalizeLocator(value) {
+      if (!isObject(value)) return null;
+      const selectors = this.normalizeStringArray(value.selectors || [], LOCATOR_LIMITS.maxSelectors);
+      const shadowHostChain = this.normalizeStringArray(
+        value.shadowHostChain || [],
+        LOCATOR_LIMITS.maxShadowHosts,
+      );
+      const frameChain = this.normalizeStringArray(
+        value.frameChain || [],
+        LOCATOR_LIMITS.maxShadowHosts,
+      );
+      if (!selectors || selectors.length === 0 || !shadowHostChain || !frameChain) return null;
+
+      const fingerprint = typeof value.fingerprint === 'string' ? value.fingerprint : '';
+      if (
+        utf8ByteLength(fingerprint, LOCATOR_LIMITS.maxSelectorBytes) >
+        LOCATOR_LIMITS.maxSelectorBytes
+      ) {
+        return null;
+      }
+
+      const rawPath = value.path === undefined ? [] : value.path;
+      if (!Array.isArray(rawPath) || rawPath.length > LOCATOR_LIMITS.maxDepth) return null;
+      const path = [];
+      for (const index of rawPath) {
+        if (!Number.isSafeInteger(index) || index < 0 || index > 1000000) return null;
+        path.push(index);
+      }
+
+      return { selectors, fingerprint, path, shadowHostChain, frameChain };
+    },
+
+    copyLocatorEnvelope(value) {
+      if (!isObject(value)) return null;
+      const copyArray = (candidate, maximum) => {
+        if (!Array.isArray(candidate) || candidate.length > maximum) return null;
+        const output = [];
+        for (const item of candidate) output.push(item);
+        return output;
+      };
+      const selectors = copyArray(value.selectors || [], LOCATOR_LIMITS.maxSelectors);
+      const shadowHostChain = copyArray(
+        value.shadowHostChain || [],
+        LOCATOR_LIMITS.maxShadowHosts,
+      );
+      const frameChain = copyArray(value.frameChain || [], LOCATOR_LIMITS.maxShadowHosts);
+      const path = copyArray(value.path || [], LOCATOR_LIMITS.maxDepth);
+      if (!selectors || !shadowHostChain || !frameChain || !path) return null;
+      return {
+        selectors,
+        fingerprint: value.fingerprint,
+        path,
+        shadowHostChain,
+        frameChain,
+      };
+    },
+
     /**
      * Resolve ElementLocator to DOM element
      * Simplified version for MAIN world (no iframe support yet)
      */
     locate(locator, rootDocument = document) {
       try {
-        if (!isObject(locator)) return null;
+        const normalizedLocator = this.normalizeLocator(locator);
+        if (!normalizedLocator) return null;
 
         let queryRoot = rootDocument;
         const budget = this.createBudget();
 
         // Traverse Shadow DOM host chain
         const shadowHostChain = this.normalizeStringArray(
-          locator.shadowHostChain || [],
+          normalizedLocator.shadowHostChain,
           LOCATOR_LIMITS.maxShadowHosts,
         );
         if (!shadowHostChain) return null;
@@ -303,7 +453,7 @@
 
         // Try each selector candidate
         const selectors = this.normalizeStringArray(
-          locator.selectors || [],
+          normalizedLocator.selectors,
           LOCATOR_LIMITS.maxSelectors,
         );
         if (!selectors) return null;
@@ -312,7 +462,7 @@
           if (!element) continue;
 
           // Verify fingerprint if provided
-          const fp = safeString(locator.fingerprint);
+          const fp = normalizedLocator.fingerprint;
           if (fp && !this.verifyFingerprint(element, fp)) continue;
 
           return element;
@@ -432,11 +582,14 @@
         const renderers = hook.renderers;
         if (renderers instanceof Map) {
           for (const [id, renderer] of renderers.entries()) {
+            if (result.length >= 32) break;
             result.push({ id, renderer });
           }
         } else if (renderers && typeof renderers === 'object') {
-          for (const [id, renderer] of Object.entries(renderers)) {
-            result.push({ id, renderer });
+          for (const id in renderers) {
+            if (result.length >= 32) break;
+            if (!Object.prototype.hasOwnProperty.call(renderers, id)) continue;
+            result.push({ id, renderer: renderers[id] });
           }
         }
       } catch {
@@ -534,8 +687,11 @@
     findFiberFromDOM(node) {
       try {
         if (!node || typeof node !== 'object') return null;
-        const keys = Object.keys(node);
-        for (const key of keys) {
+        let inspected = 0;
+        for (const key in node) {
+          if (inspected >= 256) break;
+          if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+          inspected += 1;
           if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
             return node[key];
           }
@@ -813,7 +969,132 @@
       return {
         seen: typeof WeakMap === 'function' ? new WeakMap() : null,
         nextId: 1,
+        nodes: 0,
+        bytes: 0,
+        deadline: Date.now() + SERIALIZE_LIMITS.maxDurationMs,
+        exhausted: false,
+        reason: '',
       };
+    },
+
+    markExhausted(ctx, reason) {
+      if (!ctx) return;
+      ctx.exhausted = true;
+      if (!ctx.reason) ctx.reason = reason;
+    },
+
+    consumeNode(ctx, fixedBytes = 48) {
+      if (!ctx || ctx.exhausted) return false;
+      if (Date.now() > ctx.deadline) {
+        this.markExhausted(ctx, 'time');
+        return false;
+      }
+      if (ctx.nodes >= SERIALIZE_LIMITS.maxNodes) {
+        this.markExhausted(ctx, 'nodes');
+        return false;
+      }
+      if (ctx.bytes + fixedBytes > SERIALIZE_LIMITS.maxBytes) {
+        this.markExhausted(ctx, 'bytes');
+        return false;
+      }
+      ctx.nodes += 1;
+      ctx.bytes += fixedBytes;
+      return true;
+    },
+
+    checkBudget(ctx) {
+      if (!ctx || ctx.exhausted) return false;
+      if (Date.now() > ctx.deadline) {
+        this.markExhausted(ctx, 'time');
+        return false;
+      }
+      if (ctx.bytes > SERIALIZE_LIMITS.maxBytes) {
+        this.markExhausted(ctx, 'bytes');
+        return false;
+      }
+      return true;
+    },
+
+    takeString(value, ctx, maxLength = SERIALIZE_LIMITS.maxStringLength) {
+      if (!this.checkBudget(ctx)) return { value: '', truncated: true };
+      const input = safeString(value);
+      if (!this.checkBudget(ctx)) return { value: '', truncated: true };
+      let output = '';
+      let bytes = 0;
+      let codeUnits = 0;
+      let truncated = false;
+
+      for (const character of input) {
+        if ((codeUnits & 63) === 0 && !this.checkBudget(ctx)) {
+          truncated = true;
+          break;
+        }
+        const characterBytes = utf8BytesForCodePoint(character.codePointAt(0) || 0);
+        if (codeUnits + character.length > maxLength) {
+          truncated = true;
+          break;
+        }
+        if (!ctx || ctx.bytes + bytes + characterBytes > SERIALIZE_LIMITS.maxBytes) {
+          truncated = true;
+          this.markExhausted(ctx, 'bytes');
+          break;
+        }
+        output += character;
+        bytes += characterBytes;
+        codeUnits += character.length;
+      }
+
+      if (ctx) ctx.bytes += bytes;
+      return { value: output, truncated: truncated || output.length < input.length };
+    },
+
+    resourceLimitValue(ctx) {
+      return {
+        kind: 'unknown',
+        type: 'resource_limit',
+        preview: `[Serialization stopped: ${safeString(ctx?.reason) || 'limit'}]`,
+      };
+    },
+
+    collectOwnEnumerableKeys(value, ctx, maximumEntries = SERIALIZE_LIMITS.maxEntries) {
+      const keys = [];
+      let truncated = false;
+      if (!ctx || ctx.exhausted) return { keys, truncated: true };
+      try {
+        for (const key in value) {
+          if (ctx.exhausted) {
+            truncated = true;
+            break;
+          }
+          if (Date.now() > ctx.deadline) {
+            this.markExhausted(ctx, 'time');
+            truncated = true;
+            break;
+          }
+          if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+          if (keys.length >= maximumEntries) {
+            truncated = true;
+            break;
+          }
+          if (
+            key.length > SERIALIZE_LIMITS.maxKeyBytes ||
+            utf8ByteLength(key, SERIALIZE_LIMITS.maxKeyBytes) > SERIALIZE_LIMITS.maxKeyBytes
+          ) {
+            truncated = true;
+            continue;
+          }
+          if (ctx.bytes + utf8ByteLength(key) + 24 > SERIALIZE_LIMITS.maxBytes) {
+            this.markExhausted(ctx, 'bytes');
+            truncated = true;
+            break;
+          }
+          ctx.bytes += utf8ByteLength(key) + 24;
+          keys.push(key);
+        }
+      } catch {
+        truncated = true;
+      }
+      return { keys, truncated };
     },
 
     /**
@@ -821,21 +1102,17 @@
      */
     serializeValue(value, ctx, depth = 0) {
       try {
+        if (!this.consumeNode(ctx)) return this.resourceLimitValue(ctx);
         if (value === null) return { kind: 'null' };
         if (value === undefined) return { kind: 'undefined' };
 
         const t = typeof value;
 
         if (t === 'string') {
-          if (value.length > SERIALIZE_LIMITS.maxStringLength) {
-            return {
-              kind: 'string',
-              value: value.slice(0, SERIALIZE_LIMITS.maxStringLength),
-              truncated: true,
-              length: value.length,
-            };
-          }
-          return { kind: 'string', value };
+          const taken = this.takeString(value, ctx);
+          return taken.truncated
+            ? { kind: 'string', value: taken.value, truncated: true, length: value.length }
+            : { kind: 'string', value: taken.value };
         }
 
         if (t === 'number') {
@@ -845,22 +1122,27 @@
         }
 
         if (t === 'boolean') return { kind: 'boolean', value };
-        if (t === 'bigint') return { kind: 'bigint', value: value.toString() };
-        if (t === 'symbol') return { kind: 'symbol', description: safeString(value) };
+        if (t === 'bigint')
+          return { kind: 'bigint', value: this.takeString(value.toString(), ctx).value };
+        if (t === 'symbol')
+          return { kind: 'symbol', description: this.takeString(value, ctx).value };
         if (t === 'function')
-          return { kind: 'function', name: safeString(value.name) || undefined };
+          return { kind: 'function', name: this.takeString(value.name, ctx).value || undefined };
 
         // Object types
         if (this.isReactElement(value)) {
-          return { kind: 'react_element', display: this.reactElementDisplay(value) };
+          return {
+            kind: 'react_element',
+            display: this.takeString(this.reactElementDisplay(value), ctx).value,
+          };
         }
 
         if (typeof Element !== 'undefined' && value instanceof Element) {
           return {
             kind: 'dom_element',
-            tagName: safeString(value.tagName).toLowerCase(),
-            id: safeString(value.id) || undefined,
-            className: safeString(value.className) || undefined,
+            tagName: this.takeString(value.tagName, ctx, 128).value.toLowerCase(),
+            id: this.takeString(value.id, ctx).value || undefined,
+            className: this.takeString(value.className, ctx).value || undefined,
           };
         }
 
@@ -871,18 +1153,22 @@
           } catch {
             iso = safeString(value);
           }
-          return { kind: 'date', value: iso };
+          return { kind: 'date', value: this.takeString(iso, ctx).value };
         }
 
         if (value instanceof RegExp) {
-          return { kind: 'regexp', source: value.source, flags: value.flags };
+          return {
+            kind: 'regexp',
+            source: this.takeString(value.source, ctx).value,
+            flags: this.takeString(value.flags, ctx, 32).value,
+          };
         }
 
         if (value instanceof Error) {
           return {
             kind: 'error',
-            name: safeString(value.name) || 'Error',
-            message: safeString(value.message),
+            name: this.takeString(value.name, ctx, 128).value || 'Error',
+            message: this.takeString(value.message, ctx).value,
           };
         }
 
@@ -890,8 +1176,8 @@
         if (depth >= SERIALIZE_LIMITS.maxDepth) {
           return {
             kind: 'max_depth',
-            type: Object.prototype.toString.call(value),
-            preview: safeString(value),
+            type: this.takeString(Object.prototype.toString.call(value), ctx, 128).value,
+            preview: this.takeString(value, ctx).value,
           };
         }
 
@@ -906,13 +1192,13 @@
         if (Array.isArray(value)) {
           const max = Math.min(value.length, SERIALIZE_LIMITS.maxArrayLength);
           const items = [];
-          for (let i = 0; i < max; i++) {
+          for (let i = 0; i < max && !ctx.exhausted; i++) {
             items.push(this.serializeValue(value[i], ctx, depth + 1));
           }
           return {
             kind: 'array',
             length: value.length,
-            truncated: value.length > max,
+            truncated: value.length > items.length,
             items,
           };
         }
@@ -922,7 +1208,7 @@
           const entries = [];
           let count = 0;
           for (const [k, v] of value.entries()) {
-            if (count >= SERIALIZE_LIMITS.maxEntries) break;
+            if (count >= SERIALIZE_LIMITS.maxEntries || ctx.exhausted) break;
             entries.push({
               key: this.serializeValue(k, ctx, depth + 1),
               value: this.serializeValue(v, ctx, depth + 1),
@@ -942,7 +1228,7 @@
           const items = [];
           let count = 0;
           for (const v of value.values()) {
-            if (count >= SERIALIZE_LIMITS.maxEntries) break;
+            if (count >= SERIALIZE_LIMITS.maxEntries || ctx.exhausted) break;
             items.push(this.serializeValue(v, ctx, depth + 1));
             count++;
           }
@@ -956,22 +1242,36 @@
 
         // Plain object
         const constructorName = value?.constructor?.name;
-        const name = typeof constructorName === 'string' ? constructorName : undefined;
-        const keys = Object.keys(value);
-        const limitedKeys = keys.slice(0, SERIALIZE_LIMITS.maxEntries);
-        const entries = limitedKeys.map((k) => ({
-          key: k,
-          value: this.serializeValue(value[k], ctx, depth + 1),
-        }));
+        const name =
+          typeof constructorName === 'string'
+            ? this.takeString(constructorName, ctx, 128).value
+            : undefined;
+        const keyResult = this.collectOwnEnumerableKeys(value, ctx);
+        const entries = [];
+        for (const key of keyResult.keys) {
+          if (ctx.exhausted) break;
+          let raw;
+          try {
+            raw = value[key];
+          } catch {
+            raw = undefined;
+          }
+          entries.push({ key, value: this.serializeValue(raw, ctx, depth + 1) });
+        }
 
         return {
           kind: 'object',
           name: name !== 'Object' ? name : undefined,
-          truncated: keys.length > limitedKeys.length,
+          truncated:
+            keyResult.truncated || ctx.exhausted || entries.length < keyResult.keys.length,
           entries,
         };
       } catch (err) {
-        return { kind: 'unknown', type: typeof value, preview: safeString(err) };
+        return {
+          kind: 'unknown',
+          type: typeof value,
+          preview: this.takeString(err, ctx).value,
+        };
       }
     },
 
@@ -989,10 +1289,10 @@
         return { kind: 'props', entries: [] };
       }
 
-      const keys = Object.keys(props);
-      const limited = keys.slice(0, SERIALIZE_LIMITS.maxEntries);
+      const keyResult = this.collectOwnEnumerableKeys(props, ctx);
 
-      for (const key of limited) {
+      for (const key of keyResult.keys) {
+        if (ctx.exhausted || !this.consumeNode(ctx, 64)) break;
         let raw;
         try {
           raw = props[key];
@@ -1009,14 +1309,38 @@
         // Attach enum values if available
         const enumValues = enumMap ? enumMap[key] : null;
         if (Array.isArray(enumValues) && enumValues.length > 0) {
-          entry.enumValues = enumValues.slice(0, EnumIntrospection.MAX_ENUM_VALUES);
+          const boundedEnumValues = [];
+          for (
+            let index = 0;
+            index < enumValues.length &&
+            index < EnumIntrospection.MAX_ENUM_VALUES &&
+            !ctx.exhausted;
+            index++
+          ) {
+            const enumValue = enumValues[index];
+            if (typeof enumValue === 'string') {
+              boundedEnumValues.push(this.takeString(enumValue, ctx).value);
+            } else if (
+              typeof enumValue === 'boolean' ||
+              (typeof enumValue === 'number' && Number.isFinite(enumValue))
+            ) {
+              boundedEnumValues.push(enumValue);
+            }
+          }
+          if (boundedEnumValues.length > 0) entry.enumValues = boundedEnumValues;
         }
 
         entries.push(entry);
       }
 
       const result = { kind: 'props', entries };
-      if (keys.length > limited.length) result.truncated = true;
+      if (
+        keyResult.truncated ||
+        ctx.exhausted ||
+        entries.length < keyResult.keys.length
+      ) {
+        result.truncated = true;
+      }
       return result;
     },
   };
@@ -1092,18 +1416,22 @@
       // Check type.name === 'enum' with type.value array
       const t = propInfo.type;
       if (isObject(t) && t.name === 'enum' && Array.isArray(t.value)) {
-        const rawList = t.value.map((item) =>
-          isObject(item) && 'value' in item ? item.value : item,
-        );
+        const rawList = [];
+        for (let index = 0; index < t.value.length && index < this.MAX_ENUM_VALUES; index++) {
+          const item = t.value[index];
+          rawList.push(isObject(item) && 'value' in item ? item.value : item);
+        }
         return this.normalizeEnumList(rawList);
       }
 
       // Check tsType for TypeScript enums
       const ts = propInfo.tsType;
       if (isObject(ts) && ts.name === 'union' && Array.isArray(ts.elements)) {
-        const rawList = ts.elements.map((el) =>
-          isObject(el) && 'value' in el ? el.value : el.name,
-        );
+        const rawList = [];
+        for (let index = 0; index < ts.elements.length && index < this.MAX_ENUM_VALUES; index++) {
+          const element = ts.elements[index];
+          rawList.push(isObject(element) && 'value' in element ? element.value : element.name);
+        }
         return this.normalizeEnumList(rawList);
       }
 
@@ -1122,7 +1450,12 @@
         if (!isObject(docgen) || !isObject(docgen.props)) return {};
 
         const result = {};
-        for (const [key, info] of Object.entries(docgen.props)) {
+        let inspected = 0;
+        for (const key in docgen.props) {
+          if (inspected >= SERIALIZE_LIMITS.maxEntries) break;
+          if (!Object.prototype.hasOwnProperty.call(docgen.props, key)) continue;
+          inspected += 1;
+          const info = docgen.props[key];
           const values = this.extractDocgenEnumValues(info);
           if (values.length > 0) result[key] = values;
         }
@@ -1174,15 +1507,26 @@
   }
 
   function normalizePropPath(value) {
-    if (!Array.isArray(value) || value.length === 0 || value.length > 32) return null;
+    if (
+      !Array.isArray(value) ||
+      value.length === 0 ||
+      value.length > TRANSPORT_LIMITS.maxPropPathEntries
+    ) {
+      return null;
+    }
 
     const result = [];
+    let totalBytes = 0;
     for (const seg of value) {
       if (typeof seg === 'string') {
         const s = seg.trim();
         if (!s) return null;
         // Reject dangerous keys to prevent prototype pollution
         if (isDangerousKey(s)) return null;
+        const bytes = utf8ByteLength(s, TRANSPORT_LIMITS.maxPropSegmentBytes);
+        if (bytes > TRANSPORT_LIMITS.maxPropSegmentBytes) return null;
+        totalBytes += bytes;
+        if (totalBytes > TRANSPORT_LIMITS.maxPropPathBytes) return null;
         result.push(s);
       } else if (typeof seg === 'number' && Number.isInteger(seg) && seg >= 0 && seg <= 1e6) {
         result.push(seg);
@@ -1216,9 +1560,29 @@
     if (init?.hookStatus) data.hookStatus = init.hookStatus;
     if (typeof init?.needsRefresh === 'boolean') data.needsRefresh = init.needsRefresh;
     if (init?.framework) data.framework = init.framework;
-    if (init?.frameworkVersion) data.frameworkVersion = init.frameworkVersion;
-    if (init?.componentName) data.componentName = init.componentName;
-    if (init?.debugSource) data.debugSource = init.debugSource;
+    if (init?.frameworkVersion) {
+      data.frameworkVersion = truncateUtf8(init.frameworkVersion, 512);
+    }
+    if (init?.componentName) data.componentName = truncateUtf8(init.componentName, 512);
+    if (isObject(init?.debugSource)) {
+      const file = truncateUtf8(init.debugSource.file, 4 * 1024);
+      if (file) {
+        data.debugSource = {
+          file,
+          line:
+            Number.isSafeInteger(init.debugSource.line) && init.debugSource.line > 0
+              ? init.debugSource.line
+              : undefined,
+          column:
+            Number.isSafeInteger(init.debugSource.column) && init.debugSource.column > 0
+              ? init.debugSource.column
+              : undefined,
+          componentName: init.debugSource.componentName
+            ? truncateUtf8(init.debugSource.componentName, 512)
+            : undefined,
+        };
+      }
+    }
     if (init?.props) data.props = init.props;
     if (init?.capabilities) data.capabilities = init.capabilities;
     if (init?.meta) data.meta = init.meta;
@@ -1506,7 +1870,12 @@
         }
 
         if (!usedRenderer) {
-          base.meta = { write: { method: 'overrideProps', error: safeString(lastErr) } };
+          base.meta = {
+            write: {
+              method: 'overrideProps',
+              error: truncateUtf8(lastErr, TRANSPORT_LIMITS.maxErrorBytes),
+            },
+          };
           return Transport.createResponse(
             req.requestId,
             false,
