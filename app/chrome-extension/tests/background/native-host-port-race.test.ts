@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const dependencyMocks = vi.hoisted(() => ({
   acquireKeepalive: vi.fn(() => vi.fn()),
   clearAllSessionContexts: vi.fn(),
+  handleCallTool: vi.fn(),
   updateConnectionBadge: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/entrypoints/background/tools", () => ({
-  handleCallTool: vi.fn(),
+  handleCallTool: dependencyMocks.handleCallTool,
 }));
 vi.mock("@/entrypoints/background/record-replay-v3", () => ({
   createStoragePort: vi.fn(() => ({
@@ -36,14 +37,18 @@ vi.mock("@/entrypoints/background/tab-queue", () => ({
 }));
 
 type DisconnectListener = () => void;
+type MessageListener = (message: any) => void | Promise<void>;
 
 function createNativePort() {
   let disconnectListener: DisconnectListener | undefined;
+  let messageListener: MessageListener | undefined;
 
   return {
     port: {
       onMessage: {
-        addListener: vi.fn(),
+        addListener: vi.fn((listener: MessageListener) => {
+          messageListener = listener;
+        }),
         removeListener: vi.fn(),
       },
       onDisconnect: {
@@ -56,7 +61,16 @@ function createNativePort() {
       disconnect: vi.fn(),
     } as unknown as chrome.runtime.Port,
     emitDisconnect: () => disconnectListener?.(),
+    emitMessage: async (message: any) => await messageListener?.(message),
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 describe("native host port lifecycle", () => {
@@ -145,5 +159,70 @@ describe("native host port lifecycle", () => {
 
     expect(connectNativeHost()).toBe(true);
     expect(chrome.runtime.connectNative).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not post an old port's delayed tool completion to a replacement port", async () => {
+    const first = createNativePort();
+    const second = createNativePort();
+    const ports = [first.port, second.port];
+    const toolResult = deferred<unknown>();
+    dependencyMocks.handleCallTool.mockReturnValueOnce(toolResult.promise);
+
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "test-extension-id",
+        lastError: null,
+        connectNative: vi.fn(() => ports.shift()),
+        getManifest: vi.fn(() => ({ version: "0.9.0" })),
+        sendMessage: vi.fn().mockResolvedValue(undefined),
+      },
+      storage: {
+        local: {
+          get: vi.fn().mockResolvedValue({}),
+          set: vi.fn().mockResolvedValue(undefined),
+          remove: vi.fn().mockResolvedValue(undefined),
+        },
+      },
+      tabs: {
+        onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      windows: {
+        onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+    });
+
+    const { connectNativeHost } = await import("@/entrypoints/background/native-host");
+    expect(connectNativeHost()).toBe(true);
+
+    const oldRequest = first.emitMessage({
+      type: "call_tool",
+      requestId: "old-request",
+      payload: { name: "chrome_read_page", args: {} },
+    });
+    await vi.waitFor(() => {
+      expect(dependencyMocks.handleCallTool).toHaveBeenCalledOnce();
+    });
+
+    first.emitDisconnect();
+    expect(connectNativeHost()).toBe(true);
+
+    toolResult.resolve({ content: [{ type: "text", text: "done" }] });
+    await oldRequest;
+
+    expect(first.port.postMessage).not.toHaveBeenCalled();
+    expect(second.port.postMessage).not.toHaveBeenCalled();
+
+    dependencyMocks.handleCallTool.mockResolvedValueOnce({
+      content: [{ type: "text", text: "current" }],
+    });
+    await second.emitMessage({
+      type: "call_tool",
+      requestId: "current-request",
+      payload: { name: "chrome_read_page", args: {} },
+    });
+
+    expect(second.port.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ responseToRequestId: "current-request" }),
+    );
   });
 });

@@ -1101,7 +1101,26 @@ export function connectNativeHost(): boolean {
     nativePort = connectedPort;
     syncConnectionBadge();
 
+    const postOnConnectedPort = (response: unknown): boolean => {
+      // Async work started by an older port must never reply through a newer
+      // connection. Apart from crossing request namespaces, that can make a
+      // new native host accept completion for work it never dispatched.
+      if (nativePort !== connectedPort) {
+        return false;
+      }
+      try {
+        connectedPort.postMessage(response);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
     connectedPort.onMessage.addListener(async (message) => {
+      if (nativePort !== connectedPort) {
+        return;
+      }
+
       if (message?.responseToRequestId) {
         const requestId = String(message.responseToRequestId);
         const pending = pendingNativeRequests.get(requestId);
@@ -1124,7 +1143,7 @@ export function connectNativeHost(): boolean {
         const requestId = message.requestId;
         const requestPayload = message.payload;
 
-        nativePort?.postMessage({
+        postOnConnectedPort({
           responseToRequestId: requestId,
           payload: {
             status: "success",
@@ -1162,7 +1181,7 @@ export function connectNativeHost(): boolean {
             args: payload.args,
             meta: { ...payload.meta, source: "mcp" },
           });
-          nativePort?.postMessage({
+          postOnConnectedPort({
             responseToRequestId: requestId,
             payload: {
               status: "success",
@@ -1171,7 +1190,7 @@ export function connectNativeHost(): boolean {
             },
           });
         } catch (error) {
-          nativePort?.postMessage({
+          postOnConnectedPort({
             responseToRequestId: requestId,
             payload: {
               status: "error",
@@ -1189,7 +1208,7 @@ export function connectNativeHost(): boolean {
           const items = listPublishedFlowDetails(
             await createStoragePort().flows.list(),
           );
-          nativePort?.postMessage({
+          postOnConnectedPort({
             responseToRequestId: requestId,
             payload: {
               status: "success",
@@ -1198,7 +1217,7 @@ export function connectNativeHost(): boolean {
             },
           });
         } catch (error: any) {
-          nativePort?.postMessage({
+          postOnConnectedPort({
             responseToRequestId: requestId,
             payload: {
               status: "error",
@@ -1210,7 +1229,7 @@ export function connectNativeHost(): boolean {
         message.type === NativeMessageType.GET_CAPABILITIES &&
         message.requestId
       ) {
-        nativePort?.postMessage({
+        postOnConnectedPort({
           responseToRequestId: message.requestId,
           payload: {
             status: "success",
