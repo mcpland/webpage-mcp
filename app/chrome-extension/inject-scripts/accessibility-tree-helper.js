@@ -38,12 +38,16 @@
   const MAX_VARIABLE_LABEL_BYTES = 512;
   const MAX_VARIABLE_VALUE_BYTES = 8 * 1024;
   const MAX_VARIABLE_VALUES_BYTES = 256 * 1024;
+  const MAX_OVERLAY_LINES = 200;
+  const MAX_OVERLAY_LINE_BYTES = 4 * 1024;
+  const MAX_OVERLAY_TEXT_BYTES = 256 * 1024;
 
   // Keep a weak map from ref id to elements
   if (!window.__claudeElementMap) window.__claudeElementMap = {};
   if (!window.__claudeRefCounter) window.__claudeRefCounter = 0;
   if (!window.__claudeElementRefs) window.__claudeElementRefs = new WeakMap();
   if (!window.__claudeRefOrder) window.__claudeRefOrder = [];
+  if (!window.__rrOverlayState) window.__rrOverlayState = { bytes: 0 };
 
   function utf8BytesForCodePoint(codePoint) {
     if (codePoint <= 0x7f) return 1;
@@ -1376,7 +1380,10 @@
       }
       if (request && request.action === 'rr_overlay') {
         try {
-          const cmd = request.cmd || 'init';
+          const cmd = request.cmd === undefined ? 'init' : request.cmd;
+          if (cmd !== 'init' && cmd !== 'append' && cmd !== 'done') {
+            throw new Error('overlay command must be init, append, or done');
+          }
           let root = document.getElementById('__rr_overlay_root');
           if (!root) {
             root = document.createElement('div');
@@ -1409,12 +1416,34 @@
             root.appendChild(title);
             root.appendChild(body);
             document.documentElement.appendChild(root);
+            window.__rrOverlayState.bytes = 0;
           }
           const body = document.getElementById('__rr_overlay_body');
           if (cmd === 'append' && body) {
             const line = document.createElement('div');
-            line.textContent = String(request.text || '');
+            const text = truncateUtf8(
+              typeof request.text === 'string' ? request.text : '',
+              MAX_OVERLAY_LINE_BYTES,
+            );
+            const lineBytes = utf8ByteLength(text);
+            line.textContent = text;
+            line.dataset.rrBytes = String(lineBytes);
+            while (
+              body.firstElementChild &&
+              (body.childElementCount >= MAX_OVERLAY_LINES ||
+                window.__rrOverlayState.bytes + lineBytes > MAX_OVERLAY_TEXT_BYTES)
+            ) {
+              const first = body.firstElementChild;
+              const removedBytes = Number(first.dataset.rrBytes || 0);
+              window.__rrOverlayState.bytes = Math.max(
+                0,
+                window.__rrOverlayState.bytes -
+                  (Number.isFinite(removedBytes) ? removedBytes : 0),
+              );
+              first.remove();
+            }
             body.appendChild(line);
+            window.__rrOverlayState.bytes += lineBytes;
             body.scrollTop = body.scrollHeight;
           }
           if (cmd === 'done' && root) {

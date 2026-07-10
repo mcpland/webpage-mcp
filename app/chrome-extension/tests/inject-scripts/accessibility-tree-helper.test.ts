@@ -323,4 +323,30 @@ describe('accessibility-tree-helper resource boundaries', () => {
     expect(dangerous.error).toContain('not allowed');
   });
 
+  it('keeps the replay log overlay within line and byte budgets', async () => {
+    loadHelper();
+    const listener = getRuntimeListener();
+
+    for (let index = 0; index < 250; index += 1) {
+      const response = await dispatch(listener, {
+        action: 'rr_overlay',
+        cmd: 'append',
+        text: `${index}:${'😀'.repeat(2000)}`,
+      });
+      expect(response.success).toBe(true);
+    }
+
+    const body = document.getElementById('__rr_overlay_body');
+    const lines = body ? Array.from(body.children) : [];
+    const bytes = lines.reduce(
+      (total, line) => total + new TextEncoder().encode(line.textContent || '').byteLength,
+      0,
+    );
+    expect(lines.length).toBeLessThanOrEqual(200);
+    expect(bytes).toBeLessThanOrEqual(256 * 1024);
+    expect(
+      Math.max(...lines.map((line) => new TextEncoder().encode(line.textContent || '').byteLength)),
+    ).toBeLessThanOrEqual(4 * 1024);
+  });
+
 });
