@@ -843,11 +843,8 @@
         pointerEvents: 'none',
       });
 
-      shadowRoot = hostElement.attachShadow({ mode: 'open' });
+      shadowRoot = hostElement.attachShadow({ mode: 'closed' });
       shadowRoot.innerHTML = `<style>${PANEL_STYLES}</style>${PANEL_TEMPLATE}`;
-
-      hostElement.querySelector = (...args) => shadowRoot.querySelector(...args);
-      hostElement.querySelectorAll = (...args) => shadowRoot.querySelectorAll(...args);
 
       const panel = shadowRoot.querySelector('.em-panel');
       if (panel) {
@@ -2463,8 +2460,8 @@
     STATE.active = true;
 
     if (IS_MAIN) {
-      const { host } = PanelHost.mount();
-      STATE.box = host;
+      const { shadow } = PanelHost.mount();
+      STATE.box = shadow;
       StateStore.init();
       bindControls();
     }

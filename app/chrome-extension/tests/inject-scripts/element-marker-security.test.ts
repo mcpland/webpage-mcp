@@ -10,10 +10,18 @@ describe('Element Marker injected UI security', () => {
     document.querySelector('#marker-security-target')?.remove();
     delete (window as any).__ELEMENT_MARKER_INSTALLED__;
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  it('does not execute an action for a synthetic host-page click', async () => {
+  it('isolates controls and rejects synthetic clicks even with a leaked root', async () => {
     let messageListener: ((request: any, sender: any, respond: (value: any) => void) => any) | undefined;
+    let panelShadow: ShadowRoot | undefined;
+    const nativeAttachShadow = HTMLElement.prototype.attachShadow;
+    vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (options) {
+      const shadow = nativeAttachShadow.call(this, options);
+      if (this.id === '__element_marker_overlay') panelShadow = shadow;
+      return shadow;
+    });
     const sendMessage = vi.fn().mockResolvedValue({ tool: { ok: true } });
     const chromeMock = {
       runtime: {
@@ -48,8 +56,9 @@ describe('Element Marker injected UI security', () => {
     document.body.appendChild(target);
 
     const host = document.querySelector('#__element_marker_overlay') as HTMLElement | null;
-    const shadow = host?.shadowRoot;
-    expect(shadow).not.toBeNull();
+    expect(host?.shadowRoot).toBeNull();
+    const shadow = panelShadow;
+    expect(shadow).toBeDefined();
     const selector = shadow?.querySelector('#__em_selector');
     expect(selector).not.toBeNull();
     if (selector) selector.textContent = '#marker-security-target';
