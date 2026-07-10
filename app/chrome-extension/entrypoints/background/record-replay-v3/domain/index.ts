@@ -29,6 +29,7 @@ export * from "./event-limits";
 export * from "./run-limits";
 export * from "./rpc-limits";
 export * from "./debug-limits";
+export * from "./persistent-var-limits";
 
 // Debugger type
 export * from "./debug";
