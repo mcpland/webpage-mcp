@@ -91,7 +91,6 @@ class NetworkRequestTool extends BaseBrowserToolExecutor {
       windowId,
     } = args;
 
-    console.log(`NetworkRequestTool: Executing with options:`, args);
 
     if (!url) {
       return createErrorResponse('URL parameter is required.');
@@ -133,7 +132,6 @@ class NetworkRequestTool extends BaseBrowserToolExecutor {
         timeout: timeout,
       });
 
-      console.log(`NetworkRequestTool: Response from content script:`, resultFromContentScript);
 
       return {
         content: [

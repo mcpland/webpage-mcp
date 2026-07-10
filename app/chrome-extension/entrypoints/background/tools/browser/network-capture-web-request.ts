@@ -815,7 +815,6 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
       background = false,
     } = args;
 
-    console.log(`NetworkCaptureStartTool: Executing with args:`, args);
 
     try {
       const explicitTab = await this.tryGetTab(targetTabId);

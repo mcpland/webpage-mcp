@@ -595,7 +595,6 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
   async execute(args: CloseTabsToolParams): Promise<ToolResult> {
     const { tabIds, url, tabId, windowId } = args;
     let urlPattern = url;
-    console.log(`Attempting to close tabs with options:`, args);
 
     try {
       // If URL is provided, close all tabs matching that URL

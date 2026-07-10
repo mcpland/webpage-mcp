@@ -52,7 +52,7 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
         );
         return;
       } else {
-        console.warn(`Unexpected ping response in tab ${tabId}:`, response);
+        console.warn(`Unexpected ping response in tab ${tabId}`);
       }
     } catch (error) {
       console.error(

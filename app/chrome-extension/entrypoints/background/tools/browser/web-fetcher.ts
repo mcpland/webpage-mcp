@@ -378,7 +378,6 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
   async execute(args: GetInteractiveElementsToolParams): Promise<ToolResult> {
     const { textQuery, selector, includeCoordinates = true, types, tabId, windowId } = args;
 
-    console.log(`Starting get interactive elements with options:`, args);
 
     try {
       const explicit = await this.tryGetTab(tabId);

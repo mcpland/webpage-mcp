@@ -380,7 +380,6 @@ class BookmarkAddTool extends BaseBrowserToolExecutor {
   async execute(args: BookmarkAddToolParams): Promise<ToolResult> {
     const { url, title, parentId, createFolder = false, tabId, windowId } = args;
 
-    console.log(`BookmarkAddTool: Adding bookmark, options:`, args);
 
     try {
       // If no URL provided, use current active tab
@@ -522,7 +521,6 @@ class BookmarkDeleteTool extends BaseBrowserToolExecutor {
   async execute(args: BookmarkDeleteToolParams): Promise<ToolResult> {
     const { bookmarkId, url, title } = args;
 
-    console.log(`BookmarkDeleteTool: Deleting bookmark, options:`, args);
 
     if (!bookmarkId && !url) {
       return createErrorResponse('Must provide bookmark ID or URL to delete bookmark');

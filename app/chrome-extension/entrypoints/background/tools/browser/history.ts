@@ -117,7 +117,6 @@ class HistoryTool extends BaseBrowserToolExecutor {
 
   async execute(args: HistoryToolParams): Promise<ToolResult> {
     try {
-      console.log('Executing HistoryTool with args:', args);
 
       const {
         text = '',

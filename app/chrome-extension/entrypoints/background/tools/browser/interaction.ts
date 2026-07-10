@@ -349,7 +349,6 @@ class ClickTool extends BaseBrowserToolExecutor {
       modifiers,
     } = args;
 
-    console.log(`Starting click operation with options:`, args);
 
     if (!selector && !coordinates && !args.ref) {
       return createErrorResponse(
@@ -501,7 +500,6 @@ class FillTool extends BaseBrowserToolExecutor {
   async execute(args: FillToolParams): Promise<ToolResult> {
     const { selector, selectorType = 'css', ref, value, frameId } = args;
 
-    console.log(`Starting fill operation with options:`, args);
 
     if (!selector && !ref) {
       return createErrorResponse(

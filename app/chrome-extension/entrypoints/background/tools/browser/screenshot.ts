@@ -228,7 +228,6 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       savePng = true,
     } = args;
 
-    console.log(`Starting screenshot with options:`, args);
 
     try {
       assertValidScreenshotParams(args);

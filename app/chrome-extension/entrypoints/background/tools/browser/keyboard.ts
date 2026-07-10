@@ -214,7 +214,6 @@ class KeyboardTool extends BaseBrowserToolExecutor {
       delay = TIMEOUTS.KEYBOARD_DELAY,
     } = args;
 
-    console.log(`Starting keyboard operation with options:`, args);
 
     if (!keys) {
       return createErrorResponse(

@@ -413,7 +413,7 @@ export class ClaudeEngine implements AgentEngine {
           .trim();
 
         console.error(
-          `[ClaudeEngine] Prompt with image paths: ${promptInstruction.slice(0, 200)}...`,
+          `[ClaudeEngine] Prepared prompt with ${imageLines.length} image path(s)`,
         );
       }
 
