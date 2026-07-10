@@ -55,17 +55,17 @@
     "chrome-devtools-frontend": "^1.0.1299282",
     "commander": "^13.1.0",
     "cross-spawn": "^7.0.6",
-    "drizzle-orm": "^0.38.2",
+    "drizzle-orm": "^0.45.2",
     "is-admin": "^4.0.0",
     "pino": "^9.6.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/chrome": "^0.0.318",
     "@types/node": "^22.15.3",
     "@typescript-eslint/parser": "^8.31.1",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "^3.2.6",
     "cross-env": "^7.0.3",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.1",
@@ -73,7 +73,7 @@
     "pino-pretty": "^13.0.0",
     "rimraf": "^6.0.1",
     "tsup": "^8.4.0",
-    "vitest": "^2.1.8",
+    "vitest": "^3.2.6",
     "webpage-mcp-shared": "workspace:*"
   },
   "husky": {
