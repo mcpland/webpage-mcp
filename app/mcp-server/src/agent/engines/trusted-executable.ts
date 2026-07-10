@@ -1,6 +1,6 @@
 import {
-  X_OK,
   accessSync,
+  constants,
   realpathSync,
   statSync,
 } from 'node:fs';
@@ -41,7 +41,7 @@ function defaultIsRunnableFile(
 ): boolean {
   try {
     if (!statSync(candidate).isFile()) return false;
-    if (platform !== 'win32') accessSync(candidate, X_OK);
+    if (platform !== 'win32') accessSync(candidate, constants.X_OK);
     return true;
   } catch {
     return false;
