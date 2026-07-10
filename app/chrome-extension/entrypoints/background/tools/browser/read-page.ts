@@ -4,7 +4,21 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
 import { listMarkersForUrl } from '@/entrypoints/background/element-marker/element-marker-storage';
-import { boundInteractiveElements } from './interactive-elements-limits';
+import {
+  boundInteractiveElements,
+  truncateInteractiveString,
+  utf8ByteLengthBounded,
+} from './interactive-elements-limits';
+
+const READ_PAGE_LIMITS = {
+  refIdBytes: 128,
+  pageContentBytes: 384 * 1024,
+  refMapCount: 256,
+} as const;
+
+function finiteNonNegative(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
 
 interface ReadPageStats {
   processed: number;
@@ -38,11 +52,26 @@ class ReadPageTool extends BaseBrowserToolExecutor {
   async execute(args: ReadPageParams): Promise<ToolResult> {
     const { filter, depth, refId } = args || {};
 
+    if (filter !== undefined && filter !== 'interactive') {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: filter must be "interactive" when provided`,
+      );
+    }
+
     // Validate refId parameter
     const focusRefId = typeof refId === 'string' ? refId.trim() : '';
     if (refId !== undefined && !focusRefId) {
       return createErrorResponse(
         `${ERROR_MESSAGES.INVALID_PARAMETERS}: refId must be a non-empty string`,
+      );
+    }
+    if (
+      focusRefId.length > READ_PAGE_LIMITS.refIdBytes ||
+      utf8ByteLengthBounded(focusRefId, READ_PAGE_LIMITS.refIdBytes) >
+        READ_PAGE_LIMITS.refIdBytes
+    ) {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: refId exceeds the ${READ_PAGE_LIMITS.refIdBytes}-byte UTF-8 limit`,
       );
     }
 
@@ -111,16 +140,22 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
       // Evaluate tree result and decide whether to fallback
       const treeOk = resp && resp.success === true;
-      const pageContent: string =
+      const rawPageContent: string =
         resp && typeof resp.pageContent === 'string' ? resp.pageContent : '';
+      const pageContent = truncateInteractiveString(
+        rawPageContent,
+        READ_PAGE_LIMITS.pageContentBytes,
+      );
+      const treeTruncated =
+        resp?.truncated === true || pageContent.length < rawPageContent.length;
 
       // Extract stats from response
       const stats: ReadPageStats | null =
         treeOk && resp?.stats
           ? {
-              processed: resp.stats.processed ?? 0,
-              included: resp.stats.included ?? 0,
-              durationMs: resp.stats.durationMs ?? 0,
+              processed: finiteNonNegative(resp.stats.processed),
+              included: finiteNonNegative(resp.stats.included),
+              durationMs: finiteNonNegative(resp.stats.durationMs),
             }
           : null;
 
@@ -128,7 +163,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         ? pageContent.split('\n').filter((l: string) => l.trim().length > 0)
             .length
         : 0;
-      const refCount = Array.isArray(resp?.refMap) ? resp.refMap.length : 0;
+      const refCount = Array.isArray(resp?.refMap)
+        ? Math.min(resp.refMap.length, READ_PAGE_LIMITS.refMapCount)
+        : 0;
 
       // Skip sparse heuristics when user explicitly controls output
       const isSparse = !userControlled && lines < 10 && refCount < 3;
@@ -175,9 +212,14 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         success: true,
         filter: filter || 'all',
         pageContent,
+        truncated: treeTruncated,
         tips: standardTips,
         viewport: treeOk
-          ? resp.viewport
+          ? {
+              width: finiteNonNegative(resp?.viewport?.width),
+              height: finiteNonNegative(resp?.viewport?.height),
+              dpr: finiteNonNegative(resp?.viewport?.dpr),
+            }
           : { width: null, height: null, dpr: null },
         stats: stats || { processed: 0, included: 0, durationMs: 0 },
         refMapCount: refCount,

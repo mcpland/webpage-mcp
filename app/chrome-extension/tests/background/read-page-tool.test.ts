@@ -64,6 +64,17 @@ describe('readPageTool', () => {
     expect(sendMessageToTab).not.toHaveBeenCalled();
   });
 
+  it('rejects unbounded filter and ref inputs before touching a tab', async () => {
+    const tryGetTab = vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+
+    const invalidFilter = await readPageTool.execute({ filter: 'all' as any });
+    const oversizedRef = await readPageTool.execute({ refId: 'r'.repeat(129) });
+
+    expect(invalidFilter.isError).toBe(true);
+    expect(oversizedRef.isError).toBe(true);
+    expect(tryGetTab).not.toHaveBeenCalled();
+  });
+
   it('activates an inactive target tab before reading the page', async () => {
     vi.stubGlobal('chrome', {
       tabs: {
@@ -148,5 +159,30 @@ describe('readPageTool', () => {
     expect(new TextEncoder().encode(payload.elements[0].text).byteLength).toBeLessThanOrEqual(
       1024,
     );
+  });
+
+  it('re-bounds the primary page tree and viewport at the background boundary', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'activateTabIfNeeded').mockResolvedValue(makeTab());
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: '😀'.repeat(200_000),
+      viewport: { width: 'x'.repeat(100_000), height: Infinity, dpr: 2 },
+      stats: { processed: Infinity, included: -1, durationMs: 2 },
+      refMap: [{}, {}, {}],
+    });
+
+    const result = await readPageTool.execute({ tabId: 7 });
+    const text = String((result.content[0] as { text?: string })?.text || '{}');
+    const payload = JSON.parse(text);
+
+    expect(result.isError).toBe(false);
+    expect(payload.truncated).toBe(true);
+    expect(new TextEncoder().encode(payload.pageContent).byteLength).toBeLessThanOrEqual(
+      384 * 1024,
+    );
+    expect(payload.viewport).toEqual({ width: 0, height: 0, dpr: 2 });
+    expect(payload.stats).toEqual({ processed: 0, included: 0, durationMs: 2 });
   });
 });
