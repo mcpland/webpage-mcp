@@ -143,6 +143,114 @@ describe('NativeMessagingHost outbound requests', () => {
     });
   });
 
+  it('rejects oversized agent stream identifiers before subscribing', async () => {
+    const output = new CollectingWritable();
+    const host = new NativeMessagingHost(new NativeMessageWriter(output));
+    const subscribeAgentEvents = vi.fn(() => vi.fn());
+    (
+      host as unknown as {
+        servers: Map<
+          string,
+          {
+            isRunning: boolean;
+            subscribeAgentEvents: typeof subscribeAgentEvents;
+          }
+        >;
+        handleAgentStreamSubscribe: (message: unknown) => Promise<void>;
+      }
+    ).servers.set(DEFAULT_MCP_INSTANCE_ID, {
+      isRunning: true,
+      subscribeAgentEvents,
+    });
+
+    await (
+      host as unknown as {
+        handleAgentStreamSubscribe: (message: unknown) => Promise<void>;
+      }
+    ).handleAgentStreamSubscribe({
+      requestId: 'bounded-request',
+      payload: {
+        sessionId: 'session-1',
+        subscriptionId: '😀'.repeat(65),
+      },
+    });
+
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(1));
+    expect(decodeFrame(output.chunks[0])).toMatchObject({
+      responseToRequestId: 'bounded-request',
+      error: expect.stringContaining('subscriptionId exceeds 256 bytes'),
+    });
+    expect(subscribeAgentEvents).not.toHaveBeenCalled();
+  });
+
+  it('bounds total and per-session native agent stream subscriptions', async () => {
+    const output = new CollectingWritable();
+    const host = new NativeMessagingHost(new NativeMessageWriter(output));
+    const subscribeAgentEvents = vi.fn(() => vi.fn());
+    const state = host as unknown as {
+      servers: Map<
+        string,
+        {
+          isRunning: boolean;
+          subscribeAgentEvents: typeof subscribeAgentEvents;
+        }
+      >;
+      streamSubscriptions: Map<
+        string,
+        {
+          subscriptionId: string;
+          instanceId: string;
+          sessionId: string;
+          dispose: () => void;
+        }
+      >;
+      handleAgentStreamSubscribe: (message: unknown) => Promise<void>;
+    };
+    state.servers.set(DEFAULT_MCP_INSTANCE_ID, {
+      isRunning: true,
+      subscribeAgentEvents,
+    });
+
+    for (let index = 0; index < 16; index += 1) {
+      state.streamSubscriptions.set(`same-session-${index}`, {
+        subscriptionId: `same-session-${index}`,
+        instanceId: DEFAULT_MCP_INSTANCE_ID,
+        sessionId: 'session-full',
+        dispose: vi.fn(),
+      });
+    }
+    await state.handleAgentStreamSubscribe({
+      requestId: 'per-session-overflow',
+      payload: { sessionId: 'session-full' },
+    });
+
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(1));
+    expect(decodeFrame(output.chunks[0])).toMatchObject({
+      responseToRequestId: 'per-session-overflow',
+      error: expect.stringContaining('session subscription limit reached (16)'),
+    });
+
+    for (let index = state.streamSubscriptions.size; index < 128; index += 1) {
+      state.streamSubscriptions.set(`global-${index}`, {
+        subscriptionId: `global-${index}`,
+        instanceId: DEFAULT_MCP_INSTANCE_ID,
+        sessionId: `session-${index}`,
+        dispose: vi.fn(),
+      });
+    }
+    await state.handleAgentStreamSubscribe({
+      requestId: 'global-overflow',
+      payload: { sessionId: 'new-session' },
+    });
+
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(2));
+    expect(decodeFrame(output.chunks[1])).toMatchObject({
+      responseToRequestId: 'global-overflow',
+      error: expect.stringContaining('subscription limit reached (128)'),
+    });
+    expect(subscribeAgentEvents).not.toHaveBeenCalled();
+  });
+
   it('coalesces queued stream snapshots and preserves the final under backpressure', async () => {
     const output = new ControlledWritable();
     const host = new NativeMessagingHost(new NativeMessageWriter(output));

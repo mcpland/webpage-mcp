@@ -142,6 +142,14 @@ function readStringRecord(value: unknown): Record<string, string> | undefined {
   return Object.fromEntries(entries);
 }
 
+const MAX_AGENT_STREAM_SUBSCRIPTIONS = 128;
+const MAX_AGENT_STREAM_SUBSCRIPTIONS_PER_SESSION = 16;
+const MAX_AGENT_STREAM_IDENTIFIER_BYTES = 256;
+
+function isBoundedAgentStreamIdentifier(value: string): boolean {
+  return Buffer.byteLength(value, 'utf8') <= MAX_AGENT_STREAM_IDENTIFIER_BYTES;
+}
+
 export class NativeMessagingHost {
   private servers: Map<string, Server> = new Map();
   private instanceStatuses: Map<string, McpServerInstanceStatus> = new Map();
@@ -915,6 +923,12 @@ export class NativeMessagingHost {
       this.sendError('agent_stream_subscribe requires requestId');
       return;
     }
+    if (!isBoundedAgentStreamIdentifier(requestId)) {
+      this.sendError(
+        `agent_stream_subscribe requestId exceeds ${MAX_AGENT_STREAM_IDENTIFIER_BYTES} bytes`,
+      );
+      return;
+    }
 
     const payload =
       message?.payload && typeof message.payload === 'object'
@@ -926,12 +940,62 @@ export class NativeMessagingHost {
       this.sendRequestResponse(requestId, undefined, 'sessionId is required');
       return;
     }
+    if (!isBoundedAgentStreamIdentifier(sessionId)) {
+      this.sendRequestResponse(
+        requestId,
+        undefined,
+        `sessionId exceeds ${MAX_AGENT_STREAM_IDENTIFIER_BYTES} bytes`,
+      );
+      return;
+    }
 
     const requestedSubscriptionId =
       typeof payload.subscriptionId === 'string' ? payload.subscriptionId.trim() : '';
     const subscriptionId = requestedSubscriptionId || requestId;
+    if (!isBoundedAgentStreamIdentifier(subscriptionId)) {
+      this.sendRequestResponse(
+        requestId,
+        undefined,
+        `subscriptionId exceeds ${MAX_AGENT_STREAM_IDENTIFIER_BYTES} bytes`,
+      );
+      return;
+    }
 
+    const server = this.getOrCreateServer(instanceId);
+    if (!server.isRunning) {
+      await this.startServer(instanceId);
+    }
+
+    // Re-read capacity after asynchronous startup. Replacing an existing id is
+    // allowed at the limit because it does not grow the registry.
     const existing = this.streamSubscriptions.get(subscriptionId);
+    if (!existing && this.streamSubscriptions.size >= MAX_AGENT_STREAM_SUBSCRIPTIONS) {
+      this.sendRequestResponse(
+        requestId,
+        undefined,
+        `Agent stream subscription limit reached (${MAX_AGENT_STREAM_SUBSCRIPTIONS})`,
+      );
+      return;
+    }
+    let sessionSubscriptions = 0;
+    for (const subscription of this.streamSubscriptions.values()) {
+      if (
+        subscription !== existing &&
+        subscription.instanceId === instanceId &&
+        subscription.sessionId === sessionId
+      ) {
+        sessionSubscriptions += 1;
+      }
+    }
+    if (sessionSubscriptions >= MAX_AGENT_STREAM_SUBSCRIPTIONS_PER_SESSION) {
+      this.sendRequestResponse(
+        requestId,
+        undefined,
+        `Agent stream session subscription limit reached (${MAX_AGENT_STREAM_SUBSCRIPTIONS_PER_SESSION})`,
+      );
+      return;
+    }
+
     if (existing) {
       try {
         existing.dispose();
@@ -939,11 +1003,6 @@ export class NativeMessagingHost {
         // ignore
       }
       this.streamSubscriptions.delete(subscriptionId);
-    }
-
-    const server = this.getOrCreateServer(instanceId);
-    if (!server.isRunning) {
-      await this.startServer(instanceId);
     }
 
     const dispose = server.subscribeAgentEvents(sessionId, (event: RealtimeEvent) => {
