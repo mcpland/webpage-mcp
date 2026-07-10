@@ -5,11 +5,12 @@
 ### Prerequisites
 
 ```bash
-# Install Rust
+# Install rustup. The repository's rust-toolchain.toml selects Rust 1.94.0
+# and the wasm32-unknown-unknown target automatically.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install wasm-pack
-curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+# Install the exact generator version recorded in artifacts.json.
+cargo install wasm-pack --version '=0.15.0' --locked
 ```
 
 ### Build Options
@@ -17,15 +18,15 @@ curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 1. **Build from project root** (Recommended):
 
    ```bash
-   # Build WASM and automatically copy to Chrome extension
-   npm run build:wasm
+   # Build WASM, update its hash manifest, and copy verified runtime files.
+   pnpm build:wasm
    ```
 
 2. **Build WASM package only**:
 
    ```bash
    # From the packages/wasm-simd directory
-   npm run build
+   pnpm build
 
    # Or use pnpm filter from anywhere
    pnpm --filter @webpage-mcp/wasm-simd build
@@ -33,7 +34,7 @@ curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
 3. **Development mode build**:
    ```bash
-   npm run build:dev  # Unoptimized version, faster build
+   pnpm build:dev  # Unoptimized package-only build, faster build
    ```
 
 ### Build Artifacts
@@ -43,7 +44,7 @@ After building, the following files will be generated in the `pkg/` directory:
 - `simd_math.js` - JavaScript bindings
 - `simd_math_bg.wasm` - WebAssembly binary file
 - `simd_math.d.ts` - TypeScript type definitions
-- `package.json` - NPM package info
+- `simd_math_bg.wasm.d.ts` - low-level WebAssembly export types
 
 ### Integration with Chrome Extension
 
@@ -58,8 +59,15 @@ const wasmModule = await import(wasmUrl);
 ## 🔧 Development Workflow
 
 1. Modify the Rust code in `src/lib.rs`
-2. Run `npm run build` to rebuild
-3. Chrome extension will automatically use the new WASM files
+2. Run `pnpm build:wasm` from the repository root
+3. Review changes to `artifacts.json`, `simd_math.js`, and `simd_math_bg.wasm`
+4. Run `pnpm verify:wasm` to rebuild in a clean temporary directory and verify hashes and exports
+
+Release builds use `Cargo.lock`, the pinned Rust and wasm-pack versions, a fixed
+source-date epoch, disabled incremental compilation, and remapped source paths.
+This keeps user names, Cargo home paths, and worktree paths out of the committed
+WASM binary. CI performs the same clean rebuild and rejects stale artifacts or a
+public JavaScript/WebAssembly interface change.
 
 ## 📊 Performance Testing
 

@@ -2,16 +2,19 @@
   "name": "@webpage-mcp/wasm-simd",
   "version": "0.1.0",
   "description": "SIMD-optimized WebAssembly math functions for Webpage MCP",
+  "type": "module",
   "main": "pkg/simd_math.js",
   "types": "pkg/simd_math.d.ts",
   "files": [
     "pkg/"
   ],
   "scripts": {
-    "build": "wasm-pack build --target web --out-dir pkg --release",
-    "build:dev": "wasm-pack build --target web --out-dir pkg --dev",
+    "build": "node ./scripts/wasm-artifacts.mjs sync",
+    "build:dev": "wasm-pack build --target web --out-dir pkg --out-name simd_math --dev --locked --no-pack",
     "clean": "rimraf pkg/",
-    "test": "node ./scripts/run-wasm-pack-test.cjs"
+    "copy:artifacts": "node ./scripts/wasm-artifacts.mjs copy",
+    "test": "cargo test --locked",
+    "verify:artifacts": "node ./scripts/wasm-artifacts.mjs verify"
   },
   "keywords": [
     "wasm",

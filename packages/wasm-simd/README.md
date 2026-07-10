@@ -41,8 +41,8 @@ impl SIMDMath {
 From repository root:
 
 ```bash
-pnpm --filter @webpage-mcp/wasm-simd build
-pnpm run copy:wasm
+pnpm build:wasm
+pnpm verify:wasm
 ```
 
 Inside this package:
@@ -51,6 +51,11 @@ Inside this package:
 pnpm build
 pnpm build:dev
 ```
+
+The release toolchain and generated artifact hashes/exports are recorded in
+`rust-toolchain.toml`, `Cargo.lock`, and `artifacts.json`. `pnpm build:wasm`
+performs a deterministic release build and synchronizes the extension workers;
+`pnpm verify:wasm` independently rebuilds and rejects any source/artifact drift.
 
 ## Browser Support
 

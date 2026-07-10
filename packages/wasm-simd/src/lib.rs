@@ -95,9 +95,15 @@ impl SIMDMath {
 
     #[wasm_bindgen]
     pub fn batch_similarity(&self, vectors: &[f32], query: &[f32], vector_dim: usize) -> Vec<f32> {
-        if vector_dim == 0 { return Vec::new(); }
-        if vectors.len() % vector_dim != 0 { return Vec::new(); }
-        if query.len() != vector_dim { return Vec::new(); }
+        if vector_dim == 0 {
+            return Vec::new();
+        }
+        if vectors.len() % vector_dim != 0 {
+            return Vec::new();
+        }
+        if query.len() != vector_dim {
+            return Vec::new();
+        }
 
         let num_vectors = vectors.len() / vector_dim;
         let mut results = Vec::with_capacity(num_vectors);
@@ -180,8 +186,14 @@ impl SIMDMath {
 
     // Batch matrix similarity computation - optimized version
     #[wasm_bindgen]
-    pub fn similarity_matrix(&self, vectors_a: &[f32], vectors_b: &[f32], vector_dim: usize) -> Vec<f32> {
-        if vector_dim == 0 || vectors_a.len() % vector_dim != 0 || vectors_b.len() % vector_dim != 0 {
+    pub fn similarity_matrix(
+        &self,
+        vectors_a: &[f32],
+        vectors_b: &[f32],
+        vector_dim: usize,
+    ) -> Vec<f32> {
+        if vector_dim == 0 || vectors_a.len() % vector_dim != 0 || vectors_b.len() % vector_dim != 0
+        {
             return Vec::new();
         }
 
@@ -241,5 +253,62 @@ impl SIMDMath {
         }
 
         results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SIMDMath;
+
+    fn assert_approx_eq(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 1e-5,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn cosine_similarity_handles_simd_lanes_and_tail_values() {
+        let math = SIMDMath::new();
+
+        assert_approx_eq(
+            math.cosine_similarity(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1.0, 2.0, 3.0, 4.0, 5.0]),
+            1.0,
+        );
+        assert_approx_eq(
+            math.cosine_similarity(&[1.0, 0.0, 0.0, 0.0], &[0.0, 1.0, 0.0, 0.0]),
+            0.0,
+        );
+    }
+
+    #[test]
+    fn invalid_or_zero_vectors_have_safe_results() {
+        let math = SIMDMath::new();
+
+        assert_eq!(math.cosine_similarity(&[], &[]), 0.0);
+        assert_eq!(math.cosine_similarity(&[1.0], &[1.0, 2.0]), 0.0);
+        assert_eq!(
+            math.batch_similarity(&[1.0, 2.0], &[1.0], 2),
+            Vec::<f32>::new()
+        );
+        assert_eq!(
+            math.batch_similarity(&[0.0, 0.0], &[0.0, 0.0], 2),
+            vec![0.0]
+        );
+    }
+
+    #[test]
+    fn batch_and_matrix_results_preserve_vector_order() {
+        let math = SIMDMath::new();
+        let basis = [1.0, 0.0, 0.0, 1.0];
+
+        assert_eq!(
+            math.batch_similarity(&basis, &[1.0, 0.0], 2),
+            vec![1.0, 0.0]
+        );
+        assert_eq!(
+            math.similarity_matrix(&basis, &basis, 2),
+            vec![1.0, 0.0, 0.0, 1.0]
+        );
     }
 }

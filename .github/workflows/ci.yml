@@ -56,3 +56,31 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  wasm-artifacts:
+    name: Rebuild and verify WASM artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal --target wasm32-unknown-unknown
+          rustc --version
+
+      - name: Install pinned wasm-pack
+        run: cargo install wasm-pack --version '=0.15.0' --locked
+
+      - name: Test Rust implementation
+        run: cargo test --manifest-path packages/wasm-simd/Cargo.toml --locked
+
+      - name: Verify generated runtime artifacts
+        run: node packages/wasm-simd/scripts/wasm-artifacts.mjs verify

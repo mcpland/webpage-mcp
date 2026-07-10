@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "toolchain": {
+    "rust": "1.94.0",
+    "wasmPack": "0.15.0",
+    "wasmBindgen": "0.2.126"
+  },
+  "artifacts": {
+    "simd_math.js": "cc1a9aa14db7776b156bce49c5eef1d6c9ae05d67cb64615f42eb1cd15bb97eb",
+    "simd_math_bg.wasm": "00d71cb6fc7a735447d100c2cf8de6abedf4f914c2405fca6c66d1e6ba2b96c7"
+  },
+  "interface": {
+    "moduleExports": ["SIMDMath", "default", "init", "initSync"],
+    "simdMathMethods": [
+      "__destroy_into_raw",
+      "batch_similarity",
+      "constructor",
+      "cosine_similarity",
+      "free",
+      "similarity_matrix"
+    ],
+    "wasmExports": [
+      "__abort_handler",
+      "__instance_terminated",
+      "__wbg_simdmath_free",
+      "__wbindgen_externrefs",
+      "__wbindgen_free",
+      "__wbindgen_malloc",
+      "__wbindgen_realloc",
+      "__wbindgen_start",
+      "init",
+      "memory",
+      "simdmath_batch_similarity",
+      "simdmath_cosine_similarity",
+      "simdmath_new",
+      "simdmath_similarity_matrix"
+    ]
+  }
+}
