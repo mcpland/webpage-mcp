@@ -3,6 +3,38 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { getMessage } from '@/utils/i18n';
 import { hasDisallowedPublicUrlScheme } from './common';
+import {
+  measureJsonBytes,
+  measureUtf8Bytes,
+  normalizeBoundedInteger,
+  truncateJsonString,
+} from './bounded-tool-output';
+
+export const BOOKMARK_SEARCH_MAX_RESULTS = 200;
+export const BOOKMARK_SEARCH_MAX_SCAN_NODES = 5_000;
+export const BOOKMARK_SEARCH_MAX_OUTPUT_UTF8_BYTES = 1024 * 1024;
+export const BOOKMARK_SEARCH_MAX_QUERY_UTF8_BYTES = 2 * 1024;
+export const BOOKMARK_SEARCH_MAX_FOLDER_PATH_UTF8_BYTES = 2 * 1024;
+const BOOKMARK_MAX_FOLDER_DEPTH = 64;
+const BOOKMARK_MAX_QUEUED_FOLDERS = 256;
+const BOOKMARK_MAX_ID_JSON_BYTES = 512;
+const BOOKMARK_MAX_TITLE_JSON_BYTES = 4 * 1024;
+const BOOKMARK_MAX_URL_JSON_BYTES = 8 * 1024;
+const BOOKMARK_MAX_PATH_JSON_BYTES = 4 * 1024;
+const BOOKMARK_OUTPUT_ENVELOPE_RESERVE_BYTES = 4 * 1024;
+
+interface BookmarkScanBudget {
+  scannedNodes: number;
+  truncated: boolean;
+}
+
+interface BoundedBookmarkSearchResult {
+  id: string;
+  title: string;
+  url: string;
+  dateAdded?: number;
+  folderPath: string;
+}
 
 /**
  * Bookmark search tool parameters interface
@@ -47,6 +79,7 @@ function isPublicBookmarkUrl(url?: string | null): boolean {
  */
 async function getBookmarkFolderPath(bookmarkNodeId: string): Promise<string> {
   const pathParts: string[] = [];
+  const seen = new Set<string>();
 
   try {
     // First get the node itself to check if it's a bookmark or folder
@@ -56,13 +89,20 @@ async function getBookmarkFolderPath(bookmarkNodeId: string): Promise<string> {
 
       // Build path starting from parent node (same for both bookmarks and folders)
       let pathNodeId = initialNode.parentId;
-      while (pathNodeId) {
+      while (
+        pathNodeId &&
+        pathParts.length < BOOKMARK_MAX_FOLDER_DEPTH &&
+        !seen.has(pathNodeId)
+      ) {
+        seen.add(pathNodeId);
         const parentNodes = await chrome.bookmarks.get(pathNodeId);
         if (parentNodes.length === 0) break;
 
         const parentNode = parentNodes[0];
         if (parentNode.title) {
-          pathParts.unshift(parentNode.title);
+          pathParts.unshift(
+            truncateJsonString(parentNode.title, BOOKMARK_MAX_TITLE_JSON_BYTES),
+          );
         }
 
         if (!parentNode.parentId) break;
@@ -71,10 +111,13 @@ async function getBookmarkFolderPath(bookmarkNodeId: string): Promise<string> {
     }
   } catch (error) {
     console.error(`Error getting bookmark path for node ID ${bookmarkNodeId}:`, error);
-    return pathParts.join(' > ') || 'Error getting path';
+    return (
+      truncateJsonString(pathParts.join(' > '), BOOKMARK_MAX_PATH_JSON_BYTES) ||
+      'Error getting path'
+    );
   }
 
-  return pathParts.join(' > ');
+  return truncateJsonString(pathParts.join(' > '), BOOKMARK_MAX_PATH_JSON_BYTES);
 }
 
 /**
@@ -86,9 +129,11 @@ async function getBookmarkFolderPath(bookmarkNodeId: string): Promise<string> {
  */
 async function findFolderByPathOrId(
   pathOrId: string,
+  scanBudget?: BookmarkScanBudget,
 ): Promise<chrome.bookmarks.BookmarkTreeNode | null> {
   try {
     const nodes = await chrome.bookmarks.get(pathOrId);
+    if (scanBudget) scanBudget.scannedNodes += Math.min(nodes.length, 1);
     if (nodes && nodes.length > 0 && !nodes[0].url) {
       return nodes[0];
     }
@@ -113,7 +158,18 @@ async function findFolderByPathOrId(
     let matchedNodeThisLevel: chrome.bookmarks.BookmarkTreeNode | null = null;
 
     for (const node of currentNodes) {
-      if (!node.url && node.title.toLowerCase() === part.toLowerCase()) {
+      if (scanBudget) {
+        if (scanBudget.scannedNodes >= BOOKMARK_SEARCH_MAX_SCAN_NODES) {
+          scanBudget.truncated = true;
+          return null;
+        }
+        scanBudget.scannedNodes += 1;
+      }
+      if (
+        !node.url &&
+        truncateJsonString(node.title, BOOKMARK_MAX_TITLE_JSON_BYTES).toLowerCase() ===
+          part.toLowerCase()
+      ) {
         matchedNodeThisLevel = node;
         break;
       }
@@ -201,37 +257,6 @@ async function createFolderPath(
 }
 
 /**
- * Flatten bookmark tree (or node array) to bookmark list (excluding folders)
- * @param nodes Bookmark tree nodes to flatten
- * @returns Returns actual bookmark node array (nodes with URLs)
- */
-function flattenBookmarkNodesToBookmarks(
-  nodes: chrome.bookmarks.BookmarkTreeNode[],
-): chrome.bookmarks.BookmarkTreeNode[] {
-  const result: chrome.bookmarks.BookmarkTreeNode[] = [];
-  const stack = [...nodes]; // Use stack for iterative traversal to avoid deep recursion issues
-
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (!node) continue;
-
-    if (node.url) {
-      // It's a bookmark
-      result.push(node);
-    }
-
-    if (node.children) {
-      // Add child nodes to stack for processing
-      for (let i = node.children.length - 1; i >= 0; i--) {
-        stack.push(node.children[i]);
-      }
-    }
-  }
-
-  return result;
-}
-
-/**
  * Find bookmarks by URL and title
  * @param url Bookmark URL
  * @param title Optional bookmark title for auxiliary matching
@@ -269,91 +294,222 @@ class BookmarkSearchTool extends BaseBrowserToolExecutor {
    * Execute bookmark search
    */
   async execute(args: BookmarkSearchToolParams): Promise<ToolResult> {
-    const { query = '', maxResults = 50, folderPath } = args;
-
-    console.log(
-      `BookmarkSearchTool: Searching bookmarks, keywords: "${query}", folder path: "${folderPath}"`,
-    );
-
     try {
-      let bookmarksToSearch: chrome.bookmarks.BookmarkTreeNode[] = [];
-      let targetFolderNode: chrome.bookmarks.BookmarkTreeNode | null = null;
-
-      // If folder path is specified, find that folder first
-      if (folderPath) {
-        targetFolderNode = await findFolderByPathOrId(folderPath);
-        if (!targetFolderNode) {
-          return createErrorResponse(`Specified folder not found: "${folderPath}"`);
-        }
-        // Get all bookmarks in that folder and its subfolders
-        const subTree = await chrome.bookmarks.getSubTree(targetFolderNode.id);
-        bookmarksToSearch =
-          subTree.length > 0 ? flattenBookmarkNodesToBookmarks(subTree[0].children || []) : [];
+      const query = typeof args.query === 'string' ? args.query : '';
+      const folderPath =
+        typeof args.folderPath === 'string' ? args.folderPath : undefined;
+      if (
+        measureUtf8Bytes(query, BOOKMARK_SEARCH_MAX_QUERY_UTF8_BYTES) >
+        BOOKMARK_SEARCH_MAX_QUERY_UTF8_BYTES
+      ) {
+        return createErrorResponse(
+          `Bookmark query exceeds the ${BOOKMARK_SEARCH_MAX_QUERY_UTF8_BYTES}-byte limit.`,
+        );
       }
-
-      let filteredBookmarks: chrome.bookmarks.BookmarkTreeNode[];
-
-      if (query) {
-        if (targetFolderNode) {
-          // Has query keywords and specified folder: manually filter bookmarks from folder
-          const lowerCaseQuery = query.toLowerCase();
-          filteredBookmarks = bookmarksToSearch.filter(
-            (bookmark) =>
-              (bookmark.title && bookmark.title.toLowerCase().includes(lowerCaseQuery)) ||
-              (bookmark.url && bookmark.url.toLowerCase().includes(lowerCaseQuery)),
-          );
-        } else {
-          // Has query keywords but no specified folder: use API search
-          filteredBookmarks = await chrome.bookmarks.search({ query });
-          // API search may return folders (if title matches), filter them out
-          filteredBookmarks = filteredBookmarks.filter((item) => isPublicBookmarkUrl(item.url));
-        }
-      } else {
-        // No query keywords
-        if (!targetFolderNode) {
-          // No folder path specified, get all bookmarks
-          const tree = await chrome.bookmarks.getTree();
-          bookmarksToSearch = flattenBookmarkNodesToBookmarks(tree);
-        }
-        filteredBookmarks = bookmarksToSearch;
+      if (
+        folderPath !== undefined &&
+        measureUtf8Bytes(
+          folderPath,
+          BOOKMARK_SEARCH_MAX_FOLDER_PATH_UTF8_BYTES,
+        ) > BOOKMARK_SEARCH_MAX_FOLDER_PATH_UTF8_BYTES
+      ) {
+        return createErrorResponse(
+          `Bookmark folderPath exceeds the ${BOOKMARK_SEARCH_MAX_FOLDER_PATH_UTF8_BYTES}-byte limit.`,
+        );
       }
-
-      filteredBookmarks = filteredBookmarks.filter((bookmark) => isPublicBookmarkUrl(bookmark.url));
-
-      // Limit number of results
-      const limitedResults = filteredBookmarks.slice(0, maxResults);
-
-      // Add folder path information for each bookmark
-      const resultsWithPath = await Promise.all(
-        limitedResults.map(async (bookmark) => {
-          const path = await getBookmarkFolderPath(bookmark.id);
-          return {
-            id: bookmark.id,
-            title: bookmark.title,
-            url: bookmark.url,
-            dateAdded: bookmark.dateAdded,
-            folderPath: path,
-          };
-        }),
+      const maxResults = normalizeBoundedInteger(
+        args.maxResults,
+        50,
+        1,
+        BOOKMARK_SEARCH_MAX_RESULTS,
       );
+      const scanBudget: BookmarkScanBudget = {
+        scannedNodes: 0,
+        truncated: false,
+      };
+
+      console.log(
+        `BookmarkSearchTool: Searching bookmarks, keywords: "${query}", folder path: "${folderPath || ''}"`,
+      );
+
+      let targetFolderNode: chrome.bookmarks.BookmarkTreeNode | null = null;
+      if (folderPath) {
+        targetFolderNode = await findFolderByPathOrId(folderPath, scanBudget);
+        if (!targetFolderNode) {
+          if (scanBudget.truncated) {
+            return createErrorResponse(
+              `Bookmark folder lookup exceeded the ${BOOKMARK_SEARCH_MAX_SCAN_NODES}-node scan limit.`,
+            );
+          }
+          return createErrorResponse('Specified bookmark folder was not found.');
+        }
+      }
+
+      let rootPath = '';
+      if (targetFolderNode) {
+        const parentPath = await getBookmarkFolderPath(targetFolderNode.id);
+        const targetTitle = truncateJsonString(
+          targetFolderNode.title,
+          BOOKMARK_MAX_TITLE_JSON_BYTES,
+        );
+        rootPath = truncateJsonString(
+          [parentPath, targetTitle].filter(Boolean).join(' > '),
+          BOOKMARK_MAX_PATH_JSON_BYTES,
+        );
+      } else {
+        try {
+          const rootNodes = await chrome.bookmarks.get('0');
+          scanBudget.scannedNodes += Math.min(rootNodes.length, 1);
+          rootPath = truncateJsonString(
+            rootNodes[0]?.title || '',
+            BOOKMARK_MAX_PATH_JSON_BYTES,
+          );
+        } catch {
+          rootPath = '';
+        }
+      }
+
+      const queue: Array<{ id: string; path: string; depth: number }> = [
+        {
+          id: targetFolderNode?.id || '0',
+          path: rootPath,
+          depth: 0,
+        },
+      ];
+      const seenFolders = new Set<string>([queue[0].id]);
+      const normalizedQuery = query.toLowerCase();
+      const bookmarks: BoundedBookmarkSearchResult[] = [];
+      let bookmarkBytes = 2;
+      let queueIndex = 0;
+
+      scan: while (queueIndex < queue.length) {
+        if (scanBudget.scannedNodes >= BOOKMARK_SEARCH_MAX_SCAN_NODES) {
+          scanBudget.truncated = true;
+          break;
+        }
+        const folder = queue[queueIndex++];
+        const children = await chrome.bookmarks.getChildren(folder.id);
+        for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+          if (scanBudget.scannedNodes >= BOOKMARK_SEARCH_MAX_SCAN_NODES) {
+            scanBudget.truncated = true;
+            break scan;
+          }
+          scanBudget.scannedNodes += 1;
+          const child = children[childIndex];
+          if (child.url) {
+            const boundedUrl = truncateJsonString(
+              child.url,
+              BOOKMARK_MAX_URL_JSON_BYTES,
+            );
+            const boundedTitle = truncateJsonString(
+              child.title,
+              BOOKMARK_MAX_TITLE_JSON_BYTES,
+            );
+            if (!isPublicBookmarkUrl(boundedUrl)) continue;
+            if (
+              normalizedQuery &&
+              !boundedTitle.toLowerCase().includes(normalizedQuery) &&
+              !boundedUrl.toLowerCase().includes(normalizedQuery)
+            ) {
+              continue;
+            }
+
+            const result: BoundedBookmarkSearchResult = {
+              id: truncateJsonString(child.id, BOOKMARK_MAX_ID_JSON_BYTES),
+              title: boundedTitle,
+              url: boundedUrl,
+              dateAdded:
+                typeof child.dateAdded === 'number' &&
+                Number.isFinite(child.dateAdded)
+                  ? child.dateAdded
+                  : undefined,
+              folderPath: folder.path,
+            };
+            const nextBytes =
+              measureJsonBytes(result) + (bookmarks.length > 0 ? 1 : 0);
+            if (
+              bookmarkBytes + nextBytes >
+              BOOKMARK_SEARCH_MAX_OUTPUT_UTF8_BYTES -
+                BOOKMARK_OUTPUT_ENVELOPE_RESERVE_BYTES
+            ) {
+              scanBudget.truncated = true;
+              break scan;
+            }
+            bookmarks.push(result);
+            bookmarkBytes += nextBytes;
+            if (bookmarks.length >= maxResults) {
+              if (
+                childIndex < children.length - 1 ||
+                queueIndex < queue.length
+              ) {
+                scanBudget.truncated = true;
+              }
+              break scan;
+            }
+            continue;
+          }
+
+          const childId = truncateJsonString(
+            child.id,
+            BOOKMARK_MAX_ID_JSON_BYTES,
+          );
+          if (!childId || seenFolders.has(childId)) continue;
+          if (
+            folder.depth >= BOOKMARK_MAX_FOLDER_DEPTH ||
+            queue.length >= BOOKMARK_MAX_QUEUED_FOLDERS
+          ) {
+            scanBudget.truncated = true;
+            continue;
+          }
+          seenFolders.add(childId);
+          const childTitle = truncateJsonString(
+            child.title,
+            BOOKMARK_MAX_TITLE_JSON_BYTES,
+          );
+          queue.push({
+            id: childId,
+            path: truncateJsonString(
+              [folder.path, childTitle].filter(Boolean).join(' > '),
+              BOOKMARK_MAX_PATH_JSON_BYTES,
+            ),
+            depth: folder.depth + 1,
+          });
+        }
+      }
+
+      const response = {
+        success: true,
+        totalResults: bookmarks.length,
+        query: query
+          ? truncateJsonString(query, BOOKMARK_SEARCH_MAX_QUERY_UTF8_BYTES)
+          : null,
+        folderSearched: targetFolderNode
+          ? truncateJsonString(
+              targetFolderNode.title || targetFolderNode.id,
+              BOOKMARK_MAX_TITLE_JSON_BYTES,
+            )
+          : 'All bookmarks',
+        scannedNodes: scanBudget.scannedNodes,
+        truncated: scanBudget.truncated,
+        bookmarks,
+      };
+      let serialized = JSON.stringify(response);
+      while (
+        measureUtf8Bytes(serialized, BOOKMARK_SEARCH_MAX_OUTPUT_UTF8_BYTES) >
+          BOOKMARK_SEARCH_MAX_OUTPUT_UTF8_BYTES &&
+        response.bookmarks.length > 0
+      ) {
+        response.bookmarks.pop();
+        response.totalResults = response.bookmarks.length;
+        response.truncated = true;
+        serialized = JSON.stringify(response);
+      }
 
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(
-              {
-                success: true,
-                totalResults: resultsWithPath.length,
-                query: query || null,
-                folderSearched: targetFolderNode
-                  ? targetFolderNode.title || targetFolderNode.id
-                  : 'All bookmarks',
-                bookmarks: resultsWithPath,
-              },
-              null,
-              2,
-            ),
+            text: serialized,
           },
         ],
         isError: false,

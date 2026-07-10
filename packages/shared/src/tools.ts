@@ -1847,15 +1847,20 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         query: {
           type: 'string',
+          maxLength: 2048,
           description:
             'Search query to match against bookmark titles and URLs. Leave empty to retrieve all bookmarks.',
         },
         maxResults: {
           type: 'number',
-          description: 'Maximum number of bookmarks to return (default: 50)',
+          minimum: 1,
+          maximum: 200,
+          description:
+            'Maximum number of bookmarks to return (default: 50, maximum: 200)',
         },
         folderPath: {
           type: 'string',
+          maxLength: 2048,
           description:
             'Optional folder path or ID to limit search to a specific bookmark folder. Can be a path string (e.g., "Work/Projects") or a folder ID.',
         },
