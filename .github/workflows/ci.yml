@@ -52,7 +52,9 @@ jobs:
         run: pnpm --filter webpage-mcp-connector compile
 
       - name: Test
-        run: pnpm -r --if-present test
+        run: |
+          pnpm test:release
+          pnpm -r --if-present test
 
       - name: Build
         run: pnpm build

@@ -14,6 +14,7 @@
     "zip": "pnpm build && pnpm --filter webpage-mcp-connector zip",
     "copy:wasm": "pnpm --filter @webpage-mcp/wasm-simd copy:artifacts",
     "verify:wasm": "pnpm --filter @webpage-mcp/wasm-simd verify:artifacts",
+    "test:release": "node --test scripts/release-preflight.test.mjs",
     "dev:shared": "pnpm --filter webpage-mcp-shared dev",
     "dev:mcp": "pnpm --filter webpage-mcp dev",
     "dev:extension": "pnpm --filter webpage-mcp-connector dev",

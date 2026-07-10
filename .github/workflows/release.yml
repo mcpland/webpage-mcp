@@ -13,8 +13,7 @@ on:
         type: boolean
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
@@ -29,6 +28,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify release metadata
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: node scripts/release-preflight.mjs metadata --tag "$RELEASE_TAG"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -55,7 +59,9 @@ jobs:
         run: pnpm --filter webpage-mcp-connector compile
 
       - name: Test
-        run: pnpm -r --if-present test
+        run: |
+          pnpm test:release
+          pnpm -r --if-present test
 
       - name: Build workspace
         run: pnpm build
@@ -89,6 +95,11 @@ jobs:
               | xargs -0 sha256sum > SHA256SUMS.txt
           )
 
+      - name: Verify release artifacts
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: node scripts/release-preflight.mjs artifacts artifacts --tag "$RELEASE_TAG"
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -97,8 +108,29 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: build-assets
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-${{ github.sha }}
+          path: artifacts
+
+      - name: Reverify release metadata and artifacts
+        run: node scripts/release-preflight.mjs artifacts artifacts --tag "$GITHUB_REF_NAME"
+
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -113,8 +145,31 @@ jobs:
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_npm == true)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-${{ github.sha }}
+          path: artifacts
+
+      - name: Reverify release metadata and artifacts
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: node scripts/release-preflight.mjs artifacts artifacts --tag "$RELEASE_TAG"
+
+      - name: Setup Node.js for npm publish
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
       - name: Ensure NPM token is configured
         env:
           NPM_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
@@ -124,41 +179,9 @@ jobs:
             exit 1
           fi
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.0
-          run_install: false
-
-      - name: Setup Node.js for npm publish
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          registry-url: https://registry.npmjs.org
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Verify tag version matches package version
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION=$(node -p "require('./app/mcp-server/package.json').version")
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "Tag version (${TAG_VERSION}) does not match app/mcp-server/package.json version (${PKG_VERSION})."
-            exit 1
-          fi
-
-      - name: Build publishable package
-        run: |
-          pnpm --filter webpage-mcp-shared build
-          pnpm --filter webpage-mcp build
-
       - name: Publish package
-        run: pnpm --filter webpage-mcp publish --provenance --access public --no-git-checks
+        run: |
+          VERSION=$(node -p "require('./app/mcp-server/package.json').version")
+          npm publish "artifacts/mcp/webpage-mcp-${VERSION}.tgz" --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
