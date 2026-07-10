@@ -16,6 +16,11 @@ import {
 import { getDb, sessions, messages, type SessionRow } from './db';
 import type { EngineName } from './engines/types';
 import { sanitizeAgentMessageForPublicRead } from './public-message-sanitizer';
+import {
+  stringifySessionConfig,
+  validateSessionCreatePayload,
+  validateSessionUpdatePayload,
+} from './session-payload-limits';
 
 // ============================================================
 // Types
@@ -164,11 +169,6 @@ function parseJson<T>(value: string | null): T | undefined {
   }
 }
 
-function stringifyJson<T>(value: T | null | undefined): string | null {
-  if (value === null || value === undefined) return null;
-  return JSON.stringify(value);
-}
-
 // ============================================================
 // Type Conversion
 // ============================================================
@@ -203,6 +203,7 @@ export async function createSession(
   engineName: EngineName,
   options: CreateSessionOptions = {},
 ): Promise<AgentSession> {
+  validateSessionCreatePayload(projectId, engineName, options);
   const db = getDb();
   const now = new Date().toISOString();
 
@@ -225,8 +226,8 @@ export async function createSession(
     model: options.model?.trim() || null,
     permissionMode: resolvedPermissionMode,
     allowDangerouslySkipPermissions: resolvedAllowDangerouslySkipPermissions ? '1' : null,
-    systemPromptConfig: stringifyJson(options.systemPromptConfig),
-    optionsConfig: stringifyJson(options.optionsConfig),
+    systemPromptConfig: stringifySessionConfig(options.systemPromptConfig, 'systemPromptConfig'),
+    optionsConfig: stringifySessionConfig(options.optionsConfig, 'optionsConfig'),
     managementInfo: null,
     createdAt: now,
     updatedAt: now,
@@ -390,6 +391,7 @@ export async function getSessionsByProjectAndEngine(
  * Update an existing session.
  */
 export async function updateSession(sessionId: string, updates: UpdateSessionInput): Promise<void> {
+  validateSessionUpdatePayload(sessionId, updates);
   const db = getDb();
   const now = new Date().toISOString();
 
@@ -420,15 +422,18 @@ export async function updateSession(sessionId: string, updates: UpdateSessionInp
   }
 
   if (updates.systemPromptConfig !== undefined) {
-    updateData.systemPromptConfig = stringifyJson(updates.systemPromptConfig);
+    updateData.systemPromptConfig = stringifySessionConfig(
+      updates.systemPromptConfig,
+      'systemPromptConfig',
+    );
   }
 
   if (updates.optionsConfig !== undefined) {
-    updateData.optionsConfig = stringifyJson(updates.optionsConfig);
+    updateData.optionsConfig = stringifySessionConfig(updates.optionsConfig, 'optionsConfig');
   }
 
   if (updates.managementInfo !== undefined) {
-    updateData.managementInfo = stringifyJson(updates.managementInfo);
+    updateData.managementInfo = stringifySessionConfig(updates.managementInfo, 'managementInfo');
   }
 
   await db.update(sessions).set(updateData).where(eq(sessions.id, sessionId));

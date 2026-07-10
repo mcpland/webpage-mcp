@@ -35,6 +35,10 @@ import {
 } from './public-session-sanitizer';
 import { validateAgentAttachments } from './attachment-limits';
 import { validateSessionSecurityConfig } from './session-security';
+import {
+  validateSessionCreatePayload,
+  validateSessionUpdatePayload,
+} from './session-payload-limits';
 import { sanitizeProjectForPublicRead } from './public-project-sanitizer';
 import { getProject } from './project-service';
 import { getDefaultWorkspaceDir, getDefaultProjectRoot } from './storage';
@@ -508,6 +512,7 @@ export async function dispatchAgentRpc(
         if (!payload.engineName) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'engineName is required' });
         }
+        validateSessionCreatePayload(projectId, payload.engineName, payload);
         if (payload.engineSessionId !== undefined) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
             error: 'engineSessionId is managed by the engine and cannot be set',
@@ -563,6 +568,7 @@ export async function dispatchAgentRpc(
         if (!sessionId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'sessionId is required' });
         }
+        validateSessionUpdatePayload(sessionId, updates);
         if (updates.engineSessionId !== undefined) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
             error: 'engineSessionId is managed by the engine and cannot be set',
