@@ -32,6 +32,12 @@
   const MAX_TARGET_SCAN_MS = 250;
   const MAX_TARGET_STYLE_CHECKS = 1000;
   const MAX_TARGET_LAYOUT_CHECKS = 1000;
+  const MAX_VARIABLE_COUNT = 128;
+  const MAX_VARIABLE_PAYLOAD_BYTES = 256 * 1024;
+  const MAX_VARIABLE_KEY_BYTES = 128;
+  const MAX_VARIABLE_LABEL_BYTES = 512;
+  const MAX_VARIABLE_VALUE_BYTES = 8 * 1024;
+  const MAX_VARIABLE_VALUES_BYTES = 256 * 1024;
 
   // Keep a weak map from ref id to elements
   if (!window.__claudeElementMap) window.__claudeElementMap = {};
@@ -755,6 +761,80 @@
         ),
       };
     }
+  }
+
+  function normalizeVariableDefinitions(request) {
+    let source = Array.isArray(request.variables) ? request.variables : [];
+    if (source.length === 0 && request.payload !== undefined && request.payload !== null) {
+      if (typeof request.payload !== 'string') {
+        throw new Error('variable payload must be a JSON string');
+      }
+      if (
+        request.payload.length > MAX_VARIABLE_PAYLOAD_BYTES ||
+        utf8ByteLength(request.payload, MAX_VARIABLE_PAYLOAD_BYTES) >
+          MAX_VARIABLE_PAYLOAD_BYTES
+      ) {
+        throw new Error(
+          `variable payload exceeds the ${MAX_VARIABLE_PAYLOAD_BYTES}-byte UTF-8 limit`,
+        );
+      }
+      const parsed = JSON.parse(request.payload || '{}');
+      source = Array.isArray(parsed.variables) ? parsed.variables : [];
+    }
+    if (source.length > MAX_VARIABLE_COUNT) {
+      throw new Error(`variables exceed the ${MAX_VARIABLE_COUNT}-entry limit`);
+    }
+
+    const variables = [];
+    const keys = new Set();
+    let aggregateBytes = 2;
+    for (const item of source) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        throw new Error('each variable must be an object');
+      }
+      const key = normalizeTargetInput(item.key, 'variable key', MAX_VARIABLE_KEY_BYTES);
+      if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
+        throw new Error(`variable key is not allowed: ${key}`);
+      }
+      if (keys.has(key)) throw new Error(`duplicate variable key: ${key}`);
+      keys.add(key);
+      const label = truncateUtf8(
+        typeof item.label === 'string' ? item.label : key,
+        MAX_VARIABLE_LABEL_BYTES,
+      );
+      const rawDefault =
+        typeof item.default === 'string' ||
+        typeof item.default === 'number' ||
+        typeof item.default === 'boolean'
+          ? String(item.default)
+          : '';
+      const normalized = {
+        key,
+        label,
+        default: truncateUtf8(rawDefault, MAX_VARIABLE_VALUE_BYTES),
+        sensitive: item.sensitive === true,
+      };
+      const bytes = utf8ByteLength(JSON.stringify(normalized));
+      if (aggregateBytes + bytes > MAX_VARIABLE_PAYLOAD_BYTES) {
+        throw new Error('normalized variables exceed the aggregate byte limit');
+      }
+      aggregateBytes += bytes;
+      variables.push(normalized);
+    }
+    return variables;
+  }
+
+  function putBoundedVariableValue(values, state, key, value) {
+    const bounded = truncateUtf8(
+      typeof value === 'string' ? value : '',
+      MAX_VARIABLE_VALUE_BYTES,
+    );
+    const bytes = utf8ByteLength(key) + utf8ByteLength(bounded) + 8;
+    if (state.bytes + bytes > MAX_VARIABLE_VALUES_BYTES) {
+      throw new Error('collected variable values exceed the aggregate byte limit');
+    }
+    state.bytes += bytes;
+    values[key] = bounded;
   }
 
   /**
@@ -1856,25 +1936,19 @@
       }
       if (request && request.action === 'collectVariables') {
         try {
-          let vars = Array.isArray(request.variables) ? request.variables : [];
-          if ((!vars || vars.length === 0) && request.payload) {
-            try {
-              const p = JSON.parse(String(request.payload || '{}'));
-              if (Array.isArray(p.variables)) vars = p.variables;
-            } catch {}
-          }
+          const vars = normalizeVariableDefinitions(request);
           const useOverlay = request.useOverlay !== false; // default true
-          const values = {};
+          const values = Object.create(null);
+          const valueState = { bytes: 2 };
           if (!useOverlay) {
             for (const v of vars) {
-              const key = String(v && v.key ? v.key : '');
-              if (!key) continue;
-              const label = v.label || key;
-              const def = v.default || '';
-              const promptText = `Please enter parameters ${label} (${key})`;
-              let val = window.prompt(promptText, def);
-              if (typeof val !== 'string') val = def;
-              values[key] = val;
+              const promptText = truncateUtf8(
+                `Please enter parameters ${v.label} (${v.key})`,
+                MAX_VARIABLE_LABEL_BYTES + MAX_VARIABLE_KEY_BYTES + 32,
+              );
+              let val = window.prompt(promptText, v.default);
+              if (typeof val !== 'string') val = v.default;
+              putBoundedVariableValue(values, valueState, v.key, val);
             }
             sendResponse({ success: true, values });
             return true;
@@ -1914,11 +1988,12 @@
             marginBottom: '12px',
           });
           const form = document.createElement('form');
+          const inputs = new Map();
           for (const v of vars) {
             const row = document.createElement('div');
             Object.assign(row.style, { marginBottom: '10px' });
             const label = document.createElement('label');
-            label.textContent = `${v.label || v.key}${v.sensitive ? ' (Sensitive)' : ''}`;
+            label.textContent = `${v.label}${v.sensitive ? ' (Sensitive)' : ''}`;
             Object.assign(label.style, {
               display: 'block',
               marginBottom: '6px',
@@ -1926,8 +2001,9 @@
             });
             const input = document.createElement('input');
             input.type = v.sensitive ? 'password' : 'text';
-            input.name = String(v.key);
-            input.value = String(v.default || '');
+            input.name = v.key;
+            input.value = v.default;
+            input.maxLength = MAX_VARIABLE_VALUE_BYTES;
             Object.assign(input.style, {
               width: '100%',
               boxSizing: 'border-box',
@@ -1939,6 +2015,7 @@
             row.appendChild(label);
             row.appendChild(input);
             form.appendChild(row);
+            inputs.set(v.key, input);
           }
           const actions = document.createElement('div');
           Object.assign(actions.style, {
@@ -1986,22 +2063,35 @@
             sendResponse({ success: false, cancelled: true });
           };
           form.onsubmit = (e) => {
-            e.preventDefault();
-            for (const v of vars) {
-              const el = form.querySelector(
-                `input[name="${CSS.escape(String(v.key))}"]`,
-              );
-              if (el)
-                values[v.key] = /** @type {HTMLInputElement} */ (el).value;
+            try {
+              e.preventDefault();
+              for (const v of vars) {
+                const input = inputs.get(v.key);
+                if (input) {
+                  putBoundedVariableValue(values, valueState, v.key, input.value);
+                }
+              }
+              cleanup();
+              sendResponse({ success: true, values });
+            } catch (error) {
+              cleanup();
+              sendResponse({
+                success: false,
+                error: truncateUtf8(
+                  error && error.message ? error.message : String(error),
+                  MAX_TARGET_ERROR_BYTES,
+                ),
+              });
             }
-            cleanup();
-            sendResponse({ success: true, values });
           };
           return true; // async
         } catch (e) {
           sendResponse({
             success: false,
-            error: String(e && e.message ? e.message : e),
+            error: truncateUtf8(
+              e && e.message ? e.message : String(e),
+              MAX_TARGET_ERROR_BYTES,
+            ),
           });
           return true;
         }

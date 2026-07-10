@@ -274,4 +274,53 @@ describe('accessibility-tree-helper resource boundaries', () => {
     expect(source).not.toContain('querySelectorAll(');
     expect(source).not.toContain('ORDERED_NODE_SNAPSHOT_TYPE');
   });
+
+  it('rejects excessive variable forms before allocating overlay controls', async () => {
+    loadHelper();
+
+    const response = await dispatch(getRuntimeListener(), {
+      action: 'collectVariables',
+      variables: Array.from({ length: 129 }, (_, index) => ({ key: `v${index}` })),
+    });
+
+    expect(response).toMatchObject({ success: false });
+    expect(response.error).toContain('128-entry limit');
+    expect(document.getElementById('__rr_var_overlay__')).toBeNull();
+  });
+
+  it('bounds variable defaults and collected values by UTF-8 bytes', async () => {
+    vi.spyOn(window, 'prompt').mockReturnValue('😀'.repeat(10_000));
+    loadHelper();
+
+    const response = await dispatch(getRuntimeListener(), {
+      action: 'collectVariables',
+      useOverlay: false,
+      variables: [{ key: 'message', label: 'Message', default: 'x'.repeat(20_000) }],
+    });
+
+    expect(response.success).toBe(true);
+    expect(new TextEncoder().encode(response.values.message).byteLength).toBeLessThanOrEqual(
+      8 * 1024,
+    );
+  });
+
+  it('rejects oversized JSON payloads and prototype-mutating variable keys', async () => {
+    loadHelper();
+
+    const oversized = await dispatch(getRuntimeListener(), {
+      action: 'collectVariables',
+      payload: 'x'.repeat(256 * 1024 + 1),
+    });
+    const dangerous = await dispatch(getRuntimeListener(), {
+      action: 'collectVariables',
+      useOverlay: false,
+      variables: [{ key: '__proto__' }],
+    });
+
+    expect(oversized).toMatchObject({ success: false });
+    expect(oversized.error).toContain('262144-byte UTF-8 limit');
+    expect(dangerous).toMatchObject({ success: false });
+    expect(dangerous.error).toContain('not allowed');
+  });
+
 });
