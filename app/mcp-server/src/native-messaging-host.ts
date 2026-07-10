@@ -68,6 +68,8 @@ const IPC_MAX_PENDING_REQUESTS = 16;
 const IPC_PAUSE_HIGH_WATERMARK = 8;
 const IPC_RESUME_LOW_WATERMARK = 4;
 const NATIVE_MAX_PENDING_DIRECTIVES = 64;
+export const NATIVE_MAX_SERVER_INSTANCES = 64;
+export const NATIVE_MAX_INSTANCE_LABEL_BYTES = 256;
 
 function agentStreamCoalesceKey(...parts: string[]): string {
   // JSON tuple encoding prevents delimiter collisions between subscription IDs
@@ -112,6 +114,12 @@ function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
   }
   const obj = raw as Record<string, unknown>;
   const instanceId = resolveInstanceId(obj.instanceId);
+  if (
+    typeof obj.label === 'string' &&
+    Buffer.byteLength(obj.label, 'utf8') > NATIVE_MAX_INSTANCE_LABEL_BYTES
+  ) {
+    throw new Error(`Instance label exceeds ${NATIVE_MAX_INSTANCE_LABEL_BYTES} bytes`);
+  }
 
   return {
     instanceId,
@@ -794,6 +802,9 @@ export class NativeMessagingHost {
   private resolveSyncDirective(payload: unknown): McpServerInstanceConfig[] {
     const rawPayload = payload && typeof payload === 'object' ? (payload as NativeSyncInstancesPayload) : null;
     const rawInstances = Array.isArray(rawPayload?.instances) ? rawPayload.instances : [];
+    if (rawInstances.length > NATIVE_MAX_SERVER_INSTANCES) {
+      throw new Error(`Instance count exceeds ${NATIVE_MAX_SERVER_INSTANCES}`);
+    }
     const byId = new Map<string, McpServerInstanceConfig>();
 
     for (const raw of rawInstances) {

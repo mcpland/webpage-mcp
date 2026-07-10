@@ -19,7 +19,7 @@ describe('instance id validation', () => {
     expect(resolveInstanceId(' custom.instance-1 ')).toBe('custom.instance-1');
   });
 
-  it.each([null, '', '   ', '../default', 'instance/name', 'a'.repeat(65), 42])(
+  it.each([null, '', '   ', '../default', 'instance/name', 'a'.repeat(65), ' '.repeat(129), 42])(
     'rejects an explicitly supplied malformed instanceId: %s',
     (instanceId) => {
       expect(() => resolveInstanceId(instanceId)).toThrow('Invalid instanceId');

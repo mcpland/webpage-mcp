@@ -36,6 +36,9 @@ import { clearTabQueue } from "./tab-queue";
 
 const LOG_PREFIX = "[NativeHost]";
 const INSTANCE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
+const MAX_MANAGED_SERVER_INSTANCES = 64;
+const MAX_INSTANCE_LABEL_BYTES = 256;
+const MAX_INSTANCE_ID_INPUT_LENGTH = 128;
 const WORKFLOW_RUNTIME_FEATURE_FLAGS = [
   "workflow_run",
   "published_workflow_descriptors",
@@ -196,7 +199,10 @@ function makeRequestId(): string {
 }
 
 function normalizeInstanceId(value: unknown): string {
-  if (typeof value !== "string") {
+  if (
+    typeof value !== "string" ||
+    value.length > MAX_INSTANCE_ID_INPUT_LENGTH
+  ) {
     return DEFAULT_MCP_INSTANCE_ID;
   }
   const trimmed = value.trim();
@@ -207,7 +213,10 @@ function normalizeInstanceId(value: unknown): string {
 }
 
 function parseInstanceIdInput(value: unknown): string | null {
-  if (typeof value !== "string") {
+  if (
+    typeof value !== "string" ||
+    value.length > MAX_INSTANCE_ID_INPUT_LENGTH
+  ) {
     return null;
   }
   const trimmed = value.trim();
@@ -233,6 +242,23 @@ function sortInstances(
       return 1;
     return a.instanceId.localeCompare(b.instanceId);
   });
+}
+
+function isUtf8LengthAtMost(value: string, maximumBytes: number): boolean {
+  let bytes = 0;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    bytes +=
+      codePoint <= 0x7f
+        ? 1
+        : codePoint <= 0x7ff
+          ? 2
+          : codePoint <= 0xffff
+            ? 3
+            : 4;
+    if (bytes > maximumBytes) return false;
+  }
+  return true;
 }
 
 function normalizeServerStatus(raw: unknown): ServerStatus {
@@ -266,7 +292,10 @@ function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
   const record = raw as Record<string, unknown>;
   let instanceId = DEFAULT_MCP_INSTANCE_ID;
   if (record.instanceId !== undefined && record.instanceId !== null) {
-    if (typeof record.instanceId !== "string") {
+    if (
+      typeof record.instanceId !== "string" ||
+      record.instanceId.length > MAX_INSTANCE_ID_INPUT_LENGTH
+    ) {
       return null;
     }
     const trimmed = record.instanceId.trim();
@@ -279,10 +308,12 @@ function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
   const enabled = typeof record.enabled === "boolean" ? record.enabled : true;
   const autoStart =
     typeof record.autoStart === "boolean" ? record.autoStart : true;
-  const label =
-    typeof record.label === "string" && record.label.trim()
-      ? record.label.trim()
-      : undefined;
+  const rawLabel =
+    typeof record.label === "string" ? record.label : undefined;
+  if (rawLabel && !isUtf8LengthAtMost(rawLabel, MAX_INSTANCE_LABEL_BYTES)) {
+    return null;
+  }
+  const label = rawLabel?.trim() || undefined;
 
   return {
     instanceId,
@@ -295,7 +326,7 @@ function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
 function normalizeManagedInstances(
   instances: McpServerInstanceConfig[],
 ): McpServerInstanceConfig[] {
-  return sortInstances(instances);
+  return sortInstances(instances).slice(0, MAX_MANAGED_SERVER_INSTANCES);
 }
 
 async function saveServerStatuses(): Promise<void> {
@@ -321,11 +352,14 @@ async function loadServerStatuses(): Promise<void> {
     const nextMap: ServerStatusMap = {};
 
     if (mapRaw && typeof mapRaw === "object") {
-      for (const [rawId, status] of Object.entries(
-        mapRaw as Record<string, unknown>,
-      )) {
+      let retainedStatuses = 0;
+      for (const rawId in mapRaw as Record<string, unknown>) {
+        if (retainedStatuses >= MAX_MANAGED_SERVER_INSTANCES) break;
+        if (!Object.prototype.hasOwnProperty.call(mapRaw, rawId)) continue;
+        const status = (mapRaw as Record<string, unknown>)[rawId];
         const instanceId = normalizeInstanceId(rawId);
         nextMap[instanceId] = normalizeServerStatus(status);
+        retainedStatuses += 1;
       }
     }
 
@@ -390,6 +424,12 @@ async function persistManagedInstances(): Promise<void> {
 
 function applyInstanceStatus(status: McpServerInstanceStatus): void {
   const instanceId = normalizeInstanceId(status.instanceId);
+  if (
+    currentServerStatuses[instanceId] === undefined &&
+    Object.keys(currentServerStatuses).length >= MAX_MANAGED_SERVER_INSTANCES
+  ) {
+    return;
+  }
   const nextStatus: ServerStatus = {
     isRunning: Boolean(status.isRunning),
     lastUpdated:
@@ -410,7 +450,7 @@ function applyInstanceStatus(status: McpServerInstanceStatus): void {
 
 function applyInstanceStatusList(rawStatuses: unknown[]): void {
   const next: ServerStatusMap = {};
-  for (const raw of rawStatuses) {
+  for (const raw of rawStatuses.slice(0, MAX_MANAGED_SERVER_INSTANCES)) {
     if (!raw || typeof raw !== "object") continue;
     const item = raw as Record<string, unknown>;
     const instanceId = normalizeInstanceId(item.instanceId);
@@ -505,7 +545,7 @@ async function ensureManagedInstancesLoaded(): Promise<
     : [];
 
   const byId = new Map<string, McpServerInstanceConfig>();
-  for (const raw of rawList) {
+  for (const raw of rawList.slice(0, MAX_MANAGED_SERVER_INSTANCES)) {
     const normalized = normalizeInstanceConfig(raw);
     if (!normalized) continue;
     byId.set(normalized.instanceId, normalized);
@@ -538,6 +578,14 @@ async function upsertManagedInstance(
   }
 
   const byId = await getManagedInstancesById();
+  if (
+    !byId.has(normalized.instanceId) &&
+    byId.size >= MAX_MANAGED_SERVER_INSTANCES
+  ) {
+    throw new Error(
+      `Managed server instance limit reached (${MAX_MANAGED_SERVER_INSTANCES})`,
+    );
+  }
   byId.set(normalized.instanceId, normalized);
   if (!byId.has(DEFAULT_MCP_INSTANCE_ID)) {
     byId.set(DEFAULT_MCP_INSTANCE_ID, createDefaultInstanceConfig());

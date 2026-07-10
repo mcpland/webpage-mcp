@@ -5,7 +5,11 @@ import {
   CHROME_NATIVE_MESSAGE_MAX_OUTBOUND_BYTES,
   NativeMessageWriter,
 } from './native-message-output';
-import { NativeMessagingHost } from './native-messaging-host';
+import {
+  NATIVE_MAX_INSTANCE_LABEL_BYTES,
+  NATIVE_MAX_SERVER_INSTANCES,
+  NativeMessagingHost,
+} from './native-messaging-host';
 import type { RealtimeEvent } from './agent/types';
 
 class FailingWritable extends Writable {
@@ -62,6 +66,35 @@ function decodeFrame(frame: Buffer): Record<string, unknown> {
 }
 
 describe('NativeMessagingHost outbound requests', () => {
+  it('bounds synchronized server instance count and labels before allocation', () => {
+    const host = new NativeMessagingHost(
+      new NativeMessageWriter(new Writable({ write: (_chunk, _encoding, callback) => callback() })),
+    );
+    const resolveSyncDirective = (
+      host as unknown as {
+        resolveSyncDirective: (payload: unknown) => unknown;
+      }
+    ).resolveSyncDirective.bind(host);
+
+    expect(() =>
+      resolveSyncDirective({
+        instances: Array.from({ length: NATIVE_MAX_SERVER_INSTANCES + 1 }, (_, index) => ({
+          instanceId: `instance-${index}`,
+        })),
+      }),
+    ).toThrow(`Instance count exceeds ${NATIVE_MAX_SERVER_INSTANCES}`);
+    expect(() =>
+      resolveSyncDirective({
+        instances: [
+          {
+            instanceId: 'bounded-instance',
+            label: '界'.repeat(NATIVE_MAX_INSTANCE_LABEL_BYTES),
+          },
+        ],
+      }),
+    ).toThrow(`Instance label exceeds ${NATIVE_MAX_INSTANCE_LABEL_BYTES} bytes`);
+  });
+
   it('rejects a pending request immediately when stdout fails', async () => {
     const host = new NativeMessagingHost(new NativeMessageWriter(new FailingWritable()));
 
