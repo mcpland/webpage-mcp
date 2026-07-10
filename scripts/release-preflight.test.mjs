@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -11,9 +12,41 @@ import {
   verifyReleaseArtifacts,
   verifyReleaseMetadata,
 } from "./release-preflight.mjs";
+import {
+  EXTENSION_EXPECTED_ID_ENV,
+  EXTENSION_PUBLIC_KEY_ENV,
+  LEGACY_EXTENSION_KEY_ENV,
+  REQUIRE_EXTENSION_PUBLIC_KEY_ENV,
+  deriveChromeExtensionId,
+  resolveChromeExtensionPublicKey,
+  validateChromeExtensionPublicKey,
+} from "./extension-public-key.mjs";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = "1.2.3";
+const { publicKey: testPublicKey, privateKey: testPrivateKey } =
+  generateKeyPairSync("rsa", { modulusLength: 2048 });
+const TEST_EXTENSION_PUBLIC_KEY = testPublicKey
+  .export({ format: "der", type: "spki" })
+  .toString("base64");
+const TEST_PRIVATE_KEY_DER = testPrivateKey
+  .export({ format: "der", type: "pkcs8" })
+  .toString("base64");
+const TEST_PKCS1_PUBLIC_KEY = testPublicKey
+  .export({ format: "der", type: "pkcs1" })
+  .toString("base64");
+const { publicKey: testEcPublicKey } = generateKeyPairSync("ec", {
+  namedCurve: "prime256v1",
+});
+const TEST_EC_PUBLIC_KEY = testEcPublicKey
+  .export({ format: "der", type: "spki" })
+  .toString("base64");
+const TEST_EXTENSION_ID = deriveChromeExtensionId(TEST_EXTENSION_PUBLIC_KEY);
+const TEST_RELEASE_ENVIRONMENT = {
+  [EXTENSION_EXPECTED_ID_ENV]: TEST_EXTENSION_ID,
+  [EXTENSION_PUBLIC_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
+  [REQUIRE_EXTENSION_PUBLIC_KEY_ENV]: "true",
+};
 
 async function writeJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
@@ -127,6 +160,9 @@ async function createArtifacts(rootDir, overrides = {}) {
   });
   await writeJson(join(stagingDir, "manifest.json"), {
     version: overrides.extensionVersion ?? VERSION,
+    ...(overrides.extensionKey === undefined
+      ? {}
+      : { key: overrides.extensionKey }),
   });
 
   await writeFile(
@@ -178,6 +214,125 @@ test("release metadata requires aligned package and tag versions", async (t) => 
   );
 });
 
+test("extension identity accepts only a canonical public DER key", () => {
+  assert.equal(
+    validateChromeExtensionPublicKey(TEST_EXTENSION_PUBLIC_KEY),
+    TEST_EXTENSION_PUBLIC_KEY,
+  );
+  assert.match(TEST_EXTENSION_ID, /^[a-p]{32}$/);
+  assert.equal(resolveChromeExtensionPublicKey({}), undefined);
+  assert.equal(
+    resolveChromeExtensionPublicKey(TEST_RELEASE_ENVIRONMENT),
+    TEST_EXTENSION_PUBLIC_KEY,
+  );
+
+  assert.throws(
+    () =>
+      resolveChromeExtensionPublicKey({
+        [EXTENSION_EXPECTED_ID_ENV]: TEST_EXTENSION_ID,
+        [REQUIRE_EXTENSION_PUBLIC_KEY_ENV]: "true",
+      }),
+    /is required for a formal release/,
+  );
+  assert.throws(
+    () =>
+      resolveChromeExtensionPublicKey({
+        [EXTENSION_PUBLIC_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
+        [REQUIRE_EXTENSION_PUBLIC_KEY_ENV]: "true",
+      }),
+    /CHROME_EXTENSION_EXPECTED_ID is required/,
+  );
+  assert.throws(
+    () =>
+      resolveChromeExtensionPublicKey({
+        [EXTENSION_EXPECTED_ID_ENV]: "a".repeat(32),
+        [EXTENSION_PUBLIC_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
+      }),
+    /does not derive the CHROME_EXTENSION_EXPECTED_ID identity/,
+  );
+  assert.throws(
+    () =>
+      resolveChromeExtensionPublicKey({
+        [EXTENSION_EXPECTED_ID_ENV]: "invalid",
+        [EXTENSION_PUBLIC_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
+      }),
+    /must be a 32-character Chrome extension ID/,
+  );
+  assert.throws(
+    () =>
+      resolveChromeExtensionPublicKey({
+        [LEGACY_EXTENSION_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
+      }),
+    /old name encouraged private-key use/,
+  );
+  assert.throws(
+    () =>
+      resolveChromeExtensionPublicKey({
+        [REQUIRE_EXTENSION_PUBLIC_KEY_ENV]: "sometimes",
+      }),
+    /must be true, false, 1, or 0/,
+  );
+  assert.throws(
+    () => validateChromeExtensionPublicKey("YOUR_PUBLIC_KEY_HERE"),
+    /private key, or a placeholder/,
+  );
+  assert.throws(
+    () =>
+      validateChromeExtensionPublicKey(
+        testPrivateKey.export({ format: "pem", type: "pkcs8" }),
+      ),
+    /never PEM text/,
+  );
+  assert.throws(
+    () =>
+      validateChromeExtensionPublicKey(
+        testPublicKey.export({ format: "pem", type: "spki" }),
+      ),
+    /never PEM text/,
+  );
+  assert.throws(
+    () => validateChromeExtensionPublicKey(TEST_PRIVATE_KEY_DER),
+    /SubjectPublicKeyInfo public key/,
+  );
+  assert.throws(
+    () => validateChromeExtensionPublicKey(TEST_PKCS1_PUBLIC_KEY),
+    /SubjectPublicKeyInfo public key/,
+  );
+  assert.throws(
+    () => validateChromeExtensionPublicKey(TEST_EC_PUBLIC_KEY),
+    /must contain an RSA public key/,
+  );
+  assert.throws(
+    () => validateChromeExtensionPublicKey("not+canonical=base64"),
+    /not canonical base64/,
+  );
+  assert.throws(
+    () => validateChromeExtensionPublicKey(`${TEST_EXTENSION_PUBLIC_KEY}\n`),
+    /without whitespace/,
+  );
+});
+
+test("local environment files are ignored without hiding the safe example", () => {
+  for (const path of [
+    ".env",
+    ".env.local",
+    "app/chrome-extension/.env",
+    "app/chrome-extension/.env.local",
+  ]) {
+    const result = spawnSync("git", ["check-ignore", "--quiet", path], {
+      cwd: REPOSITORY_ROOT,
+    });
+    assert.equal(result.status, 0, `${path} must be ignored by git`);
+  }
+
+  const example = spawnSync(
+    "git",
+    ["check-ignore", "--quiet", "app/chrome-extension/.env.example"],
+    { cwd: REPOSITORY_ROOT },
+  );
+  assert.notEqual(example.status, 0, ".env.example must remain trackable");
+});
+
 test("release artifacts must contain matching package metadata and checksums", async (t) => {
   const rootDir = await createReleaseRoot(t);
   const { artifactsDir } = await createArtifacts(rootDir);
@@ -193,6 +348,31 @@ test("release artifacts must contain matching package metadata and checksums", a
     `extension/webpage-mcp-connector-${VERSION}-chrome-extension.zip`,
     `mcp/webpage-mcp-${VERSION}.tgz`,
   ]);
+});
+
+test("formal release artifacts bind the configured public key", async (t) => {
+  const rootDir = await createReleaseRoot(t);
+  const { artifactsDir } = await createArtifacts(rootDir, {
+    extensionKey: TEST_EXTENSION_PUBLIC_KEY,
+  });
+
+  const result = await verifyReleaseArtifacts({
+    rootDir,
+    artifactsDir,
+    environment: TEST_RELEASE_ENVIRONMENT,
+  });
+  assert.equal(result.extensionPublicKey, TEST_EXTENSION_PUBLIC_KEY);
+
+  const missingKeyRoot = await createReleaseRoot(t);
+  const missingKeyArtifacts = await createArtifacts(missingKeyRoot);
+  await assert.rejects(
+    verifyReleaseArtifacts({
+      rootDir: missingKeyRoot,
+      artifactsDir: missingKeyArtifacts.artifactsDir,
+      environment: TEST_RELEASE_ENVIRONMENT,
+    }),
+    /manifest public key does not match/,
+  );
 });
 
 test("release artifact verification fails closed", async (t) => {
@@ -258,6 +438,22 @@ test("release workflow verifies before either publish mutation", async () => {
     npmJob,
   );
   const npmPublish = workflow.indexOf('          npm publish "', npmJob);
+
+  assert.match(
+    workflow,
+    /CHROME_EXTENSION_PUBLIC_KEY:\s*\$\{\{\s*vars\.CHROME_EXTENSION_PUBLIC_KEY\s*\}\}/,
+    "formal releases must source the public key from a repository variable",
+  );
+  assert.match(
+    workflow,
+    /WEBPAGE_MCP_REQUIRE_EXTENSION_PUBLIC_KEY:\s*["']true["']/,
+    "formal releases must fail closed when the public key is unavailable",
+  );
+  assert.match(
+    workflow,
+    /CHROME_EXTENSION_EXPECTED_ID:\s*iehgbogeakiedihodennfcnigojnncag/,
+    "formal releases must bind the public key to the official extension ID",
+  );
 
   const remoteActionRefs = Array.from(
     workflow.matchAll(/^\s*uses:\s*([^\s#]+)/gm),

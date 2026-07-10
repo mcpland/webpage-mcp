@@ -6,6 +6,11 @@ import { join, relative, resolve, sep } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
+import {
+  resolveChromeExtensionPublicKey,
+  validateChromeExtensionPublicKey,
+} from "./extension-public-key.mjs";
+
 const RELEASE_PACKAGES = [
   {
     path: "app/mcp-server/package.json",
@@ -63,8 +68,10 @@ function normalizeReleaseTag(tag) {
 export async function verifyReleaseMetadata({
   rootDir = process.cwd(),
   tag,
+  environment = process.env,
 } = {}) {
   const tagVersion = normalizeReleaseTag(tag);
+  const extensionPublicKey = resolveChromeExtensionPublicKey(environment);
   const packages = [];
 
   for (const releasePackage of RELEASE_PACKAGES) {
@@ -97,7 +104,7 @@ export async function verifyReleaseMetadata({
     );
   }
 
-  return { version: expectedVersion, tagVersion, packages };
+  return { version: expectedVersion, tagVersion, packages, extensionPublicKey };
 }
 
 async function listFiles(rootDir, currentDir = rootDir) {
@@ -342,9 +349,10 @@ export async function verifyReleaseArtifacts({
   rootDir = process.cwd(),
   artifactsDir,
   tag,
+  environment = process.env,
 } = {}) {
   invariant(artifactsDir, "artifactsDir is required");
-  const metadata = await verifyReleaseMetadata({ rootDir, tag });
+  const metadata = await verifyReleaseMetadata({ rootDir, tag, environment });
   const mcpRelativePath = `mcp/webpage-mcp-${metadata.version}.tgz`;
   const extensionRelativePath = `extension/webpage-mcp-connector-${metadata.version}-chrome-extension.zip`;
   const expectedFiles = [
@@ -389,6 +397,16 @@ export async function verifyReleaseArtifacts({
     extensionManifest.version === metadata.version,
     `Extension manifest version ${String(extensionManifest.version)} does not match release version ${metadata.version}`,
   );
+  const packedExtensionPublicKey =
+    extensionManifest.key === undefined
+      ? undefined
+      : validateChromeExtensionPublicKey(extensionManifest.key);
+  if (metadata.extensionPublicKey !== undefined) {
+    invariant(
+      packedExtensionPublicKey === metadata.extensionPublicKey,
+      "Extension manifest public key does not match CHROME_EXTENSION_PUBLIC_KEY",
+    );
+  }
 
   const checksumSource = await readFile(
     join(artifactRoot, "SHA256SUMS.txt"),

@@ -520,6 +520,7 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 - On tag pushes, creates a GitHub Release and uploads assets
 - On tag pushes (`v*`), publishes `webpage-mcp` to npm (requires `NPM_AUTH_TOKEN` secret)
 - Manual npm publish available via `workflow_dispatch` with `publish_npm=true`
+- Formal release builds require the Actions repository variable `CHROME_EXTENSION_PUBLIC_KEY`. It must contain the single-line base64 DER public-key body from Chrome Web Store, never a PEM or private key, and must derive the configured official extension ID. Local builds may omit it, but then unpacked builds do not use the official stable extension ID.
 
 </details>
 
