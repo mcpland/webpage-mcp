@@ -17,7 +17,7 @@ import type {
   AttachmentMetadata,
   AttachmentProjectStats,
 } from 'webpage-mcp-shared';
-import { getAgentDataDir } from './storage';
+import { getAgentDataDir, PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE } from './storage';
 
 // ============================================================
 // Types
@@ -214,8 +214,17 @@ export class AttachmentService {
     const sizeBytes = buffer.length;
 
     // Create directory and write file
-    await fs.mkdir(projectDir, { recursive: true });
-    await fs.writeFile(absolutePath, buffer);
+    await fs.mkdir(projectDir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+    if (process.platform !== 'win32') {
+      await Promise.all([
+        fs.chmod(this.getAttachmentsRootDir(), PRIVATE_DIRECTORY_MODE),
+        fs.chmod(projectDir, PRIVATE_DIRECTORY_MODE),
+      ]);
+    }
+    await fs.writeFile(absolutePath, buffer, {
+      flag: 'wx',
+      mode: PRIVATE_FILE_MODE,
+    });
 
     // Build metadata
     const metadata: AttachmentMetadata = {

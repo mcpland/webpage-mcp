@@ -501,7 +501,10 @@ async function attemptFixes(
   };
 
   await attempt('logs', 'Ensure logs directory exists', async () => {
-    fs.mkdirSync(logDir, { recursive: true });
+    fs.mkdirSync(logDir, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') {
+      fs.chmodSync(logDir, 0o700);
+    }
   });
 
   await attempt('node_path', 'Write node_path.txt for run_host scripts', async () => {

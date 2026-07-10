@@ -10,9 +10,9 @@
 import { drizzle, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { sql } from 'drizzle-orm';
 import * as schema from './schema';
-import { getAgentDataDir } from '../storage';
+import { getAgentDataDir, PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE } from '../storage';
 import path from 'node:path';
-import { existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type BetterSqlite3 from 'better-sqlite3';
 
@@ -182,7 +182,19 @@ function initializeSchema(sqlite: BetterSqlite3.Database): void {
 function ensureDataDir(): void {
   const dataDir = getAgentDataDir();
   if (!existsSync(dataDir)) {
-    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  }
+  if (process.platform !== 'win32') {
+    chmodSync(dataDir, PRIVATE_DIRECTORY_MODE);
+  }
+}
+
+function applyPrivateDatabaseModes(dbPath: string): void {
+  if (process.platform === 'win32') return;
+  for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (existsSync(candidate)) {
+      chmodSync(candidate, PRIVATE_FILE_MODE);
+    }
   }
 }
 
@@ -204,14 +216,23 @@ export function getDb(): DrizzleDB {
 
   // Create SQLite connection
   const BetterSqlite3 = loadBetterSqlite3();
-  const sqlite = new BetterSqlite3(dbPath);
-  sqliteInstance = sqlite;
+  const previousUmask = process.platform === 'win32' ? undefined : process.umask(0o077);
+  let sqlite: BetterSqlite3.Database;
+  try {
+    sqlite = new BetterSqlite3(dbPath);
+    sqliteInstance = sqlite;
 
-  // Enable WAL mode for better concurrent read performance
-  sqlite.pragma('journal_mode = WAL');
+    // Enable WAL mode for better concurrent read performance
+    sqlite.pragma('journal_mode = WAL');
 
-  // Initialize schema
-  initializeSchema(sqlite);
+    // Initialize schema
+    initializeSchema(sqlite);
+    applyPrivateDatabaseModes(dbPath);
+  } finally {
+    if (previousUmask !== undefined) {
+      process.umask(previousUmask);
+    }
+  }
 
   // Create Drizzle instance
   dbInstance = drizzle(sqlite, { schema });

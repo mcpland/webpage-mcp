@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+# Wrapper logs can include paths and diagnostics. Create them privately, then
+# restore the caller's umask before launching Node so project files are unaffected.
+ORIGINAL_UMASK="$(umask)"
+umask 077
+
 # Configuration
 ENABLE_LOG_ROTATION="true"
 LOG_RETENTION_COUNT=5
@@ -34,6 +39,9 @@ fi
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 WRAPPER_LOG="${LOG_DIR}/native_host_wrapper_unix_${TIMESTAMP}.log"
 STDERR_LOG="${LOG_DIR}/native_host_stderr_unix_${TIMESTAMP}.log"
+: > "${STDERR_LOG}"
+chmod 700 "${LOG_DIR}" 2>/dev/null || true
+chmod 600 "${WRAPPER_LOG}" "${STDERR_LOG}" 2>/dev/null || true
 
 # Initial logging
 {
@@ -273,4 +281,5 @@ if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
     echo "ANTHROPIC_AUTH_TOKEN is set (value hidden)" >> "${WRAPPER_LOG}"
 fi
 
+umask "${ORIGINAL_UMASK}"
 exec "${NODE_EXEC}" "${NODE_SCRIPT}" 2>> "${STDERR_LOG}"

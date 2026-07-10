@@ -13,6 +13,9 @@ import path from 'node:path';
 
 const DEFAULT_DATA_DIR = path.join(os.homedir(), '.webpage-mcp-agent');
 
+export const PRIVATE_DIRECTORY_MODE = 0o700;
+export const PRIVATE_FILE_MODE = 0o600;
+
 /**
  * Resolve base data directory for agent state.
  *
