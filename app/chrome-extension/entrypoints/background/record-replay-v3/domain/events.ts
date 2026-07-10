@@ -29,6 +29,8 @@ export type RunStatus =
 export interface EventBase {
   /** Owned Run ID */
   runId: RunId;
+  /** Associated flow, populated by the persistence layer. */
+  flowId?: FlowId;
   /** event timestamp */
   ts: UnixMillis;
   /** monotonically increasing sequence number */

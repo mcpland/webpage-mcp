@@ -5,6 +5,12 @@
 
 import type { RunId } from '../domain/ids';
 import type { RunEvent, RunEventInput, RunRecordV3 } from '../domain/events';
+import {
+  EVENT_RESOURCE_LIMITS,
+  findEventResourceLimitViolation,
+  normalizeEventListOptions,
+  type EventListOptions,
+} from '../domain/event-limits';
 import { RR_ERROR_CODES, createRRError } from '../domain/errors';
 import type { EventsStore } from '../engine/storage/storage-port';
 import { RR_V3_STORES, withTransaction } from './db';
@@ -64,92 +70,71 @@ function idbRequest<T>(request: IDBRequest<T>, context: string): Promise<T> {
   });
 }
 
-function eventKey(event: RunEvent): [RunId, number] {
-  return [event.runId, event.seq];
+type EventCursorSource = IDBObjectStore | IDBIndex;
+
+function runEventRange(runId: RunId): IDBKeyRange {
+  return IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER]);
 }
 
-function eventKeyString(event: RunEvent): string {
-  return `${event.runId}\u0000${event.seq}`;
+function flowEventRange(flowId: string): IDBKeyRange {
+  return IDBKeyRange.bound([flowId, 0], [flowId, Number.MAX_SAFE_INTEGER]);
 }
 
-function oldestEventFirst(a: RunEvent, b: RunEvent): number {
-  if (a.ts !== b.ts) return a.ts - b.ts;
-  const runCompare = String(a.runId).localeCompare(String(b.runId));
-  if (runCompare !== 0) return runCompare;
-  return a.seq - b.seq;
-}
-
-async function getEventsForRun(store: IDBObjectStore, runId: RunId): Promise<RunEvent[]> {
-  return new Promise<RunEvent[]>((resolve, reject) => {
-    const results: RunEvent[] = [];
-    const range = IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER]);
-    const request = store.openCursor(range);
+async function deleteFirstEvents(
+  source: EventCursorSource,
+  range: IDBKeyRange | undefined,
+  count: number,
+): Promise<void> {
+  if (count <= 0) return;
+  return new Promise<void>((resolve, reject) => {
+    let remaining = count;
+    const request = source.openCursor(range);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const cursor = request.result;
-      if (!cursor) {
-        resolve(results);
+      if (!cursor || remaining <= 0) {
+        resolve();
         return;
       }
-      results.push(cursor.value as RunEvent);
-      cursor.continue();
+      const deleteRequest = cursor.delete();
+      deleteRequest.onerror = () => reject(deleteRequest.error);
+      deleteRequest.onsuccess = () => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          resolve();
+          return;
+        }
+        cursor.continue();
+      };
     };
   });
 }
 
-async function getAllEvents(store: IDBObjectStore): Promise<RunEvent[]> {
-  return idbRequest(store.getAll() as IDBRequest<RunEvent[]>, 'events.getAll');
-}
-
-async function getRunIdsForFlow(runsStore: IDBObjectStore, flowId: string): Promise<Set<RunId>> {
-  const index = runsStore.index('flowId');
-  const runs = await idbRequest<RunRecordV3[]>(
-    index.getAll(flowId) as IDBRequest<RunRecordV3[]>,
-    `events.getRunsForFlow(${flowId})`,
-  );
-  return new Set(runs.map((run) => run.id));
-}
-
-async function deleteOldestEvents(
-  eventsStore: IDBObjectStore,
-  events: RunEvent[],
+async function pruneOldestEvents(
+  source: EventCursorSource,
+  range: IDBKeyRange | undefined,
   maxCount: number,
-  deletedKeys: Set<string>,
 ): Promise<void> {
-  if (events.length <= maxCount) {
-    return;
-  }
-
-  const deleteCount = events.length - maxCount;
-  const oldest = [...events].sort(oldestEventFirst).slice(0, deleteCount);
-  for (const event of oldest) {
-    const key = eventKeyString(event);
-    if (deletedKeys.has(key)) {
-      continue;
-    }
-    deletedKeys.add(key);
-    await idbRequest(eventsStore.delete(eventKey(event)), `events.delete(${key})`);
-  }
+  const count = await idbRequest(source.count(range), 'events.retention.count');
+  const overflow = Math.min(
+    Math.max(0, count - maxCount),
+    EVENT_RESOURCE_LIMITS.maxPruneDeletesPerAppend,
+  );
+  await deleteFirstEvents(source, range, overflow);
 }
 
 async function pruneEventRetention(
-  runsStore: IDBObjectStore,
   eventsStore: IDBObjectStore,
   policy: EventRetentionPolicy,
   run: RunRecordV3,
 ): Promise<void> {
-  const deletedKeys = new Set<string>();
-
-  const runEvents = await getEventsForRun(eventsStore, run.id);
-  await deleteOldestEvents(eventsStore, runEvents, policy.maxEventsPerRun, deletedKeys);
-
-  const allAfterRunPrune = await getAllEvents(eventsStore);
-  const flowRunIds = await getRunIdsForFlow(runsStore, run.flowId);
-  const flowEvents = allAfterRunPrune.filter((event) => flowRunIds.has(event.runId));
-  await deleteOldestEvents(eventsStore, flowEvents, policy.maxEventsPerFlow, deletedKeys);
-
-  const allAfterFlowPrune = await getAllEvents(eventsStore);
-  await deleteOldestEvents(eventsStore, allAfterFlowPrune, policy.maxTotalEvents, deletedKeys);
+  await pruneOldestEvents(eventsStore, runEventRange(run.id), policy.maxEventsPerRun);
+  await pruneOldestEvents(
+    eventsStore.index('flowId_ts'),
+    flowEventRange(run.flowId),
+    policy.maxEventsPerFlow,
+  );
+  await pruneOldestEvents(eventsStore.index('ts'), undefined, policy.maxTotalEvents);
 }
 
 /**
@@ -169,6 +154,10 @@ export function createEventsStore(
      * @description In a single transaction: read RunRecordV3.nextSeq -> Write event -> increment nextSeq
      */
     async append(input: RunEventInput): Promise<RunEvent> {
+      const inputViolation = findEventResourceLimitViolation(input);
+      if (inputViolation) {
+        throw createRRError(RR_ERROR_CODES.VALIDATION_ERROR, inputViolation);
+      }
       return withTransaction(
         [RR_V3_STORES.RUNS, RR_V3_STORES.EVENTS],
         'readwrite',
@@ -203,9 +192,15 @@ export function createEventsStore(
           const timestamp = Math.max(input.ts ?? Date.now(), run.updatedAt);
           const event: RunEvent = {
             ...input,
+            flowId: run.flowId,
             seq,
             ts: timestamp,
           } as RunEvent;
+
+          const eventViolation = findEventResourceLimitViolation(event);
+          if (eventViolation) {
+            throw createRRError(RR_ERROR_CODES.VALIDATION_ERROR, eventViolation);
+          }
 
           // Step 3: Write event to events store
           await idbRequest(eventsStore.add(event), `append.addEvent(${input.runId}, seq=${seq})`);
@@ -222,7 +217,7 @@ export function createEventsStore(
             `append.updateNextSeq(${input.runId}, nextSeq=${seq + 1})`,
           );
 
-          await pruneEventRetention(runsStore, eventsStore, retentionPolicy, updatedRun);
+          await pruneEventRetention(eventsStore, retentionPolicy, updatedRun);
 
           return event;
         },
@@ -233,11 +228,19 @@ export function createEventsStore(
      * list events
      * @description Utilize composite primary keys [runId, seq] Implement efficient range queries
      */
-    async list(runId: RunId, opts?: { fromSeq?: number; limit?: number }): Promise<RunEvent[]> {
+    async list(runId: RunId, opts?: EventListOptions): Promise<RunEvent[]> {
+      let normalized: ReturnType<typeof normalizeEventListOptions>;
+      try {
+        normalized = normalizeEventListOptions(opts);
+      } catch (error) {
+        throw createRRError(
+          RR_ERROR_CODES.VALIDATION_ERROR,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
       return withTransaction(RR_V3_STORES.EVENTS, 'readonly', async (stores) => {
         const store = stores[RR_V3_STORES.EVENTS];
-        const fromSeq = opts?.fromSeq ?? 0;
-        const limit = opts?.limit;
+        const { fromSeq, limit } = normalized;
 
         // Early return for zero limit
         if (limit === 0) {
@@ -265,7 +268,7 @@ export function createEventsStore(
             results.push(event);
 
             // Check limit
-            if (limit !== undefined && results.length >= limit) {
+            if (results.length >= limit) {
               resolve(results);
               return;
             }
@@ -275,6 +278,18 @@ export function createEventsStore(
 
           request.onerror = () => reject(request.error);
         });
+      });
+    },
+
+    async deleteByRun(runId: RunId): Promise<number> {
+      return withTransaction(RR_V3_STORES.EVENTS, 'readwrite', async (stores) => {
+        const store = stores[RR_V3_STORES.EVENTS];
+        const range = runEventRange(runId);
+        const count = await idbRequest(store.count(range), `events.countByRun(${runId})`);
+        if (count > 0) {
+          await idbRequest(store.delete(range), `events.deleteByRun(${runId})`);
+        }
+        return count;
       });
     },
   };

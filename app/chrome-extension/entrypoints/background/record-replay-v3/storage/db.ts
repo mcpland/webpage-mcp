@@ -7,7 +7,7 @@
 export const RR_V3_DB_NAME = 'rr_v3';
 
 /** Database version */
-export const RR_V3_DB_VERSION = 2;
+export const RR_V3_DB_VERSION = 3;
 
 /**
  * Store Name constant
@@ -65,6 +65,8 @@ export const RR_V3_STORE_SCHEMAS: Record<string, StoreConfig> = {
       { name: 'type', keyPath: 'type' },
       // Compound index for filtering events by run and type
       { name: 'runId_type', keyPath: ['runId', 'type'] },
+      { name: 'ts', keyPath: 'ts' },
+      { name: 'flowId_ts', keyPath: ['flowId', 'ts'] },
     ],
   },
   [RR_V3_STORES.QUEUE]: {
@@ -110,7 +112,12 @@ export const RR_V3_STORE_SCHEMAS: Record<string, StoreConfig> = {
 /**
  * Database upgrade processor
  */
-export function handleUpgrade(db: IDBDatabase, oldVersion: number, _newVersion: number): void {
+export function handleUpgrade(
+  db: IDBDatabase,
+  oldVersion: number,
+  _newVersion: number,
+  transaction?: IDBTransaction,
+): void {
   // Version 0 -> 1: Create all stores
   if (oldVersion < 1) {
     for (const [storeName, config] of Object.entries(RR_V3_STORE_SCHEMAS)) {
@@ -138,6 +145,41 @@ export function handleUpgrade(db: IDBDatabase, oldVersion: number, _newVersion: 
     for (const index of config.indexes || []) {
       store.createIndex(index.name, index.keyPath, index.options);
     }
+  }
+
+  // Version 2 -> 3: add ordered event indexes and backfill flow ownership.
+  if (oldVersion >= 1 && oldVersion < 3 && transaction) {
+    const eventsStore = transaction.objectStore(RR_V3_STORES.EVENTS);
+    if (!eventsStore.indexNames.contains('ts')) {
+      eventsStore.createIndex('ts', 'ts');
+    }
+    if (!eventsStore.indexNames.contains('flowId_ts')) {
+      eventsStore.createIndex('flowId_ts', ['flowId', 'ts']);
+    }
+
+    const runsStore = transaction.objectStore(RR_V3_STORES.RUNS);
+    const cursorRequest = eventsStore.openCursor();
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) return;
+      const event = cursor.value as { runId?: unknown; flowId?: unknown };
+      if (typeof event.flowId === 'string' && event.flowId) {
+        cursor.continue();
+        return;
+      }
+      if (typeof event.runId !== 'string' || !event.runId) {
+        cursor.continue();
+        return;
+      }
+      const runRequest = runsStore.get(event.runId);
+      runRequest.onsuccess = () => {
+        const run = runRequest.result as { flowId?: unknown } | undefined;
+        if (typeof run?.flowId === 'string' && run.flowId) {
+          cursor.update({ ...event, flowId: run.flowId });
+        }
+        cursor.continue();
+      };
+    };
   }
 }
 
@@ -183,7 +225,7 @@ export async function openRrV3Db(): Promise<IDBDatabase> {
       const db = request.result;
       const oldVersion = event.oldVersion;
       const newVersion = event.newVersion ?? RR_V3_DB_VERSION;
-      handleUpgrade(db, oldVersion, newVersion);
+      handleUpgrade(db, oldVersion, newVersion, request.transaction ?? undefined);
     };
   });
 

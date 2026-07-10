@@ -7,6 +7,7 @@ import type { FlowId, RunId, TriggerId } from "../../domain/ids";
 import type { FlowV3 } from "../../domain/flow";
 import type { FlowListOptions } from "../../domain/flow-limits";
 import type { RunEvent, RunEventInput, RunRecordV3 } from "../../domain/events";
+import type { EventListOptions } from "../../domain/event-limits";
 import type {
   PersistentVarRecord,
   PersistentVariableName,
@@ -61,10 +62,10 @@ export interface EventsStore {
    * @param runId Run ID
    * @param opts Query options
    */
-  list(
-    runId: RunId,
-    opts?: { fromSeq?: number; limit?: number },
-  ): Promise<RunEvent[]>;
+  list(runId: RunId, opts?: EventListOptions): Promise<RunEvent[]>;
+
+  /** Delete every event owned by a run without materializing the records. */
+  deleteByRun(runId: RunId): Promise<number>;
 }
 
 /**

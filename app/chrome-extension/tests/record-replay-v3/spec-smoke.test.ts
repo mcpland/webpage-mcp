@@ -362,7 +362,7 @@ import {
 describe('V3 Storage Constants', () => {
   it('should export database constants', () => {
     expect(RR_V3_DB_NAME).toBe('rr_v3');
-    expect(RR_V3_DB_VERSION).toBe(2);
+    expect(RR_V3_DB_VERSION).toBe(3);
   });
 
   it('should export store names', () => {

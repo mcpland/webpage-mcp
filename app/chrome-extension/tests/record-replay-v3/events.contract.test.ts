@@ -17,6 +17,7 @@ import type {
 } from '@/entrypoints/background/record-replay-v3';
 
 import {
+  EVENT_RESOURCE_LIMITS,
   RUN_SCHEMA_VERSION,
   RR_ERROR_CODES,
   closeRrV3Db,
@@ -217,6 +218,23 @@ describe('V3 Events contracts', () => {
       });
     });
 
+    it('rejects oversized event payloads before persistence', async () => {
+      const runs = createRunsStore();
+      const events = createEventsStore();
+      await runs.save(createRunRecord('run-1'));
+
+      await expect(
+        events.append(
+          createEventInput('run-1', {
+            type: 'log',
+            level: 'info',
+            message: 'x'.repeat(EVENT_RESOURCE_LIMITS.maxStringUtf8Bytes + 1),
+          } as Partial<RunEventInput>),
+        ),
+      ).rejects.toMatchObject({ code: RR_ERROR_CODES.VALIDATION_ERROR });
+      await expect(events.list('run-1')).resolves.toEqual([]);
+    });
+
     it('list returns events ordered by seq ascending (even if inserted out-of-order)', async () => {
       const events = createEventsStore();
       const runId = 'run-1';
@@ -261,6 +279,17 @@ describe('V3 Events contracts', () => {
 
       const empty = await events.list('run-1', { limit: 0 });
       expect(empty).toEqual([]);
+    });
+
+    it('rejects invalid list bounds in the storage layer', async () => {
+      const events = createEventsStore();
+
+      await expect(events.list('run-1', { fromSeq: -1 })).rejects.toMatchObject({
+        code: RR_ERROR_CODES.VALIDATION_ERROR,
+      });
+      await expect(
+        events.list('run-1', { limit: EVENT_RESOURCE_LIMITS.maxListLimit + 1 }),
+      ).rejects.toMatchObject({ code: RR_ERROR_CODES.VALIDATION_ERROR });
     });
 
     it('prunes oldest events beyond the per-run retention limit without resetting nextSeq', async () => {
@@ -329,6 +358,20 @@ describe('V3 Events contracts', () => {
 
       expect((await events.list('run-1')).map((event) => event.seq)).toEqual([2]);
       expect((await events.list('run-2')).map((event) => event.seq)).toEqual([1, 2]);
+    });
+
+    it('deletes a run event range without affecting other runs', async () => {
+      const runs = createRunsStore();
+      const events = createEventsStore();
+      await runs.save(createRunRecord('run-1'));
+      await runs.save(createRunRecord('run-2'));
+      await events.append(createEventInput('run-1'));
+      await events.append(createEventInput('run-1'));
+      await events.append(createEventInput('run-2'));
+
+      await expect(events.deleteByRun('run-1')).resolves.toBe(2);
+      await expect(events.list('run-1')).resolves.toEqual([]);
+      await expect(events.list('run-2')).resolves.toHaveLength(1);
     });
 
     it('seq allocation remains correct under concurrent appends', async () => {
