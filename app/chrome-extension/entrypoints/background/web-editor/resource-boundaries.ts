@@ -3,11 +3,15 @@ import type {
   ElementChangeSummary,
   ElementLocator,
   WebEditorApplyBatchPayload,
+  WebEditorSelectionChangedPayload,
+  WebEditorTxChangedPayload,
 } from '@/common/web-editor-types';
 
 export const WEB_EDITOR_RESOURCE_LIMITS = {
   applyPayloadBytes: 256 * 1024,
   applyBatchPayloadBytes: 1024 * 1024,
+  txSessionPayloadBytes: 512 * 1024,
+  selectionSessionPayloadBytes: 128 * 1024,
   payloadDepth: 20,
   payloadValues: 20_000,
   containerEntries: 512,
@@ -36,6 +40,8 @@ export const WEB_EDITOR_RESOURCE_LIMITS = {
   styleValueBytes: 16 * 1024,
   classBytes: 1024,
   hintBytes: 1024,
+  tagNameBytes: 256,
+  transactionCount: 100_000,
 } as const;
 
 interface JsonResourceLimits {
@@ -333,6 +339,14 @@ function normalizeNonNegativeInteger(value: unknown, path: string, fallback = 0)
   return value as number;
 }
 
+function normalizeBoundedCount(value: unknown, path: string): number {
+  const count = normalizeNonNegativeInteger(value, path);
+  if (count > WEB_EDITOR_RESOURCE_LIMITS.transactionCount) {
+    throw new Error(`${path} exceeds the Web Editor transaction count limit`);
+  }
+  return count;
+}
+
 function normalizeDebugSource(value: unknown, path: string): DebugSource | undefined {
   if (value === undefined || value === null) return undefined;
   const record = requireRecord(value, path);
@@ -394,7 +408,7 @@ function normalizeStyleMap(
   return outputCount > 0 ? output : undefined;
 }
 
-function normalizeLocator(value: unknown, path: string): ElementLocator {
+export function normalizeElementLocator(value: unknown, path: string): ElementLocator {
   const record = requireRecord(value, path);
   const selectors = boundedStringArray(
     record.selectors,
@@ -521,7 +535,7 @@ function normalizeNetEffect(
   const locator =
     record.locator === undefined
       ? fallbackLocator
-      : normalizeLocator(record.locator, `${path}.locator`);
+      : normalizeElementLocator(record.locator, `${path}.locator`);
   const netEffect: ElementChangeSummary['netEffect'] = { elementKey, locator };
   if (record.styleChanges !== undefined && record.styleChanges !== null) {
     const styleChanges = requireRecord(record.styleChanges, `${path}.styleChanges`);
@@ -585,7 +599,7 @@ function normalizeElementChangeSummary(value: unknown, path: string): ElementCha
       `${path}.fullLabel`,
       WEB_EDITOR_RESOURCE_LIMITS.fullLabelBytes,
     ) ?? label;
-  const locator = normalizeLocator(record.locator, `${path}.locator`);
+  const locator = normalizeElementLocator(record.locator, `${path}.locator`);
   const type = normalizeElementChangeType(record.type, `${path}.type`);
   const changes = normalizeChanges(record.changes, `${path}.changes`);
   const transactionIds = boundedStringArray(
@@ -758,6 +772,113 @@ export function normalizeStoredExcludedKeys(value: unknown): string[] {
     WEB_EDITOR_RESOURCE_LIMITS.excludedKeys,
     WEB_EDITOR_RESOURCE_LIMITS.identifierBytes,
   );
+}
+
+export function normalizeTxChangedPayload(
+  raw: unknown,
+  senderTabId: number,
+): WebEditorTxChangedPayload {
+  assertJsonWithinLimits(raw, 'payload', {
+    maxBytes: WEB_EDITOR_RESOURCE_LIMITS.txSessionPayloadBytes,
+  });
+  const record = requireRecord(raw, 'payload');
+  const action = record.action;
+  if (
+    action !== 'push' &&
+    action !== 'merge' &&
+    action !== 'undo' &&
+    action !== 'redo' &&
+    action !== 'clear' &&
+    action !== 'rollback'
+  ) {
+    throw new Error('payload.action is invalid');
+  }
+  if (!Array.isArray(record.elements)) throw new Error('payload.elements must be an array');
+  if (record.elements.length > WEB_EDITOR_RESOURCE_LIMITS.batchElements) {
+    throw new Error('payload.elements exceeds the Web Editor item limit');
+  }
+  const elements: ElementChangeSummary[] = [];
+  for (let index = 0; index < record.elements.length; index += 1) {
+    elements.push(
+      normalizeElementChangeSummary(record.elements[index], `payload.elements[${index}]`),
+    );
+  }
+  if (typeof record.hasApplicableChanges !== 'boolean') {
+    throw new Error('payload.hasApplicableChanges must be a boolean');
+  }
+  const pageUrl = normalizeBoundedPageUrl(record.pageUrl, 'payload.pageUrl');
+  const payload: WebEditorTxChangedPayload = {
+    tabId: senderTabId,
+    action,
+    elements,
+    undoCount: normalizeBoundedCount(record.undoCount, 'payload.undoCount'),
+    redoCount: normalizeBoundedCount(record.redoCount, 'payload.redoCount'),
+    hasApplicableChanges: record.hasApplicableChanges,
+    ...(pageUrl ? { pageUrl } : {}),
+  };
+  assertJsonWithinLimits(payload, 'normalized TX_CHANGED payload', {
+    maxBytes: WEB_EDITOR_RESOURCE_LIMITS.txSessionPayloadBytes,
+  });
+  return payload;
+}
+
+export function normalizeSelectionChangedPayload(
+  raw: unknown,
+  senderTabId: number,
+): WebEditorSelectionChangedPayload {
+  assertJsonWithinLimits(raw, 'payload', {
+    maxBytes: WEB_EDITOR_RESOURCE_LIMITS.selectionSessionPayloadBytes,
+  });
+  const record = requireRecord(raw, 'payload');
+  if (record.selected === undefined) throw new Error('payload.selected is required');
+  const pageUrl = normalizeBoundedPageUrl(record.pageUrl, 'payload.pageUrl');
+  let selected: WebEditorSelectionChangedPayload['selected'] = null;
+  if (record.selected !== null) {
+    const selectedRecord = requireRecord(record.selected, 'payload.selected');
+    const elementKey = normalizeBoundedIdentifier(
+      selectedRecord.elementKey,
+      'payload.selected.elementKey',
+      true,
+    )!;
+    const label =
+      boundedString(
+        selectedRecord.label,
+        'payload.selected.label',
+        WEB_EDITOR_RESOURCE_LIMITS.labelBytes,
+      ) ?? elementKey;
+    const fullLabel =
+      boundedString(
+        selectedRecord.fullLabel,
+        'payload.selected.fullLabel',
+        WEB_EDITOR_RESOURCE_LIMITS.fullLabelBytes,
+      ) ?? label;
+    const tagName = boundedString(
+      selectedRecord.tagName,
+      'payload.selected.tagName',
+      WEB_EDITOR_RESOURCE_LIMITS.tagNameBytes,
+      { required: true },
+    )!;
+    selected = {
+      elementKey,
+      locator: normalizeElementLocator(selectedRecord.locator, 'payload.selected.locator'),
+      label,
+      fullLabel,
+      tagName,
+      updatedAt: normalizeNonNegativeInteger(
+        selectedRecord.updatedAt,
+        'payload.selected.updatedAt',
+      ),
+    };
+  }
+  const payload: WebEditorSelectionChangedPayload = {
+    tabId: senderTabId,
+    selected,
+    ...(pageUrl ? { pageUrl } : {}),
+  };
+  assertJsonWithinLimits(payload, 'normalized SELECTION_CHANGED payload', {
+    maxBytes: WEB_EDITOR_RESOURCE_LIMITS.selectionSessionPayloadBytes,
+  });
+  return payload;
 }
 
 /** Incrementally enforces the final prompt budget before retaining each line. */

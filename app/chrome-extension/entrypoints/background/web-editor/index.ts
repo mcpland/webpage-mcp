@@ -5,7 +5,6 @@ import {
   WEB_EDITOR_ACTIONS,
   type ElementChangeSummary,
   type WebEditorApplyBatchPayload,
-  type WebEditorTxChangedPayload,
   type WebEditorHighlightElementPayload,
   type WebEditorRevertElementPayload,
   type WebEditorCancelExecutionPayload,
@@ -30,7 +29,9 @@ import {
   normalizeApplyPayload,
   normalizeBoundedIdentifier,
   normalizeBoundedPageUrl,
+  normalizeSelectionChangedPayload,
   normalizeStoredExcludedKeys,
+  normalizeTxChangedPayload,
   type NormalizedWebEditorApplyPayload,
 } from './resource-boundaries';
 
@@ -945,22 +946,12 @@ export function initWebEditorListeners(): void {
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED) {
         (async () => {
           const senderTabId = (_sender as chrome.runtime.MessageSender)?.tab?.id;
-          if (typeof senderTabId !== 'number') {
+          if (!Number.isSafeInteger(senderTabId) || (senderTabId as number) <= 0) {
             sendResponse({ success: false, error: 'Sender tabId is required' });
             return;
           }
 
-          const rawPayload = message.payload as WebEditorTxChangedPayload | undefined;
-          if (!rawPayload || typeof rawPayload !== 'object') {
-            sendResponse({ success: false, error: 'Invalid payload' });
-            return;
-          }
-
-          // Hydrate payload with tabId from sender
-          const payload: WebEditorTxChangedPayload = {
-            ...rawPayload,
-            tabId: senderTabId,
-          };
+          const payload = normalizeTxChangedPayload(message.payload, senderTabId as number);
           const storageKey = `${WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX}${senderTabId}`;
 
           // Persist to session storage for cold-start recovery
@@ -999,21 +990,12 @@ export function initWebEditorListeners(): void {
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED) {
         (async () => {
           const senderTabId = (_sender as chrome.runtime.MessageSender)?.tab?.id;
-          if (typeof senderTabId !== 'number') {
+          if (!Number.isSafeInteger(senderTabId) || (senderTabId as number) <= 0) {
             sendResponse({ success: false, error: 'Sender tabId is required' });
             return;
           }
 
-          const rawPayload = message.payload as
-            | import('@/common/web-editor-types').WebEditorSelectionChangedPayload
-            | undefined;
-          if (!rawPayload || typeof rawPayload !== 'object') {
-            sendResponse({ success: false, error: 'Invalid payload' });
-            return;
-          }
-
-          // Hydrate payload with tabId from sender
-          const payload = { ...rawPayload, tabId: senderTabId };
+          const payload = normalizeSelectionChangedPayload(message.payload, senderTabId as number);
           const storageKey = `${WEB_EDITOR_SELECTION_SESSION_KEY_PREFIX}${senderTabId}`;
 
           // Persist to session storage for cold-start recovery
