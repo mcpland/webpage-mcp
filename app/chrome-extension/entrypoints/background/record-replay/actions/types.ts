@@ -517,6 +517,7 @@ export interface SwitchFrameParams {
 
 export interface LoopElementsParams {
   selector: Resolvable<string>;
+  maxIterations?: number;
   saveAs?: VariableName;
   itemVar?: VariableName;
   subflowId: SubflowId;

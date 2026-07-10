@@ -122,6 +122,7 @@ export interface StepSwitchFrame extends StepBase {
 export interface StepLoopElements extends StepBase {
   type: 'loopElements';
   selector: string;
+  maxIterations?: number;
   saveAs?: string; // list var name
   itemVar?: string; // default 'item'
   subflowId: string;

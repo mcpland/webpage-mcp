@@ -4,6 +4,11 @@ import type { ExecCtx, ExecResult, NodeRuntime } from './types';
 import { expandTemplatesDeep } from '../rr-utils';
 import type { Step } from '../types';
 import { locateElement } from '../selector-engine';
+import {
+  boundedLoopElementIterations,
+  collectLoopElementPaths,
+  LOOP_ELEMENTS_RESOURCE_LIMITS,
+} from './loop-elements-resources';
 import { resolveNodeTabId } from './tab-context';
 
 function extractToolText(result: unknown): string | undefined {
@@ -220,47 +225,18 @@ export const loopElementsNode: NodeRuntime<any> = {
     const tabId = await resolveNodeTabId(ctx);
     const world: any = 'MAIN';
     const selector = String(s.selector || '');
+    if (!selector || selector.length > LOOP_ELEMENTS_RESOURCE_LIMITS.maxSelectorLength) {
+      throw new Error('loopElements: selector is empty or exceeds the resource limit');
+    }
+    const maxIterations = boundedLoopElementIterations(s.maxIterations);
     const res = await chrome.scripting.executeScript({
       target: {
         tabId,
         frameIds: typeof ctx.frameId === 'number' ? [ctx.frameId] : undefined,
       } as any,
       world,
-      func: (sel: string) => {
-        try {
-          const list = Array.from(document.querySelectorAll(sel));
-          const toCss = (node: Element) => {
-            try {
-              if ((node as HTMLElement).id) {
-                const idSel = `#${CSS.escape((node as HTMLElement).id)}`;
-                if (document.querySelectorAll(idSel).length === 1) return idSel;
-              }
-            } catch {}
-            let path = '';
-            let current: Element | null = node;
-            while (current && current.tagName !== 'BODY') {
-              let part = current.tagName.toLowerCase();
-              const parentEl: Element | null = current.parentElement;
-              if (parentEl) {
-                const siblings = Array.from(parentEl.children).filter(
-                  (c) => (c as any).tagName === current!.tagName,
-                );
-                if (siblings.length > 1) {
-                  const idx = siblings.indexOf(current) + 1;
-                  part += `:nth-of-type(${idx})`;
-                }
-              }
-              path = path ? `${part} > ${path}` : part;
-              current = parentEl;
-            }
-            return path ? `body > ${path}` : 'body';
-          };
-          return list.map(toCss);
-        } catch (e) {
-          return [];
-        }
-      },
-      args: [selector],
+      func: collectLoopElementPaths,
+      args: [selector, maxIterations, LOOP_ELEMENTS_RESOURCE_LIMITS],
     } as any);
     const arr: string[] = (res && Array.isArray(res[0]?.result) ? res[0].result : []) as any;
     const listVar = String(s.saveAs || 'elements');
