@@ -7,8 +7,8 @@ import type {
 } from '@/common/element-marker-types';
 import {
   deleteMarker,
-  listAllMarkers,
-  listMarkersForUrl,
+  listAllMarkersWithMetadata,
+  listMarkersForUrlWithMetadata,
   saveMarker,
   updateMarker,
 } from './element-marker-storage';
@@ -284,16 +284,20 @@ export function initElementMarkerListeners() {
         }
         case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_ALL: {
           assertExtensionPageMarkerAccess(sender);
-          listAllMarkers()
-            .then((markers) => sendResponse({ success: true, markers }))
+          listAllMarkersWithMetadata()
+            .then(({ markers, truncated }) =>
+              sendResponse({ success: true, markers, truncated }),
+            )
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_FOR_URL: {
           assertExtensionPageMarkerAccess(sender);
           const url = String(message.url || '');
-          listMarkersForUrl(url)
-            .then((markers) => sendResponse({ success: true, markers }))
+          listMarkersForUrlWithMetadata(url)
+            .then(({ markers, truncated }) =>
+              sendResponse({ success: true, markers, truncated }),
+            )
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }

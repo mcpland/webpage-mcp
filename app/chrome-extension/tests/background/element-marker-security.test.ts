@@ -3,8 +3,8 @@ import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 
 const storageMocks = vi.hoisted(() => ({
   deleteMarker: vi.fn(),
-  listAllMarkers: vi.fn(),
-  listMarkersForUrl: vi.fn(),
+  listAllMarkersWithMetadata: vi.fn(),
+  listMarkersForUrlWithMetadata: vi.fn(),
   saveMarker: vi.fn(),
   updateMarker: vi.fn(),
 }));
@@ -67,8 +67,14 @@ describe('Element Marker target authorization', () => {
     toolMocks.computerExecute.mockResolvedValue({ isError: false, content: [] });
     toolMocks.clickExecute.mockResolvedValue({ isError: false, content: [] });
     toolMocks.keyboardExecute.mockResolvedValue({ isError: false, content: [] });
-    storageMocks.listAllMarkers.mockResolvedValue([]);
-    storageMocks.listMarkersForUrl.mockResolvedValue([]);
+    storageMocks.listAllMarkersWithMetadata.mockResolvedValue({
+      markers: [],
+      truncated: false,
+    });
+    storageMocks.listMarkersForUrlWithMetadata.mockResolvedValue({
+      markers: [],
+      truncated: false,
+    });
     storageMocks.saveMarker.mockResolvedValue({ id: 'saved-marker' });
     storageMocks.updateMarker.mockResolvedValue(undefined);
     storageMocks.deleteMarker.mockResolvedValue(undefined);
@@ -173,8 +179,8 @@ describe('Element Marker target authorization', () => {
       });
     }
 
-    expect(storageMocks.listAllMarkers).not.toHaveBeenCalled();
-    expect(storageMocks.listMarkersForUrl).not.toHaveBeenCalled();
+    expect(storageMocks.listAllMarkersWithMetadata).not.toHaveBeenCalled();
+    expect(storageMocks.listMarkersForUrlWithMetadata).not.toHaveBeenCalled();
     expect(storageMocks.updateMarker).not.toHaveBeenCalled();
     expect(storageMocks.deleteMarker).not.toHaveBeenCalled();
   });
@@ -207,7 +213,7 @@ describe('Element Marker target authorization', () => {
       dispatch({ type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_DELETE, id: 'marker-id' }, sender),
     ).resolves.toMatchObject({ success: true });
 
-    expect(storageMocks.listAllMarkers).toHaveBeenCalledOnce();
+    expect(storageMocks.listAllMarkersWithMetadata).toHaveBeenCalledOnce();
     expect(storageMocks.saveMarker).toHaveBeenCalledOnce();
     expect(storageMocks.updateMarker).toHaveBeenCalledOnce();
     expect(storageMocks.deleteMarker).toHaveBeenCalledOnce();
