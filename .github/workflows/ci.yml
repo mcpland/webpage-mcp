@@ -52,6 +52,8 @@ jobs:
         run: pnpm --filter webpage-mcp-connector compile
 
       - name: Test
+        env:
+          ENFORCE_COVERAGE: "true"
         run: |
           pnpm test:release
           pnpm -r --if-present test
