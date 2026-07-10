@@ -56,7 +56,7 @@ describe('Web Editor props early injection registry', () => {
 
     const result = await registerPropsAgentEarlyInjection(12, 'https://example.com/editor');
 
-    expect(result.id).toBe('mcp_we_props_early_example_com');
+    expect(result.id).toMatch(/^mcp_we_props_early_example_com_[a-f0-9]{24}$/);
     expect(chrome.scripting.registerContentScripts).toHaveBeenCalledWith([
       expect.objectContaining({
         id: result.id,
@@ -79,14 +79,31 @@ describe('Web Editor props early injection registry', () => {
     await releasePropsAgentEarlyInjection(12);
 
     expect(unregisterContentScripts).not.toHaveBeenCalled();
-    expect(registeredScripts.has('mcp_we_props_early_example_com')).toBe(true);
+    const registrationId = sessionData['web-editor-props-early-tab-13'] as string;
+    expect(registrationId).toMatch(/^mcp_we_props_early_example_com_[a-f0-9]{24}$/);
+    expect(registeredScripts.has(registrationId)).toBe(true);
 
     await releasePropsAgentEarlyInjection(13);
 
     expect(unregisterContentScripts).toHaveBeenCalledWith({
-      ids: ['mcp_we_props_early_example_com'],
+      ids: [registrationId],
     });
-    expect(registeredScripts.has('mcp_we_props_early_example_com')).toBe(false);
+    expect(registeredScripts.has(registrationId)).toBe(false);
+  });
+
+  it('keeps distinct hosts separate when their sanitized names collide', async () => {
+    const { registerPropsAgentEarlyInjection } = await import(
+      '@/entrypoints/background/web-editor/props-early-injection'
+    );
+
+    const dotted = await registerPropsAgentEarlyInjection(12, 'https://foo.bar/editor');
+    const underscored = await registerPropsAgentEarlyInjection(13, 'https://foo_bar/editor');
+
+    expect(dotted.id).not.toBe(underscored.id);
+    expect(dotted.id).toMatch(/^mcp_we_props_early_foo_bar_[a-f0-9]{24}$/);
+    expect(underscored.id).toMatch(/^mcp_we_props_early_foo_bar_[a-f0-9]{24}$/);
+    expect(registeredScripts.get(dotted.id)?.matches).toEqual(['*://foo.bar/*']);
+    expect(registeredScripts.get(underscored.id)?.matches).toEqual(['*://foo_bar/*']);
   });
 
   it('prunes orphaned legacy registrations without touching unrelated scripts', async () => {

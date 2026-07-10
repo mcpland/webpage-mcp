@@ -29,7 +29,15 @@ function sanitizeContentScriptId(input: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, '_')
     .replace(/^_+|_+$/g, '');
-  return cleaned.slice(0, 80) || 'site';
+  return cleaned.slice(0, 64) || 'site';
+}
+
+async function buildRegistrationId(host: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(host));
+  const hash = Array.from(new Uint8Array(digest).slice(0, 12), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  return `${REGISTRATION_ID_PREFIX}_${sanitizeContentScriptId(host)}_${hash}`;
 }
 
 function buildEarlyInjectionPatterns(tabUrl: string): { host: string; matches: string[] } {
@@ -84,7 +92,7 @@ export function registerPropsAgentEarlyInjection(
 ): Promise<EarlyInjectionResult> {
   return serializeRegistryOperation(async () => {
     const { host, matches } = buildEarlyInjectionPatterns(tabUrl);
-    const id = `${REGISTRATION_ID_PREFIX}_${sanitizeContentScriptId(host)}`;
+    const id = await buildRegistrationId(host);
     const storageKey = registrationStorageKey(tabId);
     const previous = await chrome.storage.session.get(storageKey);
     const previousId = typeof previous[storageKey] === 'string' ? previous[storageKey] : undefined;
