@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import spawn from 'cross-spawn';
 import readline from 'node:readline';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -36,6 +36,15 @@ export function buildCodexSandboxArgs(
   }
 
   return ['--sandbox', config.sandboxMode, '--ask-for-approval', 'never'];
+}
+
+export function buildCodexSpawnSpec(): { command: string; shell: false } {
+  return {
+    // cross-spawn resolves npm's codex.cmd shim on Windows.
+    command: 'codex',
+    // Keep user-controlled prompt text out of cmd.exe command parsing.
+    shell: false,
+  };
 }
 
 /**
@@ -116,7 +125,7 @@ export class CodexEngine implements AgentEngine {
       ? await this.appendProjectContext(normalizedInstruction, repoPath)
       : normalizedInstruction;
 
-    const executable = process.platform === 'win32' ? 'codex.cmd' : 'codex';
+    const spawnSpec = buildCodexSpawnSpec();
     const args: string[] = [
       'exec',
       '--json',
@@ -181,9 +190,10 @@ export class CodexEngine implements AgentEngine {
 
     // Use explicit Promise wrapping to ensure child process errors are properly rejected.
     return new Promise<void>((resolve, reject) => {
-      const child = spawn(executable, args, {
+      const child = spawn(spawnSpec.command, args, {
         cwd: repoPath,
         env: this.buildCodexEnv(),
+        shell: spawnSpec.shell,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 

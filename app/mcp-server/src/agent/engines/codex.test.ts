@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { CODEX_AUTO_INSTRUCTIONS } from 'webpage-mcp-shared';
-import { buildCodexSandboxArgs } from './codex';
+import { buildCodexSandboxArgs, buildCodexSpawnSpec } from './codex';
+
+describe('buildCodexSpawnSpec', () => {
+  it('uses cross-spawn without a shell so Windows cmd shims are escaped safely', () => {
+    expect(buildCodexSpawnSpec()).toEqual({ command: 'codex', shell: false });
+  });
+});
 
 describe('buildCodexSandboxArgs', () => {
   it.each(['read-only', 'workspace-write'] as const)(

@@ -54,6 +54,7 @@
     "chalk": "^5.4.1",
     "chrome-devtools-frontend": "^1.0.1299282",
     "commander": "^13.1.0",
+    "cross-spawn": "^7.0.6",
     "drizzle-orm": "^0.38.2",
     "is-admin": "^4.0.0",
     "pino": "^9.6.0",

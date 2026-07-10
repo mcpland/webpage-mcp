@@ -156,6 +156,9 @@ importers:
       commander:
         specifier: ^13.1.0
         version: 13.1.0
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
       drizzle-orm:
         specifier: ^0.38.2
         version: 0.38.4(@types/better-sqlite3@7.6.13)(@types/react@18.3.28)(better-sqlite3@11.10.0)(react@18.3.1)
