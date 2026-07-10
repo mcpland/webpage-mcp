@@ -1,8 +1,5 @@
 import { BACKGROUND_MESSAGE_TYPES, PRIVILEGED_UI_ACTIONS } from '@/common/message-types';
-import {
-  isExtensionPageSender,
-  isExtensionRuntimeSender,
-} from '@/common/runtime-sender-auth';
+import { isExtensionPageSender, isExtensionRuntimeSender } from '@/common/runtime-sender-auth';
 import { sanitizeAgentStreamRelayPayload } from '@/common/agent-stream-boundaries';
 import {
   WEB_EDITOR_ACTIONS,
@@ -15,11 +12,7 @@ import {
   type WebEditorCancelExecutionResponse,
 } from '@/common/web-editor-types';
 import { openAgentSetupSidepanel } from '../utils/sidepanel';
-import {
-  requestAgentRpcFetch,
-  subscribeAgentStream,
-  unsubscribeAgentStream,
-} from '../native-host';
+import { requestAgentRpcFetch, subscribeAgentStream, unsubscribeAgentStream } from '../native-host';
 import { consumePrivilegedUiAuthorization } from '../privileged-ui-authorization';
 import {
   pruneOrphanedPropsAgentEarlyInjections,
@@ -31,6 +24,15 @@ import {
   WEB_EDITOR_STATUS_CACHE_TTL_MS,
   type ExecutionStatusEntry,
 } from './execution-status-cache';
+import {
+  BoundedPromptBuilder,
+  normalizeApplyBatchPayload,
+  normalizeApplyPayload,
+  normalizeBoundedIdentifier,
+  normalizeBoundedPageUrl,
+  normalizeStoredExcludedKeys,
+  type NormalizedWebEditorApplyPayload,
+} from './resource-boundaries';
 
 const CONTEXT_MENU_ID = 'web_editor_toggle';
 const COMMAND_KEY = 'toggle_web_editor';
@@ -51,9 +53,7 @@ const WEB_EDITOR_EXTENSION_PAGE_MESSAGE_TYPES = new Set<string>([
 
 function isWebEditorContentSender(sender: chrome.runtime.MessageSender): boolean {
   return (
-    sender.id === chrome.runtime.id &&
-    typeof sender.tab?.id === 'number' &&
-    sender.frameId === 0
+    sender.id === chrome.runtime.id && typeof sender.tab?.id === 'number' && sender.frameId === 0
   );
 }
 
@@ -95,11 +95,7 @@ function getExecutionSenderScope(
   sender: chrome.runtime.MessageSender,
 ): Omit<ExecutionOwner, 'sessionId' | 'updatedAt'> | null {
   const tabId = sender.tab?.id;
-  if (
-    sender.id !== chrome.runtime.id ||
-    typeof tabId !== 'number' ||
-    sender.frameId !== 0
-  ) {
+  if (sender.id !== chrome.runtime.id || typeof tabId !== 'number' || sender.frameId !== 0) {
     return null;
   }
   return {
@@ -117,7 +113,11 @@ function rememberExecutionOwner(
   const scope = getExecutionSenderScope(sender);
   if (!scope) return;
   executionOwners.delete(requestId);
-  executionOwners.set(requestId, { ...scope, sessionId, updatedAt: Date.now() });
+  executionOwners.set(requestId, {
+    ...scope,
+    sessionId,
+    updatedAt: Date.now(),
+  });
   while (executionOwners.size > MAX_EXECUTION_OWNERS) {
     const oldestRequestId = executionOwners.keys().next().value as string | undefined;
     if (!oldestRequestId) break;
@@ -213,7 +213,10 @@ export async function subscribeToSessionStatus(
   sessionId: string,
   requestId: string,
 ): Promise<void> {
-  const intent: SessionStatusSubscriptionIntent = { requestId, token: Symbol(requestId) };
+  const intent: SessionStatusSubscriptionIntent = {
+    requestId,
+    token: Symbol(requestId),
+  };
   sseSubscriptionIntents.set(sessionId, intent);
 
   // Close existing subscription for this session if any
@@ -241,10 +244,7 @@ export async function subscribeToSessionStatus(
       return;
     }
 
-    const onMessage = (
-      message: unknown,
-      sender: chrome.runtime.MessageSender,
-    ): void => {
+    const onMessage = (message: unknown, sender: chrome.runtime.MessageSender): void => {
       if (!isExtensionRuntimeSender(sender)) return;
       const msg = message as {
         type?: string;
@@ -306,9 +306,7 @@ function handleSseEvent(sessionId: string, requestId: string, event: unknown): v
     if (status === 'error') mappedStatus = 'failed';
 
     setExecutionStatus(requestId, mappedStatus, message);
-    if (
-      (mappedStatus === 'completed' || mappedStatus === 'failed' || mappedStatus === 'cancelled')
-    ) {
+    if (mappedStatus === 'completed' || mappedStatus === 'failed' || mappedStatus === 'cancelled') {
       void closeSessionStatusSubscription(sessionId, requestId);
     }
   } else if (type === 'message' && data) {
@@ -345,192 +343,8 @@ const WEB_EDITOR_SCRIPT_PATH = 'web-editor.js';
 /** Script path for Phase 7 props agent (MAIN world) */
 const PROPS_AGENT_SCRIPT_PATH = 'inject-scripts/props-agent.js';
 
-type WebEditorInstructionType = 'update_text' | 'update_style';
-
-interface WebEditorFingerprint {
-  tag: string;
-  id?: string;
-  classes: string[];
-  text?: string;
-}
-
-/** Debug source from framework fiber metadata (file, line, component name) */
-interface DebugSource {
-  file: string;
-  line?: number;
-  column?: number;
-  componentName?: string;
-}
-
-/** Style operation details (before/after diff) */
-interface StyleOperation {
-  type: 'update_style';
-  before: Record<string, string>;
-  after: Record<string, string>;
-  removed: string[];
-}
-
-interface WebEditorApplyPayload {
-  pageUrl: string;
-  targetFile?: string;
-  fingerprint: WebEditorFingerprint;
-  techStackHint?: string[];
-  instruction: {
-    type: WebEditorInstructionType;
-    description: string;
-    text?: string;
-    style?: Record<string, string>;
-  };
-
-  // Extended fields (best-effort, optional)
-  selectorCandidates?: string[];
-  debugSource?: DebugSource;
-  operation?: StyleOperation;
-}
-
 function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value : '';
-}
-
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => normalizeString(item)).filter(Boolean);
-}
-
-function normalizeStyleMap(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    const key = normalizeString(k).trim();
-    const val = normalizeString(v).trim();
-    if (!key || !val) continue;
-    out[key] = val;
-  }
-  return Object.keys(out).length ? out : undefined;
-}
-
-function normalizeStyleMapAllowEmpty(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    const key = normalizeString(k).trim();
-    if (!key) continue;
-    // Allow empty values (represents removed styles)
-    out[key] = normalizeString(v).trim();
-  }
-  return Object.keys(out).length ? out : undefined;
-}
-
-function normalizeDebugSource(value: unknown): DebugSource | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const obj = value as Record<string, unknown>;
-  const file = normalizeString(obj.file).trim();
-  if (!file) return undefined;
-
-  const source: DebugSource = { file };
-  const line = Number(obj.line);
-  if (Number.isFinite(line) && line > 0) source.line = line;
-  const column = Number(obj.column);
-  if (Number.isFinite(column) && column >= 0) source.column = column;
-  const componentName = normalizeString(obj.componentName).trim();
-  if (componentName) source.componentName = componentName;
-
-  return source;
-}
-
-function normalizeOperation(value: unknown): StyleOperation | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const obj = value as Record<string, unknown>;
-  if (obj.type !== 'update_style') return undefined;
-
-  const before = normalizeStyleMapAllowEmpty(obj.before);
-  const after = normalizeStyleMapAllowEmpty(obj.after);
-  const removed = normalizeStringArray(obj.removed);
-
-  if (!before && !after && removed.length === 0) return undefined;
-
-  return {
-    type: 'update_style',
-    before: before ?? {},
-    after: after ?? {},
-    removed,
-  };
-}
-
-function normalizeApplyPayload(raw: unknown): WebEditorApplyPayload {
-  const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const pageUrl = normalizeString(obj.pageUrl).trim();
-  const targetFile = normalizeString(obj.targetFile).trim() || undefined;
-  const techStackHint = normalizeStringArray(obj.techStackHint);
-
-  const fingerprintRaw = (
-    obj.fingerprint && typeof obj.fingerprint === 'object' ? obj.fingerprint : {}
-  ) as Record<string, unknown>;
-  const fingerprint: WebEditorFingerprint = {
-    tag: normalizeString(fingerprintRaw.tag).trim() || 'unknown',
-    id: normalizeString(fingerprintRaw.id).trim() || undefined,
-    classes: normalizeStringArray(fingerprintRaw.classes),
-    text: normalizeString(fingerprintRaw.text).trim() || undefined,
-  };
-
-  const instructionRaw = (
-    obj.instruction && typeof obj.instruction === 'object' ? obj.instruction : {}
-  ) as Record<string, unknown>;
-  const type = normalizeString(instructionRaw.type).trim() as WebEditorInstructionType;
-  if (type !== 'update_text' && type !== 'update_style') {
-    throw new Error('Invalid instruction.type');
-  }
-
-  const instruction = {
-    type,
-    description: normalizeString(instructionRaw.description).trim() || '',
-    text: normalizeString(instructionRaw.text).trim() || undefined,
-    style: normalizeStyleMap(instructionRaw.style),
-  };
-
-  if (!pageUrl) {
-    throw new Error('pageUrl is required');
-  }
-  if (!instruction.description) {
-    throw new Error('instruction.description is required');
-  }
-
-  // Extended fields (optional)
-  const selectorCandidates = normalizeStringArray(obj.selectorCandidates);
-  const debugSource = normalizeDebugSource(obj.debugSource);
-  const operation = normalizeOperation(obj.operation);
-
-  return {
-    pageUrl,
-    targetFile,
-    fingerprint,
-    techStackHint: techStackHint.length ? techStackHint : undefined,
-    instruction,
-    selectorCandidates: selectorCandidates.length ? selectorCandidates : undefined,
-    debugSource,
-    operation,
-  };
-}
-
-/**
- * Normalize and validate batch apply payload.
- * Runtime validation for WebEditorApplyBatchPayload.
- */
-function normalizeApplyBatchPayload(raw: unknown): WebEditorApplyBatchPayload {
-  const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-
-  const tabIdRaw = Number(obj.tabId);
-  const tabId = Number.isFinite(tabIdRaw) && tabIdRaw > 0 ? tabIdRaw : 0;
-
-  const elements = Array.isArray(obj.elements) ? (obj.elements as ElementChangeSummary[]) : [];
-
-  const excludedKeys = Array.isArray(obj.excludedKeys)
-    ? obj.excludedKeys.map((k) => normalizeString(k).trim()).filter((k): k is string => Boolean(k))
-    : [];
-
-  const pageUrl = normalizeString(obj.pageUrl).trim() || undefined;
-
-  return { tabId, elements, excludedKeys, pageUrl };
 }
 
 /**
@@ -538,7 +352,7 @@ function normalizeApplyBatchPayload(raw: unknown): WebEditorApplyBatchPayload {
  * Designed for Agent session integration to apply multiple visual edits at once.
  */
 function buildAgentPromptBatch(elements: readonly ElementChangeSummary[], pageUrl: string): string {
-  const lines: string[] = [];
+  const lines = new BoundedPromptBuilder();
 
   // Header
   lines.push('You are a senior frontend engineer working in a local codebase.');
@@ -655,11 +469,11 @@ function buildAgentPromptBatch(elements: readonly ElementChangeSummary[], pageUr
     '## Output\nApply all the changes in the repo, then reply with a short summary of what file(s) you modified and the exact changes made.',
   );
 
-  return lines.join('\n');
+  return lines.build();
 }
 
-function buildAgentPrompt(payload: WebEditorApplyPayload): string {
-  const lines: string[] = [];
+function buildAgentPrompt(payload: NormalizedWebEditorApplyPayload): string {
+  const lines = new BoundedPromptBuilder();
 
   // Header
   lines.push('You are a senior frontend engineer working in a local codebase.');
@@ -794,7 +608,7 @@ function buildAgentPrompt(payload: WebEditorApplyPayload): string {
     '## Output\nApply the change in the repo, then reply with a short summary of what file(s) you modified and the exact change made.',
   );
 
-  return lines.join('\n');
+  return lines.build();
 }
 
 async function ensureContextMenu(): Promise<void> {
@@ -972,7 +786,10 @@ export function initWebEditorListeners(): void {
           return false;
         }
         if (!isWebEditorContentSender(_sender)) {
-          sendResponse({ success: false, error: 'Web Editor page message sender is not trusted' });
+          sendResponse({
+            success: false,
+            error: 'Web Editor page message sender is not trusted',
+          });
           return false;
         }
       }
@@ -981,7 +798,10 @@ export function initWebEditorListeners(): void {
         WEB_EDITOR_EXTENSION_PAGE_MESSAGE_TYPES.has(messageType) &&
         !isExtensionPageSender(_sender)
       ) {
-        sendResponse({ success: false, error: 'Web Editor control requires an extension page' });
+        sendResponse({
+          success: false,
+          error: 'Web Editor control requires an extension page',
+        });
         return false;
       }
 
@@ -1034,13 +854,19 @@ export function initWebEditorListeners(): void {
             const debugSource = payload?.debugSource;
 
             if (!debugSource || typeof debugSource !== 'object') {
-              return sendResponse({ success: false, error: 'debugSource is required' });
+              return sendResponse({
+                success: false,
+                error: 'debugSource is required',
+              });
             }
 
             const rec = debugSource as Record<string, unknown>;
             const file = typeof rec.file === 'string' ? rec.file.trim() : '';
             if (!file) {
-              return sendResponse({ success: false, error: 'debugSource.file is required' });
+              return sendResponse({
+                success: false,
+                error: 'debugSource.file is required',
+              });
             }
 
             const stored = await chrome.storage.local.get(['agent-selected-project-id']);
@@ -1079,7 +905,10 @@ export function initWebEditorListeners(): void {
             // Try to parse JSON response for detailed error
             let result: { success: boolean; error?: string };
             try {
-              result = (openResp.json || {}) as { success: boolean; error?: string };
+              result = (openResp.json || {}) as {
+                success: boolean;
+                error?: string;
+              };
             } catch {
               const text = openResp.body || '';
               result = {
@@ -1128,7 +957,10 @@ export function initWebEditorListeners(): void {
           }
 
           // Hydrate payload with tabId from sender
-          const payload: WebEditorTxChangedPayload = { ...rawPayload, tabId: senderTabId };
+          const payload: WebEditorTxChangedPayload = {
+            ...rawPayload,
+            tabId: senderTabId,
+          };
           const storageKey = `${WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX}${senderTabId}`;
 
           // Persist to session storage for cold-start recovery
@@ -1257,7 +1089,10 @@ export function initWebEditorListeners(): void {
           const senderWindowId = (_sender as chrome.runtime.MessageSender)?.tab?.windowId;
 
           if (typeof senderTabId !== 'number') {
-            sendResponse({ success: false, error: 'Web Editor request must originate from a tab.' });
+            sendResponse({
+              success: false,
+              error: 'Web Editor request must originate from a tab.',
+            });
             return;
           }
 
@@ -1279,7 +1114,11 @@ export function initWebEditorListeners(): void {
 
           const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
 
-          const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
+          const sessionId =
+            normalizeBoundedIdentifier(
+              stored?.[STORAGE_KEY_SELECTED_SESSION],
+              'selected Agent session ID',
+            ) ?? '';
 
           // Best-effort: open Agent Setup so the selected session is visible.
           if (typeof senderTabId === 'number') {
@@ -1313,10 +1152,7 @@ export function initWebEditorListeners(): void {
                   string,
                   unknown
                 >;
-                const raw = stored?.[excludedSessionKey];
-                sessionExcludedKeys = Array.isArray(raw)
-                  ? raw.map((k) => normalizeString(k).trim()).filter(Boolean)
-                  : [];
+                sessionExcludedKeys = normalizeStoredExcludedKeys(stored?.[excludedSessionKey]);
               }
             } catch {
               // Best-effort: ignore session storage failures
@@ -1327,14 +1163,20 @@ export function initWebEditorListeners(): void {
           const excluded = new Set([...hydratedPayload.excludedKeys, ...sessionExcludedKeys]);
           const elements = hydratedPayload.elements.filter((e) => !excluded.has(e.elementKey));
           if (elements.length === 0) {
-            sendResponse({ success: false, error: 'No elements selected to apply.' });
+            sendResponse({
+              success: false,
+              error: 'No elements selected to apply.',
+            });
             return;
           }
 
           // Build page URL from payload or sender tab
           const pageUrl =
-            normalizeString(hydratedPayload.pageUrl).trim() ||
-            normalizeString((_sender as chrome.runtime.MessageSender)?.tab?.url).trim() ||
+            normalizeBoundedPageUrl(hydratedPayload.pageUrl, 'payload.pageUrl') ??
+            normalizeBoundedPageUrl(
+              (_sender as chrome.runtime.MessageSender)?.tab?.url,
+              'sender tab URL',
+            ) ??
             'unknown';
 
           // Build batch prompt and send to agent
@@ -1376,11 +1218,7 @@ export function initWebEditorListeners(): void {
           const requestId = normalizeString(json?.requestId).trim() || undefined;
 
           if (requestId) {
-            rememberExecutionOwner(
-              requestId,
-              sessionId,
-              _sender as chrome.runtime.MessageSender,
-            );
+            rememberExecutionOwner(requestId, sessionId, _sender as chrome.runtime.MessageSender);
             // Start SSE subscription for status updates (fire and forget)
             subscribeToSessionStatus(sessionId, requestId).catch(() => {});
           }
@@ -1446,7 +1284,10 @@ export function initWebEditorListeners(): void {
           );
 
           if (!primarySelector) {
-            sendResponse({ success: false, error: 'No valid selector in locator' });
+            sendResponse({
+              success: false,
+              error: 'No valid selector in locator',
+            });
             return;
           }
 
@@ -1531,7 +1372,10 @@ export function initWebEditorListeners(): void {
           const senderWindowId = sender.tab?.windowId;
 
           if (typeof senderTabId !== 'number') {
-            sendResponse({ success: false, error: 'Web Editor request must originate from a tab.' });
+            sendResponse({
+              success: false,
+              error: 'Web Editor request must originate from a tab.',
+            });
             return;
           }
 
@@ -1552,7 +1396,11 @@ export function initWebEditorListeners(): void {
           const payload = normalizeApplyPayload(message.payload);
 
           const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
-          const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
+          const sessionId =
+            normalizeBoundedIdentifier(
+              stored?.[STORAGE_KEY_SELECTED_SESSION],
+              'selected Agent session ID',
+            ) ?? '';
 
           if (typeof senderTabId === 'number') {
             openAgentSetupSidepanel(senderTabId, senderWindowId, sessionId || undefined).catch(
@@ -1626,7 +1474,11 @@ export function initWebEditorListeners(): void {
         const entry = getExecutionStatus(requestId);
         if (!entry) {
           // No status yet - likely still pending or not tracked
-          sendResponse({ success: true, status: 'pending', message: 'Waiting for status...' });
+          sendResponse({
+            success: true,
+            status: 'pending',
+            message: 'Waiting for status...',
+          });
         } else {
           sendResponse({
             success: true,
