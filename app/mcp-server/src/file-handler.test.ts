@@ -6,15 +6,23 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { FileHandler } from './file-handler';
 
 function createTestHandler(): { handler: FileHandler; tempDir: string } {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webpage-mcp-file-handler-'));
-  const handler = new FileHandler();
-  (handler as any).tempDir = tempDir;
+  const handler = trackHandler(new FileHandler());
+  const tempDir = handler.getTempDir();
   return { handler, tempDir };
 }
 
 const dirsToCleanup: string[] = [];
+const handlersToDispose: FileHandler[] = [];
+
+function trackHandler(handler: FileHandler): FileHandler {
+  handlersToDispose.push(handler);
+  return handler;
+}
 
 afterEach(() => {
+  while (handlersToDispose.length > 0) {
+    handlersToDispose.pop()?.dispose();
+  }
   while (dirsToCleanup.length > 0) {
     const dir = dirsToCleanup.pop();
     if (dir) {
@@ -106,5 +114,56 @@ describe('FileHandler temp file safety', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('base64Data is required');
+  });
+
+  it.skipIf(process.platform === 'win32')('creates private directories and files', async () => {
+    const { handler, tempDir } = createTestHandler();
+    dirsToCleanup.push(tempDir);
+    const result = await handler.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('private').toString('base64'),
+      fileName: 'private.txt',
+    });
+
+    expect(fs.statSync(tempDir).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(result.filePath).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === 'win32')('does not follow symlinks inside the temp directory', async () => {
+    const { handler, tempDir } = createTestHandler();
+    dirsToCleanup.push(tempDir);
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webpage-mcp-symlink-victim-'));
+    dirsToCleanup.push(outsideDir);
+    const victim = path.join(outsideDir, 'victim.txt');
+    const link = path.join(tempDir, 'linked.txt');
+    fs.writeFileSync(victim, 'keep');
+    fs.symlinkSync(victim, link);
+
+    const readResult = await handler.handleFileRequest({
+      action: 'readBase64File',
+      filePath: link,
+    });
+    const writeResult = await handler.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('overwrite').toString('base64'),
+      fileName: 'linked.txt',
+    });
+
+    expect(readResult.success).toBe(false);
+    expect(readResult.error).toContain('Symbolic links are not allowed');
+    expect(writeResult.success).toBe(false);
+    expect(fs.readFileSync(victim, 'utf8')).toBe('keep');
+  });
+
+  it('removes the private directory on disposal', async () => {
+    const { handler, tempDir } = createTestHandler();
+    await handler.handleFileRequest({
+      action: 'prepareFile',
+      base64Data: Buffer.from('cleanup').toString('base64'),
+    });
+
+    handler.dispose();
+
+    expect(fs.existsSync(tempDir)).toBe(false);
   });
 });

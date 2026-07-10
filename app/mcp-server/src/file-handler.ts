@@ -10,14 +10,29 @@ const MAX_CONTROL_CHARACTER_CODE = 31;
  * File handler for managing file uploads through the native messaging host
  */
 export class FileHandler {
-  private tempDir: string;
+  private readonly tempDir: string;
+  private disposed = false;
+  private readonly exitHandler = (): void => this.dispose();
 
-  constructor() {
-    // Create a temp directory for file operations
-    this.tempDir = path.join(os.tmpdir(), 'webpage-mcp-uploads');
-    if (!fs.existsSync(this.tempDir)) {
-      fs.mkdirSync(this.tempDir, { recursive: true });
+  constructor(temporaryRoot = os.tmpdir()) {
+    // A per-process unpredictable directory prevents pre-planted symlinks and
+    // cross-instance file access through a shared /tmp path.
+    this.tempDir = fs.mkdtempSync(path.join(temporaryRoot, 'webpage-mcp-uploads-'));
+    if (process.platform !== 'win32') {
+      fs.chmodSync(this.tempDir, 0o700);
     }
+    process.once('exit', this.exitHandler);
+  }
+
+  getTempDir(): string {
+    return this.tempDir;
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    process.removeListener('exit', this.exitHandler);
+    fs.rmSync(this.tempDir, { recursive: true, force: true });
   }
 
   /**
@@ -87,7 +102,7 @@ export class FileHandler {
       const filePath = this.resolveTempFilePath(finalFileName);
 
       // Save to file
-      fs.writeFileSync(filePath, buffer);
+      fs.writeFileSync(filePath, buffer, { flag: 'wx', mode: 0o600 });
 
       return {
         success: true,
@@ -112,16 +127,14 @@ export class FileHandler {
       if (!fs.existsSync(resolvedPath)) {
         throw new Error(`File does not exist: ${resolvedPath}`);
       }
-      const stats = fs.statSync(resolvedPath);
-      if (!stats.isFile()) {
-        throw new Error(`Path is not a file: ${resolvedPath}`);
-      }
-      const buf = fs.readFileSync(resolvedPath);
+      const safePath = this.resolveSafeExistingTempFile(resolvedPath);
+      const stats = fs.statSync(safePath);
+      const buf = fs.readFileSync(safePath);
       const base64 = buf.toString('base64');
       return {
         success: true,
-        filePath: resolvedPath,
-        fileName: path.basename(resolvedPath),
+        filePath: safePath,
+        fileName: path.basename(safePath),
         size: stats.size,
         base64Data: base64,
       };
@@ -147,7 +160,7 @@ export class FileHandler {
       }
 
       if (fs.existsSync(resolvedPath)) {
-        fs.unlinkSync(resolvedPath);
+        fs.unlinkSync(this.resolveSafeExistingTempFile(resolvedPath));
       }
 
       return {
@@ -225,6 +238,24 @@ export class FileHandler {
     return resolvedFilePath;
   }
 
+  private resolveSafeExistingTempFile(filePath: string): string {
+    const stats = fs.lstatSync(filePath);
+    if (stats.isSymbolicLink()) {
+      throw new Error('Symbolic links are not allowed in the temp directory');
+    }
+    if (!stats.isFile()) {
+      throw new Error(`Path is not a file: ${filePath}`);
+    }
+
+    const realTempDir = fs.realpathSync(this.tempDir);
+    const realFilePath = fs.realpathSync(filePath);
+    const relative = path.relative(realTempDir, realFilePath);
+    if (!relative || relative === '.' || relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('Resolved file escapes the temp directory');
+    }
+    return realFilePath;
+  }
+
   /**
    * Clean up old temporary files (older than 1 hour)
    */
@@ -236,8 +267,8 @@ export class FileHandler {
       const files = fs.readdirSync(this.tempDir);
       for (const file of files) {
         const filePath = path.join(this.tempDir, file);
-        const stats = fs.statSync(filePath);
-        if (now - stats.mtimeMs > oneHour) {
+        const stats = fs.lstatSync(filePath);
+        if (!stats.isSymbolicLink() && stats.isFile() && now - stats.mtimeMs > oneHour) {
           fs.unlinkSync(filePath);
           // Use stderr to avoid polluting stdout (Native Messaging protocol)
           console.error(`Cleaned up old temp file: ${file}`);

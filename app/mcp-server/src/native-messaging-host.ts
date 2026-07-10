@@ -958,6 +958,7 @@ export class NativeMessagingHost {
       pending.reject(new Error('Native host is shutting down or Chrome disconnected.'));
     });
     this.pendingRequests.clear();
+    fileHandler.dispose();
 
     for (const [subscriptionId, subscription] of this.streamSubscriptions.entries()) {
       try {
