@@ -25,7 +25,9 @@ const shutdown = async (exitCode: number): Promise<void> => {
 try {
   serverInstance.setNativeHost(nativeMessagingHostInstance); // Server needs setNativeHost method
   nativeMessagingHostInstance.setServer(serverInstance); // NativeHost needs setServer method
-  nativeMessagingHostInstance.start();
+  void nativeMessagingHostInstance.start().catch((error) => {
+    exitWithError("startup failed", error);
+  });
 } catch (error) {
   exitWithError("startup failed", error);
 }

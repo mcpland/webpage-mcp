@@ -1,5 +1,4 @@
 import { stdin, stdout } from 'process';
-import fs from 'node:fs';
 import net from 'node:net';
 import { Server } from './server';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,6 +27,12 @@ import {
   type NativeIpcCredential,
 } from './ipc/bridge-auth';
 import { BoundedNdjsonDecoder } from './ipc/bounded-ndjson';
+import {
+  captureUnixSocketIdentity,
+  prepareUnixSocketPath,
+  removeOwnedUnixSocket,
+  type UnixSocketIdentity,
+} from './ipc/socket-lifecycle';
 import {
   callToolForContext,
   listToolsForContext,
@@ -59,20 +64,6 @@ const IPC_MAX_IN_FLIGHT_REQUESTS = 4;
 const IPC_MAX_PENDING_REQUESTS = 16;
 const IPC_PAUSE_HIGH_WATERMARK = 8;
 const IPC_RESUME_LOW_WATERMARK = 4;
-
-function removeSocketIfExists(socketPath: string): void {
-  if (process.platform === 'win32') {
-    return;
-  }
-  if (!socketPath || !fs.existsSync(socketPath)) {
-    return;
-  }
-  try {
-    fs.unlinkSync(socketPath);
-  } catch {
-    // Ignore stale socket cleanup failures; listen will report a concrete error if needed.
-  }
-}
 
 function normalizeInstanceId(raw: unknown): string {
   if (typeof raw === 'string') {
@@ -128,6 +119,8 @@ export class NativeMessagingHost {
   private ipcServer: net.Server | null = null;
   private ipcSockets: Set<net.Socket> = new Set();
   private ipcCredential: NativeIpcCredential | null = null;
+  private ipcSocketIdentity: UnixSocketIdentity | null = null;
+  private ipcSocketPath: string | null = null;
   private static readonly AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
 
   public constructor(private readonly messageWriter = new NativeMessageWriter(stdout)) {}
@@ -144,13 +137,9 @@ export class NativeMessagingHost {
   }
 
   // add message handler to wait for start server
-  public start(): void {
-    try {
-      this.setupIpcServer();
-      this.setupMessageHandling();
-    } catch (_error: any) {
-      process.exit(1);
-    }
+  public async start(): Promise<void> {
+    await this.setupIpcServer();
+    this.setupMessageHandling();
   }
 
   public async stopServers(): Promise<void> {
@@ -168,32 +157,102 @@ export class NativeMessagingHost {
     }
   }
 
-  private setupIpcServer(): void {
+  private async setupIpcServer(): Promise<void> {
     const socketPath = getNativeSocketPath();
 
     if (process.platform !== 'win32') {
       ensureNativeSocketParentDir(socketPath);
-      removeSocketIfExists(socketPath);
+      const preparation = await prepareUnixSocketPath(socketPath);
+      if (preparation === 'active') {
+        throw new Error(`IPC socket is already owned by a running native host: ${socketPath}`);
+      }
 
       // Best-effort cleanup for legacy tmp socket path from older builds.
       const legacySocketPath = getLegacyNativeSocketPath();
-      if (legacySocketPath !== socketPath) {
-        removeSocketIfExists(legacySocketPath);
+      if (!process.env.WEBPAGE_MCP_NATIVE_SOCKET?.trim() && legacySocketPath !== socketPath) {
+        await prepareUnixSocketPath(legacySocketPath).catch(() => {
+          // Never disturb an active listener or unrelated entry at the legacy path.
+        });
       }
     }
 
-    this.ipcCredential = createNativeIpcCredential(socketPath);
-
-    this.ipcServer = net.createServer((socket) => {
+    const pendingSockets = new Set<net.Socket>();
+    let boundSocketIdentity: UnixSocketIdentity | null = null;
+    let createdCredential: NativeIpcCredential | null = null;
+    let bridgeReady = false;
+    const ipcServer = net.createServer({ pauseOnConnect: true }, (socket) => {
+      if (!bridgeReady) {
+        pendingSockets.add(socket);
+        socket.once('close', () => pendingSockets.delete(socket));
+        return;
+      }
       this.handleIpcSocket(socket);
+      socket.resume();
     });
 
-    this.ipcServer.on('error', (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      this.sendError(`IPC server error: ${message}`);
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error): void => {
+          ipcServer.removeListener('listening', onListening);
+          reject(error);
+        };
+        const onListening = (): void => {
+          ipcServer.removeListener('error', onError);
+          resolve();
+        };
 
-    this.ipcServer.listen(socketPath);
+        ipcServer.once('error', onError);
+        ipcServer.once('listening', onListening);
+        ipcServer.listen(socketPath);
+      });
+
+      ipcServer.on('error', (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.sendError(`IPC server error: ${message}`);
+      });
+
+      boundSocketIdentity = process.platform === 'win32' ? null : captureUnixSocketIdentity(socketPath);
+      createdCredential = createNativeIpcCredential(socketPath);
+
+      this.ipcServer = ipcServer;
+      this.ipcCredential = createdCredential;
+      this.ipcSocketIdentity = boundSocketIdentity;
+      this.ipcSocketPath = socketPath;
+      bridgeReady = true;
+
+      for (const socket of pendingSockets) {
+        pendingSockets.delete(socket);
+        if (!socket.destroyed) {
+          this.handleIpcSocket(socket);
+          socket.resume();
+        }
+      }
+    } catch (error) {
+      for (const socket of pendingSockets) {
+        socket.destroy();
+      }
+      pendingSockets.clear();
+      try {
+        ipcServer.close();
+      } catch {
+        // Ignore cleanup failure while preserving the startup error.
+      }
+
+      if (createdCredential) {
+        removeNativeIpcCredential(createdCredential);
+        if (this.ipcCredential === createdCredential) {
+          this.ipcCredential = null;
+        }
+      }
+      if (process.platform !== 'win32' && boundSocketIdentity) {
+        try {
+          removeOwnedUnixSocket(socketPath, boundSocketIdentity);
+        } catch {
+          // The path was never bound or no longer belongs to this startup attempt.
+        }
+      }
+      throw error;
+    }
   }
 
   private handleIpcSocket(socket: net.Socket): void {
@@ -1167,14 +1226,15 @@ export class NativeMessagingHost {
       removeNativeIpcCredential(this.ipcCredential);
       this.ipcCredential = null;
     }
-    const socketPath = getNativeSocketPath();
-    if (process.platform !== 'win32') {
-      removeSocketIfExists(socketPath);
-      const legacySocketPath = getLegacyNativeSocketPath();
-      if (legacySocketPath !== socketPath) {
-        removeSocketIfExists(legacySocketPath);
+    if (process.platform !== 'win32' && this.ipcSocketPath && this.ipcSocketIdentity) {
+      try {
+        removeOwnedUnixSocket(this.ipcSocketPath, this.ipcSocketIdentity);
+      } catch {
+        // Never remove a replacement path during shutdown.
       }
     }
+    this.ipcSocketPath = null;
+    this.ipcSocketIdentity = null;
 
     this.stopServers()
       .then(() => {
