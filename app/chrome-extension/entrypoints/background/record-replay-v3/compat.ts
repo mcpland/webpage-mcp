@@ -229,11 +229,24 @@ export async function saveFlowToV3(
     validateRuntimeNodeKinds(flow);
     validateReachableRuntimeNodes(flow);
     if (flow.meta?.tool?.published) {
-      ensurePublishedSlugAvailable(
-        await runtime.storage.flows.list(),
-        flow.id as FlowId,
-        normalizeToolSlug(flow.meta.tool.slug, flow.name),
-      );
+      const slug = normalizeToolSlug(flow.meta.tool.slug, flow.name);
+      if (runtime.storage.flows.findPublishedSlugOwner) {
+        const owner = await runtime.storage.flows.findPublishedSlugOwner(
+          slug,
+          flow.id as FlowId,
+        );
+        if (owner) {
+          throw new Error(
+            `Published workflow slug "${slug}" is already used by flow "${owner}"`,
+          );
+        }
+      } else {
+        ensurePublishedSlugAvailable(
+          await runtime.storage.flows.list(),
+          flow.id as FlowId,
+          slug,
+        );
+      }
     }
     await runtime.storage.flows.save(flow);
     return flow;

@@ -20,6 +20,7 @@ import {
   EVENT_RESOURCE_LIMITS,
   RUN_SCHEMA_VERSION,
   RR_ERROR_CODES,
+  jsonUtf8ByteLength,
   closeRrV3Db,
   deleteRrV3Db,
 } from '@/entrypoints/background/record-replay-v3';
@@ -279,6 +280,12 @@ describe('V3 Events contracts', () => {
 
       const empty = await events.list('run-1', { limit: 0 });
       expect(empty).toEqual([]);
+
+      const firstEvent = (await events.list('run-1', { limit: 1 }))[0];
+      const oneEventBudget = jsonUtf8ByteLength(firstEvent) + 2;
+      await expect(
+        events.list('run-1', { limit: 5, maxBytes: oneEventBudget }),
+      ).resolves.toHaveLength(1);
     });
 
     it('rejects invalid list bounds in the storage layer', async () => {

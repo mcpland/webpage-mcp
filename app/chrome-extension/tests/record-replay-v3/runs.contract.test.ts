@@ -5,6 +5,7 @@ import {
   RUN_SCHEMA_VERSION,
   closeRrV3Db,
   deleteRrV3Db,
+  jsonUtf8ByteLength,
   type RunRecordV3,
 } from "@/entrypoints/background/record-replay-v3";
 import { createEventsStore } from "@/entrypoints/background/record-replay-v3/storage/events";
@@ -77,6 +78,11 @@ describe("V3 run storage bounds", () => {
     await expect(runs.list({ status: "failed" })).resolves.toMatchObject([
       { id: "middle" },
     ]);
+    const newest = await runs.get("new");
+    const oneRunBudget = jsonUtf8ByteLength(newest) + 2;
+    await expect(
+      runs.list({ limit: 3, maxBytes: oneRunBudget }),
+    ).resolves.toMatchObject([{ id: "new" }]);
     await expect(
       runs.list({ limit: RUN_RESOURCE_LIMITS.maxListLimit + 1 }),
     ).rejects.toThrow(`${RUN_RESOURCE_LIMITS.maxListLimit}`);

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   FLOW_RESOURCE_LIMITS,
   FLOW_SCHEMA_VERSION,
+  jsonUtf8ByteLength,
   closeRrV3Db,
   deleteRrV3Db,
   type FlowV3,
@@ -123,6 +124,38 @@ describe("V3 flow storage bounds", () => {
     ]);
     await expect(store.list({ offset: 1, limit: 1 })).resolves.toMatchObject([
       { id: "middle" },
+    ]);
+
+    const newest = await store.get("new");
+    const oneFlowBudget = jsonUtf8ByteLength(newest) + 2;
+    await expect(
+      store.list({ limit: 3, maxBytes: oneFlowBudget }),
+    ).resolves.toMatchObject([{ id: "new" }]);
+  });
+
+  it("scans the full catalog for published slug conflicts without returning full flows", async () => {
+    const store = createFlowsStore();
+    const flows = Array.from(
+      { length: FLOW_RESOURCE_LIMITS.defaultListLimit + 1 },
+      (_, index) =>
+        createFlow(
+          `catalog-${index}`,
+          `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        ),
+    );
+    flows[0].meta = {
+      tool: { published: true, slug: "reserved-slug" },
+    };
+    await putFlowsWithoutValidation(flows);
+
+    await expect(store.list()).resolves.toHaveLength(
+      FLOW_RESOURCE_LIMITS.defaultListLimit,
+    );
+    await expect(
+      store.findPublishedSlugOwner?.("reserved-slug", "new-flow"),
+    ).resolves.toBe("catalog-0");
+    await expect(store.listPublishedInfos?.()).resolves.toMatchObject([
+      { id: "catalog-0", slug: "reserved-slug" },
     ]);
   });
 

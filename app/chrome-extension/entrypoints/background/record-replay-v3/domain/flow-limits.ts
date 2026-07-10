@@ -2,11 +2,11 @@ import type { FlowV3 } from "./flow";
 import { findJsonResourceLimitViolation } from "./json-limits";
 
 export const FLOW_RESOURCE_LIMITS = Object.freeze({
-  maxStoredFlows: 128,
+  maxStoredFlows: 64,
   maxNodes: 5_000,
   maxEdges: 20_000,
   maxVariables: 256,
-  maxFlowUtf8Bytes: 16 * 1024 * 1024,
+  maxFlowUtf8Bytes: 8 * 1024 * 1024,
   maxNodeConfigUtf8Bytes: 1024 * 1024,
   maxStringUtf8Bytes: 256 * 1024,
   maxJsonDepth: 64,
@@ -16,16 +16,23 @@ export const FLOW_RESOURCE_LIMITS = Object.freeze({
   maxRetries: 10,
   maxRetryIntervalMs: 10 * 60 * 1000,
   maxRetryErrorCodes: 64,
+  defaultListLimit: 20,
+  maxListLimit: 50,
+  maxListUtf8Bytes: 16 * 1024 * 1024,
+  maxPublishedListUtf8Bytes: 2 * 1024 * 1024,
 });
 
 export interface FlowListOptions {
   offset?: number;
   limit?: number;
+  /** Internal callers may request a smaller aggregate budget. */
+  maxBytes?: number;
 }
 
 export function normalizeFlowListOptions(options: FlowListOptions = {}): {
   offset: number;
   limit: number;
+  maxBytes: number;
 } {
   const offset =
     Number.isSafeInteger(options.offset) && (options.offset ?? -1) >= 0
@@ -33,9 +40,13 @@ export function normalizeFlowListOptions(options: FlowListOptions = {}): {
       : 0;
   const limit =
     Number.isSafeInteger(options.limit) && (options.limit ?? 0) > 0
-      ? Math.min(options.limit!, FLOW_RESOURCE_LIMITS.maxStoredFlows)
-      : FLOW_RESOURCE_LIMITS.maxStoredFlows;
-  return { offset, limit };
+      ? Math.min(options.limit!, FLOW_RESOURCE_LIMITS.maxListLimit)
+      : FLOW_RESOURCE_LIMITS.defaultListLimit;
+  const maxBytes =
+    Number.isSafeInteger(options.maxBytes) && (options.maxBytes ?? 0) > 0
+      ? Math.min(options.maxBytes!, FLOW_RESOURCE_LIMITS.maxListUtf8Bytes)
+      : FLOW_RESOURCE_LIMITS.maxListUtf8Bytes;
+  return { offset, limit, maxBytes };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

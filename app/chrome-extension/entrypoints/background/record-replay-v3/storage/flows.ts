@@ -13,6 +13,12 @@ import {
   type FlowListOptions,
 } from "../domain/flow-limits";
 import { RR_ERROR_CODES, createRRError } from "../domain/errors";
+import { jsonUtf8ByteLength } from "../domain/json-limits";
+import {
+  getPublishedFlowInfo,
+  normalizeToolSlug,
+  type PublishedFlowInfoV3,
+} from "../flows/publish";
 import type { FlowsStore } from "../engine/storage/storage-port";
 import { RR_V3_STORES, withTransaction } from "./db";
 
@@ -101,12 +107,13 @@ export function validateFlow(flow: FlowV3): void {
 export function createFlowsStore(): FlowsStore {
   return {
     async list(options?: FlowListOptions): Promise<FlowV3[]> {
-      const { offset, limit } = normalizeFlowListOptions(options);
+      const { offset, limit, maxBytes } = normalizeFlowListOptions(options);
       return withTransaction(RR_V3_STORES.FLOWS, "readonly", async (stores) => {
         const store = stores[RR_V3_STORES.FLOWS];
         return new Promise<FlowV3[]>((resolve, reject) => {
           const results: FlowV3[] = [];
           let skipped = 0;
+          let aggregateBytes = 2;
           const request = store.index("updatedAt").openCursor(null, "prev");
           request.onsuccess = () => {
             const cursor = request.result;
@@ -119,10 +126,85 @@ export function createFlowsStore(): FlowsStore {
               cursor.continue();
               return;
             }
-            results.push(cursor.value as FlowV3);
+            const flow = cursor.value as FlowV3;
+            const flowBytes = jsonUtf8ByteLength(flow, maxBytes);
+            const addedBytes = flowBytes + (results.length > 0 ? 1 : 0);
+            if (addedBytes > maxBytes - aggregateBytes) {
+              resolve(results);
+              return;
+            }
+            aggregateBytes += addedBytes;
+            results.push(flow);
             cursor.continue();
           };
           request.onerror = () => reject(request.error);
+        });
+      });
+    },
+
+    async findPublishedSlugOwner(
+      slug: string,
+      excludingFlowId: FlowId,
+    ): Promise<FlowId | null> {
+      return withTransaction(RR_V3_STORES.FLOWS, "readonly", async (stores) => {
+        const store = stores[RR_V3_STORES.FLOWS];
+        return new Promise<FlowId | null>((resolve, reject) => {
+          const request = store.openCursor();
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor) {
+              resolve(null);
+              return;
+            }
+            const flow = cursor.value as FlowV3;
+            if (
+              flow.id !== excludingFlowId &&
+              flow.meta?.tool?.published === true &&
+              normalizeToolSlug(flow.meta.tool.slug, flow.name) === slug
+            ) {
+              resolve(flow.id);
+              return;
+            }
+            cursor.continue();
+          };
+        });
+      });
+    },
+
+    async listPublishedInfos(): Promise<PublishedFlowInfoV3[]> {
+      return withTransaction(RR_V3_STORES.FLOWS, "readonly", async (stores) => {
+        const store = stores[RR_V3_STORES.FLOWS];
+        return new Promise<PublishedFlowInfoV3[]>((resolve, reject) => {
+          const results: PublishedFlowInfoV3[] = [];
+          let aggregateBytes = 2;
+          const request = store.openCursor();
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor) {
+              resolve(results.sort((a, b) => a.slug.localeCompare(b.slug)));
+              return;
+            }
+            const info = getPublishedFlowInfo(cursor.value as FlowV3);
+            if (info) {
+              const infoBytes = jsonUtf8ByteLength(
+                info,
+                FLOW_RESOURCE_LIMITS.maxPublishedListUtf8Bytes,
+              );
+              const addedBytes = infoBytes + (results.length > 0 ? 1 : 0);
+              if (
+                addedBytes >
+                FLOW_RESOURCE_LIMITS.maxPublishedListUtf8Bytes - aggregateBytes
+              ) {
+                resolve(results.sort((a, b) => a.slug.localeCompare(b.slug)));
+                return;
+              }
+              aggregateBytes += addedBytes;
+              results.push(info);
+            }
+            cursor.continue();
+          };
         });
       });
     },

@@ -57,6 +57,36 @@ function jsonStringUtf8Bytes(value: string, stopAfter: number): number {
   return bytes;
 }
 
+/** Measure one already-bounded JSON value without allocating a UTF-8 buffer. */
+export function jsonUtf8ByteLength(
+  value: unknown,
+  stopAfter = Number.MAX_SAFE_INTEGER,
+): number {
+  let serialized: string;
+  try {
+    const result = JSON.stringify(value);
+    if (result === undefined) return 0;
+    serialized = result;
+  } catch {
+    return stopAfter + 1;
+  }
+
+  let bytes = 0;
+  for (const character of serialized) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    bytes +=
+      codePoint <= 0x7f
+        ? 1
+        : codePoint <= 0x7ff
+          ? 2
+          : codePoint <= 0xffff
+            ? 3
+            : 4;
+    if (bytes > stopAfter) return bytes;
+  }
+  return bytes;
+}
+
 /**
  * Validate JSON-compatible data without first materializing a second, potentially
  * huge serialized copy. The reported byte count matches JSON.stringify for the

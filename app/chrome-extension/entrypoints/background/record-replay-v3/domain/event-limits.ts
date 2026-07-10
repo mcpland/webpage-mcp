@@ -1,18 +1,21 @@
 import { findJsonResourceLimitViolation } from "./json-limits";
 
 export const EVENT_RESOURCE_LIMITS = Object.freeze({
-  maxEventUtf8Bytes: 256 * 1024,
-  maxStringUtf8Bytes: 128 * 1024,
+  maxEventUtf8Bytes: 64 * 1024,
+  maxStringUtf8Bytes: 32 * 1024,
   maxJsonDepth: 32,
   maxJsonValues: 10_000,
-  defaultListLimit: 1_000,
-  maxListLimit: 1_000,
+  defaultListLimit: 250,
+  maxListLimit: 250,
+  maxListUtf8Bytes: 4 * 1024 * 1024,
   maxPruneDeletesPerAppend: 512,
 });
 
 export interface EventListOptions {
   fromSeq?: number;
   limit?: number;
+  /** Internal callers may request a smaller aggregate budget. */
+  maxBytes?: number;
 }
 
 export function findEventResourceLimitViolation(value: unknown): string | null {
@@ -31,6 +34,7 @@ export function findEventResourceLimitViolation(value: unknown): string | null {
 export function normalizeEventListOptions(options: EventListOptions = {}): {
   fromSeq: number;
   limit: number;
+  maxBytes: number;
 } {
   const fromSeq = options.fromSeq ?? 0;
   if (!Number.isSafeInteger(fromSeq) || fromSeq < 0) {
@@ -47,5 +51,15 @@ export function normalizeEventListOptions(options: EventListOptions = {}): {
       `limit must be an integer between 0 and ${EVENT_RESOURCE_LIMITS.maxListLimit}`,
     );
   }
-  return { fromSeq, limit };
+  const maxBytes = options.maxBytes ?? EVENT_RESOURCE_LIMITS.maxListUtf8Bytes;
+  if (
+    !Number.isSafeInteger(maxBytes) ||
+    maxBytes < 1 ||
+    maxBytes > EVENT_RESOURCE_LIMITS.maxListUtf8Bytes
+  ) {
+    throw new Error(
+      `maxBytes must be an integer between 1 and ${EVENT_RESOURCE_LIMITS.maxListUtf8Bytes}`,
+    );
+  }
+  return { fromSeq, limit, maxBytes };
 }

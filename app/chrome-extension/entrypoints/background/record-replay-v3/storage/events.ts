@@ -12,6 +12,7 @@ import {
   type EventListOptions,
 } from '../domain/event-limits';
 import { RR_ERROR_CODES, createRRError } from '../domain/errors';
+import { jsonUtf8ByteLength } from '../domain/json-limits';
 import type { EventsStore } from '../engine/storage/storage-port';
 import { RR_V3_STORES, withTransaction } from './db';
 
@@ -22,9 +23,9 @@ export interface EventRetentionPolicy {
 }
 
 export const DEFAULT_EVENT_RETENTION: EventRetentionPolicy = {
-  maxEventsPerRun: 1_000,
-  maxEventsPerFlow: 5_000,
-  maxTotalEvents: 50_000,
+  maxEventsPerRun: 250,
+  maxEventsPerFlow: 1_000,
+  maxTotalEvents: 2_000,
 };
 
 function positiveInteger(value: unknown, fallback: number): number {
@@ -41,15 +42,18 @@ function resolveEventRetentionPolicy(
     overrides.maxTotalEvents,
     DEFAULT_EVENT_RETENTION.maxTotalEvents,
   );
+  const boundedTotalEvents = Math.min(maxTotalEvents, DEFAULT_EVENT_RETENTION.maxTotalEvents);
   const maxEventsPerFlow = Math.min(
-    maxTotalEvents,
+    boundedTotalEvents,
+    DEFAULT_EVENT_RETENTION.maxEventsPerFlow,
     positiveInteger(overrides.maxEventsPerFlow, DEFAULT_EVENT_RETENTION.maxEventsPerFlow),
   );
   const maxEventsPerRun = Math.min(
     maxEventsPerFlow,
+    DEFAULT_EVENT_RETENTION.maxEventsPerRun,
     positiveInteger(overrides.maxEventsPerRun, DEFAULT_EVENT_RETENTION.maxEventsPerRun),
   );
-  return { maxEventsPerRun, maxEventsPerFlow, maxTotalEvents };
+  return { maxEventsPerRun, maxEventsPerFlow, maxTotalEvents: boundedTotalEvents };
 }
 
 /**
@@ -240,7 +244,7 @@ export function createEventsStore(
       }
       return withTransaction(RR_V3_STORES.EVENTS, 'readonly', async (stores) => {
         const store = stores[RR_V3_STORES.EVENTS];
-        const { fromSeq, limit } = normalized;
+        const { fromSeq, limit, maxBytes } = normalized;
 
         // Early return for zero limit
         if (limit === 0) {
@@ -249,6 +253,7 @@ export function createEventsStore(
 
         return new Promise<RunEvent[]>((resolve, reject) => {
           const results: RunEvent[] = [];
+          let aggregateBytes = 2;
 
           // Use compound primary key [runId, seq] for efficient range query
           // This yields events in seq-ascending order naturally
@@ -265,6 +270,13 @@ export function createEventsStore(
             }
 
             const event = cursor.value as RunEvent;
+            const eventBytes = jsonUtf8ByteLength(event, maxBytes);
+            const addedBytes = eventBytes + (results.length > 0 ? 1 : 0);
+            if (addedBytes > maxBytes - aggregateBytes) {
+              resolve(results);
+              return;
+            }
+            aggregateBytes += addedBytes;
             results.push(event);
 
             // Check limit

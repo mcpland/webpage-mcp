@@ -647,9 +647,7 @@ export class RpcServer {
       const flow = this.normalizeFlowSpec(rawFlow, existingFlow);
 
       if (flow.meta?.tool?.published) {
-        const allFlows = await this.storage.flows.list();
-        ensurePublishedSlugAvailable(
-          allFlows,
+        await this.ensurePublishedSlugAvailable(
           flow.id,
           normalizeToolSlug(flow.meta.tool.slug, flow.name),
         );
@@ -690,10 +688,10 @@ export class RpcServer {
         typeof params.limit !== "number" ||
         !Number.isSafeInteger(params.limit) ||
         params.limit < 1 ||
-        params.limit > FLOW_RESOURCE_LIMITS.maxStoredFlows
+        params.limit > FLOW_RESOURCE_LIMITS.maxListLimit
       ) {
         throw new Error(
-          `limit must be an integer between 1 and ${FLOW_RESOURCE_LIMITS.maxStoredFlows}`,
+          `limit must be an integer between 1 and ${FLOW_RESOURCE_LIMITS.maxListLimit}`,
         );
       }
       options.limit = params.limit;
@@ -702,8 +700,24 @@ export class RpcServer {
   }
 
   private async handleListPublishedFlows(): Promise<JsonValue> {
+    if (this.storage.flows.listPublishedInfos) {
+      return (await this.storage.flows.listPublishedInfos()) as unknown as JsonValue;
+    }
     const flows = await this.storage.flows.list();
     return listPublishedFlowInfos(flows) as unknown as JsonValue;
+  }
+
+  private async ensurePublishedSlugAvailable(flowId: FlowId, slug: string): Promise<void> {
+    if (this.storage.flows.findPublishedSlugOwner) {
+      const owner = await this.storage.flows.findPublishedSlugOwner(slug, flowId);
+      if (owner) {
+        throw new Error(
+          `Published workflow slug "${slug}" is already used by flow "${owner}"`,
+        );
+      }
+      return;
+    }
+    ensurePublishedSlugAvailable(await this.storage.flows.list(), flowId, slug);
   }
 
   private async handlePublishFlow(
@@ -762,9 +776,7 @@ export class RpcServer {
         ),
       };
 
-      const allFlows = await this.storage.flows.list();
-      ensurePublishedSlugAvailable(
-        allFlows,
+      await this.ensurePublishedSlugAvailable(
         updated.id,
         normalizeToolSlug(updated.meta?.tool?.slug, updated.name),
       );

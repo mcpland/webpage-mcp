@@ -16,6 +16,7 @@ import {
   type RunRetentionPolicy,
 } from '../domain/run-limits';
 import { RR_ERROR_CODES, createRRError } from '../domain/errors';
+import { jsonUtf8ByteLength } from '../domain/json-limits';
 import type { RunsStore } from '../engine/storage/storage-port';
 import { RR_V3_STORES, withTransaction } from './db';
 
@@ -226,6 +227,7 @@ export function createRunsStore(
         return new Promise<RunRecordV3[]>((resolve, reject) => {
           const results: RunRecordV3[] = [];
           let skipped = 0;
+          let aggregateBytes = 2;
           const request = store.index('createdAt').openCursor(null, 'prev');
           request.onsuccess = () => {
             const cursor = request.result;
@@ -243,6 +245,13 @@ export function createRunsStore(
               cursor.continue();
               return;
             }
+            const runBytes = jsonUtf8ByteLength(run, normalized.maxBytes);
+            const addedBytes = runBytes + (results.length > 0 ? 1 : 0);
+            if (addedBytes > normalized.maxBytes - aggregateBytes) {
+              resolve(results);
+              return;
+            }
+            aggregateBytes += addedBytes;
             results.push(run);
             cursor.continue();
           };

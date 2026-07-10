@@ -16,6 +16,7 @@ import type {
 import type { TriggerSpec } from "../../domain/triggers";
 import type { RunQueue } from "../queue/queue";
 import type { ArtifactStore } from "../../storage/artifacts";
+import type { PublishedFlowInfoV3 } from "../../flows/publish";
 
 /**
  * FlowsStore interface
@@ -23,6 +24,13 @@ import type { ArtifactStore } from "../../storage/artifacts";
 export interface FlowsStore {
   /** List flows within the persisted collection bound. */
   list(options?: FlowListOptions): Promise<FlowV3[]>;
+  /** Find a conflicting published slug without materializing the catalog. */
+  findPublishedSlugOwner?(
+    slug: string,
+    excludingFlowId: FlowId,
+  ): Promise<FlowId | null>;
+  /** Return bounded, lightweight published catalog entries. */
+  listPublishedInfos?(): Promise<PublishedFlowInfoV3[]>;
   /** Get a single flow */
   get(id: FlowId): Promise<FlowV3 | null>;
   /** Save Flow */

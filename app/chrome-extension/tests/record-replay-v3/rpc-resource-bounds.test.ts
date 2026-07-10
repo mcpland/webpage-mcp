@@ -85,7 +85,7 @@ describe("RR-V3 RPC resource bounds", () => {
     expect(list).toHaveBeenCalledWith({ offset: 2, limit: 3 });
 
     await expect(call(server, "rr_v3.listFlows", { limit: 0 })).rejects.toThrow(
-      `limit must be an integer between 1 and ${FLOW_RESOURCE_LIMITS.maxStoredFlows}`,
+      `limit must be an integer between 1 and ${FLOW_RESOURCE_LIMITS.maxListLimit}`,
     );
     await expect(
       call(server, "rr_v3.listFlows", {

@@ -2,17 +2,18 @@ import type { RunRecordV3, RunStatus } from "./events";
 import { findJsonResourceLimitViolation } from "./json-limits";
 
 export const RUN_RESOURCE_LIMITS = Object.freeze({
-  maxStoredRuns: 2_000,
-  maxRunsPerFlow: 500,
-  maxRunUtf8Bytes: 1024 * 1024,
-  maxStringUtf8Bytes: 128 * 1024,
+  maxStoredRuns: 1_000,
+  maxRunsPerFlow: 250,
+  maxRunUtf8Bytes: 256 * 1024,
+  maxStringUtf8Bytes: 64 * 1024,
   maxJsonDepth: 32,
   maxJsonValues: 20_000,
   maxAttempts: 10,
   terminalTtlMs: 30 * 24 * 60 * 60 * 1000,
   maxPruneRunsPerWrite: 50,
-  defaultListLimit: 50,
-  maxListLimit: 200,
+  defaultListLimit: 25,
+  maxListLimit: 100,
+  maxListUtf8Bytes: 4 * 1024 * 1024,
 });
 
 export interface RunListOptions {
@@ -20,6 +21,8 @@ export interface RunListOptions {
   limit?: number;
   flowId?: string;
   status?: RunStatus;
+  /** Internal callers may request a smaller aggregate budget. */
+  maxBytes?: number;
 }
 
 export interface RunRetentionPolicy {
@@ -55,7 +58,7 @@ export function findRunResourceLimitViolation(value: unknown): string | null {
 export function normalizeRunListOptions(
   options: RunListOptions = {},
 ): Required<Pick<RunListOptions, "offset" | "limit">> &
-  Pick<RunListOptions, "flowId" | "status"> {
+  Pick<RunListOptions, "flowId" | "status"> & { maxBytes: number } {
   const offset = options.offset ?? 0;
   if (
     !Number.isSafeInteger(offset) ||
@@ -85,9 +88,20 @@ export function normalizeRunListOptions(
   if (options.status !== undefined && !RUN_STATUSES.has(options.status)) {
     throw new Error("status is invalid");
   }
+  const maxBytes = options.maxBytes ?? RUN_RESOURCE_LIMITS.maxListUtf8Bytes;
+  if (
+    !Number.isSafeInteger(maxBytes) ||
+    maxBytes < 1 ||
+    maxBytes > RUN_RESOURCE_LIMITS.maxListUtf8Bytes
+  ) {
+    throw new Error(
+      `maxBytes must be an integer between 1 and ${RUN_RESOURCE_LIMITS.maxListUtf8Bytes}`,
+    );
+  }
   return {
     offset,
     limit,
+    maxBytes,
     ...(options.flowId ? { flowId: options.flowId } : {}),
     ...(options.status ? { status: options.status } : {}),
   };
