@@ -189,6 +189,13 @@ function ensureDataDir(): void {
   }
 }
 
+function ensureDatabaseParentDir(dbPath: string): void {
+  const parentDir = path.dirname(dbPath);
+  if (!existsSync(parentDir)) {
+    mkdirSync(parentDir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  }
+}
+
 function applyPrivateDatabaseModes(dbPath: string): void {
   if (process.platform === 'win32') return;
   for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -213,6 +220,7 @@ export function getDb(): DrizzleDB {
 
   ensureDataDir();
   const dbPath = getDatabasePath();
+  ensureDatabaseParentDir(dbPath);
 
   // Create SQLite connection
   const BetterSqlite3 = loadBetterSqlite3();

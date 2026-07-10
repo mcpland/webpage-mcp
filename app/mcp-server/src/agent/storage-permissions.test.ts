@@ -81,3 +81,21 @@ describe.skipIf(process.platform === 'win32')('private agent storage permissions
     );
   });
 });
+
+describe('custom database path', () => {
+  it('creates a missing parent directory before opening SQLite', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'webpage-mcp-custom-db-'));
+    temporaryDirectories.push(root);
+    const dataDir = path.join(root, 'agent-data');
+    const dbFile = path.join(root, 'custom', 'nested', 'agent.db');
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+    vi.resetModules();
+
+    const { getDb } = await import('./db/client');
+    getDb();
+
+    expect((await fs.stat(dbFile)).isFile()).toBe(true);
+    expect((await fs.stat(path.dirname(dbFile))).isDirectory()).toBe(true);
+  });
+});
