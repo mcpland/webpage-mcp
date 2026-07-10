@@ -17,7 +17,6 @@ import {
   flowBuilderToV3ForRpc,
   flowV3ToBuilderForEditor,
   isFlowV3,
-  extractFlowCandidates,
   isWorkflowRunTargetTabUrl,
   mergeHiddenSensitiveVariables,
 } from "@/entrypoints/shared/utils";
@@ -35,6 +34,7 @@ import Sidebar from "@/entrypoints/popup/components/builder/components/Sidebar";
 import PropertyPanel from "@/entrypoints/popup/components/builder/components/PropertyPanel";
 import { getMessage } from "@/utils/i18n";
 import { useRRV3Rpc } from "../shared/react/useRRV3Rpc";
+import { readBuilderImportCandidates } from "./import-boundaries";
 import "./App.css";
 
 type ToastLevel = "info" | "warn" | "error";
@@ -437,9 +437,7 @@ export default function BuilderApp() {
     if (!file) return;
 
     try {
-      const txt = await file.text();
-      const parsed = JSON.parse(txt);
-      const candidates = extractFlowCandidates(parsed);
+      const candidates = await readBuilderImportCandidates(file);
 
       if (!candidates.length) {
         pushToast(
