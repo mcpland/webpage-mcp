@@ -13,6 +13,118 @@ interface WebFetcherToolParams {
   windowId?: number; // target window id to pick active tab or create tab
 }
 
+export const WEB_FETCHER_LIMITS = {
+  selectorBytes: 4 * 1024,
+  urlBytes: 16 * 1024,
+  titleBytes: 8 * 1024,
+  htmlBytes: 512 * 1024,
+  textBytes: 100 * 1024,
+  metadataFieldBytes: 8 * 1024,
+  articleFieldBytes: 8 * 1024,
+  errorBytes: 4 * 1024,
+  resultJsonBytes: 700 * 1024,
+} as const;
+
+function utf8BytesForCodePoint(codePoint: number): number {
+  if (codePoint <= 0x7f) return 1;
+  if (codePoint <= 0x7ff) return 2;
+  if (codePoint <= 0xffff) return 3;
+  return 4;
+}
+
+function utf8ByteLength(value: string, stopAfter = Number.POSITIVE_INFINITY): number {
+  let bytes = 0;
+  for (const character of value) {
+    bytes += utf8BytesForCodePoint(character.codePointAt(0) ?? 0);
+    if (bytes > stopAfter) return bytes;
+  }
+  return bytes;
+}
+
+function truncateUtf8(value: unknown, maximumBytes: number): { value: string; truncated: boolean } {
+  const input = typeof value === 'string' ? value : '';
+  let bytes = 0;
+  let end = 0;
+  for (const character of input) {
+    const characterBytes = utf8BytesForCodePoint(character.codePointAt(0) ?? 0);
+    if (bytes + characterBytes > maximumBytes) {
+      return { value: input.slice(0, end), truncated: true };
+    }
+    bytes += characterBytes;
+    end += character.length;
+  }
+  return { value: input, truncated: false };
+}
+
+function boundedFields(
+  value: unknown,
+  keys: readonly string[],
+  maximumFieldBytes: number,
+): { value: Record<string, string>; truncated: boolean } {
+  const input = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const output: Record<string, string> = {};
+  let truncated = false;
+  for (const key of keys) {
+    const bounded = truncateUtf8(input[key], maximumFieldBytes);
+    output[key] = bounded.value;
+    truncated ||= bounded.truncated;
+  }
+  return { value: output, truncated };
+}
+
+function serializeBoundedResult(result: Record<string, unknown>, primaryField?: string): string {
+  let serialized = JSON.stringify(result);
+  if (utf8ByteLength(serialized, WEB_FETCHER_LIMITS.resultJsonBytes) <= WEB_FETCHER_LIMITS.resultJsonBytes) {
+    return serialized;
+  }
+
+  result.truncated = true;
+  const originalPrimary =
+    primaryField && typeof result[primaryField] === 'string' ? (result[primaryField] as string) : '';
+  if (primaryField === 'htmlContent') {
+    delete result.htmlContent;
+    result.htmlContentError = 'HTML content exceeded the bounded JSON result size';
+    serialized = JSON.stringify(result);
+  }
+  if (primaryField && primaryField !== 'htmlContent') {
+    let low = 0;
+    let high = originalPrimary.length;
+    let best = '';
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      let candidate = originalPrimary.slice(0, middle);
+      if (/^[\uD800-\uDBFF]/u.test(candidate.slice(-1))) candidate = candidate.slice(0, -1);
+      result[primaryField] = candidate;
+      const candidateJson = JSON.stringify(result);
+      if (
+        utf8ByteLength(candidateJson, WEB_FETCHER_LIMITS.resultJsonBytes) <=
+        WEB_FETCHER_LIMITS.resultJsonBytes
+      ) {
+        best = candidate;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    result[primaryField] = best;
+    serialized = JSON.stringify(result);
+  }
+
+  if (utf8ByteLength(serialized, WEB_FETCHER_LIMITS.resultJsonBytes) > WEB_FETCHER_LIMITS.resultJsonBytes) {
+    delete result.article;
+    delete result.metadata;
+    serialized = JSON.stringify(result);
+  }
+  if (utf8ByteLength(serialized, WEB_FETCHER_LIMITS.resultJsonBytes) > WEB_FETCHER_LIMITS.resultJsonBytes) {
+    return JSON.stringify({
+      success: false,
+      truncated: true,
+      error: 'Web content exceeded the bounded result size',
+    });
+  }
+  return serialized;
+}
+
 function hasDisallowedPublicPageScheme(url: string): boolean {
   const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
   if (!match) {
@@ -33,20 +145,49 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
     // Handle mutually exclusive parameters: if htmlContent is true, textContent is forced to false
     const htmlContent = args.htmlContent === true;
     const textContent = htmlContent ? false : args.textContent !== false; // Default is true, unless htmlContent is true or textContent is explicitly set to false
-    const url = typeof args.url === 'string' ? args.url.trim() : undefined;
+    const rawUrl = args.url;
+    let url: string | undefined;
     const selector = args.selector;
     const explicitTabId = args.tabId;
     const background = args.background === true;
     const windowId = args.windowId;
 
-    console.log(`Starting web fetcher with options:`, {
-      htmlContent,
-      textContent,
-      url,
-      selector,
-    });
-
     try {
+      if (rawUrl !== undefined && typeof rawUrl !== 'string') {
+        return createErrorResponse('url must be a string');
+      }
+      if (
+        typeof rawUrl === 'string' &&
+        utf8ByteLength(rawUrl, WEB_FETCHER_LIMITS.urlBytes) > WEB_FETCHER_LIMITS.urlBytes
+      ) {
+        return createErrorResponse(
+          `url exceeds the ${WEB_FETCHER_LIMITS.urlBytes}-byte UTF-8 limit`,
+        );
+      }
+      url = typeof rawUrl === 'string' ? rawUrl.trim() : undefined;
+      if (selector !== undefined && typeof selector !== 'string') {
+        return createErrorResponse('selector must be a string');
+      }
+      if (
+        selector &&
+        utf8ByteLength(selector, WEB_FETCHER_LIMITS.selectorBytes) >
+          WEB_FETCHER_LIMITS.selectorBytes
+      ) {
+        return createErrorResponse(
+          `selector exceeds the ${WEB_FETCHER_LIMITS.selectorBytes}-byte UTF-8 limit`,
+        );
+      }
+      if (selector && /:has\s*\(/iu.test(selector)) {
+        return createErrorResponse(
+          'selector must not use the resource-intensive :has() pseudo-class',
+        );
+      }
+      console.log(`Starting web fetcher with options:`, {
+        htmlContent,
+        textContent,
+        urlProvided: Boolean(url),
+        selectorProvided: Boolean(selector),
+      });
       if (url && hasDisallowedPublicPageScheme(url)) {
         return createErrorResponse(
           'Only http:// and https:// pages are supported by chrome_get_web_content',
@@ -60,24 +201,24 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         tab = await chrome.tabs.get(explicitTabId);
       } else if (url) {
         // If URL is provided, check if it's already open
-        console.log(`Checking if URL is already open: ${url}`);
+        console.log('Checking whether the requested URL is already open');
         const allTabs = await chrome.tabs.query({});
+        const targetUrl = url.endsWith('/') ? url.slice(0, -1) : url;
 
         // Find tab with matching URL
         const matchingTabs = allTabs.filter((t) => {
           // Normalize URLs for comparison (remove trailing slashes)
           const tabUrl = t.url?.endsWith('/') ? t.url.slice(0, -1) : t.url;
-          const targetUrl = url.endsWith('/') ? url.slice(0, -1) : url;
           return tabUrl === targetUrl;
         });
 
         if (matchingTabs.length > 0) {
           // Use existing tab
           tab = matchingTabs[0];
-          console.log(`Found existing tab with URL: ${url}, tab ID: ${tab.id}`);
+          console.log(`Found an existing matching tab, tab ID: ${tab.id}`);
         } else {
           // Create new tab with the URL
-          console.log(`No existing tab found with URL: ${url}, creating new tab`);
+          console.log('No existing matching tab found; creating a new tab');
           tab = await chrome.tabs.create({ url, active: background ? false : true });
 
           // Wait for page to load
@@ -112,11 +253,14 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
       }
 
       // Prepare result object
-      const result: any = {
+      const boundedUrl = truncateUtf8(tab.url, WEB_FETCHER_LIMITS.urlBytes);
+      const boundedTitle = truncateUtf8(tab.title, WEB_FETCHER_LIMITS.titleBytes);
+      const result: Record<string, unknown> = {
         success: true,
-        url: tab.url,
-        title: tab.title,
+        url: boundedUrl.value,
+        title: boundedTitle.value,
       };
+      if (boundedUrl.truncated || boundedTitle.truncated) result.truncated = true;
 
       await this.injectContentScript(tab.id, ['inject-scripts/web-fetcher-helper.js']);
 
@@ -127,11 +271,20 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
           selector: selector,
         });
 
-        if (htmlResponse.success) {
-          result.htmlContent = htmlResponse.htmlContent;
+        if (htmlResponse?.success) {
+          const boundedHtml = truncateUtf8(
+            htmlResponse.htmlContent,
+            WEB_FETCHER_LIMITS.htmlBytes,
+          );
+          result.htmlContent = boundedHtml.value;
+          if (htmlResponse.truncated === true || boundedHtml.truncated) result.truncated = true;
         } else {
-          console.error('Failed to get HTML content:', htmlResponse.error);
-          result.htmlContentError = htmlResponse.error;
+          const boundedError = truncateUtf8(
+            htmlResponse?.error,
+            WEB_FETCHER_LIMITS.errorBytes,
+          ).value;
+          console.error('Failed to get HTML content:', boundedError);
+          result.htmlContentError = boundedError;
         }
       }
 
@@ -142,27 +295,42 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
           selector: selector,
         });
 
-        if (textResponse.success) {
-          result.textContent = textResponse.textContent;
+        if (textResponse?.success) {
+          const boundedText = truncateUtf8(
+            textResponse.textContent,
+            WEB_FETCHER_LIMITS.textBytes,
+          );
+          result.textContent = boundedText.value;
+          if (textResponse.truncated === true || boundedText.truncated) result.truncated = true;
 
           // Include article metadata if available
           if (textResponse.article) {
-            result.article = {
-              title: textResponse.article.title,
-              byline: textResponse.article.byline,
-              siteName: textResponse.article.siteName,
-              excerpt: textResponse.article.excerpt,
-              lang: textResponse.article.lang,
-            };
+            const article = boundedFields(
+              textResponse.article,
+              ['title', 'byline', 'siteName', 'excerpt', 'lang'],
+              WEB_FETCHER_LIMITS.articleFieldBytes,
+            );
+            result.article = article.value;
+            if (article.truncated) result.truncated = true;
           }
 
           // Include page metadata if available
           if (textResponse.metadata) {
-            result.metadata = textResponse.metadata;
+            const metadata = boundedFields(
+              textResponse.metadata,
+              ['title', 'description', 'author', 'keywords', 'published', 'siteName'],
+              WEB_FETCHER_LIMITS.metadataFieldBytes,
+            );
+            result.metadata = metadata.value;
+            if (metadata.truncated) result.truncated = true;
           }
         } else {
-          console.error('Failed to get text content:', textResponse.error);
-          result.textContentError = textResponse.error;
+          const boundedError = truncateUtf8(
+            textResponse?.error,
+            WEB_FETCHER_LIMITS.errorBytes,
+          ).value;
+          console.error('Failed to get text content:', boundedError);
+          result.textContentError = boundedError;
         }
       }
 
@@ -172,16 +340,20 @@ class WebFetcherTool extends BaseBrowserToolExecutor {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(result),
+            text: serializeBoundedResult(result, htmlContent ? 'htmlContent' : 'textContent'),
           },
         ],
         isError: false,
       };
     } catch (error) {
-      console.error('Error in web fetcher:', error);
-      return createErrorResponse(
-        `Error fetching web content: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      const prefix = 'Error fetching web content: ';
+      const detail = truncateUtf8(
+        error instanceof Error ? error.message : String(error),
+        WEB_FETCHER_LIMITS.errorBytes - utf8ByteLength(prefix),
+      ).value;
+      const message = `${prefix}${detail}`;
+      console.error(message);
+      return createErrorResponse(message);
     }
   }
 }

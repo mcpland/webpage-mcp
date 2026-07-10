@@ -2604,7 +2604,9 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
         return null;
       }
 
-      this.log('Grabbed: ' + articleContent.innerHTML);
+      if (this._debug) {
+        this.log('Grabbed: ' + articleContent.innerHTML);
+      }
 
       this._postProcessContent(articleContent);
 
@@ -2671,9 +2673,490 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       '.comments',
     ],
     minTextLength: 20,
-    maxTotalLength: 100000,
     minParagraphLength: 2,
+    maxDomElements: 50000,
+    maxDomNodes: 100000,
+    maxComputedStyleChecks: 10000,
+    maxReadabilitySourceBytes: 512 * 1024,
+    maxHtmlBytes: 512 * 1024,
+    maxTextBytes: 100 * 1024,
+    maxIframeCount: 16,
+    maxIframeTextBytes: 32 * 1024,
+    maxSelectorBytes: 4 * 1024,
+    maxMetadataFieldBytes: 8 * 1024,
+    maxArticleFieldBytes: 8 * 1024,
+    maxErrorBytes: 4 * 1024,
+    maxAttributeValueBytes: 8 * 1024,
+    maxAttributesPerElement: 128,
+    maxTextScanMultiplier: 4,
+    maxMessageJsonBytes: 700 * 1024,
   };
+
+  const OMITTED_HTML_TAGS = new Set(['SCRIPT', 'STYLE', 'LINK', 'NOSCRIPT', 'TEMPLATE']);
+  const OMITTED_TEXT_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
+  const VOID_HTML_TAGS = new Set([
+    'area',
+    'base',
+    'br',
+    'col',
+    'embed',
+    'hr',
+    'img',
+    'input',
+    'link',
+    'meta',
+    'param',
+    'source',
+    'track',
+    'wbr',
+  ]);
+  const HTML_TRUNCATION_MARKER = '<!-- webpage-mcp: content truncated -->';
+
+  function utf8BytesForCodePoint(codePoint) {
+    if (codePoint <= 0x7f) return 1;
+    if (codePoint <= 0x7ff) return 2;
+    if (codePoint <= 0xffff) return 3;
+    return 4;
+  }
+
+  function utf8ByteLength(value, stopAfter = Number.POSITIVE_INFINITY) {
+    let bytes = 0;
+    for (const character of String(value || '')) {
+      bytes += utf8BytesForCodePoint(character.codePointAt(0));
+      if (bytes > stopAfter) return bytes;
+    }
+    return bytes;
+  }
+
+  function truncateUtf8(value, maximumBytes) {
+    const input = String(value || '');
+    if (maximumBytes <= 0) return { value: '', bytes: 0, truncated: input.length > 0 };
+
+    let bytes = 0;
+    let end = 0;
+    for (const character of input) {
+      const characterBytes = utf8BytesForCodePoint(character.codePointAt(0));
+      if (bytes + characterBytes > maximumBytes) {
+        return { value: input.slice(0, end), bytes, truncated: true };
+      }
+      bytes += characterBytes;
+      end += character.length;
+    }
+    return { value: input, bytes, truncated: false };
+  }
+
+  function boundedError(error, prefix) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return truncateUtf8(`${prefix}: ${detail}`, config.maxErrorBytes).value;
+  }
+
+  function validateSelector(selector) {
+    if (selector === undefined || selector === null || selector === '') return undefined;
+    if (typeof selector !== 'string') {
+      throw new Error('selector must be a string');
+    }
+    if (utf8ByteLength(selector, config.maxSelectorBytes) > config.maxSelectorBytes) {
+      throw new Error(`selector exceeds the ${config.maxSelectorBytes}-byte UTF-8 limit`);
+    }
+    if (/:has\s*\(/iu.test(selector)) {
+      throw new Error('selector must not use the resource-intensive :has() pseudo-class');
+    }
+    return selector;
+  }
+
+  function escapeHtmlBounded(value, maximumBytes, attribute = false) {
+    let output = '';
+    let bytes = 0;
+    let truncated = false;
+    for (const character of String(value || '')) {
+      let escaped = character;
+      if (character === '&') escaped = '&amp;';
+      else if (character === '<') escaped = '&lt;';
+      else if (character === '>') escaped = '&gt;';
+      else if (attribute && character === '"') escaped = '&quot;';
+
+      const escapedBytes = utf8ByteLength(escaped);
+      if (bytes + escapedBytes > maximumBytes) {
+        truncated = true;
+        break;
+      }
+      output += escaped;
+      bytes += escapedBytes;
+    }
+    return { value: output, bytes, truncated };
+  }
+
+  function serializeBoundedHtml(root, wrapFragment = false) {
+    const markerBytes = utf8ByteLength(HTML_TRUNCATION_MARKER);
+    const maximumDataBytes = Math.max(0, config.maxHtmlBytes - markerBytes);
+    const wrapperPrefix = wrapFragment ? '<html><head></head><body>' : '';
+    const wrapperSuffix = wrapFragment ? '</body></html>' : '';
+    const wrapperSuffixBytes = utf8ByteLength(wrapperSuffix);
+    const parts = wrapperPrefix ? [wrapperPrefix] : [];
+    let bytes = utf8ByteLength(wrapperPrefix);
+    let visitedElements = 0;
+    let visitedNodes = 0;
+    let truncated = false;
+    let exhausted = false;
+
+    const remainingBytes = (reservedBytes = 0) => maximumDataBytes - bytes - reservedBytes;
+    const append = (value, reservedBytes = 0) => {
+      const bounded = truncateUtf8(value, remainingBytes(reservedBytes));
+      if (bounded.value) {
+        parts.push(bounded.value);
+        bytes += bounded.bytes;
+      }
+      if (bounded.truncated) {
+        truncated = true;
+        exhausted = true;
+      }
+      return !bounded.truncated;
+    };
+
+    const serializeNode = (node, depth, ancestorClosingBytes) => {
+      if (!node || exhausted || depth > 128) {
+        truncated = true;
+        exhausted = true;
+        return;
+      }
+
+      visitedNodes += 1;
+      if (visitedNodes > config.maxDomNodes) {
+        truncated = true;
+        exhausted = true;
+        return;
+      }
+
+      if (node.nodeType === Node.TEXT_NODE) {
+        const escaped = escapeHtmlBounded(node.nodeValue || '', remainingBytes(ancestorClosingBytes));
+        if (escaped.value) {
+          parts.push(escaped.value);
+          bytes += escaped.bytes;
+        }
+        if (escaped.truncated) {
+          truncated = true;
+          exhausted = true;
+        }
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+      visitedElements += 1;
+      if (visitedElements > config.maxDomElements) {
+        truncated = true;
+        exhausted = true;
+        return;
+      }
+
+      const element = node;
+      if (OMITTED_HTML_TAGS.has(element.tagName)) return;
+      if (element.tagName === 'SVG') {
+        if (!append('<span data-placeholder="svg-icon">[SVG Icon]</span>', ancestorClosingBytes)) {
+          truncated = true;
+        }
+        return;
+      }
+
+      const tagName = String(element.localName || element.tagName || 'div').toLowerCase();
+      const isVoid = VOID_HTML_TAGS.has(tagName);
+      const closingTag = isVoid ? '' : `</${tagName}>`;
+      const closingBytes = utf8ByteLength(closingTag);
+      let openingTag = `<${tagName}`;
+      let openingBytes = utf8ByteLength(openingTag);
+      const attributes = element.attributes;
+
+      for (let index = 0; index < attributes.length; index += 1) {
+        if (index >= config.maxAttributesPerElement) {
+          truncated = true;
+          break;
+        }
+        const attribute = attributes[index];
+        const name = String(attribute.name || '').toLowerCase();
+        if (!name || name === 'style' || name.startsWith('on')) continue;
+
+        const prefix = ` ${name}="`;
+        const suffix = '"';
+        const structuralBytes =
+          utf8ByteLength(prefix) + utf8ByteLength(suffix) + utf8ByteLength('>') + closingBytes;
+        const availableForValue = Math.min(
+          config.maxAttributeValueBytes,
+          remainingBytes(ancestorClosingBytes) - openingBytes - structuralBytes,
+        );
+        if (availableForValue < 0) {
+          truncated = true;
+          break;
+        }
+        const escaped = escapeHtmlBounded(attribute.value || '', availableForValue, true);
+        openingTag += `${prefix}${escaped.value}${suffix}`;
+        openingBytes += utf8ByteLength(prefix) + escaped.bytes + utf8ByteLength(suffix);
+        if (escaped.truncated) truncated = true;
+      }
+
+      openingTag += '>';
+      openingBytes += 1;
+      if (remainingBytes(ancestorClosingBytes) < openingBytes + closingBytes) {
+        truncated = true;
+        exhausted = true;
+        return;
+      }
+      parts.push(openingTag);
+      bytes += openingBytes;
+
+      if (!isVoid) {
+        const childClosingBytes = ancestorClosingBytes + closingBytes;
+        const children = element.childNodes;
+        for (let index = 0; index < children.length; index += 1) {
+          if (exhausted) break;
+          serializeNode(children[index], depth + 1, childClosingBytes);
+        }
+        parts.push(closingTag);
+        bytes += closingBytes;
+      }
+    };
+
+    serializeNode(root, 0, wrapperSuffixBytes);
+    if (wrapperSuffix) {
+      parts.push(wrapperSuffix);
+      bytes += wrapperSuffixBytes;
+    }
+    if (truncated) parts.push(HTML_TRUNCATION_MARKER);
+    return { value: parts.join(''), truncated };
+  }
+
+  function createTextTraversalBudget(maximumBytes) {
+    return {
+      remainingCharacters: maximumBytes * config.maxTextScanMultiplier,
+      remainingElements: config.maxDomElements,
+      remainingNodes: config.maxDomNodes,
+      remainingStyleChecks: config.maxComputedStyleChecks,
+    };
+  }
+
+  function collectBoundedText(root, maximumBytes, sharedBudget) {
+    const traversalBudget = sharedBudget || createTextTraversalBudget(maximumBytes);
+    const parts = [];
+    let buffer = '';
+    let bytes = 0;
+    let previousWasWhitespace = true;
+    let truncated = false;
+
+    const flush = () => {
+      if (buffer) {
+        parts.push(buffer);
+        buffer = '';
+      }
+    };
+    const appendText = (value) => {
+      for (const character of String(value || '')) {
+        if (traversalBudget.remainingCharacters <= 0) {
+          truncated = true;
+          return false;
+        }
+        traversalBudget.remainingCharacters -= 1;
+        const isWhitespace = /\s/u.test(character);
+        const output = isWhitespace ? ' ' : character;
+        if (isWhitespace && previousWasWhitespace) continue;
+        const outputBytes = utf8BytesForCodePoint(output.codePointAt(0));
+        if (bytes + outputBytes > maximumBytes) {
+          truncated = true;
+          return false;
+        }
+        buffer += output;
+        bytes += outputBytes;
+        previousWasWhitespace = isWhitespace;
+        if (buffer.length >= 4096) flush();
+      }
+      return true;
+    };
+
+    const visit = (node, depth) => {
+      if (!node || truncated || depth > 128) {
+        truncated = true;
+        return;
+      }
+      if (traversalBudget.remainingNodes <= 0) {
+        truncated = true;
+        return;
+      }
+      traversalBudget.remainingNodes -= 1;
+      if (node.nodeType === Node.TEXT_NODE) {
+        appendText(node.nodeValue || '');
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_NODE) return;
+
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if (traversalBudget.remainingElements <= 0) {
+          truncated = true;
+          return;
+        }
+        traversalBudget.remainingElements -= 1;
+        const element = node;
+        if (
+          OMITTED_TEXT_TAGS.has(element.tagName) ||
+          element.hidden ||
+          element.getAttribute('aria-hidden') === 'true'
+        ) {
+          return;
+        }
+        if (traversalBudget.remainingStyleChecks <= 0) {
+          truncated = true;
+          return;
+        }
+        traversalBudget.remainingStyleChecks -= 1;
+        try {
+          const styleView = element.ownerDocument?.defaultView || window;
+          const style = styleView.getComputedStyle(element);
+          if (
+            style.display === 'none' ||
+            style.visibility === 'hidden' ||
+            style.visibility === 'collapse'
+          ) {
+            return;
+          }
+        } catch (_) {
+          return;
+        }
+      }
+
+      const children = node.childNodes;
+      for (let index = 0; index < children.length; index += 1) {
+        if (truncated) break;
+        visit(children[index], depth + 1);
+      }
+      if (node.nodeType === Node.ELEMENT_NODE) appendText(' ');
+    };
+
+    visit(root, 0);
+    flush();
+    return { value: parts.join('').trim(), truncated };
+  }
+
+  function isReadabilityInputBounded(root) {
+    let remainingBytes = config.maxReadabilitySourceBytes;
+    let elements = 0;
+    let nodes = 0;
+    let exceeded = false;
+
+    const charge = (value) => {
+      if (exceeded) return;
+      const bytes = utf8ByteLength(value, remainingBytes);
+      if (bytes > remainingBytes) {
+        exceeded = true;
+        return;
+      }
+      remainingBytes -= bytes;
+    };
+    const visit = (node, depth) => {
+      if (!node || exceeded || depth > 128) {
+        exceeded = true;
+        return;
+      }
+      nodes += 1;
+      if (nodes > config.maxDomNodes) {
+        exceeded = true;
+        return;
+      }
+      if (
+        node.nodeType === Node.TEXT_NODE ||
+        node.nodeType === Node.COMMENT_NODE ||
+        node.nodeType === Node.CDATA_SECTION_NODE ||
+        node.nodeType === Node.PROCESSING_INSTRUCTION_NODE
+      ) {
+        charge(node.nodeValue || '');
+        return;
+      }
+      if (node.nodeType === Node.DOCUMENT_TYPE_NODE) {
+        charge(node.name || '');
+        charge(node.publicId || '');
+        charge(node.systemId || '');
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_NODE) return;
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        elements += 1;
+        if (elements > config.maxDomElements) {
+          exceeded = true;
+          return;
+        }
+        charge(node.tagName || '');
+        const attributes = node.attributes;
+        for (let index = 0; index < attributes.length; index += 1) {
+          const attribute = attributes[index];
+          charge(attribute.name || '');
+          charge(attribute.value || '');
+          if (exceeded) return;
+        }
+      }
+      const children = node.childNodes;
+      for (let index = 0; index < children.length; index += 1) {
+        visit(children[index], depth + 1);
+        if (exceeded) return;
+      }
+    };
+
+    visit(root, 0);
+    return !exceeded;
+  }
+
+  function createReadabilityClone() {
+    const clone = document.cloneNode(true);
+    const urlAttributes = new Set([
+      'action',
+      'cite',
+      'data',
+      'formaction',
+      'href',
+      'manifest',
+      'poster',
+      'src',
+      'srcset',
+      'xlink:href',
+    ]);
+    const elements = clone.getElementsByTagName('*');
+    for (let elementIndex = 0; elementIndex < elements.length; elementIndex += 1) {
+      const element = elements[elementIndex];
+      for (let attributeIndex = element.attributes.length - 1; attributeIndex >= 0; attributeIndex -= 1) {
+        const name = element.attributes[attributeIndex]?.name.toLowerCase();
+        if (name === 'style' || name?.startsWith('on') || (name && urlAttributes.has(name))) {
+          element.removeAttribute(name);
+        }
+      }
+    }
+    return clone;
+  }
+
+  function sendBoundedResponse(sendResponse, response) {
+    try {
+      const serialized = JSON.stringify(response);
+      if (utf8ByteLength(serialized, config.maxMessageJsonBytes) > config.maxMessageJsonBytes) {
+        sendResponse({
+          success: false,
+          truncated: true,
+          error: 'Extracted web content exceeded the bounded extension message size',
+        });
+        return;
+      }
+      sendResponse(response);
+    } catch (error) {
+      sendResponse({
+        success: false,
+        error: boundedError(error, 'Failed to serialize extracted web content'),
+      });
+    }
+  }
+
+  function boundArticleFields(article) {
+    const fields = ['title', 'byline', 'siteName', 'excerpt', 'lang'];
+    const value = {};
+    let truncated = false;
+    for (const field of fields) {
+      const bounded = truncateUtf8(article[field], config.maxArticleFieldBytes);
+      value[field] = bounded.value;
+      truncated = truncated || bounded.truncated;
+    }
+    return { value, truncated };
+  }
 
   // Listen for messages from the extension
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
@@ -2687,32 +3170,37 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
     // Get HTML content
     else if (request.action === 'getHtmlContent') {
       try {
-        let rawHtml;
+        const selector = validateSelector(request.selector);
+        let root;
 
         // If selector is specified, only get content from the matching element
-        if (request.selector) {
-          const element = document.querySelector(request.selector);
+        if (selector) {
+          if (!isReadabilityInputBounded(document)) {
+            throw new Error('document exceeds the safe selector traversal budget');
+          }
+          const element = document.querySelector(selector);
           if (element) {
-            rawHtml = element.outerHTML;
+            root = element;
           } else {
-            throw new Error(`No element found matching selector: ${request.selector}`);
+            throw new Error(`No element found matching selector: ${selector}`);
           }
         } else {
           // Otherwise get the entire page content
-          rawHtml = document.documentElement.outerHTML;
+          root = document.documentElement;
         }
 
-        const cleanedHtml = cleanHtmlContent(rawHtml);
+        const serialized = serializeBoundedHtml(root, Boolean(selector));
 
-        sendResponse({
+        sendBoundedResponse(sendResponse, {
           success: true,
-          htmlContent: cleanedHtml,
-          selector: request.selector,
+          htmlContent: serialized.value,
+          selector,
+          truncated: serialized.truncated,
         });
       } catch (error) {
-        sendResponse({
+        sendBoundedResponse(sendResponse, {
           success: false,
-          error: `Failed to get HTML content: ${error.message}`,
+          error: boundedError(error, 'Failed to get HTML content'),
         });
       }
     }
@@ -2720,26 +3208,34 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
     // Get text content
     else if (request.action === 'getTextContent') {
       try {
+        const selector = validateSelector(request.selector);
         // If selector is specified, only get content from the matching element
-        if (request.selector) {
-          const element = document.querySelector(request.selector);
+        if (selector) {
+          if (!isReadabilityInputBounded(document)) {
+            throw new Error('document exceeds the safe selector traversal budget');
+          }
+          const element = document.querySelector(selector);
           if (element) {
-            // Directly get the text content of the element
-            const textContent = element.innerText;
+            const textContent = collectBoundedText(element, config.maxTextBytes);
 
-            sendResponse({
+            sendBoundedResponse(sendResponse, {
               success: true,
-              textContent: textContent,
-              selector: request.selector,
+              textContent: textContent.value,
+              selector,
+              truncated: textContent.truncated,
             });
           } else {
-            throw new Error(`No element found matching selector: ${request.selector}`);
+            throw new Error(`No element found matching selector: ${selector}`);
           }
-        } else {
+        } else if (isReadabilityInputBounded(document)) {
           // Otherwise use Readability to extract the main content
-          const documentClone = document.cloneNode(true);
+          const documentClone = createReadabilityClone();
 
-          const reader = new Readability(documentClone);
+          const reader = new Readability(documentClone, {
+            maxElemsToParse: config.maxDomElements,
+            disableJSONLD: true,
+            serializer: () => '',
+          });
           const article = reader.parse();
 
           if (article && article.textContent) {
@@ -2750,42 +3246,51 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
             const iframeContent = extractIframeContent();
 
             // Combine content
-            let fullContent = article.textContent;
-            if (iframeContent && iframeContent.trim().length > config.minTextLength) {
-              fullContent += '\n\n--- Embedded Content ---\n\n' + iframeContent;
+            let fullContent = String(article.textContent || '');
+            if (iframeContent.value.trim().length > config.minTextLength) {
+              fullContent += '\n\n--- Embedded Content ---\n\n' + iframeContent.value;
             }
 
             // Clean content
             fullContent = cleanContent(fullContent);
 
-            sendResponse({
+            const boundedArticle = boundArticleFields(article);
+            sendBoundedResponse(sendResponse, {
               success: true,
-              textContent: fullContent,
-              article: {
-                title: article.title,
-                byline: article.byline,
-                siteName: article.siteName,
-                excerpt: article.excerpt,
-                lang: article.lang,
-                content: article.content, // HTML content
-              },
-              metadata: metadata,
+              textContent: fullContent.value,
+              truncated:
+                fullContent.truncated ||
+                iframeContent.truncated ||
+                boundedArticle.truncated ||
+                metadata.truncated,
+              article: boundedArticle.value,
+              metadata: metadata.value,
             });
           } else {
             // Fallback to basic extraction
-            const textContent = document.body.innerText;
-            sendResponse({
+            const textContent = collectBoundedText(document.body, config.maxTextBytes);
+            sendBoundedResponse(sendResponse, {
               success: true,
-              textContent: textContent,
+              textContent: textContent.value,
               fallback: true,
+              truncated: textContent.truncated,
             });
           }
+        } else {
+          const textContent = collectBoundedText(document.body, config.maxTextBytes);
+          sendBoundedResponse(sendResponse, {
+            success: true,
+            textContent: textContent.value,
+            fallback: true,
+            truncated: true,
+          });
         }
       } catch (error) {
-        console.error('Error extracting text content:', error);
-        sendResponse({
+        const message = boundedError(error, 'Failed to extract text content');
+        console.error(message);
+        sendBoundedResponse(sendResponse, {
           success: false,
-          error: `Failed to extract text content: ${error.message}`,
+          error: message,
         });
       }
 
@@ -2848,7 +3353,13 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       metadata.siteName = siteNameElement.getAttribute('content') || '';
     }
 
-    return metadata;
+    let truncated = false;
+    for (const key of Object.keys(metadata)) {
+      const bounded = truncateUtf8(metadata[key], config.maxMetadataFieldBytes);
+      metadata[key] = bounded.value;
+      truncated = truncated || bounded.truncated;
+    }
+    return { value: metadata, truncated };
   }
 
   /**
@@ -2856,28 +3367,46 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
    * @returns {string} - Combined iframe content
    */
   function extractIframeContent() {
-    let allIframeText = '';
-    const iframes = document.querySelectorAll('iframe');
+    const parts = [];
+    let remainingBytes = config.maxIframeTextBytes;
+    let inspected = 0;
+    let truncated = false;
+    const traversalBudget = createTextTraversalBudget(config.maxIframeTextBytes);
+    const iframes = document.getElementsByTagName('iframe');
 
-    for (const iframe of iframes) {
+    for (let index = 0; index < iframes.length && inspected < config.maxIframeCount; index += 1) {
+      const iframe = iframes[index];
+      inspected += 1;
       try {
         if (isSameOrigin(iframe) && isElementVisible(iframe)) {
           const doc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (doc) {
-            const iframeText = doc.body.innerText;
-            if (iframeText && iframeText.trim().length >= config.minTextLength) {
-              allIframeText += iframeText.trim() + '\n\n';
+          if (doc?.body && remainingBytes > 0) {
+            const separatorBytes = parts.length > 0 ? 2 : 0;
+            const iframeText = collectBoundedText(
+              doc.body,
+              Math.max(0, remainingBytes - separatorBytes),
+              traversalBudget,
+            );
+            truncated = truncated || iframeText.truncated;
+            if (iframeText.value.length >= config.minTextLength) {
+              parts.push(iframeText.value);
+              remainingBytes -= utf8ByteLength(iframeText.value) + separatorBytes;
             }
           }
         }
       } catch (error) {
+        const detail = truncateUtf8(
+          error instanceof Error ? error.message : String(error),
+          config.maxErrorBytes,
+        ).value;
         console.warn(
-          `Cannot access iframe content (possible cross-origin restriction): ${error.message}`,
+          `Cannot access iframe content (possible cross-origin restriction): ${detail}`,
         );
       }
     }
 
-    return allIframeText.trim();
+    if (inspected < iframes.length || remainingBytes <= 0) truncated = true;
+    return { value: parts.join('\n\n').trim(), truncated };
   }
 
   /**
@@ -2925,137 +3454,9 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
    * @returns {string} - Cleaned text
    */
   function cleanContent(text) {
-    return text
-      .replace(/\s+/g, ' ')
-      .replace(/\n\s*\n/g, '\n\n')
-      .trim()
-      .substring(0, config.maxTotalLength);
-  }
-
-  /**
-   * Clean HTML content by removing style tags and their content
-   * @param {string} html - The HTML content to clean
-   * @returns {string} - Cleaned HTML content
-   */
-  function cleanHtmlContent(html) {
-    // Create a new document parser
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-
-    // Remove all style tags
-    const styleElements = doc.querySelectorAll('style');
-    styleElements.forEach((element) => {
-      if (element.parentNode) {
-        element.parentNode.removeChild(element);
-      }
-    });
-
-    // Remove all inline style attributes
-    const allElementsWithStyle = doc.querySelectorAll('*');
-    allElementsWithStyle.forEach((element) => {
-      element.removeAttribute('style');
-    });
-
-    // Remove all link tags
-    const linkElements = doc.querySelectorAll('link');
-    linkElements.forEach((element) => {
-      if (element.parentNode) {
-        element.parentNode.removeChild(element);
-      }
-    });
-
-    // Remove all script tags
-    const scriptElements = doc.querySelectorAll('script');
-    scriptElements.forEach((element) => {
-      if (element.parentNode) {
-        element.parentNode.removeChild(element);
-      }
-    });
-
-    // Replace all SVG elements with placeholders
-    const svgElements = doc.querySelectorAll('svg');
-    svgElements.forEach((element) => {
-      if (element.parentNode) {
-        // Create a placeholder element
-        const placeholder = doc.createElement('span');
-        placeholder.textContent = '[SVG Icon]';
-        placeholder.setAttribute('data-placeholder', 'svg-icon');
-
-        // Replace SVG element
-        element.parentNode.replaceChild(placeholder, element);
-      }
-    });
-
-    // Replace all SVG images and objects
-    const svgImages = doc.querySelectorAll(
-      'img[src$=".svg"], object[data$=".svg"], embed[src$=".svg"]',
-    );
-    svgImages.forEach((element) => {
-      if (element.parentNode) {
-        // Create a placeholder element
-        const placeholder = doc.createElement('span');
-        placeholder.textContent = '[SVG Image]';
-        placeholder.setAttribute('data-placeholder', 'svg-image');
-        if (element.alt) {
-          placeholder.textContent = `[SVG Image: ${element.alt}]`;
-        }
-
-        // Replace SVG image element
-        element.parentNode.replaceChild(placeholder, element);
-      }
-    });
-
-    // Remove elements with only data-* attributes, no children, and no class or style
-    const allElements = Array.from(doc.querySelectorAll('*'));
-    allElements.forEach((element) => {
-      // Check if element has only data-* attributes
-      let hasOnlyDataAttributes = true;
-      let hasDataAttribute = false;
-
-      // Check all attributes
-      for (let i = 0; i < element.attributes.length; i++) {
-        const attr = element.attributes[i];
-        if (attr.name.startsWith('data-')) {
-          hasDataAttribute = true;
-        } else if (attr.name !== 'id') {
-          // Allow id attribute
-          hasOnlyDataAttributes = false;
-          break;
-        }
-      }
-
-      // If element has only data-* attributes, no children, and no text content
-      if (
-        hasOnlyDataAttributes &&
-        hasDataAttribute &&
-        element.children.length === 0 &&
-        element.textContent.trim() === ''
-      ) {
-        // Remove the element
-        if (element.parentNode) {
-          element.parentNode.removeChild(element);
-        }
-      }
-    });
-
-    // Remove all HTML comments
-    const removeComments = (node) => {
-      const childNodes = node.childNodes;
-      for (let i = childNodes.length - 1; i >= 0; i--) {
-        const child = childNodes[i];
-        if (child.nodeType === 8) {
-          // Comment node
-          node.removeChild(child);
-        } else if (child.nodeType === 1) {
-          // Element node
-          removeComments(child);
-        }
-      }
-    };
-    removeComments(doc);
-
-    // Return cleaned HTML
-    return new XMLSerializer().serializeToString(doc);
+    const container = document.createElement('div');
+    container.appendChild(document.createTextNode(String(text || '')));
+    return collectBoundedText(container, config.maxTextBytes);
   }
 
   // Interactive elements feature has been removed
