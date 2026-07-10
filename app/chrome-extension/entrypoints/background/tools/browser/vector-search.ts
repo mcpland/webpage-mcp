@@ -48,6 +48,7 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
   private isInitialized = false;
   private activeSearches = 0;
   private readonly searchIdleWaiters = new Set<() => void>();
+  private explicitIndexPromise: Promise<void> | null = null;
   private rebuildPromise: Promise<void> | null = null;
 
   constructor(contentIndexer?: ContentIndexer) {
@@ -55,7 +56,7 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
     this.contentIndexer =
       contentIndexer ??
       new ContentIndexer({
-        autoIndex: true,
+        autoIndex: false,
         maxChunksPerPage: LIMITS.MAX_SEARCH_RESULTS,
         skipDuplicates: true,
       });
@@ -120,6 +121,11 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
           }
         }
       }
+
+      // Page text is collected only as a direct consequence of this explicit
+      // tool invocation. Concurrent searches share the same bounded indexing
+      // pass, and ContentIndexer skips pages already indexed in this session.
+      await this.indexCurrentTabsForSearch();
 
       // Execute vector search, get more results for deduplication
       const searchResults = await this.contentIndexer.searchContent(
@@ -245,6 +251,64 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
     });
 
     await Promise.allSettled(workers);
+  }
+
+  private selectIndexableTabIds(tabs: chrome.tabs.Tab[]): {
+    tabIds: number[];
+    scannedTabs: number;
+  } {
+    const tabIds: number[] = [];
+    const seenTabIds = new Set<number>();
+    const scanLimit = Math.min(tabs.length, VECTOR_REBUILD_MAX_TAB_SCAN);
+    let scannedTabs = 0;
+
+    for (let index = 0; index < scanLimit && tabIds.length < VECTOR_REBUILD_MAX_TABS; index += 1) {
+      const tab = tabs[index];
+      scannedTabs += 1;
+      if (
+        typeof tab.id !== 'number' ||
+        !Number.isSafeInteger(tab.id) ||
+        tab.id < 0 ||
+        seenTabIds.has(tab.id)
+      ) {
+        continue;
+      }
+      seenTabIds.add(tab.id);
+
+      const boundedUrl = truncateJsonString(tab.url, VECTOR_SEARCH_MAX_URL_JSON_BYTES);
+      if (
+        !boundedUrl ||
+        !/^https?:\/\//i.test(boundedUrl) ||
+        hasDisallowedPublicUrlScheme(boundedUrl)
+      ) {
+        continue;
+      }
+      tabIds.push(tab.id);
+    }
+
+    return { tabIds, scannedTabs };
+  }
+
+  private indexCurrentTabsForSearch(): Promise<void> {
+    if (this.explicitIndexPromise) return this.explicitIndexPromise;
+
+    const operation = this.performExplicitIndexPass();
+    const tracked = operation.finally(() => {
+      if (this.explicitIndexPromise === tracked) this.explicitIndexPromise = null;
+    });
+    this.explicitIndexPromise = tracked;
+    return tracked;
+  }
+
+  private async performExplicitIndexPass(): Promise<void> {
+    const tabs = await chrome.tabs.query({});
+    const { tabIds, scannedTabs } = this.selectIndexableTabIds(tabs);
+    await this.ensureTabsIndexed(tabIds);
+
+    console.log(
+      `VectorSearchTabsContentTool: Explicitly indexed ${tabIds.length} tabs ` +
+        `(scanned ${scannedTabs}, limits ${VECTOR_REBUILD_MAX_TABS}/${VECTOR_REBUILD_MAX_TAB_SCAN})`,
+    );
   }
 
   /**
@@ -383,24 +447,7 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
       await this.contentIndexer.clearAllIndexes();
 
       const tabs = await chrome.tabs.query({});
-      const validTabIds: number[] = [];
-      const scanLimit = Math.min(tabs.length, VECTOR_REBUILD_MAX_TAB_SCAN);
-      let scannedTabs = 0;
-      for (
-        let index = 0;
-        index < scanLimit && validTabIds.length < VECTOR_REBUILD_MAX_TABS;
-        index += 1
-      ) {
-        const tab = tabs[index];
-        scannedTabs += 1;
-        if (typeof tab.id !== 'number' || !Number.isFinite(tab.id)) continue;
-        const boundedUrl = truncateJsonString(
-          tab.url,
-          VECTOR_SEARCH_MAX_URL_JSON_BYTES,
-        );
-        if (!boundedUrl || hasDisallowedPublicUrlScheme(boundedUrl)) continue;
-        validTabIds.push(tab.id);
-      }
+      const { tabIds: validTabIds, scannedTabs } = this.selectIndexableTabIds(tabs);
 
       await this.ensureTabsIndexed(validTabIds);
 

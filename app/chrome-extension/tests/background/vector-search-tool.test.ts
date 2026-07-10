@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   VECTOR_REBUILD_MAX_CONCURRENCY,
@@ -30,8 +30,8 @@ function createIndexer() {
       semanticEngineInitializing: false,
     })),
     clearAllIndexes: vi.fn(async () => undefined),
-    indexTabContent: vi.fn(async () => undefined),
-    removeTabIndex: vi.fn(async () => undefined),
+    indexTabContent: vi.fn(async (_tabId: number) => undefined),
+    removeTabIndex: vi.fn(async (_tabId: number) => undefined),
   };
 }
 
@@ -55,6 +55,10 @@ function makeSearchResult(index: number, value: string): SearchResult {
     distance: index / 1_000,
   };
 }
+
+beforeEach(() => {
+  vi.mocked(chrome.tabs.query).mockReset().mockResolvedValue([]);
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -97,6 +101,107 @@ describe('VectorSearchTabsContentTool resource bounds', () => {
         8 * 1024,
       );
     }
+  });
+
+  it('explicitly indexes only bounded, unique HTTP tabs before searching', async () => {
+    const indexer = createIndexer();
+    let activeIndexes = 0;
+    let peakIndexes = 0;
+    indexer.indexTabContent.mockImplementation(async (tabId) => {
+      activeIndexes += 1;
+      peakIndexes = Math.max(peakIndexes, activeIndexes);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (tabId % 17 === 0) throw new Error('simulated tab failure');
+      } finally {
+        activeIndexes -= 1;
+      }
+    });
+    indexer.searchContent.mockImplementation(async () => {
+      expect(activeIndexes).toBe(0);
+      expect(indexer.indexTabContent).toHaveBeenCalledTimes(
+        VECTOR_REBUILD_MAX_TABS,
+      );
+      return [];
+    });
+
+    const tabs = [
+      { id: 1, index: 0, windowId: 1, url: 'chrome://settings' },
+      { id: 2, index: 1, windowId: 1, url: 'https://example.test/two' },
+      { id: 2, index: 2, windowId: 1, url: 'https://duplicate.test' },
+      { id: 3, index: 3, windowId: 1, url: 'http://example.test/three' },
+      { id: 4, index: 4, windowId: 1, url: 'relative/path' },
+      { id: 5, index: 5, windowId: 1, url: 'javascript:alert(1)' },
+      ...Array.from({ length: VECTOR_REBUILD_MAX_TABS + 20 }, (_, index) => ({
+        id: index + 10,
+        index: index + 6,
+        windowId: 1,
+        url: `https://example.test/${index}`,
+      })),
+    ] as chrome.tabs.Tab[];
+    vi.mocked(chrome.tabs.query).mockResolvedValue(tabs);
+    const tool = new VectorSearchTabsContentTool(
+      indexer as unknown as ContentIndexer,
+    );
+
+    const result = await tool.execute({ query: 'explicit search' });
+
+    expect(result.isError).toBe(false);
+    const indexedTabIds = indexer.indexTabContent.mock.calls.map(([tabId]) =>
+      Number(tabId),
+    );
+    expect(indexedTabIds).toHaveLength(VECTOR_REBUILD_MAX_TABS);
+    expect(new Set(indexedTabIds).size).toBe(VECTOR_REBUILD_MAX_TABS);
+    expect(indexedTabIds).toContain(2);
+    expect(indexedTabIds).toContain(3);
+    expect(indexedTabIds).not.toContain(1);
+    expect(indexedTabIds).not.toContain(4);
+    expect(indexedTabIds).not.toContain(5);
+    expect(peakIndexes).toBeGreaterThan(1);
+    expect(peakIndexes).toBeLessThanOrEqual(VECTOR_REBUILD_MAX_CONCURRENCY);
+    expect(indexer.searchContent).toHaveBeenCalledAfter(
+      indexer.indexTabContent,
+    );
+  });
+
+  it('does not scan past the explicit-search tab budget', async () => {
+    const indexer = createIndexer();
+    vi.mocked(chrome.tabs.query).mockResolvedValue(
+      Array.from({ length: VECTOR_REBUILD_MAX_TAB_SCAN + 100 }, (_, index) => ({
+        id: index + 1,
+        index,
+        windowId: 1,
+        url:
+          index < VECTOR_REBUILD_MAX_TAB_SCAN
+            ? `chrome://settings/${index}`
+            : `https://example.test/${index}`,
+      })) as chrome.tabs.Tab[],
+    );
+    const tool = new VectorSearchTabsContentTool(
+      indexer as unknown as ContentIndexer,
+    );
+
+    const result = await tool.execute({ query: 'bounded scan' });
+
+    expect(result.isError).toBe(false);
+    expect(indexer.indexTabContent).not.toHaveBeenCalled();
+    expect(indexer.searchContent).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed when the explicit tab inventory cannot be read', async () => {
+    const indexer = createIndexer();
+    vi.mocked(chrome.tabs.query).mockRejectedValue(
+      new Error('tab inventory unavailable'),
+    );
+    const tool = new VectorSearchTabsContentTool(
+      indexer as unknown as ContentIndexer,
+    );
+
+    const result = await tool.execute({ query: 'inventory failure' });
+
+    expect(result.isError).toBe(true);
+    expect(indexer.indexTabContent).not.toHaveBeenCalled();
+    expect(indexer.searchContent).not.toHaveBeenCalled();
   });
 
   it('limits search concurrency and runs one bounded rebuild exclusively', async () => {
@@ -150,7 +255,7 @@ describe('VectorSearchTabsContentTool resource bounds', () => {
 
     expect(indexer.clearAllIndexes).toHaveBeenCalledTimes(1);
     expect(indexer.indexTabContent).toHaveBeenCalledTimes(
-      VECTOR_REBUILD_MAX_TABS,
+      VECTOR_REBUILD_MAX_TABS * 2,
     );
     expect(peakIndexes).toBeGreaterThan(1);
     expect(peakIndexes).toBeLessThanOrEqual(VECTOR_REBUILD_MAX_CONCURRENCY);

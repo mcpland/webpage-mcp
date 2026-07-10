@@ -88,12 +88,34 @@ describe('ContentIndexer tab/page lifecycle', () => {
     } as typeof chrome.scripting;
   });
 
-  async function createIndexer() {
+  async function createIndexer(options?: { autoIndex?: boolean }) {
     const { ContentIndexer } = await import('@/utils/content-indexer');
-    const indexer = new ContentIndexer({ autoIndex: false });
+    const indexer = new ContentIndexer(options);
     await indexer.initialize();
     return indexer;
   }
+
+  it('does not register a completed-load indexing listener by default', async () => {
+    await createIndexer();
+
+    expect(chrome.tabs.onUpdated.addListener).not.toHaveBeenCalled();
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+    expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the live tab URL and never extracts non-HTTP content', async () => {
+    pagesByTab.set(30, {
+      url: 'data:text/html,private',
+      title: 'Non-public page',
+    });
+    const indexer = await createIndexer();
+
+    await indexer.indexTabContent(30);
+
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+    expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(mocks.addDocument).not.toHaveBeenCalled();
+  });
 
   it('indexes identical URL/title pages independently in different tabs', async () => {
     pagesByTab.set(1, { url: 'https://example.test/page', title: 'Same page' });
@@ -143,7 +165,7 @@ describe('ContentIndexer tab/page lifecycle', () => {
   });
 
   it('registers tab and navigation listeners only once across reinitialization', async () => {
-    const indexer = await createIndexer();
+    const indexer = await createIndexer({ autoIndex: true });
 
     await indexer.reinitialize();
 

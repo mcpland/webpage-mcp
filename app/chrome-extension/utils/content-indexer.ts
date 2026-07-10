@@ -1,6 +1,6 @@
 /**
  * Content index manager
- * Responsible for automatically extracting, chunking and indexing tab content
+ * Responsible for explicitly extracting, chunking and indexing tab content
  */
 
 import { TextChunker } from './text-chunker';
@@ -35,7 +35,9 @@ export class ContentIndexer {
 
   constructor(options?: IndexingOptions) {
     this.options = {
-      autoIndex: true,
+      // Page text is private browsing data. Background indexing is opt-in so
+      // constructing or initializing an indexer never starts collecting it.
+      autoIndex: false,
       maxChunksPerPage: 50,
       skipDuplicates: true,
       ...options,
@@ -517,8 +519,10 @@ export class ContentIndexer {
     }
     this.tabEventListenersInitialized = true;
 
-    chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-      if (this.options.autoIndex && changeInfo.status === 'complete' && tab.url) {
+    if (this.options.autoIndex) {
+      chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+        if (changeInfo.status !== 'complete' || !tab.url) return;
+
         setTimeout(() => {
           if (!this.isSemanticEngineReady() && !this.isSemanticEngineInitializing()) {
             console.log(
@@ -531,8 +535,8 @@ export class ContentIndexer {
             console.error(`ContentIndexer: Auto-indexing failed for tab ${tabId}:`, error);
           });
         }, 2000);
-      }
-    });
+      });
+    }
 
     chrome.tabs.onRemoved.addListener(async (tabId) => {
       await this.removeTabIndex(tabId);
@@ -548,16 +552,12 @@ export class ContentIndexer {
   }
 
   private shouldIndexUrl(url: string): boolean {
-    const excludePatterns = [
-      /^chrome:\/\//,
-      /^chrome-extension:\/\//,
-      /^edge:\/\//,
-      /^about:/,
-      /^moz-extension:\/\//,
-      /^file:\/\//,
-    ];
-
-    return !excludePatterns.some((pattern) => pattern.test(url));
+    try {
+      const protocol = new URL(url).protocol.toLowerCase();
+      return protocol === 'http:' || protocol === 'https:';
+    } catch {
+      return false;
+    }
   }
 
   private async extractTabContent(
