@@ -5,6 +5,71 @@ if (window.__FILL_HELPER_INITIALIZED__) {
   // Already initialized, skip
 } else {
   window.__FILL_HELPER_INITIALIZED__ = true;
+
+  const MAX_SHADOW_SEARCH_NODES = 2000;
+  const MAX_SHADOW_SEARCH_DEPTH = 32;
+  const MAX_SHADOW_SEARCH_MS = 100;
+  const MAX_SHADOW_SEARCH_FRONTIER = 512;
+  const MAX_SHADOW_SEARCH_ROOTS = 64;
+
+  function findFillableInShadowRoot(root) {
+    if (!(root instanceof ShadowRoot)) return null;
+    const deadline = Date.now() + MAX_SHADOW_SEARCH_MS;
+    const queue = [];
+    let head = 0;
+    let queued = 0;
+    let visited = 0;
+    let shadowRoots = 1;
+
+    const enqueueChildren = (container, depth) => {
+      let child = container.firstElementChild;
+      while (child) {
+        if (
+          Date.now() > deadline ||
+          queued >= MAX_SHADOW_SEARCH_NODES ||
+          queue.length - head >= MAX_SHADOW_SEARCH_FRONTIER
+        ) {
+          return false;
+        }
+        queue.push({ element: child, depth });
+        queued += 1;
+        child = child.nextElementSibling;
+      }
+      return true;
+    };
+
+    enqueueChildren(root, 0);
+    while (
+      head < queue.length &&
+      visited < MAX_SHADOW_SEARCH_NODES &&
+      Date.now() <= deadline
+    ) {
+      const entry = queue[head];
+      head += 1;
+      visited += 1;
+      const current = entry.element;
+      if (
+        current.tagName === 'INPUT' ||
+        current.tagName === 'TEXTAREA' ||
+        current.tagName === 'SELECT'
+      ) {
+        // The search returns at most one result.
+        return current;
+      }
+
+      if (entry.depth >= MAX_SHADOW_SEARCH_DEPTH) continue;
+      enqueueChildren(current, entry.depth + 1);
+
+      const innerRoot = current.shadowRoot;
+      if (innerRoot) {
+        if (shadowRoots >= MAX_SHADOW_SEARCH_ROOTS) continue;
+        shadowRoots += 1;
+        enqueueChildren(innerRoot, entry.depth + 1);
+      }
+    }
+    return null;
+  }
+
   /**
    * Fill an input element with the specified value
    * @param {string} selector - CSS selector for the element to fill
@@ -95,27 +160,8 @@ if (window.__FILL_HELPER_INITIALIZED__) {
           const anyEl = /** @type {any} */ (element);
           const sr = anyEl && anyEl.shadowRoot ? anyEl.shadowRoot : null;
           if (sr) {
-            // Search common fillable targets inside shadow root (breadth-first)
-            const queue = Array.from(sr.children || []);
-            const isFillable = (el) =>
-              !!el &&
-              (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
-            while (queue.length) {
-              const cur = queue.shift();
-              if (!cur) continue;
-              if (isFillable(cur)) {
-                element = cur;
-                break;
-              }
-              try {
-                const children = cur.children || [];
-                for (let i = 0; i < children.length; i++) queue.push(children[i]);
-                const innerSr = /** @type {any} */ (cur).shadowRoot;
-                if (innerSr && innerSr.children) {
-                  for (let i = 0; i < innerSr.children.length; i++) queue.push(innerSr.children[i]);
-                }
-              } catch (_) {}
-            }
+            // Search common fillable targets inside shadow roots with strict BFS budgets.
+            element = findFillableInShadowRoot(sr) || element;
             if (!validTags.includes(element.tagName)) {
               return {
                 error: `Element with selector "${selector}" is not a fillable element (must be INPUT, TEXTAREA, or SELECT)`,
