@@ -24,4 +24,12 @@ describe('BoundedNdjsonDecoder', () => {
     expect(decoder.push('a\nbb\nccc\n')).toEqual(['a', 'bb', 'ccc']);
     expect(decoder.bufferedBytes).toBe(0);
   });
+
+  it('consumes one bounded unterminated line at EOF', () => {
+    const decoder = new BoundedNdjsonDecoder(16);
+    expect(decoder.push('  trailing  ')).toEqual([]);
+    expect(decoder.finish()).toEqual(['trailing']);
+    expect(decoder.bufferedBytes).toBe(0);
+    expect(decoder.finish()).toEqual([]);
+  });
 });

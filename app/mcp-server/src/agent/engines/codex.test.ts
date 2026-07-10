@@ -21,9 +21,12 @@ vi.mock('./trusted-executable', () => ({
 import {
   CODEX_AUTO_INSTRUCTIONS_MAX_BYTES,
   CODEX_ENGINE_PROMPT_MAX_BYTES,
+  CODEX_EVENT_TRAVERSAL_MAX_DEPTH,
+  CODEX_EVENT_TRAVERSAL_MAX_NODES,
   CODEX_PROJECT_CONTEXT_ENTRY_NAME_MAX_BYTES,
   CODEX_PROJECT_CONTEXT_MAX_BYTES,
   CODEX_PROJECT_CONTEXT_MAX_ENTRIES,
+  CODEX_STDOUT_MAX_LINE_BYTES,
   CodexEngine,
   buildCodexAutoInstructionsBlock,
   buildCodexPrompt,
@@ -110,6 +113,21 @@ function observeSettlement(promise: Promise<unknown>): () => boolean {
     },
   );
   return () => settled;
+}
+
+async function startFakeCodexExecution(emit = vi.fn()) {
+  const stdin = new CollectingWritable();
+  const child = new FakeCodexChildProcess(stdin);
+  spawnMock.mockReturnValue(child as unknown as ChildProcess);
+  const execution = new CodexEngine('test-instance').initializeAndRun(
+    createEngineOptions('bounded stdout prompt'),
+    { emit },
+  );
+
+  await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+  child.emit('spawn');
+  if (!stdin.writableFinished) await once(stdin, 'finish');
+  return { child, emit, execution };
 }
 
 afterEach(() => {
@@ -449,6 +467,112 @@ describe('CodexEngine prompt transport', () => {
 
     child.emit('close', null, 'SIGTERM');
     await expect(execution).rejects.toThrow('execution was cancelled');
+  });
+
+  it('terminates on an oversized unterminated stdout line without logging its contents', async () => {
+    const secretMarker = 'oversized-stdout-secret-marker';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { child, execution } = await startFakeCodexExecution();
+      const isSettled = observeSettlement(execution);
+      const parseSpy = vi.spyOn(JSON, 'parse');
+
+      try {
+        child.stdout.end(
+          `${secretMarker}${'x'.repeat(CODEX_STDOUT_MAX_LINE_BYTES + 1)}`,
+        );
+
+        await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGTERM'));
+        expect(isSettled()).toBe(false);
+        expect(parseSpy).not.toHaveBeenCalled();
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secretMarker);
+
+        child.emit('close', null, 'SIGTERM');
+        await expect(execution).rejects.toThrow(
+          `stdout line exceeds the ${CODEX_STDOUT_MAX_LINE_BYTES}-byte limit`,
+        );
+      } finally {
+        parseSpy.mockRestore();
+      }
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    {
+      name: 'over-depth event value',
+      createType: () => {
+        let value: unknown = 'agent_message';
+        for (let index = 0; index <= CODEX_EVENT_TRAVERSAL_MAX_DEPTH; index += 1) {
+          value = [value];
+        }
+        return value;
+      },
+      expectedError: `${CODEX_EVENT_TRAVERSAL_MAX_DEPTH}-level limit`,
+    },
+    {
+      name: 'large-fanout event value',
+      createType: () => Array.from({ length: CODEX_EVENT_TRAVERSAL_MAX_NODES }, () => null),
+      expectedError: `${CODEX_EVENT_TRAVERSAL_MAX_NODES}-node limit`,
+    },
+  ])('terminates on a $name without overflowing traversal', async ({ createType, expectedError }) => {
+    const { child, execution } = await startFakeCodexExecution();
+    const isSettled = observeSettlement(execution);
+    const line = JSON.stringify({
+      type: 'item.completed',
+      item: { type: createType() },
+    });
+    expect(Buffer.byteLength(line, 'utf8')).toBeLessThan(CODEX_STDOUT_MAX_LINE_BYTES);
+
+    child.stdout.write(`${line}\n`);
+
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGTERM'));
+    expect(isSettled()).toBe(false);
+
+    child.emit('close', null, 'SIGTERM');
+    await expect(execution).rejects.toThrow(expectedError);
+  });
+
+  it('decodes fragmented and EOF-terminated events while logging malformed bytes only', async () => {
+    const secretMarker = 'malformed-stdout-secret-marker';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const emit = vi.fn();
+      const { child, execution } = await startFakeCodexExecution(emit);
+      const assistantEvent = JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'bounded normal reply' },
+      });
+      const turnCompleted = JSON.stringify({ type: 'turn.completed' });
+      const splitAt = Math.floor(assistantEvent.length / 2);
+
+      child.stdout.write(`${secretMarker} is not JSON\n`);
+      child.stdout.write(assistantEvent.slice(0, splitAt));
+      child.stdout.write(assistantEvent.slice(splitAt));
+      const stdoutEnded = once(child.stdout, 'end');
+      child.stdout.end(`\n${turnCompleted}`);
+      await stdoutEnded;
+      child.emit('close', 0, null);
+
+      await expect(execution).resolves.toBeUndefined();
+      expect(emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'message',
+          data: expect.objectContaining({
+            role: 'assistant',
+            content: 'bounded normal reply',
+            isFinal: true,
+          }),
+        }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('type=unknown, bytes='),
+      );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secretMarker);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('rejects oversized instructions before spawning Codex', async () => {

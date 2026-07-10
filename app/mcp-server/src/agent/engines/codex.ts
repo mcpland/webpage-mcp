@@ -1,5 +1,4 @@
 import spawn from 'cross-spawn';
-import readline from 'node:readline';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Writable } from 'node:stream';
@@ -44,6 +43,10 @@ import {
   writePrivateTempAttachment,
 } from './private-temp-attachment';
 import { resolveTrustedExecutable } from './trusted-executable';
+import {
+  BoundedNdjsonDecoder,
+  IpcLineTooLargeError,
+} from '../../ipc/bounded-ndjson';
 
 /** Resource budgets for the optional top-level project directory summary. */
 export const CODEX_PROJECT_CONTEXT_MAX_ENTRIES = 1_000;
@@ -53,6 +56,11 @@ export const CODEX_AUTO_INSTRUCTIONS_MAX_BYTES =
   AGENT_CODEX_AUTO_INSTRUCTIONS_MAX_BYTES;
 export const CODEX_ENGINE_PROMPT_MAX_BYTES =
   AGENT_FINAL_PROMPT_MAX_BYTES + CODEX_PROJECT_CONTEXT_MAX_BYTES;
+/** Bound one CLI event before string allocation and JSON.parse. */
+export const CODEX_STDOUT_MAX_LINE_BYTES = 1024 * 1024;
+/** Bound nested fallback lookup inside one already size-bounded event. */
+export const CODEX_EVENT_TRAVERSAL_MAX_DEPTH = 32;
+export const CODEX_EVENT_TRAVERSAL_MAX_NODES = 4_096;
 
 const PROJECT_CONTEXT_PREFIX =
   '\n\n<current_project_context>\nCurrent files in project directory: ';
@@ -71,6 +79,84 @@ interface ProjectContextEntry {
 
 function utf8ByteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8');
+}
+
+function createCodexTraversalLimitError(kind: 'depth' | 'nodes'): Error {
+  const limit =
+    kind === 'depth'
+      ? CODEX_EVENT_TRAVERSAL_MAX_DEPTH
+      : CODEX_EVENT_TRAVERSAL_MAX_NODES;
+  return new Error(
+    `CodexEngine: event traversal exceeds the ${limit}-${kind === 'depth' ? 'level' : 'node'} limit`,
+  );
+}
+
+/**
+ * Preserve the adapter's depth-first string lookup without recursive calls or
+ * allowing an adversarial JSON shape to consume unbounded CPU/stack memory.
+ */
+export function pickBoundedCodexString(value: unknown): string | undefined {
+  const stack: Array<{ value: unknown; depth: number }> = [
+    { value, depth: 0 },
+  ];
+  const visitedObjects = new WeakSet<object>();
+  let visitedNodes = 0;
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    visitedNodes += 1;
+    if (visitedNodes > CODEX_EVENT_TRAVERSAL_MAX_NODES) {
+      throw createCodexTraversalLimitError('nodes');
+    }
+    if (current.depth > CODEX_EVENT_TRAVERSAL_MAX_DEPTH) {
+      throw createCodexTraversalLimitError('depth');
+    }
+
+    const candidate = current.value;
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      if (trimmed) return trimmed;
+      continue;
+    }
+    if (typeof candidate === 'number' || typeof candidate === 'boolean') {
+      return String(candidate);
+    }
+    if (!candidate || typeof candidate !== 'object') {
+      continue;
+    }
+    if (visitedObjects.has(candidate)) {
+      continue;
+    }
+    visitedObjects.add(candidate);
+
+    const candidateIsArray = Array.isArray(candidate);
+    const keys = candidateIsArray ? null : Object.keys(candidate);
+    const childCount = candidateIsArray ? candidate.length : keys!.length;
+    if (childCount === 0) {
+      continue;
+    }
+    if (current.depth === CODEX_EVENT_TRAVERSAL_MAX_DEPTH) {
+      throw createCodexTraversalLimitError('depth');
+    }
+    if (
+      stack.length + childCount >
+      CODEX_EVENT_TRAVERSAL_MAX_NODES - visitedNodes
+    ) {
+      throw createCodexTraversalLimitError('nodes');
+    }
+    if (candidateIsArray) {
+      for (let index = candidate.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: candidate[index], depth: current.depth + 1 });
+      }
+      continue;
+    }
+    const record = candidate as Record<string, unknown>;
+    for (let index = keys!.length - 1; index >= 0; index -= 1) {
+      stack.push({ value: record[keys![index]], depth: current.depth + 1 });
+    }
+  }
+
+  return undefined;
 }
 
 function compareProjectEntryNames(left: string, right: string): number {
@@ -584,9 +670,15 @@ export class CodexEngine implements AgentEngine {
       let terminalError: Error | null = null;
       let finishPromise: Promise<void> | null = null;
       let promptDeliveryPromise: Promise<void> | null = null;
-
-      // Readline interface - declared early to avoid TDZ issues in finish()
-      let rl: readline.Interface | null = null;
+      const stdoutDecoder = new BoundedNdjsonDecoder(
+        CODEX_STDOUT_MAX_LINE_BYTES,
+      );
+      let stdoutStopped = false;
+      let cleanupStdout = (): void => {
+        stdoutStopped = true;
+        stdoutDecoder.reset();
+        child.stdout?.pause();
+      };
       const configuredTimeoutMs = Number.parseInt(
         process.env.CODEX_ENGINE_TIMEOUT_MS || '',
         10,
@@ -602,9 +694,9 @@ export class CodexEngine implements AgentEngine {
         timeoutError: () => new Error('CodexEngine: execution timed out'),
         onTerminationRequested: () => {
           try {
-            rl?.close();
+            cleanupStdout();
           } catch {
-            // Closing readline is best-effort; process termination remains authoritative.
+            // Closing stdout is best-effort; process termination remains authoritative.
           }
           try {
             child.stdin?.destroy();
@@ -729,12 +821,10 @@ export class CodexEngine implements AgentEngine {
             assistantStream?.cancel();
           }
 
-          if (rl) {
-            try {
-              rl.close();
-            } catch {
-              // Ignore close errors during cleanup.
-            }
+          try {
+            cleanupStdout();
+          } catch {
+            // Ignore stdout cleanup errors after the child has closed.
           }
 
           // The process is now closed (or never spawned), so temporary files
@@ -791,9 +881,6 @@ export class CodexEngine implements AgentEngine {
 
         console.error('[CodexEngine][stderr]', text);
       });
-
-      rl = readline.createInterface({ input: child.stdout });
-
       /**
        * Reset assistant buffers after emitting a final message.
        */
@@ -1079,88 +1166,148 @@ export class CodexEngine implements AgentEngine {
         }
       };
 
-      // Main event processing loop (wrapped in IIFE to handle async properly)
-      void (async () => {
+      const logMalformedStdoutEvent = (
+        line: string,
+        eventType: 'unknown' | 'non-object',
+      ): void => {
+        console.warn(
+          `[CodexEngine] Ignored malformed Codex stdout event (type=${eventType}, bytes=${utf8ByteLength(line)})`,
+        );
+      };
+
+      const processCodexEventLine = (line: string): void => {
+        if (!line) return;
+
+        let parsed: unknown;
         try {
-          for await (const line of rl) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
+          parsed = JSON.parse(line);
+        } catch {
+          logMalformedStdoutEvent(line, 'unknown');
+          return;
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          logMalformedStdoutEvent(line, 'non-object');
+          return;
+        }
 
-            let event: Record<string, unknown>;
-            try {
-              event = JSON.parse(trimmed) as Record<string, unknown>;
-            } catch {
-              console.warn(
-                '[CodexEngine] Failed to parse Codex event line:',
-                trimmed,
-              );
-              continue;
-            }
-
-            const eventType = this.pickFirstString(event.type);
-            switch (eventType) {
-              case 'item.started':
-                handleItemStarted((event as { item?: unknown }).item ?? null);
-                break;
-              case 'item.delta':
-                handleItemDelta((event as { delta?: unknown }).delta ?? null);
-                break;
-              case 'item.completed':
-                handleItemCompleted((event as { item?: unknown }).item ?? null);
-                break;
-              case 'item.failed': {
-                const item = (event as { item?: unknown }).item ?? null;
-                handleItemCompleted(item);
-                // Flush assistant message before throwing (aligned with other/cweb)
-                emitAssistant(true);
-                resetAssistantBuffers();
-                const msg =
-                  (item &&
-                    typeof item === 'object' &&
-                    this.pickFirstString(
-                      (item as Record<string, unknown>).error,
-                    )) ||
-                  'Codex execution failed';
-                hasCompleted = true;
-                throw new Error(msg);
-              }
-              case 'error': {
-                // Flush assistant message before throwing (aligned with other/cweb)
-                emitAssistant(true);
-                resetAssistantBuffers();
-                const msg =
-                  this.pickFirstString((event as { error?: unknown }).error) ||
-                  this.pickFirstString(
-                    (event as { message?: unknown }).message,
-                  ) ||
-                  stderrBuffer.slice(-5).join('\n') ||
-                  'Codex execution error';
-                hasCompleted = true;
-                throw new Error(msg);
-              }
-              case 'turn.completed':
-                emitAssistant(true);
-                resetAssistantBuffers();
-                hasCompleted = true;
-                break;
-              default:
-                // Non-critical events are ignored
-                break;
-            }
+        const event = parsed as Record<string, unknown>;
+        const eventType = this.pickFirstString(event.type);
+        switch (eventType) {
+          case 'item.started':
+            handleItemStarted((event as { item?: unknown }).item ?? null);
+            break;
+          case 'item.delta':
+            handleItemDelta((event as { delta?: unknown }).delta ?? null);
+            break;
+          case 'item.completed':
+            handleItemCompleted((event as { item?: unknown }).item ?? null);
+            break;
+          case 'item.failed': {
+            const item = (event as { item?: unknown }).item ?? null;
+            handleItemCompleted(item);
+            // Flush assistant message before throwing (aligned with other/cweb)
+            emitAssistant(true);
+            resetAssistantBuffers();
+            const msg =
+              (item &&
+                typeof item === 'object' &&
+                this.pickFirstString(
+                  (item as Record<string, unknown>).error,
+                )) ||
+              'Codex execution failed';
+            hasCompleted = true;
+            throw new Error(msg);
           }
+          case 'error': {
+            // Flush assistant message before throwing (aligned with other/cweb)
+            emitAssistant(true);
+            resetAssistantBuffers();
+            const msg =
+              this.pickFirstString((event as { error?: unknown }).error) ||
+              this.pickFirstString(
+                (event as { message?: unknown }).message,
+              ) ||
+              stderrBuffer.slice(-5).join('\n') ||
+              'Codex execution error';
+            hasCompleted = true;
+            throw new Error(msg);
+          }
+          case 'turn.completed':
+            emitAssistant(true);
+            resetAssistantBuffers();
+            hasCompleted = true;
+            break;
+          default:
+            // Non-critical events are ignored
+            break;
+        }
+      };
 
-          // Emit final assistant message if not already completed
+      const stdout = child.stdout;
+      if (!stdout) {
+        void finish(new Error('CodexEngine: Codex stdout pipe was not created'));
+        return;
+      }
+
+      const handleStdoutFailure = (error: unknown): void => {
+        if (stdoutStopped) return;
+        cleanupStdout();
+        const normalizedError =
+          error instanceof IpcLineTooLargeError
+            ? new Error(
+                `CodexEngine: stdout line exceeds the ${CODEX_STDOUT_MAX_LINE_BYTES}-byte limit`,
+              )
+            : error instanceof Error
+              ? error
+              : new Error('CodexEngine: failed to read stdout');
+        void finish(normalizedError);
+      };
+      const handleStdoutData = (chunk: Buffer): void => {
+        if (stdoutStopped) return;
+        try {
+          const lines = stdoutDecoder.push(chunk);
+          for (const line of lines) {
+            processCodexEventLine(line);
+          }
+        } catch (error) {
+          handleStdoutFailure(error);
+        }
+      };
+      const handleStdoutEnd = (): void => {
+        if (stdoutStopped) return;
+        try {
+          for (const line of stdoutDecoder.finish()) {
+            processCodexEventLine(line);
+          }
           if (!hasCompleted) {
             emitAssistant(true);
             resetAssistantBuffers();
             hasCompleted = true;
           }
-
-          await finish();
+          cleanupStdout();
+          void finish();
         } catch (error) {
-          await finish(error);
+          handleStdoutFailure(error);
         }
-      })();
+      };
+      const handleStdoutError = (error: Error): void => {
+        handleStdoutFailure(
+          new Error(`CodexEngine: failed to read stdout: ${error.message}`),
+        );
+      };
+
+      cleanupStdout = (): void => {
+        stdoutStopped = true;
+        stdoutDecoder.reset();
+        stdout.removeListener('data', handleStdoutData);
+        stdout.removeListener('end', handleStdoutEnd);
+        stdout.pause();
+      };
+      stdout.on('data', handleStdoutData);
+      stdout.once('end', handleStdoutEnd);
+      // Keep this listener after cleanup so a late stream error cannot become
+      // an uncaught EventEmitter error while the supervised child is exiting.
+      stdout.on('error', handleStdoutError);
     });
   }
 
@@ -1259,32 +1406,7 @@ export class CodexEngine implements AgentEngine {
   }
 
   private pickFirstString(value: unknown): string | undefined {
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : undefined;
-    }
-    if (typeof value === 'number' || typeof value === 'boolean') {
-      return String(value);
-    }
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        const candidate = this.pickFirstString(entry);
-        if (candidate) {
-          return candidate;
-        }
-      }
-      return undefined;
-    }
-    if (value && typeof value === 'object') {
-      const record = value as Record<string, unknown>;
-      for (const key of Object.keys(record)) {
-        const candidate = this.pickFirstString(record[key]);
-        if (candidate) {
-          return candidate;
-        }
-      }
-    }
-    return undefined;
+    return pickBoundedCodexString(value);
   }
 
   private summarizeApplyPatch(payload: {

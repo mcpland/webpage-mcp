@@ -45,6 +45,14 @@ export class BoundedNdjsonDecoder {
     return lines;
   }
 
+  /** Consume the final unterminated line when the input reaches EOF. */
+  finish(): string[] {
+    if (this.lineBytes === 0) {
+      return [];
+    }
+    return [this.consumeLine()];
+  }
+
   reset(): void {
     this.segments.length = 0;
     this.lineBytes = 0;
