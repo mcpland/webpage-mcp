@@ -21,6 +21,11 @@ import {
   registerPropsAgentEarlyInjection,
   releasePropsAgentEarlyInjection,
 } from './props-early-injection';
+import {
+  ExecutionStatusCache,
+  WEB_EDITOR_STATUS_CACHE_TTL_MS,
+  type ExecutionStatusEntry,
+} from './execution-status-cache';
 
 const CONTEXT_MENU_ID = 'web_editor_toggle';
 const COMMAND_KEY = 'toggle_web_editor';
@@ -36,14 +41,8 @@ const WEB_EDITOR_EXCLUDED_KEYS_SESSION_KEY_PREFIX = 'web-editor-excluded-keys-';
 const STORAGE_KEY_SELECTED_SESSION = 'agent-selected-session-id';
 
 // In-memory execution status cache (per requestId)
-interface ExecutionStatusEntry {
-  status: string;
-  message?: string;
-  updatedAt: number;
-  result?: { success: boolean; summary?: string; error?: string };
-}
-const executionStatusCache = new Map<string, ExecutionStatusEntry>();
-const STATUS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const executionStatusCache = new ExecutionStatusCache();
+const STATUS_CACHE_TTL = WEB_EDITOR_STATUS_CACHE_TTL_MS;
 const MAX_EXECUTION_OWNERS = 100;
 
 interface ExecutionOwner {
@@ -114,15 +113,6 @@ function isExecutionOwner(
   );
 }
 
-function cleanupExpiredStatuses(): void {
-  const now = Date.now();
-  for (const [key, entry] of executionStatusCache) {
-    if (now - entry.updatedAt > STATUS_CACHE_TTL) {
-      executionStatusCache.delete(key);
-    }
-  }
-}
-
 function setExecutionStatus(
   requestId: string,
   status: string,
@@ -131,16 +121,7 @@ function setExecutionStatus(
 ): void {
   const owner = executionOwners.get(requestId);
   if (owner) owner.updatedAt = Date.now();
-  executionStatusCache.set(requestId, {
-    status,
-    message,
-    updatedAt: Date.now(),
-    result,
-  });
-  // Periodic cleanup
-  if (executionStatusCache.size > 100) {
-    cleanupExpiredStatuses();
-  }
+  executionStatusCache.set(requestId, status, message, result);
 }
 
 function getExecutionStatus(requestId: string): ExecutionStatusEntry | undefined {
