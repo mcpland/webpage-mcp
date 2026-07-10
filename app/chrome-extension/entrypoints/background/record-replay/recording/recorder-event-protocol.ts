@@ -5,6 +5,7 @@ export const RECORDER_EVENT_PROTOCOL_VERSION = 1;
 export interface RecorderEventSource {
   tabId: number;
   frameId: number;
+  documentId: string;
 }
 
 export interface RecorderEventMeta {
@@ -16,6 +17,7 @@ export interface RecorderEventMeta {
   source?: {
     href?: string;
     isTop?: boolean;
+    documentId?: string;
   };
 }
 
@@ -77,6 +79,14 @@ export function parseRecorderEventMeta(input: unknown):
     if (sourceObj.isTop !== undefined && typeof sourceObj.isTop !== 'boolean') {
       return { ok: false, error: 'source.isTop must be a boolean' };
     }
+    if (
+      sourceObj.documentId !== undefined &&
+      (typeof sourceObj.documentId !== 'string' ||
+        sourceObj.documentId.length === 0 ||
+        sourceObj.documentId.length > 128)
+    ) {
+      return { ok: false, error: 'source.documentId must be a non-empty bounded string' };
+    }
   }
 
   const seqNum = seq as number;
@@ -95,15 +105,30 @@ export function parseRecorderEventMeta(input: unknown):
   };
 }
 
-export function getRecorderEventSource(sender: MessageSender): RecorderEventSource {
+export function getRecorderEventSource(
+  sender: MessageSender,
+  meta?: RecorderEventMeta,
+): RecorderEventSource {
   const tabId = sender?.tab?.id;
   const frameId = sender?.frameId;
+  const senderDocumentId = sender?.documentId;
+  const metaDocumentId = meta?.source?.documentId;
   return {
     tabId: typeof tabId === 'number' ? tabId : -1,
     frameId: typeof frameId === 'number' ? frameId : 0,
+    documentId:
+      typeof senderDocumentId === 'string' &&
+      senderDocumentId.length > 0 &&
+      senderDocumentId.length <= 128
+        ? senderDocumentId
+        : typeof metaDocumentId === 'string' &&
+            metaDocumentId.length > 0 &&
+            metaDocumentId.length <= 128
+          ? metaDocumentId
+          : 'legacy-document',
   };
 }
 
 export function getRecorderSourceKey(source: RecorderEventSource): string {
-  return `${source.tabId}:${source.frameId}`;
+  return JSON.stringify([source.tabId, source.frameId, source.documentId]);
 }

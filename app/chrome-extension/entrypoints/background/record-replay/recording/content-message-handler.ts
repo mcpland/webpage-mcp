@@ -354,7 +354,7 @@ export function createRecorderEventMessageHandler(
       }
 
       const meta = parsedMeta.meta;
-      const source = getRecorderEventSource(sender);
+      const source = getRecorderEventSource(sender, meta);
       const sourceKey = getRecorderSourceKey(source);
 
       if (source.tabId < 0) {

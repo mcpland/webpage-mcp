@@ -16,6 +16,16 @@
   const RECORDER_EVENT_PROTOCOL_VERSION = 1;
   const SEND_RETRY_MAX = 2;
   const SEND_RETRY_BASE_MS = 80;
+  const RECORDER_DOCUMENT_ID = (() => {
+    try {
+      if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    } catch {
+      return `doc_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+    }
+  })();
 
   // ================================================================
   // 2) UI CLASS (injected via constructor)
@@ -1399,6 +1409,7 @@
         source: {
           href: String(location && location.href ? location.href : ''),
           isTop: window === window.top,
+          documentId: RECORDER_DOCUMENT_ID,
         },
       };
     }

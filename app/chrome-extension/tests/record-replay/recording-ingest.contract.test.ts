@@ -25,10 +25,15 @@ function createSessionMock(sessionId = 'sess_test') {
   };
 }
 
-function createSender(tabId = 101, frameId = 0): chrome.runtime.MessageSender {
+function createSender(
+  tabId = 101,
+  frameId = 0,
+  documentId?: string,
+): chrome.runtime.MessageSender {
   return {
     tab: { id: tabId } as chrome.tabs.Tab,
     frameId,
+    ...(documentId ? { documentId } : {}),
   };
 }
 
@@ -292,6 +297,40 @@ describe('Recorder ingest protocol', () => {
           decision: 'accept',
           highWatermarkSeq: 1,
         }),
+      }),
+    );
+  });
+
+  it('keeps sequence watermarks separate across documents in one tab and frame', () => {
+    const mock = createSessionMock();
+    const handler = createRecorderEventMessageHandler(mock.session as any);
+
+    handler(
+      {
+        type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
+        payload: { kind: 'steps', steps: [createClickStep('old-document')] },
+        meta: createMeta({ eventId: 'old-event', seq: 20 }),
+      },
+      createSender(101, 0, 'document-old'),
+      vi.fn(),
+    );
+
+    const response = vi.fn();
+    handler(
+      {
+        type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
+        payload: { kind: 'steps', steps: [createClickStep('new-document')] },
+        meta: createMeta({ eventId: 'new-event', seq: 1 }),
+      },
+      createSender(101, 0, 'document-new'),
+      response,
+    );
+
+    expect(mock.appendSteps).toHaveBeenCalledTimes(2);
+    expect(response).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        ack: expect.objectContaining({ decision: 'accept', highWatermarkSeq: 1 }),
       }),
     );
   });

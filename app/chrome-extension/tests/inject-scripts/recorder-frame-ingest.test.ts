@@ -154,6 +154,8 @@ describe('recorder iframe ingest boundary', () => {
       frameTarget: expect.objectContaining({ selector: '#checkout' }),
     });
     expect(envelope.payload).not.toHaveProperty('step');
+    expect(envelope.meta?.source?.documentId).toEqual(expect.any(String));
+    expect(envelope.meta.source.documentId.length).toBeGreaterThan(0);
     expect(JSON.stringify(envelope)).not.toContain('__RECORDER_PWNED__');
   });
 
