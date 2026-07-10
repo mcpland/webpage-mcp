@@ -49,6 +49,12 @@ import {
   writePrivateTempAttachment,
 } from './private-temp-attachment';
 
+export function describeClaudeAuthTokenConfiguration(
+  authToken: string | undefined,
+): string | null {
+  return authToken ? '[ClaudeEngine] ANTHROPIC_AUTH_TOKEN is configured' : null;
+}
+
 // Images are provided to Claude Code via local file paths referenced in the prompt text.
 // Claude Code CLI reads images from local paths, so we write base64 images to temp files and reference them.
 
@@ -1326,7 +1332,7 @@ export class ClaudeEngine implements AgentEngine {
       env.PATH = [nodeBinDir, currentPath].filter(Boolean).join(path.delimiter);
     }
 
-    // Log configured Anthropic env vars for debugging (without exposing full token).
+    // Log configured Anthropic env vars without exposing any token material.
     const baseUrl = env.ANTHROPIC_BASE_URL;
     const authToken = env.ANTHROPIC_AUTH_TOKEN;
     if (baseUrl) {
@@ -1334,11 +1340,8 @@ export class ClaudeEngine implements AgentEngine {
         `[ClaudeEngine] Using ANTHROPIC_BASE_URL: ${boundClaudeLogField(baseUrl)}`,
       );
     }
-    if (authToken) {
-      const preview =
-        authToken.length > 8 ? `${authToken.slice(0, 4)}...${authToken.slice(-4)}` : '****';
-      console.error(`[ClaudeEngine] Using ANTHROPIC_AUTH_TOKEN: ${preview}`);
-    }
+    const authTokenStatus = describeClaudeAuthTokenConfiguration(authToken);
+    if (authTokenStatus) console.error(authTokenStatus);
 
     return env;
   }
