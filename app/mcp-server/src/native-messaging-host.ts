@@ -67,6 +67,8 @@ const IPC_MAX_IN_FLIGHT_REQUESTS = 4;
 const IPC_MAX_PENDING_REQUESTS = 16;
 const IPC_PAUSE_HIGH_WATERMARK = 8;
 const IPC_RESUME_LOW_WATERMARK = 4;
+export const IPC_MAX_CONNECTIONS = 64;
+export const IPC_AUTHENTICATION_TIMEOUT_MS = 5_000;
 const NATIVE_MAX_PENDING_DIRECTIVES = 64;
 export const NATIVE_MAX_SERVER_INSTANCES = 64;
 export const NATIVE_MAX_INSTANCE_LABEL_BYTES = 256;
@@ -75,6 +77,17 @@ export const NATIVE_MESSAGE_TYPE_MAX_BYTES = 128;
 export const NATIVE_CONTROL_ERROR_MAX_BYTES = 8 * 1024;
 export const IPC_METHOD_MAX_BYTES = 128;
 export const IPC_TOOL_NAME_MAX_BYTES = 256;
+
+export function createNativeIpcListenOptions(socketPath: string): net.ListenOptions {
+  return {
+    path: socketPath,
+    // Keep the Windows named pipe on Node's private default explicitly. These
+    // flags are ignored for Unix-domain sockets.
+    readableAll: false,
+    writableAll: false,
+    exclusive: true,
+  };
+}
 
 function isBoundedNonEmptyString(value: unknown, maximumBytes: number): value is string {
   return (
@@ -268,12 +281,15 @@ export class NativeMessagingHost {
     let bridgeReady = false;
     const ipcServer = net.createServer({ pauseOnConnect: true }, (socket) => {
       if (!bridgeReady) {
+        if (pendingSockets.size + this.ipcSockets.size >= IPC_MAX_CONNECTIONS) {
+          socket.destroy();
+          return;
+        }
         pendingSockets.add(socket);
         socket.once('close', () => pendingSockets.delete(socket));
         return;
       }
-      this.handleIpcSocket(socket);
-      socket.resume();
+      this.acceptIpcSocket(socket);
     });
 
     try {
@@ -289,7 +305,7 @@ export class NativeMessagingHost {
 
         ipcServer.once('error', onError);
         ipcServer.once('listening', onListening);
-        ipcServer.listen(socketPath);
+        ipcServer.listen(createNativeIpcListenOptions(socketPath));
       });
 
       ipcServer.on('error', (error) => {
@@ -309,8 +325,7 @@ export class NativeMessagingHost {
       for (const socket of pendingSockets) {
         pendingSockets.delete(socket);
         if (!socket.destroyed) {
-          this.handleIpcSocket(socket);
-          socket.resume();
+          this.acceptIpcSocket(socket);
         }
       }
     } catch (error) {
@@ -341,6 +356,16 @@ export class NativeMessagingHost {
     }
   }
 
+  private acceptIpcSocket(socket: net.Socket): boolean {
+    if (this.ipcSockets.size >= IPC_MAX_CONNECTIONS) {
+      socket.destroy();
+      return false;
+    }
+    this.handleIpcSocket(socket);
+    socket.resume();
+    return true;
+  }
+
   private handleIpcSocket(socket: net.Socket): void {
     this.ipcSockets.add(socket);
     const decoder = new BoundedNdjsonDecoder(IPC_MAX_REQUEST_LINE_BYTES);
@@ -353,6 +378,13 @@ export class NativeMessagingHost {
     let closing = false;
     let closed = false;
     let writeTail = Promise.resolve();
+    let authenticationTimeout: NodeJS.Timeout | null = null;
+
+    const clearAuthenticationTimeout = (): void => {
+      if (!authenticationTimeout) return;
+      clearTimeout(authenticationTimeout);
+      authenticationTimeout = null;
+    };
 
     const send = (payload: any): Promise<void> => {
       let serialized = JSON.stringify(payload);
@@ -461,6 +493,17 @@ export class NativeMessagingHost {
       updateInputBackpressure();
     };
 
+    authenticationTimeout = setTimeout(() => {
+      if (authenticated || closing || closed) return;
+      // Do not wait for a peer-controlled write callback when enforcing the
+      // authentication deadline.
+      closing = true;
+      decoder.reset();
+      abortConnectionWork();
+      socket.destroy();
+    }, IPC_AUTHENTICATION_TIMEOUT_MS);
+    authenticationTimeout.unref();
+
     socket.on('data', (chunk: Buffer) => {
       let lines: string[];
       try {
@@ -504,6 +547,7 @@ export class NativeMessagingHost {
             return;
           }
           authenticated = true;
+          clearAuthenticationTimeout();
           void send({ id: parsed.id, result: { authenticated: true } });
           continue;
         }
@@ -587,6 +631,7 @@ export class NativeMessagingHost {
 
     socket.on('close', () => {
       closed = true;
+      clearAuthenticationTimeout();
       decoder.reset();
       abortConnectionWork();
       this.ipcSockets.delete(socket);

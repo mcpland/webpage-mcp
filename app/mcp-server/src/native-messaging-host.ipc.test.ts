@@ -8,7 +8,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNativeIpcCredential } from './ipc/bridge-auth';
 import { IPC_CANCEL_REQUEST_METHOD } from './ipc/bridge-protocol';
 import { NativeMessageWriter } from './native-message-output';
-import { NativeMessagingHost } from './native-messaging-host';
+import {
+  IPC_AUTHENTICATION_TIMEOUT_MS,
+  IPC_MAX_CONNECTIONS,
+  NativeMessagingHost,
+  createNativeIpcListenOptions,
+} from './native-messaging-host';
 
 class FakeSocket extends EventEmitter {
   public readonly writes: string[] = [];
@@ -84,12 +89,70 @@ function parseWrites(socket: FakeSocket): Array<Record<string, unknown>> {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const directory of tempDirs.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
 
 describe('NativeMessagingHost IPC authentication', () => {
+  it('uses an explicit private and exclusive IPC listener configuration', () => {
+    expect(createNativeIpcListenOptions('native-test-socket')).toEqual({
+      path: 'native-test-socket',
+      readableAll: false,
+      writableAll: false,
+      exclusive: true,
+    });
+  });
+
+  it('destroys a peer that does not authenticate before the deadline', async () => {
+    vi.useFakeTimers();
+    const { socket } = createHostAndSocket();
+
+    await vi.advanceTimersByTimeAsync(IPC_AUTHENTICATION_TIMEOUT_MS);
+
+    expect(socket.destroyed).toBe(true);
+    expect(socket.writes).toEqual([]);
+  });
+
+  it('clears the authentication deadline after a valid bearer', async () => {
+    vi.useFakeTimers();
+    const { credential, socket } = createHostAndSocket();
+
+    socket.emit(
+      'data',
+      `${JSON.stringify({
+        id: 'auth-1',
+        method: 'authenticate',
+        params: { token: credential.token },
+      })}\n`,
+    );
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(IPC_AUTHENTICATION_TIMEOUT_MS);
+
+    expect(socket.destroyed).toBe(false);
+    expect(parseWrites(socket)).toEqual([
+      { id: 'auth-1', result: { authenticated: true } },
+    ]);
+    socket.destroy();
+  });
+
+  it('rejects connections beyond the process-wide cap', () => {
+    const host = createQuietHost();
+    const state = host as unknown as {
+      ipcSockets: Set<net.Socket>;
+      acceptIpcSocket: (socket: net.Socket) => boolean;
+    };
+    state.ipcSockets = new Set(
+      Array.from({ length: IPC_MAX_CONNECTIONS }, () => ({}) as net.Socket),
+    );
+    const socket = new FakeSocket();
+
+    expect(state.acceptIpcSocket(socket as unknown as net.Socket)).toBe(false);
+    expect(socket.destroyed).toBe(true);
+    expect(state.ipcSockets.size).toBe(IPC_MAX_CONNECTIONS);
+  });
+
   it('rejects every bridge method before authentication without echoing the credential', async () => {
     const { credential, socket } = createHostAndSocket();
 
