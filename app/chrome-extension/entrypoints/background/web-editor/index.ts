@@ -82,7 +82,23 @@ const sseConnections = new Map<
   { subscriptionId: string; lastRequestId: string; listener: (message: unknown) => void }
 >();
 
-async function closeSessionStatusSubscription(sessionId: string, requestId?: string): Promise<void> {
+interface SessionStatusSubscriptionIntent {
+  readonly requestId: string;
+  readonly token: symbol;
+}
+
+/** Latest requested subscription, including subscriptions still awaiting native-host setup. */
+const sseSubscriptionIntents = new Map<string, SessionStatusSubscriptionIntent>();
+
+export async function closeSessionStatusSubscription(
+  sessionId: string,
+  requestId?: string,
+): Promise<void> {
+  const intent = sseSubscriptionIntents.get(sessionId);
+  if (!requestId || intent?.requestId === requestId) {
+    sseSubscriptionIntents.delete(sessionId);
+  }
+
   const existing = sseConnections.get(sessionId);
   if (!existing) {
     return;
@@ -91,22 +107,33 @@ async function closeSessionStatusSubscription(sessionId: string, requestId?: str
     return;
   }
 
+  // Relinquish ownership before awaiting so a replacement cannot be deleted
+  // by this older close operation after it finishes.
+  sseConnections.delete(sessionId);
   chrome.runtime.onMessage.removeListener(existing.listener);
   await unsubscribeAgentStream(existing.subscriptionId).catch(() => {});
-  sseConnections.delete(sessionId);
 }
 
 /**
  * Start SSE subscription for a session to receive status updates
  */
-async function subscribeToSessionStatus(
+export async function subscribeToSessionStatus(
   sessionId: string,
   requestId: string,
 ): Promise<void> {
+  const intent: SessionStatusSubscriptionIntent = { requestId, token: Symbol(requestId) };
+  sseSubscriptionIntents.set(sessionId, intent);
+
   // Close existing subscription for this session if any
   const existing = sseConnections.get(sessionId);
   if (existing) {
-    await closeSessionStatusSubscription(sessionId);
+    sseConnections.delete(sessionId);
+    chrome.runtime.onMessage.removeListener(existing.listener);
+    await unsubscribeAgentStream(existing.subscriptionId).catch(() => {});
+  }
+
+  if (sseSubscriptionIntents.get(sessionId)?.token !== intent.token) {
+    return;
   }
 
   // Set initial status
@@ -116,6 +143,11 @@ async function subscribeToSessionStatus(
     const subscription = await subscribeAgentStream(sessionId, {
       subscriptionId: `web-editor-${sessionId}-${requestId}`,
     });
+
+    if (sseSubscriptionIntents.get(sessionId)?.token !== intent.token) {
+      await unsubscribeAgentStream(subscription.subscriptionId).catch(() => {});
+      return;
+    }
 
     const onMessage = (message: unknown): void => {
       const msg = message as {
@@ -131,7 +163,7 @@ async function subscribeToSessionStatus(
       if (msg.payload?.subscriptionId !== subscription.subscriptionId || !msg.payload.event) {
         return;
       }
-      handleSseEvent(requestId, msg.payload.event);
+      handleSseEvent(sessionId, requestId, msg.payload.event);
     };
 
     sseConnections.set(sessionId, {
@@ -142,6 +174,10 @@ async function subscribeToSessionStatus(
     chrome.runtime.onMessage.addListener(onMessage);
     setExecutionStatus(requestId, 'running', 'Agent processing...');
   } catch (err) {
+    if (sseSubscriptionIntents.get(sessionId)?.token !== intent.token) {
+      return;
+    }
+    sseSubscriptionIntents.delete(sessionId);
     const cached = getExecutionStatus(requestId);
     if (cached && !['completed', 'failed', 'cancelled'].includes(cached.status)) {
       setExecutionStatus(requestId, 'running', 'Agent processing (connection lost)...');
@@ -152,7 +188,7 @@ async function subscribeToSessionStatus(
 /**
  * Handle SSE event from Agent stream
  */
-function handleSseEvent(requestId: string, event: unknown): void {
+function handleSseEvent(sessionId: string, requestId: string, event: unknown): void {
   if (!event || typeof event !== 'object') return;
   const e = event as Record<string, unknown>;
   const type = e.type;
@@ -165,8 +201,6 @@ function handleSseEvent(requestId: string, event: unknown): void {
   if (type === 'status' && data) {
     const status = data.status as string;
     const message = data.message as string | undefined;
-    const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
-
     // Map Agent status to our status
     // - 'ready' -> 'running' (ready is a running sub-state)
     // - 'error' -> 'failed' (normalize server 'error' to UI 'failed')
@@ -176,7 +210,6 @@ function handleSseEvent(requestId: string, event: unknown): void {
 
     setExecutionStatus(requestId, mappedStatus, message);
     if (
-      sessionId &&
       (mappedStatus === 'completed' || mappedStatus === 'failed' || mappedStatus === 'cancelled')
     ) {
       void closeSessionStatusSubscription(sessionId, requestId);
@@ -197,6 +230,7 @@ function handleSseEvent(requestId: string, event: unknown): void {
         success: true,
         summary: content?.slice(0, 200),
       });
+      void closeSessionStatusSubscription(sessionId, requestId);
     }
   } else if (type === 'error') {
     const errorMsg = (e.error as string) || 'Unknown error';
@@ -204,6 +238,7 @@ function handleSseEvent(requestId: string, event: unknown): void {
       success: false,
       error: errorMsg,
     });
+    void closeSessionStatusSubscription(sessionId, requestId);
   }
 }
 
@@ -1508,10 +1543,7 @@ export function initWebEditorListeners(): void {
             setExecutionStatus(requestId, 'cancelled', 'Execution cancelled by user');
 
             // Abort SSE connection for this session
-            const sseConnection = sseConnections.get(sessionId);
-            if (sseConnection && sseConnection.lastRequestId === requestId) {
-              void closeSessionStatusSubscription(sessionId, requestId);
-            }
+            void closeSessionStatusSubscription(sessionId, requestId);
 
             sendResponse({ success: true } as WebEditorCancelExecutionResponse);
           } catch (error) {
