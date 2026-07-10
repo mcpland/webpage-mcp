@@ -34,6 +34,7 @@ export default defineConfig({
     // ],
   },
   manifest: {
+    minimum_chrome_version: "135",
     // Chrome accepts the base64 DER SubjectPublicKeyInfo body, never a private key.
     // Development builds may omit it; the release workflow requires and revalidates it.
     key: CHROME_EXTENSION_PUBLIC_KEY,
@@ -45,6 +46,7 @@ export default defineConfig({
       "tabs",
       "activeTab",
       "scripting",
+      "userScripts",
       "contextMenus",
       "downloads",
       "webRequest",

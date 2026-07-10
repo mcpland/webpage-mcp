@@ -18,6 +18,10 @@ const TAB = {
 describe('userscript command routing', () => {
   let runtimeListeners: RuntimeListener[];
   let storage: Record<string, any>;
+  let storageChangeListeners: Array<
+    (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => void
+  >;
+  let registeredScripts: Map<string, chrome.userScripts.RegisteredUserScript>;
   let userscriptTool: typeof import('@/entrypoints/background/tools/browser/userscript').userscriptTool;
 
   const dispatchRuntimeMessage = async (message: any): Promise<any> => {
@@ -70,6 +74,8 @@ describe('userscript command routing', () => {
     vi.resetModules();
     runtimeListeners = [];
     storage = {};
+    storageChangeListeners = [];
+    registeredScripts = new Map();
 
     vi.stubGlobal('chrome', {
       runtime: {
@@ -81,9 +87,14 @@ describe('userscript command routing', () => {
         },
       },
       storage: {
+        onChanged: {
+          addListener: vi.fn((listener) => storageChangeListeners.push(listener)),
+        },
         local: {
           get: vi.fn(async (keys: string[]) =>
-            Object.fromEntries(keys.filter((key) => key in storage).map((key) => [key, storage[key]])),
+            Object.fromEntries(
+              keys.filter((key) => key in storage).map((key) => [key, storage[key]]),
+            ),
           ),
           set: vi.fn(async (values: Record<string, any>) => Object.assign(storage, values)),
         },
@@ -111,6 +122,31 @@ describe('userscript command routing', () => {
           const args = 'args' in details && details.args ? details.args : [];
           const result = await details.func!(...args);
           return [{ frameId: 0, result }];
+        }),
+      },
+      userScripts: {
+        configureWorld: vi.fn(async () => undefined),
+        execute: vi.fn(async (details: chrome.userScripts.UserScriptInjection) => {
+          const source = details.js[0]?.code || '';
+          const result = window.eval(source);
+          return [{ documentId: 'document-1', frameId: 0, result }];
+        }),
+        getScripts: vi.fn(async (filter?: chrome.userScripts.UserScriptFilter) => {
+          const scripts = [...registeredScripts.values()];
+          return filter?.ids
+            ? scripts.filter((script) => filter.ids?.includes(script.id))
+            : scripts;
+        }),
+        register: vi.fn(async (scripts: chrome.userScripts.RegisteredUserScript[]) => {
+          for (const script of scripts) registeredScripts.set(script.id, script);
+        }),
+        update: vi.fn(async (scripts: chrome.userScripts.RegisteredUserScript[]) => {
+          for (const script of scripts) registeredScripts.set(script.id, script);
+        }),
+        unregister: vi.fn(async (filter?: chrome.userScripts.UserScriptFilter) => {
+          for (const id of filter?.ids || [...registeredScripts.keys()]) {
+            registeredScripts.delete(id);
+          }
         }),
       },
     });
@@ -147,6 +183,17 @@ describe('userscript command routing', () => {
       };`,
     );
 
+    expect(registeredScripts.get(firstId)).toEqual(
+      expect.objectContaining({
+        id: firstId,
+        matches: ['<all_urls>'],
+        world: 'USER_SCRIPT',
+      }),
+    );
+    expect(registeredScripts.get(firstId)?.js[0]?.code).not.toMatch(
+      /\beval\s*\(|new\s+Function\s*\(/,
+    );
+
     expect((await sendCommand(firstId, 'a')).body.result).toEqual({ data: 'first:a' });
     expect((globalThis as any).__userscriptRoutingCalls).toEqual({ first: 1, second: 0 });
     expect((await sendCommand(secondId, 'b')).body.result).toEqual({ data: 'second:b' });
@@ -167,9 +214,11 @@ describe('userscript command routing', () => {
     expect((globalThis as any).__userscriptRoutingCalls).toEqual({ first: 11, second: 1 });
 
     await userscriptTool.execute({ action: 'disable', args: { id: firstId } });
+    expect(registeredScripts.has(firstId)).toBe(false);
     expect((await sendCommand(firstId, 'disabled')).result.isError).toBe(true);
 
     await userscriptTool.execute({ action: 'remove', args: { id: secondId } });
+    expect(registeredScripts.has(secondId)).toBe(false);
     expect((await sendCommand(secondId, 'removed')).result.isError).toBe(true);
   });
 
@@ -192,9 +241,41 @@ describe('userscript command routing', () => {
       };`,
     );
 
+    expect(registeredScripts.get(firstId)?.world).toBe('MAIN');
+    expect(registeredScripts.get(firstId)?.js[0]?.code).not.toMatch(
+      /\beval\s*\(|new\s+Function\s*\(/,
+    );
+
     expect((await sendCommand(firstId, 'a')).body.result).toEqual({ data: 'main-first:a' });
     expect((window as any).__userscriptRoutingCalls).toEqual({ first: 1, second: 0 });
     expect((await sendCommand(secondId, 'b')).body.result).toEqual({ data: 'main-second:b' });
     expect((window as any).__userscriptRoutingCalls).toEqual({ first: 1, second: 1 });
+  });
+
+  it('unregisters and cleans scripts while the emergency switch is enabled', async () => {
+    (globalThis as any).__userscriptRoutingCalls = { first: 0 };
+    const id = await createScript(
+      'emergency-script',
+      'ISOLATED',
+      `globalThis.__userscript_onCommand__ = () => {
+        globalThis.__userscriptRoutingCalls.first += 1;
+        return 'enabled';
+      };`,
+    );
+    expect(registeredScripts.has(id)).toBe(true);
+
+    storage.userscripts_disabled = true;
+    for (const listener of storageChangeListeners) {
+      listener({ userscripts_disabled: { oldValue: false, newValue: true } }, 'local');
+    }
+    await vi.waitFor(() => expect(registeredScripts.has(id)).toBe(false));
+    expect((await sendCommand(id, 'disabled')).result.isError).toBe(true);
+
+    storage.userscripts_disabled = false;
+    for (const listener of storageChangeListeners) {
+      listener({ userscripts_disabled: { oldValue: true, newValue: false } }, 'local');
+    }
+    await vi.waitFor(() => expect(registeredScripts.has(id)).toBe(true));
+    expect((await sendCommand(id, 'enabled')).body.result).toEqual({ data: 'enabled' });
   });
 });

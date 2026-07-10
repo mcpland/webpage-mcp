@@ -1,4 +1,3 @@
-
 (() => {
   // Prevent duplicate injection of the bridge itself.
   if (window.__INJECT_SCRIPT_TOOL_UNIVERSAL_BRIDGE_LOADED__) return;
@@ -40,12 +39,12 @@
       return true;
     }
 
-    // --- Execution Command for MAIN world ---
-    if (request.targetWorld === 'MAIN') {
+    // --- Execution Command for MAIN or USER_SCRIPT world ---
+    if (request.targetWorld === 'MAIN' || request.targetWorld === 'USER_SCRIPT') {
       const requestId = `req-${Date.now()}-${Math.random()}`;
       const timeoutId = window.setTimeout(() => {
         settlePendingRequest(requestId, {
-          error: `MAIN world userscript request timed out after ${REQUEST_TIMEOUT_MS}ms.`,
+          error: `${request.targetWorld} world userscript request timed out after ${REQUEST_TIMEOUT_MS}ms.`,
         });
       }, REQUEST_TIMEOUT_MS);
       pendingRequests.set(requestId, { sendResponse, timeoutId });
@@ -68,8 +67,7 @@
       }
       return true; // Async response is expected.
     }
-    // Note: Requests for ISOLATED world are handled by the user's isolatedWorldCode script directly.
-    // This listener won't process them unless it's the only script in ISOLATED world.
+    // Unknown target worlds are ignored.
   };
 
   chrome.runtime.onMessage.addListener(messageHandler);

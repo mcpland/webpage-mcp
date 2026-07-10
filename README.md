@@ -60,7 +60,7 @@ Webpage MCP has no hosted Webpage MCP relay: the extension-to-native-host bridge
 | Navigation, requests, workflows, uploads, and downloads | URLs, request bodies, files, cookies available to the browser context, and workflow inputs                                   | Sent to the requested website or endpoint when the corresponding tool/workflow runs. These operations can have real external side effects.                                                                                                                             |
 | Local persistence and diagnostics                       | Agent projects, sessions, messages, image attachments, extension IndexedDB/Cache Storage, and bounded native-host logs       | Stored locally in the Chrome profile and, by default, under `~/.webpage-mcp-agent` plus the platform log directory. A generated diagnostic report can include redacted log excerpts; review it before sharing and use `--include-logs none` when logs are unnecessary. |
 
-The extension requests broad capabilities including `<all_urls>`, `history`, `bookmarks`, `debugger`, `webRequest`, `downloads`, and `scripting` because its advertised tools operate across the user's live browser profile. Treat an enabled MCP client or Agent session as a privileged browser operator: use trusted clients/providers, keep Agent sandbox/permission settings constrained, avoid sensitive pages when the task does not require them, and inspect high-impact workflow actions before running them.
+The extension requests broad capabilities including `<all_urls>`, `history`, `bookmarks`, `debugger`, `webRequest`, `downloads`, `scripting`, and `userScripts` because its advertised tools operate across the user's live browser profile. The `userScripts` permission is used only for scripts entered locally in the extension UI, and Chrome may require the separate **Allow User Scripts** extension toggle described below. Treat an enabled MCP client or Agent session as a privileged browser operator: use trusted clients/providers, keep Agent sandbox/permission settings constrained, avoid sensitive pages when the task does not require them, and inspect high-impact workflow actions before running them.
 
 ### Privacy verification
 
@@ -146,6 +146,8 @@ A strong local setup is to use Chrome DevTools MCP as the debugging engine and W
 **3.** Start your MCP client (with Chrome open and extension enabled).
 
 `webpage-mcp-stdio` now performs silent bootstrap on startup: it checks Native Messaging manifest/runtime and auto-registers user-level host when needed.
+
+The user-script manager requires Chrome 135 or newer. On Chrome 138 or newer, open the extension's Details page in `chrome://extensions` and enable **Allow User Scripts** before using that feature.
 
 **4.** If extension still cannot connect, use fallback recovery:
 
