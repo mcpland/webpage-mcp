@@ -152,7 +152,7 @@ function formatBridgeConnectError(
   return new Error(lines.join('\n'));
 }
 
-class NativeIpcBridgeClient {
+export class NativeIpcBridgeClient {
   private socket: net.Socket | null = null;
   private authenticated = false;
   private readonly decoder = new BoundedNdjsonDecoder(IPC_MAX_RESPONSE_LINE_BYTES);
@@ -358,10 +358,25 @@ class NativeIpcBridgeClient {
     }
 
     let requestWritten = false;
+    const cancelRemoteIfWritten = (): void => {
+      if (!sendCancellation || !requestWritten || this.socket !== socket || socket.destroyed) {
+        return;
+      }
+      void this.sendRequest(
+        socket,
+        IPC_CANCEL_REQUEST_METHOD,
+        { requestId: id },
+        5_000,
+      ).catch(() => {
+        // The original request is already finished locally.
+      });
+    };
     const response = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         const pending = this.takePending(id);
-        pending?.reject(new Error(`IPC request timed out after ${timeoutMs}ms`));
+        if (!pending) return;
+        pending.reject(new Error(`IPC request timed out after ${timeoutMs}ms`));
+        cancelRemoteIfWritten();
       }, timeoutMs);
 
       const pending: PendingIpcRequest = {
@@ -375,16 +390,7 @@ class NativeIpcBridgeClient {
           const aborted = this.takePending(id);
           if (!aborted) return;
           aborted.reject(createAbortError());
-          if (sendCancellation && requestWritten && this.socket === socket && !socket.destroyed) {
-            void this.sendRequest(
-              socket,
-              IPC_CANCEL_REQUEST_METHOD,
-              { requestId: id },
-              5_000,
-            ).catch(() => {
-              // The original request is already cancelled locally.
-            });
-          }
+          cancelRemoteIfWritten();
         };
       }
       this.pending.set(id, pending);
@@ -641,7 +647,9 @@ async function main(): Promise<void> {
   await getStdioMcpServer().connect(transport);
 }
 
-main().catch((error) => {
-  console.error('Fatal error in webpage-mcp-stdio:', error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('Fatal error in webpage-mcp-stdio:', error);
+    process.exit(1);
+  });
+}
