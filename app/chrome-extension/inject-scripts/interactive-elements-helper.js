@@ -1,31 +1,33 @@
 // interactive-elements-helper.js
-// This script is injected into the page to find interactive elements.
-// Final version by Calvin, featuring a multi-layered fallback strategy
-// and comprehensive element support, built on a performant and reliable core.
+// Bounded page-side discovery for interactive controls and text targets.
 
 (function () {
-  // Prevent re-initialization
-  if (window.__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__) {
-    return;
-  }
+  if (window.__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__) return;
   window.__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__ = true;
 
-  /**
-   * @typedef {Object} ElementInfo
-   * @property {string} type - The type of the element (e.g., 'button', 'link').
-   * @property {string} selector - A CSS selector to uniquely identify the element.
-   * @property {string} text - The visible text or accessible name of the element.
-   * @property {boolean} isInteractive - Whether the element is currently interactive.
-   * @property {Object} [coordinates] - The coordinates of the element if requested.
-   * @property {boolean} [disabled] - For elements that can be disabled.
-   * @property {string} [href] - For links.
-   * @property {boolean} [checked] - for checkboxes and radio buttons.
-   */
+  const LIMITS = {
+    maxNodes: 12000,
+    maxDepth: 128,
+    maxDurationMs: 250,
+    maxStyleChecks: 2000,
+    maxLayoutChecks: 2000,
+    maxSelectorChecks: 16000,
+    maxSelectorSteps: 8000,
+    maxTextReads: 4096,
+    maxTextNodesPerName: 64,
+    maxAncestorSteps: 64,
+    maxSiblingSteps: 128,
+    maxResults: 200,
+    maxResultJsonBytes: 512 * 1024,
+    resultJsonReserveBytes: 4096,
+    selectorBytes: 4 * 1024,
+    textQueryBytes: 1024,
+    elementTextBytes: 1024,
+    scannedTextNodeBytes: 4 * 1024,
+    typeBytes: 64,
+    errorBytes: 4 * 1024,
+  };
 
-  /**
-   * Configuration for element types and their corresponding selectors.
-   * Now more comprehensive with common ARIA roles.
-   */
   const ELEMENT_CONFIG = {
     button: 'button, input[type="button"], input[type="submit"], [role="button"]',
     link: 'a[href], [role="link"]',
@@ -36,168 +38,332 @@
     textarea: 'textarea, [role="textbox"], [role="searchbox"]',
     select: 'select, [role="combobox"]',
     tab: '[role="tab"]',
-    // Generic interactive elements: combines tabindex, common roles, and explicit handlers.
-    // This is the key to finding custom-built interactive components.
-    interactive: `[onclick], [tabindex]:not([tabindex^="-"]), [role="menuitem"], [role="slider"], [role="option"], [role="treeitem"], [role="switch"]`,
+    interactive:
+      '[onclick], [tabindex]:not([tabindex^="-"]), [role="menuitem"], [role="slider"], [role="option"], [role="treeitem"], [role="switch"]',
   };
+  const TYPE_NAMES = Object.keys(ELEMENT_CONFIG);
+  const TYPE_SET = new Set(TYPE_NAMES);
 
-  // A combined selector for ANY interactive element, used in the fallback logic.
-  const ANY_INTERACTIVE_SELECTOR = Object.values(ELEMENT_CONFIG).join(', ');
+  function now() {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+  }
 
-  // Query helpers that pierce open shadow roots. These are used only in fallback paths or
-  // when a selector is explicitly provided, to keep costs bounded.
-  function* walkAllNodesDeep(root) {
-    const stack = [root];
-    const MAX = 12000; // safety bound
-    let count = 0;
-    while (stack.length) {
-      const node = stack.pop();
-      if (!node) continue;
-      if (++count > MAX) break;
-      yield node;
-      const anyNode = /** @type {any} */ (node);
-      try {
-        const children = node.children ? Array.from(node.children) : [];
-        for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
-        const sr = anyNode && anyNode.shadowRoot ? anyNode.shadowRoot : null;
-        if (sr && sr.children) {
-          const srChildren = Array.from(sr.children);
-          for (let i = srChildren.length - 1; i >= 0; i--) stack.push(srChildren[i]);
+  function utf8BytesForCodePoint(codePoint) {
+    if (codePoint <= 0x7f) return 1;
+    if (codePoint <= 0x7ff) return 2;
+    if (codePoint <= 0xffff) return 3;
+    return 4;
+  }
+
+  function utf8ByteLength(value, stopAfter = Number.POSITIVE_INFINITY) {
+    let bytes = 0;
+    for (const character of typeof value === 'string' ? value : '') {
+      bytes += utf8BytesForCodePoint(character.codePointAt(0) || 0);
+      if (bytes > stopAfter) return bytes;
+    }
+    return bytes;
+  }
+
+  function truncateUtf8(value, maximumBytes) {
+    if (typeof value !== 'string') return '';
+    let bytes = 0;
+    let end = 0;
+    for (const character of value) {
+      const nextBytes = utf8BytesForCodePoint(character.codePointAt(0) || 0);
+      if (bytes + nextBytes > maximumBytes) break;
+      bytes += nextBytes;
+      end += character.length;
+    }
+    return value.slice(0, end);
+  }
+
+  function createBudget() {
+    return {
+      startedAt: now(),
+      deadline: now() + LIMITS.maxDurationMs,
+      nodes: 0,
+      styleChecks: 0,
+      layoutChecks: 0,
+      selectorChecks: 0,
+      selectorSteps: 0,
+      textReads: 0,
+      resultBytes: 2,
+      truncated: false,
+      reasons: new Set(),
+    };
+  }
+
+  function markTruncated(budget, reason) {
+    budget.truncated = true;
+    if (budget.reasons.size < 8) budget.reasons.add(reason);
+  }
+
+  function withinDeadline(budget) {
+    if (now() <= budget.deadline) return true;
+    markTruncated(budget, 'time');
+    return false;
+  }
+
+  function consume(budget, key, maximum, reason, amount = 1) {
+    if (budget[key] + amount > maximum) {
+      markTruncated(budget, reason);
+      return false;
+    }
+    budget[key] += amount;
+    return true;
+  }
+
+  function createFrame(node, depth) {
+    return {
+      node,
+      depth,
+      entered: false,
+      shadowChild: null,
+      lightChild: null,
+    };
+  }
+
+  // Depth-first traversal stores only the current ancestry. It never expands a
+  // wide child collection into an attacker-sized Array or stack.
+  function* walkAllNodesDeep(root, budget) {
+    const first =
+      root instanceof Node && root.nodeType === Node.ELEMENT_NODE
+        ? root
+        : root && root.documentElement
+          ? root.documentElement
+          : root && root.firstElementChild
+            ? root.firstElementChild
+            : null;
+    if (!first) return;
+
+    const stack = [createFrame(first, 0)];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      if (!frame.entered) {
+        frame.entered = true;
+        if (!consume(budget, 'nodes', LIMITS.maxNodes, 'nodes')) return;
+        if ((budget.nodes & 63) === 0 && !withinDeadline(budget)) return;
+
+        try {
+          frame.lightChild = frame.node.firstChild || null;
+        } catch (_) {
+          frame.lightChild = null;
         }
-      } catch (_) {
-        /* ignore */
+        try {
+          const shadowRoot =
+            frame.node instanceof Element && frame.node.shadowRoot
+              ? frame.node.shadowRoot
+              : null;
+          frame.shadowChild = shadowRoot ? shadowRoot.firstChild : null;
+        } catch (_) {
+          frame.shadowChild = null;
+        }
+        yield frame.node;
+        continue;
       }
+
+      let child = null;
+      if (frame.shadowChild) {
+        child = frame.shadowChild;
+        frame.shadowChild = child.nextSibling;
+      } else if (frame.lightChild) {
+        child = frame.lightChild;
+        frame.lightChild = child.nextSibling;
+      } else {
+        stack.pop();
+        continue;
+      }
+
+      if (frame.depth >= LIMITS.maxDepth) {
+        markTruncated(budget, 'depth');
+        continue;
+      }
+      stack.push(createFrame(child, frame.depth + 1));
     }
   }
 
-  function querySelectorAllDeep(selector, root = document) {
-    const results = [];
-    for (const node of walkAllNodesDeep(root)) {
-      if (!(node instanceof Element)) continue;
+  function normalizeOptions(value) {
+    const input = value && typeof value === 'object' ? value : {};
+    const normalizeString = (name, raw, maximumBytes) => {
+      if (raw === undefined || raw === null || raw === '') return undefined;
+      if (typeof raw !== 'string') throw new Error(name + ' must be a string');
+      const normalized = raw.trim();
+      if (!normalized) return undefined;
+      if (
+        normalized.length > maximumBytes ||
+        utf8ByteLength(normalized, maximumBytes) > maximumBytes
+      ) {
+        throw new Error(name + ' exceeds the ' + maximumBytes + '-byte UTF-8 limit');
+      }
+      return normalized;
+    };
+
+    const selector = normalizeString('selector', input.selector, LIMITS.selectorBytes);
+    if (selector && /:has\s*\(/iu.test(selector)) {
+      throw new Error('selector must not use the resource-intensive :has() pseudo-class');
+    }
+    if (selector) {
       try {
-        if (node.matches && node.matches(selector)) results.push(node);
-      } catch (_) {
-        /* ignore invalid selectors for given node */
+        document.documentElement.matches(selector);
+      } catch (error) {
+        throw new Error(
+          'Invalid CSS selector: ' +
+            truncateUtf8(error && error.message ? error.message : String(error), 512),
+        );
       }
     }
-    return results;
+
+    const textQuery = normalizeString(
+      'textQuery',
+      input.textQuery,
+      LIMITS.textQueryBytes,
+    );
+    let types = TYPE_NAMES;
+    if (input.types !== undefined) {
+      if (!Array.isArray(input.types)) throw new Error('types must be an array');
+      if (input.types.length > TYPE_NAMES.length) {
+        throw new Error('types contains too many entries');
+      }
+      const unique = new Set();
+      for (const item of input.types) {
+        if (typeof item !== 'string' || !TYPE_SET.has(item)) {
+          throw new Error(
+            'Unsupported interactive element type: ' +
+              (typeof item === 'string'
+                ? truncateUtf8(item, LIMITS.typeBytes)
+                : typeof item),
+          );
+        }
+        unique.add(item);
+      }
+      types = Array.from(unique);
+    }
+
+    return {
+      selector,
+      textQuery,
+      includeCoordinates: input.includeCoordinates !== false,
+      types,
+    };
   }
 
-  // --- Core Helper Functions ---
+  function matchesSelector(element, selector, budget) {
+    if (!consume(budget, 'selectorChecks', LIMITS.maxSelectorChecks, 'selector_checks')) {
+      return false;
+    }
+    try {
+      return element.matches(selector);
+    } catch (_) {
+      return false;
+    }
+  }
 
-  /**
-   * Checks if an element is genuinely visible on the page.
-   * "Visible" means it's not styled with display:none, visibility:hidden, etc.
-   * This check intentionally IGNORES whether the element is within the current viewport.
-   * @param {Element} el The element to check.
-   * @returns {boolean} True if the element is visible.
-   */
-  function isElementVisible(el) {
-    if (!el || !el.isConnected) return false;
+  function isElementInteractive(element, budget) {
+    if (
+      element.hasAttribute('disabled') ||
+      element.getAttribute('aria-disabled') === 'true'
+    ) {
+      return false;
+    }
+    let current = element;
+    let steps = 0;
+    while (current && steps < LIMITS.maxAncestorSteps) {
+      if (current.getAttribute && current.getAttribute('aria-hidden') === 'true') {
+        return false;
+      }
+      current = current.parentElement;
+      steps += 1;
+    }
+    if (current) markTruncated(budget, 'ancestor_depth');
+    return true;
+  }
 
-    const style = window.getComputedStyle(el);
+  function getVisibleRect(element, budget) {
+    if (!element || !element.isConnected) return null;
+    if (!consume(budget, 'styleChecks', LIMITS.maxStyleChecks, 'style_checks')) {
+      return null;
+    }
+    const style = window.getComputedStyle(element);
     if (
       style.display === 'none' ||
       style.visibility === 'hidden' ||
       parseFloat(style.opacity) === 0
     ) {
-      return false;
+      return null;
     }
-
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 || rect.height > 0 || el.tagName === 'A'; // Allow zero-size anchors as they can still be navigated
+    if (!consume(budget, 'layoutChecks', LIMITS.maxLayoutChecks, 'layout_checks')) {
+      return null;
+    }
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 && rect.height <= 0 && element.tagName !== 'A') return null;
+    return rect;
   }
 
-  /**
-   * Checks if an element is considered interactive (not disabled or hidden from accessibility).
-   * @param {Element} el The element to check.
-   * @returns {boolean} True if the element is interactive.
-   */
-  function isElementInteractive(el) {
-    if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true') {
-      return false;
+  function collectBoundedText(root, budget) {
+    if (!root) return '';
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let output = '';
+    let textNodes = 0;
+    let current = walker.nextNode();
+    while (current && textNodes < LIMITS.maxTextNodesPerName) {
+      if (!consume(budget, 'textReads', LIMITS.maxTextReads, 'text_reads')) break;
+      const remaining = LIMITS.elementTextBytes - utf8ByteLength(output);
+      if (remaining <= 0) break;
+      const piece = truncateUtf8(current.nodeValue || '', remaining);
+      output += piece;
+      if (piece.length < String(current.nodeValue || '').length) break;
+      textNodes += 1;
+      current = walker.nextNode();
     }
-    if (el.closest('[aria-hidden="true"]')) {
-      return false;
-    }
-    return true;
+    if (current) markTruncated(budget, 'element_text');
+    return output.replace(/\s+/g, ' ').trim();
   }
 
-  /**
-   * Generates a reasonably stable CSS selector for a given element.
-   * @param {Element} el The element.
-   * @returns {string} A CSS selector.
-   */
-  function generateSelector(el) {
-    if (!(el instanceof Element)) return '';
-
-    if (el.id) {
-      const idSelector = `#${CSS.escape(el.id)}`;
-      if (document.querySelectorAll(idSelector).length === 1) return idSelector;
+  function findParentLabel(element, budget) {
+    let current = element.parentElement;
+    let steps = 0;
+    while (current && steps < LIMITS.maxAncestorSteps) {
+      if (current.tagName === 'LABEL') return current;
+      current = current.parentElement;
+      steps += 1;
     }
+    if (current) markTruncated(budget, 'ancestor_depth');
+    return null;
+  }
 
-    for (const attr of ['data-testid', 'data-cy', 'name']) {
-      const attrValue = el.getAttribute(attr);
-      if (attrValue) {
-        const attrSelector = `[${attr}="${CSS.escape(attrValue)}"]`;
-        if (document.querySelectorAll(attrSelector).length === 1) return attrSelector;
+  function getAccessibleName(element, budget) {
+    const labelledBy = truncateUtf8(
+      element.getAttribute('aria-labelledby') || '',
+      LIMITS.elementTextBytes,
+    )
+      .split(/\s+/)
+      .filter(Boolean)[0];
+    if (labelledBy) {
+      const labelElement = document.getElementById(labelledBy);
+      if (labelElement) {
+        const labelText = collectBoundedText(labelElement, budget);
+        if (labelText) return labelText;
       }
     }
 
-    let path = '';
-    let current = el;
-    while (current && current.nodeType === Node.ELEMENT_NODE && current.tagName !== 'BODY') {
-      let selector = current.tagName.toLowerCase();
-      const parent = current.parentElement;
-      if (parent) {
-        const siblings = Array.from(parent.children).filter(
-          (child) => child.tagName === current.tagName,
-        );
-        if (siblings.length > 1) {
-          const index = siblings.indexOf(current) + 1;
-          selector += `:nth-of-type(${index})`;
-        }
-      }
-      path = path ? `${selector} > ${path}` : selector;
-      current = parent;
+    for (const attribute of ['aria-label', 'placeholder', 'value', 'title']) {
+      const value = truncateUtf8(
+        element.getAttribute(attribute) || '',
+        LIMITS.elementTextBytes,
+      ).trim();
+      if (value) return value;
     }
-    return path ? `body > ${path}` : 'body';
+
+    const parentLabel = findParentLabel(element, budget);
+    if (parentLabel) {
+      const labelText = collectBoundedText(parentLabel, budget);
+      if (labelText) return labelText;
+    }
+    return collectBoundedText(element, budget);
   }
 
-  /**
-   * Finds the accessible name for an element (label, aria-label, etc.).
-   * @param {Element} el The element.
-   * @returns {string} The accessible name.
-   */
-  function getAccessibleName(el) {
-    const labelledby = el.getAttribute('aria-labelledby');
-    if (labelledby) {
-      const labelElement = document.getElementById(labelledby);
-      if (labelElement) return labelElement.textContent?.trim() || '';
-    }
-    const ariaLabel = el.getAttribute('aria-label');
-    if (ariaLabel) return ariaLabel.trim();
-    if (el.id) {
-      const label = document.querySelector(`label[for="${el.id}"]`);
-      if (label) return label.textContent?.trim() || '';
-    }
-    const parentLabel = el.closest('label');
-    if (parentLabel) return parentLabel.textContent?.trim() || '';
-    return (
-      el.getAttribute('placeholder') ||
-      el.getAttribute('value') ||
-      el.textContent?.trim() ||
-      el.getAttribute('title') ||
-      ''
-    );
-  }
-
-  /**
-   * Simple subsequence matching for fuzzy search.
-   * @param {string} text The text to search within.
-   * @param {string} query The query subsequence.
-   * @returns {boolean}
-   */
   function fuzzyMatch(text, query) {
     if (!text || !query) return false;
     const lowerText = text.toLowerCase();
@@ -205,188 +371,319 @@
     let textIndex = 0;
     let queryIndex = 0;
     while (textIndex < lowerText.length && queryIndex < lowerQuery.length) {
-      if (lowerText[textIndex] === lowerQuery[queryIndex]) {
-        queryIndex++;
-      }
-      textIndex++;
+      if (lowerText[textIndex] === lowerQuery[queryIndex]) queryIndex += 1;
+      textIndex += 1;
     }
     return queryIndex === lowerQuery.length;
   }
 
-  /**
-   * Creates the standardized info object for an element.
-   * Modified to handle the new 'text' type from the final fallback.
-   */
-  function createElementInfo(el, type, includeCoordinates, isInteractiveOverride = null) {
-    const isActuallyInteractive = isElementInteractive(el);
+  function cssEscapeIdentifier(value) {
+    const input = truncateUtf8(value, LIMITS.selectorBytes);
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+      return CSS.escape(input);
+    }
+    return input.replace(/[^a-zA-Z0-9_-]/g, (character) => {
+      return '\\' + character.codePointAt(0).toString(16) + ' ';
+    });
+  }
+
+  function cssEscapeString(value) {
+    return truncateUtf8(value, LIMITS.selectorBytes)
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/[\n\r\f]/g, ' ');
+  }
+
+  function generateSelector(element, budget) {
+    if (!(element instanceof Element)) return '';
+    if (element.id) {
+      return truncateUtf8('#' + cssEscapeIdentifier(element.id), LIMITS.selectorBytes);
+    }
+    for (const attribute of ['data-testid', 'data-cy', 'name']) {
+      const value = element.getAttribute(attribute);
+      if (value) {
+        return truncateUtf8(
+          '[' + attribute + '="' + cssEscapeString(value) + '"]',
+          LIMITS.selectorBytes,
+        );
+      }
+    }
+
+    const parts = [];
+    let current = element;
+    let depth = 0;
+    while (
+      current &&
+      current.nodeType === Node.ELEMENT_NODE &&
+      current.tagName !== 'BODY' &&
+      depth < 32
+    ) {
+      if (!consume(budget, 'selectorSteps', LIMITS.maxSelectorSteps, 'selector_steps')) {
+        break;
+      }
+      const tagName = current.tagName.toLowerCase();
+      let sameTypeBefore = 0;
+      let sibling = current.previousElementSibling;
+      let siblingSteps = 0;
+      while (sibling && siblingSteps < LIMITS.maxSiblingSteps) {
+        if (!consume(budget, 'selectorSteps', LIMITS.maxSelectorSteps, 'selector_steps')) {
+          sibling = null;
+          break;
+        }
+        if (sibling.tagName === current.tagName) sameTypeBefore += 1;
+        sibling = sibling.previousElementSibling;
+        siblingSteps += 1;
+      }
+      if (sibling) markTruncated(budget, 'selector_siblings');
+      parts.push(
+        sameTypeBefore > 0 ? tagName + ':nth-of-type(' + (sameTypeBefore + 1) + ')' : tagName,
+      );
+      current = current.parentElement;
+      depth += 1;
+    }
+    if (current && current.tagName !== 'BODY') markTruncated(budget, 'selector_depth');
+    const path = parts.reverse().join(' > ');
+    return truncateUtf8(path ? 'body > ' + path : 'body', LIMITS.selectorBytes);
+  }
+
+  function determineType(element, types, budget) {
+    for (const type of types) {
+      if (matchesSelector(element, ELEMENT_CONFIG[type], budget)) return type;
+    }
+    return null;
+  }
+
+  function finite(value) {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function createElementInfo(
+    element,
+    type,
+    includeCoordinates,
+    budget,
+    knownRect,
+    knownText,
+  ) {
     const info = {
-      type,
-      selector: generateSelector(el),
-      text: getAccessibleName(el) || el.textContent?.trim(),
-      isInteractive: isInteractiveOverride !== null ? isInteractiveOverride : isActuallyInteractive,
-      disabled: el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true',
+      type: truncateUtf8(type || 'unknown', LIMITS.typeBytes),
+      selector: generateSelector(element, budget),
+      text:
+        typeof knownText === 'string'
+          ? truncateUtf8(knownText, LIMITS.elementTextBytes)
+          : getAccessibleName(element, budget),
+      isInteractive: isElementInteractive(element, budget),
+      disabled:
+        element.hasAttribute('disabled') ||
+        element.getAttribute('aria-disabled') === 'true',
     };
+    const href = truncateUtf8(element.getAttribute('href') || '', LIMITS.selectorBytes);
+    if (href) info.href = href;
+    if ('checked' in element && typeof element.checked === 'boolean') {
+      info.checked = element.checked;
+    }
     if (includeCoordinates) {
-      const rect = el.getBoundingClientRect();
-      info.coordinates = {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-        rect: {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-          top: rect.top,
-          right: rect.right,
-          bottom: rect.bottom,
-          left: rect.left,
-        },
-      };
+      const rect =
+        knownRect ||
+        (consume(budget, 'layoutChecks', LIMITS.maxLayoutChecks, 'layout_checks')
+          ? element.getBoundingClientRect()
+          : null);
+      if (rect) {
+        info.coordinates = {
+          x: finite(rect.left + rect.width / 2),
+          y: finite(rect.top + rect.height / 2),
+          rect: {
+            x: finite(rect.x),
+            y: finite(rect.y),
+            width: finite(rect.width),
+            height: finite(rect.height),
+            top: finite(rect.top),
+            right: finite(rect.right),
+            bottom: finite(rect.bottom),
+            left: finite(rect.left),
+          },
+        };
+      }
     }
     return info;
   }
 
-  /**
-   * [CORE UTILITY] Finds interactive elements based on a set of types.
-   * This is our high-performance Layer 1 search function.
-   */
-  function findInteractiveElements(options = {}) {
-    const { textQuery, includeCoordinates = true, types = Object.keys(ELEMENT_CONFIG) } = options;
+  function pushBoundedResult(results, info, budget) {
+    if (results.length >= LIMITS.maxResults) {
+      markTruncated(budget, 'results');
+      return false;
+    }
+    const bytes = utf8ByteLength(JSON.stringify(info));
+    const maximum = LIMITS.maxResultJsonBytes - LIMITS.resultJsonReserveBytes;
+    if (budget.resultBytes + bytes + (results.length > 0 ? 1 : 0) > maximum) {
+      markTruncated(budget, 'result_bytes');
+      return false;
+    }
+    results.push(info);
+    budget.resultBytes += bytes + (results.length > 1 ? 1 : 0);
+    return true;
+  }
 
-    const selectorsToFind = types
+  function findInteractiveAncestor(element, selector, budget) {
+    let current = element;
+    let steps = 0;
+    while (current && steps < LIMITS.maxAncestorSteps) {
+      if (
+        matchesSelector(current, selector, budget) &&
+        isElementInteractive(current, budget)
+      ) {
+        return current;
+      }
+      current = current.parentElement;
+      steps += 1;
+    }
+    if (current) markTruncated(budget, 'ancestor_depth');
+    return null;
+  }
+
+  function findElements(options) {
+    const budget = createBudget();
+    const results = [];
+    const textAncestors = new Set();
+    const textParents = new Set();
+    const selectorForTypes = options.types
       .map((type) => ELEMENT_CONFIG[type])
       .filter(Boolean)
       .join(', ');
-    if (!selectorsToFind) return [];
+    const normalizedQuery = (options.textQuery || '').toLowerCase();
 
-    const targetElements = querySelectorAllDeep(selectorsToFind);
-    const uniqueElements = new Set(targetElements);
-    const results = [];
-
-    for (const el of uniqueElements) {
-      if (!isElementVisible(el) || !isElementInteractive(el)) continue;
-
-      const accessibleName = getAccessibleName(el);
-      if (textQuery && !fuzzyMatch(accessibleName, textQuery)) continue;
-
-      let elementType = 'unknown';
-      for (const [type, typeSelector] of Object.entries(ELEMENT_CONFIG)) {
-        if (el.matches(typeSelector)) {
-          elementType = type;
-          break;
-        }
-      }
-      results.push(createElementInfo(el, elementType, includeCoordinates));
-    }
-    return results;
-  }
-
-  /**
-   * [ORCHESTRATOR] The main entry point that implements the 3-layer fallback logic.
-   * @param {object} options - The main search options.
-   * @returns {ElementInfo[]}
-   */
-  function findElementsByTextWithFallback(options = {}) {
-    const { textQuery, includeCoordinates = true } = options;
-
-    if (!textQuery) {
-      return findInteractiveElements({ ...options, types: Object.keys(ELEMENT_CONFIG) });
+    if (!options.selector && !selectorForTypes) {
+      return { elements: [], budget };
     }
 
-    // --- Layer 1: High-reliability search for interactive elements matching text ---
-    let results = findInteractiveElements({ ...options, types: Object.keys(ELEMENT_CONFIG) });
-    if (results.length > 0) {
-      return results;
-    }
-
-    // --- Layer 2: Find text, then find its interactive ancestor ---
-    const lowerCaseText = textQuery.toLowerCase();
-    const xPath = `//text()[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${lowerCaseText}')]`;
-    const textNodes = document.evaluate(
-      xPath,
-      document,
-      null,
-      XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
-      null,
-    );
-
-    const interactiveElements = new Set();
-    if (textNodes.snapshotLength > 0) {
-      for (let i = 0; i < textNodes.snapshotLength; i++) {
-        const parentElement = textNodes.snapshotItem(i).parentElement;
-        if (parentElement) {
-          const interactiveAncestor = parentElement.closest(ANY_INTERACTIVE_SELECTOR);
-          if (
-            interactiveAncestor &&
-            isElementVisible(interactiveAncestor) &&
-            isElementInteractive(interactiveAncestor)
-          ) {
-            interactiveElements.add(interactiveAncestor);
+    for (const node of walkAllNodesDeep(document, budget)) {
+      if (node instanceof Element) {
+        if (options.selector) {
+          if (matchesSelector(node, options.selector, budget)) {
+            const info = createElementInfo(
+              node,
+              'selected',
+              options.includeCoordinates,
+              budget,
+              null,
+            );
+            if (!pushBoundedResult(results, info, budget)) break;
           }
-        }
-      }
-
-      if (interactiveElements.size > 0) {
-        return Array.from(interactiveElements).map((el) => {
-          let elementType = 'interactive';
-          for (const [type, typeSelector] of Object.entries(ELEMENT_CONFIG)) {
-            if (el.matches(typeSelector)) {
-              elementType = type;
-              break;
+        } else if (selectorForTypes && matchesSelector(node, selectorForTypes, budget)) {
+          const rect = getVisibleRect(node, budget);
+          if (rect && isElementInteractive(node, budget)) {
+            const name = getAccessibleName(node, budget);
+            if (!normalizedQuery || fuzzyMatch(name, normalizedQuery)) {
+              const type = determineType(node, options.types, budget) || 'interactive';
+              const info = createElementInfo(
+                node,
+                type,
+                options.includeCoordinates,
+                budget,
+                rect,
+                name,
+              );
+              if (!pushBoundedResult(results, info, budget)) break;
             }
           }
-          return createElementInfo(el, elementType, includeCoordinates);
-        });
+        }
+      } else if (
+        normalizedQuery &&
+        node.nodeType === Node.TEXT_NODE &&
+        textParents.size < LIMITS.maxResults
+      ) {
+        if (!consume(budget, 'textReads', LIMITS.maxTextReads, 'text_reads')) break;
+        const text = truncateUtf8(
+          node.nodeValue || '',
+          LIMITS.scannedTextNodeBytes,
+        )
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+        if (text && text.includes(normalizedQuery)) {
+          const parent = node.parentElement;
+          if (parent) {
+            const interactive = findInteractiveAncestor(parent, selectorForTypes, budget);
+            if (interactive) textAncestors.add(interactive);
+            textParents.add(parent);
+          }
+        }
+      } else if (
+        normalizedQuery &&
+        node.nodeType === Node.TEXT_NODE &&
+        textParents.size >= LIMITS.maxResults
+      ) {
+        markTruncated(budget, 'text_candidates');
+      }
+
+      if (
+        results.length >= LIMITS.maxResults ||
+        budget.styleChecks >= LIMITS.maxStyleChecks ||
+        budget.layoutChecks >= LIMITS.maxLayoutChecks ||
+        budget.selectorChecks >= LIMITS.maxSelectorChecks
+      ) {
+        markTruncated(budget, 'work');
+        break;
       }
     }
 
-    // --- Layer 3: Final fallback, return any element containing the text ---
-    const leafElements = new Set();
-    for (let i = 0; i < textNodes.snapshotLength; i++) {
-      const parentElement = textNodes.snapshotItem(i).parentElement;
-      if (parentElement && isElementVisible(parentElement)) {
-        leafElements.add(parentElement);
+    if (results.length === 0 && normalizedQuery) {
+      const candidates = textAncestors.size > 0 ? textAncestors : textParents;
+      for (const element of candidates) {
+        const rect = getVisibleRect(element, budget);
+        if (!rect) continue;
+        const type =
+          textAncestors.size > 0
+            ? determineType(element, options.types, budget) || 'interactive'
+            : 'text';
+        const info = createElementInfo(
+          element,
+          type,
+          options.includeCoordinates,
+          budget,
+          rect,
+        );
+        if (!pushBoundedResult(results, info, budget)) break;
       }
     }
 
-    const finalElements = Array.from(leafElements).filter((el) => {
-      return ![...leafElements].some((otherEl) => el !== otherEl && el.contains(otherEl));
-    });
-
-    return finalElements.map((el) => createElementInfo(el, 'text', includeCoordinates, true));
+    return { elements: results, budget };
   }
 
-  // --- Chrome Message Listener ---
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-    if (request.action === 'getInteractiveElements') {
+    if (request && request.action === 'getInteractiveElements') {
       try {
-        let elements;
-        if (request.selector) {
-          // If a selector is provided, bypass the text-based logic and use a direct query.
-          const foundEls = querySelectorAllDeep(request.selector);
-          elements = foundEls.map((el) =>
-            createElementInfo(
-              el,
-              'selected',
-              request.includeCoordinates !== false,
-              isElementInteractive(el),
-            ),
-          );
-        } else {
-          // Otherwise, use our powerful multi-layered text search
-          elements = findElementsByTextWithFallback(request);
-        }
-        sendResponse({ success: true, elements });
+        const options = normalizeOptions(request);
+        const outcome = findElements(options);
+        const endedAt = now();
+        sendResponse({
+          success: true,
+          elements: outcome.elements,
+          count: outcome.elements.length,
+          truncated: outcome.budget.truncated,
+          truncationReasons: Array.from(outcome.budget.reasons),
+          stats: {
+            visitedNodes: outcome.budget.nodes,
+            styleChecks: outcome.budget.styleChecks,
+            layoutChecks: outcome.budget.layoutChecks,
+            selectorChecks: outcome.budget.selectorChecks,
+            durationMs: Math.max(0, Math.round(endedAt - outcome.budget.startedAt)),
+          },
+        });
       } catch (error) {
-        console.error('Error in getInteractiveElements:', error);
-        sendResponse({ success: false, error: error.message });
+        sendResponse({
+          success: false,
+          error: truncateUtf8(
+            error && error.message ? error.message : String(error),
+            LIMITS.errorBytes,
+          ),
+        });
       }
-      return true; // Async response
-    } else if (request.action === 'chrome_get_interactive_elements_ping') {
+      return true;
+    }
+    if (request && request.action === 'chrome_get_interactive_elements_ping') {
       sendResponse({ status: 'pong' });
       return false;
     }
   });
-
-  console.log('Interactive elements helper script loaded');
 })();

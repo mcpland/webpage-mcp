@@ -110,4 +110,43 @@ describe('readPageTool', () => {
       expect.objectContaining({ action: 'generateAccessibilityTree' }),
     );
   });
+
+  it('re-bounds interactive fallback fields from the page before returning them', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'activateTabIfNeeded').mockResolvedValue(makeTab());
+    vi.spyOn(readPageTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: '',
+        viewport: { width: 800, height: 600, dpr: 1 },
+        stats: { processed: 0, included: 0, durationMs: 1 },
+        refMap: [],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        elements: Array.from({ length: 300 }, (_, index) => ({
+          type: 'button',
+          selector: `#item-${index}${'a'.repeat(20_000)}`,
+          text: '😀'.repeat(20_000),
+          isInteractive: true,
+        })),
+      });
+
+    const result = await readPageTool.execute({ tabId: 7, background: true });
+    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      fallbackUsed: true,
+      fallbackSource: 'get_interactive_elements',
+      truncated: true,
+    });
+    expect(payload.count).toBe(payload.elements.length);
+    expect(payload.elements.length).toBeGreaterThan(0);
+    expect(payload.elements.length).toBeLessThanOrEqual(150);
+    expect(new TextEncoder().encode(payload.elements[0].text).byteLength).toBeLessThanOrEqual(
+      1024,
+    );
+  });
 });

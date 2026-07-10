@@ -4,6 +4,7 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
 import { listMarkersForUrl } from '@/entrypoints/background/element-marker/element-marker-storage';
+import { boundInteractiveElements } from './interactive-elements-limits';
 
 interface ReadPageStats {
   processed: number;
@@ -224,7 +225,8 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         });
 
         if (fallback && fallback.success && Array.isArray(fallback.elements)) {
-          const limited = fallback.elements.slice(0, 150);
+          const boundedFallback = boundInteractiveElements(fallback.elements, 150);
+          const limited = boundedFallback.elements;
           // Merge user markers at the front, de-duplicated by selector
           const markerEls = userMarkers.map((m) => ({
             type: 'marker',
@@ -247,7 +249,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             ? 'sparse_tree'
             : resp?.error || 'tree_failed';
           basePayload.elements = merged;
-          basePayload.count = fallback.elements.length;
+          basePayload.count = limited.length;
+          basePayload.truncated =
+            fallback.truncated === true || boundedFallback.truncated;
           if (!basePayload.pageContent) {
             basePayload.pageContent = formatElementsAsPageContent(merged);
           }

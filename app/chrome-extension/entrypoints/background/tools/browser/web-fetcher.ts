@@ -2,6 +2,12 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
+import {
+  boundInteractiveElements,
+  INTERACTIVE_ELEMENTS_LIMITS,
+  normalizeInteractiveElementsQuery,
+  truncateInteractiveString,
+} from './interactive-elements-limits';
 
 interface WebFetcherToolParams {
   htmlContent?: boolean; // get the visible HTML content of the current page. default: false
@@ -376,10 +382,10 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
    * Execute get interactive elements operation
    */
   async execute(args: GetInteractiveElementsToolParams): Promise<ToolResult> {
-    const { textQuery, selector, includeCoordinates = true, types, tabId, windowId } = args;
-
-
     try {
+      const query = normalizeInteractiveElementsQuery(args);
+      const input = args && typeof args === 'object' ? args : ({} as GetInteractiveElementsToolParams);
+      const { tabId, windowId } = input;
       const explicit = await this.tryGetTab(tabId);
       const tab = explicit || (await this.getActiveTabInWindow(windowId));
       if (!tab) {
@@ -395,15 +401,20 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
       // Send message to content script
       const result = await this.sendMessageToTab(tab.id, {
         action: TOOL_MESSAGE_TYPES.GET_INTERACTIVE_ELEMENTS,
-        textQuery,
-        selector,
-        includeCoordinates,
-        types,
+        ...query,
       });
 
       if (!result.success) {
-        return createErrorResponse(result.error || 'Failed to get interactive elements');
+        return createErrorResponse(
+          truncateInteractiveString(
+            result.error || 'Failed to get interactive elements',
+            INTERACTIVE_ELEMENTS_LIMITS.errorBytes,
+          ),
+        );
       }
+
+      const bounded = boundInteractiveElements(result.elements);
+      const truncated = result.truncated === true || bounded.truncated;
 
       return {
         content: [
@@ -411,12 +422,13 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
             type: 'text',
             text: JSON.stringify({
               success: true,
-              elements: result.elements,
-              count: result.elements.length,
+              elements: bounded.elements,
+              count: bounded.elements.length,
+              truncated,
               query: {
-                textQuery,
-                selector,
-                types: types || 'all',
+                ...(query.textQuery ? { textQuery: query.textQuery } : {}),
+                ...(query.selector ? { selector: query.selector } : {}),
+                types: query.types || 'all',
               },
             }),
           },
@@ -426,7 +438,10 @@ class GetInteractiveElementsTool extends BaseBrowserToolExecutor {
     } catch (error) {
       console.error('Error in get interactive elements operation:', error);
       return createErrorResponse(
-        `Error getting interactive elements: ${error instanceof Error ? error.message : String(error)}`,
+        `Error getting interactive elements: ${truncateInteractiveString(
+          error instanceof Error ? error.message : String(error),
+          INTERACTIVE_ELEMENTS_LIMITS.errorBytes,
+        )}`,
       );
     }
   }
