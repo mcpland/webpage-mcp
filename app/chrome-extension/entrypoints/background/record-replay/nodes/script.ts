@@ -2,6 +2,7 @@ import type { StepScript } from '../types';
 import { expandTemplatesDeep, applyAssign } from '../rr-utils';
 import type { ExecCtx, ExecResult, NodeRuntime } from './types';
 import { resolveNodeTabId } from './tab-context';
+import { executePageScript } from '@/utils/page-script-executor';
 
 export const scriptNode: NodeRuntime<StepScript> = {
   run: async (ctx: ExecCtx, step: StepScript) => {
@@ -11,19 +12,14 @@ export const scriptNode: NodeRuntime<StepScript> = {
     const code = String(s.code || '');
     if (!code.trim()) return {} as ExecResult;
     const tabId = await resolveNodeTabId(ctx);
-    const frameIds = typeof ctx.frameId === 'number' ? [ctx.frameId] : undefined;
-    const [{ result }] = await chrome.scripting.executeScript({
-      target: { tabId, frameIds } as any,
-      func: (userCode: string) => {
-        try {
-          return (0, eval)(userCode);
-        } catch {
-          return null;
-        }
-      },
-      args: [code],
-      world: world as any,
-    } as any);
+    const result = await executePageScript({
+      tabId,
+      frameId: ctx.frameId,
+      code,
+      mode: 'raw',
+      world: world === 'MAIN' ? 'MAIN' : 'ISOLATED',
+      owner: 'legacy-workflow-script',
+    });
     if (s.saveAs) ctx.vars[s.saveAs] = result;
     if (s.assign && typeof s.assign === 'object') applyAssign(ctx.vars, result, s.assign);
     return {} as ExecResult;

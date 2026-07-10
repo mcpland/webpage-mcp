@@ -8,6 +8,7 @@
 
 import { failed, invalid, ok, tryResolveString } from '../registry';
 import type { ActionHandler, BrowserWorld, JsonValue, VariableStore } from '../types';
+import { executePageScript } from '@/utils/page-script-executor';
 
 /** Default attribute to extract */
 const DEFAULT_EXTRACT_ATTR = 'textContent';
@@ -73,7 +74,10 @@ async function executeExtraction(
 
       const result = Array.isArray(injected) ? injected[0]?.result : undefined;
       if (!result || typeof result !== 'object') {
-        return { ok: false, error: 'Extraction script returned invalid result' };
+        return {
+          ok: false,
+          error: 'Extraction script returned invalid result',
+        };
       }
 
       if (!result.success) {
@@ -83,56 +87,16 @@ async function executeExtraction(
       return { ok: true, value: result.value as JsonValue };
     }
 
-    // JS mode
-    const injected = await chrome.scripting.executeScript({
-      target: { tabId, frameIds } as chrome.scripting.InjectionTarget,
-      world,
-      func: (code: string) => {
-        try {
-          // Create function and execute
-          const fn = new Function(code);
-          const result = fn();
-
-          // Handle promises
-          if (result instanceof Promise) {
-            return result.then(
-              (value: unknown) => ({ success: true, value }),
-              (error: Error) => ({ success: false, error: error?.message || String(error) }),
-            );
-          }
-
-          return { success: true, value: result };
-        } catch (e) {
-          return { success: false, error: e instanceof Error ? e.message : String(e) };
-        }
-      },
-      args: [params.code!],
+    // JS mode: arbitrary workflow code is permitted only through the Debugger API.
+    const result = await executePageScript({
+      tabId,
+      frameId,
+      code: params.code!,
+      mode: 'body',
+      world: world === 'ISOLATED' ? 'ISOLATED' : 'MAIN',
+      owner: 'workflow-extract-action',
     });
-
-    const result = Array.isArray(injected) ? injected[0]?.result : undefined;
-
-    // Handle async result
-    if (result instanceof Promise) {
-      const asyncResult = await result;
-      if (!asyncResult || typeof asyncResult !== 'object') {
-        return { ok: false, error: 'Async extraction returned invalid result' };
-      }
-      if (!asyncResult.success) {
-        return { ok: false, error: asyncResult.error || 'Extraction failed' };
-      }
-      return { ok: true, value: asyncResult.value as JsonValue };
-    }
-
-    if (!result || typeof result !== 'object') {
-      return { ok: false, error: 'Extraction script returned invalid result' };
-    }
-
-    const typedResult = result as { success: boolean; value?: unknown; error?: string };
-    if (!typedResult.success) {
-      return { ok: false, error: typedResult.error || 'Extraction failed' };
-    }
-
-    return { ok: true, value: typedResult.value as JsonValue };
+    return { ok: true, value: result as JsonValue };
   } catch (e) {
     return {
       ok: false,

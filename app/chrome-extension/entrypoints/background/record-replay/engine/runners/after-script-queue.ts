@@ -9,6 +9,7 @@ import type { ExecCtx } from '../../nodes';
 import { RunLogger } from '../logging/run-logger';
 import { applyAssign } from '../../rr-utils';
 import { resolveNodeTabId } from '../../nodes/tab-context';
+import { executePageScript } from '@/utils/page-script-executor';
 
 export class AfterScriptQueue {
   private queue: StepScript[] = [];
@@ -32,7 +33,11 @@ export class AfterScriptQueue {
       const world = (s as any).world || 'ISOLATED';
       const code = String((s as any).code || '');
       if (!code.trim()) {
-        this.logger.push({ stepId: s.id, status: 'success', tookMs: Date.now() - tScript });
+        this.logger.push({
+          stepId: s.id,
+          status: 'success',
+          tookMs: Date.now() - tScript,
+        });
         continue;
       }
       try {
@@ -47,30 +52,16 @@ export class AfterScriptQueue {
           });
         }
         const tabId = await resolveNodeTabId(ctx);
-        const frameIds = typeof ctx.frameId === 'number' ? [ctx.frameId] : undefined;
-        const [{ result }] = await chrome.scripting.executeScript({
-          target: { tabId, frameIds },
-          func: (userCode: string) => {
-            try {
-              return (0, eval)(userCode);
-            } catch (e) {
-              return { __error: true, message: String(e) } as any;
-            }
-          },
-          args: [code],
-          world: world as any,
-        } as any);
-        if ((result as any)?.__error) {
-          this.logger.push({
-            stepId: s.id,
-            status: 'warning',
-            message: `After-script error: ${(result as any).message || 'unknown'}`,
-          });
-        }
-        const value = (result as any)?.__error ? null : result;
+        const value = await executePageScript({
+          tabId,
+          frameId: ctx.frameId,
+          code,
+          mode: 'raw',
+          world: world === 'MAIN' ? 'MAIN' : 'ISOLATED',
+          owner: 'legacy-workflow-after-script',
+        });
         if ((s as any).saveAs) (vars as any)[(s as any).saveAs] = value;
-        if ((s as any).assign && typeof (s as any).assign === 'object')
-          applyAssign(vars, value, (s as any).assign);
+        if ((s as any).assign && typeof (s as any).assign === 'object') applyAssign(vars, value, (s as any).assign);
       } catch (e: any) {
         // Re-queue remaining and stop flush cycle for now
         const remaining = scriptsToFlush.slice(i + 1);
@@ -82,7 +73,11 @@ export class AfterScriptQueue {
         });
         break;
       }
-      this.logger.push({ stepId: s.id, status: 'success', tookMs: Date.now() - tScript });
+      this.logger.push({
+        stepId: s.id,
+        status: 'success',
+        tookMs: Date.now() - tScript,
+      });
     }
   }
 }

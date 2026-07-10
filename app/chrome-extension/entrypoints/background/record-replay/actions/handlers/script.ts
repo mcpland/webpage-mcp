@@ -10,14 +10,8 @@
  */
 
 import { failed, invalid, ok, tryResolveValue } from '../registry';
-import type {
-  ActionHandler,
-  Assignments,
-  BrowserWorld,
-  JsonValue,
-  Resolvable,
-  VariableStore,
-} from '../types';
+import type { ActionHandler, Assignments, BrowserWorld, JsonValue, Resolvable, VariableStore } from '../types';
+import { executePageScript } from '@/utils/page-script-executor';
 
 /** Maximum code length to prevent abuse */
 const MAX_CODE_LENGTH = 100000;
@@ -35,7 +29,10 @@ function resolveArgs(
   for (const [key, resolvable] of Object.entries(args)) {
     const result = tryResolveValue(resolvable, vars);
     if (!result.ok) {
-      return { ok: false, error: `Failed to resolve arg "${key}": ${result.error}` };
+      return {
+        ok: false,
+        error: `Failed to resolve arg "${key}": ${result.error}`,
+      };
     }
     resolved[key] = result.value;
   }
@@ -96,68 +93,17 @@ async function executeScript(
   args: Record<string, JsonValue>,
   world: BrowserWorld,
 ): Promise<{ ok: true; result: JsonValue } | { ok: false; error: string }> {
-  const frameIds = typeof frameId === 'number' ? [frameId] : undefined;
-
   try {
-    const injected = await chrome.scripting.executeScript({
-      target: { tabId, frameIds } as chrome.scripting.InjectionTarget,
+    const result = await executePageScript({
+      tabId,
+      frameId,
+      code,
+      mode: 'body',
+      args,
       world: world === 'ISOLATED' ? 'ISOLATED' : 'MAIN',
-      func: (scriptCode: string, scriptArgs: Record<string, JsonValue>) => {
-        try {
-          // Create function with args available
-          const argNames = Object.keys(scriptArgs);
-          const argValues = Object.values(scriptArgs);
-
-          // Wrap code to return result
-          const wrappedCode = `
-            return (function(${argNames.join(', ')}) {
-              ${scriptCode}
-            })(${argNames.map((_, i) => `arguments[${i}]`).join(', ')});
-          `;
-
-          const fn = new Function(...argNames, wrappedCode);
-          const result = fn(...argValues);
-
-          // Handle promises
-          if (result instanceof Promise) {
-            return result.then(
-              (value: unknown) => ({ success: true, result: value }),
-              (error: Error) => ({ success: false, error: error?.message || String(error) }),
-            );
-          }
-
-          return { success: true, result };
-        } catch (e) {
-          return { success: false, error: e instanceof Error ? e.message : String(e) };
-        }
-      },
-      args: [code, args],
+      owner: 'workflow-script-action',
     });
-
-    const scriptResult = Array.isArray(injected) ? injected[0]?.result : undefined;
-
-    // Handle async result
-    if (scriptResult instanceof Promise) {
-      const asyncResult = await scriptResult;
-      if (!asyncResult || typeof asyncResult !== 'object') {
-        return { ok: false, error: 'Async script returned invalid result' };
-      }
-      if (!asyncResult.success) {
-        return { ok: false, error: asyncResult.error || 'Script failed' };
-      }
-      return { ok: true, result: asyncResult.result as JsonValue };
-    }
-
-    if (!scriptResult || typeof scriptResult !== 'object') {
-      return { ok: false, error: 'Script returned invalid result' };
-    }
-
-    const typedResult = scriptResult as { success: boolean; result?: unknown; error?: string };
-    if (!typedResult.success) {
-      return { ok: false, error: typedResult.error || 'Script failed' };
-    }
-
-    return { ok: true, result: typedResult.result as JsonValue };
+    return { ok: true, result: result as JsonValue };
   } catch (e) {
     return {
       ok: false,
