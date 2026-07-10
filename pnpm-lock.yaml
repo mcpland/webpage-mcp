@@ -145,6 +145,9 @@ importers:
       '@types/react-dom':
         specifier: ^18.3.1
         version: 18.3.7(@types/react@18.3.28)
+      '@vitest/coverage-v8':
+        specifier: ^3.2.7
+        version: 3.2.7(vitest@3.2.7(@types/node@22.19.11)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(yaml@2.8.3))
       '@wxt-dev/module-react':
         specifier: ^1.0.2
         version: 1.2.2(vite@7.3.6(@types/node@22.19.11)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.8.3))(wxt@0.20.27(@types/node@22.19.11)(eslint@9.39.4(jiti@2.7.0))(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.2)(yaml@2.8.3))

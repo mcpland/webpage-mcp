@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
+const enforceCoverage = process.env.ENFORCE_COVERAGE === 'true';
 
 export default defineConfig({
   resolve: {
@@ -28,6 +29,29 @@ export default defineConfig({
     // Auto-cleanup mocks between tests
     clearMocks: true,
     restoreMocks: true,
+    testTimeout: enforceCoverage ? 30_000 : 5_000,
+    coverage: {
+      enabled: enforceCoverage,
+      provider: 'v8',
+      reportsDirectory: 'coverage',
+      reporter: ['text', 'lcov', 'html'],
+      include: [
+        'common/**/*.{ts,tsx}',
+        'config/**/*.{ts,tsx}',
+        'entrypoints/**/*.{ts,tsx}',
+        'shared/**/*.{ts,tsx}',
+        'utils/**/*.{ts,tsx}',
+      ],
+      exclude: ['**/*.d.ts'],
+      // Measured across all production TypeScript. Keep a small runtime margin
+      // while preventing material regressions on the extension's broad surface.
+      thresholds: {
+        branches: 65,
+        functions: 70,
+        lines: 45,
+        statements: 45,
+      },
+    },
     // TypeScript support via esbuild (faster than ts-jest)
     typecheck: {
       enabled: false,

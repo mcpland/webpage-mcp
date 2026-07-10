@@ -17,6 +17,7 @@ describe('coverage policy', () => {
     expect(coverage?.exclude).toEqual(
       expect.arrayContaining(['src/**/*.test.ts', 'src/**/*.spec.ts', 'src/**/*.d.ts']),
     );
+    expect(coverage?.exclude).not.toContain('src/scripts/**/*');
     expect(coverage?.thresholds).toMatchObject({
       branches: 65,
       functions: 70,

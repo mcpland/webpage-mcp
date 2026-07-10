@@ -18,7 +18,6 @@ export default defineConfig({
         'src/**/*.d.ts',
         'src/**/*.test.ts',
         'src/**/*.spec.ts',
-        'src/scripts/**/*',
       ],
       // Production-only baseline. Raise these as untested CLI/engine paths gain coverage.
       thresholds: {

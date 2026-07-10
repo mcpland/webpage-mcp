@@ -30,6 +30,9 @@ function dispatch(listener: RuntimeListener, request: unknown): Promise<any> {
 describe('interactive-elements-helper resource boundaries', () => {
   beforeEach(() => {
     document.documentElement.innerHTML = '<head></head><body></body>';
+    // Keep count/byte-budget assertions deterministic under V8 coverage,
+    // where instrumentation overhead can otherwise exhaust the wall-clock cap.
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
       () =>
         ({
