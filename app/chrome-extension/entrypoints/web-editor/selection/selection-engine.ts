@@ -82,6 +82,9 @@ const MAX_ANCESTOR_DEPTH = 6;
 /** Max total candidates to consider */
 const MAX_CANDIDATES = 60;
 
+/** Max direct children inspected for wrapper text heuristics */
+const MAX_DIRECT_TEXT_NODES = 256;
+
 /** Epsilon for rect comparisons */
 const RECT_EPSILON = 0.5;
 
@@ -174,7 +177,9 @@ function isTransparentColor(value: string): boolean {
  * Check if element has direct text content (not just whitespace)
  */
 function hasDirectNonWhitespaceText(element: Element): boolean {
-  for (const node of Array.from(element.childNodes)) {
+  let inspected = 0;
+  for (let node = element.firstChild; node && inspected < MAX_DIRECT_TEXT_NODES; node = node.nextSibling) {
+    inspected += 1;
     if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
       return true;
     }

@@ -152,6 +152,31 @@ describe('selection-engine: getCandidatesAtPoint', () => {
     expect(hasReason(buttonCandidate, 'button') || hasReason(buttonCandidate, 'type')).toBe(true);
   });
 
+  it('checks direct text without materializing the full child node list', () => {
+    const wrapper = document.createElement('div');
+    wrapper.append(document.createTextNode('meaningful text'));
+    document.body.append(wrapper);
+    Object.defineProperty(wrapper.childNodes, Symbol.iterator, {
+      configurable: true,
+      value: () => {
+        throw new Error('childNodes must not be materialized');
+      },
+    });
+
+    restores.push(mockBoundingClientRect(wrapper, { left: 0, top: 0, width: 120, height: 40 }));
+    restores.push(
+      installDomMocks({
+        elementsFromPoint: () => [wrapper],
+        getComputedStyle: () => ({}),
+      }),
+    );
+
+    engine = createSelectionEngine({ isOverlayElement });
+
+    expect(() => engine!.getCandidatesAtPoint(10, 10)).not.toThrow();
+    expect(getCandidate(engine.getCandidatesAtPoint(10, 10), wrapper)).toBeDefined();
+  });
+
   it('prefers elements with visual boundaries', () => {
     const plain = document.createElement('div');
     const bordered = document.createElement('div');
