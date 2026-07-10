@@ -1,4 +1,4 @@
-import * as fs from 'fs';
+import * as fs from 'node:fs';
 
 // Import DevTools trace engine and formatters from chrome-devtools-frontend
 // We intentionally use deep imports to match the package structure.
@@ -9,17 +9,34 @@ import { PerformanceTraceFormatter } from 'chrome-devtools-frontend/front_end/mo
 import { PerformanceInsightFormatter } from 'chrome-devtools-frontend/front_end/models/ai_assistance/data_formatters/PerformanceInsightFormatter.js';
 import { AgentFocus } from 'chrome-devtools-frontend/front_end/models/ai_assistance/performance/AIContext.js';
 
-const engine = TraceEngine.TraceModel.Model.createWithAllHandlers();
+export const MAX_TRACE_FILE_BYTES = 256 * 1024 * 1024;
 
-function readJsonFile(path: string): any {
-  const text = fs.readFileSync(path, 'utf-8');
-  return JSON.parse(text);
+export async function readTraceJsonFile(
+  filePath: string,
+  maximumBytes = MAX_TRACE_FILE_BYTES,
+): Promise<any> {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes <= 0) {
+    throw new RangeError('maximumBytes must be a positive safe integer');
+  }
+
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of fs.createReadStream(filePath)) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > maximumBytes) {
+      throw new Error(`Trace file exceeds the ${maximumBytes} byte limit`);
+    }
+    chunks.push(buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks, totalBytes).toString('utf8'));
 }
 
 export async function parseTrace(json: any): Promise<{
   parsedTrace: any;
   insights: any | null;
 }> {
+  const engine = TraceEngine.TraceModel.Model.createWithAllHandlers();
   engine.resetProcessor();
   const events = Array.isArray(json) ? json : json.traceEvents;
   if (!events || !Array.isArray(events)) {
@@ -60,7 +77,7 @@ export async function analyzeTraceFile(
   summary: string;
   insight?: string;
 }> {
-  const json = readJsonFile(filePath);
+  const json = await readTraceJsonFile(filePath);
   const { parsedTrace, insights } = await parseTrace(json);
   const summary = getTraceSummary(parsedTrace);
   if (insightName) {
