@@ -26,6 +26,10 @@ import {
   type McpClientCapabilityFallback,
 } from './mcp/register-tools';
 import { NativeMessageFrameDecoder } from './native-message-framing';
+import {
+  isNativeMessageEncodingError,
+  NativeMessageWriter,
+} from './native-message-output';
 
 interface PendingRequest {
   resolve: (value: any) => void;
@@ -110,6 +114,8 @@ export class NativeMessagingHost {
   private ipcServer: net.Server | null = null;
   private ipcSockets: Set<net.Socket> = new Set();
   private static readonly AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
+
+  public constructor(private readonly messageWriter = new NativeMessageWriter(stdout)) {}
 
   public setServer(serverInstance: Server): void {
     const instanceId = normalizeInstanceId(serverInstance.instanceId);
@@ -419,6 +425,11 @@ export class NativeMessagingHost {
       response.payload = payload;
     }
     this.sendMessage(response);
+  }
+
+  private reportMessageWriteFailure(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[NativeMessagingHost] ${message}\n`);
   }
 
   private resolveStartDirective(
@@ -881,12 +892,23 @@ export class NativeMessagingHost {
       // Store request's resolve/reject functions and timeout ID
       this.pendingRequests.set(requestId, { resolve, reject, timeoutId });
 
-      // Send message with requestId to Chrome
-      this.sendMessage({
-        type: messageType, // Define a request type, e.g. 'request_data'
-        payload: messagePayload,
-        requestId: requestId, // <--- Key: include request ID
-      });
+      // Send message with requestId to Chrome. Encoding and stdout failures
+      // reject immediately rather than leaving the request waiting for timeout.
+      void this.messageWriter
+        .send({
+          type: messageType,
+          payload: messagePayload,
+          requestId,
+        })
+        .catch((error) => {
+          const pending = this.pendingRequests.get(requestId);
+          if (!pending) {
+            return;
+          }
+          clearTimeout(pending.timeoutId);
+          this.pendingRequests.delete(requestId);
+          pending.reject(error);
+        });
     });
   }
 
@@ -894,24 +916,26 @@ export class NativeMessagingHost {
    * Send message to Chrome extension
    */
   public sendMessage(message: any): void {
-    try {
-      const messageString = JSON.stringify(message);
-      const messageBuffer = Buffer.from(messageString);
-      const headerBuffer = Buffer.alloc(4);
-      headerBuffer.writeUInt32LE(messageBuffer.length, 0);
-      // Ensure atomic write
-      stdout.write(Buffer.concat([headerBuffer, messageBuffer]), (err) => {
-        if (err) {
-          // Consider how to handle write failure, may affect request completion
-        } else {
-          // Message sent successfully, no action needed
-        }
-      });
-    } catch (_error: any) {
-      // Catch JSON.stringify or Buffer operation errors
-      // If preparation stage fails, associated request may never be sent
-      // Need to consider whether to reject corresponding Promise (if called within sendRequestToExtensionAndWait)
-    }
+    void this.messageWriter.send(message).catch((error) => {
+      const responseToRequestId =
+        message && typeof message === 'object' && typeof message.responseToRequestId === 'string'
+          ? message.responseToRequestId
+          : '';
+
+      // Oversized or unserializable responses have not touched stdout, so a
+      // compact protocol error can still complete the extension's request.
+      if (responseToRequestId && isNativeMessageEncodingError(error)) {
+        void this.messageWriter
+          .send({
+            responseToRequestId,
+            error: `Native host could not encode response: ${error instanceof Error ? error.message : String(error)}`,
+          })
+          .catch((fallbackError) => this.reportMessageWriteFailure(fallbackError));
+        return;
+      }
+
+      this.reportMessageWriteFailure(error);
+    });
   }
 
   /**
