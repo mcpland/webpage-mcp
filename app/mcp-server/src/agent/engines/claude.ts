@@ -28,6 +28,22 @@ import {
   createBoundedAgentMessage,
   type AssistantStreamSnapshot,
 } from './stream-output';
+import {
+  CLAUDE_EVENT_ERROR_MAX_BYTES,
+  CLAUDE_EVENT_LOG_MAX_BYTES,
+  CLAUDE_TOOL_ID_MAX_BYTES,
+  boundClaudeEventText,
+  boundClaudeLogField,
+  buildBoundedClaudeAuthStatus,
+  buildBoundedClaudeManagementInfo,
+  buildBoundedClaudeResultError,
+  buildBoundedClaudeToolMetadata,
+  extractBoundedClaudeMessageContent,
+  extractBoundedClaudeToolResultContent,
+  parseBoundedClaudeSessionId,
+  pickBoundedClaudeIdentifier,
+  pickBoundedClaudeString,
+} from './claude-event-bounds';
 
 // Images are provided to Claude Code via local file paths referenced in the prompt text.
 // Claude Code CLI reads images from local paths, so we write base64 images to temp files and reference them.
@@ -302,101 +318,13 @@ export class ClaudeEngine implements AgentEngine {
      */
     const buildToolMetadata = (contentBlock: Record<string, unknown>): Record<string, unknown> => {
       const toolName = this.pickFirstString(contentBlock.name) || 'unknown';
-      const toolId = this.pickFirstString(contentBlock.id);
-      const input = contentBlock.input as Record<string, unknown> | undefined;
       const action = inferActionFromToolName(toolName);
-
-      const metadata: Record<string, unknown> = {
+      return buildBoundedClaudeToolMetadata(
         toolName,
-        tool_name: toolName,
-        toolId,
+        contentBlock.id,
+        contentBlock.input,
         action,
-      };
-
-      if (!input) {
-        return metadata;
-      }
-
-      // Extract tool-specific details
-      const normalizedName = toolName.toLowerCase();
-
-      // File operations (read, write, edit)
-      if (typeof input.file_path === 'string') {
-        metadata.filePath = input.file_path;
-      }
-
-      // Edit tool - extract diff information
-      if (
-        normalizedName.includes('edit') ||
-        normalizedName === 'apply_patch' ||
-        normalizedName === 'patch_file'
-      ) {
-        if (typeof input.old_string === 'string') {
-          metadata.oldString = input.old_string;
-          metadata.deletedLines = input.old_string.split('\n').length;
-        }
-        if (typeof input.new_string === 'string') {
-          metadata.newString = input.new_string;
-          metadata.addedLines = input.new_string.split('\n').length;
-        }
-        if (typeof input.replace_all === 'boolean') {
-          metadata.replaceAll = input.replace_all;
-        }
-      }
-
-      // Write tool - content preview
-      if (normalizedName.includes('write') || normalizedName === 'create_file') {
-        if (typeof input.content === 'string') {
-          metadata.contentPreview = input.content.slice(0, 200);
-          metadata.totalLines = input.content.split('\n').length;
-        }
-      }
-
-      // Read tool - offset/limit
-      if (normalizedName.includes('read')) {
-        if (typeof input.offset === 'number') metadata.offset = input.offset;
-        if (typeof input.limit === 'number') metadata.limit = input.limit;
-      }
-
-      // Bash/shell - command
-      if (
-        normalizedName === 'bash' ||
-        normalizedName.includes('shell') ||
-        normalizedName === 'run'
-      ) {
-        if (typeof input.command === 'string') {
-          metadata.command = input.command;
-        }
-        if (typeof input.description === 'string') {
-          metadata.commandDescription = input.description;
-        }
-      }
-
-      // Search tools (grep, glob)
-      if (normalizedName === 'grep' || normalizedName.includes('search')) {
-        if (typeof input.pattern === 'string') metadata.pattern = input.pattern;
-        if (typeof input.path === 'string') metadata.searchPath = input.path;
-        if (typeof input.glob === 'string') metadata.glob = input.glob;
-        if (typeof input.output_mode === 'string') metadata.outputMode = input.output_mode;
-      }
-
-      if (normalizedName === 'glob' || normalizedName === 'glob_files') {
-        if (typeof input.pattern === 'string') metadata.pattern = input.pattern;
-        if (typeof input.path === 'string') metadata.searchPath = input.path;
-      }
-
-      // TodoWrite
-      if (normalizedName === 'todo_write' || normalizedName === 'todowrite') {
-        if (Array.isArray(input.todos)) {
-          metadata.todoCount = input.todos.length;
-          metadata.todos = input.todos;
-        }
-      }
-
-      // Store raw input for debugging (truncated)
-      metadata.rawInput = JSON.stringify(input).slice(0, 1000);
-
-      return metadata;
+      );
     };
 
     // State for temp file cleanup
@@ -434,8 +362,12 @@ export class ClaudeEngine implements AgentEngine {
 
     try {
       // Use console.error for logging to avoid polluting stdout (Native Messaging protocol)
-      console.error(`[ClaudeEngine] Starting query with model: ${resolvedModel}`);
-      console.error(`[ClaudeEngine] Working directory: ${repoPath}`);
+      console.error(
+        `[ClaudeEngine] Starting query with model: ${boundClaudeLogField(resolvedModel)}`,
+      );
+      console.error(
+        `[ClaudeEngine] Working directory: ${boundClaudeLogField(repoPath)}`,
+      );
 
       // Check for image attachments - prefer resolvedImagePaths (persisted), fallback to temp files
       const hasResolvedPaths = resolvedImagePaths && resolvedImagePaths.length > 0;
@@ -509,7 +441,7 @@ export class ClaudeEngine implements AgentEngine {
           const project = await getProject(projectId);
           return project?.enableWebpageMcp !== false;
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+          const message = boundClaudeLogField(err);
           console.error(
             `[ClaudeEngine] Failed to load project enableWebpageMcp, defaulting to enabled: ${message}`,
           );
@@ -585,7 +517,7 @@ export class ClaudeEngine implements AgentEngine {
       removeExternalAbortListener = linkAbortSignal(signal, internalAbortController);
 
       const recordStderr = (data: string): void => {
-        const chunk = String(data).trimEnd();
+        const chunk = boundClaudeLogField(data, CLAUDE_EVENT_LOG_MAX_BYTES).trimEnd();
         if (!chunk) return;
         if (stderrBuffer.length >= ClaudeEngine.MAX_STDERR_LINES) {
           stderrBuffer.shift();
@@ -773,7 +705,9 @@ export class ClaudeEngine implements AgentEngine {
       // Add resume option if we have a valid Claude session ID
       if (resumeClaudeSessionId) {
         queryOptions.resume = resumeClaudeSessionId;
-        console.error(`[ClaudeEngine] Resuming Claude session: ${resumeClaudeSessionId}`);
+        console.error(
+          `[ClaudeEngine] Resuming Claude session: ${boundClaudeLogField(resumeClaudeSessionId)}`,
+        );
       }
 
       const response = query({
@@ -789,7 +723,9 @@ export class ClaudeEngine implements AgentEngine {
           throw new Error('ClaudeEngine: execution was cancelled');
         }
 
-        console.error('[ClaudeEngine] Message type:', message.type);
+        console.error(
+          `[ClaudeEngine] Message type: ${boundClaudeLogField(message.type)}`,
+        );
 
         if (message.type === 'stream_event') {
           const event = (message as unknown as { event?: Record<string, unknown> }).event ?? {};
@@ -820,8 +756,8 @@ export class ClaudeEngine implements AgentEngine {
                   STREAM_TOOL_FIELD_MAX_BYTES,
                 ).text;
                 const toolId = boundStreamText(
-                  this.pickFirstString(contentBlock.id) || '',
-                  STREAM_TOOL_FIELD_MAX_BYTES,
+                  pickBoundedClaudeIdentifier(contentBlock.id, CLAUDE_TOOL_ID_MAX_BYTES) || '',
+                  CLAUDE_TOOL_ID_MAX_BYTES,
                 ).text;
 
                 // Store pending tool input for accumulation
@@ -854,7 +790,12 @@ export class ClaudeEngine implements AgentEngine {
               } else if (contentBlock && contentBlock.type === 'tool_result') {
                 // Handle tool_result in content_block_start
                 const metadata = this.buildToolResultMetadata(contentBlock);
-                const content = this.extractToolResultContent(contentBlock);
+                const extracted = extractBoundedClaudeToolResultContent(contentBlock);
+                const content = extracted.content;
+                if (extracted.truncated) {
+                  metadata.truncated = true;
+                  metadata.truncation = [{ field: 'toolResult' }];
+                }
                 const isError = contentBlock.is_error === true;
 
                 dispatchToolMessage(
@@ -887,7 +828,9 @@ export class ClaudeEngine implements AgentEngine {
                     input = JSON.parse(fullJsonStr);
                   }
                 } catch (e) {
-                  console.error(`[ClaudeEngine] Failed to parse tool input JSON: ${e}`);
+                  console.error(
+                    `[ClaudeEngine] Failed to parse tool input JSON: ${boundClaudeLogField(e)}`,
+                  );
                 }
 
                 console.error(
@@ -913,10 +856,15 @@ export class ClaudeEngine implements AgentEngine {
 
                 // Build informative content
                 let content = `Using tool: ${pending.toolName}`;
-                if (input.command) content = `Running: ${input.command}`;
-                else if (input.file_path) content = `Operating on: ${input.file_path}`;
-                else if (input.pattern) content = `Searching: ${input.pattern}`;
-                else if (input.query) content = `Searching: ${input.query}`;
+                if (typeof metadata.command === 'string') {
+                  content = `Running: ${metadata.command}`;
+                } else if (typeof metadata.filePath === 'string') {
+                  content = `Operating on: ${metadata.filePath}`;
+                } else if (typeof metadata.pattern === 'string') {
+                  content = `Searching: ${metadata.pattern}`;
+                } else if (typeof input.query === 'string') {
+                  content = `Searching: ${boundClaudeEventText(input.query).text}`;
+                }
 
                 // Emit final tool_use message with complete metadata
                 dispatchToolMessage(
@@ -931,7 +879,12 @@ export class ClaudeEngine implements AgentEngine {
               const contentBlock = event.content_block as Record<string, unknown> | undefined;
               if (contentBlock && contentBlock.type === 'tool_result') {
                 const metadata = this.buildToolResultMetadata(contentBlock);
-                const content = this.extractToolResultContent(contentBlock);
+                const extracted = extractBoundedClaudeToolResultContent(contentBlock);
+                const content = extracted.content;
+                if (extracted.truncated) {
+                  metadata.truncated = true;
+                  metadata.truncation = [{ field: 'toolResult' }];
+                }
                 const isError = contentBlock.is_error === true;
 
                 dispatchToolMessage(
@@ -955,7 +908,17 @@ export class ClaudeEngine implements AgentEngine {
               if (delta && typeof delta === 'object' && delta.type === 'input_json_delta') {
                 const partialJson = delta.partial_json as string | undefined;
                 if (partialJson && pendingToolInputs.has(blockIndex)) {
-                  pendingToolInputs.get(blockIndex)!.inputJson.append(partialJson);
+                  const boundedPartial = boundClaudeEventText(
+                    partialJson,
+                    STREAM_PENDING_TOOL_INPUT_MAX_BYTES,
+                  );
+                  const accumulator = pendingToolInputs.get(blockIndex)!.inputJson;
+                  accumulator.append(boundedPartial.text);
+                  if (boundedPartial.truncated) {
+                    // Force the accumulator's own truncation flag so the JSON
+                    // is never parsed and the emitted metadata reports it.
+                    accumulator.append('....');
+                  }
                 }
                 break;
               }
@@ -971,7 +934,14 @@ export class ClaudeEngine implements AgentEngine {
                     : typeof delta.text === 'string'
                       ? delta.text
                       : '';
-                if (thinkingChunk) assistantStream.appendThinking(thinkingChunk);
+                if (thinkingChunk) {
+                  assistantStream.appendThinking(
+                    boundClaudeEventText(
+                      thinkingChunk,
+                      STREAM_THINKING_TEXT_MAX_BYTES,
+                    ).text,
+                  );
+                }
                 break;
               }
 
@@ -991,7 +961,12 @@ export class ClaudeEngine implements AgentEngine {
               }
 
               if (textChunk) {
-                assistantStream.appendAssistant(textChunk);
+                assistantStream.appendAssistant(
+                  boundClaudeEventText(
+                    textChunk,
+                    STREAM_ASSISTANT_TEXT_MAX_BYTES,
+                  ).text,
+                );
               }
               break;
             }
@@ -1014,7 +989,7 @@ export class ClaudeEngine implements AgentEngine {
           }
         } else if (message.type === 'assistant') {
           // Fallback for non-streaming assistant messages
-          const content = this.extractMessageContent(message);
+          const content = extractBoundedClaudeMessageContent(message).content;
           if (content) {
             assistantStream.replaceAssistant(content);
             emitAssistant(true);
@@ -1023,8 +998,11 @@ export class ClaudeEngine implements AgentEngine {
           // Final result - check for errors first
           const resultRecord = message as unknown as Record<string, unknown>;
 
-          // Log full result for debugging
-          console.error(`[ClaudeEngine] Result message: ${JSON.stringify(resultRecord, null, 2)}`);
+          // Do not serialize the result payload: it may contain an arbitrarily
+          // large final response. Log only fixed-size scalar diagnostics.
+          console.error(
+            `[ClaudeEngine] Result message: isError=${resultRecord.is_error === true}, durationMs=${typeof resultRecord.duration_ms === 'number' ? resultRecord.duration_ms : 0}, numTurns=${typeof resultRecord.num_turns === 'number' ? resultRecord.num_turns : 0}`,
+          );
 
           // Extract and emit usage statistics
           const usage = resultRecord.usage as Record<string, unknown> | undefined;
@@ -1060,12 +1038,13 @@ export class ClaudeEngine implements AgentEngine {
           // Check if result contains errors (SDK puts error details here)
           // Note: is_error can be true even with empty errors array
           if (resultRecord.is_error) {
-            const errors = resultRecord.errors as string[] | undefined;
-            const resultText = resultRecord.result as string | undefined;
-            const errorMsg = errors?.length
-              ? errors.join('; ')
-              : resultText || 'Unknown error from Claude Code';
-            console.error(`[ClaudeEngine] Result error: ${errorMsg}`);
+            const errorMsg = buildBoundedClaudeResultError(
+              resultRecord.errors,
+              resultRecord.result,
+            );
+            console.error(
+              `[ClaudeEngine] Result error: ${boundClaudeLogField(errorMsg)}`,
+            );
 
             // Check if this is a resume failure
             const isResumeFailure =
@@ -1093,7 +1072,7 @@ export class ClaudeEngine implements AgentEngine {
           }
 
           // Extract content from successful result
-          const resultContent = this.extractMessageContent(message);
+          const resultContent = extractBoundedClaudeMessageContent(message).content;
           if (resultContent) {
             assistantStream.replaceAssistant(resultContent);
             emitAssistant(true);
@@ -1105,7 +1084,14 @@ export class ClaudeEngine implements AgentEngine {
 
           if (subtype === 'init') {
             // system:init - contains session_id and management information
-            const claudeSessionId = record.session_id ? String(record.session_id) : undefined;
+            const parsedSessionId = parseBoundedClaudeSessionId(record.session_id);
+            const claudeSessionId = parsedSessionId.id;
+
+            if (parsedSessionId.rejected) {
+              console.error(
+                `[ClaudeEngine] Ignored invalid session ID (${parsedSessionId.observedBytes} UTF-8 bytes observed)`,
+              );
+            }
 
             if (claudeSessionId) {
               console.error(`[ClaudeEngine] Session initialized: ${claudeSessionId}`);
@@ -1114,9 +1100,13 @@ export class ClaudeEngine implements AgentEngine {
               if (ctx.persistClaudeSessionId && projectId) {
                 try {
                   await ctx.persistClaudeSessionId(claudeSessionId);
-                  console.error(`[ClaudeEngine] Session ID persisted for project: ${projectId}`);
+                  console.error(
+                    `[ClaudeEngine] Session ID persisted for project: ${boundClaudeLogField(projectId)}`,
+                  );
                 } catch (persistError) {
-                  console.error('[ClaudeEngine] Failed to persist session ID:', persistError);
+                  console.error(
+                    `[ClaudeEngine] Failed to persist session ID: ${boundClaudeLogField(persistError)}`,
+                  );
                 }
               }
             }
@@ -1124,90 +1114,47 @@ export class ClaudeEngine implements AgentEngine {
             // Extract and persist management information
             if (ctx.persistManagementInfo) {
               try {
-                const managementInfo = {
-                  tools: Array.isArray(record.tools)
-                    ? record.tools.filter((t): t is string => typeof t === 'string')
-                    : undefined,
-                  agents: Array.isArray(record.agents)
-                    ? record.agents.filter((a): a is string => typeof a === 'string')
-                    : undefined,
-                  // SDK returns plugins as { name, path }[] objects
-                  plugins: Array.isArray(record.plugins)
-                    ? (record.plugins as Array<{ name?: string; path?: string }>)
-                        .filter((p) => p && typeof p.name === 'string')
-                        .map((p) => ({
-                          name: String(p.name),
-                          path: p.path ? String(p.path) : undefined,
-                        }))
-                    : undefined,
-                  skills: Array.isArray(record.skills)
-                    ? record.skills.filter((s): s is string => typeof s === 'string')
-                    : undefined,
-                  mcpServers: Array.isArray(record.mcp_servers)
-                    ? (record.mcp_servers as Array<{ name?: string; status?: string }>)
-                        .filter((s) => s && typeof s.name === 'string')
-                        .map((s) => ({
-                          name: String(s.name),
-                          status: String(s.status || 'unknown'),
-                        }))
-                    : undefined,
-                  slashCommands: Array.isArray(record.slash_commands)
-                    ? record.slash_commands.filter((c): c is string => typeof c === 'string')
-                    : undefined,
-                  model: this.pickFirstString(record.model),
-                  permissionMode: this.pickFirstString(record.permissionMode),
-                  cwd: this.pickFirstString(record.cwd),
-                  outputStyle: this.pickFirstString(record.output_style),
-                  betas: Array.isArray(record.betas)
-                    ? record.betas.filter((b): b is string => typeof b === 'string')
-                    : undefined,
-                  claudeCodeVersion: this.pickFirstString(record.claude_code_version),
-                  apiKeySource: this.pickFirstString(record.apiKeySource),
-                };
-
-                await ctx.persistManagementInfo(managementInfo);
-                console.error('[ClaudeEngine] Management info persisted');
+                const management = buildBoundedClaudeManagementInfo(record);
+                await ctx.persistManagementInfo(management.info);
+                console.error(
+                  management.truncated
+                    ? `[ClaudeEngine] Management info persisted with bounded fields: ${management.truncatedFields.join(', ')}`
+                    : '[ClaudeEngine] Management info persisted',
+                );
               } catch (persistError) {
-                console.error('[ClaudeEngine] Failed to persist management info:', persistError);
+                console.error(
+                  `[ClaudeEngine] Failed to persist management info: ${boundClaudeLogField(persistError)}`,
+                );
               }
             }
           } else if (subtype === 'status') {
             // system:status - log for debugging (e.g., compacting)
             const statusText = this.pickFirstString(record.status);
-            console.error(`[ClaudeEngine] System status: ${statusText || 'unknown'}`);
+            console.error(
+              `[ClaudeEngine] System status: ${boundClaudeLogField(statusText || 'unknown')}`,
+            );
           }
         } else if (message.type === 'auth_status') {
           // Handle authentication status - SDK fields: isAuthenticating, output, error
           const record = message as unknown as Record<string, unknown>;
           const isAuthenticating = record.isAuthenticating === true;
-          const output = Array.isArray(record.output)
-            ? record.output.filter((o): o is string => typeof o === 'string')
-            : [];
-          const authError = this.pickFirstString(record.error);
+          const authStatus = buildBoundedClaudeAuthStatus(record);
 
           console.error(
-            `[ClaudeEngine] Auth status: isAuthenticating=${isAuthenticating}, hasError=${!!authError}`,
+            `[ClaudeEngine] Auth status: isAuthenticating=${isAuthenticating}, hasError=${Boolean(authStatus.error)}`,
           );
 
           // Build content from output or error
-          const content = authError || output.join('\n') || 'Authentication in progress...';
-
           // Determine if login is required:
           // - Not currently authenticating AND (has error OR output contains login keywords)
-          const outputText = output.join(' ').toLowerCase();
-          const requiresLogin =
-            !isAuthenticating &&
-            (!!authError ||
-              outputText.includes('login') ||
-              outputText.includes('authenticate') ||
-              outputText.includes('sign in'));
+          const requiresLogin = !isAuthenticating && authStatus.requiresLogin;
 
           // Emit auth status as a system message so UI can display login prompts
           const authSystemMessage: AgentMessage = {
             id: randomUUID(),
             sessionId,
             role: 'system',
-            content,
+            content: authStatus.content,
             messageType: 'status',
             cliSource: this.name,
             requestId,
@@ -1218,9 +1165,11 @@ export class ClaudeEngine implements AgentEngine {
               cli_type: 'claude',
               event_type: 'auth_status',
               isAuthenticating,
-              output,
-              error: authError,
+              output: authStatus.output,
+              error: authStatus.error,
               requires_login: requiresLogin,
+              truncated: authStatus.truncated || undefined,
+              truncation: authStatus.truncated ? authStatus.truncation : undefined,
             },
           };
 
@@ -1228,9 +1177,15 @@ export class ClaudeEngine implements AgentEngine {
         } else if (message.type === 'tool_progress') {
           // Handle tool progress - SDK fields: tool_use_id, tool_name, parent_tool_use_id, elapsed_time_seconds
           const record = message as unknown as Record<string, unknown>;
-          const toolUseId = this.pickFirstString(record.tool_use_id);
+          const toolUseId = pickBoundedClaudeIdentifier(
+            record.tool_use_id,
+            CLAUDE_TOOL_ID_MAX_BYTES,
+          );
           const toolName = this.pickFirstString(record.tool_name);
-          const parentToolUseId = this.pickFirstString(record.parent_tool_use_id);
+          const parentToolUseId = pickBoundedClaudeIdentifier(
+            record.parent_tool_use_id,
+            CLAUDE_TOOL_ID_MAX_BYTES,
+          );
           const elapsedTimeSeconds =
             typeof record.elapsed_time_seconds === 'number'
               ? record.elapsed_time_seconds
@@ -1240,7 +1195,9 @@ export class ClaudeEngine implements AgentEngine {
             const displayName = toolName || toolUseId || 'tool';
             const elapsedStr =
               elapsedTimeSeconds !== undefined ? ` (${elapsedTimeSeconds.toFixed(1)}s)` : '';
-            console.error(`[ClaudeEngine] Tool progress: ${displayName}${elapsedStr}`);
+            console.error(
+              `[ClaudeEngine] Tool progress: ${boundClaudeLogField(displayName)}${elapsedStr}`,
+            );
 
             // Use tool_use_id as message id if available, so UI can update the same progress entry
             const messageId = toolUseId ? `progress-${toolUseId}` : randomUUID();
@@ -1280,7 +1237,7 @@ export class ClaudeEngine implements AgentEngine {
       console.error('[ClaudeEngine] Query completed successfully');
     } catch (error) {
       caughtExecutionError = true;
-      const message = error instanceof Error ? error.message : String(error);
+      const message = boundClaudeLogField(error, CLAUDE_EVENT_ERROR_MAX_BYTES);
 
       // Log full stderr for debugging
       console.error(`[ClaudeEngine] Error: ${message}`);
@@ -1290,11 +1247,13 @@ export class ClaudeEngine implements AgentEngine {
       }
 
       // Check if this is a resume failure from stderr
-      const stderrText = stderrBuffer.join('\n');
       const isResumeFailure =
-        stderrText.includes('No conversation found') ||
-        stderrText.includes('Failed to resume session') ||
-        stderrText.includes('session ID') ||
+        stderrBuffer.some(
+          (line) =>
+            line.includes('No conversation found') ||
+            line.includes('Failed to resume session') ||
+            line.includes('session ID'),
+        ) ||
         message.includes('Resume failed');
 
       if (isResumeFailure && resumeClaudeSessionId && ctx.persistClaudeSessionId && projectId) {
@@ -1308,7 +1267,10 @@ export class ClaudeEngine implements AgentEngine {
       }
 
       // Classify errors for better UX
-      const errorMessage = this.classifyError(message, stderrBuffer);
+      const errorMessage = boundClaudeEventText(
+        this.classifyError(message, stderrBuffer),
+        CLAUDE_EVENT_ERROR_MAX_BYTES,
+      ).text;
       executionError = new Error(`ClaudeEngine: ${errorMessage}`);
     } finally {
       removeExternalAbortListener?.();
@@ -1365,7 +1327,9 @@ export class ClaudeEngine implements AgentEngine {
     const baseUrl = env.ANTHROPIC_BASE_URL;
     const authToken = env.ANTHROPIC_AUTH_TOKEN;
     if (baseUrl) {
-      console.error(`[ClaudeEngine] Using ANTHROPIC_BASE_URL: ${baseUrl}`);
+      console.error(
+        `[ClaudeEngine] Using ANTHROPIC_BASE_URL: ${boundClaudeLogField(baseUrl)}`,
+      );
     }
     if (authToken) {
       const preview =
@@ -1389,73 +1353,7 @@ export class ClaudeEngine implements AgentEngine {
    * Pick first string value from unknown input.
    */
   private pickFirstString(value: unknown): string | undefined {
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : undefined;
-    }
-    if (typeof value === 'number' || typeof value === 'boolean') {
-      return String(value);
-    }
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        const candidate = this.pickFirstString(entry);
-        if (candidate) return candidate;
-      }
-      return undefined;
-    }
-    return undefined;
-  }
-
-  /**
-   * Extract content from SDK message.
-   * Handles various message structures from Claude Agent SDK:
-   * - result.result (final result text)
-   * - assistant.message (nested message content)
-   * - content/text (direct content fields)
-   * - content[] (array of content blocks)
-   *
-   * @param message - The message object to extract content from
-   * @param depth - Current recursion depth (max 3 to prevent infinite loops)
-   */
-  private extractMessageContent(message: unknown, depth = 0): string | undefined {
-    // Prevent infinite recursion
-    if (depth > 3 || !message || typeof message !== 'object') return undefined;
-    const record = message as Record<string, unknown>;
-
-    // Handle result message: result field contains final text
-    if (typeof record.result === 'string') {
-      return record.result.trim();
-    }
-
-    // Handle assistant message: message field may contain nested content
-    if (record.message && typeof record.message === 'object') {
-      const nested = this.extractMessageContent(record.message, depth + 1);
-      if (nested) return nested;
-    }
-
-    // Try common content fields
-    if (typeof record.content === 'string') {
-      return record.content.trim();
-    }
-    if (typeof record.text === 'string') {
-      return record.text.trim();
-    }
-    if (Array.isArray(record.content)) {
-      const textParts: string[] = [];
-      for (const part of record.content) {
-        if (part && typeof part === 'object' && (part as Record<string, unknown>).type === 'text') {
-          const text = (part as Record<string, unknown>).text;
-          if (typeof text === 'string') {
-            textParts.push(text);
-          }
-        }
-      }
-      if (textParts.length > 0) {
-        return textParts.join('').trim();
-      }
-    }
-
-    return undefined;
+    return pickBoundedClaudeString(value);
   }
 
   /**
@@ -1481,7 +1379,10 @@ export class ClaudeEngine implements AgentEngine {
    * Build metadata for tool result events.
    */
   private buildToolResultMetadata(block: Record<string, unknown>): Record<string, unknown> {
-    const toolUseId = this.pickFirstString(block.tool_use_id);
+    const toolUseId = pickBoundedClaudeIdentifier(
+      block.tool_use_id,
+      CLAUDE_TOOL_ID_MAX_BYTES,
+    );
     const isError = block.is_error === true;
 
     return {
@@ -1490,24 +1391,6 @@ export class ClaudeEngine implements AgentEngine {
       status: isError ? 'failed' : 'completed',
       cli_type: 'claude',
     };
-  }
-
-  /**
-   * Extract content from a tool_result block.
-   */
-  private extractToolResultContent(block: Record<string, unknown>): string | undefined {
-    const content = block.content;
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-      const textParts = content
-        .filter((c) => c && typeof c === 'object' && (c as Record<string, unknown>).type === 'text')
-        .map((c) => (c as Record<string, unknown>).text as string)
-        .filter(Boolean);
-      if (textParts.length > 0) {
-        return textParts.join('\n');
-      }
-    }
-    return undefined;
   }
 
   /**
