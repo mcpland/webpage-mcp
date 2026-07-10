@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createSession, getSession } from "../agent/session-service";
 import { getDb, projects } from "../agent/db";
@@ -26,6 +26,23 @@ describe("Server agent RPC runtime", () => {
       status: "ok",
       message: "pong",
     });
+  });
+
+  test("stop cancels active agent executions", async () => {
+    const lifecycleServer = new Server({ instanceId: "lifecycle-test" });
+    const chatService = (
+      lifecycleServer as unknown as {
+        agentChatService: { cancelAllExecutions(): number };
+      }
+    ).agentChatService;
+    const cancelAllExecutions = vi.spyOn(chatService, "cancelAllExecutions");
+
+    await lifecycleServer.start({
+      sendRequestToExtensionAndWait: async () => ({ ok: true }),
+    });
+    await lifecycleServer.stop();
+
+    expect(cancelAllExecutions).toHaveBeenCalledOnce();
   });
 
   test("agent.engines.list returns engines", async () => {

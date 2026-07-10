@@ -9,6 +9,19 @@ const exitWithError = (label: string, error: unknown): never => {
   process.exit(1);
 };
 
+let shutdownStarted = false;
+const shutdown = async (exitCode: number): Promise<void> => {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+
+  try {
+    await nativeMessagingHostInstance.stopServers();
+    process.exit(exitCode);
+  } catch (error) {
+    exitWithError("shutdown failed", error);
+  }
+};
+
 try {
   serverInstance.setNativeHost(nativeMessagingHostInstance); // Server needs setNativeHost method
   nativeMessagingHostInstance.setServer(serverInstance); // NativeHost needs setServer method
@@ -23,11 +36,11 @@ process.on("error", (error) => {
 
 // Handle process signals and uncaught exceptions
 process.on("SIGINT", () => {
-  process.exit(0);
+  void shutdown(0);
 });
 
 process.on("SIGTERM", () => {
-  process.exit(0);
+  void shutdown(0);
 });
 
 process.on("uncaughtException", (error) => {

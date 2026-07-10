@@ -109,6 +109,8 @@ export class Server {
   }
 
   public async stop(): Promise<void> {
+    this.agentChatService.cancelAllExecutions();
+
     if (!this.isRunning) {
       return;
     }

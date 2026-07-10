@@ -316,8 +316,7 @@ describe('AgentChatService legacy session migration', () => {
     expect(projectServiceMocks.touchProjectActivity).toHaveBeenCalledTimes(touchedProjectCount);
     expect(attachmentServiceMocks.saveAttachment).toHaveBeenCalledTimes(savedAttachmentCount);
 
-    expect(service.cancelExecution(legacySession.id, 'shared-request-id')).toBe(true);
-    expect(service.cancelExecution(alternateSession.id, 'shared-request-id')).toBe(true);
+    expect(service.cancelAllExecutions()).toBe(2);
 
     await vi.waitFor(() => {
       expect(service.getRunningExecutions()).toHaveLength(0);

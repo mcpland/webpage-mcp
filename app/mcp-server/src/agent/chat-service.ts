@@ -542,6 +542,25 @@ export class AgentChatService {
   }
 
   /**
+   * Cancel every running execution during server shutdown.
+   * Returns the number of executions that were newly cancelled.
+   */
+  cancelAllExecutions(): number {
+    const sessionIds = new Set<string>();
+    for (const execution of this.runningExecutions.values()) {
+      if (!execution.cancelled) {
+        sessionIds.add(execution.sessionId);
+      }
+    }
+
+    let cancelled = 0;
+    for (const sessionId of sessionIds) {
+      cancelled += this.cancelSessionExecutions(sessionId);
+    }
+    return cancelled;
+  }
+
+  /**
    * Get list of running executions for diagnostics.
    */
   getRunningExecutions(): RunningExecution[] {

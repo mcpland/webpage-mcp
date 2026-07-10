@@ -131,6 +131,21 @@ export class NativeMessagingHost {
     }
   }
 
+  public async stopServers(): Promise<void> {
+    const results = await Promise.allSettled(
+      Array.from(this.servers.values()).map((server) => server.stop()),
+    );
+    const failures = results.filter((result) => result.status === 'rejected');
+    if (failures.length > 0) {
+      const details = failures
+        .map((failure) =>
+          failure.reason instanceof Error ? failure.reason.message : String(failure.reason),
+        )
+        .join('; ');
+      throw new Error(`Failed to stop one or more MCP server instances: ${details}`);
+    }
+  }
+
   private setupIpcServer(): void {
     const socketPath = getNativeSocketPath();
 
@@ -977,24 +992,9 @@ export class NativeMessagingHost {
       }
     }
 
-    const runningServers = Array.from(this.servers.values()).filter((server) => server.isRunning);
-    if (runningServers.length === 0) {
-      process.exit(0);
-      return;
-    }
-
-    Promise.allSettled(
-      runningServers.map(async (server) => {
-        try {
-          await server.stop();
-        } catch {
-          // Ignore cleanup failures; we still want process exit.
-        }
-      }),
-    )
-      .then((results) => {
-        const hasRejected = results.some((result) => result.status === 'rejected');
-        process.exit(hasRejected ? 1 : 0);
+    this.stopServers()
+      .then(() => {
+        process.exit(0);
       })
       .catch(() => {
         process.exit(1);
