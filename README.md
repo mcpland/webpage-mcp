@@ -333,7 +333,7 @@ Important:
 - **Triggerable Browser Workflows** — Launch flows from URL matches, DOM appearance, intervals, one-time schedules, keyboard commands, and context-menu actions
 - **Web Editor** — Visual in-page DOM editor overlay with a property panel, transaction system, undo/redo, and structured apply-to-code handoff (`Cmd+Shift+E`)
 - **Quick Panel** — Keyboard-triggered floating AI chat accessible from any page, with page context and streaming responses (`Cmd+Shift+U`)
-- **Semantic Search** — On-device embedding model ([all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)) with HNSW vector index for searching tab content across live browser state
+- **Semantic Search** — On-device [multilingual E5](https://huggingface.co/Xenova/multilingual-e5-small) embeddings with an HNSW vector index for searching tab content across live browser state. Remote tokenizer and model URLs use immutable Hugging Face commit revisions; downloaded ONNX binaries must also match the checked-in size and SHA-256 manifest before they are cached for offline reuse.
 - **Element Marker** — Annotate DOM elements with stable names/selectors so agents and workflows can refer to page targets more reliably
 
 ---

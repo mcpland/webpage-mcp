@@ -7,6 +7,11 @@ import { STORAGE_KEYS } from '@/common/constants';
 import { OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
 
 import { ModelCacheManager } from './model-cache-manager';
+import {
+  resolvePinnedModelArtifact,
+  verifyPinnedModelArtifact,
+  type PinnedModelArtifact,
+} from './model-assets';
 
 function decodeProbeText(buffer: ArrayBuffer, maxBytes = 512): string {
   try {
@@ -33,23 +38,32 @@ function looksLikeHtmlOrJson(text: string): boolean {
 
 /**
  * Get cached model data, prioritizing cache reads and handling redirected URLs.
- * @param {string} modelUrl Stable, permanent URL of the model
+ * @param artifact Pinned model artifact metadata
  * @returns {Promise<ArrayBuffer>} Model data as ArrayBuffer
  */
-async function getCachedModelData(modelUrl: string): Promise<ArrayBuffer> {
+async function getCachedModelData(artifact: PinnedModelArtifact): Promise<ArrayBuffer> {
   const cacheManager = ModelCacheManager.getInstance();
 
-  // 1. Try to get data from cache
-  const cachedData = await cacheManager.getCachedModelData(modelUrl);
-  if (cachedData) {
-    return cachedData;
+  // 1. Try the immutable cache key first. The legacy `main` key is accepted
+  // only after the same integrity check so existing offline caches keep working.
+  for (const cacheUrl of [artifact.url, artifact.legacyCacheUrl]) {
+    const cachedData = await cacheManager.getCachedModelData(cacheUrl);
+    if (!cachedData) continue;
+
+    try {
+      await verifyPinnedModelArtifact(cachedData, artifact);
+      return cachedData;
+    } catch (error) {
+      console.warn(`Discarding model cache entry that failed integrity verification:`, error);
+      await cacheManager.deleteCacheEntry(cacheUrl);
+    }
   }
 
   console.log('Model not found in cache or expired. Fetching from network...');
 
   try {
     // 2. Fetch data from network
-    const response = await fetch(modelUrl);
+    const response = await fetch(artifact.url);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch model: ${response.status} ${response.statusText}`);
@@ -74,7 +88,8 @@ async function getCachedModelData(modelUrl: string): Promise<ArrayBuffer> {
       );
     }
 
-    await cacheManager.storeModelData(modelUrl, arrayBuffer);
+    await verifyPinnedModelArtifact(arrayBuffer, artifact);
+    await cacheManager.storeModelData(artifact.url, arrayBuffer);
 
     console.log(
       `Model fetched from network and successfully cached (${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)}MB).`,
@@ -84,7 +99,7 @@ async function getCachedModelData(modelUrl: string): Promise<ArrayBuffer> {
   } catch (error) {
     console.error(`Error fetching or caching model:`, error);
     // If fetch fails, clean up potentially incomplete cache entries
-    await cacheManager.deleteCacheEntry(modelUrl);
+    await cacheManager.deleteCacheEntry(artifact.url);
     throw error;
   }
 }
@@ -153,16 +168,17 @@ export async function isDefaultModelCached(): Promise<boolean> {
 
     // Build the model URL
     const modelInfo = PREDEFINED_MODELS[defaultModel];
-    const modelIdentifier = modelInfo.modelIdentifier;
-    const onnxModelFile = 'model.onnx'; // Default ONNX file name
-
-    const modelIdParts = modelIdentifier.split('/');
-    const modelNameForUrl = modelIdParts.length > 1 ? modelIdentifier : `Xenova/${modelIdentifier}`;
-    const onnxModelUrl = `https://huggingface.co/${modelNameForUrl}/resolve/main/onnx/${onnxModelFile}`;
+    const artifact = resolvePinnedModelArtifact(
+      modelInfo.modelIdentifier,
+      getOnnxFileNameForVersion('quantized'),
+    );
 
     // Check if this model is cached
     const cacheManager = ModelCacheManager.getInstance();
-    return await cacheManager.isModelCached(onnxModelUrl);
+    return (
+      (await cacheManager.isModelCached(artifact.url)) ||
+      (await cacheManager.isModelCached(artifact.legacyCacheUrl))
+    );
   } catch (error) {
     console.error('Error checking if default model is cached:', error);
     return false;
@@ -1002,6 +1018,10 @@ export class SemanticSimilarityEngine {
     this.simdMath = new SIMDMathEngine();
   }
 
+  private resolveRemoteModelArtifact(): PinnedModelArtifact {
+    return resolvePinnedModelArtifact(this.config.modelIdentifier, this.config.onnxModelFile);
+  }
+
   private _sendMessageToWorker(
     type: string,
     payload?: WorkerMessagePayload,
@@ -1339,6 +1359,9 @@ export class SemanticSimilarityEngine {
       } else {
         // Use direct Worker mode
         this._setupWorker();
+        const remoteArtifact = this.config.useLocalFiles
+          ? null
+          : this.resolveRemoteModelArtifact();
 
         TransformersEnv.allowRemoteModels = !this.config.useLocalFiles;
         TransformersEnv.allowLocalModels = this.config.useLocalFiles;
@@ -1366,6 +1389,9 @@ export class SemanticSimilarityEngine {
           quantized: false,
           local_files_only: this.config.useLocalFiles,
         };
+        if (remoteArtifact) {
+          tokenizerConfig.revision = remoteArtifact.revision;
+        }
 
         // For models that do not require token_type_ids, set this explicitly in the tokenizer configuration
         if (!this.config.requiresTokenTypeIds) {
@@ -1399,23 +1425,15 @@ export class SemanticSimilarityEngine {
           });
         } else {
           // Remote files mode - use cached model data
-          const modelIdParts = this.config.modelIdentifier.split('/');
-          const modelNameForUrl =
-            modelIdParts.length > 1
-              ? this.config.modelIdentifier
-              : `Xenova/${this.config.modelIdentifier}`;
-          const onnxModelUrl = `https://huggingface.co/${modelNameForUrl}/resolve/main/onnx/${this.config.onnxModelFile}`;
-
-          if (!this.config.modelIdentifier.includes('/')) {
-            console.warn(
-              `Warning: modelIdentifier "${this.config.modelIdentifier}" might not be a full HuggingFace path. Assuming Xenova prefix for remote URL.`,
-            );
+          if (!remoteArtifact) {
+            throw new Error('Pinned remote model artifact was not resolved.');
           }
-
-          console.log(`SemanticSimilarityEngine: Getting cached model data from ${onnxModelUrl}`);
+          console.log(
+            `SemanticSimilarityEngine: Getting cached model data from ${remoteArtifact.url}`,
+          );
 
           // Get model data from cache (may download if not cached)
-          const modelData = await getCachedModelData(onnxModelUrl);
+          const modelData = await getCachedModelData(remoteArtifact);
 
           console.log(
             `SemanticSimilarityEngine: Sending cached model data to worker (${modelData.byteLength} bytes)`,
@@ -1493,6 +1511,7 @@ export class SemanticSimilarityEngine {
     // Use direct Worker mode
     reportProgress('initializing', 25, 'Setting up worker...');
     this._setupWorker();
+    const remoteArtifact = this.config.useLocalFiles ? null : this.resolveRemoteModelArtifact();
 
     TransformersEnv.allowRemoteModels = !this.config.useLocalFiles;
     TransformersEnv.allowLocalModels = this.config.useLocalFiles;
@@ -1532,6 +1551,9 @@ export class SemanticSimilarityEngine {
       quantized: false,
       local_files_only: this.config.useLocalFiles,
     };
+    if (remoteArtifact) {
+      tokenizerConfig.revision = remoteArtifact.revision;
+    }
 
     // For models that do not require token_type_ids, set this explicitly in the tokenizer configuration
     if (!this.config.requiresTokenTypeIds) {
@@ -1571,24 +1593,16 @@ export class SemanticSimilarityEngine {
       });
     } else {
       // Remote files mode - use cached model data
-      const modelIdParts = this.config.modelIdentifier.split('/');
-      const modelNameForUrl =
-        modelIdParts.length > 1
-          ? this.config.modelIdentifier
-          : `Xenova/${this.config.modelIdentifier}`;
-      const onnxModelUrl = `https://huggingface.co/${modelNameForUrl}/resolve/main/onnx/${this.config.onnxModelFile}`;
-
-      if (!this.config.modelIdentifier.includes('/')) {
-        console.warn(
-          `Warning: modelIdentifier "${this.config.modelIdentifier}" might not be a full HuggingFace path. Assuming Xenova prefix for remote URL.`,
-        );
+      if (!remoteArtifact) {
+        throw new Error('Pinned remote model artifact was not resolved.');
       }
-
       reportProgress('downloading', 80, 'Loading cached ONNX model...');
-      console.log(`SemanticSimilarityEngine: Getting cached model data from ${onnxModelUrl}`);
+      console.log(
+        `SemanticSimilarityEngine: Getting cached model data from ${remoteArtifact.url}`,
+      );
 
       // Get model data from cache (may download if not cached)
-      const modelData = await getCachedModelData(onnxModelUrl);
+      const modelData = await getCachedModelData(remoteArtifact);
 
       console.log(
         `SemanticSimilarityEngine: Sending cached model data to worker (${modelData.byteLength} bytes)`,
