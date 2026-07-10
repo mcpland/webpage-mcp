@@ -8,6 +8,10 @@ const hnswMocks = vi.hoisted(() => {
   const readCalls: string[] = [];
   const addedLabels: number[] = [];
   const deletedLabels: number[] = [];
+  const searchCalls: Array<{
+    filter?: (label: number) => boolean;
+    topK: number;
+  }> = [];
   const pendingWriteSyncs: Array<() => void> = [];
   const instances: Array<{ count: number; fileName?: string }> = [];
   let populateSnapshot: Map<string, number> | null = null;
@@ -15,6 +19,7 @@ const hnswMocks = vi.hoisted(() => {
   let synced = true;
   let autoCompleteWriteSync = true;
   let vectorFloatDeleteCalls = 0;
+  let searchFailuresRemaining = 0;
   let writeFailuresRemaining = 0;
 
   class VectorFloat {
@@ -32,6 +37,8 @@ const hnswMocks = vi.hoisted(() => {
   class HierarchicalNSW {
     count = 0;
     readonly fileName?: string;
+    private labels: number[] = [];
+    private readonly deleted = new Set<number>();
 
     constructor(_space: string, _dimension: number, fileName?: string) {
       this.fileName = fileName;
@@ -40,6 +47,8 @@ const hnswMocks = vi.hoisted(() => {
 
     initIndex() {
       this.count = 0;
+      this.labels = [];
+      this.deleted.clear();
     }
 
     setEfSearch() {}
@@ -50,11 +59,28 @@ const hnswMocks = vi.hoisted(() => {
 
     addPoint(_vector: unknown, label: number) {
       addedLabels.push(label);
+      this.labels.push(label);
       this.count += 1;
     }
 
-    searchKnn() {
-      return { neighbors: [], distances: [] };
+    searchKnn(
+      _query: unknown,
+      topK: number,
+      filter?: (label: number) => boolean,
+    ) {
+      searchCalls.push({ filter, topK });
+      if (searchFailuresRemaining > 0) {
+        searchFailuresRemaining -= 1;
+        throw new Error("search failed");
+      }
+      const neighbors = this.labels
+        .filter((label) => !this.deleted.has(label))
+        .filter((label) => !filter || filter(label))
+        .slice(0, topK);
+      return {
+        neighbors,
+        distances: neighbors.map((_label, index) => 0.1 + index * 0.01),
+      };
     }
 
     resizeIndex() {}
@@ -65,12 +91,18 @@ const hnswMocks = vi.hoisted(() => {
 
     markDelete(label: number) {
       deletedLabels.push(label);
+      this.deleted.add(label);
     }
 
     async readIndex(fileName: string) {
       readCalls.push(fileName);
       if (!files.has(fileName)) throw new Error("missing index");
       this.count = fileCounts.get(fileName) ?? 0;
+      this.labels = Array.from(
+        { length: this.count },
+        (_value, index) => index,
+      );
+      this.deleted.clear();
     }
 
     writeIndex(fileName: string) {
@@ -130,6 +162,8 @@ const hnswMocks = vi.hoisted(() => {
       synced = true;
       autoCompleteWriteSync = true;
       pendingWriteSyncs.length = 0;
+      searchCalls.length = 0;
+      searchFailuresRemaining = 0;
       populateSnapshot = null;
       writeFailuresRemaining = 0;
     },
@@ -139,11 +173,15 @@ const hnswMocks = vi.hoisted(() => {
     setWriteFailures(value: number) {
       writeFailuresRemaining = value;
     },
+    setSearchFailures(value: number) {
+      searchFailuresRemaining = value;
+    },
     completeNextWriteSync() {
       pendingWriteSyncs.shift()?.();
     },
     pendingWriteSyncs,
     readCalls,
+    searchCalls,
     setPopulateSnapshot(entries: Array<[string, number]>) {
       populateSnapshot = new Map(entries);
     },
@@ -894,6 +932,251 @@ describe("vector database cleanup", () => {
       completedPages: [],
       repairTabIds: [7],
     });
+  });
+
+  it("never searches an uncommitted page while returning a completed page", async () => {
+    const indexFileName = `search-completion-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await database.addDocument(
+      7,
+      "https://example.test/incomplete",
+      "Incomplete",
+      { text: "incomplete", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    await database.addDocument(
+      8,
+      "https://example.test/complete",
+      "Complete",
+      { text: "complete", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([0, 1, 0]),
+    );
+    await database.commitTabPage(
+      8,
+      "https://example.test/complete",
+      "Complete",
+    );
+
+    await expect(
+      database.search(new Float32Array([1, 0, 0]), 10),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        document: expect.objectContaining({ tabId: 8, title: "Complete" }),
+      }),
+    ]);
+    const filter = hnswMocks.searchCalls.at(-1)?.filter;
+    expect(filter?.(0)).toBe(false);
+    expect(filter?.(1)).toBe(true);
+  });
+
+  it("makes a page searchable only after its completion commit succeeds", async () => {
+    const indexFileName = `search-after-commit-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+
+    await expect(database.search(new Float32Array([1, 0, 0]))).resolves.toEqual(
+      [],
+    );
+    expect(hnswMocks.searchCalls).toHaveLength(0);
+
+    await database.commitTabPage(7, "https://example.test/page", "Page");
+    const deletesBeforeSearch = hnswMocks.getVectorFloatDeleteCalls();
+    await expect(database.search(new Float32Array([1, 0, 0]))).resolves.toEqual(
+      [
+        expect.objectContaining({
+          document: expect.objectContaining({ tabId: 7, title: "Page" }),
+        }),
+      ],
+    );
+    expect(hnswMocks.getVectorFloatDeleteCalls() - deletesBeforeSearch).toBe(1);
+  });
+
+  it("releases a failed VectorFloat query before using the search fallback", async () => {
+    const indexFileName = `search-vector-release-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    await database.commitTabPage(7, "https://example.test/page", "Page");
+    hnswMocks.setSearchFailures(1);
+    const deletesBeforeSearch = hnswMocks.getVectorFloatDeleteCalls();
+
+    await expect(database.search(new Float32Array([1, 0, 0]))).resolves.toEqual(
+      [
+        expect.objectContaining({
+          document: expect.objectContaining({ tabId: 7 }),
+        }),
+      ],
+    );
+    expect(hnswMocks.searchCalls).toHaveLength(2);
+    expect(hnswMocks.getVectorFloatDeleteCalls() - deletesBeforeSearch).toBe(1);
+  });
+
+  it("queues search behind an in-flight completion persistence", async () => {
+    const indexFileName = `search-commit-queue-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+
+    const statefulRemove = chrome.storage.local.remove;
+    let releaseRemoval!: () => void;
+    const removalGate = new Promise<void>((resolve) => {
+      releaseRemoval = resolve;
+    });
+    chrome.storage.local.remove = vi.fn(async (keys: string | string[]) => {
+      await removalGate;
+      await statefulRemove(keys);
+    }) as typeof chrome.storage.local.remove;
+
+    const commit = database.commitTabPage(
+      7,
+      "https://example.test/page",
+      "Page",
+    );
+    await vi.waitFor(() =>
+      expect(chrome.storage.local.remove).toHaveBeenCalled(),
+    );
+    let searchSettled = false;
+    const search = database.search(new Float32Array([1, 0, 0])).finally(() => {
+      searchSettled = true;
+    });
+    await Promise.resolve();
+    expect(searchSettled).toBe(false);
+    expect(hnswMocks.searchCalls).toHaveLength(0);
+
+    releaseRemoval();
+    await expect(commit).resolves.toBeUndefined();
+    await expect(search).resolves.toEqual([
+      expect.objectContaining({
+        document: expect.objectContaining({ tabId: 7 }),
+      }),
+    ]);
+  });
+
+  it("keeps a page unsearchable after its queued completion commit fails", async () => {
+    const indexFileName = `search-failed-commit-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    const transactionSpy = await abortNextVectorMappingWrite();
+    const statefulSet = chrome.storage.local.set;
+    let rejectFallbackOnce = true;
+    chrome.storage.local.set = vi.fn(async (values) => {
+      if (rejectFallbackOnce) {
+        rejectFallbackOnce = false;
+        throw new Error("completion fallback failed");
+      }
+      await statefulSet(values);
+    }) as typeof chrome.storage.local.set;
+
+    try {
+      const commit = database.commitTabPage(
+        7,
+        "https://example.test/page",
+        "Page",
+      );
+      const search = database.search(new Float32Array([1, 0, 0]));
+
+      await expect(commit).rejects.toThrow("Failed to save vector mappings");
+      await expect(search).resolves.toEqual([]);
+      expect(hnswMocks.searchCalls).toHaveLength(0);
+    } finally {
+      transactionSpy.mockRestore();
+    }
+  });
+
+  it("treats a deleted last tab as an empty searchable state", async () => {
+    const indexFileName = `search-empty-deleted-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    await database.commitTabPage(7, "https://example.test/page", "Page");
+    await database.removeTabDocuments(7);
+    hnswMocks.searchCalls.length = 0;
+
+    await expect(database.search(new Float32Array([1, 0, 0]))).resolves.toEqual(
+      [],
+    );
+    expect(hnswMocks.searchCalls).toHaveLength(0);
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+  });
+
+  it("serializes clear behind an in-flight add mutation", async () => {
+    const indexFileName = `clear-add-queue-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    hnswMocks.setAutoCompleteWriteSync(false);
+
+    const add = database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    await vi.waitFor(() => expect(hnswMocks.pendingWriteSyncs).toHaveLength(1));
+    let clearSettled = false;
+    const clear = database.clear().finally(() => {
+      clearSettled = true;
+    });
+    await Promise.resolve();
+    expect(clearSettled).toBe(false);
+    expect(database.getStats().totalDocuments).toBe(1);
+
+    hnswMocks.completeNextWriteSync();
+    await expect(add).resolves.toBe(0);
+    await vi.waitFor(() => expect(hnswMocks.pendingWriteSyncs).toHaveLength(1));
+    hnswMocks.completeNextWriteSync();
+    await expect(clear).resolves.toBeUndefined();
+
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+    await expect(database.search(new Float32Array([1, 0, 0]))).resolves.toEqual(
+      [],
+    );
   });
 
   it("rejects mixed page commit and classifies incomplete mixed mappings for repair", async () => {

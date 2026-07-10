@@ -1472,6 +1472,15 @@ export class VectorDatabase {
       await this.initialize();
     }
 
+    return this.enqueueMutation(() =>
+      this.searchInternal(queryEmbedding, topK),
+    );
+  }
+
+  private async searchInternal(
+    queryEmbedding: Float32Array,
+    topK: number,
+  ): Promise<SearchResult[]> {
     try {
       // Validate query vector
       if (!queryEmbedding || queryEmbedding.length !== this.config.dimension) {
@@ -1493,6 +1502,18 @@ export class VectorDatabase {
         `VectorDatabase: Searching with query embedding dimension: ${queryEmbedding.length}, topK: ${topK}`,
       );
 
+      // Only a page whose exact label set and identity have crossed the durable
+      // completion boundary is searchable. This also makes an HNSW index that
+      // contains only deleted/tombstoned points a valid empty search state,
+      // without trying to resurrect document mappings from persistence.
+      const searchableLabels = this.collectSearchableLabels();
+      if (searchableLabels.size === 0) {
+        console.log(
+          "VectorDatabase: No durably completed pages are searchable",
+        );
+        return [];
+      }
+
       // Check if index is empty
       const currentCount = this.index.getCurrentCount();
       if (currentCount === 0) {
@@ -1502,49 +1523,42 @@ export class VectorDatabase {
 
       console.log(`VectorDatabase: Index contains ${currentCount} vectors`);
 
-      // Check if document mapping and index are synchronized
-      const mappingCount = this.documents.size;
-      if (mappingCount === 0 && currentCount > 0) {
-        console.warn(
-          `VectorDatabase: Index has ${currentCount} vectors but document mapping is empty. Attempting to reload mappings...`,
-        );
-        await this.loadDocumentMappings();
-
-        if (this.documents.size === 0) {
-          console.error(
-            "VectorDatabase: Failed to load document mappings. Index and mappings are out of sync.",
-          );
-          return [];
-        }
-        console.log(
-          `VectorDatabase: Successfully reloaded ${this.documents.size} document mappings`,
-        );
-      }
-
       // Process query vector according to hnswlib-wasm-static emscripten binding requirements
       let queryVector;
       let searchResult;
+      const completedPageFilter = (label: number) =>
+        searchableLabels.has(label);
 
       try {
         // Method 1: Try using VectorFloat constructor (if available)
         if (globalHnswlib && globalHnswlib.VectorFloat) {
           console.log("VectorDatabase: Using VectorFloat for search query");
           queryVector = new globalHnswlib.VectorFloat();
-          // Add elements to VectorFloat one by one
-          for (let i = 0; i < queryEmbedding.length; i++) {
-            queryVector.push_back(queryEmbedding[i]);
-          }
-          searchResult = this.index.searchKnn(queryVector, topK, undefined);
-
-          // Clean up VectorFloat object
-          if (queryVector && typeof queryVector.delete === "function") {
-            queryVector.delete();
+          try {
+            // Add elements to VectorFloat one by one
+            for (let i = 0; i < queryEmbedding.length; i++) {
+              queryVector.push_back(queryEmbedding[i]);
+            }
+            searchResult = this.index.searchKnn(
+              queryVector,
+              topK,
+              completedPageFilter,
+            );
+          } finally {
+            // Embind allocations must be released before a failed VectorFloat
+            // search falls back to a JS typed/plain array.
+            if (typeof queryVector.delete === "function") queryVector.delete();
+            queryVector = null;
           }
         } else {
           // Method 2: Use plain JS array (fallback)
           console.log("VectorDatabase: Using plain JS array for search query");
           const queryArray = Array.from(queryEmbedding);
-          searchResult = this.index.searchKnn(queryArray, topK, undefined);
+          searchResult = this.index.searchKnn(
+            queryArray,
+            topK,
+            completedPageFilter,
+          );
         }
       } catch (vectorError) {
         console.error(
@@ -1557,7 +1571,11 @@ export class VectorDatabase {
           console.log(
             "VectorDatabase: Trying Float32Array directly for search",
           );
-          searchResult = this.index.searchKnn(queryEmbedding, topK, undefined);
+          searchResult = this.index.searchKnn(
+            queryEmbedding,
+            topK,
+            completedPageFilter,
+          );
         } catch (float32Error) {
           console.error(
             "VectorDatabase: Float32Array search failed:",
@@ -1571,7 +1589,7 @@ export class VectorDatabase {
           searchResult = this.index.searchKnn(
             [...queryEmbedding],
             topK,
-            undefined,
+            completedPageFilter,
           );
         }
       }
@@ -1599,7 +1617,16 @@ export class VectorDatabase {
 
         // Find corresponding document by label
         const document = this.findDocumentByLabel(label);
-        if (document) {
+        const completion = document
+          ? this.completedTabPages.get(document.tabId)
+          : undefined;
+        if (
+          document &&
+          searchableLabels.has(label) &&
+          completion?.labels.includes(label) &&
+          document.url === completion.url &&
+          document.title === completion.title
+        ) {
           console.log(
             `VectorDatabase: Found document for label ${label}: ${document.id}`,
           );
@@ -1672,6 +1699,16 @@ export class VectorDatabase {
       });
       throw error;
     }
+  }
+
+  private collectSearchableLabels(): Set<number> {
+    const labels = new Set<number>();
+    for (const tabId of this.completedTabPages.keys()) {
+      const completedPage = this.getExactCompletedPage(tabId);
+      if (!completedPage) continue;
+      for (const label of completedPage.labels) labels.add(label);
+    }
+    return labels;
   }
 
   /**
@@ -1927,41 +1964,18 @@ export class VectorDatabase {
     ]);
 
     for (const tabId of [...allTabIds].sort((left, right) => left - right)) {
-      const labels = Array.from(this.tabDocuments.get(tabId) ?? []).sort(
-        (left, right) => left - right,
-      );
-      const completion = this.completedTabPages.get(tabId);
-      if (labels.length === 0 || !completion) {
-        repairTabs.add(tabId);
-        continue;
-      }
-
-      const documents = labels.map((label) => this.documents.get(label));
-      const identityMatches = documents.every(
-        (document) =>
-          document?.tabId === tabId &&
-          document.url === completion.url &&
-          document.title === completion.title,
-      );
-      const labelsMatch =
-        completion.expectedCount === labels.length &&
-        completion.labels.length === labels.length &&
-        completion.labels.every((label, index) => label === labels[index]);
-      if (
-        !identityMatches ||
-        !labelsMatch ||
-        completion.pageKey !== `${completion.url}\u0000${completion.title}`
-      ) {
+      const completedPage = this.getExactCompletedPage(tabId);
+      if (!completedPage) {
         repairTabs.add(tabId);
         continue;
       }
 
       completedPages.push({
         tabId,
-        pageKey: completion.pageKey,
-        url: completion.url,
-        title: completion.title,
-        expectedCount: completion.expectedCount,
+        pageKey: completedPage.completion.pageKey,
+        url: completedPage.completion.url,
+        title: completedPage.completion.title,
+        expectedCount: completedPage.completion.expectedCount,
       });
     }
 
@@ -1969,6 +1983,39 @@ export class VectorDatabase {
       completedPages,
       repairTabIds: [...repairTabs].sort((left, right) => left - right),
     };
+  }
+
+  private getExactCompletedPage(tabId: number): {
+    completion: PersistedTabPageCompletion;
+    labels: number[];
+  } | null {
+    const labels = Array.from(this.tabDocuments.get(tabId) ?? []).sort(
+      (left, right) => left - right,
+    );
+    const completion = this.completedTabPages.get(tabId);
+    if (labels.length === 0 || !completion) return null;
+
+    const labelsMatch =
+      completion.expectedCount === labels.length &&
+      completion.labels.length === labels.length &&
+      completion.labels.every((label, index) => label === labels[index]);
+    const identityMatches = labels.every((label) => {
+      const document = this.documents.get(label);
+      return (
+        document?.tabId === tabId &&
+        document.url === completion.url &&
+        document.title === completion.title
+      );
+    });
+    if (
+      !labelsMatch ||
+      !identityMatches ||
+      completion.pageKey !== `${completion.url}\u0000${completion.title}`
+    ) {
+      return null;
+    }
+
+    return { completion, labels };
   }
 
   /**
@@ -2100,11 +2147,16 @@ export class VectorDatabase {
    * Clear entire database
    */
   public async clear(options: VectorDatabaseClearOptions = {}): Promise<void> {
-    console.log("VectorDatabase: Starting complete database clear...");
-    const persistIndex = options.persistIndex !== false;
     if (this.isInitializing && this.initPromise) {
       await this.initPromise;
     }
+
+    const persistIndex = options.persistIndex !== false;
+    return this.enqueueMutation(() => this.clearInternal(persistIndex));
+  }
+
+  private async clearInternal(persistIndex: boolean): Promise<void> {
+    console.log("VectorDatabase: Starting complete database clear...");
 
     this.documents.clear();
     this.tabDocuments.clear();
