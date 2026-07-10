@@ -3,17 +3,28 @@
  * @description Implement Flow’s CRUD operations
  */
 
-import type { FlowId } from '../domain/ids';
-import type { FlowV3 } from '../domain/flow';
-import { FLOW_SCHEMA_VERSION } from '../domain/flow';
-import { RR_ERROR_CODES, createRRError } from '../domain/errors';
-import type { FlowsStore } from '../engine/storage/storage-port';
-import { RR_V3_STORES, withTransaction } from './db';
+import type { FlowId } from "../domain/ids";
+import type { FlowV3 } from "../domain/flow";
+import { FLOW_SCHEMA_VERSION } from "../domain/flow";
+import {
+  FLOW_RESOURCE_LIMITS,
+  findFlowResourceLimitViolation,
+  normalizeFlowListOptions,
+  type FlowListOptions,
+} from "../domain/flow-limits";
+import { RR_ERROR_CODES, createRRError } from "../domain/errors";
+import type { FlowsStore } from "../engine/storage/storage-port";
+import { RR_V3_STORES, withTransaction } from "./db";
 
 /**
  * Verify Flow structure
  */
 export function validateFlow(flow: FlowV3): void {
+  const resourceViolation = findFlowResourceLimitViolation(flow);
+  if (resourceViolation) {
+    throw createRRError(RR_ERROR_CODES.VALIDATION_ERROR, resourceViolation);
+  }
+
   // Verify schema version
   if (flow.schemaVersion !== FLOW_SCHEMA_VERSION) {
     throw createRRError(
@@ -24,13 +35,19 @@ export function validateFlow(flow: FlowV3): void {
 
   // Validate required fields
   if (!flow.id) {
-    throw createRRError(RR_ERROR_CODES.VALIDATION_ERROR, 'Flow id is required');
+    throw createRRError(RR_ERROR_CODES.VALIDATION_ERROR, "Flow id is required");
   }
   if (!flow.name) {
-    throw createRRError(RR_ERROR_CODES.VALIDATION_ERROR, 'Flow name is required');
+    throw createRRError(
+      RR_ERROR_CODES.VALIDATION_ERROR,
+      "Flow name is required",
+    );
   }
   if (!flow.entryNodeId) {
-    throw createRRError(RR_ERROR_CODES.VALIDATION_ERROR, 'Flow entryNodeId is required');
+    throw createRRError(
+      RR_ERROR_CODES.VALIDATION_ERROR,
+      "Flow entryNodeId is required",
+    );
   }
 
   const nodeIds = new Set<string>();
@@ -83,19 +100,35 @@ export function validateFlow(flow: FlowV3): void {
  */
 export function createFlowsStore(): FlowsStore {
   return {
-    async list(): Promise<FlowV3[]> {
-      return withTransaction(RR_V3_STORES.FLOWS, 'readonly', async (stores) => {
+    async list(options?: FlowListOptions): Promise<FlowV3[]> {
+      const { offset, limit } = normalizeFlowListOptions(options);
+      return withTransaction(RR_V3_STORES.FLOWS, "readonly", async (stores) => {
         const store = stores[RR_V3_STORES.FLOWS];
         return new Promise<FlowV3[]>((resolve, reject) => {
-          const request = store.getAll();
-          request.onsuccess = () => resolve(request.result as FlowV3[]);
+          const results: FlowV3[] = [];
+          let skipped = 0;
+          const request = store.index("updatedAt").openCursor(null, "prev");
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor || results.length >= limit) {
+              resolve(results);
+              return;
+            }
+            if (skipped < offset) {
+              skipped += 1;
+              cursor.continue();
+              return;
+            }
+            results.push(cursor.value as FlowV3);
+            cursor.continue();
+          };
           request.onerror = () => reject(request.error);
         });
       });
     },
 
     async get(id: FlowId): Promise<FlowV3 | null> {
-      return withTransaction(RR_V3_STORES.FLOWS, 'readonly', async (stores) => {
+      return withTransaction(RR_V3_STORES.FLOWS, "readonly", async (stores) => {
         const store = stores[RR_V3_STORES.FLOWS];
         return new Promise<FlowV3 | null>((resolve, reject) => {
           const request = store.get(id);
@@ -109,25 +142,54 @@ export function createFlowsStore(): FlowsStore {
       // Verification
       validateFlow(flow);
 
-      return withTransaction(RR_V3_STORES.FLOWS, 'readwrite', async (stores) => {
-        const store = stores[RR_V3_STORES.FLOWS];
-        return new Promise<void>((resolve, reject) => {
-          const request = store.put(flow);
-          request.onsuccess = () => resolve();
-          request.onerror = () => reject(request.error);
-        });
-      });
+      return withTransaction(
+        RR_V3_STORES.FLOWS,
+        "readwrite",
+        async (stores) => {
+          const store = stores[RR_V3_STORES.FLOWS];
+          const existing = await new Promise<FlowV3 | undefined>(
+            (resolve, reject) => {
+              const request = store.get(flow.id);
+              request.onsuccess = () =>
+                resolve(request.result as FlowV3 | undefined);
+              request.onerror = () => reject(request.error);
+            },
+          );
+          if (!existing) {
+            const count = await new Promise<number>((resolve, reject) => {
+              const request = store.count();
+              request.onsuccess = () => resolve(request.result);
+              request.onerror = () => reject(request.error);
+            });
+            if (count >= FLOW_RESOURCE_LIMITS.maxStoredFlows) {
+              throw createRRError(
+                RR_ERROR_CODES.VALIDATION_ERROR,
+                `Cannot store more than ${FLOW_RESOURCE_LIMITS.maxStoredFlows} flows`,
+              );
+            }
+          }
+          return new Promise<void>((resolve, reject) => {
+            const request = store.put(flow);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+          });
+        },
+      );
     },
 
     async delete(id: FlowId): Promise<void> {
-      return withTransaction(RR_V3_STORES.FLOWS, 'readwrite', async (stores) => {
-        const store = stores[RR_V3_STORES.FLOWS];
-        return new Promise<void>((resolve, reject) => {
-          const request = store.delete(id);
-          request.onsuccess = () => resolve();
-          request.onerror = () => reject(request.error);
-        });
-      });
+      return withTransaction(
+        RR_V3_STORES.FLOWS,
+        "readwrite",
+        async (stores) => {
+          const store = stores[RR_V3_STORES.FLOWS];
+          return new Promise<void>((resolve, reject) => {
+            const request = store.delete(id);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+          });
+        },
+      );
     },
   };
 }

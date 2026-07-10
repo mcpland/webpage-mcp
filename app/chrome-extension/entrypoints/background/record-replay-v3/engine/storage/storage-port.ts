@@ -3,20 +3,24 @@
  * @description Define the abstract interface of the Storage layer for dependency injection
  */
 
-import type { FlowId, RunId, TriggerId } from '../../domain/ids';
-import type { FlowV3 } from '../../domain/flow';
-import type { RunEvent, RunEventInput, RunRecordV3 } from '../../domain/events';
-import type { PersistentVarRecord, PersistentVariableName } from '../../domain/variables';
-import type { TriggerSpec } from '../../domain/triggers';
-import type { RunQueue } from '../queue/queue';
-import type { ArtifactStore } from '../../storage/artifacts';
+import type { FlowId, RunId, TriggerId } from "../../domain/ids";
+import type { FlowV3 } from "../../domain/flow";
+import type { FlowListOptions } from "../../domain/flow-limits";
+import type { RunEvent, RunEventInput, RunRecordV3 } from "../../domain/events";
+import type {
+  PersistentVarRecord,
+  PersistentVariableName,
+} from "../../domain/variables";
+import type { TriggerSpec } from "../../domain/triggers";
+import type { RunQueue } from "../queue/queue";
+import type { ArtifactStore } from "../../storage/artifacts";
 
 /**
  * FlowsStore interface
  */
 export interface FlowsStore {
-  /** List all flows */
-  list(): Promise<FlowV3[]>;
+  /** List flows within the persisted collection bound. */
+  list(options?: FlowListOptions): Promise<FlowV3[]>;
   /** Get a single flow */
   get(id: FlowId): Promise<FlowV3 | null>;
   /** Save Flow */
@@ -57,7 +61,10 @@ export interface EventsStore {
    * @param runId Run ID
    * @param opts Query options
    */
-  list(runId: RunId, opts?: { fromSeq?: number; limit?: number }): Promise<RunEvent[]>;
+  list(
+    runId: RunId,
+    opts?: { fromSeq?: number; limit?: number },
+  ): Promise<RunEvent[]>;
 }
 
 /**
@@ -69,7 +76,7 @@ export interface PersistentVarsStore {
   /** Set persistent variables */
   set(
     key: PersistentVariableName,
-    value: PersistentVarRecord['value'],
+    value: PersistentVarRecord["value"],
   ): Promise<PersistentVarRecord>;
   /** Delete persistent variables */
   delete(key: PersistentVariableName): Promise<void>;
@@ -121,7 +128,7 @@ function createNotImplementedStore<T extends object>(name: string): T {
   return new Proxy(target, {
     get(_, prop) {
       // Avoid thenable behavior by returning undefined for 'then'
-      if (prop === 'then') {
+      if (prop === "then") {
         return undefined;
       }
       return async () => {
@@ -137,12 +144,14 @@ function createNotImplementedStore<T extends object>(name: string): T {
  */
 export function createNotImplementedStoragePort(): StoragePort {
   return {
-    flows: createNotImplementedStore<FlowsStore>('FlowsStore'),
-    runs: createNotImplementedStore<RunsStore>('RunsStore'),
-    events: createNotImplementedStore<EventsStore>('EventsStore'),
-    queue: createNotImplementedStore<RunQueue>('RunQueue'),
-    persistentVars: createNotImplementedStore<PersistentVarsStore>('PersistentVarsStore'),
-    triggers: createNotImplementedStore<TriggersStore>('TriggersStore'),
-    artifacts: createNotImplementedStore<ArtifactStore>('ArtifactStore'),
+    flows: createNotImplementedStore<FlowsStore>("FlowsStore"),
+    runs: createNotImplementedStore<RunsStore>("RunsStore"),
+    events: createNotImplementedStore<EventsStore>("EventsStore"),
+    queue: createNotImplementedStore<RunQueue>("RunQueue"),
+    persistentVars: createNotImplementedStore<PersistentVarsStore>(
+      "PersistentVarsStore",
+    ),
+    triggers: createNotImplementedStore<TriggersStore>("TriggersStore"),
+    artifacts: createNotImplementedStore<ArtifactStore>("ArtifactStore"),
   };
 }
