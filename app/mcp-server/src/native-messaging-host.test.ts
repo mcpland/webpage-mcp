@@ -6,8 +6,12 @@ import {
   NativeMessageWriter,
 } from './native-message-output';
 import {
+  IPC_METHOD_MAX_BYTES,
+  IPC_TOOL_NAME_MAX_BYTES,
+  NATIVE_CONTROL_IDENTIFIER_MAX_BYTES,
   NATIVE_MAX_INSTANCE_LABEL_BYTES,
   NATIVE_MAX_SERVER_INSTANCES,
+  NATIVE_MESSAGE_TYPE_MAX_BYTES,
   NativeMessagingHost,
 } from './native-messaging-host';
 import type { RealtimeEvent } from './agent/types';
@@ -66,6 +70,57 @@ function decodeFrame(frame: Buffer): Record<string, unknown> {
 }
 
 describe('NativeMessagingHost outbound requests', () => {
+  it('rejects oversized native and IPC routing fields before dispatch', async () => {
+    const output = new CollectingWritable();
+    const host = new NativeMessagingHost(new NativeMessageWriter(output));
+    const internal = host as unknown as {
+      handleMessage: (message: unknown) => Promise<void>;
+      handleIpcRequest: (request: unknown) => Promise<unknown>;
+      parseAgentRpcPayload: (payload: unknown) => unknown;
+    };
+
+    await internal.handleMessage({
+      type: 'x'.repeat(NATIVE_MESSAGE_TYPE_MAX_BYTES + 1),
+      requestId: 'bounded-request',
+    });
+    await internal.handleMessage({
+      type: NativeMessageType.AGENT_RPC,
+      requestId: 'x'.repeat(NATIVE_CONTROL_IDENTIFIER_MAX_BYTES + 1),
+      payload: { operation: 'health.ping' },
+    });
+
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(2));
+    expect(decodeFrame(output.chunks[0])).toMatchObject({
+      responseToRequestId: 'bounded-request',
+      error: expect.stringContaining('message type'),
+    });
+    expect(decodeFrame(output.chunks[1])).toMatchObject({
+      type: NativeMessageType.ERROR_FROM_NATIVE_HOST,
+      payload: { message: expect.stringContaining('requestId') },
+    });
+
+    await expect(
+      internal.handleIpcRequest({ method: 'x'.repeat(IPC_METHOD_MAX_BYTES + 1) }),
+    ).rejects.toThrow('IPC method');
+    await expect(
+      internal.handleIpcRequest({
+        method: 'ping',
+        params: { sessionId: 'x'.repeat(NATIVE_CONTROL_IDENTIFIER_MAX_BYTES + 1) },
+      }),
+    ).rejects.toThrow('sessionId');
+    await expect(
+      internal.handleIpcRequest({
+        method: 'mcp_call_tool',
+        params: { name: 'x'.repeat(IPC_TOOL_NAME_MAX_BYTES + 1) },
+      }),
+    ).rejects.toThrow('name');
+    expect(() =>
+      internal.parseAgentRpcPayload({
+        operation: 'x'.repeat(NATIVE_MESSAGE_TYPE_MAX_BYTES + 1),
+      }),
+    ).toThrow('agent_rpc payload must include operation');
+  });
+
   it('bounds synchronized server instance count and labels before allocation', () => {
     const host = new NativeMessagingHost(
       new NativeMessageWriter(new Writable({ write: (_chunk, _encoding, callback) => callback() })),

@@ -70,6 +70,34 @@ const IPC_RESUME_LOW_WATERMARK = 4;
 const NATIVE_MAX_PENDING_DIRECTIVES = 64;
 export const NATIVE_MAX_SERVER_INSTANCES = 64;
 export const NATIVE_MAX_INSTANCE_LABEL_BYTES = 256;
+export const NATIVE_CONTROL_IDENTIFIER_MAX_BYTES = 256;
+export const NATIVE_MESSAGE_TYPE_MAX_BYTES = 128;
+export const NATIVE_CONTROL_ERROR_MAX_BYTES = 8 * 1024;
+export const IPC_METHOD_MAX_BYTES = 128;
+export const IPC_TOOL_NAME_MAX_BYTES = 256;
+
+function isBoundedNonEmptyString(value: unknown, maximumBytes: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    Buffer.byteLength(value, 'utf8') <= maximumBytes
+  );
+}
+
+function truncateControlText(value: string, maximumBytes = NATIVE_CONTROL_ERROR_MAX_BYTES): string {
+  if (Buffer.byteLength(value, 'utf8') <= maximumBytes) return value;
+  const marker = '…';
+  const markerBytes = Buffer.byteLength(marker, 'utf8');
+  let retained = '';
+  let retainedBytes = 0;
+  for (const character of value) {
+    const characterBytes = Buffer.byteLength(character, 'utf8');
+    if (retainedBytes + characterBytes + markerBytes > maximumBytes) break;
+    retained += character;
+    retainedBytes += characterBytes;
+  }
+  return `${retained}${marker}`;
+}
 
 function agentStreamCoalesceKey(...parts: string[]): string {
   // JSON tuple encoding prevents delimiter collisions between subscription IDs
@@ -415,7 +443,9 @@ export class NativeMessagingHost {
             if (!closing && !closed && !controller.signal.aborted) {
               await send({
                 id: request?.id ?? null,
-                error: error instanceof Error ? error.message : String(error),
+                error: truncateControlText(
+                  error instanceof Error ? error.message : String(error),
+                ),
               });
             }
           } finally {
@@ -453,6 +483,14 @@ export class NativeMessagingHost {
           return;
         }
 
+        if (
+          typeof parsed?.id === 'string' &&
+          !isBoundedNonEmptyString(parsed.id, NATIVE_CONTROL_IDENTIFIER_MAX_BYTES)
+        ) {
+          closeWithError(null, `IPC request id exceeds ${NATIVE_CONTROL_IDENTIFIER_MAX_BYTES} bytes`);
+          return;
+        }
+
         if (!authenticated) {
           const token = parsed?.params?.token;
           if (
@@ -479,6 +517,10 @@ export class NativeMessagingHost {
           closeWithError(null, 'IPC request id must be a non-empty string');
           return;
         }
+        if (!isBoundedNonEmptyString(parsed.method, IPC_METHOD_MAX_BYTES)) {
+          closeWithError(parsed.id, `IPC method must be a non-empty string up to ${IPC_METHOD_MAX_BYTES} bytes`);
+          return;
+        }
         if (parsed.method === IPC_CANCEL_REQUEST_METHOD) {
           if (pendingCancellationResponses >= IPC_MAX_PENDING_REQUESTS) {
             closeWithError(parsed.id, 'IPC connection has too many cancellation requests');
@@ -498,6 +540,13 @@ export class NativeMessagingHost {
             sendCancellationResponse({
               id: parsed.id,
               error: 'requestId is required for IPC cancellation',
+            });
+            continue;
+          }
+          if (!isBoundedNonEmptyString(targetRequestId, NATIVE_CONTROL_IDENTIFIER_MAX_BYTES)) {
+            sendCancellationResponse({
+              id: parsed.id,
+              error: `requestId exceeds ${NATIVE_CONTROL_IDENTIFIER_MAX_BYTES} bytes`,
             });
             continue;
           }
@@ -551,9 +600,18 @@ export class NativeMessagingHost {
 
   private async handleIpcRequest(request: any, signal?: AbortSignal): Promise<unknown> {
     const method = typeof request?.method === 'string' ? request.method : '';
+    if (!isBoundedNonEmptyString(method, IPC_METHOD_MAX_BYTES)) {
+      throw new Error(`IPC method must be a non-empty string up to ${IPC_METHOD_MAX_BYTES} bytes`);
+    }
     const params = request?.params && typeof request.params === 'object' ? request.params : {};
     const instanceId = resolveInstanceId((params as Record<string, unknown>).instanceId);
     const sessionIdRaw = (params as Record<string, unknown>).sessionId;
+    if (
+      sessionIdRaw !== undefined &&
+      !isBoundedNonEmptyString(sessionIdRaw, NATIVE_CONTROL_IDENTIFIER_MAX_BYTES)
+    ) {
+      throw new Error(`sessionId must be a non-empty string up to ${NATIVE_CONTROL_IDENTIFIER_MAX_BYTES} bytes`);
+    }
     const sessionId =
       typeof sessionIdRaw === 'string' && sessionIdRaw.trim() ? sessionIdRaw.trim() : uuidv4();
 
@@ -574,8 +632,8 @@ export class NativeMessagingHost {
       case 'mcp_call_tool': {
         const paramsRecord = params as Record<string, unknown>;
         const name = typeof paramsRecord.name === 'string' ? paramsRecord.name : '';
-        if (!name) {
-          throw new Error('name is required');
+        if (!isBoundedNonEmptyString(name, IPC_TOOL_NAME_MAX_BYTES)) {
+          throw new Error(`name must be a non-empty string up to ${IPC_TOOL_NAME_MAX_BYTES} bytes`);
         }
         const args = paramsRecord.args ?? {};
         const result = await callToolForContext(
@@ -758,7 +816,7 @@ export class NativeMessagingHost {
       responseToRequestId: requestId,
     };
     if (error) {
-      response.error = error;
+      response.error = truncateControlText(error);
     } else {
       response.payload = payload;
     }
@@ -907,6 +965,10 @@ export class NativeMessagingHost {
     const requestId = typeof message?.requestId === 'string' ? message.requestId : '';
     if (!requestId) {
       this.sendError('agent_rpc requires requestId');
+      return;
+    }
+    if (!isBoundedNonEmptyString(requestId, NATIVE_CONTROL_IDENTIFIER_MAX_BYTES)) {
+      this.sendError(`agent_rpc requestId exceeds ${NATIVE_CONTROL_IDENTIFIER_MAX_BYTES} bytes`);
       return;
     }
 
@@ -1073,12 +1135,31 @@ export class NativeMessagingHost {
       this.sendError('agent_stream_unsubscribe requires requestId');
       return;
     }
+    if (!isBoundedNonEmptyString(requestId, NATIVE_CONTROL_IDENTIFIER_MAX_BYTES)) {
+      this.sendError(
+        `agent_stream_unsubscribe requestId exceeds ${NATIVE_CONTROL_IDENTIFIER_MAX_BYTES} bytes`,
+      );
+      return;
+    }
 
     const payload =
       message?.payload && typeof message.payload === 'object'
         ? (message.payload as Record<string, unknown>)
         : {};
-    const subscriptionId = typeof payload.subscriptionId === 'string' ? payload.subscriptionId.trim() : '';
+    const rawSubscriptionId = payload.subscriptionId;
+    if (
+      rawSubscriptionId !== undefined &&
+      !isBoundedNonEmptyString(rawSubscriptionId, NATIVE_CONTROL_IDENTIFIER_MAX_BYTES)
+    ) {
+      this.sendRequestResponse(
+        requestId,
+        undefined,
+        `subscriptionId exceeds ${NATIVE_CONTROL_IDENTIFIER_MAX_BYTES} bytes`,
+      );
+      return;
+    }
+    const subscriptionId =
+      typeof rawSubscriptionId === 'string' ? rawSubscriptionId.trim() : '';
     if (!subscriptionId) {
       this.sendRequestResponse(requestId, undefined, 'subscriptionId is required');
       return;
@@ -1106,14 +1187,25 @@ export class NativeMessagingHost {
       return;
     }
 
-    if (message.responseToRequestId) {
-      const requestId = String(message.responseToRequestId);
+    if (message.responseToRequestId !== undefined) {
+      if (
+        !isBoundedNonEmptyString(
+          message.responseToRequestId,
+          NATIVE_CONTROL_IDENTIFIER_MAX_BYTES,
+        )
+      ) {
+        this.sendError(
+          `responseToRequestId must be a non-empty string up to ${NATIVE_CONTROL_IDENTIFIER_MAX_BYTES} bytes`,
+        );
+        return;
+      }
+      const requestId = message.responseToRequestId;
       const pending = this.pendingRequests.get(requestId);
 
       if (pending) {
         clearTimeout(pending.timeoutId);
         if (message.error) {
-          pending.reject(new Error(String(message.error)));
+          pending.reject(new Error(truncateControlText(String(message.error))));
         } else {
           pending.resolve(message.payload);
         }
@@ -1122,7 +1214,30 @@ export class NativeMessagingHost {
       return;
     }
 
+    if (
+      message.requestId !== undefined &&
+      !isBoundedNonEmptyString(message.requestId, NATIVE_CONTROL_IDENTIFIER_MAX_BYTES)
+    ) {
+      this.sendError(
+        `requestId must be a non-empty string up to ${NATIVE_CONTROL_IDENTIFIER_MAX_BYTES} bytes`,
+      );
+      return;
+    }
     const requestId = typeof message.requestId === 'string' ? message.requestId : undefined;
+    if (!isBoundedNonEmptyString(message.type, NATIVE_MESSAGE_TYPE_MAX_BYTES)) {
+      if (requestId) {
+        this.sendRequestResponse(
+          requestId,
+          undefined,
+          `message type must be a non-empty string up to ${NATIVE_MESSAGE_TYPE_MAX_BYTES} bytes`,
+        );
+      } else {
+        this.sendError(
+          `message type must be a non-empty string up to ${NATIVE_MESSAGE_TYPE_MAX_BYTES} bytes`,
+        );
+      }
+      return;
+    }
 
     // Handle directive messages from Chrome
     try {
@@ -1370,7 +1485,7 @@ export class NativeMessagingHost {
   private sendError(errorMessage: string): void {
     this.sendMessage({
       type: NativeMessageType.ERROR_FROM_NATIVE_HOST, // Use more explicit type
-      payload: { message: errorMessage },
+      payload: { message: truncateControlText(errorMessage) },
     });
   }
 

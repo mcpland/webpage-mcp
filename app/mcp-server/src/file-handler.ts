@@ -10,6 +10,9 @@ export const DEFAULT_TEMP_UPLOAD_MAX_FILES = 128;
 export const DEFAULT_TEMP_UPLOAD_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 export const DEFAULT_TEMP_BASE64_READ_MAX_FILE_BYTES = 700 * 1024;
 export const TEMP_UPLOAD_MAX_FILENAME_BYTES = 255;
+export const FILE_OPERATION_ACTION_MAX_BYTES = 64;
+export const FILE_OPERATION_PATH_MAX_BYTES = 4096;
+export const TRACE_INSIGHT_NAME_MAX_BYTES = 256;
 const DATA_URL_PREFIX_ALLOWANCE = 4096;
 
 export interface FileHandlerLimits {
@@ -101,6 +104,42 @@ export class FileHandler {
     const { action, base64Data, fileName, filePath, traceFilePath, insightName } = request;
 
     try {
+      if (
+        typeof action !== 'string' ||
+        !action ||
+        Buffer.byteLength(action, 'utf8') > FILE_OPERATION_ACTION_MAX_BYTES
+      ) {
+        return {
+          success: false,
+          error: `action must be a non-empty string up to ${FILE_OPERATION_ACTION_MAX_BYTES} bytes`,
+        };
+      }
+      for (const [name, value] of [
+        ['filePath', filePath],
+        ['traceFilePath', traceFilePath],
+      ] as const) {
+        if (
+          value !== undefined &&
+          (typeof value !== 'string' ||
+            Buffer.byteLength(value, 'utf8') > FILE_OPERATION_PATH_MAX_BYTES)
+        ) {
+          return {
+            success: false,
+            error: `${name} must be a string up to ${FILE_OPERATION_PATH_MAX_BYTES} bytes`,
+          };
+        }
+      }
+      if (
+        insightName !== undefined &&
+        (typeof insightName !== 'string' ||
+          Buffer.byteLength(insightName, 'utf8') > TRACE_INSIGHT_NAME_MAX_BYTES)
+      ) {
+        return {
+          success: false,
+          error: `insightName must be a string up to ${TRACE_INSIGHT_NAME_MAX_BYTES} bytes`,
+        };
+      }
+
       switch (action) {
         case 'prepareFile':
           if (base64Data) {

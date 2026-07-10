@@ -32,6 +32,24 @@ afterEach(() => {
 });
 
 describe('FileHandler temp file safety', () => {
+  it('bounds native file-operation routing fields before dispatch', async () => {
+    const { handler } = createTestHandler();
+
+    await expect(
+      handler.handleFileRequest({ action: 'x'.repeat(65) }),
+    ).resolves.toMatchObject({ success: false, error: expect.stringContaining('action') });
+    await expect(
+      handler.handleFileRequest({ action: 'cleanupFile', filePath: 'x'.repeat(4097) }),
+    ).resolves.toMatchObject({ success: false, error: expect.stringContaining('filePath') });
+    await expect(
+      handler.handleFileRequest({
+        action: 'analyzeTrace',
+        traceFilePath: '/tmp/trace.json',
+        insightName: '界'.repeat(100),
+      }),
+    ).resolves.toMatchObject({ success: false, error: expect.stringContaining('insightName') });
+  });
+
   it('enforces single-file bytes before writing', async () => {
     const handler = trackHandler(
       new FileHandler(os.tmpdir(), {

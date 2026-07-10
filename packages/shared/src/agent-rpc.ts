@@ -49,6 +49,24 @@ export const AGENT_ATTACHMENT_RPC_CHUNK_BYTES = 512 * 1024;
  * extra headroom is reserved for Base64 expansion and the JSON envelope.
  */
 export const AGENT_ATTACHMENT_RPC_INLINE_BYTES = 700 * 1024;
+export const AGENT_RPC_OPERATION_MAX_BYTES = 128;
+
+function isUtf8LengthAtMost(value: string, maximumBytes: number): boolean {
+  let bytes = 0;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    bytes +=
+      codePoint <= 0x7f
+        ? 1
+        : codePoint <= 0x7ff
+          ? 2
+          : codePoint <= 0xffff
+            ? 3
+            : 4;
+    if (bytes > maximumBytes) return false;
+  }
+  return true;
+}
 
 export type AgentRpcOperation = (typeof AGENT_RPC_OPERATIONS)[number] | (string & {});
 
@@ -76,5 +94,9 @@ export function isAgentRpcRequestPayload(value: unknown): value is AgentRpcReque
     return false;
   }
   const record = value as Record<string, unknown>;
-  return typeof record.operation === 'string' && record.operation.trim().length > 0;
+  return (
+    typeof record.operation === 'string' &&
+    isUtf8LengthAtMost(record.operation, AGENT_RPC_OPERATION_MAX_BYTES) &&
+    record.operation.trim().length > 0
+  );
 }
