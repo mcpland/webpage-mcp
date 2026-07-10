@@ -5,6 +5,7 @@ REM Setup paths
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 set "NODE_SCRIPT=%SCRIPT_DIR%\index.js"
+set "LOG_RUNNER_SCRIPT=%SCRIPT_DIR%\scripts\native-log-runner.js"
 
 REM Setup log directory - prefer user-writable locations
 REM Windows: %LOCALAPPDATA%\webpage-mcp\logs
@@ -18,8 +19,17 @@ if not exist "%LOG_DIR%" (
 
 REM Generate timestamp
 for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format 'yyyyMMdd_HHmmss'"') do set "TIMESTAMP=%%i"
-set "WRAPPER_LOG=%LOG_DIR%\native_host_wrapper_windows_%TIMESTAMP%.log"
-set "STDERR_LOG=%LOG_DIR%\native_host_stderr_windows_%TIMESTAMP%.log"
+set "RUN_ID=%TIMESTAMP%_%RANDOM%_%RANDOM%"
+set "WRAPPER_LOG=%LOG_DIR%\native_host_wrapper_windows_%RUN_ID%.log"
+set "STDERR_LOG=%LOG_DIR%\native_host_stderr_windows_%RUN_ID%.log"
+type nul > "%STDERR_LOG%"
+
+REM The Node supervisor enforces byte limits and retention on every platform.
+set "WEBPAGE_MCP_WRAPPER_LOG_PATH=%WRAPPER_LOG%"
+set "WEBPAGE_MCP_STDERR_LOG_PATH=%STDERR_LOG%"
+if not defined WEBPAGE_MCP_WRAPPER_LOG_MAX_BYTES set "WEBPAGE_MCP_WRAPPER_LOG_MAX_BYTES=1048576"
+if not defined WEBPAGE_MCP_STDERR_LOG_MAX_BYTES set "WEBPAGE_MCP_STDERR_LOG_MAX_BYTES=8388608"
+if not defined WEBPAGE_MCP_LOG_RETENTION_COUNT set "WEBPAGE_MCP_LOG_RETENTION_COUNT=5"
 
 REM Initial logging
 echo Wrapper script called at %DATE% %TIME% > "%WRAPPER_LOG%"
@@ -171,6 +181,11 @@ if not exist "%NODE_SCRIPT%" (
     exit /B 1
 )
 
+if not exist "%LOG_RUNNER_SCRIPT%" (
+    echo ERROR: Native log supervisor not found at %LOG_RUNNER_SCRIPT% >> "%WRAPPER_LOG%"
+    exit /B 1
+)
+
 REM Add Node.js bin directory to PATH for child processes
 for %%I in ("%NODE_EXEC%") do set "NODE_BIN_DIR=%%~dpI"
 if defined PATH (set "PATH=%NODE_BIN_DIR%;%PATH%") else (set "PATH=%NODE_BIN_DIR%")
@@ -197,10 +212,8 @@ if defined ANTHROPIC_AUTH_TOKEN (
     echo ANTHROPIC_AUTH_TOKEN is set (value hidden) >> "%WRAPPER_LOG%"
 )
 
-echo Executing: "%NODE_EXEC%" "%NODE_SCRIPT%" >> "%WRAPPER_LOG%"
-call "%NODE_EXEC%" "%NODE_SCRIPT%" 2>> "%STDERR_LOG%"
+echo Executing: "%NODE_EXEC%" "%LOG_RUNNER_SCRIPT%" "%NODE_SCRIPT%" >> "%WRAPPER_LOG%"
+call "%NODE_EXEC%" "%LOG_RUNNER_SCRIPT%" "%NODE_SCRIPT%"
 set "EXIT_CODE=%ERRORLEVEL%"
 
-echo Exit code: %EXIT_CODE% >> "%WRAPPER_LOG%"
-endlocal
-exit /B %EXIT_CODE%
+endlocal & exit /B %EXIT_CODE%

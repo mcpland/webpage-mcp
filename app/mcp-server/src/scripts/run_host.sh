@@ -5,13 +5,10 @@
 ORIGINAL_UMASK="$(umask)"
 umask 077
 
-# Configuration
-ENABLE_LOG_ROTATION="true"
-LOG_RETENTION_COUNT=5
-
 # Setup paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NODE_SCRIPT="${SCRIPT_DIR}/index.js"
+LOG_RUNNER_SCRIPT="${SCRIPT_DIR}/scripts/native-log-runner.js"
 
 # Setup log directory - prefer user-writable locations
 # macOS: ~/Library/Logs/webpage-mcp
@@ -28,20 +25,22 @@ if ! mkdir -p "${LOG_DIR}" 2>/dev/null; then
     mkdir -p "${LOG_DIR}" 2>/dev/null || true
 fi
 
-# Log rotation
-if [ "${ENABLE_LOG_ROTATION}" = "true" ]; then
-    # Clean up old logs (both legacy _macos_ and new _unix_ naming)
-    ls -tp "${LOG_DIR}/native_host_wrapper_"* 2>/dev/null | tail -n +$((LOG_RETENTION_COUNT + 1)) | xargs -I {} rm -- {}
-    ls -tp "${LOG_DIR}/native_host_stderr_"* 2>/dev/null | tail -n +$((LOG_RETENTION_COUNT + 1)) | xargs -I {} rm -- {}
-fi
-
 # Logging setup
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-WRAPPER_LOG="${LOG_DIR}/native_host_wrapper_unix_${TIMESTAMP}.log"
-STDERR_LOG="${LOG_DIR}/native_host_stderr_unix_${TIMESTAMP}.log"
+RUN_ID="${TIMESTAMP}_$$"
+WRAPPER_LOG="${LOG_DIR}/native_host_wrapper_unix_${RUN_ID}.log"
+STDERR_LOG="${LOG_DIR}/native_host_stderr_unix_${RUN_ID}.log"
 : > "${STDERR_LOG}"
 chmod 700 "${LOG_DIR}" 2>/dev/null || true
 chmod 600 "${WRAPPER_LOG}" "${STDERR_LOG}" 2>/dev/null || true
+
+# The Node supervisor enforces byte limits and cross-platform retention while
+# draining the native host's complete stderr stream (including native modules).
+export WEBPAGE_MCP_WRAPPER_LOG_PATH="${WRAPPER_LOG}"
+export WEBPAGE_MCP_STDERR_LOG_PATH="${STDERR_LOG}"
+export WEBPAGE_MCP_WRAPPER_LOG_MAX_BYTES="${WEBPAGE_MCP_WRAPPER_LOG_MAX_BYTES:-1048576}"
+export WEBPAGE_MCP_STDERR_LOG_MAX_BYTES="${WEBPAGE_MCP_STDERR_LOG_MAX_BYTES:-8388608}"
+export WEBPAGE_MCP_LOG_RETENTION_COUNT="${WEBPAGE_MCP_LOG_RETENTION_COUNT:-5}"
 
 # Initial logging
 {
@@ -247,11 +246,16 @@ if [ ! -f "${NODE_SCRIPT}" ]; then
     exit 1
 fi
 
+if [ ! -f "${LOG_RUNNER_SCRIPT}" ]; then
+    echo "ERROR: Native log supervisor not found at ${LOG_RUNNER_SCRIPT}" >> "${WRAPPER_LOG}"
+    exit 1
+fi
+
 {
     echo "Using Node executable: ${NODE_EXEC}"
     echo "Node discovery source: ${NODE_EXEC_SOURCE:-unknown}"
     echo "Node version: $(${NODE_EXEC} -v)"
-    echo "Executing: ${NODE_EXEC} ${NODE_SCRIPT}"
+    echo "Executing: ${NODE_EXEC} ${LOG_RUNNER_SCRIPT} ${NODE_SCRIPT}"
 } >> "${WRAPPER_LOG}"
 
 # Add Node.js bin directory to PATH so child processes can find node and related tools
@@ -282,4 +286,4 @@ if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
 fi
 
 umask "${ORIGINAL_UMASK}"
-exec "${NODE_EXEC}" "${NODE_SCRIPT}" 2>> "${STDERR_LOG}"
+exec "${NODE_EXEC}" "${LOG_RUNNER_SCRIPT}" "${NODE_SCRIPT}"
