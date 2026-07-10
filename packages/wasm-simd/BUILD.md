@@ -69,10 +69,18 @@ This keeps user names, Cargo home paths, and worktree paths out of the committed
 WASM binary. CI performs the same clean rebuild and rejects stale artifacts or a
 public JavaScript/WebAssembly interface change.
 
-## 📊 Performance Testing
+## ✅ Correctness and Artifact Verification
 
 ```bash
-# Run benchmarks in Chrome extension
-import { runSIMDBenchmark } from './utils/simd-benchmark';
-await runSIMDBenchmark();
+# Exercise the Rust implementation, including tails and invalid inputs.
+pnpm --filter @webpage-mcp/wasm-simd test
+
+# Rebuild in a clean temporary directory and verify hashes, exports, and
+# generated-module cosine/batch smoke checks.
+pnpm verify:wasm
 ```
+
+The repository does not currently ship a reproducible performance benchmark.
+Performance claims require a checked-in harness, documented hardware and
+browser/runtime versions, warm-up and sampling rules, and a reviewable baseline;
+the presence of SIMD instructions alone is not a benchmark result.

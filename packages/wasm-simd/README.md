@@ -1,20 +1,30 @@
 # @webpage-mcp/wasm-simd
 
-SIMD-optimized WebAssembly math functions for high-performance vector operations.
+SIMD-enabled WebAssembly math functions for vector operations.
 
 ## Features
 
 - SIMD acceleration using WebAssembly SIMD instructions
-- Optimized vector operations: cosine similarity, batch similarity, similarity matrix
+- Vector operations: cosine similarity, batch similarity, similarity matrix
 - Browser-compatible WASM module for extension-side use
 
-## Performance
+## Correctness and reproducibility
 
-| Operation                      | JavaScript | SIMD WASM | Speedup |
-| ------------------------------ | ---------- | --------- | ------- |
-| Cosine Similarity (768d)       | 100ms      | 18ms      | 5.6x    |
-| Batch Similarity (100x768d)    | 850ms      | 95ms      | 8.9x    |
-| Similarity Matrix (50x50x384d) | 2.1s       | 180ms     | 11.7x   |
+From the repository root:
+
+```bash
+pnpm --filter @webpage-mcp/wasm-simd test
+pnpm verify:wasm
+```
+
+The Rust tests cover SIMD-lane tails, mismatched and zero-length inputs, and
+batch/matrix result ordering. `pnpm verify:wasm` performs a clean deterministic
+rebuild, checks the generated JavaScript and WebAssembly export surfaces and
+hashes, and executes cosine and batch smoke checks against the generated module.
+
+These checks establish numerical behavior and artifact reproducibility. This
+repository does not currently include a reproducible performance benchmark, so
+it does not claim a particular speedup over JavaScript.
 
 ## API (Rust / wasm-bindgen)
 

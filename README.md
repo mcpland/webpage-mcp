@@ -87,7 +87,7 @@ The extension requests broad capabilities including `<all_urls>`, `history`, `bo
 | :brain:                 | **Semantic Search**           | Built-in vector database for intelligent browser tab content discovery                                                                   |
 | :mag:                   | **Smart Content Analysis**    | AI-powered text extraction and similarity matching                                                                                       |
 | :globe_with_meridians:  | **20+ Tools**                 | Screenshots, network monitoring, interactive operations, bookmark management, browsing history, and more                                 |
-| :rocket:                | **SIMD-Accelerated AI**       | Custom WebAssembly SIMD optimization for 4-8x faster vector operations                                                                   |
+| :rocket:                | **SIMD Vector Math**          | Custom WebAssembly SIMD vector operations with reproducible artifacts and numerical correctness checks                                   |
 
 ## Comparison with Similar Projects
 
