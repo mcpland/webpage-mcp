@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInThisContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type RuntimeListener = (
@@ -13,8 +14,9 @@ const nativeMouseEvent = window.MouseEvent;
 function loadHelper(): RuntimeListener {
   delete (window as any).__CLICK_HELPER_INITIALIZED__;
   vi.mocked(chrome.runtime.onMessage.addListener).mockClear();
-  const source = readFileSync(join(process.cwd(), 'inject-scripts', 'click-helper.js'), 'utf8');
-  window.eval(source);
+  const scriptPath = join(process.cwd(), 'inject-scripts', 'click-helper.js');
+  const source = readFileSync(scriptPath, 'utf8');
+  runInThisContext(source, { filename: scriptPath });
   const listener = vi.mocked(chrome.runtime.onMessage.addListener).mock.calls.at(-1)?.[0];
   if (!listener) throw new Error('Click helper did not register a listener');
   return listener as RuntimeListener;

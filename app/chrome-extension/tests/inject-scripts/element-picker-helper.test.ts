@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { runInThisContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type PickerApi = {
@@ -24,11 +25,9 @@ function loadHelper(): PickerApi {
   vi.mocked(chrome.runtime.onMessage.addListener).mockClear();
   vi.mocked(chrome.runtime.sendMessage).mockClear();
 
-  const source = readFileSync(
-    join(process.cwd(), "inject-scripts", "element-picker.js"),
-    "utf8",
-  );
-  window.eval(source);
+  const scriptPath = join(process.cwd(), "inject-scripts", "element-picker.js");
+  const source = readFileSync(scriptPath, "utf8");
+  runInThisContext(source, { filename: scriptPath });
   const api = (window as any).__mcpElementPicker;
   if (!api) throw new Error("Element picker helper did not expose its API");
   return api as PickerApi;

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInThisContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPropsBridge } from '@/entrypoints/web-editor/core/props-bridge';
 
@@ -13,8 +14,9 @@ let originalReactHook: unknown;
 
 function loadAgent(): void {
   delete (window as any)[AGENT_KEY];
-  const source = readFileSync(join(process.cwd(), 'inject-scripts', 'props-agent.js'), 'utf8');
-  window.eval(source);
+  const scriptPath = join(process.cwd(), 'inject-scripts', 'props-agent.js');
+  const source = readFileSync(scriptPath, 'utf8');
+  runInThisContext(source, { filename: scriptPath });
   if (!(window as any)[AGENT_KEY]) throw new Error('Props agent did not initialize');
 }
 

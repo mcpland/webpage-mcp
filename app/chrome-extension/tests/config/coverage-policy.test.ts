@@ -12,7 +12,7 @@ interface CoveragePolicy {
 }
 
 describe('extension coverage policy', () => {
-  it('measures the full production TypeScript surface at an honest baseline', () => {
+  it('measures production TypeScript and first-party page and Worker JavaScript', () => {
     const testConfig = (vitestConfig as { test?: Record<string, unknown> }).test;
     const coverage = testConfig?.coverage as CoveragePolicy | undefined;
 
@@ -21,15 +21,17 @@ describe('extension coverage policy', () => {
       expect.arrayContaining([
         'common/**/*.{ts,tsx}',
         'entrypoints/**/*.{ts,tsx}',
+        'inject-scripts/**/*.js',
         'shared/**/*.{ts,tsx}',
         'utils/**/*.{ts,tsx}',
+        'workers/similarity.worker.js',
       ]),
     );
     expect(coverage?.thresholds).toMatchObject({
-      branches: 65,
-      functions: 70,
-      lines: 45,
-      statements: 45,
+      branches: 63,
+      functions: 71,
+      lines: 48,
+      statements: 48,
     });
   });
 

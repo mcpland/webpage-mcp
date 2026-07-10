@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { runInThisContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type MessageListener = (
@@ -53,11 +54,9 @@ function loadWaitHelper(): MessageListener {
   delete (window as any).__WAIT_HELPER_INITIALIZED__;
   delete (window as any).__claudeElementMap;
   delete (window as any).__claudeRefCounter;
-  const source = readFileSync(
-    join(process.cwd(), "inject-scripts/wait-helper.js"),
-    "utf8",
-  );
-  window.eval(source);
+  const scriptPath = join(process.cwd(), "inject-scripts/wait-helper.js");
+  const source = readFileSync(scriptPath, "utf8");
+  runInThisContext(source, { filename: scriptPath });
 
   if (!listener)
     throw new Error("wait helper did not register its message listener");

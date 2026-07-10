@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInThisContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 describe('Element Marker injected UI security', () => {
@@ -39,11 +40,9 @@ describe('Element Marker injected UI security', () => {
     vi.stubGlobal('chrome', chromeMock);
     Object.defineProperty(window, 'chrome', { configurable: true, value: chromeMock });
 
-    const source = readFileSync(
-      join(process.cwd(), 'inject-scripts/element-marker.js'),
-      'utf8',
-    );
-    window.eval(source);
+    const scriptPath = join(process.cwd(), 'inject-scripts/element-marker.js');
+    const source = readFileSync(scriptPath, 'utf8');
+    runInThisContext(source, { filename: scriptPath });
     expect(messageListener).toBeTypeOf('function');
 
     const respond = vi.fn();

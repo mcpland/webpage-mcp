@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInThisContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 function installCssEscape(): void {
@@ -20,8 +21,9 @@ function installCssEscape(): void {
 function loadRecorderShared(): any {
   delete (window as any).__RR_RECORDER_SHARED__;
   installCssEscape();
-  const source = readFileSync(join(process.cwd(), 'inject-scripts/recorder-shared.js'), 'utf8');
-  window.eval(source);
+  const scriptPath = join(process.cwd(), 'inject-scripts/recorder-shared.js');
+  const source = readFileSync(scriptPath, 'utf8');
+  runInThisContext(source, { filename: scriptPath });
   return (window as any).__RR_RECORDER_SHARED__;
 }
 

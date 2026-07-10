@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInThisContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type RuntimeListener = (
@@ -14,11 +15,9 @@ const TEXT_LIMIT_BYTES = 100 * 1024;
 function loadHelper(): RuntimeListener {
   delete (window as any).__WEB_FETCHER_HELPER_INITIALIZED__;
   vi.mocked(chrome.runtime.onMessage.addListener).mockClear();
-  const source = readFileSync(
-    join(process.cwd(), 'inject-scripts', 'web-fetcher-helper.js'),
-    'utf8',
-  );
-  window.eval(source);
+  const scriptPath = join(process.cwd(), 'inject-scripts', 'web-fetcher-helper.js');
+  const source = readFileSync(scriptPath, 'utf8');
+  runInThisContext(source, { filename: scriptPath });
   const listener = vi.mocked(chrome.runtime.onMessage.addListener).mock.calls.at(-1)?.[0];
   if (!listener) throw new Error('Web Fetcher helper did not register a listener');
   return listener as RuntimeListener;

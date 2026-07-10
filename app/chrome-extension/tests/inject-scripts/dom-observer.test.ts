@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInThisContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type MessageListener = (
@@ -41,8 +42,9 @@ function loadDomObserver(): {
     },
   });
   delete (window as { __RR_DOM_OBSERVER__?: boolean }).__RR_DOM_OBSERVER__;
-  const source = readFileSync(join(process.cwd(), 'inject-scripts/dom-observer.js'), 'utf8');
-  window.eval(source);
+  const scriptPath = join(process.cwd(), 'inject-scripts/dom-observer.js');
+  const source = readFileSync(scriptPath, 'utf8');
+  runInThisContext(source, { filename: scriptPath });
 
   const observer = ControlledMutationObserver.instances.at(-1);
   if (!listener || !observer) throw new Error('DOM observer did not initialize');

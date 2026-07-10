@@ -39,17 +39,20 @@ export default defineConfig({
         'common/**/*.{ts,tsx}',
         'config/**/*.{ts,tsx}',
         'entrypoints/**/*.{ts,tsx}',
+        'inject-scripts/**/*.js',
         'shared/**/*.{ts,tsx}',
         'utils/**/*.{ts,tsx}',
+        'workers/similarity.worker.js',
       ],
       exclude: ['**/*.d.ts'],
-      // Measured across all production TypeScript. Keep a small runtime margin
-      // while preventing material regressions on the extension's broad surface.
+      // Measured across production TypeScript plus first-party page/Worker JS.
+      // Generated WASM glue and vendored runtime files are intentionally outside
+      // these roots. Keep a small runtime margin while preventing regressions.
       thresholds: {
-        branches: 65,
-        functions: 70,
-        lines: 45,
-        statements: 45,
+        branches: 63,
+        functions: 71,
+        lines: 48,
+        statements: 48,
       },
     },
     // TypeScript support via esbuild (faster than ts-jest)

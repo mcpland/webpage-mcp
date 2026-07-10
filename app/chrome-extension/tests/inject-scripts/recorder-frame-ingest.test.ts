@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInThisContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type RuntimeListener = Parameters<typeof chrome.runtime.onMessage.addListener>[0];
 
 function evalInjectScript(filename: string): void {
-  const source = readFileSync(join(process.cwd(), 'inject-scripts', filename), 'utf8');
-  window.eval(source);
+  const scriptPath = join(process.cwd(), 'inject-scripts', filename);
+  const source = readFileSync(scriptPath, 'utf8');
+  runInThisContext(source, { filename: scriptPath });
 }
 
 function loadRecorder(): {

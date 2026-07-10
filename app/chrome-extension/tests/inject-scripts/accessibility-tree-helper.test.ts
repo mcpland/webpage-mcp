@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInThisContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface AccessibilityTreeResult {
@@ -24,11 +25,9 @@ function loadHelper(): (filter: 'all' | 'interactive' | null) => AccessibilityTr
   delete (window as any).__claudeRefOrder;
   delete (window as any).__claudeRefCounter;
   vi.mocked(chrome.runtime.onMessage.addListener).mockClear();
-  const source = readFileSync(
-    join(process.cwd(), 'inject-scripts', 'accessibility-tree-helper.js'),
-    'utf8',
-  );
-  window.eval(source);
+  const scriptPath = join(process.cwd(), 'inject-scripts', 'accessibility-tree-helper.js');
+  const source = readFileSync(scriptPath, 'utf8');
+  runInThisContext(source, { filename: scriptPath });
   const generate = (window as any).__generateAccessibilityTree;
   if (typeof generate !== 'function') {
     throw new Error('Accessibility tree helper did not expose its generator');
