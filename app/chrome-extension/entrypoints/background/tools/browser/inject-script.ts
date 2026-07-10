@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { ExecutionWorld } from '@/common/constants';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 interface InjectScriptParam {
   url?: string;
@@ -22,6 +23,8 @@ interface SendCommandToInjectScriptToolParam {
 }
 
 const injectedTabs = new Map();
+const MAX_INJECTED_SCRIPT_BYTES = 256 * 1024;
+const INJECTED_SCRIPT_TIMEOUT_MS = 30_000;
 class InjectScriptTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.INJECT_SCRIPT;
   async execute(args: InjectScriptParam & ScriptConfig): Promise<ToolResult> {
@@ -54,7 +57,9 @@ class InjectScriptTool extends BaseBrowserToolExecutor {
           console.log(`Found existing tab with URL: ${url}, tab ID: ${tab.id}`);
         } else {
           // Create new tab with the URL
-          console.log(`No existing tab found with URL: ${url}, creating new tab`);
+          console.log(
+            `No existing tab found with URL: ${url}, creating new tab`,
+          );
           tab = await chrome.tabs.create({
             url,
             active: background === true ? false : true,
@@ -193,27 +198,46 @@ async function handleInject(tabId: number, scriptConfig: ScriptConfig) {
   const { type, jsScript } = scriptConfig;
   const hasMain = type === ExecutionWorld.MAIN;
 
-  if (hasMain) {
-    // The bridge is essential for MAIN world communication and cleanup.
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['inject-scripts/inject-bridge.js'],
-      world: ExecutionWorld.ISOLATED,
-    });
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (code) => new Function(code)(),
-      args: [jsScript],
-      world: ExecutionWorld.MAIN,
-    });
-  } else {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (code) => new Function(code)(),
-      args: [jsScript],
-      world: ExecutionWorld.ISOLATED,
-    });
+  if (!hasMain) {
+    throw new Error(
+      'ISOLATED dynamic injection is not supported in Manifest V3; use MAIN/CDP execution',
+    );
   }
+  if (
+    new TextEncoder().encode(jsScript).byteLength > MAX_INJECTED_SCRIPT_BYTES
+  ) {
+    throw new Error(
+      `Injected script exceeds the ${MAX_INJECTED_SCRIPT_BYTES} byte limit`,
+    );
+  }
+
+  // The bridge is packaged extension code; arbitrary script text is evaluated
+  // only through the Chrome Debugger API, which is the MV3-approved path.
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['inject-scripts/inject-bridge.js'],
+    world: ExecutionWorld.ISOLATED,
+  });
+  await cdpSessionManager.withSession(tabId, 'inject-script', async () => {
+    const result = await cdpSessionManager.sendCommand<{
+      exceptionDetails?: {
+        text?: string;
+        exception?: { description?: string };
+      };
+    }>(tabId, 'Runtime.evaluate', {
+      expression: `(async function () {\n${jsScript}\n}).call(globalThis)`,
+      awaitPromise: true,
+      returnByValue: false,
+      timeout: INJECTED_SCRIPT_TIMEOUT_MS,
+    });
+    if (result?.exceptionDetails) {
+      throw new Error(
+        result.exceptionDetails.exception?.description ||
+          result.exceptionDetails.text ||
+          'Injected script failed',
+      );
+    }
+  });
   injectedTabs.set(tabId, scriptConfig);
   console.log(`Scripts successfully injected into tab ${tabId}.`);
   return { injected: true };
@@ -229,7 +253,9 @@ async function handleCleanup(tabId: number) {
   chrome.tabs
     .sendMessage(tabId, { type: 'webpage-mcp:cleanup' })
     .catch((err) =>
-      console.warn(`Could not send cleanup message to tab ${tabId}. It might have been closed.`),
+      console.warn(
+        `Could not send cleanup message to tab ${tabId}. It might have been closed.`,
+      ),
     );
 
   injectedTabs.delete(tabId);
@@ -237,7 +263,8 @@ async function handleCleanup(tabId: number) {
 }
 
 export const injectScriptTool = new InjectScriptTool();
-export const sendCommandToInjectScriptTool = new SendCommandToInjectScriptTool();
+export const sendCommandToInjectScriptTool =
+  new SendCommandToInjectScriptTool();
 
 // --- Automatic Cleanup Listeners ---
 chrome.tabs.onRemoved.addListener((tabId) => {

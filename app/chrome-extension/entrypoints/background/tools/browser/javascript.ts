@@ -1,9 +1,8 @@
 /**
- * JavaScript Tool - CDP Runtime.evaluate with fallback
+ * JavaScript Tool - CDP Runtime.evaluate
  *
  * Execute JavaScript in the browser tab and return the result.
  * - Primary: CDP Runtime.evaluate (supports awaitPromise + returnByValue)
- * - Fallback: chrome.scripting.executeScript (when debugger is busy)
  *
  * Features:
  * - Async code support (top-level await via async wrapper)
@@ -34,15 +33,14 @@ const CDP_SESSION_KEY = 'javascript';
 // Types
 // ============================================================================
 
-type ExecutionEngine = 'cdp' | 'scripting';
+type ExecutionEngine = 'cdp';
 
 type ErrorKind =
   | 'debugger_conflict'
   | 'timeout'
   | 'syntax_error'
   | 'runtime_error'
-  | 'cdp_error'
-  | 'scripting_error';
+  | 'cdp_error';
 
 interface JavaScriptToolParams {
   code: string;
@@ -195,8 +193,10 @@ function extractReturnValue(remoteObject?: CDPRemoteObject): unknown {
   if (!remoteObject) return undefined;
 
   if ('value' in remoteObject) return remoteObject.value;
-  if ('unserializableValue' in remoteObject) return remoteObject.unserializableValue;
-  if (typeof remoteObject.description === 'string') return remoteObject.description;
+  if ('unserializableValue' in remoteObject)
+    return remoteObject.unserializableValue;
+  if (typeof remoteObject.description === 'string')
+    return remoteObject.description;
 
   return undefined;
 }
@@ -209,13 +209,17 @@ function parseExceptionDetails(details: CDPExceptionDetails): ExecutionError {
 
   // Determine the raw error message
   const rawMessage =
-    exceptionDescription || exceptionValue || text || 'JavaScript execution failed';
+    exceptionDescription ||
+    exceptionValue ||
+    text ||
+    'JavaScript execution failed';
 
   // Sanitize the message
   const message = sanitizeText(rawMessage).text;
 
   // Classify the error kind
-  const isSyntaxError = exceptionClassName === 'SyntaxError' || /SyntaxError/i.test(rawMessage);
+  const isSyntaxError =
+    exceptionClassName === 'SyntaxError' || /SyntaxError/i.test(rawMessage);
 
   return {
     kind: isSyntaxError ? 'syntax_error' : 'runtime_error',
@@ -261,7 +265,9 @@ async function executeViaCdp(
 
     // Extract and sanitize the result
     const value = extractReturnValue(response?.result);
-    const sanitized = sanitizeAndLimitOutput(value, { maxBytes: options.maxOutputBytes });
+    const sanitized = sanitizeAndLimitOutput(value, {
+      maxBytes: options.maxOutputBytes,
+    });
 
     return {
       ok: true,
@@ -280,7 +286,9 @@ async function executeViaCdp(
     }
 
     if (isDebuggerConflictError(error)) {
-      const message = sanitizeText(error instanceof Error ? error.message : String(error)).text;
+      const message = sanitizeText(
+        error instanceof Error ? error.message : String(error),
+      ).text;
       return {
         ok: false,
         engine: 'cdp',
@@ -288,120 +296,13 @@ async function executeViaCdp(
       };
     }
 
-    const message = sanitizeText(error instanceof Error ? error.message : String(error)).text;
+    const message = sanitizeText(
+      error instanceof Error ? error.message : String(error),
+    ).text;
     return {
       ok: false,
       engine: 'cdp',
       error: { kind: 'cdp_error', message },
-    };
-  }
-}
-
-// ============================================================================
-// chrome.scripting.executeScript Fallback
-// ============================================================================
-
-interface ScriptingExecutionResult {
-  ok: boolean;
-  value?: unknown;
-  error?: {
-    name?: string;
-    message?: string;
-    stack?: string;
-  };
-}
-
-async function executeViaScripting(
-  tabId: number,
-  code: string,
-  options: ExecutionOptions,
-): Promise<ExecutionResult> {
-  const innerExecute = async (): Promise<ExecutionResult> => {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: 'ISOLATED',
-      func: async (userCode: string): Promise<ScriptingExecutionResult> => {
-        try {
-          // Use AsyncFunction constructor to support top-level await
-
-          const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-          const fn = new AsyncFunction(userCode);
-          const value = await fn();
-          return { ok: true, value };
-        } catch (err: unknown) {
-          const error = err as Error;
-          return {
-            ok: false,
-            error: {
-              name: error?.name ?? undefined,
-              message: error?.message ?? String(err),
-              stack: error?.stack ?? undefined,
-            },
-          };
-        }
-      },
-      args: [code],
-    });
-
-    // Extract the first result
-    const firstFrame = results?.[0];
-    const result = (firstFrame as { result?: ScriptingExecutionResult })?.result;
-
-    if (!result || typeof result !== 'object') {
-      return {
-        ok: false,
-        engine: 'scripting',
-        error: { kind: 'scripting_error', message: 'No result returned from executeScript' },
-      };
-    }
-
-    if (!result.ok) {
-      const rawMessage = result.error?.message ?? 'JavaScript execution failed';
-      const rawStack = result.error?.stack;
-
-      const message = sanitizeText(rawMessage).text;
-      const sanitizedStack = rawStack ? sanitizeText(rawStack).text : undefined;
-
-      const isSyntaxError = result.error?.name === 'SyntaxError' || /SyntaxError/i.test(rawMessage);
-
-      return {
-        ok: false,
-        engine: 'scripting',
-        error: {
-          kind: isSyntaxError ? 'syntax_error' : 'runtime_error',
-          message: sanitizedStack ? `${message}\n${sanitizedStack}` : message,
-        },
-      };
-    }
-
-    // Sanitize the successful result
-    const sanitized = sanitizeAndLimitOutput(result.value, { maxBytes: options.maxOutputBytes });
-
-    return {
-      ok: true,
-      engine: 'scripting',
-      output: sanitized.text,
-      truncated: sanitized.truncated,
-      redacted: sanitized.redacted,
-    };
-  };
-
-  try {
-    return await withTimeout(innerExecute(), options.timeoutMs);
-  } catch (error) {
-    if (isTimeoutError(error)) {
-      return {
-        ok: false,
-        engine: 'scripting',
-        error: { kind: 'timeout', message: error.message },
-      };
-    }
-
-    const message = sanitizeText(error instanceof Error ? error.message : String(error)).text;
-    return {
-      ok: false,
-      engine: 'scripting',
-      error: { kind: 'scripting_error', message },
     };
   }
 }
@@ -427,7 +328,9 @@ class JavaScriptTool extends BaseBrowserToolExecutor {
       const tab = await this.resolveTargetTab(args.tabId);
       if (!tab) {
         return createErrorResponse(
-          typeof args.tabId === 'number' ? `Tab not found: ${args.tabId}` : 'No active tab found',
+          typeof args.tabId === 'number'
+            ? `Tab not found: ${args.tabId}`
+            : 'No active tab found',
         );
       }
 
@@ -444,7 +347,10 @@ class JavaScriptTool extends BaseBrowserToolExecutor {
       // Normalize options
       const options: ExecutionOptions = {
         timeoutMs: normalizePositiveInt(args.timeoutMs, DEFAULT_TIMEOUT_MS),
-        maxOutputBytes: normalizePositiveInt(args.maxOutputBytes, DEFAULT_MAX_OUTPUT_BYTES),
+        maxOutputBytes: normalizePositiveInt(
+          args.maxOutputBytes,
+          DEFAULT_MAX_OUTPUT_BYTES,
+        ),
       };
 
       const warnings: string[] = [];
@@ -461,18 +367,10 @@ class JavaScriptTool extends BaseBrowserToolExecutor {
         return this.buildErrorResponse(tabId, cdpResult, startTime);
       }
 
-      // Debugger conflict - fallback to scripting API
       warnings.push(
-        'Debugger is busy (DevTools or another extension attached). Falling back to chrome.scripting.executeScript (runs in ISOLATED world, not page context).',
+        'JavaScript was not executed because DevTools or another extension owns the debugger session. Close that debugger and retry.',
       );
-
-      const scriptingResult = await executeViaScripting(tabId, code, options);
-
-      if (scriptingResult.ok) {
-        return this.buildSuccessResponse(tabId, scriptingResult, startTime, warnings);
-      }
-
-      return this.buildErrorResponse(tabId, scriptingResult, startTime, warnings);
+      return this.buildErrorResponse(tabId, cdpResult, startTime, warnings);
     } catch (error) {
       console.error('JavaScriptTool.execute error:', error);
       return createErrorResponse(
@@ -481,7 +379,9 @@ class JavaScriptTool extends BaseBrowserToolExecutor {
     }
   }
 
-  private async resolveTargetTab(tabId?: number): Promise<chrome.tabs.Tab | null> {
+  private async resolveTargetTab(
+    tabId?: number,
+  ): Promise<chrome.tabs.Tab | null> {
     if (typeof tabId === 'number') {
       return this.tryGetTab(tabId);
     }
