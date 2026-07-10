@@ -31,6 +31,127 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
     return '';
   };
 
+  const DEFAULT_NETWORK_TIMEOUT_MS = 30000;
+  const MAX_NETWORK_TIMEOUT_MS = 5 * 60 * 1000;
+  const MAX_NETWORK_RESPONSE_BYTES = 8 * 1024 * 1024;
+  const MAX_FORM_DATA_ATTACHMENT_BYTES = 16 * 1024 * 1024;
+  const MAX_FORM_DATA_TOTAL_ATTACHMENT_BYTES = 32 * 1024 * 1024;
+
+  const formatByteLimit = (bytes) => `${bytes / (1024 * 1024)} MiB`;
+
+  const normalizeTimeout = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return DEFAULT_NETWORK_TIMEOUT_MS;
+    }
+    return Math.max(1, Math.min(Math.floor(numeric), MAX_NETWORK_TIMEOUT_MS));
+  };
+
+  const estimateBase64DecodedBytes = (value) => {
+    let encodedCharacters = 0;
+    let trailingPadding = 0;
+    for (let index = 0; index < value.length; index += 1) {
+      const character = value[index];
+      if (/\s/.test(character)) continue;
+      encodedCharacters += 1;
+      if (character === '=') {
+        trailingPadding += 1;
+      } else {
+        trailingPadding = 0;
+      }
+    }
+    return Math.max(
+      0,
+      Math.floor((encodedCharacters * 3) / 4) - Math.min(trailingPadding, 2),
+    );
+  };
+
+  const getContentLength = (response) => {
+    const value = response.headers.get('content-length');
+    if (!value || !/^\d+$/.test(value.trim())) {
+      return null;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+  };
+
+  const readBoundedResponseBody = async (response, byteLimit, label) => {
+    const contentLength = getContentLength(response);
+    if (contentLength !== null && contentLength > byteLimit) {
+      throw new Error(`${label} exceeds the ${formatByteLimit(byteLimit)} limit.`);
+    }
+
+    if (!response.body) {
+      return new Uint8Array(0);
+    }
+
+    const reader = response.body.getReader();
+    const chunks = [];
+    let totalBytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+
+        totalBytes += value.byteLength;
+        if (totalBytes > byteLimit) {
+          await reader.cancel(`${label} exceeds byte limit`).catch(() => undefined);
+          throw new Error(`${label} exceeds the ${formatByteLimit(byteLimit)} limit.`);
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const combined = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return combined;
+  };
+
+  const fetchBoundedResponse = async (
+    url,
+    options,
+    timeoutMs,
+    byteLimit,
+    label,
+    requireOk,
+    consumeBody = true,
+  ) => {
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timeoutId = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      if (requireOk && !response.ok) {
+        throw new Error(`${label} returned HTTP ${response.status}.`);
+      }
+      const bytes = consumeBody
+        ? await readBoundedResponseBody(response, byteLimit, label)
+        : new Uint8Array(0);
+      return { response, bytes };
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
+      if (didTimeout) {
+        throw new Error(`${label} timed out after ${timeoutMs} ms.`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
   /**
    * Replay a network request
    * @param {string} url - The URL to send the request to
@@ -49,6 +170,8 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
     formDataDescriptor = null,
   ) {
     try {
+      const effectiveTimeout = normalizeTimeout(timeout);
+
       if (hasDisallowedPublicUrlScheme(getPageContextUrl())) {
         return {
           success: false,
@@ -73,7 +196,24 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
       };
 
       // Helper: convert base64 to Blob
+      let totalAttachmentBytes = 0;
+      const accountForAttachment = (byteLength) => {
+        if (byteLength > MAX_FORM_DATA_ATTACHMENT_BYTES) {
+          throw new Error(
+            `FormData attachment exceeds the ${formatByteLimit(MAX_FORM_DATA_ATTACHMENT_BYTES)} limit.`,
+          );
+        }
+        if (totalAttachmentBytes + byteLength > MAX_FORM_DATA_TOTAL_ATTACHMENT_BYTES) {
+          throw new Error(
+            `FormData attachments exceed the ${formatByteLimit(MAX_FORM_DATA_TOTAL_ATTACHMENT_BYTES)} total limit.`,
+          );
+        }
+        totalAttachmentBytes += byteLength;
+      };
+
       const base64ToBlob = (base64, contentType = 'application/octet-stream') => {
+        const estimatedBytes = estimateBase64DecodedBytes(base64);
+        accountForAttachment(estimatedBytes);
         try {
           const decodedString = atob(base64);
           const len = decodedString.length;
@@ -81,8 +221,24 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
           for (let i = 0; i < len; i++) bytes[i] = decodedString.charCodeAt(i);
           return new Blob([bytes], { type: contentType });
         } catch (e) {
-          return new Blob([]);
+          totalAttachmentBytes -= estimatedBytes;
+          throw new Error('Invalid base64 FormData attachment.');
         }
+      };
+
+      const downloadFormDataAttachment = async (attachmentUrl) => {
+        const { response, bytes } = await fetchBoundedResponse(
+          attachmentUrl,
+          {},
+          effectiveTimeout,
+          MAX_FORM_DATA_ATTACHMENT_BYTES,
+          'FormData attachment',
+          true,
+        );
+        accountForAttachment(bytes.byteLength);
+        return new Blob([bytes], {
+          type: response.headers.get('content-type') || 'application/octet-stream',
+        });
       };
 
       // Build multipart/form-data if descriptor is provided
@@ -102,8 +258,7 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
                     'Only http:// and https:// URLs are allowed for chrome_network_request formData attachments.',
                   );
                 }
-                const resp = await fetch(url);
-                const blob = await resp.blob();
+                const blob = await downloadFormDataAttachment(url);
                 const fn =
                   filenameHint || url.split('?')[0].split('#')[0].split('/').pop() || 'file';
                 fd.append(name, blob, fn);
@@ -133,8 +288,7 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
                     'Only http:// and https:// URLs are allowed for chrome_network_request formData attachments.',
                   );
                 }
-                const resp = await fetch(String(file.fileUrl));
-                const blob = await resp.blob();
+                const blob = await downloadFormDataAttachment(String(file.fileUrl));
                 const fn =
                   file.filename ||
                   String(file.fileUrl).split('?')[0].split('#')[0].split('/').pop() ||
@@ -173,26 +327,16 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
         options.body = body;
       }
 
-      // Create a fetch with timeout
-      const fetchWithTimeout = async (url, options, timeout) => {
-        const controller = new AbortController();
-        const signal = controller.signal;
-
-        // Set timeout
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-        try {
-          const response = await fetch(url, { ...options, signal });
-          clearTimeout(timeoutId);
-          return response;
-        } catch (error) {
-          clearTimeout(timeoutId);
-          throw error;
-        }
-      };
-
-      // Send request with timeout
-      const response = await fetchWithTimeout(url, options, timeout);
+      // Keep the request timeout active until the bounded response body has been consumed.
+      const { response, bytes: responseBytes } = await fetchBoundedResponse(
+        url,
+        options,
+        effectiveTimeout,
+        MAX_NETWORK_RESPONSE_BYTES,
+        'Network response',
+        false,
+        method !== 'HEAD',
+      );
 
       // Process response
       const responseData = {
@@ -208,16 +352,17 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
 
       // Try to get response body based on content type
       const contentType = response.headers.get('content-type') || '';
+      const decodedBody = new TextDecoder().decode(responseBytes);
 
       try {
         if (contentType.includes('application/json')) {
-          responseData.body = await response.json();
+          responseData.body = JSON.parse(decodedBody);
         } else if (
           contentType.includes('text/') ||
           contentType.includes('application/xml') ||
           contentType.includes('application/javascript')
         ) {
-          responseData.body = await response.text();
+          responseData.body = decodedBody;
         } else {
           // For binary data, just indicate it was received but not parsed
           responseData.body = '[Binary data not displayed]';
@@ -227,7 +372,10 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
       }
 
       return {
-        success: true,
+        success: response.ok,
+        ...(response.ok
+          ? {}
+          : { error: `Network request returned HTTP ${response.status}.` }),
         response: responseData,
       };
     } catch (error) {
