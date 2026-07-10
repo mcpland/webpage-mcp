@@ -31,6 +31,16 @@ Install or npx resolution
 
 System-level registration is a fallback and always requires explicit `--system` plus administrator/root privileges.
 
+## Requirements
+
+- Node.js `>= 22` (Node.js 24 LTS recommended)
+- Google Chrome 135 or newer with the Webpage MCP Connector installed
+
+Chrome 135 is the minimum for the entire Connector, not only for optional
+features. The user-script manager also requires a browser opt-in: enable
+**Developer mode** on `chrome://extensions` in Chrome 135–137; in Chrome 138 or
+newer, enable **Allow User Scripts** on the Connector's Details page.
+
 ## Detailed Installation Steps
 
 ### 1. Configure the MCP stdio entry (recommended)

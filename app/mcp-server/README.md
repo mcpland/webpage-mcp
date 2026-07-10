@@ -22,7 +22,12 @@ No localhost HTTP server or port is required.
 ## Requirements
 
 - Node.js `>= 22` (Node.js 24 LTS recommended)
-- Chrome/Chromium with the Webpage MCP Connector extension installed
+- Google Chrome 135 or newer with the Webpage MCP Connector extension installed
+
+The Connector's Chrome 135 minimum applies to the entire extension. To use its
+user-script manager, enable **Developer mode** on `chrome://extensions` in
+Chrome 135–137. In Chrome 138 or newer, open the Connector's Details page and
+enable **Allow User Scripts** instead.
 
 ## Quick Start (npm users)
 

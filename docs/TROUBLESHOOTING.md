@@ -55,15 +55,16 @@ Symptoms:
 
 Checks:
 
-1. Open `chrome://extensions`, ensure Developer Mode is on, and the extension is enabled.
-2. Inspect extension service worker logs for native host errors.
-3. Run:
+1. Confirm Google Chrome is version 135 or newer and the extension is enabled on `chrome://extensions`.
+2. Developer mode is required to load an unpacked build. For the user-script manager, enable **Developer mode** in Chrome 135–137; in Chrome 138 or newer, enable **Allow User Scripts** on the extension's Details page.
+3. Inspect extension service worker logs for native host errors.
+4. Run:
 
 ```bash
 npx -y webpage-mcp@latest doctor --fix
 ```
 
-4. Re-register host:
+5. Re-register host:
 
 ```bash
 npx -y webpage-mcp@latest register --detect
