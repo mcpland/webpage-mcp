@@ -26,16 +26,23 @@ import {
 
 const LOG_PREFIX = '[QuickPanelTabs]';
 
+export const QUICK_PANEL_TAB_LIMITS = Object.freeze({
+  maxResults: 100,
+  maxTitleChars: 256,
+  maxUrlChars: 2_048,
+  maxFavIconUrlChars: 2_048,
+});
+
 // ============================================================
 // Helpers
 // ============================================================
 
 function isValidTabId(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+  return Number.isSafeInteger(value) && (value as number) > 0;
 }
 
 function isValidWindowId(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+  return Number.isSafeInteger(value) && (value as number) > 0;
 }
 
 function isTrustedQuickPanelSender(sender: chrome.runtime.MessageSender): boolean {
@@ -52,6 +59,13 @@ function getLastAccessed(tab: chrome.tabs.Tab): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function truncateString(value: unknown, maxChars: number): { value: string; truncated: boolean } {
+  if (typeof value !== 'string') return { value: '', truncated: false };
+  return value.length > maxChars
+    ? { value: value.slice(0, maxChars), truncated: true }
+    : { value, truncated: false };
+}
+
 function safeErrorMessage(err: unknown): string {
   if (err instanceof Error) {
     return err.message || String(err);
@@ -63,24 +77,32 @@ function safeErrorMessage(err: unknown): string {
  * Convert a chrome.tabs.Tab to our summary format.
  * Returns null if tab is invalid.
  */
-function toTabSummary(tab: chrome.tabs.Tab): QuickPanelTabSummary | null {
+function toTabSummary(
+  tab: chrome.tabs.Tab,
+): { summary: QuickPanelTabSummary; truncated: boolean } | null {
   if (!isValidTabId(tab.id)) return null;
 
   const windowId = isValidWindowId(tab.windowId) ? tab.windowId : null;
   if (windowId === null) return null;
 
+  const title = truncateString(tab.title, QUICK_PANEL_TAB_LIMITS.maxTitleChars);
+  const url = truncateString(tab.url, QUICK_PANEL_TAB_LIMITS.maxUrlChars);
+  const favIconUrl = truncateString(tab.favIconUrl, QUICK_PANEL_TAB_LIMITS.maxFavIconUrlChars);
   return {
-    tabId: tab.id,
-    windowId,
-    title: tab.title ?? '',
-    url: tab.url ?? '',
-    favIconUrl: tab.favIconUrl ?? undefined,
-    active: normalizeBoolean(tab.active),
-    pinned: normalizeBoolean(tab.pinned),
-    audible: normalizeBoolean(tab.audible),
-    muted: normalizeBoolean(tab.mutedInfo?.muted),
-    index: typeof tab.index === 'number' && Number.isFinite(tab.index) ? tab.index : 0,
-    lastAccessed: getLastAccessed(tab),
+    truncated: title.truncated || url.truncated || favIconUrl.truncated,
+    summary: {
+      tabId: tab.id,
+      windowId,
+      title: title.value,
+      url: url.value,
+      ...(favIconUrl.value ? { favIconUrl: favIconUrl.value } : {}),
+      active: normalizeBoolean(tab.active),
+      pinned: normalizeBoolean(tab.pinned),
+      audible: normalizeBoolean(tab.audible),
+      muted: normalizeBoolean(tab.mutedInfo?.muted),
+      index: Number.isSafeInteger(tab.index) && tab.index >= 0 ? tab.index : 0,
+      lastAccessed: getLastAccessed(tab),
+    },
   };
 }
 
@@ -97,7 +119,11 @@ async function handleTabsQuery(
       return { success: false, error: 'Quick Panel tab request denied' };
     }
 
-    const includeAllWindows = message.payload?.includeAllWindows ?? true;
+    const requestedScope = message.payload?.includeAllWindows;
+    if (requestedScope !== undefined && typeof requestedScope !== 'boolean') {
+      return { success: false, error: 'includeAllWindows must be a boolean' };
+    }
+    const includeAllWindows = requestedScope ?? true;
 
     // Extract current context from sender
     const currentWindowId = isValidWindowId(sender.tab?.windowId) ? sender.tab!.windowId : null;
@@ -121,10 +147,13 @@ async function handleTabsQuery(
 
     // Convert to summaries, filtering out invalid tabs
     const summaries: QuickPanelTabSummary[] = [];
+    let truncated = tabs.length > QUICK_PANEL_TAB_LIMITS.maxResults;
     for (const tab of tabs) {
-      const summary = toTabSummary(tab);
-      if (summary) {
-        summaries.push(summary);
+      if (summaries.length >= QUICK_PANEL_TAB_LIMITS.maxResults) break;
+      const result = toTabSummary(tab);
+      if (result) {
+        summaries.push(result.summary);
+        truncated ||= result.truncated;
       }
     }
 
@@ -133,6 +162,7 @@ async function handleTabsQuery(
       tabs: summaries,
       currentTabId,
       currentWindowId,
+      ...(truncated ? { truncated: true } : {}),
     };
   } catch (err) {
     console.warn(`${LOG_PREFIX} Error querying tabs:`, err);

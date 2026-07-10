@@ -377,6 +377,7 @@ export type QuickPanelTabsQueryResponse =
       tabs: QuickPanelTabSummary[];
       currentTabId: number | null;
       currentWindowId: number | null;
+      truncated?: boolean;
     }
   | { success: false; error: string };
 

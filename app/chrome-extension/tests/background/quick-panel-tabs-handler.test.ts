@@ -108,4 +108,71 @@ describe('Quick Panel tabs handler', () => {
     expect(chrome.tabs.update).toHaveBeenCalledWith(8, { active: true });
     expect(chrome.tabs.remove).toHaveBeenCalledWith(8);
   });
+
+  it('bounds tab summaries and marks truncated results', async () => {
+    const { QUICK_PANEL_TAB_LIMITS } = await import(
+      '@/entrypoints/background/quick-panel/tabs-handler'
+    );
+    vi.mocked(chrome.tabs.query).mockResolvedValue(
+      Array.from({ length: QUICK_PANEL_TAB_LIMITS.maxResults + 20 }, (_, index) => ({
+        id: index + 1,
+        windowId: 3,
+        index,
+        title: 't'.repeat(QUICK_PANEL_TAB_LIMITS.maxTitleChars + 20),
+        url: `https://example.com/${'u'.repeat(QUICK_PANEL_TAB_LIMITS.maxUrlChars + 20)}`,
+        favIconUrl: `data:image/png;base64,${'a'.repeat(
+          QUICK_PANEL_TAB_LIMITS.maxFavIconUrlChars + 20,
+        )}`,
+      })),
+    );
+    const sendResponse = vi.fn();
+    const sender = {
+      id: chrome.runtime.id,
+      tab: { id: 7, windowId: 3 },
+      frameId: 0,
+    } as chrome.runtime.MessageSender;
+
+    expect(
+      requestListener(
+        { type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_TABS_QUERY },
+        sender,
+        sendResponse,
+      ),
+    ).toBe(true);
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+
+    const response = sendResponse.mock.calls[0]?.[0];
+    expect(response).toMatchObject({ success: true, truncated: true });
+    expect(response.tabs).toHaveLength(QUICK_PANEL_TAB_LIMITS.maxResults);
+    expect(response.tabs[0].title).toHaveLength(QUICK_PANEL_TAB_LIMITS.maxTitleChars);
+    expect(response.tabs[0].url).toHaveLength(QUICK_PANEL_TAB_LIMITS.maxUrlChars);
+    expect(response.tabs[0].favIconUrl).toHaveLength(
+      QUICK_PANEL_TAB_LIMITS.maxFavIconUrlChars,
+    );
+  });
+
+  it('rejects malformed query scope flags', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      id: chrome.runtime.id,
+      tab: { id: 7, windowId: 3 },
+      frameId: 0,
+    } as chrome.runtime.MessageSender;
+
+    requestListener(
+      {
+        type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_TABS_QUERY,
+        payload: { includeAllWindows: 'yes' },
+      },
+      sender,
+      sendResponse,
+    );
+    await vi.waitFor(() =>
+      expect(sendResponse).toHaveBeenCalledWith({
+        success: false,
+        error: 'includeAllWindows must be a boolean',
+      }),
+    );
+    expect(chrome.tabs.query).not.toHaveBeenCalled();
+  });
 });
