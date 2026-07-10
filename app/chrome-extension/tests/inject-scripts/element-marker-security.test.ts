@@ -17,7 +17,10 @@ describe('Element Marker injected UI security', () => {
     let messageListener: ((request: any, sender: any, respond: (value: any) => void) => any) | undefined;
     let panelShadow: ShadowRoot | undefined;
     const nativeAttachShadow = HTMLElement.prototype.attachShadow;
-    vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (options) {
+    vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (
+      this: HTMLElement,
+      options,
+    ) {
       const shadow = nativeAttachShadow.call(this, options);
       if (this.id === '__element_marker_overlay') panelShadow = shadow;
       return shadow;
