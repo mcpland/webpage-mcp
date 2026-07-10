@@ -35,6 +35,12 @@ import type {
   TriggerSpec,
   UrlMatchRule,
 } from "../../domain/triggers";
+import {
+  DOM_TRIGGER_LIMITS,
+  normalizeDomTriggerDebounceMs,
+  normalizeDomTriggerSelector,
+  normalizeDomTriggerTabId,
+} from "../../domain/dom-trigger-policy";
 import type { StoragePort } from "../storage/storage-port";
 import type { EventsBus } from "./events-bus";
 import type {
@@ -1183,7 +1189,7 @@ export class RpcServer {
   private async handleCreateTrigger(
     params: JsonObject | undefined,
   ): Promise<JsonValue> {
-    const trigger = this.normalizeTriggerSpec(params?.trigger, {
+    let trigger = this.normalizeTriggerSpec(params?.trigger, {
       requireId: false,
     });
 
@@ -1197,6 +1203,9 @@ export class RpcServer {
       throw new Error(`Flow "${trigger.flowId}" not found`);
     }
 
+    trigger = await this.ensureDomTriggerTabScope(trigger);
+    await this.assertTriggerCapacity(trigger);
+
     await this.storage.triggers.save(trigger);
     await this.requireTriggerManager().refresh();
     return trigger as unknown as JsonValue;
@@ -1205,7 +1214,7 @@ export class RpcServer {
   private async handleUpdateTrigger(
     params: JsonObject | undefined,
   ): Promise<JsonValue> {
-    const trigger = this.normalizeTriggerSpec(params?.trigger, {
+    let trigger = this.normalizeTriggerSpec(params?.trigger, {
       requireId: true,
     });
 
@@ -1218,6 +1227,9 @@ export class RpcServer {
     if (!flow) {
       throw new Error(`Flow "${trigger.flowId}" not found`);
     }
+
+    trigger = await this.ensureDomTriggerTabScope(trigger, existing);
+    await this.assertTriggerCapacity(trigger, trigger.id);
 
     await this.storage.triggers.save(trigger);
     await this.requireTriggerManager().refresh();
@@ -1274,7 +1286,9 @@ export class RpcServer {
       throw new Error(`Trigger "${triggerId}" not found`);
     }
 
-    const updated: TriggerSpec = { ...trigger, enabled: true };
+    let updated: TriggerSpec = { ...trigger, enabled: true };
+    updated = await this.ensureDomTriggerTabScope(updated, trigger);
+    await this.assertTriggerCapacity(updated, updated.id);
     await this.storage.triggers.save(updated);
     await this.requireTriggerManager().refresh();
     return updated as unknown as JsonValue;
@@ -1371,6 +1385,74 @@ export class RpcServer {
       }
       return { kind: kind as UrlMatchRule["kind"], value: ruleValue };
     });
+  }
+
+  private async ensureDomTriggerTabScope(
+    trigger: TriggerSpec,
+    existing?: TriggerSpec,
+  ): Promise<TriggerSpec> {
+    if (trigger.kind !== "dom") return trigger;
+    if (trigger.tabId !== undefined) return trigger;
+
+    if (existing?.kind === "dom" && existing.tabId !== undefined) {
+      return {
+        ...trigger,
+        tabId: normalizeDomTriggerTabId(existing.tabId),
+      };
+    }
+
+    if (!chrome.tabs?.query) {
+      throw new Error(
+        "trigger.tabId is required when the active tab cannot be resolved",
+      );
+    }
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs.find(
+      (tab) =>
+        typeof tab.id === "number" &&
+        (typeof tab.url !== "string" || /^(https?:|file:)/iu.test(tab.url)),
+    );
+    if (activeTab?.id === undefined) {
+      throw new Error(
+        "trigger.tabId is required when there is no injectable active tab",
+      );
+    }
+    return {
+      ...trigger,
+      tabId: normalizeDomTriggerTabId(activeTab.id),
+    };
+  }
+
+  private async assertTriggerCapacity(
+    trigger: TriggerSpec,
+    replacingId?: TriggerId,
+  ): Promise<void> {
+    const triggers = await this.storage.triggers.list();
+    const isReplacing =
+      replacingId !== undefined &&
+      triggers.some((candidate) => candidate.id === replacingId);
+    if (!isReplacing && triggers.length >= DOM_TRIGGER_LIMITS.maxStoredTriggers) {
+      throw new Error(
+        `Trigger limit exceeded (maximum ${DOM_TRIGGER_LIMITS.maxStoredTriggers})`,
+      );
+    }
+
+    if (trigger.kind !== "dom" || trigger.tabId === undefined) return;
+    const scopedCount = triggers.filter(
+      (candidate) =>
+        candidate.id !== replacingId &&
+        candidate.kind === "dom" &&
+        candidate.enabled &&
+        candidate.tabId === trigger.tabId,
+    ).length;
+    if (
+      trigger.enabled &&
+      scopedCount >= DOM_TRIGGER_LIMITS.maxTriggersPerTab
+    ) {
+      throw new Error(
+        `DOM trigger limit exceeded for tab ${trigger.tabId} (maximum ${DOM_TRIGGER_LIMITS.maxTriggersPerTab})`,
+      );
+    }
   }
 
   /**
@@ -1507,9 +1589,11 @@ export class RpcServer {
       }
 
       case "dom": {
-        if (!raw.selector || typeof raw.selector !== "string") {
-          throw new Error("trigger.selector is required for dom triggers");
-        }
+        const selector = normalizeDomTriggerSelector(raw.selector);
+        const tabId =
+          raw.tabId === undefined || raw.tabId === null
+            ? undefined
+            : normalizeDomTriggerTabId(raw.tabId);
         let appear: boolean | undefined;
         if (raw.appear !== undefined && raw.appear !== null) {
           if (typeof raw.appear !== "boolean") {
@@ -1524,19 +1608,11 @@ export class RpcServer {
           }
           once = raw.once;
         }
-        let debounceMs: number | undefined;
-        if (raw.debounceMs !== undefined && raw.debounceMs !== null) {
-          if (
-            typeof raw.debounceMs !== "number" ||
-            !Number.isFinite(raw.debounceMs)
-          ) {
-            throw new Error("trigger.debounceMs must be a finite number");
-          }
-          debounceMs = raw.debounceMs;
-        }
+        const debounceMs = normalizeDomTriggerDebounceMs(raw.debounceMs);
         return {
           ...base,
-          selector: raw.selector,
+          selector,
+          tabId,
           appear,
           once,
           debounceMs,

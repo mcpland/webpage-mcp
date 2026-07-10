@@ -115,6 +115,7 @@ describe('V3 DomTriggerHandler', () => {
 
     (globalThis.chrome as unknown as { tabs: unknown }).tabs = {
       query: vi.fn().mockResolvedValue([]),
+      get: vi.fn(async (tabId: number) => ({ id: tabId, url: 'https://example.com' })),
       sendMessage: vi.fn().mockResolvedValue({}),
     };
   });
@@ -148,10 +149,13 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 1,
         selector: '#submit-button',
       };
 
       await handler.install(trigger);
+
+      expect(globalThis.chrome.tabs.query).not.toHaveBeenCalled();
 
       // Listeners should be registered
       expect(runtimeMock.onMessage.addListener).toHaveBeenCalledTimes(1);
@@ -179,6 +183,7 @@ describe('V3 DomTriggerHandler', () => {
       );
 
       expect(setCalls.length).toBeGreaterThan(0);
+      expect(setCalls.every((call) => call[0] === 1)).toBe(true);
       expect(setCalls[0][1]).toEqual({
         action: TOOL_MESSAGE_TYPES.SET_DOM_TRIGGERS,
         triggers: [
@@ -217,6 +222,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 1,
         selector: '#btn',
         debounceMs: 2000,
         once: false,
@@ -252,6 +258,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 123,
         selector: '#x',
       };
 
@@ -285,6 +292,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 123,
         selector: '#x',
       };
 
@@ -297,6 +305,29 @@ describe('V3 DomTriggerHandler', () => {
           url: 'https://example.com/page',
         },
         { tab: { id: 123 } as chrome.tabs.Tab },
+      );
+
+      expect(fireCallback.onFire).not.toHaveBeenCalled();
+    });
+
+    it('ignores a trigger message sent from outside its tab scope', async () => {
+      const fireCallback: TriggerFireCallback = { onFire: vi.fn(async () => {}) };
+      const handler = createDomTriggerHandlerFactory({ logger: createSilentLogger() })(
+        fireCallback,
+      );
+
+      await handler.install({
+        id: 't1' as never,
+        kind: 'dom',
+        enabled: true,
+        flowId: 'flow-1' as never,
+        tabId: 123,
+        selector: '#x',
+      });
+
+      runtimeMock.emit(
+        { action: TOOL_MESSAGE_TYPES.DOM_TRIGGER_FIRED, triggerId: 't1' },
+        { tab: { id: 999, url: 'https://attacker.example' } as chrome.tabs.Tab },
       );
 
       expect(fireCallback.onFire).not.toHaveBeenCalled();
@@ -315,6 +346,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 123,
         selector: '#x',
       });
 
@@ -346,6 +378,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 5,
         selector: '#x',
       });
 
@@ -378,6 +411,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 5,
         selector: '#x',
       });
 
@@ -403,6 +437,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 5,
         selector: '#x',
       });
 
@@ -430,6 +465,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 1,
         selector: '#x',
       });
 
@@ -453,6 +489,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 1,
         selector: '#x',
       });
       await handler.install({
@@ -460,6 +497,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-2' as never,
+        tabId: 2,
         selector: '#y',
       });
 
@@ -485,6 +523,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-1' as never,
+        tabId: 1,
         selector: '#x',
       });
       await handler.install({
@@ -492,6 +531,7 @@ describe('V3 DomTriggerHandler', () => {
         kind: 'dom',
         enabled: true,
         flowId: 'flow-2' as never,
+        tabId: 2,
         selector: '#y',
       });
 

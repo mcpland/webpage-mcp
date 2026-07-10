@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { TriggerSpec } from '@/entrypoints/background/record-replay-v3/domain/triggers';
+import { DOM_TRIGGER_LIMITS } from '@/entrypoints/background/record-replay-v3/domain/dom-trigger-policy';
 import {
   closeRrV3Db,
   deleteRrV3Db,
@@ -48,12 +49,16 @@ function createContextMenuTrigger(id: string, flowId: string): TriggerSpec {
   };
 }
 
-function createDomTrigger(id: string, flowId: string): TriggerSpec {
+function createDomTrigger(
+  id: string,
+  flowId: string,
+): Extract<TriggerSpec, { kind: 'dom' }> {
   return {
     id: id as any,
     kind: 'dom',
     enabled: true,
     flowId: flowId as any,
+    tabId: 7,
     selector: '#submit-button',
     appear: true,
     once: false,
@@ -225,6 +230,36 @@ describe('TriggerStore CRUD', () => {
       const retrieved = await store.get('manual-1' as any);
 
       expect(retrieved?.kind).toBe('manual');
+    });
+  });
+
+  describe('resource policy', () => {
+    it('rejects unsafe DOM selectors at the storage boundary', async () => {
+      const store = createTriggersStore();
+      const trigger = createDomTrigger('dom-unsafe', 'flow-1');
+
+      await expect(
+        store.save({ ...trigger, selector: 'main:has(.expensive)' }),
+      ).rejects.toThrow('must not use the high-risk :has() pseudo-class');
+    });
+
+    it('caps the total number of persisted triggers while allowing updates', async () => {
+      const store = createTriggersStore();
+      for (let index = 0; index < DOM_TRIGGER_LIMITS.maxStoredTriggers; index += 1) {
+        await store.save(createManualTrigger(`trigger-${index}`, 'flow-1'));
+      }
+
+      await expect(
+        store.save(createManualTrigger('trigger-overflow', 'flow-1')),
+      ).rejects.toThrow(
+        `Trigger limit exceeded (maximum ${DOM_TRIGGER_LIMITS.maxStoredTriggers})`,
+      );
+      await expect(
+        store.save({
+          ...createManualTrigger('trigger-0', 'flow-1'),
+          args: { updated: true },
+        }),
+      ).resolves.toBeUndefined();
     });
   });
 

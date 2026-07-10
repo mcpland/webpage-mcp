@@ -17,6 +17,12 @@
 
 import type { TriggerId } from '../../domain/ids';
 import type { TriggerSpecByKind } from '../../domain/triggers';
+import {
+  DOM_TRIGGER_LIMITS,
+  normalizeDomTriggerDebounceMs,
+  normalizeDomTriggerSelector,
+  normalizeDomTriggerTabId,
+} from '../../domain/dom-trigger-policy';
 import { CONTENT_MESSAGE_TYPES, TOOL_MESSAGE_TYPES } from '../../../../../common/message-types';
 import type { TriggerFireCallback, TriggerHandler, TriggerHandlerFactory } from './trigger-handler';
 
@@ -51,35 +57,29 @@ interface DomTriggerFiredMessage {
 // ==================== Constants ====================
 
 const DOM_OBSERVER_SCRIPT_FILE = 'inject-scripts/dom-observer.js';
-const DEFAULT_DEBOUNCE_MS = 800;
 
 // ==================== Utilities ====================
-
-function normalizeDebounceMs(value: unknown): number {
-  if (value === undefined || value === null) return DEFAULT_DEBOUNCE_MS;
-  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_DEBOUNCE_MS;
-  return Math.max(0, Math.floor(value));
-}
 
 /**
  * Build payload for dom-observer content script
  */
 function buildDomObserverPayload(
   installed: Map<TriggerId, DomTriggerSpec>,
+  tabId: number,
 ): DomObserverTriggerPayload[] {
   const out: DomObserverTriggerPayload[] = [];
 
   for (const t of installed.values()) {
-    const selector = String(t.selector ?? '').trim();
-    if (!selector) continue;
+    if (t.tabId !== tabId) continue;
 
     out.push({
       id: t.id,
-      selector,
+      selector: t.selector,
       appear: t.appear !== false, // default true
       once: t.once !== false, // default true
-      debounceMs: normalizeDebounceMs(t.debounceMs),
+      debounceMs: normalizeDomTriggerDebounceMs(t.debounceMs),
     });
+    if (out.length >= DOM_TRIGGER_LIMITS.maxTriggersPerTab) break;
   }
 
   // Deterministic ordering for tests and debugging
@@ -101,7 +101,10 @@ function isDomTriggerFiredMessage(msg: unknown): msg is DomTriggerFiredMessage {
   if (!msg || typeof msg !== 'object') return false;
   const anyMsg = msg as Record<string, unknown>;
   return (
-    anyMsg.action === TOOL_MESSAGE_TYPES.DOM_TRIGGER_FIRED && typeof anyMsg.triggerId === 'string'
+    anyMsg.action === TOOL_MESSAGE_TYPES.DOM_TRIGGER_FIRED &&
+    typeof anyMsg.triggerId === 'string' &&
+    anyMsg.triggerId.length > 0 &&
+    anyMsg.triggerId.length <= 256
   );
 }
 
@@ -127,9 +130,8 @@ export function createDomTriggerHandler(
 
   const installed = new Map<TriggerId, DomTriggerSpec>();
 
-  // Payload cache for efficiency
-  let payloadDirty = true;
-  let payloadCache: DomObserverTriggerPayload[] = [];
+  // Tabs that received a payload are retained until an empty payload clears them.
+  let previouslyScopedTabs = new Set<number>();
 
   // Listener states
   let messageListening = false;
@@ -138,17 +140,6 @@ export function createDomTriggerHandler(
   // Coalesce sync to avoid storms (e.g. TriggerManager.refresh)
   let syncPromise: Promise<void> | null = null;
   let pendingSync = false;
-
-  function markPayloadDirty(): void {
-    payloadDirty = true;
-  }
-
-  function getPayload(): DomObserverTriggerPayload[] {
-    if (!payloadDirty) return payloadCache;
-    payloadCache = buildDomObserverPayload(installed);
-    payloadDirty = false;
-    return payloadCache;
-  }
 
   /**
    * Ping dom-observer to check if injected
@@ -209,51 +200,46 @@ export function createDomTriggerHandler(
   /**
    * Sync triggers to a single tab
    */
-  async function syncTab(tabId: number, url: string | undefined): Promise<void> {
+  async function syncTab(tabId: number): Promise<void> {
+    let url: string | undefined;
+    if (chrome.tabs?.get) {
+      try {
+        url = (await chrome.tabs.get(tabId)).url;
+      } catch {
+        // A removed tab is expected while clearing a stale scope.
+        return;
+      }
+    }
     if (typeof url === 'string' && url && !isInjectableUrl(url)) return;
 
-    const payload = getPayload();
+    const payload = buildDomObserverPayload(installed, tabId);
     if (payload.length > 0) {
       await ensureDomObserverInjected(tabId);
     }
     await setDomTriggers(tabId, payload);
   }
 
-  /**
-   * Sync triggers to all tabs
-   */
-  async function doSyncAllTabs(): Promise<void> {
-    if (!chrome.tabs?.query) {
-      logger.warn('[DomTriggerHandler] chrome.tabs.query is unavailable');
-      return;
+  async function doSyncScopedTabs(): Promise<void> {
+    const nextScopedTabs = new Set<number>();
+    for (const trigger of installed.values()) {
+      if (trigger.tabId !== undefined) nextScopedTabs.add(trigger.tabId);
     }
 
-    let tabs: chrome.tabs.Tab[] = [];
-    try {
-      tabs = await chrome.tabs.query({});
-    } catch (e) {
-      logger.debug('[DomTriggerHandler] tabs.query failed:', e);
-      return;
-    }
-
-    await Promise.all(
-      tabs
-        .filter((t) => typeof t.id === 'number')
-        .filter((t) => (typeof t.url === 'string' ? isInjectableUrl(t.url) : true))
-        .map((t) => syncTab(t.id as number, t.url)),
-    );
+    const tabsToSync = new Set([...previouslyScopedTabs, ...nextScopedTabs]);
+    previouslyScopedTabs = nextScopedTabs;
+    await Promise.all(Array.from(tabsToSync, (tabId) => syncTab(tabId)));
   }
 
   /**
    * Request sync (coalesced)
    */
-  async function requestSyncAllTabs(): Promise<void> {
+  async function requestSyncScopedTabs(): Promise<void> {
     pendingSync = true;
     if (!syncPromise) {
       syncPromise = (async () => {
         while (pendingSync) {
           pendingSync = false;
-          await doSyncAllTabs();
+          await doSyncScopedTabs();
         }
       })().finally(() => {
         syncPromise = null;
@@ -273,7 +259,15 @@ export function createDomTriggerHandler(
     if (!isDomTriggerFiredMessage(message)) return false;
 
     const triggerId = message.triggerId as TriggerId;
-    if (!installed.has(triggerId)) {
+    const trigger = installed.get(triggerId);
+    const sourceTabId = sender.tab?.id;
+    if (
+      !trigger ||
+      sourceTabId === undefined ||
+      trigger.tabId !== sourceTabId ||
+      (sender.id !== undefined && sender.id !== chrome.runtime.id) ||
+      (sender.frameId !== undefined && sender.frameId !== 0)
+    ) {
       try {
         sendResponse({ ok: false });
       } catch {
@@ -282,8 +276,7 @@ export function createDomTriggerHandler(
       return false;
     }
 
-    const sourceTabId = sender.tab?.id;
-    const sourceUrl = message.url ?? sender.tab?.url;
+    const sourceUrl = sender.tab?.url;
 
     // Fire-and-forget: do not block chrome messaging thread
     Promise.resolve(fireCallback.onFire(triggerId, { sourceTabId, sourceUrl })).catch((e) => {
@@ -306,9 +299,10 @@ export function createDomTriggerHandler(
   ): void => {
     if (details.frameId !== 0) return; // Top frame only
     if (installed.size === 0) return;
+    if (!Array.from(installed.values()).some((trigger) => trigger.tabId === details.tabId)) return;
     if (typeof details.url === 'string' && details.url && !isInjectableUrl(details.url)) return;
 
-    void syncTab(details.tabId, details.url).catch((e) => {
+    void syncTab(details.tabId).catch((e) => {
       logger.debug('[DomTriggerHandler] syncTab on navigation failed:', e);
     });
   };
@@ -359,21 +353,47 @@ export function createDomTriggerHandler(
     kind: 'dom',
 
     async install(trigger: DomTriggerSpec): Promise<void> {
-      installed.set(trigger.id, trigger);
-      markPayloadDirty();
+      let normalized: DomTriggerSpec;
+      try {
+        if (trigger.tabId === undefined) {
+          logger.warn(
+            `[DomTriggerHandler] Ignoring legacy unscoped DOM trigger "${trigger.id}"`,
+          );
+          return;
+        }
+        const tabId = normalizeDomTriggerTabId(trigger.tabId);
+        const existingForTab = Array.from(installed.values()).filter(
+          (candidate) => candidate.id !== trigger.id && candidate.tabId === tabId,
+        ).length;
+        if (existingForTab >= DOM_TRIGGER_LIMITS.maxTriggersPerTab) {
+          logger.warn(
+            `[DomTriggerHandler] Ignoring DOM trigger "${trigger.id}": tab ${tabId} reached its trigger limit`,
+          );
+          return;
+        }
+        normalized = {
+          ...trigger,
+          tabId,
+          selector: normalizeDomTriggerSelector(trigger.selector),
+          debounceMs: normalizeDomTriggerDebounceMs(trigger.debounceMs),
+        };
+      } catch (error) {
+        logger.warn(`[DomTriggerHandler] Ignoring invalid DOM trigger "${trigger.id}":`, error);
+        return;
+      }
+      installed.set(normalized.id, normalized);
 
       // Ensure listeners are ready before pushing triggers
       ensureMessageListening();
       ensureNavigationListening();
 
-      await requestSyncAllTabs();
+      await requestSyncScopedTabs();
     },
 
     async uninstall(triggerId: string): Promise<void> {
       installed.delete(triggerId as TriggerId);
-      markPayloadDirty();
 
-      await requestSyncAllTabs();
+      await requestSyncScopedTabs();
 
       if (installed.size === 0) {
         stopNavigationListening();
@@ -383,9 +403,8 @@ export function createDomTriggerHandler(
 
     async uninstallAll(): Promise<void> {
       installed.clear();
-      markPayloadDirty();
 
-      await requestSyncAllTabs();
+      await requestSyncScopedTabs();
 
       stopNavigationListening();
       stopMessageListening();

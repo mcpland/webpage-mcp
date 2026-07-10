@@ -84,6 +84,8 @@ export type TriggerSpec =
   | (TriggerSpecBase & {
       kind: 'dom';
       selector: string;
+      /** Explicit tab scope. Legacy stored triggers may omit it and remain inactive. */
+      tabId?: number;
       appear?: boolean;
       once?: boolean;
       debounceMs?: UnixMillis;

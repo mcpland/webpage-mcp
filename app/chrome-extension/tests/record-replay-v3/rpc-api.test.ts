@@ -23,6 +23,7 @@ import type { RunQueueItem } from "@/entrypoints/background/record-replay-v3/eng
 import { RpcServer } from "@/entrypoints/background/record-replay-v3/engine/transport/rpc-server";
 import type { TriggerManager } from "@/entrypoints/background/record-replay-v3/engine/triggers/trigger-manager";
 import type { TriggerSpec } from "@/entrypoints/background/record-replay-v3/domain/triggers";
+import { DOM_TRIGGER_LIMITS } from "@/entrypoints/background/record-replay-v3/domain/dom-trigger-policy";
 import type { ArtifactRecord } from "@/entrypoints/background/record-replay-v3/storage/artifacts";
 import { tryAcquireFlowWriteLock } from "@/entrypoints/background/record-replay-v3/flows/write-lock";
 import { calculateWorkflowRevision } from "@/entrypoints/background/record-replay-v3/flows/publish";
@@ -1305,6 +1306,129 @@ describe("V3 RPC Trigger Management APIs", () => {
         { subscriptions: new Set() },
       ),
     ).rejects.toThrow("trigger.match[0].value must be a non-empty string");
+  });
+
+  it("normalizes DOM trigger selector, debounce, and explicit tab scope", async () => {
+    const created = (await (
+      server as unknown as { handleRequest: Function }
+    ).handleRequest(
+      {
+        method: "rr_v3.createTrigger",
+        params: {
+          trigger: {
+            id: "trg-dom",
+            kind: "dom",
+            enabled: true,
+            flowId: "flow-1",
+            tabId: 17,
+            selector: "  #checkout  ",
+            debounceMs: 0,
+          },
+        },
+        requestId: "req-trigger-dom",
+      },
+      { subscriptions: new Set() },
+    )) as Extract<TriggerSpec, { kind: "dom" }>;
+
+    expect(created).toMatchObject({
+      id: "trg-dom",
+      kind: "dom",
+      tabId: 17,
+      selector: "#checkout",
+      debounceMs: DOM_TRIGGER_LIMITS.minDebounceMs,
+    });
+    expect(getInternal(storage).triggersMap.get("trg-dom")).toEqual(created);
+  });
+
+  it("binds a legacy unscoped DOM create request to only the active tab", async () => {
+    vi.mocked(chrome.tabs.query).mockResolvedValue([
+      { id: 42, url: "https://example.com/checkout" } as chrome.tabs.Tab,
+    ]);
+
+    const created = (await (
+      server as unknown as { handleRequest: Function }
+    ).handleRequest(
+      {
+        method: "rr_v3.createTrigger",
+        params: {
+          trigger: {
+            id: "trg-dom-legacy",
+            kind: "dom",
+            enabled: true,
+            flowId: "flow-1",
+            selector: "#checkout",
+          },
+        },
+        requestId: "req-trigger-dom-legacy",
+      },
+      { subscriptions: new Set() },
+    )) as Extract<TriggerSpec, { kind: "dom" }>;
+
+    expect(chrome.tabs.query).toHaveBeenCalledWith({
+      active: true,
+      currentWindow: true,
+    });
+    expect(created.tabId).toBe(42);
+  });
+
+  it("rejects unsafe or oversized DOM selectors", async () => {
+    const request = (selector: string) =>
+      (server as unknown as { handleRequest: Function }).handleRequest(
+        {
+          method: "rr_v3.createTrigger",
+          params: {
+            trigger: {
+              id: `trg-dom-${selector.length}`,
+              kind: "dom",
+              enabled: true,
+              flowId: "flow-1",
+              tabId: 17,
+              selector,
+            },
+          },
+          requestId: "req-trigger-dom-invalid",
+        },
+        { subscriptions: new Set() },
+      );
+
+    await expect(request("main:has(.expensive)")).rejects.toThrow(
+      "must not use the high-risk :has() pseudo-class",
+    );
+    await expect(request("😀".repeat(129))).rejects.toThrow(
+      `must be at most ${DOM_TRIGGER_LIMITS.maxSelectorUtf8Bytes} UTF-8 bytes`,
+    );
+  });
+
+  it("rejects trigger creation after the total RPC capacity is reached", async () => {
+    const triggersMap = getInternal(storage).triggersMap;
+    for (let index = 0; index < DOM_TRIGGER_LIMITS.maxStoredTriggers; index += 1) {
+      triggersMap.set(`existing-${index}`, {
+        id: `existing-${index}` as never,
+        kind: "manual",
+        enabled: true,
+        flowId: "flow-1" as never,
+      });
+    }
+
+    await expect(
+      (server as unknown as { handleRequest: Function }).handleRequest(
+        {
+          method: "rr_v3.createTrigger",
+          params: {
+            trigger: {
+              id: "overflow",
+              kind: "manual",
+              enabled: true,
+              flowId: "flow-1",
+            },
+          },
+          requestId: "req-trigger-overflow",
+        },
+        { subscriptions: new Set() },
+      ),
+    ).rejects.toThrow(
+      `Trigger limit exceeded (maximum ${DOM_TRIGGER_LIMITS.maxStoredTriggers})`,
+    );
   });
 });
 
