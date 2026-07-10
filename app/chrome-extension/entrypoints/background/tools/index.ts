@@ -59,6 +59,14 @@ const URL_PRIORITY_TOOLS = new Set<string>([
   TOOL_NAMES.BROWSER.WEB_FETCHER,
   TOOL_NAMES.BROWSER.INJECT_SCRIPT,
 ]);
+// Only these executors intentionally create or select a different target than
+// the one resolved before execution. Their own top-level result metadata may
+// advance the session cursor; arbitrary tool payloads (including page/network
+// data) must never be interpreted as routing metadata.
+const TRUSTED_RESULT_TARGET_TOOLS = new Set<string>([
+  TOOL_NAMES.BROWSER.NAVIGATE,
+  TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
+]);
 // Tools whose `background` argument can be auto-populated from MCP Background Mode.
 // Every entry here must declare a `background` parameter in its schema and honour it
 // in the executor; otherwise the injected value is silently ignored.
@@ -335,34 +343,32 @@ async function mergeArgsWithDefaultBackground(toolName: string, args: any): Prom
   return isPlainArgsObject(args) ? { ...args, background: true } : { background: true };
 }
 
-function findNumericField(
-  value: unknown,
-  key: 'tabId' | 'windowId',
-  depth = 0,
-  seen = new Set<unknown>(),
-): number | undefined {
-  if (depth > 6 || value == null || typeof value !== 'object' || seen.has(value)) {
-    return undefined;
-  }
-  seen.add(value);
-  const obj = value as Record<string, unknown>;
-  if (typeof obj[key] === 'number' && Number.isFinite(obj[key] as number)) {
-    return obj[key] as number;
-  }
-  for (const nested of Object.values(obj)) {
-    const found = findNumericField(nested, key, depth + 1, seen);
-    if (typeof found === 'number') return found;
-  }
-  return undefined;
+function readTargetId(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
 }
 
-function extractSessionPatchFromResult(result: any): { tabId?: number; windowId?: number } {
-  const candidates: unknown[] = [result];
+function extractSessionPatchFromResult(
+  toolName: string,
+  result: any,
+): { tabId?: number; windowId?: number } {
+  if (!TRUSTED_RESULT_TARGET_TOOLS.has(toolName)) {
+    return {};
+  }
+
+  const candidates: Array<Record<string, unknown>> = [];
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    candidates.push(result as Record<string, unknown>);
+  }
   const content = Array.isArray(result?.content) ? result.content : [];
   for (const item of content) {
     if (item?.type !== 'text' || typeof item?.text !== 'string') continue;
     try {
-      candidates.push(JSON.parse(item.text));
+      const parsed = JSON.parse(item.text) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        candidates.push(parsed as Record<string, unknown>);
+      }
     } catch {
       // Ignore non-JSON text content
     }
@@ -372,11 +378,12 @@ function extractSessionPatchFromResult(result: any): { tabId?: number; windowId?
   let windowId: number | undefined;
 
   for (const candidate of candidates) {
+    if (candidate.success === false) continue;
     if (typeof tabId !== 'number') {
-      tabId = findNumericField(candidate, 'tabId');
+      tabId = readTargetId(candidate.tabId);
     }
     if (typeof windowId !== 'number') {
-      windowId = findNumericField(candidate, 'windowId');
+      windowId = readTargetId(candidate.windowId);
     }
     if (typeof tabId === 'number' && typeof windowId === 'number') break;
   }
@@ -420,7 +427,7 @@ export const handleCallTool = async (param: ToolCallParam) => {
         : await execute();
 
     if (sessionId && result?.isError !== true) {
-      const patch = extractSessionPatchFromResult(result);
+      const patch = extractSessionPatchFromResult(param.name, result);
       const tabIdToPersist =
         typeof patch.tabId === 'number'
           ? patch.tabId

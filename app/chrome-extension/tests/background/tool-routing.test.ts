@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   clickExecute: vi.fn(),
   fillExecute: vi.fn(),
   keyboardExecute: vi.fn(),
+  networkRequestExecute: vi.fn(),
   flowRunExecute: vi.fn(),
   runCancelExecute: vi.fn(),
   listPublishedExecute: vi.fn(),
@@ -31,6 +32,10 @@ vi.mock('@/entrypoints/background/tools/browser', () => ({
   clickTool: { name: 'chrome_click_element', execute: mocks.clickExecute },
   fillTool: { name: 'chrome_fill_or_select', execute: mocks.fillExecute },
   keyboardTool: { name: 'chrome_keyboard', execute: mocks.keyboardExecute },
+  networkRequestTool: {
+    name: 'chrome_network_request',
+    execute: mocks.networkRequestExecute,
+  },
 }));
 
 vi.mock('@/entrypoints/background/tools/record-replay', () => ({
@@ -133,6 +138,20 @@ describe('handleCallTool navigation routing', () => {
     mocks.clickExecute.mockResolvedValue(okJson());
     mocks.fillExecute.mockResolvedValue(okJson());
     mocks.keyboardExecute.mockResolvedValue(okJson());
+    mocks.networkRequestExecute.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            response: {
+              body: { tabId: 200, windowId: 77 },
+            },
+          }),
+        },
+      ],
+      isError: false,
+    });
     mocks.flowRunExecute.mockResolvedValue({
       content: [
         {
@@ -456,6 +475,57 @@ describe('handleCallTool navigation routing', () => {
     expect(mocks.runInTabQueue).toHaveBeenCalledTimes(1);
     expect(mocks.switchExecute).toHaveBeenCalledWith({ tabId: 44 });
     expect(mocks.patchSessionContext).not.toHaveBeenCalled();
+  });
+
+  it('does not treat nested page-controlled network JSON as session routing metadata', async () => {
+    await handleCallTool({
+      name: TOOL_NAMES.BROWSER.NETWORK_REQUEST,
+      args: { url: 'https://api.example.test/data' },
+      meta: { mcpSessionId: 'session-1' },
+    });
+
+    expect(mocks.networkRequestExecute).toHaveBeenCalledWith({
+      url: 'https://api.example.test/data',
+      tabId: 10,
+      windowId: 55,
+    });
+    expect(mocks.patchSessionContext).toHaveBeenCalledWith(
+      'session-1',
+      { tabId: 10, windowId: 55 },
+      undefined,
+    );
+    expect(mocks.patchSessionContext).not.toHaveBeenCalledWith(
+      'session-1',
+      { tabId: 200, windowId: 77 },
+      undefined,
+    );
+  });
+
+  it('ignores nested target ids even for a trusted target-changing tool', async () => {
+    mocks.navigateExecute.mockResolvedValueOnce({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            data: { tabId: 200, windowId: 77 },
+          }),
+        },
+      ],
+      isError: false,
+    });
+
+    await handleCallTool({
+      name: TOOL_NAMES.BROWSER.NAVIGATE,
+      args: { url: 'https://example.test', openMode: 'current_tab' },
+      meta: { mcpSessionId: 'session-1' },
+    });
+
+    expect(mocks.patchSessionContext).toHaveBeenCalledWith(
+      'session-1',
+      { tabId: 10, windowId: 55 },
+      undefined,
+    );
   });
 
   it.each([
