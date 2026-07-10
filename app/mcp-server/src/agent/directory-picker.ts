@@ -2,16 +2,42 @@
  * Directory Picker Service.
  *
  * Provides cross-platform directory selection using native system dialogs.
- * Uses platform-specific commands:
- * - macOS: osascript (AppleScript)
- * - Windows: PowerShell
- * - Linux: zenity or kdialog
+ * Commands are launched without a shell and all user-controlled values are
+ * passed separately from the static AppleScript and PowerShell programs.
  */
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
-import os from 'node:os';
+import { execFile } from "node:child_process";
+import os from "node:os";
 
-const execAsync = promisify(exec);
+const DEFAULT_TITLE = "Select Project Directory";
+const PICKER_TIMEOUT_MS = 60_000;
+const MAX_TITLE_BYTES = 256;
+const MAX_STDIO_BYTES = 16 * 1024;
+const MAX_PATH_BYTES = 4 * 1024;
+const MAX_ERROR_BYTES = 2 * 1024;
+const WINDOWS_TITLE_ENV = "WEBPAGE_MCP_DIRECTORY_PICKER_TITLE";
+
+const MACOS_PICKER_SCRIPT = [
+  "on run argv",
+  "  set dialogTitle to item 1 of argv",
+  "  set selectedFolder to choose folder with prompt dialogTitle",
+  "  return POSIX path of selectedFolder",
+  "end run",
+].join("\n");
+
+const WINDOWS_PICKER_SCRIPT = [
+  "Add-Type -AssemblyName System.Windows.Forms",
+  "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+  "try {",
+  "  $dialog.Description = $env:WEBPAGE_MCP_DIRECTORY_PICKER_TITLE",
+  "  $dialog.ShowNewFolderButton = $true",
+  "  $result = $dialog.ShowDialog()",
+  "  if ($result -eq [System.Windows.Forms.DialogResult]::OK) {",
+  "    [Console]::Out.WriteLine($dialog.SelectedPath)",
+  "  }",
+  "} finally {",
+  "  $dialog.Dispose()",
+  "}",
+].join("\n");
 
 export interface DirectoryPickerResult {
   success: boolean;
@@ -20,23 +46,197 @@ export interface DirectoryPickerResult {
   error?: string;
 }
 
+export interface DirectoryPickerCommandOptions {
+  timeout: number;
+  maxBuffer: number;
+  windowsHide: boolean;
+  shell: false;
+  env?: NodeJS.ProcessEnv;
+}
+
+export interface DirectoryPickerCommandResult {
+  stdout: string;
+  stderr: string;
+}
+
+export type DirectoryPickerRunner = (
+  executable: string,
+  args: readonly string[],
+  options: DirectoryPickerCommandOptions,
+) => Promise<DirectoryPickerCommandResult>;
+
+export interface DirectoryPickerDependencies {
+  platform?: NodeJS.Platform;
+  homeDirectory?: string;
+  runner?: DirectoryPickerRunner;
+}
+
+const defaultRunner: DirectoryPickerRunner = (executable, args, options) =>
+  new Promise((resolve, reject) => {
+    execFile(
+      executable,
+      [...args],
+      { ...options, encoding: "utf8" },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve({ stdout, stderr });
+      },
+    );
+  });
+
+function commandOptions(
+  env?: NodeJS.ProcessEnv,
+): DirectoryPickerCommandOptions {
+  return {
+    timeout: PICKER_TIMEOUT_MS,
+    maxBuffer: MAX_STDIO_BYTES,
+    windowsHide: true,
+    shell: false,
+    ...(env ? { env } : {}),
+  };
+}
+
+function windowsPickerEnvironment(title: string): NodeJS.ProcessEnv {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([name]) => name.toUpperCase() !== WINDOWS_TITLE_ENV,
+    ),
+  );
+  env[WINDOWS_TITLE_ENV] = title;
+  return env;
+}
+
+function utf8Bytes(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
+
+function truncateUtf8(value: string, maximumBytes: number): string {
+  if (utf8Bytes(value) <= maximumBytes) {
+    return value;
+  }
+
+  const bounded = Buffer.from(value, "utf8")
+    .subarray(0, maximumBytes)
+    .toString("utf8");
+  return bounded.endsWith("\uFFFD") ? bounded.slice(0, -1) : bounded;
+}
+
+function safeErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return truncateUtf8(message || "Directory picker failed", MAX_ERROR_BYTES);
+}
+
+function normalizeTitle(title: unknown): { title?: string; error?: string } {
+  if (typeof title !== "string") {
+    return { error: "Dialog title must be a string" };
+  }
+  if (utf8Bytes(title) > MAX_TITLE_BYTES) {
+    return { error: `Dialog title exceeds ${MAX_TITLE_BYTES} UTF-8 bytes` };
+  }
+  if (title.includes("\0")) {
+    return { error: "Dialog title contains a null character" };
+  }
+  return { title: title.trim() };
+}
+
+function pickerOutput(stdout: string): DirectoryPickerResult {
+  if (utf8Bytes(stdout) > MAX_STDIO_BYTES) {
+    return {
+      success: false,
+      error: "Directory picker output exceeded the safe limit",
+    };
+  }
+
+  const selectedPath = stdout.trim();
+  if (!selectedPath) {
+    return { success: false, cancelled: true };
+  }
+  if (selectedPath.includes("\0")) {
+    return {
+      success: false,
+      error: "Selected directory path contains a null character",
+    };
+  }
+  if (utf8Bytes(selectedPath) > MAX_PATH_BYTES) {
+    return {
+      success: false,
+      error: `Selected directory path exceeds ${MAX_PATH_BYTES} UTF-8 bytes`,
+    };
+  }
+  return { success: true, path: selectedPath };
+}
+
+function processFailure(error: unknown): {
+  code?: string | number;
+  killed?: boolean;
+  signal?: NodeJS.Signals | null;
+} {
+  if (!error || typeof error !== "object") {
+    return {};
+  }
+  return error as {
+    code?: string | number;
+    killed?: boolean;
+    signal?: NodeJS.Signals | null;
+  };
+}
+
+function wasCancelled(error: unknown): boolean {
+  const { code } = processFailure(error);
+  return code === 1 || code === "1";
+}
+
+function wasTimedOut(error: unknown): boolean {
+  const { code, killed } = processFailure(error);
+  return killed === true || code === "ETIMEDOUT";
+}
+
+function exceededOutputLimit(error: unknown): boolean {
+  return processFailure(error).code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+}
+
+function timeoutResult(): DirectoryPickerResult {
+  return { success: false, error: "Dialog timed out" };
+}
+
+function outputLimitResult(): DirectoryPickerResult {
+  return {
+    success: false,
+    error: "Directory picker output exceeded the safe limit",
+  };
+}
+
 /**
  * Open a native directory picker dialog.
  * Returns the selected directory path or indicates cancellation.
  */
 export async function openDirectoryPicker(
-  title = 'Select Project Directory',
+  title: string = DEFAULT_TITLE,
+  dependencies: DirectoryPickerDependencies = {},
 ): Promise<DirectoryPickerResult> {
-  const platform = os.platform();
+  const normalizedTitle = normalizeTitle(title);
+  if (normalizedTitle.error || normalizedTitle.title === undefined) {
+    return { success: false, error: normalizedTitle.error };
+  }
+
+  const platform = dependencies.platform ?? os.platform();
+  const runner = dependencies.runner ?? defaultRunner;
 
   try {
     switch (platform) {
-      case 'darwin':
-        return await openMacOSPicker(title);
-      case 'win32':
-        return await openWindowsPicker(title);
-      case 'linux':
-        return await openLinuxPicker(title);
+      case "darwin":
+        return await openMacOSPicker(normalizedTitle.title, runner);
+      case "win32":
+        return await openWindowsPicker(normalizedTitle.title, runner);
+      case "linux":
+        return await openLinuxPicker(
+          normalizedTitle.title,
+          dependencies.homeDirectory ?? os.homedir(),
+          runner,
+        );
       default:
         return {
           success: false,
@@ -46,115 +246,112 @@ export async function openDirectoryPicker(
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: safeErrorMessage(error),
     };
   }
 }
 
-/**
- * macOS: Use osascript to open Finder folder picker.
- */
-async function openMacOSPicker(title: string): Promise<DirectoryPickerResult> {
-  const script = `
-    set selectedFolder to choose folder with prompt "${title}"
-    return POSIX path of selectedFolder
-  `;
-
+/** macOS: Use a static AppleScript program and pass the title as argv. */
+async function openMacOSPicker(
+  title: string,
+  runner: DirectoryPickerRunner,
+): Promise<DirectoryPickerResult> {
   try {
-    const { stdout } = await execAsync(`osascript -e '${script}'`);
-    const path = stdout.trim();
-    if (path) {
-      return { success: true, path };
-    }
-    return { success: false, cancelled: true };
-  } catch (error) {
-    // User cancelled returns error code 1
-    const err = error as { code?: number; stderr?: string };
-    if (err.code === 1) {
-      return { success: false, cancelled: true };
-    }
-    throw error;
-  }
-}
-
-/**
- * Windows: Use PowerShell to open folder browser dialog.
- */
-async function openWindowsPicker(title: string): Promise<DirectoryPickerResult> {
-  const psScript = `
-    Add-Type -AssemblyName System.Windows.Forms
-    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = "${title}"
-    $dialog.ShowNewFolderButton = $true
-    $result = $dialog.ShowDialog()
-    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-      Write-Output $dialog.SelectedPath
-    }
-  `;
-
-  // Escape for command line
-  const escapedScript = psScript.replace(/"/g, '\\"').replace(/\n/g, ' ');
-
-  try {
-    const { stdout } = await execAsync(
-      `powershell -NoProfile -Command "${escapedScript}"`,
-      { timeout: 60000 }, // 60 second timeout
+    const { stdout } = await runner(
+      "osascript",
+      ["-e", MACOS_PICKER_SCRIPT, "--", title],
+      commandOptions(),
     );
-    const path = stdout.trim();
-    if (path) {
-      return { success: true, path };
-    }
-    return { success: false, cancelled: true };
+    return pickerOutput(stdout);
   } catch (error) {
-    const err = error as { killed?: boolean };
-    if (err.killed) {
-      return { success: false, error: 'Dialog timed out' };
+    if (wasCancelled(error)) {
+      return { success: false, cancelled: true };
+    }
+    if (wasTimedOut(error)) {
+      return timeoutResult();
+    }
+    if (exceededOutputLimit(error)) {
+      return outputLimitResult();
     }
     throw error;
   }
 }
 
-/**
- * Linux: Try zenity first, then kdialog as fallback.
- */
-async function openLinuxPicker(title: string): Promise<DirectoryPickerResult> {
-  // Try zenity first (GTK)
+/** Windows: Use a static PowerShell program and pass the title via the environment. */
+async function openWindowsPicker(
+  title: string,
+  runner: DirectoryPickerRunner,
+): Promise<DirectoryPickerResult> {
   try {
-    const { stdout } = await execAsync(`zenity --file-selection --directory --title="${title}"`, {
-      timeout: 60000,
-    });
-    const path = stdout.trim();
-    if (path) {
-      return { success: true, path };
+    const { stdout } = await runner(
+      "powershell.exe",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-STA",
+        "-Command",
+        WINDOWS_PICKER_SCRIPT,
+      ],
+      commandOptions(windowsPickerEnvironment(title)),
+    );
+    return pickerOutput(stdout);
+  } catch (error) {
+    if (wasTimedOut(error)) {
+      return timeoutResult();
     }
-    return { success: false, cancelled: true };
-  } catch (zenityError) {
-    // zenity returns exit code 1 on cancel, 5 if not installed
-    const err = zenityError as { code?: number };
-    if (err.code === 1) {
+    if (exceededOutputLimit(error)) {
+      return outputLimitResult();
+    }
+    throw error;
+  }
+}
+
+/** Linux: Try zenity first, then kdialog as fallback. */
+async function openLinuxPicker(
+  title: string,
+  homeDirectory: string,
+  runner: DirectoryPickerRunner,
+): Promise<DirectoryPickerResult> {
+  try {
+    const { stdout } = await runner(
+      "zenity",
+      ["--file-selection", "--directory", "--title", title],
+      commandOptions(),
+    );
+    return pickerOutput(stdout);
+  } catch (error) {
+    if (wasCancelled(error)) {
       return { success: false, cancelled: true };
     }
-
-    // Try kdialog as fallback (KDE)
-    try {
-      const { stdout } = await execAsync(`kdialog --getexistingdirectory ~ --title "${title}"`, {
-        timeout: 60000,
-      });
-      const path = stdout.trim();
-      if (path) {
-        return { success: true, path };
-      }
-      return { success: false, cancelled: true };
-    } catch (kdialogError) {
-      const kdErr = kdialogError as { code?: number };
-      if (kdErr.code === 1) {
-        return { success: false, cancelled: true };
-      }
-
-      return {
-        success: false,
-        error: 'No directory picker available. Please install zenity or kdialog.',
-      };
+    if (wasTimedOut(error)) {
+      return timeoutResult();
     }
+    if (exceededOutputLimit(error)) {
+      return outputLimitResult();
+    }
+  }
+
+  try {
+    const { stdout } = await runner(
+      "kdialog",
+      ["--getexistingdirectory", homeDirectory, "--title", title],
+      commandOptions(),
+    );
+    return pickerOutput(stdout);
+  } catch (error) {
+    if (wasCancelled(error)) {
+      return { success: false, cancelled: true };
+    }
+    if (wasTimedOut(error)) {
+      return timeoutResult();
+    }
+    if (exceededOutputLimit(error)) {
+      return outputLimitResult();
+    }
+    return {
+      success: false,
+      error: "No directory picker available. Please install zenity or kdialog.",
+    };
   }
 }
