@@ -27,6 +27,7 @@ import {
   type NativeIpcCredential,
 } from './ipc/bridge-auth';
 import { BoundedNdjsonDecoder } from './ipc/bounded-ndjson';
+import { IPC_CANCEL_REQUEST_METHOD } from './ipc/bridge-protocol';
 import {
   captureUnixSocketIdentity,
   prepareUnixSocketPath,
@@ -259,9 +260,10 @@ export class NativeMessagingHost {
     this.ipcSockets.add(socket);
     const decoder = new BoundedNdjsonDecoder(IPC_MAX_REQUEST_LINE_BYTES);
     const requestQueue: any[] = [];
-    const activeControllers = new Set<AbortController>();
+    const activeControllers = new Map<string, AbortController>();
     let authenticated = false;
     let activeRequests = 0;
+    let pendingCancellationResponses = 0;
     let inputPaused = false;
     let closing = false;
     let closed = false;
@@ -302,7 +304,7 @@ export class NativeMessagingHost {
 
     const abortConnectionWork = (): void => {
       requestQueue.length = 0;
-      for (const controller of activeControllers) {
+      for (const controller of activeControllers.values()) {
         controller.abort();
       }
       activeControllers.clear();
@@ -343,7 +345,7 @@ export class NativeMessagingHost {
       ) {
         const request = requestQueue.shift();
         const controller = new AbortController();
-        activeControllers.add(controller);
+        activeControllers.set(request.id, controller);
         activeRequests += 1;
 
         void (async () => {
@@ -360,7 +362,9 @@ export class NativeMessagingHost {
               });
             }
           } finally {
-            activeControllers.delete(controller);
+            if (activeControllers.get(request.id) === controller) {
+              activeControllers.delete(request.id);
+            }
             activeRequests -= 1;
             updateInputBackpressure();
             processRequestQueue();
@@ -416,6 +420,54 @@ export class NativeMessagingHost {
 
         if (typeof parsed?.id !== 'string' || !parsed.id) {
           closeWithError(null, 'IPC request id must be a non-empty string');
+          return;
+        }
+        if (parsed.method === IPC_CANCEL_REQUEST_METHOD) {
+          if (pendingCancellationResponses >= IPC_MAX_PENDING_REQUESTS) {
+            closeWithError(parsed.id, 'IPC connection has too many cancellation requests');
+            return;
+          }
+          pendingCancellationResponses += 1;
+          const sendCancellationResponse = (payload: unknown): void => {
+            void send(payload)
+              .finally(() => {
+                pendingCancellationResponses -= 1;
+              })
+              .catch(() => {});
+          };
+          const targetRequestId =
+            typeof parsed?.params?.requestId === 'string' ? parsed.params.requestId : '';
+          if (!targetRequestId) {
+            sendCancellationResponse({
+              id: parsed.id,
+              error: 'requestId is required for IPC cancellation',
+            });
+            continue;
+          }
+
+          let cancelled = false;
+          const queuedIndex = requestQueue.findIndex(
+            (queuedRequest) => queuedRequest?.id === targetRequestId,
+          );
+          if (queuedIndex >= 0) {
+            requestQueue.splice(queuedIndex, 1);
+            cancelled = true;
+          }
+          const activeController = activeControllers.get(targetRequestId);
+          if (activeController) {
+            activeController.abort();
+            cancelled = true;
+          }
+          sendCancellationResponse({ id: parsed.id, result: { cancelled } });
+          updateInputBackpressure();
+          processRequestQueue();
+          continue;
+        }
+        if (
+          activeControllers.has(parsed.id) ||
+          requestQueue.some((queuedRequest) => queuedRequest?.id === parsed.id)
+        ) {
+          closeWithError(parsed.id, 'IPC request id is already in use');
           return;
         }
         if (activeRequests + requestQueue.length >= IPC_MAX_PENDING_REQUESTS) {

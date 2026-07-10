@@ -16,6 +16,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { getLegacyNativeSocketPath, getNativeSocketPath } from '../ipc/socket-path';
 import { IPC_AUTH_METHOD, readNativeIpcCredential } from '../ipc/bridge-auth';
 import { BoundedNdjsonDecoder } from '../ipc/bounded-ndjson';
+import { IPC_CANCEL_REQUEST_METHOD } from '../ipc/bridge-protocol';
 import { autoBootstrapNativeMessagingForStdio } from '../scripts/utils';
 import { resolveMcpClientCapabilities } from './register-tools';
 import { shouldNotifyWorkflowToolListChanged } from './tool-list-change';
@@ -41,6 +42,36 @@ interface PendingIpcRequest {
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
   timer: NodeJS.Timeout;
+  signal?: AbortSignal;
+  abortHandler?: () => void;
+}
+
+function createAbortError(): Error {
+  const error = new Error('MCP request cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+function waitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(createAbortError());
+
+  return new Promise<T>((resolve, reject) => {
+    const handleAbort = (): void => {
+      reject(createAbortError());
+    };
+    signal.addEventListener('abort', handleAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', handleAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', handleAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -125,6 +156,17 @@ class NativeIpcBridgeClient {
   private connectPromise: Promise<void> | null = null;
   private connectedSocketPath: string | null = null;
   private readonly pending = new Map<string, PendingIpcRequest>();
+
+  private takePending(id: string): PendingIpcRequest | undefined {
+    const pending = this.pending.get(id);
+    if (!pending) return undefined;
+    this.pending.delete(id);
+    clearTimeout(pending.timer);
+    if (pending.signal && pending.abortHandler) {
+      pending.signal.removeEventListener('abort', pending.abortHandler);
+    }
+    return pending;
+  }
 
   private connectOnce(socketPath: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
@@ -242,13 +284,11 @@ class NativeIpcBridgeClient {
       if (!id) {
         continue;
       }
-      const pending = this.pending.get(id);
+      const pending = this.takePending(id);
       if (!pending) {
         continue;
       }
 
-      clearTimeout(pending.timer);
-      this.pending.delete(id);
       if (message.error) {
         pending.reject(new Error(String(message.error)));
       } else {
@@ -265,10 +305,10 @@ class NativeIpcBridgeClient {
     this.authenticated = false;
     this.connectedSocketPath = null;
     this.decoder.reset();
-    for (const [id, pending] of this.pending.entries()) {
-      clearTimeout(pending.timer);
+    for (const id of Array.from(this.pending.keys())) {
+      const pending = this.takePending(id);
+      if (!pending) continue;
       pending.reject(new Error(reason));
-      this.pending.delete(id);
     }
   }
 
@@ -290,6 +330,8 @@ class NativeIpcBridgeClient {
     method: string,
     params: Record<string, unknown> | undefined,
     timeoutMs: number,
+    signal?: AbortSignal,
+    sendCancellation = false,
   ): Promise<T> {
     if (socket.destroyed || this.socket !== socket) {
       return Promise.reject(new Error('IPC socket is not connected'));
@@ -298,6 +340,9 @@ class NativeIpcBridgeClient {
       return Promise.reject(
         new Error(`IPC client has reached its ${IPC_MAX_PENDING_REQUESTS}-request limit`),
       );
+    }
+    if (signal?.aborted) {
+      return Promise.reject(createAbortError());
     }
 
     const id = randomUUID();
@@ -308,17 +353,43 @@ class NativeIpcBridgeClient {
       );
     }
 
+    let requestWritten = false;
     const response = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`IPC request timed out after ${timeoutMs}ms`));
+        const pending = this.takePending(id);
+        pending?.reject(new Error(`IPC request timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
-      this.pending.set(id, {
+      const pending: PendingIpcRequest = {
         resolve: (value) => resolve(value as T),
         reject,
         timer,
-      });
+        signal,
+      };
+      if (signal) {
+        pending.abortHandler = () => {
+          const aborted = this.takePending(id);
+          if (!aborted) return;
+          aborted.reject(createAbortError());
+          if (sendCancellation && requestWritten && this.socket === socket && !socket.destroyed) {
+            void this.sendRequest(
+              socket,
+              IPC_CANCEL_REQUEST_METHOD,
+              { requestId: id },
+              5_000,
+            ).catch(() => {
+              // The original request is already cancelled locally.
+            });
+          }
+        };
+      }
+      this.pending.set(id, pending);
+      if (signal && pending.abortHandler) {
+        signal.addEventListener('abort', pending.abortHandler, { once: true });
+        if (signal.aborted) {
+          pending.abortHandler();
+        }
+      }
     });
 
     const write = this.writeTail.then(
@@ -328,6 +399,11 @@ class NativeIpcBridgeClient {
             reject(new Error('IPC socket is not connected'));
             return;
           }
+          if (!this.pending.has(id)) {
+            resolve();
+            return;
+          }
+          requestWritten = true;
           socket.write(`${payload}\n`, (error) => {
             if (error) {
               reject(error);
@@ -339,10 +415,8 @@ class NativeIpcBridgeClient {
     );
     this.writeTail = write.catch(() => {});
     void write.catch((error) => {
-      const pending = this.pending.get(id);
+      const pending = this.takePending(id);
       if (pending) {
-        clearTimeout(pending.timer);
-        this.pending.delete(id);
         pending.reject(error);
       }
     });
@@ -350,14 +424,19 @@ class NativeIpcBridgeClient {
     return response;
   }
 
-  async request<T = unknown>(method: string, params?: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
-    await this.ensureConnected();
+  async request<T = unknown>(
+    method: string,
+    params?: Record<string, unknown>,
+    timeoutMs = 30_000,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    await waitWithSignal(this.ensureConnected(), signal);
     if (!this.socket || this.socket.destroyed) {
       const detail = this.connectedSocketPath ? ` (${this.connectedSocketPath})` : '';
       throw new Error(`IPC socket is not connected${detail}`);
     }
 
-    return await this.sendRequest<T>(this.socket, method, params, timeoutMs);
+    return await this.sendRequest<T>(this.socket, method, params, timeoutMs, signal, true);
   }
 
   close(): void {
@@ -370,10 +449,10 @@ class NativeIpcBridgeClient {
       this.socket = null;
     }
     this.authenticated = false;
-    for (const [id, pending] of this.pending.entries()) {
-      clearTimeout(pending.timer);
+    for (const id of Array.from(this.pending.keys())) {
+      const pending = this.takePending(id);
+      if (!pending) continue;
       pending.reject(new Error('IPC client closed'));
-      this.pending.delete(id);
     }
   }
 }
@@ -409,24 +488,38 @@ function getStdioMcpServer(): Server {
   return stdioMcpServer;
 }
 
-async function listToolsFromBridge(): Promise<Tool[]> {
-  const result = await bridgeClient.request<{ tools?: Tool[] }>('mcp_list_tools', {
-    sessionId: mcpSessionId,
-    clientCapabilities: resolveMcpClientCapabilities(stdioMcpServer?.getClientCapabilities()),
-  });
+async function listToolsFromBridge(signal?: AbortSignal): Promise<Tool[]> {
+  const result = await bridgeClient.request<{ tools?: Tool[] }>(
+    'mcp_list_tools',
+    {
+      sessionId: mcpSessionId,
+      clientCapabilities: resolveMcpClientCapabilities(stdioMcpServer?.getClientCapabilities()),
+    },
+    30_000,
+    signal,
+  );
   if (!result || !Array.isArray(result.tools)) {
     return TOOL_SCHEMAS;
   }
   return result.tools;
 }
 
-async function callToolFromBridge(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
-  const result = await bridgeClient.request<{ result?: CallToolResult }>('mcp_call_tool', {
-    sessionId: mcpSessionId,
-    name,
-    args,
-    clientCapabilities: resolveMcpClientCapabilities(stdioMcpServer?.getClientCapabilities()),
-  }, 120_000);
+async function callToolFromBridge(
+  name: string,
+  args: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<CallToolResult> {
+  const result = await bridgeClient.request<{ result?: CallToolResult }>(
+    'mcp_call_tool',
+    {
+      sessionId: mcpSessionId,
+      name,
+      args,
+      clientCapabilities: resolveMcpClientCapabilities(stdioMcpServer?.getClientCapabilities()),
+    },
+    120_000,
+    signal,
+  );
   if (!result?.result) {
     throw new Error('Missing result from native bridge');
   }
@@ -434,20 +527,23 @@ async function callToolFromBridge(name: string, args: Record<string, unknown>): 
 }
 
 function setupHandlers(server: Server): void {
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
+  server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
     try {
-      const tools = await listToolsFromBridge();
+      const tools = await listToolsFromBridge(extra.signal);
       return { tools };
     } catch (error) {
+      if (extra.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        throw error;
+      }
       console.warn('[webpage-mcp-stdio] Failed to list tools via native bridge:', error);
       return { tools: TOOL_SCHEMAS };
     }
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     try {
       const args = request.params.arguments || {};
-      const result = await callToolFromBridge(request.params.name, args);
+      const result = await callToolFromBridge(request.params.name, args, extra.signal);
       if (shouldNotifyWorkflowToolListChanged(request.params.name, args, result)) {
         try {
           await server.sendToolListChanged();
@@ -460,6 +556,9 @@ function setupHandlers(server: Server): void {
       }
       return result;
     } catch (error: any) {
+      if (extra.signal.aborted || error?.name === 'AbortError') {
+        throw error;
+      }
       return {
         content: [
           {

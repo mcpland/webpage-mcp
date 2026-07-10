@@ -11,9 +11,121 @@ import {
   clearDynamicFlowCacheForSession,
   listToolsForContext,
   resolveMcpClientCapabilities,
+  setupTools,
   type McpClientCapabilityFallback,
   type McpToolContext,
 } from './register-tools';
+
+type RegisteredRequestHandler = (request: any, extra: { signal: AbortSignal }) => Promise<any>;
+
+describe('SDK request cancellation', () => {
+  it('passes the MCP request signal to extension tool work', async () => {
+    const sessionId = 'sdk-cancellation';
+    clearDynamicFlowCacheForSession(sessionId);
+    const sendRequestToExtensionAndWait = vi.fn(
+      (
+        _payload: unknown,
+        messageType: string,
+        _timeoutMs: number,
+        signal?: AbortSignal,
+      ) => {
+        if (messageType === 'rr_list_published_flows') {
+          return Promise.resolve({
+            status: 'success',
+            items: [],
+            capabilities: DEFAULT_TEST_EXTENSION_CAPABILITIES,
+          });
+        }
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              const error = new Error('cancelled by MCP client');
+              error.name = 'AbortError';
+              reject(error);
+            },
+            { once: true },
+          );
+        });
+      },
+    );
+    const context = createContext(sessionId, sendRequestToExtensionAndWait, undefined, {
+      injectDefaultExtensionCapabilities: false,
+    });
+    const handlers: RegisteredRequestHandler[] = [];
+    const fakeServer = {
+      setRequestHandler: (_schema: unknown, handler: RegisteredRequestHandler) => {
+        handlers.push(handler);
+      },
+      getClientCapabilities: () => ({ experimental: { cancellation: true } }),
+    } as unknown as Parameters<typeof setupTools>[0];
+    setupTools(fakeServer, context);
+
+    const controller = new AbortController();
+    const callResult = handlers[1](
+      {
+        params: {
+          name: 'get_windows_and_tabs',
+          arguments: {},
+        },
+      },
+      { signal: controller.signal },
+    );
+
+    await vi.waitFor(() => {
+      expect(sendRequestToExtensionAndWait).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'get_windows_and_tabs' }),
+        NativeMessageType.CALL_TOOL,
+        120000,
+        controller.signal,
+      );
+    });
+    controller.abort();
+
+    await expect(callResult).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('keeps a shared flow lookup alive when one caller is cancelled', async () => {
+    const sessionId = 'shared-list-cancellation';
+    clearDynamicFlowCacheForSession(sessionId);
+    let resolveHandshake!: (value: unknown) => void;
+    const sendRequestToExtensionAndWait = vi.fn(
+      (_payload: unknown, messageType: string, _timeoutMs: number, signal?: AbortSignal) => {
+        expect(messageType).toBe('rr_list_published_flows');
+        expect(signal).toBeUndefined();
+        return new Promise((resolve) => {
+          resolveHandshake = resolve;
+        });
+      },
+    );
+    const firstController = new AbortController();
+    const firstContext = {
+      ...createContext(sessionId, sendRequestToExtensionAndWait, undefined, {
+        injectDefaultExtensionCapabilities: false,
+      }),
+      signal: firstController.signal,
+    };
+    const secondContext = createContext(sessionId, sendRequestToExtensionAndWait, undefined, {
+      injectDefaultExtensionCapabilities: false,
+    });
+
+    const firstList = listToolsForContext(firstContext);
+    await vi.waitFor(() => expect(sendRequestToExtensionAndWait).toHaveBeenCalledOnce());
+    const secondList = listToolsForContext(secondContext);
+
+    firstController.abort();
+    await expect(firstList).rejects.toMatchObject({ name: 'AbortError' });
+
+    resolveHandshake({
+      status: 'success',
+      items: [],
+      capabilities: DEFAULT_TEST_EXTENSION_CAPABILITIES,
+    });
+    await expect(secondList).resolves.toEqual(expect.any(Array));
+    expect(sendRequestToExtensionAndWait).toHaveBeenCalledOnce();
+    clearDynamicFlowCacheForSession(sessionId);
+  });
+});
 
 function createContext(
   sessionId: string,

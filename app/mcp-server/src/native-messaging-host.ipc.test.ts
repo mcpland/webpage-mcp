@@ -1,10 +1,13 @@
 import { EventEmitter } from 'node:events';
+import { Writable } from 'node:stream';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNativeIpcCredential } from './ipc/bridge-auth';
+import { IPC_CANCEL_REQUEST_METHOD } from './ipc/bridge-protocol';
+import { NativeMessageWriter } from './native-message-output';
 import { NativeMessagingHost } from './native-messaging-host';
 
 class FakeSocket extends EventEmitter {
@@ -47,6 +50,13 @@ class FakeSocket extends EventEmitter {
 
 const tempDirs: string[] = [];
 
+function createQuietHost(): NativeMessagingHost {
+  const output = new Writable({
+    write: (_chunk, _encoding, callback) => callback(),
+  });
+  return new NativeMessagingHost(new NativeMessageWriter(output));
+}
+
 function createHostAndSocket(): {
   credential: ReturnType<typeof createNativeIpcCredential>;
   host: NativeMessagingHost;
@@ -58,7 +68,7 @@ function createHostAndSocket(): {
     path.join(root, 'native.sock'),
     path.join(root, 'auth'),
   );
-  const host = new NativeMessagingHost();
+  const host = createQuietHost();
   const socket = new FakeSocket();
   (host as unknown as { ipcCredential: typeof credential }).ipcCredential = credential;
   (
@@ -272,8 +282,84 @@ describe('NativeMessagingHost IPC resource limits', () => {
     ]);
   });
 
+  it('aborts only the active request named by a cancellation frame', async () => {
+    const { credential, host, socket } = createHostAndSocket();
+    const signals = new Map<string, AbortSignal>();
+    (
+      host as unknown as {
+        handleIpcRequest: (
+          request: { id: string },
+          signal?: AbortSignal,
+        ) => Promise<never>;
+      }
+    ).handleIpcRequest = (request, signal) => {
+      if (!signal) throw new Error('signal is required');
+      signals.set(request.id, signal);
+      return new Promise<never>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    };
+    await authenticate(socket, credential.token);
+    socket.emit(
+      'data',
+      Buffer.from(
+        `${JSON.stringify({ id: 'request-1', method: 'mcp_call_tool' })}\n${JSON.stringify({ id: 'request-2', method: 'mcp_call_tool' })}\n`,
+      ),
+    );
+    await vi.waitFor(() => expect(signals.size).toBe(2));
+
+    socket.emit(
+      'data',
+      Buffer.from(
+        `${JSON.stringify({
+          id: 'cancel-1',
+          method: IPC_CANCEL_REQUEST_METHOD,
+          params: { requestId: 'request-1' },
+        })}\n`,
+      ),
+    );
+
+    await vi.waitFor(() => {
+      expect(signals.get('request-1')?.aborted).toBe(true);
+      expect(parseWrites(socket)).toContainEqual({
+        id: 'cancel-1',
+        result: { cancelled: true },
+      });
+    });
+    expect(signals.get('request-2')?.aborted).toBe(false);
+    socket.destroy();
+  });
+
+  it('rejects duplicate request ids without losing the original controller', async () => {
+    const { credential, host, socket } = createHostAndSocket();
+    let originalSignal: AbortSignal | undefined;
+    (
+      host as unknown as {
+        handleIpcRequest: (_request: unknown, signal?: AbortSignal) => Promise<never>;
+      }
+    ).handleIpcRequest = (_request, signal) => {
+      originalSignal = signal;
+      return new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    };
+    await authenticate(socket, credential.token);
+
+    const duplicate = JSON.stringify({ id: 'duplicate-id', method: 'mcp_call_tool' });
+    socket.emit('data', Buffer.from(`${duplicate}\n${duplicate}\n`));
+
+    await vi.waitFor(() => {
+      expect(originalSignal?.aborted).toBe(true);
+      expect(parseWrites(socket)).toContainEqual({
+        id: 'duplicate-id',
+        error: 'IPC request id is already in use',
+      });
+      expect(socket.destroyed).toBe(true);
+    });
+  });
+
   it('removes a pending extension request as soon as its bridge signal aborts', async () => {
-    const host = new NativeMessagingHost();
+    const host = createQuietHost();
     vi.spyOn(host, 'sendMessage').mockImplementation(() => {});
     const controller = new AbortController();
 

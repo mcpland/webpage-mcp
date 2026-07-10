@@ -55,6 +55,43 @@ function sendExtensionRequest(
   return ctx.nativeHost.sendRequestToExtensionAndWait(payload, messageType, timeoutMs);
 }
 
+function createMcpAbortError(): Error {
+  const error = new Error('MCP request cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+function isAbortFailure(error: unknown, signal?: AbortSignal): boolean {
+  return Boolean(
+    signal?.aborted ||
+      (error &&
+        typeof error === 'object' &&
+        'name' in error &&
+        (error as { name?: unknown }).name === 'AbortError'),
+  );
+}
+
+function waitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(createMcpAbortError());
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', handleAbort);
+      callback();
+    };
+    const handleAbort = (): void => finish(() => reject(createMcpAbortError()));
+    signal.addEventListener('abort', handleAbort, { once: true });
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
+  });
+}
+
 interface PublishedFlowVariable {
   key?: string;
   name?: string;
@@ -696,6 +733,9 @@ async function fetchPublishedFlows(
   ctx: McpToolContext,
   options?: { forceRefresh?: boolean },
 ): Promise<PublishedFlow[]> {
+  if (ctx.signal?.aborted) {
+    throw createMcpAbortError();
+  }
   const forceRefresh = options?.forceRefresh === true;
   const now = Date.now();
   pruneDynamicFlowCaches(now);
@@ -707,13 +747,14 @@ async function fetchPublishedFlows(
   if (!forceRefresh) {
     const inflight = publishedFlowsInflight.get(ctx.sessionId);
     if (inflight) {
-      return inflight;
+      return waitWithSignal(inflight, ctx.signal);
     }
   }
 
+  const requestContext = forceRefresh ? ctx : { ...ctx, signal: undefined };
   const requestPromise = (async () => {
     const response = await sendExtensionRequest(
-      ctx,
+      requestContext,
       {
         meta: buildExtensionToolMeta(ctx),
         handshake: {
@@ -739,19 +780,28 @@ async function fetchPublishedFlows(
     pruneDynamicFlowCaches();
     return items;
   })()
-    .catch(() => {
+    .catch((error) => {
+      if (isAbortFailure(error, requestContext.signal)) {
+        throw error;
+      }
       rememberExtensionCapabilities(
         ctx.sessionId,
         createFallbackExtensionCapabilities('Extension capability handshake failed; using conservative workflow schema.'),
       );
       return [];
-    })
-    .finally(() => {
-      publishedFlowsInflight.delete(ctx.sessionId);
     });
 
-  publishedFlowsInflight.set(ctx.sessionId, requestPromise);
-  return requestPromise;
+  if (forceRefresh) {
+    return requestPromise;
+  }
+
+  const trackedRequest = requestPromise.finally(() => {
+    if (publishedFlowsInflight.get(ctx.sessionId) === trackedRequest) {
+      publishedFlowsInflight.delete(ctx.sessionId);
+    }
+  });
+  publishedFlowsInflight.set(ctx.sessionId, trackedRequest);
+  return waitWithSignal(trackedRequest, ctx.signal);
 }
 
 function splitDynamicFlowArgs(
@@ -1022,20 +1072,22 @@ async function listDynamicFlowTools(
 
 export const setupTools = (server: Server, ctx: McpToolContext) => {
   // List tools handler
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
+  server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
     return {
       tools: await listToolsForContext({
         ...ctx,
+        signal: extra.signal,
         clientCapabilities: resolveMcpClientCapabilities(server.getClientCapabilities()),
       }),
     };
   });
 
   // Call tool handler
-  server.setRequestHandler(CallToolRequestSchema, async (request) =>
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
     callToolForContext(
       {
         ...ctx,
+        signal: extra.signal,
         clientCapabilities: resolveMcpClientCapabilities(server.getClientCapabilities()),
       },
       request.params.name,
@@ -1141,6 +1193,7 @@ export const callToolForContext = async (
           isError: true,
         };
       } catch (err: any) {
+        if (isAbortFailure(err, ctx.signal)) throw err;
         return {
           content: [
             {
@@ -1194,6 +1247,7 @@ export const callToolForContext = async (
           isError: true,
         };
       } catch (err: any) {
+        if (isAbortFailure(err, ctx.signal)) throw err;
         return {
           content: [
             {
@@ -1255,6 +1309,7 @@ export const callToolForContext = async (
       };
     }
   } catch (error: any) {
+    if (isAbortFailure(error, ctx.signal)) throw error;
     return {
       content: [
         {
