@@ -2300,7 +2300,12 @@ export const TOOL_SCHEMAS: Tool[] = [
         maxMessages: {
           type: 'number',
           description:
-            'Maximum number of console messages to capture in snapshot mode (default: 100). If limit is provided, it takes precedence.',
+            'Maximum number of console messages to capture in snapshot mode (default: 100, hard maximum: 500). If limit is provided, it takes precedence.',
+        },
+        maxExceptions: {
+          type: 'number',
+          description:
+            'Maximum number of exceptions to return (default: 50, hard maximum: 100).',
         },
         mode: {
           type: 'string',
@@ -2322,6 +2327,11 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'Buffer mode only: clear the buffered logs for this tab AFTER reading, to avoid duplicate messages on subsequent calls (default: false). This matches mcp-tools.js behavior.',
         },
+        stop: {
+          type: 'boolean',
+          description:
+            'Stop persistent console capture for the target tab and release its debugger session. This is distinct from clear, which keeps capture running.',
+        },
         pattern: {
           type: 'string',
           description:
@@ -2335,7 +2345,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         limit: {
           type: 'number',
           description:
-            'Limit returned console messages. In snapshot mode this is an alias for maxMessages; in buffer mode it limits returned messages from the buffer.',
+            'Limit returned console messages (hard maximum: 500). In snapshot mode this is an alias for maxMessages; in buffer mode it limits returned messages from the buffer.',
         },
       },
       required: [],

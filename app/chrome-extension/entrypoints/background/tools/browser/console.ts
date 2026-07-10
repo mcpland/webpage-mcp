@@ -2,7 +2,11 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
-import { consoleBuffer, BufferedConsoleMessage, BufferedConsoleException } from './console-buffer';
+import {
+  consoleBuffer,
+  BufferedConsoleMessage,
+  BufferedConsoleException,
+} from './console-buffer';
 import {
   measureWorkflowRegexUtf8Bytes,
   testWorkflowRegex,
@@ -12,8 +16,27 @@ import {
   WORKFLOW_REGEX_INPUT_MAX_UTF8_BYTES,
   type WorkflowRegexFailure,
 } from '@/entrypoints/background/record-replay/workflow-regex';
+import {
+  appendToByteRing,
+  CONSOLE_MAX_EXCEPTIONS,
+  CONSOLE_MAX_MESSAGES,
+  CONSOLE_SNAPSHOT_MAX_EVENTS,
+  CONSOLE_SNAPSHOT_MAX_EXCEPTION_BYTES,
+  CONSOLE_SNAPSHOT_MAX_MESSAGE_BYTES,
+  CONSOLE_TITLE_MAX_UTF8_BYTES,
+  CONSOLE_URL_MAX_UTF8_BYTES,
+  getByteRingValues,
+  sanitizeConsoleExceptionInput,
+  sanitizeConsoleMessageInput,
+  sanitizeRuntimeConsoleEvent,
+  truncateConsoleJsonString,
+  type ByteRingState,
+} from './console-limits';
 
 const DEFAULT_MAX_MESSAGES = 100;
+const DEFAULT_MAX_EXCEPTIONS = 50;
+export const CONSOLE_TAB_READY_TIMEOUT_MS = 30_000;
+const CONSOLE_TAB_READY_POLL_MS = 100;
 
 type ConsoleMode = 'snapshot' | 'buffer';
 
@@ -24,11 +47,13 @@ interface ConsoleToolParams {
   windowId?: number;
   includeExceptions?: boolean;
   maxMessages?: number;
+  maxExceptions?: number;
   // New parameters
   mode?: ConsoleMode;
   buffer?: boolean; // mode="buffer" alias
   clear?: boolean; // Clear before reading
   clearAfterRead?: boolean; // Empty after reading (mcp-tools.js style)
+  stop?: boolean; // Stop persistent capture without treating clear as a stop
   pattern?: string;
   onlyErrors?: boolean;
   limit?: number;
@@ -82,9 +107,16 @@ interface ParsedRegexPattern {
   flags: string;
 }
 
-function normalizeLimit(value: unknown, fallback: number): number {
-  const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
-  return Math.max(0, n);
+function normalizeLimit(
+  value: unknown,
+  fallback: number,
+  hardMax = CONSOLE_MAX_MESSAGES,
+): number {
+  const n =
+    typeof value === 'number' && Number.isFinite(value)
+      ? Math.floor(value)
+      : fallback;
+  return Math.min(hardMax, Math.max(0, n));
 }
 
 function hasDisallowedPublicPageScheme(url: string): boolean {
@@ -153,7 +185,10 @@ function matchesPattern(pattern: ParsedRegexPattern, text: string): boolean {
   return result.matched;
 }
 
-function sanitizeConsoleUrl(url: unknown): { url?: string | null; urlRedacted?: true } {
+function sanitizeConsoleUrl(url: unknown): {
+  url?: string | null;
+  urlRedacted?: true;
+} {
   if (typeof url !== 'string' || !url.trim()) {
     return {};
   }
@@ -175,7 +210,9 @@ function sanitizeNestedUrls(value: unknown, depth = 0): unknown {
   }
 
   const result: Record<string, unknown> = {};
-  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+  for (const [key, nested] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
     if (key === 'url') {
       const sanitized = sanitizeConsoleUrl(nested);
       if ('url' in sanitized) {
@@ -192,20 +229,28 @@ function sanitizeNestedUrls(value: unknown, depth = 0): unknown {
 }
 
 function sanitizeConsoleMessage(message: ConsoleMessage): ConsoleMessage {
-  const sanitizedUrl = sanitizeConsoleUrl(message.url);
+  const bounded = sanitizeConsoleMessageInput(message);
+  const sanitizedUrl = sanitizeConsoleUrl(bounded.url);
   return {
-    ...message,
+    ...bounded,
     ...sanitizedUrl,
-    ...(message.stackTrace ? { stackTrace: sanitizeNestedUrls(message.stackTrace) } : {}),
+    ...(bounded.stackTrace
+      ? { stackTrace: sanitizeNestedUrls(bounded.stackTrace) }
+      : {}),
   };
 }
 
-function sanitizeConsoleException(exception: ConsoleException): ConsoleException {
-  const sanitizedUrl = sanitizeConsoleUrl(exception.url);
+function sanitizeConsoleException(
+  exception: ConsoleException,
+): ConsoleException {
+  const bounded = sanitizeConsoleExceptionInput(exception);
+  const sanitizedUrl = sanitizeConsoleUrl(bounded.url);
   return {
-    ...exception,
+    ...bounded,
     ...sanitizedUrl,
-    ...(exception.stackTrace ? { stackTrace: sanitizeNestedUrls(exception.stackTrace) } : {}),
+    ...(bounded.stackTrace
+      ? { stackTrace: sanitizeNestedUrls(bounded.stackTrace) }
+      : {}),
   };
 }
 
@@ -216,7 +261,11 @@ function isErrorLevel(level?: string): boolean {
 
 function applyResultFilters(
   result: ConsoleResult,
-  options: { pattern?: ParsedRegexPattern; onlyErrors?: boolean; includeExceptions: boolean },
+  options: {
+    pattern?: ParsedRegexPattern;
+    onlyErrors?: boolean;
+    includeExceptions: boolean;
+  },
 ): ConsoleResult {
   const { pattern, onlyErrors = false, includeExceptions } = options;
   let matchedInputBytes = 0;
@@ -261,24 +310,57 @@ function applyResultFilters(
   };
 }
 
-function applyMessageLimit(result: ConsoleResult, limit: number): ConsoleResult {
-  const normalizedLimit = normalizeLimit(limit, DEFAULT_MAX_MESSAGES);
-  if (result.messages.length <= normalizedLimit) return result;
-  const messages = result.messages.slice(result.messages.length - normalizedLimit);
+function applyResultLimits(
+  result: ConsoleResult,
+  messageLimit: number,
+  exceptionLimit: number,
+): ConsoleResult {
+  const normalizedMessageLimit = normalizeLimit(
+    messageLimit,
+    DEFAULT_MAX_MESSAGES,
+    CONSOLE_MAX_MESSAGES,
+  );
+  const normalizedExceptionLimit = normalizeLimit(
+    exceptionLimit,
+    DEFAULT_MAX_EXCEPTIONS,
+    CONSOLE_MAX_EXCEPTIONS,
+  );
+  const messages =
+    result.messages.length > normalizedMessageLimit
+      ? result.messages.slice(result.messages.length - normalizedMessageLimit)
+      : result.messages;
+  const exceptions =
+    result.exceptions.length > normalizedExceptionLimit
+      ? result.exceptions.slice(
+          result.exceptions.length - normalizedExceptionLimit,
+        )
+      : result.exceptions;
   return {
     ...result,
     messages,
+    exceptions,
     messageCount: messages.length,
-    messageLimitReached: true,
+    exceptionCount: exceptions.length,
+    messageLimitReached:
+      result.messageLimitReached ||
+      result.messages.length > normalizedMessageLimit,
   };
 }
 
 function isDebuggerConflictError(error: unknown): boolean {
-  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  return msg.includes('debugger is already attached') || msg.includes('another client');
+  const msg = (
+    error instanceof Error ? error.message : String(error)
+  ).toLowerCase();
+  return (
+    msg.includes('debugger is already attached') ||
+    msg.includes('another client')
+  );
 }
 
-function formatDebuggerConflictMessage(tabId: number, originalMessage: string): string {
+function formatDebuggerConflictMessage(
+  tabId: number,
+  originalMessage: string,
+): string {
   return (
     `Failed to attach Chrome Debugger to tab ${tabId}: another debugger client is already attached ` +
     `(likely DevTools or another extension). Close DevTools for this tab or disable the conflicting extension, ` +
@@ -300,10 +382,12 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       background = false,
       includeExceptions = true,
       maxMessages = DEFAULT_MAX_MESSAGES,
+      maxExceptions = DEFAULT_MAX_EXCEPTIONS,
       mode = 'snapshot',
       buffer,
       clear = false,
       clearAfterRead = false,
+      stop = false,
       pattern,
       onlyErrors = false,
       limit,
@@ -312,13 +396,15 @@ class ConsoleTool extends BaseBrowserToolExecutor {
     let targetTab: chrome.tabs.Tab;
     let targetTabId: number | undefined;
 
-    // Parsing regular expressions
+    // Stop is a lifecycle operation, so filtering options must not prevent it.
     let compiledPattern: ParsedRegexPattern | undefined;
-    try {
-      compiledPattern = parseRegexPattern(pattern);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return createErrorResponse(msg);
+    if (stop !== true) {
+      try {
+        compiledPattern = parseRegexPattern(pattern);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return createErrorResponse(msg);
+      }
     }
 
     try {
@@ -331,11 +417,16 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       if (typeof tabId === 'number') {
         // Use explicit tab
         const t = await chrome.tabs.get(tabId);
-        if (!t?.id) return createErrorResponse('Failed to identify target tab.');
+        if (!t?.id)
+          return createErrorResponse('Failed to identify target tab.');
         targetTab = t;
       } else if (url) {
         // Navigate to the specified URL
-        targetTab = await this.navigateToUrl(url, background === true, windowId);
+        targetTab = await this.navigateToUrl(
+          url,
+          background === true,
+          windowId,
+        );
       } else {
         // Use current active tab
         const [activeTab] =
@@ -343,7 +434,9 @@ class ConsoleTool extends BaseBrowserToolExecutor {
             ? await chrome.tabs.query({ active: true, windowId })
             : await chrome.tabs.query({ active: true, currentWindow: true });
         if (!activeTab?.id) {
-          return createErrorResponse('No active tab found and no URL provided.');
+          return createErrorResponse(
+            'No active tab found and no URL provided.',
+          );
         }
         targetTab = activeTab;
       }
@@ -351,7 +444,10 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       if (!targetTab?.id) {
         return createErrorResponse('Failed to identify target tab.');
       }
-      if (hasDisallowedPublicPageScheme(String(targetTab.url || ''))) {
+      if (
+        stop !== true &&
+        hasDisallowedPublicPageScheme(String(targetTab.url || ''))
+      ) {
         return createErrorResponse(
           'Only http:// and https:// pages are supported by chrome_console',
         );
@@ -361,29 +457,66 @@ class ConsoleTool extends BaseBrowserToolExecutor {
 
       // Determine the mode: the buffer parameter is an alias for mode="buffer"
       const resolvedMode: ConsoleMode =
-        mode === 'buffer' || buffer === true ? 'buffer' : 'snapshot';
+        mode === 'buffer' || buffer === true || stop === true
+          ? 'buffer'
+          : 'snapshot';
 
       // Calculate effective message limit
-      const normalizedMaxMessages = normalizeLimit(maxMessages, DEFAULT_MAX_MESSAGES);
+      const normalizedMaxMessages = normalizeLimit(
+        maxMessages,
+        DEFAULT_MAX_MESSAGES,
+        CONSOLE_MAX_MESSAGES,
+      );
+      const normalizedMaxExceptions = normalizeLimit(
+        maxExceptions,
+        DEFAULT_MAX_EXCEPTIONS,
+        CONSOLE_MAX_EXCEPTIONS,
+      );
       const effectiveLimit =
         typeof limit === 'number'
-          ? normalizeLimit(limit, normalizedMaxMessages)
+          ? normalizeLimit(limit, normalizedMaxMessages, CONSOLE_MAX_MESSAGES)
           : normalizedMaxMessages;
 
       // Buffer mode
       if (resolvedMode === 'buffer') {
+        if (stop === true) {
+          const stopped = await consoleBuffer.stop(targetTabId, 'manual');
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  message: stopped
+                    ? `Console buffer stopped for tab ${targetTabId}.`
+                    : `No console buffer was active for tab ${targetTabId}.`,
+                  tabId: targetTabId,
+                  stopped,
+                  capturing: consoleBuffer.isCapturing(targetTabId),
+                }),
+              },
+            ],
+            isError: false,
+          };
+        }
+
         try {
           await consoleBuffer.ensureStarted(targetTabId);
         } catch (error: unknown) {
           const msg = error instanceof Error ? error.message : String(error);
           if (isDebuggerConflictError(error)) {
-            return createErrorResponse(formatDebuggerConflictMessage(targetTabId, msg));
+            return createErrorResponse(
+              formatDebuggerConflictMessage(targetTabId, msg),
+            );
           }
           throw error;
         }
 
         // Handle flush requests before reading
-        let clearedBefore: { clearedMessages: number; clearedExceptions: number } | null = null;
+        let clearedBefore: {
+          clearedMessages: number;
+          clearedExceptions: number;
+        } | null = null;
         if (clear === true) {
           clearedBefore = consoleBuffer.clear(targetTabId, 'manual');
         }
@@ -391,23 +524,32 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         // Read buffer
         const read = consoleBuffer.read(targetTabId, {
           includeExceptions,
+          exceptionLimit: normalizedMaxExceptions,
         });
 
         if (!read) {
-          return createErrorResponse('Console buffer is not available for this tab.');
+          return createErrorResponse(
+            'Console buffer is not available for this tab.',
+          );
         }
 
         const result: ConsoleResult = {
           success: true,
           message: '',
           tabId: targetTabId,
-          tabUrl: read.tabUrl || '',
-          tabTitle: read.tabTitle || '',
+          tabUrl: truncateConsoleJsonString(
+            read.tabUrl || '',
+            CONSOLE_URL_MAX_UTF8_BYTES,
+          ),
+          tabTitle: truncateConsoleJsonString(
+            read.tabTitle || '',
+            CONSOLE_TITLE_MAX_UTF8_BYTES,
+          ),
           captureStartTime: read.captureStartTime,
           captureEndTime: read.captureEndTime,
           totalDurationMs: read.totalDurationMs,
-          messages: (read.messages as ConsoleMessage[]).map(sanitizeConsoleMessage),
-          exceptions: (read.exceptions as ConsoleException[]).map(sanitizeConsoleException),
+          messages: read.messages as ConsoleMessage[],
+          exceptions: read.exceptions as ConsoleException[],
           messageCount: read.messageCount,
           exceptionCount: read.exceptionCount,
           messageLimitReached: read.messageLimitReached,
@@ -420,10 +562,22 @@ class ConsoleTool extends BaseBrowserToolExecutor {
           onlyErrors,
           includeExceptions,
         });
-        const limited = applyMessageLimit(filtered, effectiveLimit);
+        const bounded: ConsoleResult = {
+          ...filtered,
+          messages: filtered.messages.map(sanitizeConsoleMessage),
+          exceptions: filtered.exceptions.map(sanitizeConsoleException),
+        };
+        const limited = applyResultLimits(
+          bounded,
+          effectiveLimit,
+          normalizedMaxExceptions,
+        );
 
         // Clear only after every fallible filter/limit step has succeeded.
-        let clearedAfter: { clearedMessages: number; clearedExceptions: number } | null = null;
+        let clearedAfter: {
+          clearedMessages: number;
+          clearedExceptions: number;
+        } | null = null;
         if (clearAfterRead === true) {
           clearedAfter = consoleBuffer.clear(targetTabId, 'manual');
         }
@@ -449,6 +603,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       const result = await this.captureConsoleMessages(targetTabId, {
         includeExceptions,
         maxMessages: effectiveLimit,
+        maxExceptions: normalizedMaxExceptions,
       });
 
       // Apply filter
@@ -457,16 +612,23 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         onlyErrors,
         includeExceptions,
       });
+      const limited = applyResultLimits(
+        filtered,
+        effectiveLimit,
+        normalizedMaxExceptions,
+      );
 
       return {
-        content: [{ type: 'text', text: JSON.stringify(filtered) }],
+        content: [{ type: 'text', text: JSON.stringify(limited) }],
         isError: false,
       };
     } catch (error: unknown) {
       console.error('ConsoleTool: Critical error during execute:', error);
       const msg = error instanceof Error ? error.message : String(error);
       if (typeof targetTabId === 'number' && isDebuggerConflictError(error)) {
-        return createErrorResponse(formatDebuggerConflictMessage(targetTabId, msg));
+        return createErrorResponse(
+          formatDebuggerConflictMessage(targetTabId, msg),
+        );
       }
       return createErrorResponse(`Error in ConsoleTool: ${msg}`);
     }
@@ -490,7 +652,10 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       return tab;
     } else {
       // Create new tab with the URL
-      const createInfo: chrome.tabs.CreateProperties = { url, active: background ? false : true };
+      const createInfo: chrome.tabs.CreateProperties = {
+        url,
+        active: background ? false : true,
+      };
       if (typeof windowId === 'number') createInfo.windowId = windowId;
       const newTab = await chrome.tabs.create(createInfo);
       // Wait for tab to be ready
@@ -501,45 +666,34 @@ class ConsoleTool extends BaseBrowserToolExecutor {
 
   private async waitForTabReady(tabId: number): Promise<void> {
     return new Promise((resolve) => {
+      let settled = false;
+      let pollTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        if (pollTimer !== undefined) clearTimeout(pollTimer);
+        clearTimeout(deadlineTimer);
+        resolve();
+      };
+
       const checkTab = async () => {
         try {
           const tab = await chrome.tabs.get(tabId);
+          if (settled) return;
           if (tab.status === 'complete') {
-            resolve();
+            finish();
           } else {
-            setTimeout(checkTab, 100);
+            pollTimer = setTimeout(checkTab, CONSOLE_TAB_READY_POLL_MS);
           }
-        } catch (error) {
-          // Tab might be closed, resolve anyway
-          resolve();
+        } catch {
+          finish();
         }
       };
-      checkTab();
+
+      const deadlineTimer = setTimeout(finish, CONSOLE_TAB_READY_TIMEOUT_MS);
+      void checkTab();
     });
-  }
-
-  private formatConsoleArgs(args: any[]): string {
-    if (!args || args.length === 0) return '';
-
-    return args
-      .map((arg) => {
-        if (arg.type === 'string') {
-          return arg.value || '';
-        } else if (arg.type === 'number') {
-          return String(arg.value || '');
-        } else if (arg.type === 'boolean') {
-          return String(arg.value || '');
-        } else if (arg.type === 'object') {
-          return arg.description || '[Object]';
-        } else if (arg.type === 'undefined') {
-          return 'undefined';
-        } else if (arg.type === 'function') {
-          return arg.description || '[Function]';
-        } else {
-          return arg.description || arg.value || String(arg);
-        }
-      })
-      .join(' ');
   }
 
   private async captureConsoleMessages(
@@ -547,230 +701,159 @@ class ConsoleTool extends BaseBrowserToolExecutor {
     options: {
       includeExceptions: boolean;
       maxMessages: number;
+      maxExceptions: number;
     },
   ): Promise<ConsoleResult> {
-    const { includeExceptions, maxMessages } = options;
+    const { includeExceptions, maxMessages, maxExceptions } = options;
     const startTime = Date.now();
-    const messages: ConsoleMessage[] = [];
-    const exceptions: ConsoleException[] = [];
-    let limitReached = false;
+    const messageRing: ByteRingState<ConsoleMessage> = {
+      entries: [],
+      head: 0,
+      byteSize: 0,
+      droppedCount: 0,
+    };
+    const exceptionRing: ByteRingState<ConsoleException> = {
+      entries: [],
+      head: 0,
+      byteSize: 0,
+      droppedCount: 0,
+    };
+    let processedEventCount = 0;
+    let rateDroppedMessageCount = 0;
+    let rateDroppedExceptionCount = 0;
 
     try {
-      // Get tab information
       const tab = await chrome.tabs.get(tabId);
-
-      // Attach via shared manager
       await cdpSessionManager.attach(tabId, 'console');
 
-      // Set up event listener to collect messages
-      const collectedMessages: any[] = [];
-      const collectedExceptions: any[] = [];
+      let listenerActive = true;
+      const acceptEvent = (kind: 'message' | 'exception'): boolean => {
+        if (processedEventCount < CONSOLE_SNAPSHOT_MAX_EVENTS) {
+          processedEventCount += 1;
+          return true;
+        }
+        if (kind === 'message') rateDroppedMessageCount += 1;
+        else rateDroppedExceptionCount += 1;
+        if (listenerActive) {
+          chrome.debugger.onEvent.removeListener(eventListener);
+          listenerActive = false;
+        }
+        return false;
+      };
 
-      const eventListener = (source: chrome.debugger.Debuggee, method: string, params?: any) => {
+      const eventListener = (
+        source: chrome.debugger.Debuggee,
+        method: string,
+        params?: unknown,
+      ): void => {
         if (source.tabId !== tabId) return;
+        const record =
+          params !== null && typeof params === 'object'
+            ? (params as Record<string, unknown>)
+            : {};
 
-        if (method === 'Log.entryAdded' && params?.entry) {
-          collectedMessages.push(params.entry);
-        } else if (method === 'Runtime.consoleAPICalled' && params) {
-          // Convert Runtime.consoleAPICalled to Log.entryAdded format
-          const logEntry = {
-            timestamp: params.timestamp,
-            level: params.type || 'log',
-            text: this.formatConsoleArgs(params.args || []),
-            source: 'console-api',
-            url: params.stackTrace?.callFrames?.[0]?.url,
-            lineNumber: params.stackTrace?.callFrames?.[0]?.lineNumber,
-            stackTrace: params.stackTrace,
-            args: params.args,
-          };
-          collectedMessages.push(logEntry);
-        } else if (
+        if (method === 'Log.entryAdded' && record.entry) {
+          if (!acceptEvent('message')) return;
+          appendToByteRing(
+            messageRing,
+            sanitizeConsoleMessage(sanitizeConsoleMessageInput(record.entry)),
+            maxMessages,
+            CONSOLE_SNAPSHOT_MAX_MESSAGE_BYTES,
+          );
+          return;
+        }
+        if (method === 'Runtime.consoleAPICalled') {
+          if (!acceptEvent('message')) return;
+          appendToByteRing(
+            messageRing,
+            sanitizeConsoleMessage(sanitizeRuntimeConsoleEvent(record)),
+            maxMessages,
+            CONSOLE_SNAPSHOT_MAX_MESSAGE_BYTES,
+          );
+          return;
+        }
+        if (
           method === 'Runtime.exceptionThrown' &&
           includeExceptions &&
-          params?.exceptionDetails
+          record.exceptionDetails
         ) {
-          collectedExceptions.push(params.exceptionDetails);
+          if (!acceptEvent('exception')) return;
+          appendToByteRing(
+            exceptionRing,
+            sanitizeConsoleException(
+              sanitizeConsoleExceptionInput(record.exceptionDetails),
+            ),
+            maxExceptions,
+            CONSOLE_SNAPSHOT_MAX_EXCEPTION_BYTES,
+          );
         }
       };
 
       chrome.debugger.onEvent.addListener(eventListener);
 
       try {
-        // Enable Runtime domain first to capture console API calls and exceptions
         await cdpSessionManager.sendCommand(tabId, 'Runtime.enable');
-
-        // Also enable Log domain to capture other log entries
         await cdpSessionManager.sendCommand(tabId, 'Log.enable');
-
-        // Wait for all messages to be flushed
         await new Promise((resolve) => setTimeout(resolve, 2000));
-
-        // Process collected messages
-        // Helper to deeply serialize console arguments when possible
-        const serializeArg = async (arg: any): Promise<any> => {
-          try {
-            if (!arg) return arg;
-            if (Object.prototype.hasOwnProperty.call(arg, 'unserializableValue')) {
-              return arg.unserializableValue;
-            }
-            if (Object.prototype.hasOwnProperty.call(arg, 'value')) {
-              return arg.value;
-            }
-            if (arg.objectId) {
-              const resp = await cdpSessionManager.sendCommand(tabId, 'Runtime.callFunctionOn', {
-                objectId: arg.objectId,
-                functionDeclaration:
-                  'function(maxDepth, maxProps){\n' +
-                  '  const seen=new WeakSet();\n' +
-                  '  function S(v,d){\n' +
-                  '    try{\n' +
-                  '      if(d<0) return "[MaxDepth]";\n' +
-                  '      if(v===null) return null;\n' +
-                  '      const t=typeof v;\n' +
-                  '      if(t!=="object"){\n' +
-                  '        if(t==="bigint") return v.toString()+"n";\n' +
-                  '        return v;\n' +
-                  '      }\n' +
-                  '      if(seen.has(v)) return "[Circular]";\n' +
-                  '      seen.add(v);\n' +
-                  '      if(Array.isArray(v)){\n' +
-                  '        const out=[];\n' +
-                  '        for(let i=0;i<v.length;i++){\n' +
-                  '          if(i>=maxProps){ out.push("[...truncated]"); break; }\n' +
-                  '          out.push(S(v[i], d-1));\n' +
-                  '        }\n' +
-                  '        return out;\n' +
-                  '      }\n' +
-                  '      if(v instanceof Date) return {__type:"Date", value:v.toISOString()};\n' +
-                  '      if(v instanceof RegExp) return {__type:"RegExp", value:String(v)};\n' +
-                  '      if(v instanceof Map){\n' +
-                  '        const out={__type:"Map", entries:[]}; let c=0;\n' +
-                  '        for(const [k,val] of v.entries()){\n' +
-                  '          if(c++>=maxProps){ out.entries.push(["[...truncated]","[...truncated]"]); break; }\n' +
-                  '          out.entries.push([S(k,d-1), S(val,d-1)]);\n' +
-                  '        }\n' +
-                  '        return out;\n' +
-                  '      }\n' +
-                  '      if(v instanceof Set){\n' +
-                  '        const out={__type:"Set", values:[]}; let c=0;\n' +
-                  '        for(const val of v.values()){\n' +
-                  '          if(c++>=maxProps){ out.values.push("[...truncated]"); break; }\n' +
-                  '          out.values.push(S(val,d-1));\n' +
-                  '        }\n' +
-                  '        return out;\n' +
-                  '      }\n' +
-                  '      const out={}; let c=0;\n' +
-                  '      for(const key in v){\n' +
-                  '        if(c++>=maxProps){ out.__truncated__=true; break; }\n' +
-                  '        try{ out[key]=S(v[key], d-1); }catch(e){ out[key]="[Thrown]"; }\n' +
-                  '      }\n' +
-                  '      return out;\n' +
-                  '    }catch(e){ return "[Unserializable]" }\n' +
-                  '  }\n' +
-                  '  return S(this, maxDepth);\n' +
-                  '}',
-                arguments: [{ value: 3 }, { value: 100 }],
-                silent: true,
-                returnByValue: true,
-              });
-              return resp?.result?.value ?? '[Unavailable]';
-            }
-            return '[Unknown]';
-          } catch (e) {
-            return '[SerializeError]';
-          }
-        };
-
-        for (const entry of collectedMessages) {
-          if (messages.length >= maxMessages) {
-            limitReached = true;
-            break;
-          }
-
-          const message: ConsoleMessage = {
-            timestamp: entry.timestamp,
-            level: entry.level || 'log',
-            text: entry.text || '',
-            source: entry.source,
-            ...sanitizeConsoleUrl(entry.url),
-            lineNumber: entry.lineNumber,
-          };
-
-          if (entry.stackTrace) {
-            message.stackTrace = sanitizeNestedUrls(entry.stackTrace);
-          }
-
-          if (entry.args && Array.isArray(entry.args)) {
-            message.args = entry.args;
-            // Attempt deep serialization for better fidelity
-            const serialized: any[] = [];
-            for (const a of entry.args) {
-              serialized.push(await serializeArg(a));
-            }
-            message.argsSerialized = serialized;
-          }
-
-          messages.push(message);
-        }
-
-        // Process collected exceptions
-        for (const exceptionDetails of collectedExceptions) {
-          const exception: ConsoleException = {
-            timestamp: Date.now(),
-            text:
-              exceptionDetails.text ||
-              exceptionDetails.exception?.description ||
-              'Unknown exception',
-            ...sanitizeConsoleUrl(exceptionDetails.url),
-            lineNumber: exceptionDetails.lineNumber,
-            columnNumber: exceptionDetails.columnNumber,
-          };
-
-          if (exceptionDetails.stackTrace) {
-            exception.stackTrace = sanitizeNestedUrls(exceptionDetails.stackTrace);
-          }
-
-          exceptions.push(exception);
-        }
       } finally {
-        // Clean up
-        chrome.debugger.onEvent.removeListener(eventListener);
+        if (listenerActive) {
+          chrome.debugger.onEvent.removeListener(eventListener);
+          listenerActive = false;
+        }
 
-        // If buffer mode is using this tab, do not close the Runtime/Log field
         const keepDomainsEnabled = consoleBuffer.isCapturing(tabId);
         if (!keepDomainsEnabled) {
           try {
             await cdpSessionManager.sendCommand(tabId, 'Runtime.disable');
           } catch (e) {
-            console.warn(`ConsoleTool: Error disabling Runtime for tab ${tabId}:`, e);
+            console.warn(
+              `ConsoleTool: Error disabling Runtime for tab ${tabId}:`,
+              e,
+            );
           }
 
           try {
             await cdpSessionManager.sendCommand(tabId, 'Log.disable');
           } catch (e) {
-            console.warn(`ConsoleTool: Error disabling Log for tab ${tabId}:`, e);
+            console.warn(
+              `ConsoleTool: Error disabling Log for tab ${tabId}:`,
+              e,
+            );
           }
         }
 
         try {
           await cdpSessionManager.detach(tabId, 'console');
         } catch (e) {
-          console.warn(`ConsoleTool: Error detaching debugger for tab ${tabId}:`, e);
+          console.warn(
+            `ConsoleTool: Error detaching debugger for tab ${tabId}:`,
+            e,
+          );
         }
       }
 
       const endTime = Date.now();
-
-      // Sort messages by timestamp
+      const messages = getByteRingValues(messageRing);
+      const exceptions = getByteRingValues(exceptionRing);
       messages.sort((a, b) => a.timestamp - b.timestamp);
       exceptions.sort((a, b) => a.timestamp - b.timestamp);
+      const droppedMessageCount =
+        messageRing.droppedCount + rateDroppedMessageCount;
+      const droppedExceptionCount =
+        exceptionRing.droppedCount + rateDroppedExceptionCount;
 
       return {
         success: true,
         message: `Console capture completed for tab ${tabId}. ${messages.length} messages, ${exceptions.length} exceptions captured.`,
         tabId,
-        tabUrl: tab.url || '',
-        tabTitle: tab.title || '',
+        tabUrl: truncateConsoleJsonString(
+          tab.url || '',
+          CONSOLE_URL_MAX_UTF8_BYTES,
+        ),
+        tabTitle: truncateConsoleJsonString(
+          tab.title || '',
+          CONSOLE_TITLE_MAX_UTF8_BYTES,
+        ),
         captureStartTime: startTime,
         captureEndTime: endTime,
         totalDurationMs: endTime - startTime,
@@ -778,12 +861,15 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         exceptions,
         messageCount: messages.length,
         exceptionCount: exceptions.length,
-        messageLimitReached: limitReached,
-        droppedMessageCount: 0,
-        droppedExceptionCount: 0,
+        messageLimitReached: droppedMessageCount > 0,
+        droppedMessageCount,
+        droppedExceptionCount,
       };
-    } catch (error: any) {
-      console.error(`ConsoleTool: Error capturing console messages for tab ${tabId}:`, error);
+    } catch (error: unknown) {
+      console.error(
+        `ConsoleTool: Error capturing console messages for tab ${tabId}:`,
+        error,
+      );
       throw error;
     }
   }

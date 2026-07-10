@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { consoleTool } from '@/entrypoints/background/tools/browser/console';
+import {
+  CONSOLE_TAB_READY_TIMEOUT_MS,
+  consoleTool,
+} from '@/entrypoints/background/tools/browser/console';
 import { consoleBuffer } from '@/entrypoints/background/tools/browser/console-buffer';
+import {
+  CONSOLE_MAX_EXCEPTIONS,
+  CONSOLE_MAX_MESSAGES,
+  CONSOLE_SNAPSHOT_MAX_EVENTS,
+  CONSOLE_TEXT_MAX_UTF8_BYTES,
+  measureConsoleUtf8Bytes,
+} from '@/entrypoints/background/tools/browser/console-limits';
 import {
   WORKFLOW_REGEX_BATCH_INPUT_MAX_UTF8_BYTES,
   WORKFLOW_REGEX_INPUT_MAX_UTF8_BYTES,
@@ -56,7 +66,9 @@ describe('consoleTool', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+    expect(
+      String((result.content[0] as { text?: string })?.text || ''),
+    ).toContain(
       'Only http:// and https:// pages are supported by chrome_console',
     );
     expect(tabsCreate).not.toHaveBeenCalled();
@@ -65,18 +77,54 @@ describe('consoleTool', () => {
   it('rejects file URL tabs before attaching the debugger', async () => {
     const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
     tabsGet.mockResolvedValue(makeTab({ url: 'file:///tmp/secret.txt' }));
-    const attach = vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+    const attach = vi
+      .spyOn(cdpSessionManager, 'attach')
+      .mockResolvedValue(undefined);
 
     const result = await consoleTool.execute({
       tabId: 7,
     });
 
     expect(result.isError).toBe(true);
-    expect(String((result.content[0] as { text?: string })?.text || '')).toContain(
+    expect(
+      String((result.content[0] as { text?: string })?.text || ''),
+    ).toContain(
       'Only http:// and https:// pages are supported by chrome_console',
     );
     expect(tabsGet).toHaveBeenCalledWith(7);
     expect(attach).not.toHaveBeenCalled();
+  });
+
+  it('stops polling a perpetually loading new tab at the ready deadline', async () => {
+    vi.useFakeTimers();
+    const tabsQuery = chrome.tabs.query as ReturnType<typeof vi.fn>;
+    const tabsCreate = chrome.tabs.create as ReturnType<typeof vi.fn>;
+    const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
+    tabsQuery.mockResolvedValue([]);
+    tabsCreate.mockResolvedValue(
+      makeTab({ url: 'https://loading.example/', status: 'loading' }),
+    );
+    tabsGet.mockResolvedValue(
+      makeTab({ url: 'https://loading.example/', status: 'loading' }),
+    );
+    const attach = vi
+      .spyOn(cdpSessionManager, 'attach')
+      .mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'sendCommand').mockResolvedValue({});
+
+    const pending = consoleTool.execute({ url: 'https://loading.example/' });
+    await vi.advanceTimersByTimeAsync(CONSOLE_TAB_READY_TIMEOUT_MS - 1);
+    expect(attach).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(attach).toHaveBeenCalledWith(7, 'console');
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await pending;
+
+    expect(result.isError).toBe(false);
+    expect(tabsGet.mock.calls.length).toBeLessThanOrEqual(
+      CONSOLE_TAB_READY_TIMEOUT_MS / 100 + 2,
+    );
   });
 
   it('redacts non-public urls from snapshot console results', async () => {
@@ -86,21 +134,25 @@ describe('consoleTool', () => {
     tabsGet.mockResolvedValue(makeTab());
 
     let eventListener:
-      | ((source: chrome.debugger.Debuggee, method: string, params?: any) => void)
+      | ((
+          source: chrome.debugger.Debuggee,
+          method: string,
+          params?: any,
+        ) => void)
       | undefined;
-    const addListener = chrome.debugger.onEvent.addListener as ReturnType<typeof vi.fn>;
+    const addListener = chrome.debugger.onEvent.addListener as ReturnType<
+      typeof vi.fn
+    >;
     addListener.mockImplementation((listener) => {
       eventListener = listener;
     });
 
     vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
     vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
-    vi.spyOn(cdpSessionManager, 'sendCommand').mockImplementation(async (_tabId, method) => {
-      if (method === 'Log.enable' && eventListener) {
-        eventListener(
-          { tabId: 7 },
-          'Log.entryAdded',
-          {
+    vi.spyOn(cdpSessionManager, 'sendCommand').mockImplementation(
+      async (_tabId, method) => {
+        if (method === 'Log.enable' && eventListener) {
+          eventListener({ tabId: 7 }, 'Log.entryAdded', {
             entry: {
               timestamp: 1,
               level: 'log',
@@ -111,31 +163,34 @@ describe('consoleTool', () => {
                 callFrames: [{ url: 'data:text/plain,stack', lineNumber: 9 }],
               },
             },
-          },
-        );
-        eventListener(
-          { tabId: 7 },
-          'Runtime.exceptionThrown',
-          {
+          });
+          eventListener({ tabId: 7 }, 'Runtime.exceptionThrown', {
             exceptionDetails: {
               text: 'boom',
               url: 'chrome-extension://extension-id/script.js',
               lineNumber: 4,
               columnNumber: 5,
               stackTrace: {
-                callFrames: [{ url: 'blob:https://example.com/error-stack', lineNumber: 2 }],
+                callFrames: [
+                  {
+                    url: 'blob:https://example.com/error-stack',
+                    lineNumber: 2,
+                  },
+                ],
               },
             },
-          },
-        );
-      }
-      return {};
-    });
+          });
+        }
+        return {};
+      },
+    );
 
     const promise = consoleTool.execute({ tabId: 7 });
     await vi.runAllTimersAsync();
     const result = await promise;
-    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
+    const payload = JSON.parse(
+      String((result.content[0] as { text?: string })?.text || '{}'),
+    );
 
     expect(payload.messages[0]).toMatchObject({
       url: null,
@@ -174,7 +229,9 @@ describe('consoleTool', () => {
           text: 'buffered',
           url: 'blob:https://example.com/buffered',
           stackTrace: {
-            callFrames: [{ url: 'data:text/plain,buffer-stack', lineNumber: 8 }],
+            callFrames: [
+              { url: 'data:text/plain,buffer-stack', lineNumber: 8 },
+            ],
           },
         },
       ],
@@ -195,7 +252,9 @@ describe('consoleTool', () => {
     });
 
     const result = await consoleTool.execute({ tabId: 7, mode: 'buffer' });
-    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
+    const payload = JSON.parse(
+      String((result.content[0] as { text?: string })?.text || '{}'),
+    );
 
     expect(payload.messages[0]).toMatchObject({
       url: null,
@@ -218,7 +277,9 @@ describe('consoleTool', () => {
     });
 
     expect(result.isError).toBe(true);
-    const message = String((result.content[0] as { text?: string })?.text || '');
+    const message = String(
+      (result.content[0] as { text?: string })?.text || '',
+    );
     expect(message).toContain('WORKFLOW_REGEX_UNSAFE');
     expect(message).not.toContain('(a+)+$');
     expect(message.length).toBeLessThan(400);
@@ -255,7 +316,9 @@ describe('consoleTool', () => {
       mode: 'buffer',
       pattern: '/error [0-9]+/i',
     });
-    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
+    const payload = JSON.parse(
+      String((result.content[0] as { text?: string })?.text || '{}'),
+    );
 
     expect(result.isError).toBe(false);
     expect(payload.messages).toEqual([
@@ -300,7 +363,9 @@ describe('consoleTool', () => {
       pattern: '^a+$',
       clearAfterRead: true,
     });
-    const message = String((result.content[0] as { text?: string })?.text || '');
+    const message = String(
+      (result.content[0] as { text?: string })?.text || '',
+    );
 
     expect(result.isError).toBe(true);
     expect(message).toContain('WORKFLOW_REGEX_INPUT_TOO_LARGE');
@@ -346,10 +411,138 @@ describe('consoleTool', () => {
       mode: 'buffer',
       pattern: '^a+$',
     });
-    const message = String((result.content[0] as { text?: string })?.text || '');
+    const message = String(
+      (result.content[0] as { text?: string })?.text || '',
+    );
 
     expect(result.isError).toBe(true);
     expect(message).toContain('WORKFLOW_REGEX_BATCH_INPUT_TOO_LARGE');
     expect(message.length).toBeLessThan(500);
+  });
+
+  it('stops persistent capture explicitly without restarting or clearing it', async () => {
+    const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
+    tabsGet.mockResolvedValue(
+      makeTab({ url: 'chrome-extension://extension-id/page.html' }),
+    );
+    const stop = vi.spyOn(consoleBuffer, 'stop').mockResolvedValue(true);
+    const ensureStarted = vi.spyOn(consoleBuffer, 'ensureStarted');
+    const clear = vi.spyOn(consoleBuffer, 'clear');
+
+    const result = await consoleTool.execute({
+      tabId: 7,
+      stop: true,
+      pattern: '(a+)+$',
+    });
+    const payload = JSON.parse(
+      String((result.content[0] as { text?: string })?.text || '{}'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      tabId: 7,
+      stopped: true,
+      capturing: false,
+    });
+    expect(stop).toHaveBeenCalledWith(7, 'manual');
+    expect(ensureStarted).not.toHaveBeenCalled();
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it('bounds snapshot counts, bytes, and event work while events arrive', async () => {
+    vi.useFakeTimers();
+    const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
+    tabsGet.mockResolvedValue(makeTab());
+
+    let eventListener:
+      | ((
+          source: chrome.debugger.Debuggee,
+          method: string,
+          params?: unknown,
+        ) => void)
+      | undefined;
+    const addListener = chrome.debugger.onEvent.addListener as ReturnType<
+      typeof vi.fn
+    >;
+    const removeListener = chrome.debugger.onEvent.removeListener as ReturnType<
+      typeof vi.fn
+    >;
+    addListener.mockImplementation((listener) => {
+      eventListener = listener;
+    });
+
+    vi.spyOn(cdpSessionManager, 'attach').mockResolvedValue(undefined);
+    vi.spyOn(cdpSessionManager, 'detach').mockResolvedValue(undefined);
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) => {
+        if (method !== 'Log.enable' || !eventListener) return {};
+
+        for (let index = 0; index < 120; index += 1) {
+          eventListener({ tabId: 7 }, 'Runtime.exceptionThrown', {
+            exceptionDetails: { timestamp: index, text: `exception-${index}` },
+          });
+        }
+        const messageEvents = CONSOLE_SNAPSHOT_MAX_EVENTS - 120;
+        for (let index = 0; index < messageEvents; index += 1) {
+          if (index === messageEvents - 1) {
+            const huge = 'x'.repeat(CONSOLE_TEXT_MAX_UTF8_BYTES * 20);
+            eventListener({ tabId: 7 }, 'Runtime.consoleAPICalled', {
+              timestamp: index,
+              type: 'log',
+              args: [{ type: 'string', value: huge, description: huge }],
+              stackTrace: {
+                callFrames: [{ url: 'https://example.com/app.js' }],
+              },
+            });
+          } else {
+            eventListener({ tabId: 7 }, 'Log.entryAdded', {
+              entry: {
+                timestamp: index,
+                level: 'log',
+                text: `message-${index}`,
+              },
+            });
+          }
+        }
+        eventListener({ tabId: 7 }, 'Log.entryAdded', {
+          entry: { timestamp: 999_999, level: 'log', text: 'over-rate-limit' },
+        });
+        return {};
+      });
+
+    const promise = consoleTool.execute({
+      tabId: 7,
+      maxMessages: Number.MAX_SAFE_INTEGER,
+      maxExceptions: Number.MAX_SAFE_INTEGER,
+      limit: Number.MAX_SAFE_INTEGER,
+    });
+    await vi.runAllTimersAsync();
+    const result = await promise;
+    const payload = JSON.parse(
+      String((result.content[0] as { text?: string })?.text || '{}'),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(payload.messages.length).toBeLessThanOrEqual(CONSOLE_MAX_MESSAGES);
+    expect(payload.exceptions.length).toBeLessThanOrEqual(
+      CONSOLE_MAX_EXCEPTIONS,
+    );
+    expect(payload.droppedMessageCount).toBeGreaterThan(0);
+    expect(payload.droppedExceptionCount).toBeGreaterThan(0);
+    expect(payload.messageLimitReached).toBe(true);
+    expect(
+      Math.max(
+        ...payload.messages.map((message: { text: string }) =>
+          measureConsoleUtf8Bytes(message.text),
+        ),
+      ),
+    ).toBeLessThanOrEqual(CONSOLE_TEXT_MAX_UTF8_BYTES);
+    expect(removeListener).toHaveBeenCalledTimes(1);
+    expect(
+      sendCommand.mock.calls.some(
+        ([, method]) => method === 'Runtime.callFunctionOn',
+      ),
+    ).toBe(false);
   });
 });
