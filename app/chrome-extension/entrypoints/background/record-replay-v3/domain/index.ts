@@ -30,6 +30,7 @@ export * from "./run-limits";
 export * from "./rpc-limits";
 export * from "./debug-limits";
 export * from "./persistent-var-limits";
+export * from "./queue-limits";
 
 // Debugger type
 export * from "./debug";

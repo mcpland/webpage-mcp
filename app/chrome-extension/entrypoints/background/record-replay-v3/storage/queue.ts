@@ -5,6 +5,14 @@
 
 import type { RunId } from '../domain/ids';
 import {
+  QUEUE_RESOURCE_LIMITS,
+  findQueueItemResourceLimitViolation,
+} from '../domain/queue-limits';
+import {
+  findJsonResourceLimitViolation,
+  jsonUtf8ByteLength,
+} from '../domain/json-limits';
+import {
   DEFAULT_QUEUE_CONFIG,
   RunQueueBackpressureError,
   type EnqueueInput,
@@ -30,22 +38,114 @@ const RUN_QUEUE_PROFILES: readonly RunQueueProfile[] = [
 ];
 
 function resolveQueueAdmissionConfig(config: Partial<RunQueueConfig> = {}): ResolvedQueueAdmissionConfig {
+  const defaultMaxQueuedRuns = Math.min(
+    DEFAULT_QUEUE_CONFIG.maxQueuedRuns ?? QUEUE_RESOURCE_LIMITS.maxQueuedItems,
+    QUEUE_RESOURCE_LIMITS.maxQueuedItems,
+  );
   const maxQueuedRuns =
     typeof config.maxQueuedRuns === 'number' && Number.isFinite(config.maxQueuedRuns)
-      ? Math.max(0, Math.floor(config.maxQueuedRuns))
-      : DEFAULT_QUEUE_CONFIG.maxQueuedRuns ?? 200;
-  const maxQueuedRunsPerFlow =
+      ? Math.min(
+          QUEUE_RESOURCE_LIMITS.maxQueuedItems,
+          Math.max(0, Math.floor(config.maxQueuedRuns)),
+        )
+      : defaultMaxQueuedRuns;
+  const configuredMaxQueuedRunsPerFlow =
     typeof config.maxQueuedRunsPerFlow === 'number' && Number.isFinite(config.maxQueuedRunsPerFlow)
-      ? Math.max(0, Math.floor(config.maxQueuedRunsPerFlow))
-      : DEFAULT_QUEUE_CONFIG.maxQueuedRunsPerFlow ?? 25;
+      ? Math.min(
+          QUEUE_RESOURCE_LIMITS.maxQueuedItemsPerFlow,
+          Math.max(0, Math.floor(config.maxQueuedRunsPerFlow)),
+        )
+      : Math.min(
+          DEFAULT_QUEUE_CONFIG.maxQueuedRunsPerFlow ??
+            QUEUE_RESOURCE_LIMITS.maxQueuedItemsPerFlow,
+          QUEUE_RESOURCE_LIMITS.maxQueuedItemsPerFlow,
+        );
+  const maxQueuedRunsPerFlow = Math.min(
+    maxQueuedRuns,
+    configuredMaxQueuedRunsPerFlow,
+  );
 
   return { maxQueuedRuns, maxQueuedRunsPerFlow };
 }
 
 function resolveLeaseTtlMs(config: Partial<RunQueueConfig> = {}): number {
   return typeof config.leaseTtlMs === 'number' && Number.isFinite(config.leaseTtlMs)
-    ? Math.max(1, Math.floor(config.leaseTtlMs))
-    : DEFAULT_QUEUE_CONFIG.leaseTtlMs;
+    ? Math.min(
+        QUEUE_RESOURCE_LIMITS.maxLeaseTtlMs,
+        Math.max(1, Math.floor(config.leaseTtlMs)),
+      )
+    : Math.min(DEFAULT_QUEUE_CONFIG.leaseTtlMs, QUEUE_RESOURCE_LIMITS.maxLeaseTtlMs);
+}
+
+function validateBoundedText(value: unknown, field: string, maxUtf8Bytes: number): void {
+  if (typeof value !== 'string' || !value) {
+    throw new Error(`${field} is required`);
+  }
+  const violation = findJsonResourceLimitViolation(
+    value,
+    {
+      maxUtf8Bytes: maxUtf8Bytes + 2,
+      maxStringUtf8Bytes: maxUtf8Bytes,
+      maxDepth: 1,
+      maxValues: 1,
+    },
+    field,
+  );
+  if (violation) throw new Error(violation);
+}
+
+function validateNow(now: number): void {
+  if (
+    !Number.isSafeInteger(now) ||
+    now < 0 ||
+    now > Number.MAX_SAFE_INTEGER - QUEUE_RESOURCE_LIMITS.maxLeaseTtlMs
+  ) {
+    throw new Error(`Invalid now: ${String(now)}`);
+  }
+}
+
+function assertQueueItemWithinLimits(item: RunQueueItem): void {
+  const violation = findQueueItemResourceLimitViolation(item);
+  if (violation) throw new Error(violation);
+}
+
+function rejectQueueItemLimitViolation(
+  item: RunQueueItem,
+  reject: (reason?: unknown) => void,
+): boolean {
+  const violation = findQueueItemResourceLimitViolation(item);
+  if (!violation) return false;
+  reject(new Error(violation));
+  return true;
+}
+
+function validateEnqueueItem(item: RunQueueItem): void {
+  validateBoundedText(item.id, 'runId', QUEUE_RESOURCE_LIMITS.maxIdUtf8Bytes);
+  validateBoundedText(item.flowId, 'flowId', QUEUE_RESOURCE_LIMITS.maxIdUtf8Bytes);
+  if (
+    !Number.isFinite(item.priority) ||
+    Math.abs(item.priority) > QUEUE_RESOURCE_LIMITS.maxPriorityMagnitude
+  ) {
+    throw new Error(
+      `priority must be a finite number between -${QUEUE_RESOURCE_LIMITS.maxPriorityMagnitude} and ${QUEUE_RESOURCE_LIMITS.maxPriorityMagnitude}`,
+    );
+  }
+  if (
+    !Number.isSafeInteger(item.maxAttempts) ||
+    item.maxAttempts < 1 ||
+    item.maxAttempts > QUEUE_RESOURCE_LIMITS.maxAttempts
+  ) {
+    throw new Error(
+      `maxAttempts must be an integer between 1 and ${QUEUE_RESOURCE_LIMITS.maxAttempts}`,
+    );
+  }
+  if (
+    item.tabId !== undefined &&
+    (!Number.isSafeInteger(item.tabId) || item.tabId < 0)
+  ) {
+    throw new Error('tabId must be a non-negative safe integer');
+  }
+  assertQueueItemWithinLimits(item);
 }
 
 async function countIndex(index: IDBIndex, query?: IDBValidKey | IDBKeyRange): Promise<number> {
@@ -83,24 +183,45 @@ function normalizeProfile(value: unknown): RunQueueProfile {
 }
 
 function toBlockedSet<T extends string>(values?: readonly T[]): Set<T> {
-  return new Set((values ?? []).filter(Boolean));
+  const blocked = new Set<T>();
+  const count = Math.min(
+    values?.length ?? 0,
+    QUEUE_RESOURCE_LIMITS.maxClaimConstraints,
+  );
+  for (let index = 0; index < count; index += 1) {
+    const value = values?.[index];
+    if (value) blocked.add(value);
+  }
+  return blocked;
+}
+
+interface ResolvedClaimConstraints {
+  blockedFlowIds: Set<string>;
+  blockedProfiles: Set<RunQueueProfile>;
+}
+
+function resolveClaimConstraints(
+  constraints: RunQueueClaimConstraints | undefined,
+): ResolvedClaimConstraints {
+  return {
+    blockedFlowIds: toBlockedSet(constraints?.blockedFlowIds),
+    blockedProfiles: toBlockedSet(constraints?.blockedProfiles),
+  };
 }
 
 function isClaimableWithConstraints(
   item: RunQueueItem,
-  constraints: RunQueueClaimConstraints | undefined,
+  constraints: ResolvedClaimConstraints,
 ): boolean {
   if (item.status !== 'queued') {
     return false;
   }
 
-  const blockedFlowIds = toBlockedSet(constraints?.blockedFlowIds);
-  if (blockedFlowIds.has(item.flowId)) {
+  if (constraints.blockedFlowIds.has(item.flowId)) {
     return false;
   }
 
-  const blockedProfiles = toBlockedSet(constraints?.blockedProfiles);
-  if (blockedProfiles.has(normalizeProfile(item.profile))) {
+  if (constraints.blockedProfiles.has(normalizeProfile(item.profile))) {
     return false;
   }
 
@@ -112,27 +233,42 @@ async function findClaimCandidate(
   constraints: RunQueueClaimConstraints | undefined,
 ): Promise<RunQueueItem | null> {
   const statusIndex = store.index('status');
-  const queuedItems = await new Promise<RunQueueItem[]>((resolve, reject) => {
-    const items: RunQueueItem[] = [];
+  const resolvedConstraints = resolveClaimConstraints(constraints);
+  return new Promise<RunQueueItem | null>((resolve, reject) => {
+    let candidate: RunQueueItem | null = null;
+    let inspected = 0;
     const request = statusIndex.openCursor(IDBKeyRange.only('queued'));
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const cursor = request.result;
-      if (!cursor) {
-        resolve(items);
+      if (!cursor || inspected >= QUEUE_RESOURCE_LIMITS.maxStoredItems) {
+        resolve(candidate);
         return;
       }
-      items.push(cursor.value as RunQueueItem);
+      inspected += 1;
+      const item = cursor.value as RunQueueItem;
+      if (isClaimableWithConstraints(item, resolvedConstraints)) {
+        const itemPriority = Number.isFinite(item.priority) ? item.priority : 0;
+        const candidatePriority = candidate && Number.isFinite(candidate.priority)
+          ? candidate.priority
+          : 0;
+        const itemCreatedAt = Number.isFinite(item.createdAt)
+          ? item.createdAt
+          : Number.MAX_SAFE_INTEGER;
+        const candidateCreatedAt = candidate && Number.isFinite(candidate.createdAt)
+          ? candidate.createdAt
+          : Number.MAX_SAFE_INTEGER;
+        if (
+          !candidate ||
+          itemPriority > candidatePriority ||
+          (itemPriority === candidatePriority && itemCreatedAt < candidateCreatedAt)
+        ) {
+          candidate = item;
+        }
+      }
       cursor.continue();
     };
   });
-
-  queuedItems.sort((a, b) => {
-    if (a.priority !== b.priority) return b.priority - a.priority;
-    return a.createdAt - b.createdAt;
-  });
-
-  return queuedItems.find((item) => isClaimableWithConstraints(item, constraints)) ?? null;
 }
 
 async function enforceQueuedBackpressure(
@@ -140,6 +276,19 @@ async function enforceQueuedBackpressure(
   config: ResolvedQueueAdmissionConfig,
   input: EnqueueInput,
 ): Promise<void> {
+  const totalCount = await new Promise<number>((resolve, reject) => {
+    const request = store.count();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  if (totalCount >= QUEUE_RESOURCE_LIMITS.maxStoredItems) {
+    throw new RunQueueBackpressureError({
+      scope: 'global',
+      limit: QUEUE_RESOURCE_LIMITS.maxStoredItems,
+      queuedCount: totalCount,
+    });
+  }
+
   const statusIndex = store.index('status');
   const queuedCount = await countIndex(statusIndex, IDBKeyRange.only('queued'));
   if (queuedCount >= config.maxQueuedRuns) {
@@ -181,6 +330,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
         updatedAt: now,
         attempt: 0,
       };
+      validateEnqueueItem(item);
 
       await withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
@@ -201,12 +351,12 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
       constraints?: RunQueueClaimConstraints,
     ): Promise<RunQueueItem | null> {
       // Validate inputs
-      if (!ownerId) {
-        throw new Error('ownerId is required');
-      }
-      if (!Number.isFinite(now)) {
-        throw new Error(`Invalid now: ${String(now)}`);
-      }
+      validateBoundedText(
+        ownerId,
+        'ownerId',
+        QUEUE_RESOURCE_LIMITS.maxOwnerIdUtf8Bytes,
+      );
+      validateNow(now);
 
       return withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
@@ -227,6 +377,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
             expiresAt: now + leaseTtlMs,
           },
         };
+        assertQueueItemWithinLimits(updated);
 
         return new Promise<RunQueueItem>((resolve, reject) => {
           const request = store.put(updated);
@@ -238,16 +389,17 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
 
     async heartbeat(ownerId: string, now: number): Promise<void> {
       // Validate inputs
-      if (!ownerId) {
-        throw new Error('ownerId is required');
-      }
-      if (!Number.isFinite(now)) {
-        throw new Error(`Invalid now: ${String(now)}`);
-      }
+      validateBoundedText(
+        ownerId,
+        'ownerId',
+        QUEUE_RESOURCE_LIMITS.maxOwnerIdUtf8Bytes,
+      );
+      validateNow(now);
 
       await withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
         const statusIndex = store.index('status');
+        let inspectedItems = 0;
 
         /**
          * Renew leases for all items owned by ownerId in the given status.
@@ -259,10 +411,14 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
             request.onerror = () => reject(request.error);
             request.onsuccess = () => {
               const cursor = request.result;
-              if (!cursor) {
+              if (
+                !cursor ||
+                inspectedItems >= QUEUE_RESOURCE_LIMITS.maxStoredItems
+              ) {
                 resolve();
                 return;
               }
+              inspectedItems += 1;
 
               const item = cursor.value as RunQueueItem;
               const lease = item.lease;
@@ -282,6 +438,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
                   expiresAt: now + leaseTtlMs,
                 },
               };
+              if (rejectQueueItemLimitViolation(updated, reject)) return;
 
               const updateRequest = cursor.update(updated);
               updateRequest.onerror = () => reject(updateRequest.error);
@@ -298,9 +455,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
     },
 
     async reclaimExpiredLeases(now: number): Promise<RunId[]> {
-      if (!Number.isFinite(now)) {
-        throw new Error(`Invalid now: ${String(now)}`);
-      }
+      validateNow(now);
 
       return withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
@@ -311,15 +466,20 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
 
         return new Promise<RunId[]>((resolve, reject) => {
           const reclaimed: RunId[] = [];
+          let inspectedItems = 0;
           const request = leaseIndex.openCursor(expiredRange);
 
           request.onerror = () => reject(request.error);
           request.onsuccess = () => {
             const cursor = request.result;
-            if (!cursor) {
+            if (
+              !cursor ||
+              inspectedItems >= QUEUE_RESOURCE_LIMITS.maxStoredItems
+            ) {
               resolve(reclaimed);
               return;
             }
+            inspectedItems += 1;
 
             const item = cursor.value as RunQueueItem;
             const expiresAtKey = cursor.key;
@@ -347,6 +507,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
             const updated: RunQueueItem = isReclaimable
               ? { ...itemWithoutLease, status: 'queued', updatedAt: now }
               : { ...itemWithoutLease, updatedAt: now };
+            if (rejectQueueItemLimitViolation(updated, reject)) return;
 
             const updateRequest = cursor.update(updated);
             updateRequest.onerror = () => reject(updateRequest.error);
@@ -369,12 +530,12 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
       adoptedPaused: Array<{ runId: RunId; prevOwnerId?: string }>;
     }> {
       // Validate inputs
-      if (!ownerId) {
-        throw new Error('ownerId is required');
-      }
-      if (!Number.isFinite(now)) {
-        throw new Error(`Invalid now: ${String(now)}`);
-      }
+      validateBoundedText(
+        ownerId,
+        'ownerId',
+        QUEUE_RESOURCE_LIMITS.maxOwnerIdUtf8Bytes,
+      );
+      validateNow(now);
 
       return withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
@@ -382,6 +543,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
 
         const requeuedRunning: Array<{ runId: RunId; prevOwnerId?: string }> = [];
         const adoptedPaused: Array<{ runId: RunId; prevOwnerId?: string }> = [];
+        let inspectedItems = 0;
 
         /**
          * Scan and recycle orphan running items
@@ -395,10 +557,14 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
             request.onerror = () => reject(request.error);
             request.onsuccess = () => {
               const cursor = request.result;
-              if (!cursor) {
+              if (
+                !cursor ||
+                inspectedItems >= QUEUE_RESOURCE_LIMITS.maxStoredItems
+              ) {
                 resolve();
                 return;
               }
+              inspectedItems += 1;
 
               const item = cursor.value as RunQueueItem;
               const prevOwnerId = item.lease?.ownerId;
@@ -417,6 +583,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
                 status: 'queued',
                 updatedAt: now,
               };
+              if (rejectQueueItemLimitViolation(updated, reject)) return;
 
               const updateRequest = cursor.update(updated);
               updateRequest.onerror = () => reject(updateRequest.error);
@@ -442,10 +609,14 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
             request.onerror = () => reject(request.error);
             request.onsuccess = () => {
               const cursor = request.result;
-              if (!cursor) {
+              if (
+                !cursor ||
+                inspectedItems >= QUEUE_RESOURCE_LIMITS.maxStoredItems
+              ) {
                 resolve();
                 return;
               }
+              inspectedItems += 1;
 
               const item = cursor.value as RunQueueItem;
               const prevOwnerId = item.lease?.ownerId;
@@ -466,6 +637,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
                   expiresAt: now + leaseTtlMs,
                 },
               };
+              if (rejectQueueItemLimitViolation(updated, reject)) return;
 
               const updateRequest = cursor.update(updated);
               updateRequest.onerror = () => reject(updateRequest.error);
@@ -488,6 +660,13 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
     },
 
     async markRunning(runId: RunId, ownerId: string, now: number): Promise<void> {
+      validateBoundedText(runId, 'runId', QUEUE_RESOURCE_LIMITS.maxIdUtf8Bytes);
+      validateBoundedText(
+        ownerId,
+        'ownerId',
+        QUEUE_RESOURCE_LIMITS.maxOwnerIdUtf8Bytes,
+      );
+      validateNow(now);
       await withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
 
@@ -516,6 +695,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
             expiresAt: now + leaseTtlMs,
           },
         };
+        assertQueueItemWithinLimits(updated);
 
         return new Promise<void>((resolve, reject) => {
           const request = store.put(updated);
@@ -526,6 +706,13 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
     },
 
     async markPaused(runId: RunId, ownerId: string, now: number): Promise<void> {
+      validateBoundedText(runId, 'runId', QUEUE_RESOURCE_LIMITS.maxIdUtf8Bytes);
+      validateBoundedText(
+        ownerId,
+        'ownerId',
+        QUEUE_RESOURCE_LIMITS.maxOwnerIdUtf8Bytes,
+      );
+      validateNow(now);
       await withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
 
@@ -548,6 +735,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
             expiresAt: now + leaseTtlMs,
           },
         };
+        assertQueueItemWithinLimits(updated);
 
         return new Promise<void>((resolve, reject) => {
           const request = store.put(updated);
@@ -558,6 +746,8 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
     },
 
     async markDone(runId: RunId, now: number): Promise<void> {
+      validateBoundedText(runId, 'runId', QUEUE_RESOURCE_LIMITS.maxIdUtf8Bytes);
+      validateNow(now);
       await withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
         return new Promise<void>((resolve, reject) => {
@@ -574,6 +764,7 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
     },
 
     async get(runId: RunId): Promise<RunQueueItem | null> {
+      validateBoundedText(runId, 'runId', QUEUE_RESOURCE_LIMITS.maxIdUtf8Bytes);
       return withTransaction(RR_V3_STORES.QUEUE, 'readonly', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
         return new Promise<RunQueueItem | null>((resolve, reject) => {
@@ -585,23 +776,45 @@ export function createQueueStore(config: Partial<RunQueueConfig> = {}): RunQueue
     },
 
     async list(status?: QueueItemStatus): Promise<RunQueueItem[]> {
+      if (
+        status !== undefined &&
+        status !== 'queued' &&
+        status !== 'running' &&
+        status !== 'paused'
+      ) {
+        throw new Error('status must be one of: queued, running, paused');
+      }
       return withTransaction(RR_V3_STORES.QUEUE, 'readonly', async (stores) => {
         const store = stores[RR_V3_STORES.QUEUE];
-
-        if (status) {
-          // Use index query
-          const index = store.index('status');
-          return new Promise<RunQueueItem[]>((resolve, reject) => {
-            const request = index.getAll(IDBKeyRange.only(status));
-            request.onsuccess = () => resolve(request.result as RunQueueItem[]);
-            request.onerror = () => reject(request.error);
-          });
-        }
-
-        // Get all
         return new Promise<RunQueueItem[]>((resolve, reject) => {
-          const request = store.getAll();
-          request.onsuccess = () => resolve(request.result as RunQueueItem[]);
+          const items: RunQueueItem[] = [];
+          let aggregateBytes = 2;
+          const request = status
+            ? store.index('status').openCursor(IDBKeyRange.only(status))
+            : store.openCursor();
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor || items.length >= QUEUE_RESOURCE_LIMITS.maxStoredItems) {
+              resolve(items);
+              return;
+            }
+            const item = cursor.value as RunQueueItem;
+            const itemBytes = jsonUtf8ByteLength(
+              item,
+              QUEUE_RESOURCE_LIMITS.maxListUtf8Bytes,
+            );
+            const addedBytes = itemBytes + (items.length > 0 ? 1 : 0);
+            if (
+              addedBytes >
+              QUEUE_RESOURCE_LIMITS.maxListUtf8Bytes - aggregateBytes
+            ) {
+              resolve(items);
+              return;
+            }
+            aggregateBytes += addedBytes;
+            items.push(item);
+            cursor.continue();
+          };
           request.onerror = () => reject(request.error);
         });
       });

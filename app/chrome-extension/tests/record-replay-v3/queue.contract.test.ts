@@ -18,10 +18,44 @@ import {
 } from '@/entrypoints/background/record-replay-v3/engine/queue/queue';
 
 import {
+  QUEUE_RESOURCE_LIMITS,
   closeRrV3Db,
   deleteRrV3Db,
 } from '@/entrypoints/background/record-replay-v3';
 import { createQueueStore } from '@/entrypoints/background/record-replay-v3/storage/queue';
+import {
+  RR_V3_STORES,
+  withTransaction,
+} from '@/entrypoints/background/record-replay-v3/storage/db';
+
+function createStoredQueueItem(index: number): RunQueueItem {
+  return {
+    id: `stored-${index}` as never,
+    flowId: `flow-${index}` as never,
+    status: 'running',
+    createdAt: index,
+    updatedAt: index,
+    priority: 0,
+    attempt: 1,
+    maxAttempts: 1,
+  };
+}
+
+async function putStoredQueueItems(count: number, status: RunQueueItem['status']): Promise<void> {
+  await withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
+    const store = stores[RR_V3_STORES.QUEUE];
+    await Promise.all(
+      Array.from({ length: count }, (_, index) => {
+        const item = { ...createStoredQueueItem(index), status };
+        return new Promise<void>((resolve, reject) => {
+          const request = store.put(item);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        });
+      }),
+    );
+  });
+}
 
 describe('V3 Queue contracts', () => {
   beforeEach(async () => {
@@ -164,6 +198,55 @@ describe('V3 Queue contracts', () => {
         limit: 1,
         queuedCount: 1,
         flowId: 'flow-1',
+      });
+    });
+
+    it('rejects oversized queue items before persistence', async () => {
+      const queue = createQueueStore();
+      const payload = 'x'.repeat(QUEUE_RESOURCE_LIMITS.maxStringUtf8Bytes + 1);
+
+      await expect(
+        queue.enqueue({
+          id: 'oversized' as never,
+          flowId: 'flow-1' as never,
+          args: { payload },
+        }),
+      ).rejects.toThrow(
+        `${QUEUE_RESOURCE_LIMITS.maxStringUtf8Bytes}-byte string limit`,
+      );
+      await expect(queue.get('oversized')).resolves.toBeNull();
+    });
+
+    it('hard-caps admission overrides at the persisted queue limit', async () => {
+      await putStoredQueueItems(QUEUE_RESOURCE_LIMITS.maxQueuedItems, 'queued');
+      const queue = createQueueStore({
+        maxQueuedRuns: Number.MAX_SAFE_INTEGER,
+        maxQueuedRunsPerFlow: Number.MAX_SAFE_INTEGER,
+      });
+
+      await expect(
+        queue.enqueue({ id: 'overflow' as never, flowId: 'new-flow' as never }),
+      ).rejects.toMatchObject({
+        scope: 'global',
+        limit: QUEUE_RESOURCE_LIMITS.maxQueuedItems,
+        queuedCount: QUEUE_RESOURCE_LIMITS.maxQueuedItems,
+      });
+    });
+
+    it('bounds legacy queue listings and total stored records', async () => {
+      const legacyCount = QUEUE_RESOURCE_LIMITS.maxStoredItems + 5;
+      await putStoredQueueItems(legacyCount, 'running');
+      const queue = createQueueStore();
+
+      await expect(queue.list()).resolves.toHaveLength(
+        QUEUE_RESOURCE_LIMITS.maxStoredItems,
+      );
+      await expect(
+        queue.enqueue({ id: 'overflow' as never, flowId: 'flow-new' as never }),
+      ).rejects.toMatchObject({
+        scope: 'global',
+        limit: QUEUE_RESOURCE_LIMITS.maxStoredItems,
+        queuedCount: legacyCount,
       });
     });
   });
@@ -512,6 +595,19 @@ describe('V3 Queue contracts', () => {
       const renewedPaused = await queue.get('run-paused');
       expect(renewedClaim!.lease!.expiresAt).toBe(t1 + leaseTtlMs);
       expect(renewedPaused!.lease!.expiresAt).toBe(t1 + leaseTtlMs);
+    });
+
+    it('hard-caps oversized lease TTL overrides', async () => {
+      const queue = createQueueStore({
+        leaseTtlMs: QUEUE_RESOURCE_LIMITS.maxLeaseTtlMs + 1,
+      });
+      const now = 1_700_000_000_000;
+      await queue.enqueue({ id: 'run-1', flowId: 'flow-1' });
+
+      const claimed = await queue.claimNext('owner-1', now);
+      expect(claimed?.lease?.expiresAt).toBe(
+        now + QUEUE_RESOURCE_LIMITS.maxLeaseTtlMs,
+      );
     });
 
     it('is a no-op when the owner has no leased items', async () => {
