@@ -36,6 +36,17 @@
 
   const REACT_HOOK_NAME = '__REACT_DEVTOOLS_GLOBAL_HOOK__';
 
+  const LOCATOR_LIMITS = Object.freeze({
+    maxSelectors: 16,
+    maxShadowHosts: 16,
+    maxSelectorBytes: 4 * 1024,
+    maxSelectorSteps: 256,
+    maxVisitedElements: 12000,
+    maxDepth: 128,
+    maxDurationMs: 250,
+  });
+  const NATIVE_ELEMENT_MATCHES = Element.prototype.matches;
+
   /** @type {'READY' | 'HOOK_PRESENT_NO_RENDERERS' | 'RENDERERS_NO_EDITING' | 'HOOK_MISSING'} */
   const HOOK_STATUS = Object.freeze({
     READY: 'READY',
@@ -67,6 +78,22 @@
     } catch {
       return '';
     }
+  }
+
+  function utf8BytesForCodePoint(codePoint) {
+    if (codePoint <= 0x7f) return 1;
+    if (codePoint <= 0x7ff) return 2;
+    if (codePoint <= 0xffff) return 3;
+    return 4;
+  }
+
+  function utf8ByteLength(value, stopAfter = Number.POSITIVE_INFINITY) {
+    let bytes = 0;
+    for (const character of typeof value === 'string' ? value : '') {
+      bytes += utf8BytesForCodePoint(character.codePointAt(0) || 0);
+      if (bytes > stopAfter) return bytes;
+    }
+    return bytes;
   }
 
   function logWarn(...args) {
@@ -124,26 +151,85 @@
   // =============================================================================
 
   const Locator = {
-    safeQuerySelector(root, selector) {
+    createBudget() {
+      return {
+        visited: 0,
+        deadline: Date.now() + LOCATOR_LIMITS.maxDurationMs,
+      };
+    },
+
+    normalizeSelector(value) {
+      if (
+        typeof value !== 'string' ||
+        value.length === 0 ||
+        value.length > LOCATOR_LIMITS.maxSelectorBytes ||
+        utf8ByteLength(value, LOCATOR_LIMITS.maxSelectorBytes) >
+          LOCATOR_LIMITS.maxSelectorBytes
+      ) {
+        return null;
+      }
+      const selector = value.trim();
+      if (!selector || /:has\s*\(/i.test(selector)) return null;
+
+      let structuralSteps = 0;
+      let inWhitespace = false;
+      for (const character of selector) {
+        if (/\s/.test(character)) {
+          if (!inWhitespace) structuralSteps += 1;
+          inWhitespace = true;
+        } else {
+          inWhitespace = false;
+          if ('>+~,[]()'.includes(character)) structuralSteps += 1;
+        }
+        if (structuralSteps > LOCATOR_LIMITS.maxSelectorSteps) return null;
+      }
+      return selector;
+    },
+
+    findUnique(root, selector, budget) {
+      const normalized = this.normalizeSelector(selector);
+      if (!root || !normalized || !budget) return null;
+
       try {
-        if (!root || typeof selector !== 'string' || !selector.trim()) return null;
-        return root.querySelector(selector);
+        const first =
+          root.nodeType === Node.DOCUMENT_NODE
+            ? root.documentElement
+            : root.firstElementChild;
+        if (!(first instanceof Element)) return null;
+
+        const stack = [{ element: first, depth: 0 }];
+        let match = null;
+        while (stack.length > 0) {
+          if (
+            budget.visited >= LOCATOR_LIMITS.maxVisitedElements ||
+            Date.now() > budget.deadline
+          ) {
+            return null;
+          }
+
+          const entry = stack.pop();
+          if (!entry || entry.depth > LOCATOR_LIMITS.maxDepth) return null;
+          const element = entry.element;
+          budget.visited += 1;
+
+          if (NATIVE_ELEMENT_MATCHES.call(element, normalized)) {
+            // Stop as soon as a second match disproves uniqueness.
+            if (match) return null;
+            match = element;
+          }
+
+          const sibling = element.nextElementSibling;
+          if (sibling) stack.push({ element: sibling, depth: entry.depth });
+          const child = element.firstElementChild;
+          if (child) {
+            if (entry.depth >= LOCATOR_LIMITS.maxDepth) return null;
+            stack.push({ element: child, depth: entry.depth + 1 });
+          }
+        }
+        return match;
       } catch {
         return null;
       }
-    },
-
-    safeQuerySelectorAll(root, selector) {
-      try {
-        if (!root || typeof selector !== 'string' || !selector.trim()) return [];
-        return Array.from(root.querySelectorAll(selector));
-      } catch {
-        return [];
-      }
-    },
-
-    isSelectorUnique(root, selector) {
-      return this.safeQuerySelectorAll(root, selector).length === 1;
     },
 
     computeFingerprint(element) {
@@ -179,9 +265,15 @@
       }
     },
 
-    normalizeStringArray(value) {
-      if (!Array.isArray(value)) return [];
-      return value.map((v) => safeString(v).trim()).filter(Boolean);
+    normalizeStringArray(value, maximumEntries) {
+      if (!Array.isArray(value) || value.length > maximumEntries) return null;
+      const output = [];
+      for (const item of value) {
+        const selector = this.normalizeSelector(item);
+        if (!selector) return null;
+        output.push(selector);
+      }
+      return output;
     },
 
     /**
@@ -193,12 +285,16 @@
         if (!isObject(locator)) return null;
 
         let queryRoot = rootDocument;
+        const budget = this.createBudget();
 
         // Traverse Shadow DOM host chain
-        const shadowHostChain = this.normalizeStringArray(locator.shadowHostChain);
+        const shadowHostChain = this.normalizeStringArray(
+          locator.shadowHostChain || [],
+          LOCATOR_LIMITS.maxShadowHosts,
+        );
+        if (!shadowHostChain) return null;
         for (const hostSelector of shadowHostChain) {
-          if (!this.isSelectorUnique(queryRoot, hostSelector)) return null;
-          const host = this.safeQuerySelector(queryRoot, hostSelector);
+          const host = this.findUnique(queryRoot, hostSelector, budget);
           if (!host) return null;
           const shadowRoot = host.shadowRoot;
           if (!shadowRoot) return null;
@@ -206,10 +302,13 @@
         }
 
         // Try each selector candidate
-        const selectors = this.normalizeStringArray(locator.selectors);
+        const selectors = this.normalizeStringArray(
+          locator.selectors || [],
+          LOCATOR_LIMITS.maxSelectors,
+        );
+        if (!selectors) return null;
         for (const selector of selectors) {
-          if (!this.isSelectorUnique(queryRoot, selector)) continue;
-          const element = this.safeQuerySelector(queryRoot, selector);
+          const element = this.findUnique(queryRoot, selector, budget);
           if (!element) continue;
 
           // Verify fingerprint if provided
