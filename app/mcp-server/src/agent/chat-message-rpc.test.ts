@@ -272,6 +272,38 @@ describe('agent.sessions.history', () => {
 });
 
 describe('agent.chat.act', () => {
+  it('rejects file attachments instead of silently dropping them', async () => {
+    const { dispatchAgentRpc } = await loadAgentModules();
+    const handleAct = vi.fn();
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.chat.act',
+        params: { sessionId: 'session-does-not-need-to-exist' },
+        body: {
+          instruction: 'Read this file',
+          attachments: [
+            {
+              type: 'file',
+              name: 'secret.txt',
+              mimeType: 'text/plain',
+              dataBase64: 'c2VjcmV0',
+            },
+          ],
+        },
+      },
+      {
+        chatService: {
+          getEngineInfos: () => [],
+          handleAct,
+        } as unknown as AgentChatService,
+      },
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json).toEqual({ error: 'Only image attachments are supported' });
+    expect(handleAct).not.toHaveBeenCalled();
+  });
+
   it('returns 409 when a requestId is already active for the same session', async () => {
     const workspaceBase = await createTempDir('act-request-conflict-workspace-');
     const dataDir = await createTempDir('act-request-conflict-data-');

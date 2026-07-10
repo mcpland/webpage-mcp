@@ -125,6 +125,16 @@ export class AgentChatService {
     if (!trimmed) {
       throw new Error('instruction is required');
     }
+    if (
+      payload.attachments?.some(
+        (attachment) =>
+          !attachment ||
+          typeof attachment !== 'object' ||
+          (attachment as { type?: unknown }).type !== 'image',
+      )
+    ) {
+      throw new Error('Only image attachments are supported');
+    }
     const engineInstruction = buildInstructionWithContext(trimmed, payload.context);
 
     const requestId = payload.requestId || randomUUID();

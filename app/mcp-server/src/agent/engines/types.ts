@@ -12,7 +12,7 @@ export interface EngineInitOptions {
    */
   signal?: AbortSignal;
   /**
-   * Optional attachments (images/files) to include with the instruction.
+   * Optional image attachments to include with the instruction.
    * Note: When using persisted attachments, use resolvedImagePaths instead.
    */
   attachments?: AgentAttachment[];

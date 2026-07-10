@@ -74,7 +74,7 @@ export type RealtimeEvent =
 // ============================================================
 
 export interface AgentAttachment {
-  type: 'file' | 'image';
+  type: 'image';
   name: string;
   mimeType: string;
   dataBase64: string;
