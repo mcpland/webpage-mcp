@@ -228,6 +228,11 @@ export interface ElementPickerResult {
    */
   timedOut?: boolean;
   /**
+   * True when one or more browser-derived result fields were truncated to a
+   * safe output size.
+   */
+  truncated?: boolean;
+  /**
    * List of request IDs that were not selected (for debugging).
    */
   missingRequestIds?: string[];

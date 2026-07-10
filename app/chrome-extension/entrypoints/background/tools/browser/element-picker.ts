@@ -11,6 +11,10 @@ import { BACKGROUND_MESSAGE_TYPES, TOOL_MESSAGE_TYPES } from '@/common/message-t
 import { ERROR_MESSAGES } from '@/common/constants';
 import { hasDisallowedPublicUrlScheme } from './common';
 import {
+  measureUtf8Bytes,
+  truncateJsonString,
+} from './bounded-tool-output';
+import {
   TOOL_NAMES,
   type ElementPickerRequest,
   type ElementPickerResult,
@@ -57,13 +61,64 @@ interface PickerFrameEvent {
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 const MAX_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const MIN_TIMEOUT_MS = 10 * 1000; // 10 seconds
+export const ELEMENT_PICKER_MAX_REQUESTS = 20;
+export const ELEMENT_PICKER_MAX_RESULT_UTF8_BYTES = 256 * 1024;
+export const ELEMENT_PICKER_MAX_ID_JSON_BYTES = 128;
+export const ELEMENT_PICKER_MAX_NAME_JSON_BYTES = 256;
+export const ELEMENT_PICKER_MAX_DESCRIPTION_JSON_BYTES = 2 * 1024;
+export const ELEMENT_PICKER_MAX_REF_JSON_BYTES = 512;
+export const ELEMENT_PICKER_MAX_SELECTOR_JSON_BYTES = 4 * 1024;
+export const ELEMENT_PICKER_MAX_TEXT_JSON_BYTES = 2 * 1024;
+export const ELEMENT_PICKER_MAX_TAG_JSON_BYTES = 64;
+const ELEMENT_PICKER_MAX_COORDINATE = 10_000_000;
+const ELEMENT_PICKER_MAX_FRAME_ID = 1_000_000;
 
 // ============================================================
 // Utility Functions
 // ============================================================
 
-function toTrimmedString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
+function boundedTrimmedString(
+  value: unknown,
+  maxJsonBytes: number,
+): { value: string; truncated: boolean } {
+  if (typeof value !== 'string') return { value: '', truncated: false };
+  const bounded = truncateJsonString(value, maxJsonBytes);
+  return {
+    value: bounded.trim(),
+    truncated:
+      measureUtf8Bytes(value, maxJsonBytes) > maxJsonBytes ||
+      bounded.length !== value.length,
+  };
+}
+
+function boundedCoordinate(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.min(
+    ELEMENT_PICKER_MAX_COORDINATE,
+    Math.max(-ELEMENT_PICKER_MAX_COORDINATE, value),
+  );
+}
+
+function sanitizeRect(value: unknown): PickedElement['rect'] {
+  const rect = value !== null && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : {};
+  return {
+    x: boundedCoordinate(rect.x),
+    y: boundedCoordinate(rect.y),
+    width: Math.max(0, boundedCoordinate(rect.width)),
+    height: Math.max(0, boundedCoordinate(rect.height)),
+  };
+}
+
+function sanitizePoint(value: unknown): PickedElement['center'] {
+  const point = value !== null && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : {};
+  return {
+    x: boundedCoordinate(point.x),
+    y: boundedCoordinate(point.y),
+  };
 }
 
 function normalizeTimeoutMs(value: unknown): number {
@@ -79,19 +134,28 @@ function normalizeRequests(requests: ElementPickerRequest[]): NormalizedRequest[
 
   for (let i = 0; i < requests.length; i++) {
     const r = requests[i] || ({} as ElementPickerRequest);
-    const name = toTrimmedString(r.name);
+    const name = boundedTrimmedString(
+      r.name,
+      ELEMENT_PICKER_MAX_NAME_JSON_BYTES,
+    ).value;
     if (!name) continue;
 
     // Generate or use provided ID, ensuring uniqueness
-    const baseId = toTrimmedString(r.id) || `req_${i + 1}`;
+    const baseId =
+      boundedTrimmedString(r.id, ELEMENT_PICKER_MAX_ID_JSON_BYTES).value ||
+      `req_${i + 1}`;
     let id = baseId;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${baseId}_${suffix++}`;
+    if (seen.has(id)) {
+      let suffix = 1;
+      id = `req_${i + 1}`;
+      while (seen.has(id)) id = `req_${i + 1}_${suffix++}`;
     }
     seen.add(id);
 
-    const description = toTrimmedString(r.description);
+    const description = boundedTrimmedString(
+      r.description,
+      ELEMENT_PICKER_MAX_DESCRIPTION_JSON_BYTES,
+    ).value;
     out.push({ id, name, description: description || undefined });
   }
 
@@ -176,6 +240,36 @@ class ElementPickerTool extends BaseBrowserToolExecutor {
     if (rawRequests.length === 0) {
       return createErrorResponse(`${ERROR_MESSAGES.INVALID_PARAMETERS}: requests[] is required`);
     }
+    if (rawRequests.length > ELEMENT_PICKER_MAX_REQUESTS) {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: requests[] must contain no more than ${ELEMENT_PICKER_MAX_REQUESTS} entries`,
+      );
+    }
+    for (let index = 0; index < rawRequests.length; index += 1) {
+      const request = rawRequests[index] as Partial<ElementPickerRequest> | undefined;
+      if (!request || typeof request !== 'object') {
+        return createErrorResponse(
+          `${ERROR_MESSAGES.INVALID_PARAMETERS}: requests[${index}] must be an object`,
+        );
+      }
+      for (const [field, value, maxBytes] of [
+        ['id', request.id, ELEMENT_PICKER_MAX_ID_JSON_BYTES],
+        ['name', request.name, ELEMENT_PICKER_MAX_NAME_JSON_BYTES],
+        [
+          'description',
+          request.description,
+          ELEMENT_PICKER_MAX_DESCRIPTION_JSON_BYTES,
+        ],
+      ] as const) {
+        if (value === undefined && field !== 'name') continue;
+        const normalized = boundedTrimmedString(value, maxBytes);
+        if (typeof value !== 'string' || normalized.truncated) {
+          return createErrorResponse(
+            `${ERROR_MESSAGES.INVALID_PARAMETERS}: requests[${index}].${field} exceeds its string limit`,
+          );
+        }
+      }
+    }
 
     const requests = normalizeRequests(rawRequests);
     if (requests.length === 0) {
@@ -220,6 +314,7 @@ class ElementPickerTool extends BaseBrowserToolExecutor {
     let activeRequestId: string | null = requests[0]?.id || null;
     let uiErrorMessage: string | null = null;
     let uiAvailable = true;
+    let resultTruncated = false;
 
     let finished = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -298,6 +393,7 @@ class ElementPickerTool extends BaseBrowserToolExecutor {
         missingRequestIds: missing.length > 0 ? missing : undefined,
         results: buildResultItems(requests, pickedById),
       };
+      if (resultTruncated) result.truncated = true;
 
       resolveResult?.(result);
     };
@@ -323,8 +419,17 @@ class ElementPickerTool extends BaseBrowserToolExecutor {
         }
 
         if (msg.event === 'selected') {
-          const requestId = toTrimmedString(msg.requestId);
-          const frameId = typeof sender.frameId === 'number' ? sender.frameId : 0;
+          const requestId = boundedTrimmedString(
+            msg.requestId,
+            ELEMENT_PICKER_MAX_ID_JSON_BYTES,
+          ).value;
+          const frameId =
+            typeof sender.frameId === 'number' && Number.isFinite(sender.frameId)
+              ? Math.min(
+                  ELEMENT_PICKER_MAX_FRAME_ID,
+                  Math.max(0, Math.floor(sender.frameId)),
+                )
+              : 0;
 
           // Validate request ID
           const reqExists = requestId && requests.some((r) => r.id === requestId);
@@ -335,24 +440,42 @@ class ElementPickerTool extends BaseBrowserToolExecutor {
 
           // Validate element data
           const raw = (msg.element || {}) as Partial<Omit<PickedElement, 'frameId'>>;
-          const ref = toTrimmedString(raw.ref);
-          if (!ref) {
+          const ref = boundedTrimmedString(
+            raw.ref,
+            ELEMENT_PICKER_MAX_REF_JSON_BYTES,
+          );
+          if (!ref.value) {
             sendResponse?.({ success: false, error: 'Missing element.ref' });
             return true;
           }
 
           // Build picked element with frameId
-          const selector = toTrimmedString(raw.selector);
-          const rect = raw.rect as PickedElement['rect'] | undefined;
-          const center = raw.center as PickedElement['center'] | undefined;
+          const selector = boundedTrimmedString(
+            raw.selector,
+            ELEMENT_PICKER_MAX_SELECTOR_JSON_BYTES,
+          );
+          const text = boundedTrimmedString(
+            raw.text,
+            ELEMENT_PICKER_MAX_TEXT_JSON_BYTES,
+          );
+          const tagName = boundedTrimmedString(
+            raw.tagName,
+            ELEMENT_PICKER_MAX_TAG_JSON_BYTES,
+          );
+          resultTruncated =
+            resultTruncated ||
+            ref.truncated ||
+            selector.truncated ||
+            text.truncated ||
+            tagName.truncated;
           const picked: PickedElement = {
-            ref,
-            selector,
+            ref: ref.value,
+            selector: selector.value,
             selectorType: 'css',
-            rect: rect && typeof rect === 'object' ? rect : { x: 0, y: 0, width: 0, height: 0 },
-            center: center && typeof center === 'object' ? center : { x: 0, y: 0 },
-            text: typeof raw.text === 'string' ? raw.text : undefined,
-            tagName: typeof raw.tagName === 'string' ? raw.tagName : undefined,
+            rect: sanitizeRect(raw.rect),
+            center: sanitizePoint(raw.center),
+            text: text.value || undefined,
+            tagName: tagName.value || undefined,
             frameId,
           };
 
@@ -407,7 +530,10 @@ class ElementPickerTool extends BaseBrowserToolExecutor {
         }
 
         if (msg.event === 'set_active_request') {
-          const requestId = toTrimmedString(msg.requestId);
+          const requestId = boundedTrimmedString(
+            msg.requestId,
+            ELEMENT_PICKER_MAX_ID_JSON_BYTES,
+          ).value;
           if (!requestId || !requests.some((r) => r.id === requestId)) {
             sendResponse?.({ success: false, error: 'Unknown requestId' });
             return true;
@@ -418,7 +544,10 @@ class ElementPickerTool extends BaseBrowserToolExecutor {
         }
 
         if (msg.event === 'clear_selection') {
-          const requestId = toTrimmedString(msg.requestId);
+          const requestId = boundedTrimmedString(
+            msg.requestId,
+            ELEMENT_PICKER_MAX_ID_JSON_BYTES,
+          ).value;
           if (!requestId || !requests.some((r) => r.id === requestId)) {
             sendResponse?.({ success: false, error: 'Unknown requestId' });
             return true;
@@ -537,7 +666,16 @@ class ElementPickerTool extends BaseBrowserToolExecutor {
 
       // Wait for result
       const result = await resultPromise;
-      return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: false };
+      const serialized = JSON.stringify(result);
+      if (
+        measureUtf8Bytes(serialized, ELEMENT_PICKER_MAX_RESULT_UTF8_BYTES) >
+        ELEMENT_PICKER_MAX_RESULT_UTF8_BYTES
+      ) {
+        return createErrorResponse(
+          `${ERROR_MESSAGES.TOOL_EXECUTION_FAILED}: Element Picker result exceeded its output limit.`,
+        );
+      }
+      return { content: [{ type: 'text', text: serialized }], isError: false };
     } catch (error) {
       console.error('Error in element picker tool:', error);
       // Cleanup on error

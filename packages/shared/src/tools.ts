@@ -2184,21 +2184,25 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             'A list of element selection requests. Each request produces exactly one picked element. The user will see these requests in a panel and select each element by clicking on the page.',
           minItems: 1,
+          maxItems: 20,
           items: {
             type: 'object',
             properties: {
               id: {
                 type: 'string',
+                maxLength: 128,
                 description:
                   'Optional stable request id for correlation. If omitted, an id is auto-generated (e.g., "req_1").',
               },
               name: {
                 type: 'string',
+                maxLength: 256,
                 description:
                   'Short label shown to the user describing what element to select (e.g., "Login button", "Email input field").',
               },
               description: {
                 type: 'string',
+                maxLength: 2048,
                 description:
                   'Optional longer instruction shown to the user with more context (e.g., "Click on the primary login button in the top-right corner").',
               },
@@ -2208,6 +2212,8 @@ export const TOOL_SCHEMAS: Tool[] = [
         },
         timeoutMs: {
           type: 'number',
+          minimum: 10000,
+          maximum: 600000,
           description:
             'Timeout in milliseconds for the user to complete all selections. Default: 180000 (3 minutes). Maximum: 600000 (10 minutes).',
         },
