@@ -33,7 +33,7 @@ import {
 import { getNativeSocketPath } from '../ipc/socket-path';
 
 const SCHEMA_VERSION = 1;
-const MIN_NODE_MAJOR_VERSION = 20;
+export const MIN_NODE_MAJOR_VERSION = 22;
 
 // ============================================================================
 // Types
@@ -205,7 +205,7 @@ function parseVersionFromDirName(dirName: string): number[] | null {
  * Handles versions like: v20.10.0, v22.0.0-nightly.2024..., v21.0.0-rc.1
  * Returns major version number or null if parsing fails.
  */
-function parseNodeMajorVersion(versionString: string): number | null {
+export function parseNodeMajorVersion(versionString: string): number | null {
   if (!versionString) return null;
   // Match pattern: v?MAJOR.MINOR.PATCH[-anything]
   const match = versionString.trim().match(/^v?(\d+)(?:\.\d+)*(?:[-+].*)?$/i);

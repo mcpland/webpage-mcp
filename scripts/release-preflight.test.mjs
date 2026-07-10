@@ -74,7 +74,12 @@ function sha256(bytes) {
 }
 
 function writeTarText(header, offset, length, value) {
-  header.write(value, offset, Math.min(length, Buffer.byteLength(value)), "utf8");
+  header.write(
+    value,
+    offset,
+    Math.min(length, Buffer.byteLength(value)),
+    "utf8",
+  );
 }
 
 function writeTarOctal(header, offset, length, value) {
@@ -523,4 +528,45 @@ test("release workflow verifies before either publish mutation", async () => {
     /action-gh-release|npm publish/,
     "build and verification must not mutate a release",
   );
+});
+
+test("CI and release use maintained Node runtimes and Node 24 actions", async () => {
+  const workflowPaths = [
+    join(REPOSITORY_ROOT, ".github/workflows/ci.yml"),
+    join(REPOSITORY_ROOT, ".github/workflows/release.yml"),
+  ];
+  const workflows = await Promise.all(
+    workflowPaths.map((workflowPath) => readFile(workflowPath, "utf8")),
+  );
+  const combined = workflows.join("\n");
+
+  assert.doesNotMatch(
+    combined,
+    /node-version:\s*["']?20(?:["']?|\s|$)/,
+    "EOL Node.js 20 must not be used by CI or release jobs",
+  );
+  assert.match(
+    workflows[0],
+    /node-version:\s*\[22, 24\]/,
+    "CI must verify both supported LTS release lines",
+  );
+
+  const node24ActionCommits = new Set([
+    "df4cb1c069e1874edd31b4311f1884172cec0e10", // actions/checkout v6.0.3
+    "48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e", // actions/setup-node v6.4.0
+    "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", // actions/upload-artifact v7.0.1
+    "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", // actions/download-artifact v8.0.1
+    "fc06bc1257f339d1d5d8b3a19a8cae5388b55320", // pnpm/action-setup v5.0.0
+    "718ea10b132b3b2eba29c1007bb80653f286566b", // softprops/action-gh-release v3.0.1
+  ]);
+  const actionReferences = Array.from(
+    combined.matchAll(/^\s*uses:\s*([^\s#]+)@([a-f0-9]{40})/gm),
+  );
+  assert.ok(actionReferences.length > 0, "workflows must use remote actions");
+  for (const [, action, commit] of actionReferences) {
+    assert.ok(
+      node24ActionCommits.has(commit),
+      `${action} must be pinned to the reviewed Node 24 action release`,
+    );
+  }
 });

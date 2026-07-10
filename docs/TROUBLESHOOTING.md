@@ -186,7 +186,7 @@ Symptoms:
 
 Checks:
 
-1. Use Node.js >= 20.
+1. Use Node.js >= 22 (Node.js 24 LTS recommended).
 2. Run:
 
 ```bash

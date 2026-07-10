@@ -260,7 +260,7 @@ If you encounter problems during installation, try the following steps:
 
 1. Make sure Node.js is properly installed
    - Run `node -v` and `npm -v` to check versions
-   - Ensure Node.js version >= 20.x
+   - Ensure Node.js version >= 22.x (Node.js 24 LTS recommended)
 
 2. Check if you have sufficient permissions to create files and directories
    - User-level installation requires write permissions to user directory

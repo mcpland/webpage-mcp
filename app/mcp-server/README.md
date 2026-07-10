@@ -21,7 +21,7 @@ No localhost HTTP server or port is required.
 
 ## Requirements
 
-- Node.js `>= 20`
+- Node.js `>= 22` (Node.js 24 LTS recommended)
 - Chrome/Chromium with the Webpage MCP Connector extension installed
 
 ## Quick Start (npm users)

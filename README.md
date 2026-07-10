@@ -463,7 +463,7 @@ The extension popup and welcome page can generate this command automatically usi
 <summary><strong>Extension fails to connect</strong></summary>
 
 1. Ensure the native host is registered: `npx -y webpage-mcp@latest doctor`
-2. Check that Node.js >= 20 is available at the registered path
+2. Check that Node.js >= 22 is available at the registered path (Node.js 24 LTS recommended)
 3. Check that the Chrome extension and `webpage-mcp` npm package versions match, especially after a fresh npm release
 4. Prefer the exact register command generated in extension popup/welcome and run it once
 5. Fully restart Chrome (quit all Chrome processes), then click Connect again
