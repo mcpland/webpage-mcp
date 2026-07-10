@@ -10,6 +10,17 @@ const mocks = vi.hoisted(() => ({
   getGlobalVectorDatabase: vi.fn(),
   ensureTabDocumentsRemoved: vi.fn(),
   engineConfigs: [] as unknown[],
+  completedPagesByTab: new Map<
+    number,
+    {
+      tabId: number;
+      pageKey: string;
+      url: string;
+      title: string;
+      expectedCount: number;
+    }
+  >(),
+  inspectTabPageCompletion: vi.fn(),
   inspectTabPageState: vi.fn(),
   initializeEngine: vi.fn(),
   initializeVectorDatabase: vi.fn(),
@@ -117,12 +128,14 @@ describe("ContentIndexer tab/page lifecycle", () => {
     commitTabPage: mocks.commitTabPage,
     ensureTabDocumentsRemoved: mocks.ensureTabDocumentsRemoved,
     getStats: vi.fn(() => ({
-      totalDocuments: 0,
-      totalTabs: 0,
+      totalDocuments: mocks.completedPagesByTab.size,
+      totalTabs: mocks.completedPagesByTab.size,
+      completedPages: mocks.completedPagesByTab.size,
       indexSize: 0,
       isInitialized: true,
     })),
     initialize: mocks.initializeVectorDatabase,
+    inspectTabPageCompletion: mocks.inspectTabPageCompletion,
     inspectTabPageState: mocks.inspectTabPageState,
     removeTabDocuments: mocks.removeTabDocuments,
   };
@@ -130,26 +143,53 @@ describe("ContentIndexer tab/page lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     pagesByTab.clear();
+    mocks.completedPagesByTab.clear();
     mocks.engineConfigs.length = 0;
 
     mocks.addDocument.mockResolvedValue(1);
     mocks.chunkText.mockReturnValue([
       { text: "page content", source: "content", index: 0, wordCount: 2 },
     ]);
-    mocks.clearAllVectorData.mockResolvedValue(undefined);
-    mocks.clearVectorDatabase.mockResolvedValue(undefined);
-    mocks.commitTabPage.mockResolvedValue(undefined);
+    mocks.clearAllVectorData.mockImplementation(async () => {
+      mocks.completedPagesByTab.clear();
+    });
+    mocks.clearVectorDatabase.mockImplementation(async () => {
+      mocks.completedPagesByTab.clear();
+    });
+    mocks.commitTabPage.mockImplementation(
+      async (tabId: number, url: string, title: string) => {
+        mocks.completedPagesByTab.set(tabId, {
+          tabId,
+          pageKey: `${url}\u0000${title}`,
+          url,
+          title,
+          expectedCount: 1,
+        });
+      },
+    );
     mocks.getEmbedding.mockResolvedValue(new Float32Array([1, 0, 0]));
     mocks.getGlobalVectorDatabase.mockResolvedValue(vectorDatabase);
-    mocks.ensureTabDocumentsRemoved.mockResolvedValue(undefined);
+    mocks.ensureTabDocumentsRemoved.mockImplementation(
+      async (tabId: number) => {
+        mocks.completedPagesByTab.delete(tabId);
+      },
+    );
     mocks.initializeEngine.mockResolvedValue(undefined);
     mocks.initializeVectorDatabase.mockResolvedValue(undefined);
     mocks.inspectTabPageState.mockResolvedValue({
       completedPages: [],
       repairTabIds: [],
     });
+    mocks.inspectTabPageCompletion.mockImplementation(async (tabId: number) => {
+      const page = mocks.completedPagesByTab.get(tabId);
+      return page
+        ? { state: "complete" as const, page: { ...page } }
+        : { state: "absent" as const };
+    });
     mocks.removeTabDocuments.mockResolvedValue(undefined);
-    mocks.resetGlobalVectorDatabase.mockResolvedValue(undefined);
+    mocks.resetGlobalVectorDatabase.mockImplementation(async () => {
+      mocks.completedPagesByTab.clear();
+    });
 
     installLocalStorage();
     chrome.tabs.get = vi.fn(async (tabId: number) => {
@@ -433,6 +473,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
       completedPages: [completedPage],
       repairTabIds: [],
     });
+    mocks.completedPagesByTab.set(completedPage.tabId, completedPage);
     pagesByTab.set(12, {
       url: "https://example.test/restored",
       title: "Restored",
@@ -450,6 +491,103 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
     expect(mocks.addDocument).not.toHaveBeenCalled();
     expect(mocks.commitTabPage).not.toHaveBeenCalled();
+  });
+
+  it("revalidates a cached duplicate and reindexes when durable completion is absent", async () => {
+    pagesByTab.set(14, {
+      url: "https://example.test/stale-cache",
+      title: "Stale cache",
+    });
+    const indexer = await createIndexer();
+    await indexer.indexTabContent(14);
+    expect(indexer.getStats().indexedPages).toBe(1);
+
+    // Simulate an independent whole-page eviction. The ContentIndexer cache is
+    // intentionally left stale; VectorDatabase remains the source of truth.
+    mocks.completedPagesByTab.delete(14);
+    expect(indexer.getStats()).toMatchObject({
+      indexedPages: 0,
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+
+    await indexer.indexTabContent(14);
+
+    expect(mocks.inspectTabPageCompletion).toHaveBeenCalledTimes(2);
+    expect(mocks.addDocument).toHaveBeenCalledTimes(2);
+    expect(mocks.commitTabPage).toHaveBeenCalledTimes(2);
+    expect(indexer.getStats().indexedPages).toBe(1);
+  });
+
+  it("repairs a stale duplicate before reindexing when durable page state is incomplete", async () => {
+    pagesByTab.set(15, {
+      url: "https://example.test/repair-cache",
+      title: "Repair cache",
+    });
+    const indexer = await createIndexer();
+    await indexer.indexTabContent(15);
+    mocks.inspectTabPageCompletion.mockResolvedValueOnce({
+      state: "repair-required",
+      reason: "incomplete",
+    });
+
+    await indexer.indexTabContent(15);
+
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(15);
+    expect(
+      mocks.ensureTabDocumentsRemoved.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.addDocument.mock.invocationCallOrder[1]);
+    expect(mocks.addDocument).toHaveBeenCalledTimes(2);
+    expect(mocks.commitTabPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("hydrates a missing cache entry from exact durable completion before duplicate skip", async () => {
+    const page = {
+      tabId: 16,
+      pageKey: "https://example.test/durable-only\u0000Durable only",
+      url: "https://example.test/durable-only",
+      title: "Durable only",
+      expectedCount: 2,
+    };
+    mocks.completedPagesByTab.set(page.tabId, page);
+    pagesByTab.set(page.tabId, { url: page.url, title: page.title });
+    const indexer = await createIndexer();
+
+    await indexer.indexTabContent(page.tabId);
+
+    expect(mocks.inspectTabPageCompletion).toHaveBeenCalledWith(page.tabId);
+    expect(mocks.addDocument).not.toHaveBeenCalled();
+    expect(mocks.commitTabPage).not.toHaveBeenCalled();
+    expect(indexer.getStats().indexedPages).toBe(1);
+  });
+
+  it("keeps failed repair pending, redacts stats, and retries before duplicate inspection", async () => {
+    pagesByTab.set(17, {
+      url: "https://example.test/repair-retry",
+      title: "Repair retry",
+    });
+    const indexer = await createIndexer();
+    await indexer.indexTabContent(17);
+    mocks.inspectTabPageCompletion.mockResolvedValueOnce({
+      state: "repair-required",
+      reason: "expired",
+    });
+    mocks.ensureTabDocumentsRemoved.mockRejectedValueOnce(
+      new Error("expired repair failed"),
+    );
+
+    await expect(indexer.indexTabContent(17)).rejects.toThrow(
+      "expired repair failed",
+    );
+    expect(indexer.getStats()).toMatchObject({ available: false });
+
+    await expect(indexer.indexTabContent(17)).resolves.toBeUndefined();
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledTimes(2);
+    expect(mocks.addDocument).toHaveBeenCalledTimes(2);
+    expect(indexer.getStats()).toMatchObject({
+      available: true,
+      indexedPages: 1,
+    });
   });
 
   it("does not resurrect a page invalidated during the hydration window", async () => {
@@ -500,18 +638,18 @@ describe("ContentIndexer tab/page lifecycle", () => {
   });
 
   it("durably removes a restored page before indexing and committing its replacement", async () => {
+    const completedPage = {
+      tabId: 13,
+      pageKey: "https://example.test/old\u0000Old",
+      url: "https://example.test/old",
+      title: "Old",
+      expectedCount: 1,
+    };
     mocks.inspectTabPageState.mockResolvedValue({
-      completedPages: [
-        {
-          tabId: 13,
-          pageKey: "https://example.test/old\u0000Old",
-          url: "https://example.test/old",
-          title: "Old",
-          expectedCount: 1,
-        },
-      ],
+      completedPages: [completedPage],
       repairTabIds: [],
     });
+    mocks.completedPagesByTab.set(completedPage.tabId, completedPage);
     pagesByTab.set(13, {
       url: "https://example.test/new",
       title: "New",
@@ -581,6 +719,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
         completedPages: [completedPage],
         repairTabIds: [],
       });
+    mocks.completedPagesByTab.set(completedPage.tabId, completedPage);
     mocks.ensureTabDocumentsRemoved
       .mockRejectedValueOnce(new Error("repair failed"))
       .mockResolvedValueOnce(undefined);
@@ -589,7 +728,8 @@ describe("ContentIndexer tab/page lifecycle", () => {
 
     await expect(indexer.initialize()).rejects.toThrow("repair failed");
     expect(indexer.getStats()).toMatchObject({
-      indexedPages: 0,
+      available: false,
+      indexedPages: 1,
       isInitialized: false,
     });
 
@@ -606,6 +746,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
     vectorDatabase.getStats.mockReturnValueOnce({
       totalDocuments: 4,
       totalTabs: 2,
+      completedPages: 2,
       indexSize: 100,
       isInitialized: false,
     });

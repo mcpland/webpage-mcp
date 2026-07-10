@@ -60,6 +60,41 @@ export interface TabPageStateInspection {
   repairTabIds: number[];
 }
 
+export type TabPageCompletionInspection =
+  | { state: "absent" }
+  | {
+      state: "repair-required";
+      reason: "incomplete" | "expired";
+    }
+  | {
+      state: "complete";
+      page: CompletedTabPageIdentity;
+    };
+
+type InternalTabPageCompletionInspection =
+  | { state: "absent" }
+  | {
+      state: "repair-required";
+      reason: "incomplete" | "expired";
+    }
+  | {
+      state: "complete";
+      completion: PersistedTabPageCompletion;
+      labels: number[];
+    };
+
+export interface VectorDatabaseStats {
+  /** Documents belonging to exact, non-expired completed pages. */
+  totalDocuments: number;
+  /** Tabs with an exact, non-expired completed page. */
+  totalTabs: number;
+  /** Exact, non-expired page count. Currently one completed page per tab. */
+  completedPages: number;
+  /** Physical resident storage estimate, including hidden repair candidates. */
+  indexSize: number;
+  isInitialized: boolean;
+}
+
 interface PersistedVectorMappings {
   schemaVersion: number;
   revision: number;
@@ -1909,7 +1944,7 @@ export class VectorDatabase {
       // completion boundary is searchable. This also makes an HNSW index that
       // contains only deleted/tombstoned points a valid empty search state,
       // without trying to resurrect document mappings from persistence.
-      const searchableLabels = this.collectSearchableLabels();
+      const searchableLabels = this.collectSearchableLabels(Date.now());
       if (searchableLabels.size === 0) {
         console.log(
           "VectorDatabase: No durably completed pages are searchable",
@@ -2104,12 +2139,16 @@ export class VectorDatabase {
     }
   }
 
-  private collectSearchableLabels(): Set<number> {
+  private collectSearchableLabels(now: number): Set<number> {
     const labels = new Set<number>();
-    for (const tabId of this.completedTabPages.keys()) {
-      const completedPage = this.getExactCompletedPage(tabId);
-      if (!completedPage) continue;
-      for (const label of completedPage.labels) labels.add(label);
+    const tabIds = new Set([
+      ...this.tabDocuments.keys(),
+      ...this.completedTabPages.keys(),
+    ]);
+    for (const tabId of tabIds) {
+      const page = this.classifyTabPage(tabId, now);
+      if (page.state !== "complete") continue;
+      for (const label of page.labels) labels.add(label);
     }
     return labels;
   }
@@ -2304,14 +2343,19 @@ export class VectorDatabase {
       labels,
       expectedCount: labels.length,
     };
-    this.completedTabPages.set(tabId, completion);
+    // Keep the candidate private until both persistence and exact readback
+    // succeed. Synchronous stats must never observe a completion that only
+    // exists in an in-flight storage write.
+    const candidateCompletions = new Map(this.completedTabPages);
+    candidateCompletions.set(tabId, completion);
     try {
-      const revision = await this.saveDocumentMappings();
+      const revision = await this.saveDocumentMappings(candidateCompletions);
       await this.verifyTabPageCompletionInPersistedMappings(
         tabId,
         completion,
         revision,
       );
+      this.completedTabPages.set(tabId, completion);
     } catch (error) {
       // Never expose or leave an unverified marker behind. Persisting the
       // invalidation means a worker crash before the caller's full tab cleanup
@@ -2382,34 +2426,116 @@ export class VectorDatabase {
     );
   }
 
+  /**
+   * Inspect one tab against the only publishable page boundary: an exact,
+   * durably verified completion whose entire label set is still within the
+   * configured retention window.
+   */
+  public async inspectTabPageCompletion(
+    tabId: number,
+  ): Promise<TabPageCompletionInspection> {
+    if (!this.isInitialized) await this.initialize();
+    return this.enqueueMutation(() => {
+      this.assertSafeMutationState();
+      return Promise.resolve(
+        this.toPublicTabPageCompletion(
+          tabId,
+          this.classifyTabPage(tabId, Date.now()),
+        ),
+      );
+    });
+  }
+
   private inspectTabPageStateInternal(): TabPageStateInspection {
     this.assertSafeMutationState();
     const completedPages: CompletedTabPageIdentity[] = [];
     const repairTabs = new Set<number>();
+    const now = Date.now();
     const allTabIds = new Set([
       ...this.tabDocuments.keys(),
       ...this.completedTabPages.keys(),
     ]);
 
     for (const tabId of [...allTabIds].sort((left, right) => left - right)) {
-      const completedPage = this.getExactCompletedPage(tabId);
-      if (!completedPage) {
+      const page = this.classifyTabPage(tabId, now);
+      if (page.state === "repair-required") {
         repairTabs.add(tabId);
         continue;
       }
-
-      completedPages.push({
-        tabId,
-        pageKey: completedPage.completion.pageKey,
-        url: completedPage.completion.url,
-        title: completedPage.completion.title,
-        expectedCount: completedPage.completion.expectedCount,
-      });
+      if (page.state === "complete") {
+        completedPages.push(this.completedPageIdentity(tabId, page.completion));
+      }
     }
 
     return {
       completedPages,
       repairTabIds: [...repairTabs].sort((left, right) => left - right),
+    };
+  }
+
+  private classifyTabPage(
+    tabId: number,
+    now: number,
+  ): InternalTabPageCompletionInspection {
+    const hasTabState =
+      this.tabDocuments.has(tabId) || this.completedTabPages.has(tabId);
+    if (!hasTabState) return { state: "absent" };
+
+    const completedPage = this.getExactCompletedPage(tabId);
+    if (!completedPage) {
+      return { state: "repair-required", reason: "incomplete" };
+    }
+
+    const cutoff = this.retentionCutoff(now);
+    if (
+      cutoff !== null &&
+      completedPage.labels.some(
+        (label) => this.documents.get(label)!.timestamp < cutoff,
+      )
+    ) {
+      // Page identity is atomic. Never expose only the newer chunks of a page
+      // whose label set crossed the retention boundary.
+      return { state: "repair-required", reason: "expired" };
+    }
+
+    return {
+      state: "complete",
+      completion: completedPage.completion,
+      labels: completedPage.labels,
+    };
+  }
+
+  private retentionCutoff(now: number): number | null {
+    const days = this.config.maxRetentionDays;
+    if (typeof days !== "number" || !Number.isFinite(days) || days <= 0) {
+      return null;
+    }
+    const retentionMs = days * 24 * 60 * 60 * 1000;
+    if (!Number.isFinite(retentionMs)) return null;
+    return now - retentionMs;
+  }
+
+  private completedPageIdentity(
+    tabId: number,
+    completion: PersistedTabPageCompletion,
+  ): CompletedTabPageIdentity {
+    return {
+      tabId,
+      pageKey: completion.pageKey,
+      url: completion.url,
+      title: completion.title,
+      expectedCount: completion.expectedCount,
+    };
+  }
+
+  private toPublicTabPageCompletion(
+    tabId: number,
+    state: InternalTabPageCompletionInspection,
+  ): TabPageCompletionInspection {
+    if (state.state !== "complete") return { ...state };
+    return {
+      state: "complete",
+      page: this.completedPageIdentity(tabId, state.completion),
     };
   }
 
@@ -2449,15 +2575,17 @@ export class VectorDatabase {
   /**
    * Get database statistics
    */
-  public getStats(): {
-    totalDocuments: number;
-    totalTabs: number;
-    indexSize: number;
-    isInitialized: boolean;
-  } {
+  public getStats(): VectorDatabaseStats {
+    const searchableLabels = this.collectSearchableLabels(Date.now());
+    const completedTabs = new Set<number>();
+    for (const label of searchableLabels) {
+      const document = this.documents.get(label);
+      if (document) completedTabs.add(document.tabId);
+    }
     return {
-      totalDocuments: this.documents.size,
-      totalTabs: this.tabDocuments.size,
+      totalDocuments: searchableLabels.size,
+      totalTabs: completedTabs.size,
+      completedPages: completedTabs.size,
       indexSize: this.calculateStorageSize(),
       isInitialized: this.isInitialized && this.unsafeMutationState === null,
     };
@@ -2853,7 +2981,10 @@ export class VectorDatabase {
     await persistHnswIndex(this.index, this.config.indexFileName);
   }
 
-  private saveDocumentMappings(): Promise<number> {
+  private saveDocumentMappings(
+    completedTabPages: ReadonlyMap<number, PersistedTabPageCompletion> = this
+      .completedTabPages,
+  ): Promise<number> {
     const snapshot: Pick<
       PersistedVectorMappings,
       "documents" | "tabDocuments" | "completedTabPages" | "nextLabel"
@@ -2875,7 +3006,7 @@ export class VectorDatabase {
           Array.from(labels).sort((left, right) => left - right),
         ])
         .sort(([left], [right]) => left - right),
-      completedTabPages: Array.from(this.completedTabPages.entries())
+      completedTabPages: Array.from(completedTabPages.entries())
         .map(([tabId, completion]): [number, PersistedTabPageCompletion] => [
           tabId,
           { ...completion, labels: [...completion.labels] },

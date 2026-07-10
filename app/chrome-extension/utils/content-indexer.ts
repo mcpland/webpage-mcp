@@ -214,7 +214,7 @@ export class ContentIndexer {
     null;
   private initializingModelSelection: SemanticModelSelection<ModelPreset> | null =
     null;
-  /** Last successfully indexed page identity for each live tab. */
+  /** Last observed page identity; every duplicate decision revalidates it. */
   private indexedPageByTab = new Map<number, string>();
   /** Tabs whose last partial write could not be durably removed. */
   private tabsRequiringDurableRemoval = new Set<number>();
@@ -1272,26 +1272,36 @@ export class ContentIndexer {
         }
 
         const pageKey = `${tab.url}\u0000${tab.title || ""}`;
-        let indexedPageKey = this.indexedPageByTab.get(tabId);
-        if (
-          this.options.skipDuplicates &&
-          indexedPageKey === pageKey &&
-          !this.tabsRequiringDurableRemoval.has(tabId)
-        ) {
-          console.log(
-            `ContentIndexer: Skipping tab ${tabId} - already indexed`,
-          );
-          return;
-        }
 
-        // Retry a failed partial-page removal before any later early return.
-        // Otherwise a now-empty page (or a same-page duplicate) could leave
-        // stale private chunks behind for the lifetime of this worker.
+        // Retry a failed partial-page removal before inspecting or taking any
+        // duplicate-page early return. The in-memory page map is only a hint;
+        // durable exact completion in VectorDatabase is authoritative.
         if (this.tabsRequiringDurableRemoval.has(tabId)) {
           await this.vectorDatabase.ensureTabDocumentsRemoved(tabId);
           this.tabsRequiringDurableRemoval.delete(tabId);
           this.indexedPageByTab.delete(tabId);
-          indexedPageKey = undefined;
+        }
+
+        const pageState =
+          await this.vectorDatabase.inspectTabPageCompletion(tabId);
+        let indexedPageKey: string | undefined;
+        if (pageState.state === "complete") {
+          indexedPageKey = pageState.page.pageKey;
+          this.indexedPageByTab.set(tabId, indexedPageKey);
+        } else {
+          this.indexedPageByTab.delete(tabId);
+          if (pageState.state === "repair-required") {
+            this.tabsRequiringDurableRemoval.add(tabId);
+            await this.vectorDatabase.ensureTabDocumentsRemoved(tabId);
+            this.tabsRequiringDurableRemoval.delete(tabId);
+          }
+        }
+
+        if (this.options.skipDuplicates && indexedPageKey === pageKey) {
+          console.log(
+            `ContentIndexer: Skipping tab ${tabId} - already indexed`,
+          );
+          return;
         }
 
         console.log(
@@ -1655,15 +1665,17 @@ export class ContentIndexer {
       : {
           totalDocuments: 0,
           totalTabs: 0,
+          completedPages: 0,
           indexSize: 0,
           isInitialized: false,
         };
+    const { completedPages, ...publicVectorStats } = vectorStats;
     const vectorStateSafe =
       !this.vectorDatabase || vectorStats.isInitialized !== false;
     const effectiveInitialized = this.isInitialized && vectorStateSafe;
 
     return {
-      ...vectorStats,
+      ...publicVectorStats,
       available:
         (effectiveInitialized || this.persistentStatsKnownEmpty) &&
         vectorStateSafe &&
@@ -1674,8 +1686,9 @@ export class ContentIndexer {
         this.durableGateState === "clear" &&
         this.tabInvalidationJournalKnown &&
         this.pendingTabInvalidations.size === 0 &&
-        this.undurableTabInvalidations.size === 0,
-      indexedPages: this.indexedPageByTab.size,
+        this.undurableTabInvalidations.size === 0 &&
+        this.tabsRequiringDurableRemoval.size === 0,
+      indexedPages: completedPages,
       isInitialized: effectiveInitialized,
       semanticEngineReady: this.isSemanticEngineReady(),
       semanticEngineInitializing: this.isSemanticEngineInitializing(),

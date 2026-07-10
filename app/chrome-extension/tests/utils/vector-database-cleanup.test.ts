@@ -508,7 +508,7 @@ function createMappingPayload({
       wordCount: 2,
     },
     embedding: new Float32Array(dimension).fill(0.25),
-    timestamp: 1,
+    timestamp: Date.now(),
   };
   return {
     schemaVersion: 2,
@@ -892,7 +892,12 @@ describe("vector database cleanup", () => {
       new Float32Array([1, 0, 0]),
     );
 
-    expect(database.getStats().totalDocuments).toBe(1);
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 0,
+      totalTabs: 0,
+      completedPages: 0,
+    });
+    expect(database.getStats().indexSize).toBeGreaterThan(0);
     await database.clear();
 
     expect(database.getStats()).toMatchObject({
@@ -1134,6 +1139,224 @@ describe("vector database cleanup", () => {
       ],
       repairTabIds: [],
     });
+  });
+
+  it("publishes a defensive exact completion only after its durable commit", async () => {
+    const indexFileName = `exact-page-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await expect(database.inspectTabPageCompletion(31)).resolves.toEqual({
+      state: "absent",
+    });
+    await database.addDocument(
+      31,
+      "https://example.test/exact",
+      "Exact",
+      { text: "exact", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+
+    await expect(database.inspectTabPageCompletion(31)).resolves.toEqual({
+      state: "repair-required",
+      reason: "incomplete",
+    });
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 0,
+      totalTabs: 0,
+      completedPages: 0,
+    });
+
+    await database.commitTabPage(31, "https://example.test/exact", "Exact");
+    const state = await database.inspectTabPageCompletion(31);
+    expect(state).toEqual({
+      state: "complete",
+      page: {
+        tabId: 31,
+        pageKey: "https://example.test/exact\u0000Exact",
+        url: "https://example.test/exact",
+        title: "Exact",
+        expectedCount: 1,
+      },
+    });
+    if (state.state === "complete") state.page.pageKey = "mutated";
+    await expect(database.inspectTabPageCompletion(31)).resolves.toMatchObject({
+      state: "complete",
+      page: { pageKey: "https://example.test/exact\u0000Exact" },
+    });
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 1,
+      totalTabs: 1,
+      completedPages: 1,
+    });
+  });
+
+  it("treats the retention cutoff as inclusive and hides the whole page after it expires", async () => {
+    const indexFileName = `expired-page-${crypto.randomUUID()}.dat`;
+    const retentionMs = 24 * 60 * 60 * 1000;
+    let now = 1_800_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      useStatefulChromeStorage();
+      const database = new VectorDatabase({
+        dimension: 3,
+        enableAutoCleanup: false,
+        indexFileName,
+        maxRetentionDays: 1,
+      });
+      await database.initialize();
+      await database.addDocument(
+        32,
+        "https://example.test/expiring",
+        "Expiring",
+        { text: "old", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([1, 0, 0]),
+      );
+      await database.commitTabPage(
+        32,
+        "https://example.test/expiring",
+        "Expiring",
+      );
+
+      now += retentionMs;
+      await expect(
+        database.inspectTabPageCompletion(32),
+      ).resolves.toMatchObject({ state: "complete" });
+
+      now += 1;
+      await expect(database.inspectTabPageCompletion(32)).resolves.toEqual({
+        state: "repair-required",
+        reason: "expired",
+      });
+      await expect(database.inspectTabPageState()).resolves.toEqual({
+        completedPages: [],
+        repairTabIds: [32],
+      });
+      expect(database.getStats()).toMatchObject({
+        totalDocuments: 0,
+        totalTabs: 0,
+        completedPages: 0,
+      });
+      expect(database.getStats().indexSize).toBeGreaterThan(0);
+      const searchesBefore = hnswMocks.searchCalls.length;
+      await expect(
+        database.search(new Float32Array([1, 0, 0])),
+      ).resolves.toEqual([]);
+      expect(hnswMocks.searchCalls).toHaveLength(searchesBefore);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("never exposes a newer chunk from a page whose older chunk expired", async () => {
+    const indexFileName = `mixed-age-page-${crypto.randomUUID()}.dat`;
+    const retentionMs = 24 * 60 * 60 * 1000;
+    let now = 1_900_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      useStatefulChromeStorage();
+      const database = new VectorDatabase({
+        dimension: 3,
+        enableAutoCleanup: false,
+        indexFileName,
+        maxRetentionDays: 1,
+      });
+      await database.initialize();
+      await database.addDocument(
+        33,
+        "https://example.test/mixed-age",
+        "Mixed age",
+        { text: "old", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([1, 0, 0]),
+      );
+      now += retentionMs;
+      await database.addDocument(
+        33,
+        "https://example.test/mixed-age",
+        "Mixed age",
+        { text: "new", source: "content", index: 1, wordCount: 1 },
+        new Float32Array([0, 1, 0]),
+      );
+      await database.commitTabPage(
+        33,
+        "https://example.test/mixed-age",
+        "Mixed age",
+      );
+
+      now += 1;
+      await expect(database.inspectTabPageCompletion(33)).resolves.toEqual({
+        state: "repair-required",
+        reason: "expired",
+      });
+      await expect(
+        database.search(new Float32Array([0, 1, 0]), 10),
+      ).resolves.toEqual([]);
+      expect(database.getStats()).toMatchObject({
+        totalDocuments: 0,
+        totalTabs: 0,
+        completedPages: 0,
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("searches and counts a live page while excluding an expired completed page", async () => {
+    const indexFileName = `live-and-expired-${crypto.randomUUID()}.dat`;
+    const retentionMs = 24 * 60 * 60 * 1000;
+    let now = 2_000_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      useStatefulChromeStorage();
+      const database = new VectorDatabase({
+        dimension: 3,
+        enableAutoCleanup: false,
+        indexFileName,
+        maxRetentionDays: 1,
+      });
+      await database.initialize();
+      await database.addDocument(
+        40,
+        "https://example.test/expired",
+        "Expired",
+        { text: "expired", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([1, 0, 0]),
+      );
+      await database.commitTabPage(
+        40,
+        "https://example.test/expired",
+        "Expired",
+      );
+
+      now += retentionMs + 1;
+      await database.addDocument(
+        41,
+        "https://example.test/live",
+        "Live",
+        { text: "live", source: "content", index: 0, wordCount: 1 },
+        new Float32Array([0, 1, 0]),
+      );
+      await database.commitTabPage(41, "https://example.test/live", "Live");
+
+      await expect(database.inspectTabPageState()).resolves.toEqual({
+        completedPages: [expect.objectContaining({ tabId: 41, title: "Live" })],
+        repairTabIds: [40],
+      });
+      await expect(
+        database.search(new Float32Array([0, 1, 0]), 10),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          document: expect.objectContaining({ tabId: 41, title: "Live" }),
+        }),
+      ]);
+      expect(database.getStats()).toMatchObject({
+        totalDocuments: 1,
+        totalTabs: 1,
+        completedPages: 1,
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("invalidates a completed page as part of persisting its next chunk", async () => {
@@ -1401,6 +1624,11 @@ describe("vector database cleanup", () => {
     await vi.waitFor(() =>
       expect(chrome.storage.local.remove).toHaveBeenCalled(),
     );
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 0,
+      totalTabs: 0,
+      completedPages: 0,
+    });
     let searchSettled = false;
     const search = database.search(new Float32Array([1, 0, 0])).finally(() => {
       searchSettled = true;
@@ -1411,6 +1639,11 @@ describe("vector database cleanup", () => {
 
     releaseRemoval();
     await expect(commit).resolves.toBeUndefined();
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 1,
+      totalTabs: 1,
+      completedPages: 1,
+    });
     await expect(search).resolves.toEqual([
       expect.objectContaining({
         document: expect.objectContaining({ tabId: 7 }),
@@ -1504,7 +1737,10 @@ describe("vector database cleanup", () => {
     });
     await Promise.resolve();
     expect(clearSettled).toBe(false);
-    expect(database.getStats().totalDocuments).toBe(1);
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 0,
+      completedPages: 0,
+    });
 
     hnswMocks.completeNextWriteSync();
     await expect(add).resolves.toBe(0);
@@ -1785,8 +2021,9 @@ describe("vector database cleanup", () => {
         hnswMocks.writeCalls.filter((name) => name === indexFileName),
       ).toHaveLength(3);
       expect(database.getStats()).toMatchObject({
-        totalDocuments: 1,
-        totalTabs: 1,
+        totalDocuments: 0,
+        totalTabs: 0,
+        completedPages: 0,
       });
       await expect(
         getVectorMappingRecord(indexFileName),
