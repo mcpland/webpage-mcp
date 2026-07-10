@@ -13,6 +13,7 @@ import { initQuickPanelCommands } from './quick-panel/commands';
 import { initQuickPanelTabsHandler } from './quick-panel/tabs-handler';
 import { initPrivilegedUiAuthorization } from './privileged-ui-authorization';
 import { bootstrapV3 } from './record-replay-v3/bootstrap';
+import { initScreenshotContextLifecycle } from '@/utils/screenshot-context';
 
 /**
  * Background script entry point
@@ -30,6 +31,7 @@ export default defineBackground(() => {
   });
 
   // Initialize core services
+  initScreenshotContextLifecycle();
   initNativeHostListener();
   initSemanticSimilarityListener();
   initStorageManagerListener();
