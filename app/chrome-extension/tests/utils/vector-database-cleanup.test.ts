@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const hnswMocks = vi.hoisted(() => {
   const files = new Set<string>();
+  const fileCounts = new Map<string, number>();
   const syncCalls: boolean[] = [];
   const writeCalls: string[] = [];
+  const readCalls: string[] = [];
   const pendingWriteSyncs: Array<() => void> = [];
   const instances: Array<{ count: number; fileName?: string }> = [];
+  let populateSnapshot: Map<string, number> | null = null;
   let syncShouldSucceed = true;
   let synced = true;
   let autoCompleteWriteSync = true;
@@ -46,12 +49,15 @@ const hnswMocks = vi.hoisted(() => {
     markDelete() {}
 
     async readIndex(fileName: string) {
+      readCalls.push(fileName);
       if (!files.has(fileName)) throw new Error("missing index");
+      this.count = fileCounts.get(fileName) ?? 0;
     }
 
     writeIndex(fileName: string) {
       writeCalls.push(fileName);
       files.add(fileName);
+      fileCounts.set(fileName, this.count);
       synced = false;
       const complete = () => {
         synced = syncShouldSucceed;
@@ -70,13 +76,24 @@ const hnswMocks = vi.hoisted(() => {
       synced = false;
       queueMicrotask(() => {
         synced = syncShouldSucceed;
-        if (populate && synced) files.clear();
+        if (populate && synced) {
+          files.clear();
+          fileCounts.clear();
+          if (populateSnapshot) {
+            for (const [fileName, count] of populateSnapshot) {
+              files.add(fileName);
+              fileCounts.set(fileName, count);
+            }
+            populateSnapshot = null;
+          }
+        }
         callback();
       });
     }),
   };
 
   return {
+    fileCounts,
     files,
     instances,
     manager,
@@ -88,6 +105,7 @@ const hnswMocks = vi.hoisted(() => {
       synced = true;
       autoCompleteWriteSync = true;
       pendingWriteSyncs.length = 0;
+      populateSnapshot = null;
     },
     setAutoCompleteWriteSync(value: boolean) {
       autoCompleteWriteSync = value;
@@ -96,6 +114,10 @@ const hnswMocks = vi.hoisted(() => {
       pendingWriteSyncs.shift()?.();
     },
     pendingWriteSyncs,
+    readCalls,
+    setPopulateSnapshot(entries: Array<[string, number]>) {
+      populateSnapshot = new Map(entries);
+    },
     syncCalls,
     writeCalls,
     HierarchicalNSW,
@@ -140,6 +162,8 @@ type MutableTransaction = {
 };
 
 const originalStorageGet = chrome.storage.local.get;
+const originalStorageSet = chrome.storage.local.set;
+const originalStorageRemove = chrome.storage.local.remove;
 
 function stubDeleteRequest(request: MutableDeleteRequest) {
   vi.stubGlobal("indexedDB", {
@@ -147,13 +171,120 @@ function stubDeleteRequest(request: MutableDeleteRequest) {
   });
 }
 
+function useStatefulChromeStorage(initial: Record<string, unknown> = {}) {
+  const state: Record<string, unknown> = { ...initial };
+  chrome.storage.local.get = vi.fn(async (keys: string | string[]) => {
+    const requested = Array.isArray(keys) ? keys : [keys];
+    return Object.fromEntries(
+      requested
+        .filter((key) => Object.prototype.hasOwnProperty.call(state, key))
+        .map((key) => [key, state[key]]),
+    );
+  }) as unknown as typeof chrome.storage.local.get;
+  chrome.storage.local.set = vi.fn(async (values: Record<string, unknown>) => {
+    Object.assign(state, values);
+  }) as typeof chrome.storage.local.set;
+  chrome.storage.local.remove = vi.fn(async (keys: string | string[]) => {
+    for (const key of Array.isArray(keys) ? keys : [keys]) delete state[key];
+  }) as typeof chrome.storage.local.remove;
+  return state;
+}
+
+async function openVectorMappingDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("VectorDatabaseStorage", 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("documentMappings")) {
+        request.result.createObjectStore("documentMappings", { keyPath: "id" });
+      }
+    };
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+async function putVectorMappingRecord(
+  indexFileName: string,
+  data: unknown,
+): Promise<void> {
+  const database = await openVectorMappingDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction("documentMappings", "readwrite");
+    transaction.objectStore("documentMappings").put({
+      id: indexFileName,
+      indexFileName,
+      data,
+      timestamp: Date.now(),
+    });
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+  database.close();
+}
+
+async function getVectorMappingRecord(indexFileName: string): Promise<any> {
+  const database = await openVectorMappingDatabase();
+  const result = await new Promise<any>((resolve, reject) => {
+    const transaction = database.transaction("documentMappings", "readonly");
+    const request = transaction
+      .objectStore("documentMappings")
+      .get(indexFileName);
+    request.onsuccess = () => resolve(request.result?.data);
+    request.onerror = () => reject(request.error);
+  });
+  database.close();
+  return result;
+}
+
+function createMappingPayload({
+  dimension,
+  indexFileName,
+  revision = 1,
+  withDocument = true,
+}: {
+  dimension: number;
+  indexFileName: string;
+  revision?: number;
+  withDocument?: boolean;
+}) {
+  const document = {
+    id: "tab_7_chunk_0_1",
+    tabId: 7,
+    url: "https://example.test/private",
+    title: "Private",
+    chunk: {
+      text: "private content",
+      source: "content",
+      index: 0,
+      wordCount: 2,
+    },
+    embedding: new Float32Array(dimension).fill(0.25),
+    timestamp: 1,
+  };
+  return {
+    schemaVersion: 1,
+    revision,
+    updatedAt: revision,
+    dimension,
+    indexFileName,
+    documents: withDocument ? [[0, document]] : [],
+    tabDocuments: withDocument ? [[7, [0]]] : [],
+    nextLabel: withDocument ? 1 : 0,
+  };
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   chrome.storage.local.get = originalStorageGet;
+  chrome.storage.local.set = originalStorageSet;
+  chrome.storage.local.remove = originalStorageRemove;
   vi.clearAllMocks();
+  hnswMocks.fileCounts.clear();
   hnswMocks.files.clear();
   hnswMocks.instances.length = 0;
+  hnswMocks.readCalls.length = 0;
   hnswMocks.syncCalls.length = 0;
   hnswMocks.writeCalls.length = 0;
   hnswMocks.resetSyncState();
@@ -484,6 +615,301 @@ describe("vector database cleanup", () => {
 
     hnswMocks.completeNextWriteSync();
     await Promise.all([first, second]);
+  });
+
+  it("loads an HNSW index only after matching durable metadata is validated", async () => {
+    const indexFileName = `matching-${crypto.randomUUID()}.dat`;
+    const mapping = createMappingPayload({
+      dimension: 3,
+      indexFileName,
+      revision: 4,
+    });
+    await putVectorMappingRecord(indexFileName, mapping);
+    useStatefulChromeStorage();
+    hnswMocks.setPopulateSnapshot([[indexFileName, 1]]);
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    expect(hnswMocks.readCalls).toEqual([indexFileName]);
+    expect(hnswMocks.writeCalls).not.toContain(indexFileName);
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 1,
+      totalTabs: 1,
+    });
+  });
+
+  it("removes and verifies a stale fallback after the primary mapping commit", async () => {
+    const indexFileName = `primary-${crypto.randomUUID()}.dat`;
+    const storageKey = `hnswlib_document_mappings_${indexFileName}`;
+    const storage = useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    storage[storageKey] = createMappingPayload({
+      dimension: 3,
+      indexFileName,
+      revision: 99,
+    });
+    await database.addDocument(
+      7,
+      "https://example.test/current",
+      "Current",
+      { text: "current content", source: "content", index: 0, wordCount: 2 },
+      new Float32Array([0.1, 0.2, 0.3]),
+    );
+
+    expect(storage).not.toHaveProperty(storageKey);
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith([storageKey]);
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      schemaVersion: 1,
+      revision: 1,
+      dimension: 3,
+      documents: [[0, expect.objectContaining({ tabId: 7 })]],
+    });
+  });
+
+  it("does not report a primary mapping save as successful when fallback cleanup fails", async () => {
+    const indexFileName = `primary-cleanup-failure-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    chrome.storage.local.remove = vi.fn(async () => {
+      throw new Error("fallback cleanup failed");
+    }) as typeof chrome.storage.local.remove;
+
+    await expect(
+      database.addDocument(
+        7,
+        "https://example.test/current",
+        "Current",
+        { text: "current content", source: "content", index: 0, wordCount: 2 },
+        new Float32Array([0.1, 0.2, 0.3]),
+      ),
+    ).rejects.toThrow("fallback cleanup failed");
+  });
+
+  it.each([
+    {
+      name: "legacy metadata without a schema",
+      mutate: (mapping: any) => {
+        delete mapping.schemaVersion;
+      },
+    },
+    {
+      name: "metadata for another vector dimension",
+      mutate: (mapping: any) => {
+        mapping.dimension = 2;
+      },
+    },
+    {
+      name: "metadata with a mismatched filename",
+      mutate: (mapping: any) => {
+        mapping.indexFileName = "another-index.dat";
+      },
+    },
+    {
+      name: "metadata with inconsistent tab labels",
+      mutate: (mapping: any) => {
+        mapping.tabDocuments = [[7, [99]]];
+      },
+    },
+    {
+      name: "metadata with an empty tab mapping",
+      mutate: (mapping: any) => {
+        mapping.documents = [];
+        mapping.tabDocuments = [[7, []]];
+        mapping.nextLabel = 1;
+      },
+    },
+    {
+      name: "metadata with a non-finite timestamp",
+      mutate: (mapping: any) => {
+        mapping.documents[0][1].timestamp = Number.NaN;
+      },
+    },
+  ])(
+    "refuses $name before readIndex and replaces it with safe empty metadata",
+    async ({ mutate }) => {
+      const indexFileName = `invalid-${crypto.randomUUID()}.dat`;
+      const mapping = createMappingPayload({ dimension: 3, indexFileName });
+      mutate(mapping);
+      await putVectorMappingRecord(indexFileName, mapping);
+      const storageKey = `hnswlib_document_mappings_${indexFileName}`;
+      const storage = useStatefulChromeStorage({ [storageKey]: mapping });
+      hnswMocks.setPopulateSnapshot([[indexFileName, 1]]);
+
+      const database = new VectorDatabase({ dimension: 3, indexFileName });
+      await database.initialize();
+
+      expect(hnswMocks.readCalls).not.toContain(indexFileName);
+      expect(hnswMocks.writeCalls).toContain(indexFileName);
+      expect(hnswMocks.fileCounts.get(indexFileName)).toBe(0);
+      expect(storage).not.toHaveProperty(storageKey);
+      expect(database.getStats()).toMatchObject({
+        totalDocuments: 0,
+        totalTabs: 0,
+      });
+      await expect(
+        getVectorMappingRecord(indexFileName),
+      ).resolves.toMatchObject({
+        schemaVersion: 1,
+        revision: 1,
+        dimension: 3,
+        indexFileName,
+        documents: [],
+        tabDocuments: [],
+        nextLabel: 0,
+      });
+    },
+  );
+
+  it("refuses an index with vectors when all durable mappings are absent", async () => {
+    const indexFileName = `missing-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    hnswMocks.setPopulateSnapshot([[indexFileName, 2]]);
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    expect(hnswMocks.readCalls).not.toContain(indexFileName);
+    expect(hnswMocks.fileCounts.get(indexFileName)).toBe(0);
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      dimension: 3,
+      documents: [],
+    });
+  });
+
+  it("resets a non-empty index even when its matching metadata claims no documents", async () => {
+    const indexFileName = `orphaned-${crypto.randomUUID()}.dat`;
+    const emptyMapping = createMappingPayload({
+      dimension: 3,
+      indexFileName,
+      withDocument: false,
+    });
+    // nextLabel remains monotonic after the last document mapping is removed.
+    // This is valid metadata; the non-empty HNSW count is what requires reset.
+    emptyMapping.nextLabel = 5;
+    await putVectorMappingRecord(indexFileName, emptyMapping);
+    useStatefulChromeStorage();
+    hnswMocks.setPopulateSnapshot([[indexFileName, 2]]);
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    expect(hnswMocks.readCalls).toContain(indexFileName);
+    expect(hnswMocks.writeCalls).toContain(indexFileName);
+    expect(hnswMocks.fileCounts.get(indexFileName)).toBe(0);
+  });
+
+  it("resets an index that is newer than the valid mapping nextLabel", async () => {
+    const indexFileName = `stale-next-label-${crypto.randomUUID()}.dat`;
+    await putVectorMappingRecord(
+      indexFileName,
+      createMappingPayload({ dimension: 3, indexFileName, revision: 1 }),
+    );
+    useStatefulChromeStorage();
+    hnswMocks.setPopulateSnapshot([[indexFileName, 2]]);
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    expect(hnswMocks.readCalls).toContain(indexFileName);
+    expect(hnswMocks.writeCalls).toContain(indexFileName);
+    expect(hnswMocks.fileCounts.get(indexFileName)).toBe(0);
+    expect(database.getStats()).toMatchObject({
+      totalDocuments: 0,
+      totalTabs: 0,
+    });
+  });
+
+  it("refuses a valid primary when the fallback payload is corrupt", async () => {
+    const indexFileName = `corrupt-fallback-${crypto.randomUUID()}.dat`;
+    await putVectorMappingRecord(
+      indexFileName,
+      createMappingPayload({ dimension: 3, indexFileName, revision: 1 }),
+    );
+    const corruptFallback = createMappingPayload({
+      dimension: 3,
+      indexFileName,
+      revision: 2,
+    });
+    delete (corruptFallback as any).schemaVersion;
+    const storageKey = `hnswlib_document_mappings_${indexFileName}`;
+    useStatefulChromeStorage({ [storageKey]: corruptFallback });
+    hnswMocks.setPopulateSnapshot([[indexFileName, 1]]);
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    expect(hnswMocks.readCalls).not.toContain(indexFileName);
+    expect(hnswMocks.fileCounts.get(indexFileName)).toBe(0);
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      documents: [],
+      dimension: 3,
+    });
+  });
+
+  it("selects and migrates a newer chrome.storage fallback over stale IndexedDB metadata", async () => {
+    const indexFileName = `revision-${crypto.randomUUID()}.dat`;
+    await putVectorMappingRecord(
+      indexFileName,
+      createMappingPayload({ dimension: 3, indexFileName, revision: 1 }),
+    );
+    const newer = createMappingPayload({
+      dimension: 3,
+      indexFileName,
+      revision: 2,
+    });
+    const storageKey = `hnswlib_document_mappings_${indexFileName}`;
+    useStatefulChromeStorage({ [storageKey]: newer });
+    hnswMocks.setPopulateSnapshot([[indexFileName, 1]]);
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+
+    expect(hnswMocks.readCalls).toEqual([indexFileName]);
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      revision: 2,
+      dimension: 3,
+      indexFileName,
+    });
+  });
+
+  it("fails closed when one mapping backend errors and the other is absent", async () => {
+    const indexFileName = `read-error-${crypto.randomUUID()}.dat`;
+    hnswMocks.setPopulateSnapshot([[indexFileName, 1]]);
+    chrome.storage.local.get = vi.fn(async () => {
+      throw new Error("storage unavailable");
+    }) as typeof chrome.storage.local.get;
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await expect(database.initialize()).rejects.toThrow(
+      "Unable to determine whether persisted vector mappings exist",
+    );
+
+    expect(hnswMocks.readCalls).not.toContain(indexFileName);
+    expect(hnswMocks.writeCalls).not.toContain(indexFileName);
+  });
+
+  it("fails closed when fallback I/O prevents comparing a valid primary revision", async () => {
+    const indexFileName = `candidate-read-error-${crypto.randomUUID()}.dat`;
+    await putVectorMappingRecord(
+      indexFileName,
+      createMappingPayload({ dimension: 3, indexFileName, revision: 3 }),
+    );
+    hnswMocks.setPopulateSnapshot([[indexFileName, 1]]);
+    chrome.storage.local.get = vi.fn(async () => {
+      throw new Error("storage unavailable");
+    }) as typeof chrome.storage.local.get;
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await expect(database.initialize()).rejects.toThrow(
+      "Unable to determine whether persisted vector mappings exist",
+    );
+
+    expect(hnswMocks.readCalls).not.toContain(indexFileName);
+    expect(hnswMocks.writeCalls).not.toContain(indexFileName);
   });
 
   it("clears FILE_DATA, reconciles the in-memory mount, and cannot resurrect an old file", async () => {

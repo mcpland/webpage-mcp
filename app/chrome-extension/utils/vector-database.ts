@@ -39,6 +39,22 @@ export interface VectorDatabaseClearOptions {
   persistIndex?: boolean;
 }
 
+interface PersistedVectorMappings {
+  schemaVersion: number;
+  revision: number;
+  updatedAt: number;
+  dimension: number;
+  indexFileName: string;
+  documents: Array<[number, VectorDocument]>;
+  tabDocuments: Array<[number, number[]]>;
+  nextLabel: number;
+}
+
+type PersistedVectorMappingsLookup =
+  | { status: "absent" }
+  | { status: "invalid"; reason: string }
+  | { status: "found"; value: PersistedVectorMappings };
+
 let globalHnswlib: any = null;
 let globalHnswlibInitPromise: Promise<any> | null = null;
 let globalHnswlibInitialized = false;
@@ -49,6 +65,8 @@ const DB_NAME = "VectorDatabaseStorage";
 const DB_VERSION = 1;
 const STORE_NAME = "documentMappings";
 const HNSW_DB_NAME = "/hnswlib-index";
+const VECTOR_MAPPING_SCHEMA_VERSION = 1;
+const MAX_HNSW_LABEL = 0xffffffff;
 const HNSW_INDEX_FILES = [
   "tab_content_index.dat",
   "content_index.dat",
@@ -64,6 +82,213 @@ function errorMessage(error: unknown): string {
 
 function cleanupError(step: string, error: unknown): Error {
   return new Error(`${step}: ${errorMessage(error)}`, { cause: error });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function parsePersistedEmbedding(
+  value: unknown,
+  dimension: number,
+): Float32Array | null {
+  let values: number[];
+  if (value instanceof Float32Array) {
+    values = Array.from(value);
+  } else if (Array.isArray(value)) {
+    values = value;
+  } else if (isRecord(value)) {
+    const keys = Object.keys(value);
+    if (
+      keys.length !== dimension ||
+      keys.some((key, index) => key !== String(index))
+    ) {
+      return null;
+    }
+    values = keys.map((key) => value[key] as number);
+  } else {
+    return null;
+  }
+
+  if (
+    values.length !== dimension ||
+    values.some((entry) => typeof entry !== "number" || !Number.isFinite(entry))
+  ) {
+    return null;
+  }
+  return new Float32Array(values);
+}
+
+function parsePersistedVectorMappings(
+  value: unknown,
+  config: VectorDatabaseConfig,
+): PersistedVectorMappingsLookup {
+  if (!isRecord(value)) {
+    return { status: "invalid", reason: "mapping payload is not an object" };
+  }
+  if (value.schemaVersion !== VECTOR_MAPPING_SCHEMA_VERSION) {
+    return {
+      status: "invalid",
+      reason: "mapping schema version is missing or unsupported",
+    };
+  }
+  if (
+    !isNonNegativeSafeInteger(value.revision) ||
+    value.revision < 1 ||
+    !isNonNegativeSafeInteger(value.updatedAt)
+  ) {
+    return {
+      status: "invalid",
+      reason: "mapping revision metadata is invalid",
+    };
+  }
+  if (value.dimension !== config.dimension) {
+    return {
+      status: "invalid",
+      reason: `mapping dimension ${String(value.dimension)} does not match ${config.dimension}`,
+    };
+  }
+  if (value.indexFileName !== config.indexFileName) {
+    return {
+      status: "invalid",
+      reason: "mapping index filename does not match the configured index",
+    };
+  }
+  if (
+    !Array.isArray(value.documents) ||
+    value.documents.length > config.maxElements ||
+    !Array.isArray(value.tabDocuments) ||
+    value.tabDocuments.length > value.documents.length ||
+    !isNonNegativeSafeInteger(value.nextLabel) ||
+    value.nextLabel > MAX_HNSW_LABEL
+  ) {
+    return {
+      status: "invalid",
+      reason: "mapping collection metadata is invalid",
+    };
+  }
+
+  const documents: Array<[number, VectorDocument]> = [];
+  const documentsByLabel = new Map<number, VectorDocument>();
+  for (const entry of value.documents) {
+    if (!Array.isArray(entry) || entry.length !== 2) {
+      return { status: "invalid", reason: "document mapping entry is invalid" };
+    }
+    const [label, rawDocument] = entry;
+    if (
+      !isNonNegativeSafeInteger(label) ||
+      label > MAX_HNSW_LABEL ||
+      documentsByLabel.has(label) ||
+      !isRecord(rawDocument) ||
+      typeof rawDocument.id !== "string" ||
+      !isNonNegativeSafeInteger(rawDocument.tabId) ||
+      typeof rawDocument.url !== "string" ||
+      typeof rawDocument.title !== "string" ||
+      !isRecord(rawDocument.chunk) ||
+      typeof rawDocument.chunk.text !== "string" ||
+      typeof rawDocument.chunk.source !== "string" ||
+      !isNonNegativeSafeInteger(rawDocument.chunk.index) ||
+      !isNonNegativeSafeInteger(rawDocument.chunk.wordCount) ||
+      typeof rawDocument.timestamp !== "number" ||
+      !Number.isFinite(rawDocument.timestamp) ||
+      rawDocument.timestamp < 0
+    ) {
+      return { status: "invalid", reason: "document mapping data is invalid" };
+    }
+    const embedding = parsePersistedEmbedding(
+      rawDocument.embedding,
+      config.dimension,
+    );
+    if (!embedding) {
+      return { status: "invalid", reason: "document embedding is invalid" };
+    }
+
+    const document: VectorDocument = {
+      id: rawDocument.id,
+      tabId: rawDocument.tabId,
+      url: rawDocument.url,
+      title: rawDocument.title,
+      chunk: {
+        text: rawDocument.chunk.text,
+        source: rawDocument.chunk.source,
+        index: rawDocument.chunk.index,
+        wordCount: rawDocument.chunk.wordCount,
+      },
+      embedding,
+      timestamp: rawDocument.timestamp,
+    };
+    documentsByLabel.set(label, document);
+    documents.push([label, document]);
+  }
+
+  const tabDocuments: Array<[number, number[]]> = [];
+  const seenTabs = new Set<number>();
+  const labelsInTabs = new Set<number>();
+  for (const entry of value.tabDocuments) {
+    if (!Array.isArray(entry) || entry.length !== 2) {
+      return { status: "invalid", reason: "tab mapping entry is invalid" };
+    }
+    const [tabId, rawLabels] = entry;
+    if (
+      !isNonNegativeSafeInteger(tabId) ||
+      seenTabs.has(tabId) ||
+      !Array.isArray(rawLabels) ||
+      rawLabels.length === 0
+    ) {
+      return { status: "invalid", reason: "tab mapping data is invalid" };
+    }
+    seenTabs.add(tabId);
+    const labels: number[] = [];
+    const labelsForTab = new Set<number>();
+    for (const label of rawLabels) {
+      const document = documentsByLabel.get(label as number);
+      if (
+        !isNonNegativeSafeInteger(label) ||
+        labelsForTab.has(label) ||
+        labelsInTabs.has(label) ||
+        !document ||
+        document.tabId !== tabId
+      ) {
+        return { status: "invalid", reason: "tab labels are inconsistent" };
+      }
+      labelsForTab.add(label);
+      labelsInTabs.add(label);
+      labels.push(label);
+    }
+    tabDocuments.push([tabId, labels]);
+  }
+
+  if (labelsInTabs.size !== documentsByLabel.size) {
+    return {
+      status: "invalid",
+      reason: "not every document label belongs to exactly one tab",
+    };
+  }
+  let maxLabel = -1;
+  for (const label of documentsByLabel.keys()) {
+    maxLabel = Math.max(maxLabel, label);
+  }
+  if (value.nextLabel < maxLabel + 1) {
+    return { status: "invalid", reason: "next vector label is inconsistent" };
+  }
+
+  return {
+    status: "found",
+    value: {
+      schemaVersion: VECTOR_MAPPING_SCHEMA_VERSION,
+      revision: value.revision,
+      updatedAt: value.updatedAt,
+      dimension: config.dimension,
+      indexFileName: config.indexFileName,
+      documents,
+      tabDocuments,
+      nextLabel: value.nextLabel,
+    },
+  };
 }
 
 function enqueueHnswFileSystemOperation<T>(
@@ -436,15 +661,19 @@ class IndexedDBHelper {
     const store = transaction.objectStore(STORE_NAME);
 
     await new Promise<void>((resolve, reject) => {
-      const request = store.put({
+      store.put({
         id: indexFileName,
         indexFileName,
         data,
         timestamp: Date.now(),
       });
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Vector mapping save failed"));
+      transaction.onabort = () =>
+        reject(
+          transaction.error ?? new Error("Vector mapping save was aborted"),
+        );
     });
   }
 
@@ -470,9 +699,16 @@ class IndexedDBHelper {
     const store = transaction.objectStore(STORE_NAME);
 
     await new Promise<void>((resolve, reject) => {
-      const request = store.delete(indexFileName);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      store.delete(indexFileName);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(
+          transaction.error ?? new Error("Vector mapping deletion failed"),
+        );
+      transaction.onabort = () =>
+        reject(
+          transaction.error ?? new Error("Vector mapping deletion was aborted"),
+        );
     });
   }
 
@@ -572,6 +808,8 @@ export class VectorDatabase {
   private documents = new Map<number, VectorDocument>();
   private tabDocuments = new Map<number, Set<number>>();
   private nextLabel = 0;
+  private mappingRevision = 0;
+  private mappingSaveQueue: Promise<void> = Promise.resolve();
 
   private readonly config: VectorDatabaseConfig;
 
@@ -596,6 +834,164 @@ export class VectorDatabase {
       enableAutoCleanup: this.config.enableAutoCleanup,
       maxRetentionDays: this.config.maxRetentionDays,
     });
+  }
+
+  private initializeEmptyIndex(): void {
+    this.index.initIndex(
+      this.config.maxElements,
+      this.config.M,
+      this.config.efConstruction,
+      200,
+    );
+    this.index.setEfSearch(this.config.efSearch);
+    this.documents.clear();
+    this.tabDocuments.clear();
+    this.nextLabel = 0;
+  }
+
+  private applyDocumentMappings(mappingData: PersistedVectorMappings): void {
+    this.documents.clear();
+    for (const [label, document] of mappingData.documents) {
+      this.documents.set(label, document);
+    }
+
+    this.tabDocuments.clear();
+    for (const [tabId, labels] of mappingData.tabDocuments) {
+      this.tabDocuments.set(tabId, new Set(labels));
+    }
+
+    this.nextLabel = mappingData.nextLabel;
+    this.mappingRevision = Math.max(this.mappingRevision, mappingData.revision);
+  }
+
+  private async lookupDocumentMappings(): Promise<PersistedVectorMappingsLookup> {
+    const storageKey = `hnswlib_document_mappings_${this.config.indexFileName}`;
+    const readErrors: Error[] = [];
+    const invalidReasons: string[] = [];
+    const candidates: Array<{
+      source: "indexeddb" | "chrome-storage";
+      value: PersistedVectorMappings;
+    }> = [];
+
+    try {
+      const indexedDbValue = await IndexedDBHelper.loadData(
+        this.config.indexFileName,
+      );
+      if (indexedDbValue !== null) {
+        const parsed = parsePersistedVectorMappings(
+          indexedDbValue,
+          this.config,
+        );
+        if (parsed.status === "found") {
+          candidates.push({ source: "indexeddb", value: parsed.value });
+        } else if (parsed.status === "invalid") {
+          invalidReasons.push(`IndexedDB: ${parsed.reason}`);
+        }
+      }
+    } catch (error) {
+      readErrors.push(
+        cleanupError("read vector mappings from IndexedDB", error),
+      );
+    }
+
+    try {
+      const storageResult = await chrome.storage.local.get([storageKey]);
+      if (Object.prototype.hasOwnProperty.call(storageResult, storageKey)) {
+        const parsed = parsePersistedVectorMappings(
+          storageResult[storageKey],
+          this.config,
+        );
+        if (parsed.status === "found") {
+          candidates.push({ source: "chrome-storage", value: parsed.value });
+        } else if (parsed.status === "invalid") {
+          invalidReasons.push(`chrome.storage: ${parsed.reason}`);
+        }
+      }
+    } catch (error) {
+      readErrors.push(
+        cleanupError("read vector mappings from chrome.storage", error),
+      );
+    }
+
+    // A failed read leaves the other backend's revision unknowable. Likewise,
+    // an invalid payload may be newer than an otherwise valid candidate. Never
+    // load HNSW until both durable sources have been classified successfully.
+    if (readErrors.length > 0) {
+      throw new AggregateError(
+        readErrors,
+        "Unable to determine whether persisted vector mappings exist",
+      );
+    }
+    if (invalidReasons.length > 0) {
+      return { status: "invalid", reason: invalidReasons.join("; ") };
+    }
+
+    if (candidates.length > 0) {
+      candidates.sort((left, right) => {
+        const revisionDifference = right.value.revision - left.value.revision;
+        if (revisionDifference !== 0) return revisionDifference;
+        return left.source === "indexeddb" ? -1 : 1;
+      });
+      const selected = candidates[0];
+
+      // A newer fallback must win over a stale primary. Best-effort migration
+      // repairs IndexedDB while the verified chrome.storage copy remains safe.
+      if (selected.source === "chrome-storage") {
+        const indexedDbCandidate = candidates.find(
+          (candidate) => candidate.source === "indexeddb",
+        );
+        if (
+          !indexedDbCandidate ||
+          indexedDbCandidate.value.revision < selected.value.revision
+        ) {
+          try {
+            await IndexedDBHelper.saveData(
+              this.config.indexFileName,
+              selected.value,
+            );
+          } catch (error) {
+            console.warn(
+              "VectorDatabase: Failed to migrate newer chrome.storage mappings to IndexedDB:",
+              error,
+            );
+          }
+        }
+      }
+
+      return { status: "found", value: selected.value };
+    }
+
+    return { status: "absent" };
+  }
+
+  private async removeDocumentMappingBackup(): Promise<void> {
+    const storageKey = `hnswlib_document_mappings_${this.config.indexFileName}`;
+    await chrome.storage.local.remove([storageKey]);
+    const remaining = await chrome.storage.local.get([storageKey]);
+    if (Object.prototype.hasOwnProperty.call(remaining, storageKey)) {
+      throw new Error(`Vector storage backup still exists: ${storageKey}`);
+    }
+  }
+
+  private async replaceUnsafePersistedIndexWithEmpty(
+    reason: string,
+  ): Promise<void> {
+    console.warn(
+      `VectorDatabase: Refusing to load persisted index; replacing it with an empty current-dimension index (${reason})`,
+    );
+    this.initializeEmptyIndex();
+    this.mappingRevision = 0;
+
+    await IndexedDBHelper.deleteData(this.config.indexFileName);
+    await this.removeDocumentMappingBackup();
+    await persistHnswIndex(this.index, this.config.indexFileName);
+    await this.saveDocumentMappings();
+
+    if (this.index.getCurrentCount() !== 0 || this.documents.size !== 0) {
+      throw new Error(
+        "Vector index reset did not produce a verified empty state",
+      );
+    }
   }
 
   /**
@@ -632,63 +1028,59 @@ export class VectorDatabase {
       const indexExists = hnswlib.EmscriptenFileSystemManager.checkFileExists(
         this.config.indexFileName,
       );
+      const mappingLookup = await this.lookupDocumentMappings();
 
-      if (indexExists) {
+      if (indexExists && mappingLookup.status === "found") {
         console.log("VectorDatabase: Loading existing index...");
+        let loadFailure: unknown = null;
         try {
           await this.index.readIndex(
             this.config.indexFileName,
             this.config.maxElements,
           );
           this.index.setEfSearch(this.config.efSearch);
+        } catch (error) {
+          loadFailure = error;
+        }
 
-          await this.loadDocumentMappings();
-
-          if (this.documents.size > 0) {
-            const maxLabel = Math.max(...Array.from(this.documents.keys()));
-            this.nextLabel = maxLabel + 1;
+        if (loadFailure) {
+          console.warn(
+            "VectorDatabase: Failed to load existing index, replacing it:",
+            loadFailure,
+          );
+          await this.replaceUnsafePersistedIndexWithEmpty(
+            `index read failed: ${errorMessage(loadFailure)}`,
+          );
+        } else {
+          const indexCount = this.index.getCurrentCount();
+          const mappingCount = mappingLookup.value.documents.length;
+          if (
+            (indexCount > 0 && mappingCount === 0) ||
+            mappingCount > indexCount ||
+            mappingLookup.value.nextLabel < indexCount
+          ) {
+            await this.replaceUnsafePersistedIndexWithEmpty(
+              `index count ${indexCount} is inconsistent with ${mappingCount} document mappings and next label ${mappingLookup.value.nextLabel}`,
+            );
+          } else {
+            this.applyDocumentMappings(mappingLookup.value);
             console.log(
               `VectorDatabase: Loaded existing index with ${this.documents.size} documents, next label: ${this.nextLabel}`,
             );
-          } else {
-            const indexCount = this.index.getCurrentCount();
-            if (indexCount > 0) {
-              console.warn(
-                `VectorDatabase: Index has ${indexCount} vectors but no document mappings found. This may cause label mismatch.`,
-              );
-              this.nextLabel = indexCount;
-            } else {
-              this.nextLabel = 0;
-            }
-            console.log(
-              `VectorDatabase: No document mappings found, starting with next label: ${this.nextLabel}`,
-            );
           }
-        } catch (loadError) {
-          console.warn(
-            "VectorDatabase: Failed to load existing index, creating new one:",
-            loadError,
-          );
-
-          this.index.initIndex(
-            this.config.maxElements,
-            this.config.M,
-            this.config.efConstruction,
-            200,
-          );
-          this.index.setEfSearch(this.config.efSearch);
-          this.nextLabel = 0;
         }
+      } else if (indexExists || mappingLookup.status !== "absent") {
+        const reason = indexExists
+          ? mappingLookup.status === "invalid"
+            ? mappingLookup.reason
+            : "index file exists without durable metadata"
+          : mappingLookup.status === "invalid"
+            ? `orphaned invalid mappings: ${mappingLookup.reason}`
+            : "document mappings exist without an index file";
+        await this.replaceUnsafePersistedIndexWithEmpty(reason);
       } else {
         console.log("VectorDatabase: Creating new index...");
-        this.index.initIndex(
-          this.config.maxElements,
-          this.config.M,
-          this.config.efConstruction,
-          200,
-        );
-        this.index.setEfSearch(this.config.efSearch);
-        this.nextLabel = 0;
+        this.initializeEmptyIndex();
       }
 
       this.isInitialized = true;
@@ -1255,6 +1647,7 @@ export class VectorDatabase {
     this.nextLabel = 0;
 
     const failures: Error[] = [];
+    let emptyIndexPersisted = false;
 
     if (this.isInitialized) {
       try {
@@ -1278,6 +1671,7 @@ export class VectorDatabase {
           // writeIndex starts syncFS(false) internally and returns undefined in
           // the shipped runtime. Do not start a second overlapping sync.
           await persistHnswIndex(this.index, this.config.indexFileName);
+          emptyIndexPersisted = true;
         }
 
         if (this.index.getCurrentCount() !== 0) {
@@ -1307,6 +1701,16 @@ export class VectorDatabase {
       }
     } catch (error) {
       failures.push(cleanupError("remove vector storage backup", error));
+    }
+
+    if (persistIndex && emptyIndexPersisted && failures.length === 0) {
+      try {
+        await this.saveDocumentMappings();
+      } catch (error) {
+        failures.push(cleanupError("persist empty vector metadata", error));
+      }
+    } else if (!persistIndex) {
+      this.mappingRevision = 0;
     }
 
     if (failures.length > 0) {
@@ -1487,138 +1891,141 @@ export class VectorDatabase {
     await persistHnswIndex(this.index, this.config.indexFileName);
   }
 
-  private async saveDocumentMappings(): Promise<void> {
+  private saveDocumentMappings(): Promise<void> {
+    const snapshot: Pick<
+      PersistedVectorMappings,
+      "documents" | "tabDocuments" | "nextLabel"
+    > = {
+      documents: Array.from(
+        this.documents.entries(),
+        ([label, document]): [number, VectorDocument] => [
+          label,
+          {
+            ...document,
+            chunk: { ...document.chunk },
+            embedding: new Float32Array(document.embedding),
+          },
+        ],
+      ),
+      tabDocuments: Array.from(this.tabDocuments.entries()).map(
+        ([tabId, labels]): [number, number[]] => [tabId, Array.from(labels)],
+      ),
+      nextLabel: this.nextLabel,
+    };
+
+    const operation = this.mappingSaveQueue
+      .catch(() => undefined)
+      .then(() => this.persistDocumentMappingsSnapshot(snapshot));
+    this.mappingSaveQueue = operation;
+    return operation;
+  }
+
+  private async persistDocumentMappingsSnapshot(
+    snapshot: Pick<
+      PersistedVectorMappings,
+      "documents" | "tabDocuments" | "nextLabel"
+    >,
+  ): Promise<void> {
+    const revision = this.mappingRevision + 1;
+    if (!Number.isSafeInteger(revision)) {
+      throw new Error("Vector mapping revision is exhausted");
+    }
+    // Reserve the revision before awaiting so concurrent saves remain ordered.
+    this.mappingRevision = revision;
+    const mappingData: PersistedVectorMappings = {
+      schemaVersion: VECTOR_MAPPING_SCHEMA_VERSION,
+      revision,
+      updatedAt: Date.now(),
+      dimension: this.config.dimension,
+      indexFileName: this.config.indexFileName,
+      ...snapshot,
+    };
+    const validated = parsePersistedVectorMappings(mappingData, this.config);
+    if (validated.status !== "found") {
+      throw new Error(
+        validated.status === "invalid"
+          ? `Refusing to persist invalid vector mappings: ${validated.reason}`
+          : "Refusing to persist missing vector mappings",
+      );
+    }
+
+    let indexedDbError: unknown;
+    let indexedDbSaved = false;
     try {
-      // Save document mappings to IndexedDB
-      const mappingData = {
-        documents: Array.from(this.documents.entries()),
-        tabDocuments: Array.from(this.tabDocuments.entries()).map(
-          ([tabId, labels]) => [tabId, Array.from(labels)],
-        ),
-        nextLabel: this.nextLabel,
-      };
-
-      try {
-        // Use IndexedDB to save data, supports larger storage capacity
-        await IndexedDBHelper.saveData(this.config.indexFileName, mappingData);
-        console.log("VectorDatabase: Document mappings saved to IndexedDB");
-      } catch (idbError) {
-        console.warn(
-          "VectorDatabase: Failed to save to IndexedDB, falling back to chrome.storage:",
-          idbError,
-        );
-
-        // Fall back to chrome.storage.local
-        try {
-          const storageKey = `hnswlib_document_mappings_${this.config.indexFileName}`;
-          await chrome.storage.local.set({ [storageKey]: mappingData });
-          console.log(
-            "VectorDatabase: Document mappings saved to chrome.storage.local (fallback)",
-          );
-        } catch (storageError) {
-          console.error(
-            "VectorDatabase: Failed to save to both IndexedDB and chrome.storage:",
-            storageError,
-          );
-        }
-      }
+      await IndexedDBHelper.saveData(
+        this.config.indexFileName,
+        validated.value,
+      );
+      indexedDbSaved = true;
+      console.log("VectorDatabase: Document mappings saved to IndexedDB");
     } catch (error) {
-      console.error("VectorDatabase: Failed to save document mappings:", error);
+      indexedDbError = error;
+      console.warn(
+        "VectorDatabase: Failed to save to IndexedDB, falling back to chrome.storage:",
+        error,
+      );
+    }
+
+    if (indexedDbSaved) {
+      // A fallback can outlive an earlier primary write failure. Remove it
+      // after the primary commit so an invalid or stale copy cannot make the
+      // next startup ambiguous.
+      await this.removeDocumentMappingBackup();
+      return;
+    }
+
+    const storageKey = `hnswlib_document_mappings_${this.config.indexFileName}`;
+    try {
+      await chrome.storage.local.set({ [storageKey]: validated.value });
+      const stored = await chrome.storage.local.get([storageKey]);
+      const verified = parsePersistedVectorMappings(
+        stored[storageKey],
+        this.config,
+      );
+      if (
+        verified.status !== "found" ||
+        verified.value.revision !== validated.value.revision
+      ) {
+        throw new Error(
+          "chrome.storage did not retain the vector mapping payload",
+        );
+      }
+      console.log(
+        "VectorDatabase: Document mappings saved to chrome.storage.local (fallback)",
+      );
+    } catch (storageError) {
+      throw new AggregateError(
+        [indexedDbError, storageError],
+        "Failed to save vector mappings to IndexedDB and chrome.storage",
+      );
     }
   }
 
   public async loadDocumentMappings(): Promise<void> {
-    try {
-      // Load document mappings from IndexedDB
-      if (!globalHnswlib) {
-        return;
-      }
-
-      let mappingData = null;
-
-      try {
-        // First try to read from IndexedDB
-        mappingData = await IndexedDBHelper.loadData(this.config.indexFileName);
-        if (mappingData) {
-          console.log(
-            `VectorDatabase: Loaded document mappings from IndexedDB`,
-          );
-        }
-      } catch (idbError) {
-        console.warn(
-          "VectorDatabase: Failed to read from IndexedDB, trying chrome.storage:",
-          idbError,
-        );
-      }
-
-      // If IndexedDB has no data, try reading from chrome.storage.local (backward compatibility)
-      if (!mappingData) {
-        try {
-          const storageKey = `hnswlib_document_mappings_${this.config.indexFileName}`;
-          const result = await chrome.storage.local.get([storageKey]);
-          mappingData = result[storageKey];
-          if (mappingData) {
-            console.log(
-              `VectorDatabase: Loaded document mappings from chrome.storage.local (fallback)`,
-            );
-
-            // Migrate to IndexedDB
-            try {
-              await IndexedDBHelper.saveData(
-                this.config.indexFileName,
-                mappingData,
-              );
-              console.log(
-                "VectorDatabase: Migrated data from chrome.storage to IndexedDB",
-              );
-            } catch (migrationError) {
-              console.warn(
-                "VectorDatabase: Failed to migrate data to IndexedDB:",
-                migrationError,
-              );
-            }
-          }
-        } catch (storageError) {
-          console.warn(
-            "VectorDatabase: Failed to read from chrome.storage.local:",
-            storageError,
-          );
-        }
-      }
-
-      if (mappingData) {
-        // Restore document mappings
-        this.documents.clear();
-        for (const [label, doc] of mappingData.documents) {
-          this.documents.set(label, doc);
-        }
-
-        // Restore tab mappings
-        this.tabDocuments.clear();
-        for (const [tabId, labels] of mappingData.tabDocuments) {
-          this.tabDocuments.set(tabId, new Set(labels));
-        }
-
-        // Restore nextLabel - use saved value or calculate max label + 1
-        if (mappingData.nextLabel !== undefined) {
-          this.nextLabel = mappingData.nextLabel;
-        } else if (this.documents.size > 0) {
-          // If no saved nextLabel, calculate max label + 1
-          const maxLabel = Math.max(...Array.from(this.documents.keys()));
-          this.nextLabel = maxLabel + 1;
-        } else {
-          this.nextLabel = 0;
-        }
-
-        console.log(
-          `VectorDatabase: Loaded ${this.documents.size} document mappings, next label: ${this.nextLabel}`,
-        );
-      } else {
-        console.log("VectorDatabase: No existing document mappings found");
-      }
-    } catch (error) {
-      console.error("VectorDatabase: Failed to load document mappings:", error);
+    if (!globalHnswlib) {
+      throw new Error("HNSW module is not initialized");
     }
+
+    const lookup = await this.lookupDocumentMappings();
+    if (lookup.status !== "found") {
+      throw new Error(
+        lookup.status === "invalid"
+          ? `Persisted vector mappings are invalid: ${lookup.reason}`
+          : "Persisted vector mappings are missing",
+      );
+    }
+    if (
+      this.index.getCurrentCount() > 0 &&
+      lookup.value.documents.length === 0
+    ) {
+      throw new Error(
+        "Vector index contains vectors without document mappings",
+      );
+    }
+    this.applyDocumentMappings(lookup.value);
+    console.log(
+      `VectorDatabase: Loaded ${this.documents.size} document mappings, next label: ${this.nextLabel}`,
+    );
   }
 }
 
