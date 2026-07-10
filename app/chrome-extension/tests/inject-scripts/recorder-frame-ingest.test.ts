@@ -132,6 +132,7 @@ describe('recorder iframe ingest boundary', () => {
       registrationResponse,
     );
     expect(registrationResponse).toHaveBeenCalledWith({ ok: true });
+    const querySelectorAll = vi.spyOn(document, 'querySelectorAll');
 
     dispatchFrameMessage(frame.contentWindow!, 'https://example.com', {
       type: 'rr_iframe_event',
@@ -157,6 +158,38 @@ describe('recorder iframe ingest boundary', () => {
     expect(envelope.meta?.source?.documentId).toEqual(expect.any(String));
     expect(envelope.meta.source.documentId.length).toBeGreaterThan(0);
     expect(JSON.stringify(envelope)).not.toContain('__RECORDER_PWNED__');
+    expect(querySelectorAll).not.toHaveBeenCalled();
+  });
+
+  it('rejects an iframe source beyond the bounded document traversal', () => {
+    const { listener, sendMessage } = loadRecorder();
+    activeListener = listener;
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < 12_100; index += 1) {
+      fragment.append(document.createElement('div'));
+    }
+    const frame = document.createElement('iframe');
+    fragment.append(frame);
+    document.body.append(fragment);
+    const frameEventId = `frame_${'d'.repeat(32)}`;
+    listener(
+      {
+        action: 'rr_register_iframe_event',
+        sessionId: 'sess-frame-test',
+        frameEventId,
+      },
+      {} as chrome.runtime.MessageSender,
+      vi.fn(),
+    );
+    const querySelectorAll = vi.spyOn(document, 'querySelectorAll');
+
+    dispatchFrameMessage(frame.contentWindow!, 'https://example.com', {
+      type: 'rr_iframe_event',
+      payload: { kind: 'iframeStepContext', frameEventId },
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(querySelectorAll).not.toHaveBeenCalled();
   });
 
   it('does not mint predictable frame capabilities when Web Crypto fails', () => {

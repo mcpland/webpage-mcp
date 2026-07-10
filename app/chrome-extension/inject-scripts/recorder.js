@@ -17,6 +17,9 @@
   const RECORDER_CONTROL_REGISTER_ACTION = 'rr_register_recorder_control';
   const SEND_RETRY_MAX = 2;
   const SEND_RETRY_BASE_MS = 80;
+  const FRAME_LOOKUP_MAX_ELEMENTS = 12000;
+  const FRAME_LOOKUP_MAX_DEPTH = 128;
+  const FRAME_LOOKUP_MAX_MS = 100;
   const RECORDER_CONTROL_CAPABILITY = (() => {
     try {
       const bytes = new Uint8Array(32);
@@ -38,6 +41,41 @@
       return `doc_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
     }
   })();
+
+  function findFrameElementBySource(source) {
+    if (!source || !document.documentElement) return null;
+    const stack = [{ element: document.documentElement, depth: 0 }];
+    const deadline = Date.now() + FRAME_LOOKUP_MAX_MS;
+    let visited = 0;
+
+    while (
+      stack.length > 0 &&
+      visited < FRAME_LOOKUP_MAX_ELEMENTS &&
+      Date.now() <= deadline
+    ) {
+      const entry = stack.pop();
+      if (!entry || entry.depth > FRAME_LOOKUP_MAX_DEPTH) return null;
+      const element = entry.element;
+      visited += 1;
+
+      if (element.tagName === 'IFRAME' || element.tagName === 'FRAME') {
+        try {
+          if (element.contentWindow === source) return element;
+        } catch {
+          // Continue searching the bounded document tree.
+        }
+      }
+
+      const sibling = element.nextElementSibling;
+      if (sibling) stack.push({ element: sibling, depth: entry.depth });
+      const child = element.firstElementChild;
+      if (child) {
+        if (entry.depth >= FRAME_LOOKUP_MAX_DEPTH) return null;
+        stack.push({ element: child, depth: entry.depth + 1 });
+      }
+    }
+    return null;
+  }
 
   // ================================================================
   // 2) UI CLASS (injected via constructor)
@@ -2141,14 +2179,7 @@
         // ev.source must match contentWindow of an iframe element we control
         let frameEl = null;
         try {
-          const frames = document.querySelectorAll('iframe,frame');
-          for (let i = 0; i < frames.length; i++) {
-            const f = frames[i];
-            if (f && f.contentWindow === ev.source) {
-              frameEl = f;
-              break;
-            }
-          }
+          frameEl = findFrameElementBySource(ev.source);
         } catch {}
 
         // Reject messages not from a recognized iframe in our document

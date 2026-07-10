@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 function installCssEscape(): void {
   const css = (window as unknown as { CSS?: { escape?: (value: string) => string } }).CSS ?? {};
@@ -29,6 +29,10 @@ describe('recorder-shared selector metadata', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     delete (window as any).__RR_RECORDER_SHARED__;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('buildTarget emits extended metadata for recorded elements', () => {
@@ -82,5 +86,71 @@ describe('recorder-shared selector metadata', () => {
       shadowHostChain: ['#host'],
     });
     expect(target.domPath).toEqual(expect.arrayContaining([expect.any(Number)]));
+  });
+
+  it('stops uniqueness checks at the second match without selector snapshots', () => {
+    document.body.innerHTML =
+      '<button class="duplicate"></button><button class="duplicate"></button><button class="duplicate"></button>';
+    const target = document.body.firstElementChild as HTMLButtonElement;
+    const nativeMatches = Element.prototype.matches;
+    let matchingResults = 0;
+    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (
+      this: Element,
+      selector: string,
+    ) {
+      const matched = nativeMatches.call(this, selector);
+      if (matched) matchingResults += 1;
+      return matched;
+    });
+    const querySelectorAll = vi.spyOn(document, 'querySelectorAll');
+    const shared = loadRecorderShared();
+
+    expect(shared.SelectorEngine._isUniqueSelector('.duplicate', target)).toBe(false);
+    expect(matchingResults).toBe(2);
+    expect(querySelectorAll).not.toHaveBeenCalled();
+  });
+
+  it('shares a bounded traversal across selector work for a recorded target', () => {
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < 12_100; index += 1) {
+      fragment.append(document.createElement('div'));
+    }
+    const target = document.createElement('button');
+    target.id = 'late-target';
+    fragment.append(target);
+    document.body.append(fragment);
+    const matches = vi.spyOn(Element.prototype, 'matches');
+    const shared = loadRecorderShared();
+
+    const result = shared.SelectorEngine.buildTarget(target);
+
+    expect(result.selector).toEqual(expect.any(String));
+    expect(matches.mock.calls.length).toBeLessThanOrEqual(12_000);
+  });
+
+  it('does not materialize sibling collections or subtree text', () => {
+    const parent = document.createElement('div');
+    const button = document.createElement('button');
+    button.append(document.createTextNode('Bounded recorder text'));
+    parent.append(button);
+    document.body.append(parent);
+    Object.defineProperty(parent, 'children', {
+      configurable: true,
+      get: () => {
+        throw new Error('children must not be materialized');
+      },
+    });
+    Object.defineProperty(button, 'textContent', {
+      configurable: true,
+      get: () => {
+        throw new Error('textContent must not be materialized');
+      },
+    });
+    const shared = loadRecorderShared();
+
+    const result = shared.SelectorEngine.buildTarget(button);
+
+    expect(result.fingerprint).toContain('text=Bounded recorder text');
+    expect(result.selector).toEqual(expect.any(String));
   });
 });
