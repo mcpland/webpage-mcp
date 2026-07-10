@@ -130,7 +130,10 @@
       });
       document.documentElement.appendChild(this._box);
       if (rec.highlightEnabled)
-        document.addEventListener('mousemove', rec._onMouseMove, { capture: true, passive: true });
+        document.addEventListener('mousemove', rec._onMouseMove, {
+          capture: true,
+          passive: true,
+        });
       this.updateStatus();
     }
     remove() {
@@ -145,7 +148,7 @@
     updateStatus() {
       const badge = document.getElementById('__rr_badge');
       const pauseBtn = document.getElementById('__rr_pause');
-      if (badge) badge.textContent = this.recorder.isPaused ? 'Paused': 'Recording';
+      if (badge) badge.textContent = this.recorder.isPaused ? 'Paused' : 'Recording';
       if (pauseBtn) pauseBtn.textContent = this.recorder.isPaused ? 'Continue' : 'Pause';
     }
 
@@ -319,6 +322,12 @@
       this.sessionId = '';
       this._sendSeq = 0;
       this._sendNonce = 0;
+      // Child-frame steps travel to background directly. postMessage carries only
+      // an opaque correlation id used by the top frame to add selector context.
+      this._pendingFrameForwards = new Set();
+      this._pendingFrameContextSends = new Set();
+      this._registeredFrameEvents = new Set();
+      this._frameForwardsOk = true;
 
       // Local, content-side buffer for batching/merging steps during recording.
       // Not the authoritative Flow (background holds the real one).
@@ -424,11 +433,15 @@
       // Step 3: Finalize any pending scroll
       this._finalizePendingScroll();
 
-      // Step 4: In iframes, ensure the top-frame aggregator has processed our final postMessages
-      // before we ACK the background stop (prevents missing iframe steps)
+      // Step 4: Child frames first drain their authenticated runtime sends, then ensure
+      // the top frame has sent selector context for every correlation id.
       let topSyncOk = true;
       if (window !== window.top) {
-        topSyncOk = await this._syncStopBarrierToTop();
+        const forwardsOk = await this._drainFrameForwards();
+        const contextOk = await this._syncStopBarrierToTop();
+        topSyncOk = forwardsOk && contextOk;
+      } else {
+        topSyncOk = await this._drainFrameContextSends();
       }
 
       // Step 5: Clear timers BEFORE flush (prevent race conditions)
@@ -638,7 +651,10 @@
       if (!this.sessionBuffer.variables || this.sessionBuffer.variables.length === 0) {
         return true;
       }
-      return this._send({ kind: 'variables', variables: this.sessionBuffer.variables });
+      return this._send({
+        kind: 'variables',
+        variables: this.sessionBuffer.variables,
+      });
     }
 
     /**
@@ -692,7 +708,10 @@
       document.addEventListener('input', this._onDocInput, true);
       document.addEventListener('change', this._onChange, true);
       // capture-phase scroll to catch non-bubbling events on any container (passive to avoid jank)
-      document.addEventListener('scroll', this._onScroll, { capture: true, passive: true });
+      document.addEventListener('scroll', this._onScroll, {
+        capture: true,
+        passive: true,
+      });
       // Keyboard: record Enter and modifier combos
       document.addEventListener('keydown', this._onKeyDown, true);
       document.addEventListener('keyup', this._onKeyUp, true);
@@ -716,7 +735,9 @@
       document.removeEventListener('keyup', this._onKeyUp, true);
       window.removeEventListener('pagehide', this._onPageHide, true);
       document.removeEventListener('visibilitychange', this._onVisibilityChange, true);
-      document.removeEventListener('mousemove', this._onMouseMove, { capture: true });
+      document.removeEventListener('mousemove', this._onMouseMove, {
+        capture: true,
+      });
       // Keep top-frame aggregator alive during pause; stop() clears isPaused and will remove it
       if (window === window.top && !this.isPaused)
         window.removeEventListener('message', this._onWindowMessage, true);
@@ -742,9 +763,14 @@
 
     _updateHoverListener() {
       if (window !== window.top) return;
-      document.removeEventListener('mousemove', this._onMouseMove, { capture: true });
+      document.removeEventListener('mousemove', this._onMouseMove, {
+        capture: true,
+      });
       if (this.isRecording && !this.isPaused && this.highlightEnabled) {
-        document.addEventListener('mousemove', this._onMouseMove, { capture: true, passive: true });
+        document.addEventListener('mousemove', this._onMouseMove, {
+          capture: true,
+          passive: true,
+        });
       }
     }
 
@@ -854,13 +880,12 @@
           const added = Array.from(rec.addedNodes || []);
           for (const node of added) {
             if (!(node instanceof Element)) continue;
-            const candidate =
-              this._isLoadingLikeElement(node)
-                ? node
-                : node.querySelector &&
-                    node.querySelector(
-                      '[aria-busy="true"], .loading, .spinner, .skeleton, [class*="loading"], [class*="spinner"], [class*="skeleton"]',
-                    );
+            const candidate = this._isLoadingLikeElement(node)
+              ? node
+              : node.querySelector &&
+                node.querySelector(
+                  '[aria-busy="true"], .loading, .spinner, .skeleton, [class*="loading"], [class*="spinner"], [class*="skeleton"]',
+                );
             if (!candidate || !(candidate instanceof Element)) continue;
             const target = SelectorEngine.buildTarget(candidate);
             const selector = target && target.selector ? String(target.selector) : '';
@@ -888,7 +913,10 @@
             if (gone) {
               this._pushStep({
                 type: 'wait',
-                condition: { selector: detector.loadingSelector, visible: false },
+                condition: {
+                  selector: detector.loadingSelector,
+                  visible: false,
+                },
                 timeoutMs: 15000,
                 screenshotOnFail: false,
               });
@@ -912,7 +940,10 @@
               if (hidden) {
                 this._pushStep({
                   type: 'wait',
-                  condition: { selector: detector.loadingSelector, visible: false },
+                  condition: {
+                    selector: detector.loadingSelector,
+                    visible: false,
+                  },
                   timeoutMs: 15000,
                   screenshotOnFail: false,
                 });
@@ -959,6 +990,8 @@
       } catch {}
       this._sendSeq = 0;
       this._sendNonce = 0;
+      this._frameForwardsOk = true;
+      this._registeredFrameEvents.clear();
       this.lastFill = { step: null, ts: 0, el: null };
       this._lastInputActivityTs = 0;
       this._typingBurstStartTs = 0;
@@ -1057,17 +1090,11 @@
 
     _pushStep(step) {
       step.id = step.id || `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      // In iframes, forward to top for aggregation (compute frame selector there)
+      // Child frames send the authoritative step directly to background. The page-visible
+      // postMessage that follows contains only an unguessable correlation id, never a step.
       if (window !== window.top) {
-        try {
-          const payload = {
-            kind: 'iframeStep',
-            href: String(location && location.href ? location.href : ''),
-            step,
-          };
-          window.top.postMessage({ type: FRAME_EVENT, payload }, '*');
-          return; // Do not push locally in subframe
-        } catch {}
+        this._forwardIframeStep(step, 'iframeStep');
+        return;
       }
       // Top window: optionally insert a switchFrame if this step originated from an iframe message
       this.sessionBuffer.steps.push(step);
@@ -1083,6 +1110,99 @@
       }
 
       this._scheduleFlush();
+    }
+
+    _newFrameEventId() {
+      try {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        return `frame_${Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')}`;
+      } catch {
+        // Correlation ids are capabilities. Fail closed instead of falling back
+        // to predictable pseudo-randomness if Web Crypto is unavailable.
+        return '';
+      }
+    }
+
+    _registerFrameEvent(frameEventId, sessionId) {
+      if (window !== window.top) return false;
+      if (!/^frame_[a-f0-9]{32}$/.test(String(frameEventId || ''))) return false;
+      if (!this.sessionId || String(sessionId || '') !== this.sessionId) return false;
+      this._registeredFrameEvents.add(frameEventId);
+      while (this._registeredFrameEvents.size > 1000) {
+        const oldest = this._registeredFrameEvents.values().next().value;
+        if (!oldest) break;
+        this._registeredFrameEvents.delete(oldest);
+      }
+      return true;
+    }
+
+    _consumeFrameEvent(frameEventId) {
+      if (!this._registeredFrameEvents.has(frameEventId)) return false;
+      this._registeredFrameEvents.delete(frameEventId);
+      return true;
+    }
+
+    _trackPending(set, promise) {
+      set.add(promise);
+      promise.then(
+        () => set.delete(promise),
+        () => set.delete(promise),
+      );
+      return promise;
+    }
+
+    _forwardIframeStep(step, kind) {
+      const frameEventId = this._newFrameEventId();
+      if (!frameEventId) {
+        this._frameForwardsOk = false;
+        return Promise.resolve(false);
+      }
+      const cleanStep = (() => {
+        const { _recordingRef, ...rest } = step || {};
+        return rest;
+      })();
+      const forward = this._send({ kind, frameEventId, step: cleanStep }).then(
+        (ok) => {
+          if (!ok) {
+            this._frameForwardsOk = false;
+            return false;
+          }
+          try {
+            window.top.postMessage(
+              {
+                type: FRAME_EVENT,
+                payload: { kind: 'iframeStepContext', frameEventId },
+              },
+              '*',
+            );
+            return true;
+          } catch {
+            this._frameForwardsOk = false;
+            return false;
+          }
+        },
+        () => {
+          this._frameForwardsOk = false;
+          return false;
+        },
+      );
+      this._trackPending(this._pendingFrameForwards, forward);
+      return forward;
+    }
+
+    async _drainFrameForwards() {
+      while (this._pendingFrameForwards.size > 0) {
+        await Promise.allSettled(Array.from(this._pendingFrameForwards));
+      }
+      return this._frameForwardsOk;
+    }
+
+    async _drainFrameContextSends() {
+      while (this._pendingFrameContextSends.size > 0) {
+        await Promise.allSettled(Array.from(this._pendingFrameContextSends));
+      }
+      return true;
     }
 
     /**
@@ -1171,7 +1291,7 @@
             if (!d || d.type !== FRAME_EVENT || !d.payload) return;
             const p = d.payload || {};
             if (p.kind !== 'iframeStopBarrierAck' || p.id !== id) return;
-            cleanup(true);
+            cleanup(p.ok !== false);
           } catch {}
         };
 
@@ -1179,7 +1299,10 @@
         try {
           window.addEventListener('message', onMessage, true);
           window.top.postMessage(
-            { type: FRAME_EVENT, payload: { kind: 'iframeStopBarrier', id, href } },
+            {
+              type: FRAME_EVENT,
+              payload: { kind: 'iframeStopBarrier', id, href },
+            },
             '*',
           );
         } catch {
@@ -1310,9 +1433,7 @@
               const ackSeq = ack && Number.isFinite(ack.seq) ? Number(ack.seq) : undefined;
               const seqMismatch = ackSeq !== undefined && ackSeq !== meta.seq;
               if (seqMismatch) {
-                console.warn(
-                  `Recorder: ack seq mismatch (sent=${meta.seq}, received=${ackSeq})`,
-                );
+                console.warn(`Recorder: ack seq mismatch (sent=${meta.seq}, received=${ackSeq})`);
                 finish(false);
                 return;
               }
@@ -1331,7 +1452,11 @@
     _addVariable(key, sensitive, defVal) {
       if (!this.sessionBuffer.variables) this.sessionBuffer.variables = [];
       if (this.sessionBuffer.variables.find((v) => v.key === key)) return;
-      this.sessionBuffer.variables.push({ key, sensitive: !!sensitive, default: defVal || '' });
+      this.sessionBuffer.variables.push({
+        key,
+        sensitive: !!sensitive,
+        default: defVal || '',
+      });
     }
 
     // Handlers
@@ -1346,27 +1471,12 @@
       if (!el) return;
       try {
         if (el instanceof HTMLInputElement) {
-        const t = (el.getAttribute && el.getAttribute('type')) || '';
-        const tt = String(t).toLowerCase();
-        if (tt === 'checkbox' || tt === 'radio') return; // avoid duplicate with change
-      }
-      const overlay = document.getElementById('__rr_rec_overlay');
-      if (overlay && (el === overlay || (el.closest && el.closest('#__rr_rec_overlay')))) return;
-      const a = el.closest && el.closest('a[href]');
-        const href = a && a.getAttribute && a.getAttribute('href');
-        const tgt = a && a.getAttribute && a.getAttribute('target');
-        if (a && href && tgt && tgt.toLowerCase() === '_blank') {
-          try {
-            const abs = new URL(href, location.href).href;
-            this._pushStep({ type: 'openTab', url: abs });
-            this._pushStep({ type: 'switchTab', urlContains: abs });
-            return;
-          } catch (_) {
-            this._pushStep({ type: 'openTab', url: href });
-            this._pushStep({ type: 'switchTab', urlContains: href });
-            return;
-          }
+          const t = (el.getAttribute && el.getAttribute('type')) || '';
+          const tt = String(t).toLowerCase();
+          if (tt === 'checkbox' || tt === 'radio') return; // avoid duplicate with change
         }
+        const overlay = document.getElementById('__rr_rec_overlay');
+        if (overlay && (el === overlay || (el.closest && el.closest('#__rr_rec_overlay')))) return;
       } catch {}
 
       const target = SelectorEngine.buildTarget(el);
@@ -1398,13 +1508,10 @@
         clearTimeout(this._pendingClickTimer);
         const now = Date.now();
         const prevSelector =
-          this._pendingClick &&
-          this._pendingClick.target &&
-          this._pendingClick.target.selector
+          this._pendingClick && this._pendingClick.target && this._pendingClick.target.selector
             ? String(this._pendingClick.target.selector)
             : '';
-        const nextSelector =
-          target && target.selector ? String(target.selector) : '';
+        const nextSelector = target && target.selector ? String(target.selector) : '';
         const isFastDuplicate =
           !!prevSelector &&
           !!nextSelector &&
@@ -1585,23 +1692,14 @@
     /**
      * Enqueue a step for upsert - if step with same id exists in batch, update it.
      * This ensures the background receives the final value for fill steps.
-     * In iframes, forwards to top window to maintain selector composition consistency.
+     * In iframes, sends the authoritative update directly to background. The top frame
+     * contributes only selector context through the correlation-id join.
      */
     _enqueueForUpsert(step) {
       if (!step || !step.id) return;
 
-      // In iframes, forward upsert updates to top so we don't lose composed selectors.
-      // The top window aggregates iframe steps and computes "frame |> inner" selectors.
-      // If iframe sends directly to background, it would overwrite the composed selector.
       if (window !== window.top) {
-        try {
-          const payload = {
-            kind: 'iframeStepUpsert',
-            href: String(location && location.href ? location.href : ''),
-            step,
-          };
-          window.top.postMessage({ type: FRAME_EVENT, payload }, '*');
-        } catch {}
+        this._forwardIframeStep(step, 'iframeStepUpsert');
         return;
       }
 
@@ -1668,7 +1766,12 @@
         if (tt === 'checkbox') {
           const val = !!el.checked;
           if (this._hasRecordedValue(elRef, val)) return;
-          const st = { type: 'fill', target, value: !!el.checked, screenshotOnFail: true };
+          const st = {
+            type: 'fill',
+            target,
+            value: !!el.checked,
+            screenshotOnFail: true,
+          };
           st._recordingRef = elRef;
           this._rememberRecordedValue(elRef, val);
           this._pushStep(st);
@@ -1677,7 +1780,12 @@
         if (tt === 'radio') {
           const val = true;
           if (this._hasRecordedValue(elRef, val)) return;
-          const st = { type: 'fill', target, value: true, screenshotOnFail: true };
+          const st = {
+            type: 'fill',
+            target,
+            value: true,
+            screenshotOnFail: true,
+          };
           st._recordingRef = elRef;
           this._rememberRecordedValue(elRef, val);
           this._pushStep(st);
@@ -1689,7 +1797,12 @@
           const value = `{${varKey}}`;
           if (this._hasRecordedValue(elRef, value)) return;
           this._rememberRecordedValue(elRef, value);
-          this._pushStep({ type: 'fill', target, value, screenshotOnFail: true });
+          this._pushStep({
+            type: 'fill',
+            target,
+            value,
+            screenshotOnFail: true,
+          });
           return;
         }
       }
@@ -1887,7 +2000,12 @@
           // Record explicit key action with target first
           const target = SelectorEngine.buildTarget(/** @type {Element} */ (e.target));
           const combo = this._formatKeysCombo(e, 'Enter');
-          this._pushStep({ type: 'key', keys: combo, target, screenshotOnFail: false });
+          this._pushStep({
+            type: 'key',
+            keys: combo,
+            target,
+            screenshotOnFail: false,
+          });
 
           // Then commit and flush (form submit may navigate away)
           this._commitAndFlush();
@@ -1900,7 +2018,11 @@
         const special = enterKey || key === 'escape' || key === 'tab';
         if (special || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) {
           const comboName = this._formatKeysCombo(e, e.key);
-          this._pushStep({ type: 'key', keys: comboName, screenshotOnFail: false });
+          this._pushStep({
+            type: 'key',
+            keys: comboName,
+            screenshotOnFail: false,
+          });
           this._lastKeyTs = Date.now();
         }
       } catch {}
@@ -1931,7 +2053,9 @@
       return parts.join('+');
     }
 
-    // Top-level aggregator: receives iframe events and merges into session
+    // Top-level frame-context broker. Child steps never cross postMessage; only an
+    // unguessable id does. Background joins that id to the authoritative child-frame
+    // runtime message before it accepts a step.
     _onWindowMessage(ev) {
       try {
         const d = ev && ev.data;
@@ -1984,84 +2108,52 @@
         const payload = d.payload || {};
         const kind = payload.kind;
 
-        // Stop barrier sync: ACK back to the iframe so it can finish stop only after
-        // its final postMessages have been processed by the top aggregator
+        // Stop barrier sync: ACK only after every selector-context runtime send settles.
         if (kind === 'iframeStopBarrier') {
-          try {
-            const id = payload.id;
-            if (id && ev.source && typeof ev.source.postMessage === 'function') {
-              ev.source.postMessage(
-                { type: FRAME_EVENT, payload: { kind: 'iframeStopBarrierAck', id } },
-                '*',
-              );
-            }
-          } catch {}
+          const id = payload.id;
+          const source = ev.source;
+          if (id && source && typeof source.postMessage === 'function') {
+            this._drainFrameContextSends().then((ok) => {
+              try {
+                source.postMessage(
+                  {
+                    type: FRAME_EVENT,
+                    payload: { kind: 'iframeStopBarrierAck', id, ok },
+                  },
+                  '*',
+                );
+              } catch {}
+            });
+          }
           return;
         }
 
-        // Handle iframe flush request: immediately flush top's aggregated buffer
+        // Handle iframe flush request after pending context sends have drained.
         if (kind === 'iframeFlush') {
-          this._lastInputActivityTs = 0;
-          this._typingBurstStartTs = 0;
-          this._clearForceFlushTimer();
-          if (this.batchTimer) clearTimeout(this.batchTimer);
-          this.batchTimer = null;
-          if (this.batch.length > 0) this._flush();
+          this._drainFrameContextSends().then(() => {
+            this._lastInputActivityTs = 0;
+            this._typingBurstStartTs = 0;
+            this._clearForceFlushTimer();
+            if (this.batchTimer) clearTimeout(this.batchTimer);
+            this.batchTimer = null;
+            if (this.batch.length > 0) this._flush();
+          });
           return;
         }
 
-        const { step, href } = payload;
-        if (!step || typeof step !== 'object') return;
+        if (kind !== 'iframeStepContext') return;
+        const frameEventId = String(payload.frameEventId || '');
+        if (!/^frame_[a-f0-9]{32}$/.test(frameEventId)) return;
+        if (!this._consumeFrameEvent(frameEventId)) return;
 
-        // Compose frame selector for iframe steps
         const frameTarget = SelectorEngine.buildTarget(frameEl);
-        const frameSel = frameTarget?.selector || '';
-
-        // For upsert: find existing step in session and update it
-        if (kind === 'iframeStepUpsert') {
-          // Update input activity for iframe fills (enables flush gate for iframe input)
-          if (step.type === 'fill') {
-            this._updateInputActivity();
-          }
-
-          // Find step by id in session buffer and update its value
-          const existingIdx = this.sessionBuffer.steps.findIndex((s) => s.id === step.id);
-          if (existingIdx >= 0) {
-            // Update value but preserve the composed selector
-            this.sessionBuffer.steps[existingIdx].value = step.value;
-            this.sessionBuffer.meta.updatedAt = new Date().toISOString();
-            // Also update in batch if present
-            const batchIdx = this.batch.findIndex((s) => s.id === step.id);
-            if (batchIdx >= 0) {
-              this.batch[batchIdx].value = step.value;
-            } else {
-              // Step was already flushed, add updated version to batch
-              const updatedStep = { ...this.sessionBuffer.steps[existingIdx] };
-              this.batch.push(updatedStep);
-            }
-            this._scheduleFlush();
-          }
-          return;
-        }
-
-        // Regular iframe step: compose composite selector and push
-        if (step.target) {
-          const inner = String(step.target.selector || '').trim();
-          if (frameSel && inner) {
-            const composite = `${frameSel} |> ${inner}`;
-            step.target.selector = composite;
-            if (Array.isArray(step.target.candidates)) {
-              step.target.candidates.unshift({ type: 'css', value: composite });
-            }
-          }
-          step.target.frameContext = {
-            ...(step.target.frameContext || {}),
-            kind: 'iframe',
-            url: String(href || step.target.frameContext?.url || ''),
-            frameSelector: frameSel || step.target.frameContext?.frameSelector || '',
-          };
-        }
-        this._pushStep(step);
+        if (!frameTarget || !String(frameTarget.selector || '').trim()) return;
+        const contextSend = this._send({
+          kind: 'iframeFrameContext',
+          frameEventId,
+          frameTarget,
+        });
+        this._trackPending(this._pendingFrameContextSends, contextSend);
       } catch {}
     }
   }
@@ -2078,6 +2170,12 @@
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     try {
       if (!request || !request.action) return false;
+      if (request.action === 'rr_register_iframe_event') {
+        const rec = getRecorder();
+        const ok = rec._registerFrameEvent(request.frameEventId, request.sessionId);
+        sendResponse({ ok });
+        return true;
+      }
       if (request.action === 'rr_timeline_update') {
         const rec = getRecorder();
         // Only respond to timeline updates when recording is active
@@ -2171,7 +2269,10 @@
         return false;
       }
     } catch (e) {
-      sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+      sendResponse({
+        success: false,
+        error: String(e && e.message ? e.message : e),
+      });
       return true;
     }
     return false;

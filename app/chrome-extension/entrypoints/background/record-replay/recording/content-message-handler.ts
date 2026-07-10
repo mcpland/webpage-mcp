@@ -1,5 +1,5 @@
 import type { RecordingSessionManager } from './session-manager';
-import type { Step, VariableDef } from '../types';
+import type { Step, TargetLocator } from '../types';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import {
   type RecorderEventAck,
@@ -10,9 +10,52 @@ import {
   parseRecorderEventMeta,
 } from './recorder-event-protocol';
 import { recordingNetworkTracker, type RecordedRequest } from './network-tracker';
+import {
+  sanitizeRecorderStep,
+  sanitizeRecorderSteps,
+  sanitizeRecorderTarget,
+  sanitizeRecorderVariables,
+} from './recorder-step-validator';
 
 const MAX_SOURCES = 200;
 const MAX_RECENT_EVENT_IDS_PER_SOURCE = 300;
+const MAX_PENDING_FRAME_STEPS = 1_000;
+const FRAME_EVENT_ID_PATTERN = /^frame_[a-f0-9]{32}$/;
+
+interface PendingFrameStep {
+  step: Step;
+  href: string;
+  createdAt: number;
+}
+
+class PendingFrameStepStore {
+  private sessionId = '';
+  private readonly entries = new Map<string, PendingFrameStep>();
+
+  alignSession(sessionId: string): void {
+    if (this.sessionId === sessionId) return;
+    this.sessionId = sessionId;
+    this.entries.clear();
+  }
+
+  put(tabId: number, eventId: string, value: PendingFrameStep): void {
+    this.entries.set(`${tabId}:${eventId}`, value);
+    if (this.entries.size <= MAX_PENDING_FRAME_STEPS) return;
+    const oldest = [...this.entries.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt)[0];
+    if (oldest) this.entries.delete(oldest[0]);
+  }
+
+  take(tabId: number, eventId: string): PendingFrameStep | undefined {
+    const key = `${tabId}:${eventId}`;
+    const value = this.entries.get(key);
+    if (value) this.entries.delete(key);
+    return value;
+  }
+
+  delete(tabId: number, eventId: string): void {
+    this.entries.delete(`${tabId}:${eventId}`);
+  }
+}
 
 interface SourceIngestState {
   highWatermarkSeq: number;
@@ -46,7 +89,13 @@ class RecorderEventIngestTracker {
       return 'stale';
     }
 
-    state.highWatermarkSeq = meta.seq;
+    return 'accept';
+  }
+
+  commit(meta: RecorderEventMeta, sourceKey: string): void {
+    const state = this.getOrCreateSourceState(sourceKey);
+
+    state.highWatermarkSeq = Math.max(state.highWatermarkSeq, meta.seq);
     state.updatedAt = Date.now();
     state.recentEventSet.add(meta.eventId);
     state.recentEventIds.push(meta.eventId);
@@ -55,8 +104,6 @@ class RecorderEventIngestTracker {
       const evicted = state.recentEventIds.shift();
       if (evicted) state.recentEventSet.delete(evicted);
     }
-
-    return 'accept';
   }
 
   private getOrCreateSourceState(sourceKey: string): SourceIngestState {
@@ -132,7 +179,10 @@ function buildStepFromFlowById(session: RecordingSessionManager, stepId: string)
   if (Array.isArray(flow.nodes)) {
     const node = flow.nodes.find((item) => item.id === stepId);
     if (node) {
-      const cfg = node.config && typeof node.config === 'object' ? (node.config as Record<string, unknown>) : {};
+      const cfg =
+        node.config && typeof node.config === 'object'
+          ? (node.config as Record<string, unknown>)
+          : {};
       return { ...cfg, id: node.id, type: node.type } as Step;
     }
   }
@@ -147,85 +197,123 @@ function buildStepFromFlowById(session: RecordingSessionManager, stepId: string)
   return null;
 }
 
+type PayloadApplyResult = { ok: true } | { ok: false; error: string };
+
+function appendValidatedSteps(
+  steps: Step[],
+  session: RecordingSessionManager,
+  senderTabId?: number,
+  lastStepByTab?: Map<number, string>,
+): void {
+  if (steps.length === 0) return;
+  if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
+    const requests = recordingNetworkTracker.takeRecent(senderTabId);
+    const previousStepId = lastStepByTab.get(senderTabId);
+    if (previousStepId && requests.length > 0) {
+      const previousStep = buildStepFromFlowById(session, previousStepId);
+      if (previousStep) {
+        session.appendSteps([patchStepWithNetworkContext(previousStep, requests)]);
+      }
+    }
+  }
+  session.appendSteps(steps);
+  if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
+    const lastStep = steps[steps.length - 1];
+    if (lastStep && typeof lastStep.id === 'string' && lastStep.id) {
+      lastStepByTab.set(senderTabId, lastStep.id);
+    }
+  }
+}
+
 function applyPayload(
   payload: any,
   session: RecordingSessionManager,
   senderTabId?: number,
   lastStepByTab?: Map<number, string>,
-): void {
-  // Handle steps
+): PayloadApplyResult {
   if (payload.kind === 'steps' || payload.kind === 'step') {
-    const steps: Step[] = Array.isArray(payload.steps)
-      ? (payload.steps as Step[])
+    const rawSteps = Array.isArray(payload.steps)
+      ? payload.steps
       : payload.step
-        ? [payload.step as Step]
+        ? [payload.step]
         : [];
-    if (steps.length > 0) {
-      if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
-        const requests = recordingNetworkTracker.takeRecent(senderTabId);
-        const previousStepId = lastStepByTab.get(senderTabId);
-        if (previousStepId && requests.length > 0) {
-          const previousStep = buildStepFromFlowById(session, previousStepId);
-          if (previousStep) {
-            session.appendSteps([patchStepWithNetworkContext(previousStep, requests)]);
-          }
-        }
-      }
-      session.appendSteps(steps);
-      if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
-        const lastStep = steps[steps.length - 1];
-        if (lastStep && typeof lastStep.id === 'string' && lastStep.id) {
-          lastStepByTab.set(senderTabId, lastStep.id);
-        }
-      }
-    }
+    const steps = sanitizeRecorderSteps(rawSteps);
+    if (!steps.ok) return steps;
+    appendValidatedSteps(steps.value, session, senderTabId, lastStepByTab);
+    return { ok: true };
   }
 
-  // Handle variables (for sensitive input handling)
   if (payload.kind === 'variables') {
-    const variables: VariableDef[] = Array.isArray(payload.variables)
-      ? (payload.variables as VariableDef[])
-      : [];
-    if (variables.length > 0) {
-      session.appendVariables(variables);
-    }
+    const variables = sanitizeRecorderVariables(payload.variables);
+    if (!variables.ok) return variables;
+    if (variables.value.length > 0) session.appendVariables(variables.value);
+    return { ok: true };
   }
 
-  // Handle combined payload (steps + variables in one message)
   if (payload.kind === 'batch') {
-    const steps: Step[] = Array.isArray(payload.steps) ? (payload.steps as Step[]) : [];
-    const variables: VariableDef[] = Array.isArray(payload.variables)
-      ? (payload.variables as VariableDef[])
-      : [];
-    if (steps.length > 0) {
-      if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
-        const requests = recordingNetworkTracker.takeRecent(senderTabId);
-        const previousStepId = lastStepByTab.get(senderTabId);
-        if (previousStepId && requests.length > 0) {
-          const previousStep = buildStepFromFlowById(session, previousStepId);
-          if (previousStep) {
-            session.appendSteps([patchStepWithNetworkContext(previousStep, requests)]);
-          }
-        }
-      }
-      session.appendSteps(steps);
-      if (typeof senderTabId === 'number' && senderTabId >= 0 && lastStepByTab) {
-        const lastStep = steps[steps.length - 1];
-        if (lastStep && typeof lastStep.id === 'string' && lastStep.id) {
-          lastStepByTab.set(senderTabId, lastStep.id);
-        }
-      }
-    }
-    if (variables.length > 0) {
-      session.appendVariables(variables);
-    }
+    const steps = sanitizeRecorderSteps(payload.steps ?? []);
+    if (!steps.ok) return steps;
+    const variables = sanitizeRecorderVariables(payload.variables ?? []);
+    if (!variables.ok) return variables;
+    appendValidatedSteps(steps.value, session, senderTabId, lastStepByTab);
+    if (variables.value.length > 0) session.appendVariables(variables.value);
+    return { ok: true };
   }
+
+  return {
+    ok: false,
+    error: `unsupported recorder payload kind: ${String(payload.kind)}`,
+  };
+}
+
+function parseFrameEventId(input: unknown): string | null {
+  return typeof input === 'string' && FRAME_EVENT_ID_PATTERN.test(input) ? input : null;
+}
+
+function composeFrameTargetStep(
+  pending: PendingFrameStep,
+  rawFrameTarget: unknown,
+): PayloadApplyResult & { step?: Step } {
+  const parsedFrameTarget = sanitizeRecorderTarget(rawFrameTarget);
+  if (!parsedFrameTarget.ok) return parsedFrameTarget;
+
+  const frameSelector = String(parsedFrameTarget.value.selector || '').trim();
+  if (!frameSelector) return { ok: false, error: 'frame target requires a selector' };
+
+  const step = { ...(pending.step as any) } as Step;
+  const rawTarget = (pending.step as any).target;
+  if (!rawTarget || typeof rawTarget !== 'object') {
+    return { ok: true, step };
+  }
+
+  const target = {
+    ...rawTarget,
+    candidates: Array.isArray(rawTarget.candidates) ? [...rawTarget.candidates] : [],
+  } as TargetLocator;
+  const innerSelector = String(target.selector || '').trim();
+  if (!innerSelector) return { ok: false, error: 'iframe step target requires a selector' };
+
+  const composite = `${frameSelector} |> ${innerSelector}`;
+  target.selector = composite;
+  target.candidates.unshift({
+    type: 'css',
+    value: composite,
+    source: 'recorded',
+  });
+  target.frameContext = {
+    kind: 'iframe',
+    url: pending.href,
+    frameSelector,
+  };
+  (step as any).target = target;
+  return { ok: true, step };
 }
 
 export function createRecorderEventMessageHandler(
   session: RecordingSessionManager,
 ): Parameters<typeof chrome.runtime.onMessage.addListener>[0] {
   const tracker = new RecorderEventIngestTracker();
+  const pendingFrameSteps = new PendingFrameStepStore();
   const lastStepByTab = new Map<number, string>();
   let ingestSessionId = '';
 
@@ -253,20 +341,10 @@ export function createRecorderEventMessageHandler(
         lastStepByTab.clear();
       }
       tracker.alignSession(sessionId);
+      pendingFrameSteps.alignSession(sessionId);
 
       const parsedMeta = parseRecorderEventMeta(message?.meta);
       if (!parsedMeta.ok) {
-        const isLegacyMessage = parsedMeta.error === 'missing meta object';
-        if (isLegacyMessage) {
-          // Backward compatibility path for older recorder scripts.
-          applyPayload(payload, session, sender?.tab?.id, lastStepByTab);
-          sendResponse({
-            ok: true,
-            legacy: true,
-            warning: `Recorder meta missing or invalid: ${parsedMeta.error}`,
-          });
-          return true;
-        }
         sendResponse({
           ok: false,
           code: 'INVALID_META',
@@ -278,6 +356,15 @@ export function createRecorderEventMessageHandler(
       const meta = parsedMeta.meta;
       const source = getRecorderEventSource(sender);
       const sourceKey = getRecorderSourceKey(source);
+
+      if (source.tabId < 0) {
+        sendResponse({
+          ok: false,
+          code: 'INVALID_SOURCE',
+          error: 'recorder event requires a tab',
+        });
+        return true;
+      }
 
       if (meta.sessionId !== sessionId) {
         sendResponse({
@@ -301,8 +388,119 @@ export function createRecorderEventMessageHandler(
         return true;
       }
 
-      applyPayload(payload, session, sender?.tab?.id, lastStepByTab);
-      sendResponse({ ok: true, ack: buildAck(meta, highWatermarkSeq, 'accept') });
+      let result: PayloadApplyResult = { ok: true };
+      if (payload.kind === 'iframeStep' || payload.kind === 'iframeStepUpsert') {
+        if (source.frameId <= 0) {
+          result = {
+            ok: false,
+            error: 'iframe steps must come directly from a child frame',
+          };
+        } else {
+          const frameEventId = parseFrameEventId(payload.frameEventId);
+          const step = sanitizeRecorderStep(payload.step);
+          if (!frameEventId) {
+            result = { ok: false, error: 'invalid iframe frameEventId' };
+          } else if (!step.ok) {
+            result = step;
+          } else {
+            pendingFrameSteps.put(source.tabId, frameEventId, {
+              step: step.value,
+              href: String(meta.source?.href || '').slice(0, 16_384),
+              createdAt: Date.now(),
+            });
+            try {
+              chrome.tabs
+                .sendMessage(
+                  source.tabId,
+                  {
+                    action: 'rr_register_iframe_event',
+                    sessionId,
+                    frameEventId,
+                  },
+                  { frameId: 0 },
+                )
+                .then((registration) => {
+                  if (!registration?.ok) {
+                    pendingFrameSteps.delete(source.tabId, frameEventId);
+                    sendResponse({
+                      ok: false,
+                      code: 'FRAME_REGISTRATION_FAILED',
+                      error: 'top frame did not register iframe event',
+                    });
+                    return;
+                  }
+                  tracker.commit(meta, sourceKey);
+                  sendResponse({
+                    ok: true,
+                    ack: buildAck(meta, tracker.getHighWatermark(sourceKey), 'accept'),
+                  });
+                })
+                .catch((error) => {
+                  pendingFrameSteps.delete(source.tabId, frameEventId);
+                  sendResponse({
+                    ok: false,
+                    code: 'FRAME_REGISTRATION_FAILED',
+                    error: String((error as Error)?.message || error),
+                  });
+                });
+              return true;
+            } catch (error) {
+              pendingFrameSteps.delete(source.tabId, frameEventId);
+              result = {
+                ok: false,
+                error: `failed to register iframe event: ${String(
+                  (error as Error)?.message || error,
+                )}`,
+              };
+            }
+          }
+        }
+      } else if (payload.kind === 'iframeFrameContext') {
+        if (source.frameId !== 0) {
+          result = {
+            ok: false,
+            error: 'iframe frame context must come from the top frame',
+          };
+        } else {
+          const frameEventId = parseFrameEventId(payload.frameEventId);
+          if (!frameEventId) {
+            result = { ok: false, error: 'invalid iframe frameEventId' };
+          } else {
+            const pending = pendingFrameSteps.take(source.tabId, frameEventId);
+            if (!pending) {
+              result = {
+                ok: false,
+                error: 'unknown or already consumed iframe frameEventId',
+              };
+            } else {
+              const composed = composeFrameTargetStep(pending, payload.frameTarget);
+              if (!composed.ok || !composed.step) {
+                result = composed.ok
+                  ? { ok: false, error: 'failed to compose iframe step' }
+                  : composed;
+              } else {
+                appendValidatedSteps([composed.step], session, source.tabId, lastStepByTab);
+              }
+            }
+          }
+        }
+      } else {
+        result = applyPayload(payload, session, source.tabId, lastStepByTab);
+      }
+
+      if (!result.ok) {
+        sendResponse({
+          ok: false,
+          code: 'INVALID_PAYLOAD',
+          error: result.error,
+        });
+        return true;
+      }
+      tracker.commit(meta, sourceKey);
+      sendResponse({
+        ok: true,
+        ack: buildAck(meta, tracker.getHighWatermark(sourceKey), 'accept'),
+      });
       return true;
     } catch (e) {
       console.warn('ContentMessageHandler: processing message failed', e);
@@ -319,6 +517,8 @@ export function createRecorderEventMessageHandler(
  * - 'steps' | 'step': Append steps to the current flow
  * - 'variables': Append variables to the current flow (for sensitive input handling)
  * - 'batch': Append steps + variables in one message
+ * - 'iframeStep' | 'iframeStepUpsert': Stage a child-frame-authenticated step
+ * - 'iframeFrameContext': Join staged step with top-frame selector metadata
  */
 export function initContentMessageHandler(session: RecordingSessionManager): void {
   chrome.runtime.onMessage.addListener(createRecorderEventMessageHandler(session));
