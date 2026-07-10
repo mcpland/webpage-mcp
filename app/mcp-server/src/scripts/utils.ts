@@ -2,7 +2,6 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { execSync } from "child_process";
-import { createRequire } from "module";
 import { promisify } from "util";
 import { COMMAND_NAME, DESCRIPTION, EXTENSION_ID, HOST_NAME } from "./constant";
 import {
@@ -14,6 +13,12 @@ import {
   createSecureTemporaryManifest,
   writeManifestAtomically,
 } from "./native-manifest-file";
+import {
+  getMissingStableRuntimeDependencies,
+  getRuntimeNodeModulesPathFile,
+  installStableRuntimeDependencies,
+  RUNTIME_NODE_MODULES_PATH_FILE,
+} from "./stable-runtime-dependencies";
 
 export const access = promisify(fs.access);
 export const mkdir = promisify(fs.mkdir);
@@ -24,15 +29,7 @@ const RUNTIME_DIR_NAME = ".webpage-mcp";
 const RUNTIME_SUBDIR = "runtime";
 const RUNTIME_DIST_SUBDIR = "dist";
 const RUNTIME_VERSION_FILE = ".runtime-version";
-const RUNTIME_HOST_ENTRY_FILE = "index.js";
 const RUNTIME_NODE_MODULES_DIR_NAME = "node_modules";
-const RUNTIME_NODE_MODULES_PATH_FILE = "node_modules_path.txt";
-const RUNTIME_REQUIRED_MODULE_IDS = [
-  "drizzle-orm",
-  "drizzle-orm/sqlite-core",
-  "better-sqlite3",
-  "@modelcontextprotocol/sdk/server/index.js",
-];
 
 interface RegistrationLogOptions {
   silent?: boolean;
@@ -125,131 +122,6 @@ export function getStableRuntimeNodeModulesDir(): string {
   return path.join(getStableRuntimeRootDir(), RUNTIME_NODE_MODULES_DIR_NAME);
 }
 
-function getRuntimeNodeModulesPathFile(runtimeDistDir: string): string {
-  return path.join(runtimeDistDir, RUNTIME_NODE_MODULES_PATH_FILE);
-}
-
-function resolveSourceNodeModulesDir(sourceDistDir: string): string {
-  return path.join(path.resolve(sourceDistDir, ".."), RUNTIME_NODE_MODULES_DIR_NAME);
-}
-
-function findNearestNodeModulesDir(resolvedModulePath: string): string | null {
-  let currentDir = path.dirname(resolvedModulePath);
-  while (true) {
-    if (path.basename(currentDir) === RUNTIME_NODE_MODULES_DIR_NAME) {
-      return currentDir;
-    }
-    const parentDir = path.dirname(currentDir);
-    if (parentDir === currentDir) {
-      return null;
-    }
-    currentDir = parentDir;
-  }
-}
-
-interface SourceNodeModulesResolution {
-  path: string;
-  score: number;
-  total: number;
-  candidates: string[];
-}
-
-function resolveBestSourceNodeModulesDir(
-  sourceDistDir: string,
-): SourceNodeModulesResolution | null {
-  const entryPath = path.join(sourceDistDir, RUNTIME_HOST_ENTRY_FILE);
-  const seen = new Set<string>();
-  const candidates: string[] = [];
-
-  const addCandidate = (candidatePath: string | null | undefined): void => {
-    if (!candidatePath) {
-      return;
-    }
-    const normalized = path.resolve(candidatePath);
-    if (!fs.existsSync(normalized)) {
-      return;
-    }
-    let stats: fs.Stats;
-    try {
-      stats = fs.statSync(normalized);
-    } catch {
-      return;
-    }
-    if (!stats.isDirectory() || seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    candidates.push(normalized);
-  };
-
-  addCandidate(resolveSourceNodeModulesDir(sourceDistDir));
-  addCandidate(path.join(path.resolve(sourceDistDir, "..", ".."), RUNTIME_NODE_MODULES_DIR_NAME));
-  addCandidate(path.join(path.resolve(sourceDistDir, "..", "..", ".."), RUNTIME_NODE_MODULES_DIR_NAME));
-
-  if (fs.existsSync(entryPath)) {
-    try {
-      const runtimeRequire = createRequire(entryPath);
-      for (const moduleId of RUNTIME_REQUIRED_MODULE_IDS) {
-        try {
-          const resolvedPath = runtimeRequire.resolve(moduleId);
-          addCandidate(findNearestNodeModulesDir(resolvedPath));
-        } catch {
-          // ignore unresolved module for candidate discovery
-        }
-      }
-    } catch {
-      // ignore require creation failures
-    }
-  }
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  if (!fs.existsSync(entryPath)) {
-    return {
-      path: candidates[0],
-      score: 0,
-      total: RUNTIME_REQUIRED_MODULE_IDS.length,
-      candidates,
-    };
-  }
-
-  try {
-    const runtimeRequire = createRequire(entryPath);
-    let bestPath = candidates[0];
-    let bestScore = -1;
-    for (const candidatePath of candidates) {
-      let score = 0;
-      for (const moduleId of RUNTIME_REQUIRED_MODULE_IDS) {
-        try {
-          runtimeRequire.resolve(moduleId, { paths: [candidatePath] });
-          score += 1;
-        } catch {
-          // unresolved in this candidate
-        }
-      }
-      if (score > bestScore) {
-        bestPath = candidatePath;
-        bestScore = score;
-      }
-    }
-    return {
-      path: bestPath,
-      score: Math.max(bestScore, 0),
-      total: RUNTIME_REQUIRED_MODULE_IDS.length,
-      candidates,
-    };
-  } catch {
-    return {
-      path: candidates[0],
-      score: 0,
-      total: RUNTIME_REQUIRED_MODULE_IDS.length,
-      candidates,
-    };
-  }
-}
-
 export function getExpectedMainPath(): string {
   return path.join(getStableRuntimeDistDir(), getWrapperScriptName());
 }
@@ -329,99 +201,12 @@ async function ensureExecutionPermissionsForDistWithOptions(
   }
 }
 
-function writeRuntimeNodeModulesPathFile(
+export function getMissingRuntimeHostDependencies(
   runtimeDistDir: string,
-  sourceDistDir: string,
-  logger: RegistrationLogger,
-): void {
-  const modulesPathFile = getRuntimeNodeModulesPathFile(runtimeDistDir);
-  const resolved = resolveBestSourceNodeModulesDir(sourceDistDir);
-
-  if (!resolved) {
-    try {
-      fs.rmSync(modulesPathFile, { force: true });
-    } catch {
-      // ignore stale file cleanup failure
-    }
-    logger.warn(
-      colorText(
-        `⚠️ Package dependencies not found; checked near ${sourceDistDir}`,
-        "yellow",
-      ),
-    );
-    return;
-  }
-
-  if (resolved.score < resolved.total) {
-    logger.warn(
-      colorText(
-        `⚠️ Runtime dependency path candidate is partial (${resolved.score}/${resolved.total}): ${resolved.path}`,
-        "yellow",
-      ),
-    );
-  }
-
-  try {
-    fs.writeFileSync(modulesPathFile, `${resolved.path}\n`, "utf8");
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.warn(
-      colorText(
-        `⚠️ Failed to write ${RUNTIME_NODE_MODULES_PATH_FILE}: ${message}`,
-        "yellow",
-      ),
-    );
-  }
-}
-
-export function getMissingRuntimeHostDependencies(runtimeDistDir: string): string[] {
-  const entryPath = path.join(runtimeDistDir, RUNTIME_HOST_ENTRY_FILE);
-  if (!fs.existsSync(entryPath)) {
-    return [];
-  }
-
-  try {
-    const runtimeRequire = createRequire(entryPath);
-    const resolvePaths: string[] = [];
-    const modulesPathFile = getRuntimeNodeModulesPathFile(runtimeDistDir);
-    if (fs.existsSync(modulesPathFile)) {
-      try {
-        const lines = fs
-          .readFileSync(modulesPathFile, "utf8")
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean);
-        for (const line of lines) {
-          resolvePaths.push(line);
-        }
-      } catch {
-        // ignore malformed file
-      }
-    }
-    const runtimeNodeModulesDir = getStableRuntimeNodeModulesDir();
-    if (fs.existsSync(runtimeNodeModulesDir)) {
-      resolvePaths.push(runtimeNodeModulesDir);
-    }
-
-    return RUNTIME_REQUIRED_MODULE_IDS.filter((moduleId) => {
-      try {
-        runtimeRequire.resolve(moduleId);
-        return false;
-      } catch {
-        if (resolvePaths.length > 0) {
-          try {
-            runtimeRequire.resolve(moduleId, { paths: resolvePaths });
-            return false;
-          } catch {
-            return true;
-          }
-        }
-        return true;
-      }
-    });
-  } catch {
-    return [...RUNTIME_REQUIRED_MODULE_IDS];
-  }
+): string[] {
+  return getMissingStableRuntimeDependencies(runtimeDistDir, [
+    getStableRuntimeNodeModulesDir(),
+  ]);
 }
 
 export async function ensureStableRuntimeHostFiles(
@@ -442,7 +227,10 @@ export async function ensureStableRuntimeHostFiles(
     const targetNormalized = normalizeComparablePath(runtimeDistDir);
 
     if (sourceNormalized === targetNormalized) {
-      writeRuntimeNodeModulesPathFile(runtimeDistDir, sourceDistDir, logger);
+      await installStableRuntimeDependencies(sourceDistDir, runtimeDistDir, {
+        allowExistingGenerationWithoutSource: true,
+        warn: (message) => logger.warn(colorText(`⚠️ ${message}`, "yellow")),
+      });
       writeNodePathFile(runtimeDistDir, process.execPath, options);
       await ensureExecutionPermissionsForDistWithOptions(
         runtimeDistDir,
@@ -489,7 +277,9 @@ export async function ensureStableRuntimeHostFiles(
       writeRuntimeVersionMarker(runtimeDistDir, packageVersion);
     }
 
-    writeRuntimeNodeModulesPathFile(runtimeDistDir, sourceDistDir, logger);
+    await installStableRuntimeDependencies(sourceDistDir, runtimeDistDir, {
+      warn: (message) => logger.warn(colorText(`⚠️ ${message}`, "yellow")),
+    });
     writeNodePathFile(runtimeDistDir, process.execPath, options);
     await ensureExecutionPermissionsForDistWithOptions(runtimeDistDir, logger);
 
@@ -569,9 +359,7 @@ function toOrigin(value: string): string | null {
     return null;
   }
 
-  const originMatch = trimmed.match(
-    /^chrome-extension:\/\/([a-p]{32})\/?$/i,
-  );
+  const originMatch = trimmed.match(/^chrome-extension:\/\/([a-p]{32})\/?$/i);
   if (originMatch?.[1]) {
     const extensionId = toExtensionId(originMatch[1]);
     return extensionId ? `chrome-extension://${extensionId}/` : null;
@@ -1361,8 +1149,7 @@ export async function registerWithElevatedPermissions(
     const hasElevatedPermissions = isRoot || hasAdminRights;
 
     if (!hasElevatedPermissions) {
-      const temporaryManifest =
-        createSecureTemporaryManifest(manifestContents);
+      const temporaryManifest = createSecureTemporaryManifest(manifestContents);
       console.log(
         colorText(
           "⚠️ Administrator privileges required for system-level installation",
@@ -1446,10 +1233,7 @@ export async function registerWithElevatedPermissions(
 
       if (os.platform() === "win32") {
         console.log(
-          colorText(
-            `  rmdir /S /Q "${temporaryManifest.directory}"`,
-            "cyan",
-          ),
+          colorText(`  rmdir /S /Q "${temporaryManifest.directory}"`, "cyan"),
         );
       } else {
         console.log(
