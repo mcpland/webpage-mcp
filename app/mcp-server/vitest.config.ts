@@ -7,6 +7,7 @@ const shouldCollectCoverage = isCI && enforceCoverage;
 export default defineConfig({
   test: {
     environment: 'node',
+    globalSetup: ['./vitest.global-setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.spec.ts'],
     exclude: ['node_modules', 'dist', 'coverage'],
     coverage: {
