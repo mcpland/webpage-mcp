@@ -2411,7 +2411,17 @@
     } catch {}
   }
 
-  async function save() {
+  async function save(event) {
+    if (!event?.isTrusted) {
+      StateStore.set({
+        validation: {
+          status: 'failure',
+          message: 'Save requires a trusted user gesture',
+        },
+      });
+      return;
+    }
+
     try {
       const name = STATE.box?.querySelector('#__em_name')?.value?.trim();
       const selector = STATE.box?.querySelector('#__em_selector')?.textContent?.trim();
@@ -2428,6 +2438,7 @@
 
       await chrome.runtime.sendMessage({
         type: 'element_marker_save',
+        markerSessionId: STATE.markerSessionId,
         marker: {
           url,
           name: name || selector,

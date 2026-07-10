@@ -80,13 +80,7 @@ async function authorizeValidationTarget(
   sender: chrome.runtime.MessageSender,
 ): Promise<MarkerDocumentTarget> {
   if (sender.tab) {
-    const tabId = sender.tab.id;
-    const session = typeof tabId === 'number' ? markerSessions.get(tabId) : undefined;
-    if (!session || !isSenderBoundToSession(sender, session, request.markerSessionId)) {
-      throw new Error('marker session does not match the sender document');
-    }
-    await assertTargetIsCurrent(session);
-    return session;
+    return authorizeMarkerSessionSender(request.markerSessionId, sender);
   }
 
   if (!isExtensionPageSender(sender) || typeof request.tabId !== 'number') {
@@ -94,6 +88,51 @@ async function authorizeValidationTarget(
   }
 
   return getTopDocumentTarget(request.tabId);
+}
+
+async function authorizeMarkerSessionSender(
+  sessionId: unknown,
+  sender: chrome.runtime.MessageSender,
+): Promise<MarkerSession> {
+  const tabId = sender.tab?.id;
+  const session = typeof tabId === 'number' ? markerSessions.get(tabId) : undefined;
+  if (!session || !isSenderBoundToSession(sender, session, sessionId)) {
+    throw new Error('marker session does not match the sender document');
+  }
+  await assertTargetIsCurrent(session);
+  return session;
+}
+
+function assertExtensionPageMarkerAccess(sender: chrome.runtime.MessageSender): void {
+  if (!isExtensionPageSender(sender)) {
+    throw new Error('marker management requires an extension page');
+  }
+}
+
+function normalizeDocumentUrl(raw: unknown): string | undefined {
+  if (typeof raw !== 'string' || !raw) return undefined;
+  try {
+    const url = new URL(raw);
+    url.hash = '';
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
+async function authorizeMarkerSave(
+  request: { markerSessionId?: unknown },
+  marker: UpsertMarkerRequest,
+  sender: chrome.runtime.MessageSender,
+): Promise<void> {
+  if (isExtensionPageSender(sender)) return;
+
+  await authorizeMarkerSessionSender(request.markerSessionId, sender);
+  const markerUrl = normalizeDocumentUrl(marker?.url);
+  const senderUrl = normalizeDocumentUrl(sender.url);
+  if (!markerUrl || markerUrl !== senderUrl) {
+    throw new Error('marker URL does not match the sender document');
+  }
 }
 
 /**
@@ -244,12 +283,14 @@ export function initElementMarkerListeners() {
           return false;
         }
         case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_ALL: {
+          assertExtensionPageMarkerAccess(sender);
           listAllMarkers()
             .then((markers) => sendResponse({ success: true, markers }))
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_FOR_URL: {
+          assertExtensionPageMarkerAccess(sender);
           const url = String(message.url || '');
           listMarkersForUrl(url)
             .then((markers) => sendResponse({ success: true, markers }))
@@ -258,12 +299,14 @@ export function initElementMarkerListeners() {
         }
         case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_SAVE: {
           const req = message.marker as UpsertMarkerRequest;
-          saveMarker(req)
+          authorizeMarkerSave(message, req, sender)
+            .then(() => saveMarker(req))
             .then((marker) => sendResponse({ success: true, marker }))
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_UPDATE: {
+          assertExtensionPageMarkerAccess(sender);
           const marker = message.marker as ElementMarker;
           updateMarker(marker)
             .then(() => sendResponse({ success: true }))
@@ -271,6 +314,7 @@ export function initElementMarkerListeners() {
           return true;
         }
         case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_DELETE: {
+          assertExtensionPageMarkerAccess(sender);
           const id = String(message.id || '');
           if (!id) {
             sendResponse({ success: false, error: 'invalid id' });

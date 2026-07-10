@@ -62,6 +62,12 @@ describe('Element Marker injected UI security', () => {
     expect(sendMessage).not.toHaveBeenCalled();
     expect(shadow?.textContent).toContain('Execute requires a trusted user gesture');
 
+    (shadow?.querySelector('#__em_save') as HTMLButtonElement | null)?.click();
+    await Promise.resolve();
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(shadow?.textContent).toContain('Save requires a trusted user gesture');
+
     (shadow?.querySelector('#__em_close') as HTMLButtonElement | null)?.click();
   });
 });

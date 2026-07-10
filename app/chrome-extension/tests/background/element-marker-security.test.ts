@@ -67,6 +67,11 @@ describe('Element Marker target authorization', () => {
     toolMocks.computerExecute.mockResolvedValue({ isError: false, content: [] });
     toolMocks.clickExecute.mockResolvedValue({ isError: false, content: [] });
     toolMocks.keyboardExecute.mockResolvedValue({ isError: false, content: [] });
+    storageMocks.listAllMarkers.mockResolvedValue([]);
+    storageMocks.listMarkersForUrl.mockResolvedValue([]);
+    storageMocks.saveMarker.mockResolvedValue({ id: 'saved-marker' });
+    storageMocks.updateMarker.mockResolvedValue(undefined);
+    storageMocks.deleteMarker.mockResolvedValue(undefined);
 
     vi.stubGlobal('chrome', {
       runtime: {
@@ -124,11 +129,7 @@ describe('Element Marker target authorization', () => {
   async function startMarker(tabId = 7): Promise<void> {
     const response = await dispatch(
       { type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_START, tabId },
-      {
-        id: 'test-extension-id',
-        url: 'chrome-extension://test-extension-id/popup.html',
-        origin: 'chrome-extension://test-extension-id',
-      },
+      extensionSender(),
     );
     expect(response).toMatchObject({ success: true });
     expect(markerSessionId).not.toBe('');
@@ -144,6 +145,109 @@ describe('Element Marker target authorization', () => {
       origin: `https://tab-${tabId}.example`,
     };
   }
+
+  function extensionSender(): chrome.runtime.MessageSender {
+    return {
+      id: 'test-extension-id',
+      url: 'chrome-extension://test-extension-id/popup.html',
+      origin: 'chrome-extension://test-extension-id',
+    };
+  }
+
+  it('restricts marker management to extension pages', async () => {
+    const sender = markerSender();
+    const messages = [
+      { type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_ALL },
+      { type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_FOR_URL, url: sender.url },
+      {
+        type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_UPDATE,
+        marker: { id: 'marker-id' },
+      },
+      { type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_DELETE, id: 'marker-id' },
+    ];
+
+    for (const message of messages) {
+      await expect(dispatch(message, sender)).resolves.toMatchObject({
+        success: false,
+        error: expect.stringContaining('extension page'),
+      });
+    }
+
+    expect(storageMocks.listAllMarkers).not.toHaveBeenCalled();
+    expect(storageMocks.listMarkersForUrl).not.toHaveBeenCalled();
+    expect(storageMocks.updateMarker).not.toHaveBeenCalled();
+    expect(storageMocks.deleteMarker).not.toHaveBeenCalled();
+  });
+
+  it('allows extension pages to manage markers', async () => {
+    const sender = extensionSender();
+
+    await expect(
+      dispatch({ type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_ALL }, sender),
+    ).resolves.toMatchObject({ success: true, markers: [] });
+    await expect(
+      dispatch(
+        {
+          type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_SAVE,
+          marker: { url: 'https://example.test/', name: 'Example', selector: '#example' },
+        },
+        sender,
+      ),
+    ).resolves.toMatchObject({ success: true });
+    await expect(
+      dispatch(
+        {
+          type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_UPDATE,
+          marker: { id: 'marker-id' },
+        },
+        sender,
+      ),
+    ).resolves.toMatchObject({ success: true });
+    await expect(
+      dispatch({ type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_DELETE, id: 'marker-id' }, sender),
+    ).resolves.toMatchObject({ success: true });
+
+    expect(storageMocks.listAllMarkers).toHaveBeenCalledOnce();
+    expect(storageMocks.saveMarker).toHaveBeenCalledOnce();
+    expect(storageMocks.updateMarker).toHaveBeenCalledOnce();
+    expect(storageMocks.deleteMarker).toHaveBeenCalledOnce();
+  });
+
+  it('requires a document-bound session and URL for in-page saves', async () => {
+    const marker = {
+      url: 'https://tab-7.example/',
+      name: 'Transfer',
+      selector: '#transfer',
+    };
+
+    await expect(
+      dispatch(
+        { type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_SAVE, marker },
+        markerSender(),
+      ),
+    ).resolves.toMatchObject({ success: false, error: expect.stringContaining('session') });
+
+    await startMarker(7);
+    await expect(
+      dispatch(
+        {
+          type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_SAVE,
+          markerSessionId,
+          marker: { ...marker, url: 'https://other.example/' },
+        },
+        markerSender(),
+      ),
+    ).resolves.toMatchObject({ success: false, error: expect.stringContaining('URL') });
+    await expect(
+      dispatch(
+        { type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_SAVE, markerSessionId, marker },
+        markerSender(),
+      ),
+    ).resolves.toMatchObject({ success: true });
+
+    expect(storageMocks.saveMarker).toHaveBeenCalledOnce();
+    expect(storageMocks.saveMarker).toHaveBeenCalledWith(marker);
+  });
 
   it('keeps validation on the sender tab when another tab becomes active', async () => {
     await startMarker(7);
