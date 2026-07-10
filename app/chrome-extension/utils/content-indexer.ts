@@ -26,7 +26,11 @@ export class ContentIndexer {
   private isInitialized = false;
   private isInitializing = false;
   private initPromise: Promise<void> | null = null;
-  private indexedPages = new Set<string>();
+  /** Last successfully indexed page identity for each live tab. */
+  private indexedPageByTab = new Map<number, string>();
+  /** Serialize index/remove work per tab so navigation cannot race an in-flight index. */
+  private tabIndexOperations = new Map<number, Promise<void>>();
+  private tabEventListenersInitialized = false;
   private readonly options: Required<IndexingOptions>;
 
   constructor(options?: IndexingOptions) {
@@ -140,61 +144,71 @@ export class ContentIndexer {
       await this.initialize();
     }
 
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      if (!tab.url || !this.shouldIndexUrl(tab.url)) {
-        console.log(`ContentIndexer: Skipping tab ${tabId} - URL not indexable`);
-        return;
-      }
-
-      const pageKey = `${tab.url}_${tab.title}`;
-      if (this.options.skipDuplicates && this.indexedPages.has(pageKey)) {
-        console.log(`ContentIndexer: Skipping tab ${tabId} - already indexed`);
-        return;
-      }
-
-      console.log(`ContentIndexer: Starting to index tab ${tabId}: ${tab.title}`);
-
-      const content = await this.extractTabContent(tabId);
-      if (!content) {
-        console.log(`ContentIndexer: No content extracted from tab ${tabId}`);
-        return;
-      }
-
-      const chunks = this.textChunker.chunkText(content.textContent, content.title);
-      console.log(`ContentIndexer: Generated ${chunks.length} chunks for tab ${tabId}`);
-
-      const chunksToIndex = chunks.slice(0, this.options.maxChunksPerPage);
-      if (chunks.length > this.options.maxChunksPerPage) {
-        console.log(
-          `ContentIndexer: Limited chunks from ${chunks.length} to ${this.options.maxChunksPerPage}`,
-        );
-      }
-
-      for (const chunk of chunksToIndex) {
-        try {
-          const embedding = await this.semanticEngine.getEmbedding(chunk.text);
-          const label = await this.vectorDatabase.addDocument(
-            tabId,
-            tab.url!,
-            tab.title || '',
-            chunk,
-            embedding,
-          );
-          console.log(`ContentIndexer: Indexed chunk ${chunk.index} with label ${label}`);
-        } catch (error) {
-          console.error(`ContentIndexer: Failed to index chunk ${chunk.index}:`, error);
+    return this.runTabIndexOperation(tabId, async () => {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab.url || !this.shouldIndexUrl(tab.url)) {
+          console.log(`ContentIndexer: Skipping tab ${tabId} - URL not indexable`);
+          return;
         }
+
+        const pageKey = `${tab.url}\u0000${tab.title || ''}`;
+        const indexedPageKey = this.indexedPageByTab.get(tabId);
+        if (this.options.skipDuplicates && indexedPageKey === pageKey) {
+          console.log(`ContentIndexer: Skipping tab ${tabId} - already indexed`);
+          return;
+        }
+
+        // The navigation listener normally removes the previous page first. This
+        // fallback also keeps the tab index coherent if that event was missed.
+        if (indexedPageKey && indexedPageKey !== pageKey) {
+          await this.vectorDatabase.removeTabDocuments(tabId);
+          this.indexedPageByTab.delete(tabId);
+        }
+
+        console.log(`ContentIndexer: Starting to index tab ${tabId}: ${tab.title}`);
+
+        const content = await this.extractTabContent(tabId);
+        if (!content) {
+          console.log(`ContentIndexer: No content extracted from tab ${tabId}`);
+          return;
+        }
+
+        const chunks = this.textChunker.chunkText(content.textContent, content.title);
+        console.log(`ContentIndexer: Generated ${chunks.length} chunks for tab ${tabId}`);
+
+        const chunksToIndex = chunks.slice(0, this.options.maxChunksPerPage);
+        if (chunks.length > this.options.maxChunksPerPage) {
+          console.log(
+            `ContentIndexer: Limited chunks from ${chunks.length} to ${this.options.maxChunksPerPage}`,
+          );
+        }
+
+        for (const chunk of chunksToIndex) {
+          try {
+            const embedding = await this.semanticEngine.getEmbedding(chunk.text);
+            const label = await this.vectorDatabase.addDocument(
+              tabId,
+              tab.url!,
+              tab.title || '',
+              chunk,
+              embedding,
+            );
+            console.log(`ContentIndexer: Indexed chunk ${chunk.index} with label ${label}`);
+          } catch (error) {
+            console.error(`ContentIndexer: Failed to index chunk ${chunk.index}:`, error);
+          }
+        }
+
+        this.indexedPageByTab.set(tabId, pageKey);
+
+        console.log(
+          `ContentIndexer: Successfully indexed ${chunksToIndex.length} chunks for tab ${tabId}`,
+        );
+      } catch (error) {
+        console.error(`ContentIndexer: Failed to index tab ${tabId}:`, error);
       }
-
-      this.indexedPages.add(pageKey);
-
-      console.log(
-        `ContentIndexer: Successfully indexed ${chunksToIndex.length} chunks for tab ${tabId}`,
-      );
-    } catch (error) {
-      console.error(`ContentIndexer: Failed to index tab ${tabId}:`, error);
-    }
+    });
   }
 
   /**
@@ -258,18 +272,29 @@ export class ContentIndexer {
       return;
     }
 
-    try {
-      await this.vectorDatabase.removeTabDocuments(tabId);
+    return this.runTabIndexOperation(tabId, async () => {
+      try {
+        await this.vectorDatabase.removeTabDocuments(tabId);
+        this.indexedPageByTab.delete(tabId);
 
-      for (const pageKey of this.indexedPages) {
-        if (pageKey.includes(`tab_${tabId}_`)) {
-          this.indexedPages.delete(pageKey);
-        }
+        console.log(`ContentIndexer: Removed index for tab ${tabId}`);
+      } catch (error) {
+        console.error(`ContentIndexer: Failed to remove index for tab ${tabId}:`, error);
       }
+    });
+  }
 
-      console.log(`ContentIndexer: Removed index for tab ${tabId}`);
-    } catch (error) {
-      console.error(`ContentIndexer: Failed to remove index for tab ${tabId}:`, error);
+  private async runTabIndexOperation(tabId: number, operation: () => Promise<void>): Promise<void> {
+    const previous = this.tabIndexOperations.get(tabId) || Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    this.tabIndexOperations.set(tabId, current);
+
+    try {
+      await current;
+    } finally {
+      if (this.tabIndexOperations.get(tabId) === current) {
+        this.tabIndexOperations.delete(tabId);
+      }
     }
   }
 
@@ -321,7 +346,7 @@ export class ContentIndexer {
 
     await this.performCompleteDataCleanupForModelSwitch();
 
-    this.indexedPages.clear();
+    this.indexedPageByTab.clear();
     console.log('ContentIndexer: Cleared indexed pages cache');
 
     try {
@@ -474,7 +499,7 @@ export class ContentIndexer {
 
     return {
       ...vectorStats,
-      indexedPages: this.indexedPages.size,
+      indexedPages: this.indexedPageByTab.size,
       isInitialized: this.isInitialized,
       semanticEngineReady: this.isSemanticEngineReady(),
       semanticEngineInitializing: this.isSemanticEngineInitializing(),
@@ -491,13 +516,18 @@ export class ContentIndexer {
 
     try {
       await this.vectorDatabase.clear();
-      this.indexedPages.clear();
+      this.indexedPageByTab.clear();
       console.log('ContentIndexer: All indexes cleared');
     } catch (error) {
       console.error('ContentIndexer: Failed to clear indexes:', error);
     }
   }
   private setupTabEventListeners(): void {
+    if (this.tabEventListenersInitialized) {
+      return;
+    }
+    this.tabEventListenersInitialized = true;
+
     chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       if (this.options.autoIndex && changeInfo.status === 'complete' && tab.url) {
         setTimeout(() => {
