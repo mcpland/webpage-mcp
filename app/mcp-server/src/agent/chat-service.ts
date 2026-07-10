@@ -94,6 +94,8 @@ export class AgentChatService {
    * Registry of currently running executions, keyed by sessionId + requestId.
    */
   private readonly runningExecutions = new Map<string, RunningExecution>();
+  /** Keys being prepared before their engine is registered in runningExecutions. */
+  private readonly reservedExecutionKeys = new Set<string>();
 
   constructor(options: AgentChatServiceOptions) {
     this.streamManager = options.streamManager;
@@ -126,6 +128,21 @@ export class AgentChatService {
     const engineInstruction = buildInstructionWithContext(trimmed, payload.context);
 
     const requestId = payload.requestId || randomUUID();
+    const runningKey = executionKey(sessionId, requestId);
+
+    return this.withExecutionReservation(runningKey, () =>
+      this.handleReservedAct(sessionId, payload, trimmed, engineInstruction, requestId, runningKey),
+    );
+  }
+
+  private async handleReservedAct(
+    sessionId: string,
+    payload: AgentActRequest,
+    trimmed: string,
+    engineInstruction: string,
+    requestId: string,
+    runningKey: string,
+  ): Promise<{ requestId: string }> {
     let projectId = payload.projectId;
     // Normalize empty string to undefined
     const rawDbSessionId =
@@ -172,7 +189,8 @@ export class AgentChatService {
     // Resolve engine name - session binding takes precedence
     let engineName: EngineName;
     if (dbSession) {
-      const sessionEngineName = typeof dbSession.engineName === 'string' ? dbSession.engineName.trim() : '';
+      const sessionEngineName =
+        typeof dbSession.engineName === 'string' ? dbSession.engineName.trim() : '';
       if (this.hasRegisteredEngine(sessionEngineName)) {
         engineName = sessionEngineName;
         // Validate cliPreference matches session engine
@@ -330,8 +348,21 @@ export class AgentChatService {
       },
     });
 
+    const abortController = new AbortController();
+    const execution: RunningExecution = {
+      requestId,
+      sessionId,
+      engineName,
+      abortController,
+      startedAt: new Date(),
+      cancelled: false,
+    };
+
     const ctx: EngineExecutionContext = {
       emit: (event: RealtimeEvent) => {
+        if (!this.isExecutionCurrent(execution)) {
+          return;
+        }
         this.streamManager.publish(event);
 
         if (!projectId) {
@@ -366,7 +397,11 @@ export class AgentChatService {
               ? msg.requestId
               : requestId;
 
-          if (!this.isExecutionActive(persistedSessionId, persistedRequestId)) {
+          if (
+            persistedSessionId !== execution.sessionId ||
+            persistedRequestId !== execution.requestId ||
+            !this.isExecutionCurrent(execution)
+          ) {
             return;
           }
 
@@ -392,18 +427,24 @@ export class AgentChatService {
       // Prefer session-level persistence over project-level
       persistClaudeSessionId: dbSessionId
         ? async (claudeSessionId: string) => {
-            await updateEngineSessionId(dbSessionId, claudeSessionId);
+            if (this.isExecutionCurrent(execution)) {
+              await updateEngineSessionId(dbSessionId, claudeSessionId);
+            }
           }
         : projectId
           ? async (claudeSessionId: string) => {
-              await updateProjectClaudeSessionId(projectId, claudeSessionId);
+              if (this.isExecutionCurrent(execution)) {
+                await updateProjectClaudeSessionId(projectId, claudeSessionId);
+              }
             }
           : undefined,
       // Callback to persist management info from system:init message
       // Only available when using session-level persistence
       persistManagementInfo: dbSessionId
         ? async (info) => {
-            await updateManagementInfo(dbSessionId, info);
+            if (this.isExecutionCurrent(execution)) {
+              await updateManagementInfo(dbSessionId, info);
+            }
           }
         : undefined,
     };
@@ -430,25 +471,12 @@ export class AgentChatService {
       codexConfig: engineName === 'codex' ? dbSession?.optionsConfig?.codexConfig : undefined,
     };
 
-    // Create abort controller for cancellation support
-    const abortController = new AbortController();
-
-    const runningKey = executionKey(sessionId, requestId);
-    if (this.runningExecutions.has(runningKey)) {
-      throw new Error('requestId is already active for this session');
-    }
-
-    // Register execution in the running executions registry
-    this.runningExecutions.set(runningKey, {
-      requestId,
-      sessionId,
-      engineName,
-      abortController,
-      startedAt: new Date(),
-    });
+    // Register only after request preparation succeeds. The reservation above
+    // prevents duplicate side effects while this work is in progress.
+    this.runningExecutions.set(runningKey, execution);
 
     // Fire-and-forget execution to keep HTTP handler fast.
-    void this.runEngine(engine, engineOptions, ctx, sessionId, requestId, abortController);
+    void this.runEngine(engine, engineOptions, ctx, execution);
 
     return { requestId };
   }
@@ -460,12 +488,13 @@ export class AgentChatService {
   cancelExecution(sessionId: string, requestId: string): boolean {
     const key = executionKey(sessionId, requestId);
     const execution = this.runningExecutions.get(key);
-    if (!execution) {
+    if (!execution || execution.cancelled) {
       return false;
     }
 
-    // Remove from registry first so late engine events are ignored.
-    this.runningExecutions.delete(key);
+    // Keep an identity tombstone until the old engine settles. This prevents
+    // immediate requestId reuse from being confused with late events/finally.
+    execution.cancelled = true;
 
     // Emit cancelled status
     this.streamManager.publish({
@@ -490,9 +519,9 @@ export class AgentChatService {
    */
   cancelSessionExecutions(sessionId: string): number {
     let cancelled = 0;
-    for (const [key, execution] of this.runningExecutions) {
-      if (execution.sessionId === sessionId) {
-        this.runningExecutions.delete(key);
+    for (const execution of this.runningExecutions.values()) {
+      if (execution.sessionId === sessionId && !execution.cancelled) {
+        execution.cancelled = true;
         execution.abortController.abort();
         cancelled++;
       }
@@ -516,7 +545,7 @@ export class AgentChatService {
    * Get list of running executions for diagnostics.
    */
   getRunningExecutions(): RunningExecution[] {
-    return Array.from(this.runningExecutions.values());
+    return Array.from(this.runningExecutions.values()).filter((execution) => !execution.cancelled);
   }
 
   private resolveEngineName(preference?: EngineName, projectPreferredCli?: EngineName): EngineName {
@@ -529,18 +558,34 @@ export class AgentChatService {
     return this.defaultEngineName;
   }
 
-  private isExecutionActive(sessionId: string, requestId: string): boolean {
-    return this.runningExecutions.has(executionKey(sessionId, requestId));
+  private isExecutionCurrent(execution: RunningExecution): boolean {
+    return (
+      !execution.cancelled &&
+      this.runningExecutions.get(executionKey(execution.sessionId, execution.requestId)) ===
+        execution
+    );
+  }
+
+  private async withExecutionReservation<T>(key: string, task: () => Promise<T>): Promise<T> {
+    if (this.reservedExecutionKeys.has(key) || this.runningExecutions.has(key)) {
+      throw new Error('requestId is already active for this session');
+    }
+
+    this.reservedExecutionKeys.add(key);
+    try {
+      return await task();
+    } finally {
+      this.reservedExecutionKeys.delete(key);
+    }
   }
 
   private async runEngine(
     engine: AgentEngine,
     options: EngineInitOptions,
     ctx: EngineExecutionContext,
-    sessionId: string,
-    requestId: string,
-    abortController: AbortController,
+    execution: RunningExecution,
   ): Promise<void> {
+    const { sessionId, requestId, abortController } = execution;
     try {
       // Check if already aborted before starting
       if (abortController.signal.aborted) {
@@ -600,8 +645,11 @@ export class AgentChatService {
         },
       });
     } finally {
-      // Always remove from running executions when done
-      this.runningExecutions.delete(executionKey(sessionId, requestId));
+      // Do not let an old execution delete a newer execution that reused the key.
+      const key = executionKey(sessionId, requestId);
+      if (this.runningExecutions.get(key) === execution) {
+        this.runningExecutions.delete(key);
+      }
     }
   }
 

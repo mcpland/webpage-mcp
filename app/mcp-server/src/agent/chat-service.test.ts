@@ -21,6 +21,10 @@ const sessionServiceMocks = vi.hoisted(() => ({
   touchSessionActivity: vi.fn(),
 }));
 
+const attachmentServiceMocks = vi.hoisted(() => ({
+  saveAttachment: vi.fn(),
+}));
+
 vi.mock('./project-service', () => projectServiceMocks);
 vi.mock('./message-service', () => messageServiceMocks);
 vi.mock('./session-service', async () => {
@@ -36,7 +40,7 @@ vi.mock('./session-service', async () => {
 });
 vi.mock('./attachment-service', () => ({
   attachmentService: {
-    saveAttachment: vi.fn(),
+    saveAttachment: attachmentServiceMocks.saveAttachment,
   },
 }));
 
@@ -288,13 +292,29 @@ describe('AgentChatService legacy session migration', () => {
       expect(service.getRunningExecutions()).toHaveLength(2);
     });
 
+    const persistedMessageCount = messageServiceMocks.createMessage.mock.calls.length;
+    const touchedProjectCount = projectServiceMocks.touchProjectActivity.mock.calls.length;
+    const savedAttachmentCount = attachmentServiceMocks.saveAttachment.mock.calls.length;
+
     await expect(
       service.handleAct(legacySession.id, {
         instruction: 'Duplicate run',
         dbSessionId: legacySession.id,
         requestId: 'shared-request-id',
+        attachments: [
+          {
+            type: 'image',
+            name: 'must-not-be-saved.png',
+            mimeType: 'image/png',
+            dataBase64: 'ZmFrZQ==',
+          },
+        ],
       }),
     ).rejects.toThrow('requestId is already active for this session');
+
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(persistedMessageCount);
+    expect(projectServiceMocks.touchProjectActivity).toHaveBeenCalledTimes(touchedProjectCount);
+    expect(attachmentServiceMocks.saveAttachment).toHaveBeenCalledTimes(savedAttachmentCount);
 
     expect(service.cancelExecution(legacySession.id, 'shared-request-id')).toBe(true);
     expect(service.cancelExecution(alternateSession.id, 'shared-request-id')).toBe(true);
@@ -341,9 +361,16 @@ describe('AgentChatService legacy session migration', () => {
       },
     };
 
+    const streamManager = new AgentStreamManager();
+    const streamedContents: string[] = [];
+    streamManager.addListener(legacySession.id, (event) => {
+      if (event.type === 'message' && event.data?.content) {
+        streamedContents.push(event.data.content);
+      }
+    });
     const service = new AgentChatService({
       engines: [claudeEngine],
-      streamManager: new AgentStreamManager(),
+      streamManager,
     });
 
     await service.handleAct(legacySession.id, {
@@ -368,5 +395,53 @@ describe('AgentChatService legacy session migration', () => {
         content: lateReply,
       }),
     );
+    expect(streamedContents).not.toContain(lateReply);
+  });
+
+  it('keeps a cancelled requestId reserved until the old engine settles', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+
+    let releaseCancelledRun: (() => void) | undefined;
+    let invocationCount = 0;
+    const claudeEngine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options) {
+        invocationCount += 1;
+        if (invocationCount > 1) return;
+        await new Promise<void>((resolve) => {
+          releaseCancelledRun = resolve;
+          options.signal?.addEventListener('abort', () => {}, { once: true });
+        });
+      },
+    };
+
+    const service = new AgentChatService({
+      engines: [claudeEngine],
+      streamManager: new AgentStreamManager(),
+    });
+    const payload = {
+      instruction: 'Run with a reusable id',
+      dbSessionId: legacySession.id,
+      requestId: 'req-reuse-after-cancel',
+    };
+
+    await service.handleAct(legacySession.id, payload);
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(1));
+
+    expect(service.cancelExecution(legacySession.id, payload.requestId)).toBe(true);
+    expect(service.getRunningExecutions()).toHaveLength(0);
+    await expect(service.handleAct(legacySession.id, payload)).rejects.toThrow(
+      'requestId is already active for this session',
+    );
+
+    releaseCancelledRun?.();
+    await vi.waitFor(async () => {
+      await expect(service.handleAct(legacySession.id, payload)).resolves.toEqual({
+        requestId: payload.requestId,
+      });
+    });
   });
 });

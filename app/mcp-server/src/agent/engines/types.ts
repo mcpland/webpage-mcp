@@ -127,4 +127,6 @@ export interface RunningExecution {
   engineName: EngineName;
   abortController: AbortController;
   startedAt: Date;
+  /** Cancellation tombstone retained until the engine has actually settled. */
+  cancelled?: boolean;
 }
