@@ -354,7 +354,7 @@ export interface CodexEngineConfig {
 export const CODEX_AUTO_INSTRUCTIONS = `Act autonomously without asking for confirmations.
 Use apply_patch to create and modify files directly in the current working directory (do not create subdirectories unless the user explicitly requests it).
 Use exec_command to run, build, and test as needed.
-You have full permissions. Keep taking concrete actions until the task is complete.
+Respect the configured sandbox and filesystem boundaries. Keep taking concrete actions until the task is complete.
 Respect the existing project structure when creating or modifying files.
 Prefer concise status updates over questions.`;
 

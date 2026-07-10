@@ -21,6 +21,23 @@ interface TodoListItem {
 }
 
 /**
+ * Build the CLI arguments that enforce the configured Codex sandbox.
+ *
+ * `codex exec` is non-interactive in this integration, so safe sandbox modes
+ * use `approval=never` while still keeping the filesystem sandbox enabled.
+ * The all-access bypass is only permitted when it was explicitly selected.
+ */
+export function buildCodexSandboxArgs(
+  config: Pick<CodexEngineConfig, 'sandboxMode'>,
+): string[] {
+  if (config.sandboxMode === 'danger-full-access') {
+    return ['--dangerously-bypass-approvals-and-sandbox'];
+  }
+
+  return ['--sandbox', config.sandboxMode, '--ask-for-approval', 'never'];
+}
+
+/**
  * CodexEngine integrates the Codex CLI as an AgentEngine implementation.
  *
  * The implementation is intentionally self-contained and does not persist messages;
@@ -103,12 +120,13 @@ export class CodexEngine implements AgentEngine {
       'exec',
       '--json',
       '--skip-git-repo-check',
-      '--dangerously-bypass-approvals-and-sandbox',
       '--color',
       'never',
       '--cd',
       repoPath,
     ];
+
+    args.push(...buildCodexSandboxArgs(resolvedConfig));
 
     // Add Codex configuration arguments
     args.push(...this.buildCodexConfigArgs(resolvedConfig));
