@@ -5,9 +5,11 @@ const mocks = vi.hoisted(() => ({
   chunkText: vi.fn(),
   clearAllVectorData: vi.fn(),
   clearVectorDatabase: vi.fn(),
+  commitTabPage: vi.fn(),
   getEmbedding: vi.fn(),
   getGlobalVectorDatabase: vi.fn(),
   ensureTabDocumentsRemoved: vi.fn(),
+  inspectTabPageState: vi.fn(),
   initializeEngine: vi.fn(),
   initializeVectorDatabase: vi.fn(),
   removeTabDocuments: vi.fn(),
@@ -62,9 +64,11 @@ describe("ContentIndexer tab/page lifecycle", () => {
   const vectorDatabase = {
     addDocument: mocks.addDocument,
     clear: mocks.clearVectorDatabase,
+    commitTabPage: mocks.commitTabPage,
     ensureTabDocumentsRemoved: mocks.ensureTabDocumentsRemoved,
     getStats: vi.fn(() => ({ totalDocuments: 0, totalTabs: 0, indexSize: 0 })),
     initialize: mocks.initializeVectorDatabase,
+    inspectTabPageState: mocks.inspectTabPageState,
     removeTabDocuments: mocks.removeTabDocuments,
   };
 
@@ -78,11 +82,16 @@ describe("ContentIndexer tab/page lifecycle", () => {
     ]);
     mocks.clearAllVectorData.mockResolvedValue(undefined);
     mocks.clearVectorDatabase.mockResolvedValue(undefined);
+    mocks.commitTabPage.mockResolvedValue(undefined);
     mocks.getEmbedding.mockResolvedValue(new Float32Array([1, 0, 0]));
     mocks.getGlobalVectorDatabase.mockResolvedValue(vectorDatabase);
     mocks.ensureTabDocumentsRemoved.mockResolvedValue(undefined);
     mocks.initializeEngine.mockResolvedValue(undefined);
     mocks.initializeVectorDatabase.mockResolvedValue(undefined);
+    mocks.inspectTabPageState.mockResolvedValue({
+      completedPages: [],
+      repairTabIds: [],
+    });
     mocks.removeTabDocuments.mockResolvedValue(undefined);
     mocks.resetGlobalVectorDatabase.mockResolvedValue(undefined);
 
@@ -117,6 +126,139 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(chrome.tabs.onUpdated.addListener).not.toHaveBeenCalled();
     expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
     expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("hydrates a completed page after restart and skips same-page extraction", async () => {
+    const completedPage = {
+      tabId: 12,
+      pageKey: "https://example.test/restored\u0000Restored",
+      url: "https://example.test/restored",
+      title: "Restored",
+      expectedCount: 2,
+    };
+    mocks.inspectTabPageState.mockResolvedValue({
+      completedPages: [completedPage],
+      repairTabIds: [],
+    });
+    pagesByTab.set(12, {
+      url: "https://example.test/restored",
+      title: "Restored",
+    });
+
+    const indexer = await createIndexer();
+    expect(indexer.getStats()).toMatchObject({
+      indexedPages: 1,
+      isInitialized: true,
+    });
+
+    await indexer.indexTabContent(12);
+
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+    expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(mocks.addDocument).not.toHaveBeenCalled();
+    expect(mocks.commitTabPage).not.toHaveBeenCalled();
+  });
+
+  it("durably removes a restored page before indexing and committing its replacement", async () => {
+    mocks.inspectTabPageState.mockResolvedValue({
+      completedPages: [
+        {
+          tabId: 13,
+          pageKey: "https://example.test/old\u0000Old",
+          url: "https://example.test/old",
+          title: "Old",
+          expectedCount: 1,
+        },
+      ],
+      repairTabIds: [],
+    });
+    pagesByTab.set(13, {
+      url: "https://example.test/new",
+      title: "New",
+    });
+    const indexer = await createIndexer();
+
+    await indexer.indexTabContent(13);
+
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(13);
+    expect(mocks.addDocument).toHaveBeenCalledWith(
+      13,
+      "https://example.test/new",
+      "New",
+      expect.any(Object),
+      expect.any(Float32Array),
+    );
+    expect(mocks.commitTabPage).toHaveBeenCalledWith(
+      13,
+      "https://example.test/new",
+      "New",
+    );
+    expect(
+      mocks.ensureTabDocumentsRemoved.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.addDocument.mock.invocationCallOrder[0]);
+    expect(mocks.addDocument.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.commitTabPage.mock.invocationCallOrder[0],
+    );
+    expect(indexer.getStats().indexedPages).toBe(1);
+  });
+
+  it("repairs incomplete persisted tabs before publishing restart state", async () => {
+    mocks.inspectTabPageState
+      .mockResolvedValueOnce({ completedPages: [], repairTabIds: [21] })
+      .mockResolvedValueOnce({ completedPages: [], repairTabIds: [] });
+
+    const indexer = await createIndexer();
+
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledOnce();
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(21);
+    expect(mocks.inspectTabPageState).toHaveBeenCalledTimes(2);
+    expect(indexer.getStats()).toMatchObject({
+      indexedPages: 0,
+      isInitialized: true,
+    });
+  });
+
+  it("keeps hydration empty when repair fails and retries the pending tab on initialization", async () => {
+    const completedPage = {
+      tabId: 22,
+      pageKey: "https://example.test/good\u0000Good",
+      url: "https://example.test/good",
+      title: "Good",
+      expectedCount: 1,
+    };
+    mocks.inspectTabPageState
+      .mockResolvedValueOnce({
+        completedPages: [completedPage],
+        repairTabIds: [23],
+      })
+      .mockResolvedValueOnce({
+        completedPages: [completedPage],
+        // The first failed attempt may have persisted the deletion but failed
+        // its readback. The in-memory pending set must still force the retry.
+        repairTabIds: [],
+      })
+      .mockResolvedValueOnce({
+        completedPages: [completedPage],
+        repairTabIds: [],
+      });
+    mocks.ensureTabDocumentsRemoved
+      .mockRejectedValueOnce(new Error("repair failed"))
+      .mockResolvedValueOnce(undefined);
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    await expect(indexer.initialize()).rejects.toThrow("repair failed");
+    expect(indexer.getStats()).toMatchObject({
+      indexedPages: 0,
+      isInitialized: false,
+    });
+
+    await expect(indexer.initialize()).resolves.toBeUndefined();
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledTimes(2);
+    expect(indexer.getStats()).toMatchObject({
+      indexedPages: 1,
+      isInitialized: true,
+    });
   });
 
   it("rechecks the live tab URL and never extracts non-HTTP content", async () => {
@@ -207,6 +349,35 @@ describe("ContentIndexer tab/page lifecycle", () => {
 
     await expect(indexer.indexTabContent(5)).resolves.toBeUndefined();
     expect(mocks.addDocument).toHaveBeenCalledTimes(4);
+    expect(indexer.getStats().indexedPages).toBe(1);
+  });
+
+  it("removes every chunk when the durable page completion commit fails", async () => {
+    pagesByTab.set(51, {
+      url: "https://example.test/commit-retry",
+      title: "Commit retry",
+    });
+    mocks.chunkText.mockReturnValue([
+      { text: "first", source: "content", index: 0, wordCount: 1 },
+      { text: "second", source: "content", index: 1, wordCount: 1 },
+    ]);
+    mocks.commitTabPage.mockRejectedValueOnce(
+      new Error("completion persistence failed"),
+    );
+    const indexer = await createIndexer();
+
+    await expect(indexer.indexTabContent(51)).rejects.toThrow(
+      "completion persistence failed",
+    );
+
+    expect(mocks.addDocument).toHaveBeenCalledTimes(2);
+    expect(mocks.commitTabPage).toHaveBeenCalledOnce();
+    expect(mocks.ensureTabDocumentsRemoved).toHaveBeenCalledWith(51);
+    expect(indexer.getStats().indexedPages).toBe(0);
+
+    await expect(indexer.indexTabContent(51)).resolves.toBeUndefined();
+    expect(mocks.addDocument).toHaveBeenCalledTimes(4);
+    expect(mocks.commitTabPage).toHaveBeenCalledTimes(2);
     expect(indexer.getStats().indexedPages).toBe(1);
   });
 

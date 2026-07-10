@@ -39,6 +39,27 @@ export interface VectorDatabaseClearOptions {
   persistIndex?: boolean;
 }
 
+interface PersistedTabPageCompletion {
+  pageKey: string;
+  url: string;
+  title: string;
+  labels: number[];
+  expectedCount: number;
+}
+
+export interface CompletedTabPageIdentity {
+  tabId: number;
+  pageKey: string;
+  url: string;
+  title: string;
+  expectedCount: number;
+}
+
+export interface TabPageStateInspection {
+  completedPages: CompletedTabPageIdentity[];
+  repairTabIds: number[];
+}
+
 interface PersistedVectorMappings {
   schemaVersion: number;
   revision: number;
@@ -47,6 +68,7 @@ interface PersistedVectorMappings {
   indexFileName: string;
   documents: Array<[number, VectorDocument]>;
   tabDocuments: Array<[number, number[]]>;
+  completedTabPages: Array<[number, PersistedTabPageCompletion]>;
   nextLabel: number;
 }
 
@@ -65,7 +87,7 @@ const DB_NAME = "VectorDatabaseStorage";
 const DB_VERSION = 1;
 const STORE_NAME = "documentMappings";
 const HNSW_DB_NAME = "/hnswlib-index";
-const VECTOR_MAPPING_SCHEMA_VERSION = 1;
+const VECTOR_MAPPING_SCHEMA_VERSION = 2;
 const MAX_HNSW_LABEL = 0xffffffff;
 const HNSW_INDEX_FILES = [
   "tab_content_index.dat",
@@ -268,6 +290,95 @@ function parsePersistedVectorMappings(
       reason: "not every document label belongs to exactly one tab",
     };
   }
+
+  if (
+    !Array.isArray(value.completedTabPages) ||
+    value.completedTabPages.length > tabDocuments.length
+  ) {
+    return {
+      status: "invalid",
+      reason: "completed page metadata is invalid",
+    };
+  }
+
+  const tabLabelsById = new Map(tabDocuments);
+  const completedTabPages: Array<[number, PersistedTabPageCompletion]> = [];
+  const completedTabs = new Set<number>();
+  for (const entry of value.completedTabPages) {
+    if (!Array.isArray(entry) || entry.length !== 2) {
+      return {
+        status: "invalid",
+        reason: "completed page entry is invalid",
+      };
+    }
+    const [tabId, rawCompletion] = entry;
+    const tabLabels = tabLabelsById.get(tabId as number);
+    if (
+      !isNonNegativeSafeInteger(tabId) ||
+      completedTabs.has(tabId) ||
+      !tabLabels ||
+      !isRecord(rawCompletion) ||
+      typeof rawCompletion.pageKey !== "string" ||
+      typeof rawCompletion.url !== "string" ||
+      typeof rawCompletion.title !== "string" ||
+      rawCompletion.pageKey !==
+        `${rawCompletion.url}\u0000${rawCompletion.title}` ||
+      !Array.isArray(rawCompletion.labels) ||
+      rawCompletion.labels.length === 0 ||
+      !isNonNegativeSafeInteger(rawCompletion.expectedCount) ||
+      rawCompletion.expectedCount === 0 ||
+      rawCompletion.expectedCount !== rawCompletion.labels.length ||
+      rawCompletion.labels.length !== tabLabels.length
+    ) {
+      return {
+        status: "invalid",
+        reason: "completed page data is invalid",
+      };
+    }
+
+    const tabLabelSet = new Set(tabLabels);
+    const completionLabels = new Set<number>();
+    for (const label of rawCompletion.labels) {
+      const document = documentsByLabel.get(label as number);
+      if (
+        !isNonNegativeSafeInteger(label) ||
+        completionLabels.has(label) ||
+        !tabLabelSet.has(label) ||
+        !document ||
+        document.tabId !== tabId ||
+        document.url !== rawCompletion.url ||
+        document.title !== rawCompletion.title
+      ) {
+        return {
+          status: "invalid",
+          reason: "completed page labels are inconsistent",
+        };
+      }
+      completionLabels.add(label);
+    }
+    if (
+      completionLabels.size !== tabLabelSet.size ||
+      tabLabels.some((label) => !completionLabels.has(label))
+    ) {
+      return {
+        status: "invalid",
+        reason: "completed page labels do not exactly match the tab",
+      };
+    }
+
+    completedTabs.add(tabId);
+    completedTabPages.push([
+      tabId,
+      {
+        pageKey: rawCompletion.pageKey,
+        url: rawCompletion.url,
+        title: rawCompletion.title,
+        labels: [...completionLabels].sort((left, right) => left - right),
+        expectedCount: rawCompletion.expectedCount,
+      },
+    ]);
+  }
+
   let maxLabel = -1;
   for (const label of documentsByLabel.keys()) {
     maxLabel = Math.max(maxLabel, label);
@@ -286,6 +397,7 @@ function parsePersistedVectorMappings(
       indexFileName: config.indexFileName,
       documents,
       tabDocuments,
+      completedTabPages,
       nextLabel: value.nextLabel,
     },
   };
@@ -807,6 +919,7 @@ export class VectorDatabase {
 
   private documents = new Map<number, VectorDocument>();
   private tabDocuments = new Map<number, Set<number>>();
+  private completedTabPages = new Map<number, PersistedTabPageCompletion>();
   private nextLabel = 0;
   private mappingRevision = 0;
   private mappingSaveQueue: Promise<void> = Promise.resolve();
@@ -856,6 +969,7 @@ export class VectorDatabase {
     this.index.setEfSearch(this.config.efSearch);
     this.documents.clear();
     this.tabDocuments.clear();
+    this.completedTabPages.clear();
     this.nextLabel = 0;
   }
 
@@ -868,6 +982,14 @@ export class VectorDatabase {
     this.tabDocuments.clear();
     for (const [tabId, labels] of mappingData.tabDocuments) {
       this.tabDocuments.set(tabId, new Set(labels));
+    }
+
+    this.completedTabPages.clear();
+    for (const [tabId, completion] of mappingData.completedTabPages) {
+      this.completedTabPages.set(tabId, {
+        ...completion,
+        labels: [...completion.labels],
+      });
     }
 
     this.nextLabel = mappingData.nextLabel;
@@ -1253,6 +1375,11 @@ export class VectorDatabase {
       }
       this.tabDocuments.get(tabId)!.add(label);
 
+      // A persisted chunk is not a restorable page. The completion marker is
+      // invalid from the first new chunk until commitTabPage() durably records
+      // the exact final label set.
+      this.completedTabPages.delete(tabId);
+
       // Save index and mappings
       await this.saveIndex();
       await this.saveDocumentMappings();
@@ -1326,6 +1453,7 @@ export class VectorDatabase {
   }
 
   private removeLabelFromMappings(label: number, tabId: number): void {
+    this.completedTabPages.delete(tabId);
     this.documents.delete(label);
     const labels = this.tabDocuments.get(tabId);
     if (!labels) return;
@@ -1581,6 +1709,11 @@ export class VectorDatabase {
     const documentLabels = Array.from(this.tabDocuments.get(tabId) ?? []);
     if (documentLabels.length === 0 && !forcePersistence) return;
 
+    // Even a failed/partial deletion must no longer be restorable as a
+    // complete page. Persisting this invalidation makes a later startup retry
+    // the durable removal instead of hydrating stale content.
+    this.completedTabPages.delete(tabId);
+
     const failures: Error[] = [];
     for (const label of documentLabels) {
       try {
@@ -1651,10 +1784,191 @@ export class VectorDatabase {
       lookup.value.documents.some(([, document]) => document.tabId === tabId) ||
       lookup.value.tabDocuments.some(
         ([persistedTabId]) => persistedTabId === tabId,
+      ) ||
+      lookup.value.completedTabPages.some(
+        ([persistedTabId]) => persistedTabId === tabId,
       )
     ) {
       throw new Error(`Persisted vector mappings still contain tab ${tabId}`);
     }
+  }
+
+  /**
+   * Persist the completion boundary for one fully indexed page. Only pages
+   * with this exact durable marker may be restored after a worker restart.
+   */
+  public async commitTabPage(
+    tabId: number,
+    url: string,
+    title: string,
+  ): Promise<void> {
+    if (!this.isInitialized) await this.initialize();
+    return this.enqueueMutation(() =>
+      this.commitTabPageInternal(tabId, url, title),
+    );
+  }
+
+  private async commitTabPageInternal(
+    tabId: number,
+    url: string,
+    title: string,
+  ): Promise<void> {
+    const labels = Array.from(this.tabDocuments.get(tabId) ?? []).sort(
+      (left, right) => left - right,
+    );
+    if (labels.length === 0) {
+      throw new Error(`Cannot commit an empty vector page for tab ${tabId}`);
+    }
+    for (const label of labels) {
+      const document = this.documents.get(label);
+      if (
+        !document ||
+        document.tabId !== tabId ||
+        document.url !== url ||
+        document.title !== title
+      ) {
+        throw new Error(
+          `Cannot commit mixed or inconsistent vector page for tab ${tabId}`,
+        );
+      }
+    }
+
+    const completion: PersistedTabPageCompletion = {
+      pageKey: `${url}\u0000${title}`,
+      url,
+      title,
+      labels,
+      expectedCount: labels.length,
+    };
+    this.completedTabPages.set(tabId, completion);
+    try {
+      const revision = await this.saveDocumentMappings();
+      await this.verifyTabPageCompletionInPersistedMappings(
+        tabId,
+        completion,
+        revision,
+      );
+    } catch (error) {
+      // Never expose or leave an unverified marker behind. Persisting the
+      // invalidation means a worker crash before the caller's full tab cleanup
+      // still restarts into repair, never a falsely completed page.
+      this.completedTabPages.delete(tabId);
+      try {
+        await this.saveDocumentMappings();
+      } catch (invalidationError) {
+        throw new AggregateError(
+          [
+            cleanupError("commit page completion", error),
+            cleanupError(
+              "persist failed page-completion invalidation",
+              invalidationError,
+            ),
+          ],
+          `Vector page completion for tab ${tabId} failed and its invalidation did not persist`,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async verifyTabPageCompletionInPersistedMappings(
+    tabId: number,
+    expected: PersistedTabPageCompletion,
+    expectedRevision: number,
+  ): Promise<void> {
+    const lookup = await this.lookupDocumentMappings();
+    if (lookup.status !== "found") {
+      throw new Error(
+        lookup.status === "invalid"
+          ? `Persisted vector mappings are invalid: ${lookup.reason}`
+          : "Persisted vector mappings are missing",
+      );
+    }
+    if (lookup.value.revision !== expectedRevision) {
+      throw new Error(
+        `Persisted vector mapping revision ${lookup.value.revision} does not match ${expectedRevision}`,
+      );
+    }
+    const persisted = lookup.value.completedTabPages.find(
+      ([persistedTabId]) => persistedTabId === tabId,
+    )?.[1];
+    if (
+      !persisted ||
+      persisted.pageKey !== expected.pageKey ||
+      persisted.url !== expected.url ||
+      persisted.title !== expected.title ||
+      persisted.expectedCount !== expected.expectedCount ||
+      persisted.labels.length !== expected.labels.length ||
+      persisted.labels.some((label, index) => label !== expected.labels[index])
+    ) {
+      throw new Error(
+        `Persisted vector mappings did not retain completion for tab ${tabId}`,
+      );
+    }
+  }
+
+  /**
+   * Return a defensive, stable snapshot suitable for restart hydration. Tabs
+   * without an exact completion marker are repair candidates, never pages.
+   */
+  public async inspectTabPageState(): Promise<TabPageStateInspection> {
+    if (!this.isInitialized) await this.initialize();
+    return this.enqueueMutation(() =>
+      Promise.resolve(this.inspectTabPageStateInternal()),
+    );
+  }
+
+  private inspectTabPageStateInternal(): TabPageStateInspection {
+    const completedPages: CompletedTabPageIdentity[] = [];
+    const repairTabs = new Set<number>();
+    const allTabIds = new Set([
+      ...this.tabDocuments.keys(),
+      ...this.completedTabPages.keys(),
+    ]);
+
+    for (const tabId of [...allTabIds].sort((left, right) => left - right)) {
+      const labels = Array.from(this.tabDocuments.get(tabId) ?? []).sort(
+        (left, right) => left - right,
+      );
+      const completion = this.completedTabPages.get(tabId);
+      if (labels.length === 0 || !completion) {
+        repairTabs.add(tabId);
+        continue;
+      }
+
+      const documents = labels.map((label) => this.documents.get(label));
+      const identityMatches = documents.every(
+        (document) =>
+          document?.tabId === tabId &&
+          document.url === completion.url &&
+          document.title === completion.title,
+      );
+      const labelsMatch =
+        completion.expectedCount === labels.length &&
+        completion.labels.length === labels.length &&
+        completion.labels.every((label, index) => label === labels[index]);
+      if (
+        !identityMatches ||
+        !labelsMatch ||
+        completion.pageKey !== `${completion.url}\u0000${completion.title}`
+      ) {
+        repairTabs.add(tabId);
+        continue;
+      }
+
+      completedPages.push({
+        tabId,
+        pageKey: completion.pageKey,
+        url: completion.url,
+        title: completion.title,
+        expectedCount: completion.expectedCount,
+      });
+    }
+
+    return {
+      completedPages,
+      repairTabIds: [...repairTabs].sort((left, right) => left - right),
+    };
   }
 
   /**
@@ -1794,6 +2108,7 @@ export class VectorDatabase {
 
     this.documents.clear();
     this.tabDocuments.clear();
+    this.completedTabPages.clear();
     this.nextLabel = 0;
 
     const failures: Error[] = [];
@@ -1999,6 +2314,7 @@ export class VectorDatabase {
       }
 
       // Remove from memory mapping
+      this.completedTabPages.delete(document.tabId);
       this.documents.delete(label);
 
       // Remove from tab mapping
@@ -2044,7 +2360,7 @@ export class VectorDatabase {
   private saveDocumentMappings(): Promise<number> {
     const snapshot: Pick<
       PersistedVectorMappings,
-      "documents" | "tabDocuments" | "nextLabel"
+      "documents" | "tabDocuments" | "completedTabPages" | "nextLabel"
     > = {
       documents: Array.from(
         this.documents.entries(),
@@ -2056,10 +2372,19 @@ export class VectorDatabase {
             embedding: new Float32Array(document.embedding),
           },
         ],
-      ),
-      tabDocuments: Array.from(this.tabDocuments.entries()).map(
-        ([tabId, labels]): [number, number[]] => [tabId, Array.from(labels)],
-      ),
+      ).sort(([left], [right]) => left - right),
+      tabDocuments: Array.from(this.tabDocuments.entries())
+        .map(([tabId, labels]): [number, number[]] => [
+          tabId,
+          Array.from(labels).sort((left, right) => left - right),
+        ])
+        .sort(([left], [right]) => left - right),
+      completedTabPages: Array.from(this.completedTabPages.entries())
+        .map(([tabId, completion]): [number, PersistedTabPageCompletion] => [
+          tabId,
+          { ...completion, labels: [...completion.labels] },
+        ])
+        .sort(([left], [right]) => left - right),
       nextLabel: this.nextLabel,
     };
 
@@ -2076,7 +2401,7 @@ export class VectorDatabase {
   private async persistDocumentMappingsSnapshot(
     snapshot: Pick<
       PersistedVectorMappings,
-      "documents" | "tabDocuments" | "nextLabel"
+      "documents" | "tabDocuments" | "completedTabPages" | "nextLabel"
     >,
   ): Promise<number> {
     const revision = this.mappingRevision + 1;

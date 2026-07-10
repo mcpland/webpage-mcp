@@ -332,13 +332,27 @@ function createMappingPayload({
     timestamp: 1,
   };
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision,
     updatedAt: revision,
     dimension,
     indexFileName,
     documents: withDocument ? [[0, document]] : [],
     tabDocuments: withDocument ? [[7, [0]]] : [],
+    completedTabPages: withDocument
+      ? [
+          [
+            7,
+            {
+              pageKey: `${document.url}\u0000${document.title}`,
+              url: document.url,
+              title: document.title,
+              labels: [0],
+              expectedCount: 1,
+            },
+          ],
+        ]
+      : [],
     nextLabel: withDocument ? 1 : 0,
   };
 }
@@ -711,6 +725,257 @@ describe("vector database cleanup", () => {
     });
   });
 
+  it("restores only a durably committed page and returns defensive stable identities", async () => {
+    const indexFileName = `completed-page-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const writer = new VectorDatabase({ dimension: 3, indexFileName });
+    await writer.initialize();
+    await writer.addDocument(
+      9,
+      "https://example.test/complete",
+      "Complete",
+      { text: "first", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    await writer.addDocument(
+      9,
+      "https://example.test/complete",
+      "Complete",
+      { text: "second", source: "content", index: 1, wordCount: 1 },
+      new Float32Array([0, 1, 0]),
+    );
+
+    await expect(writer.inspectTabPageState()).resolves.toEqual({
+      completedPages: [],
+      repairTabIds: [9],
+    });
+    await writer.commitTabPage(9, "https://example.test/complete", "Complete");
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      schemaVersion: 2,
+      completedTabPages: [
+        [
+          9,
+          {
+            pageKey: "https://example.test/complete\u0000Complete",
+            labels: [0, 1],
+            expectedCount: 2,
+          },
+        ],
+      ],
+    });
+
+    hnswMocks.setPopulateSnapshot([[indexFileName, 2]]);
+    const restarted = new VectorDatabase({ dimension: 3, indexFileName });
+    await restarted.initialize();
+    const inspection = await restarted.inspectTabPageState();
+    expect(inspection).toEqual({
+      completedPages: [
+        {
+          tabId: 9,
+          pageKey: "https://example.test/complete\u0000Complete",
+          url: "https://example.test/complete",
+          title: "Complete",
+          expectedCount: 2,
+        },
+      ],
+      repairTabIds: [],
+    });
+
+    inspection.completedPages[0].pageKey = "mutated";
+    inspection.repairTabIds.push(99);
+    await expect(restarted.inspectTabPageState()).resolves.toEqual({
+      completedPages: [
+        expect.objectContaining({
+          tabId: 9,
+          pageKey: "https://example.test/complete\u0000Complete",
+        }),
+      ],
+      repairTabIds: [],
+    });
+  });
+
+  it("invalidates a completed page as part of persisting its next chunk", async () => {
+    const indexFileName = `invalidate-page-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "first", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    await database.commitTabPage(7, "https://example.test/page", "Page");
+
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "new chunk", source: "content", index: 1, wordCount: 2 },
+      new Float32Array([0, 1, 0]),
+    );
+
+    await expect(database.inspectTabPageState()).resolves.toEqual({
+      completedPages: [],
+      repairTabIds: [7],
+    });
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      tabDocuments: [[7, [0, 1]]],
+      completedTabPages: [],
+    });
+  });
+
+  it("classifies and durably removes an uncommitted page after a database restart", async () => {
+    const indexFileName = `partial-restart-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const interruptedWorker = new VectorDatabase({
+      dimension: 3,
+      indexFileName,
+    });
+    await interruptedWorker.initialize();
+    await interruptedWorker.addDocument(
+      17,
+      "https://example.test/interrupted",
+      "Interrupted",
+      { text: "partial", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+
+    hnswMocks.setPopulateSnapshot([[indexFileName, 1]]);
+    const restartedWorker = new VectorDatabase({
+      dimension: 3,
+      indexFileName,
+    });
+    await restartedWorker.initialize();
+    await expect(restartedWorker.inspectTabPageState()).resolves.toEqual({
+      completedPages: [],
+      repairTabIds: [17],
+    });
+
+    await restartedWorker.ensureTabDocumentsRemoved(17);
+    await expect(restartedWorker.inspectTabPageState()).resolves.toEqual({
+      completedPages: [],
+      repairTabIds: [],
+    });
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      documents: [],
+      tabDocuments: [],
+      completedTabPages: [],
+      nextLabel: 1,
+    });
+  });
+
+  it("serializes inspection behind an in-flight chunk persistence", async () => {
+    const indexFileName = `inspect-queue-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    hnswMocks.setAutoCompleteWriteSync(false);
+
+    const add = database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    await vi.waitFor(() => expect(hnswMocks.pendingWriteSyncs).toHaveLength(1));
+    let inspectionSettled = false;
+    const inspection = database.inspectTabPageState().finally(() => {
+      inspectionSettled = true;
+    });
+    await Promise.resolve();
+    expect(inspectionSettled).toBe(false);
+
+    hnswMocks.completeNextWriteSync();
+    await expect(add).resolves.toBe(0);
+    await expect(inspection).resolves.toEqual({
+      completedPages: [],
+      repairTabIds: [7],
+    });
+  });
+
+  it("rejects mixed page commit and classifies incomplete mixed mappings for repair", async () => {
+    const indexFileName = `mixed-page-${crypto.randomUUID()}.dat`;
+    const mapping = createMappingPayload({ dimension: 3, indexFileName });
+    const firstDocument = (mapping as any).documents[0][1];
+    const secondDocument = {
+      ...firstDocument,
+      id: "tab_7_chunk_1_2",
+      url: "https://example.test/other",
+      title: "Other",
+      chunk: { ...firstDocument.chunk, index: 1 },
+    };
+    (mapping as any).documents.push([1, secondDocument]);
+    mapping.tabDocuments = [[7, [0, 1]]];
+    mapping.completedTabPages = [];
+    mapping.nextLabel = 2;
+    await putVectorMappingRecord(indexFileName, mapping);
+    useStatefulChromeStorage();
+    hnswMocks.setPopulateSnapshot([[indexFileName, 2]]);
+
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await expect(database.inspectTabPageState()).resolves.toEqual({
+      completedPages: [],
+      repairTabIds: [7],
+    });
+    await expect(
+      database.commitTabPage(7, "https://example.test/private", "Private"),
+    ).rejects.toThrow("mixed or inconsistent");
+    await database.ensureTabDocumentsRemoved(7);
+    await expect(database.inspectTabPageState()).resolves.toEqual({
+      completedPages: [],
+      repairTabIds: [],
+    });
+  });
+
+  it("drops an unverified completion marker after commit persistence fails", async () => {
+    const indexFileName = `commit-failure-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    await database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    const transactionSpy = await abortNextVectorMappingWrite();
+    const statefulSet = chrome.storage.local.set;
+    let rejectFallbackOnce = true;
+    chrome.storage.local.set = vi.fn(async (values) => {
+      if (rejectFallbackOnce) {
+        rejectFallbackOnce = false;
+        throw new Error("commit fallback failed");
+      }
+      await statefulSet(values);
+    }) as typeof chrome.storage.local.set;
+
+    try {
+      await expect(
+        database.commitTabPage(7, "https://example.test/page", "Page"),
+      ).rejects.toThrow("Failed to save vector mappings");
+      await expect(database.inspectTabPageState()).resolves.toEqual({
+        completedPages: [],
+        repairTabIds: [7],
+      });
+      await expect(
+        getVectorMappingRecord(indexFileName),
+      ).resolves.toMatchObject({
+        tabDocuments: [[7, [0]]],
+        completedTabPages: [],
+      });
+      await expect(
+        database.ensureTabDocumentsRemoved(7),
+      ).resolves.toBeUndefined();
+    } finally {
+      transactionSpy.mockRestore();
+    }
+  });
+
   it("removes and verifies a stale fallback after the primary mapping commit", async () => {
     const indexFileName = `primary-${crypto.randomUUID()}.dat`;
     const storageKey = `hnswlib_document_mappings_${indexFileName}`;
@@ -734,7 +999,7 @@ describe("vector database cleanup", () => {
     expect(storage).not.toHaveProperty(storageKey);
     expect(chrome.storage.local.remove).toHaveBeenCalledWith([storageKey]);
     await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       revision: 1,
       dimension: 3,
       documents: [[0, expect.objectContaining({ tabId: 7 })]],
@@ -1018,6 +1283,13 @@ describe("vector database cleanup", () => {
       },
     },
     {
+      name: "legacy metadata without page completion semantics",
+      mutate: (mapping: any) => {
+        mapping.schemaVersion = 1;
+        delete mapping.completedTabPages;
+      },
+    },
+    {
       name: "metadata for another vector dimension",
       mutate: (mapping: any) => {
         mapping.dimension = 2;
@@ -1049,6 +1321,43 @@ describe("vector database cleanup", () => {
         mapping.documents[0][1].timestamp = Number.NaN;
       },
     },
+    {
+      name: "metadata without completed-page collection",
+      mutate: (mapping: any) => {
+        delete mapping.completedTabPages;
+      },
+    },
+    {
+      name: "completed metadata for a missing tab",
+      mutate: (mapping: any) => {
+        mapping.completedTabPages[0][0] = 99;
+      },
+    },
+    {
+      name: "completed metadata with an empty label set",
+      mutate: (mapping: any) => {
+        mapping.completedTabPages[0][1].labels = [];
+        mapping.completedTabPages[0][1].expectedCount = 0;
+      },
+    },
+    {
+      name: "completed metadata with a mismatched expected count",
+      mutate: (mapping: any) => {
+        mapping.completedTabPages[0][1].expectedCount = 2;
+      },
+    },
+    {
+      name: "completed metadata with a forged page key",
+      mutate: (mapping: any) => {
+        mapping.completedTabPages[0][1].pageKey = "forged";
+      },
+    },
+    {
+      name: "completed metadata whose document identity differs",
+      mutate: (mapping: any) => {
+        mapping.documents[0][1].url = "https://example.test/different";
+      },
+    },
   ])(
     "refuses $name before readIndex and replaces it with safe empty metadata",
     async ({ mutate }) => {
@@ -1074,7 +1383,7 @@ describe("vector database cleanup", () => {
       await expect(
         getVectorMappingRecord(indexFileName),
       ).resolves.toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         revision: 1,
         dimension: 3,
         indexFileName,

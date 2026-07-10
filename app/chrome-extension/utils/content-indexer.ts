@@ -337,11 +337,43 @@ export class ContentIndexer {
       });
       await this.vectorDatabase.initialize();
 
+      // A worker restart may find chunk mappings persisted before the page's
+      // final completion commit. Repair every such tab before exposing search,
+      // stats, or a duplicate-page cache, then hydrate all completed pages as
+      // one snapshot so initialization cannot publish a partial view.
+      this.indexedPageByTab.clear();
+      const initialInspection = await this.vectorDatabase.inspectTabPageState();
+      const tabsToRepair = new Set([
+        ...this.tabsRequiringDurableRemoval,
+        ...initialInspection.repairTabIds,
+      ]);
+      for (const tabId of [...tabsToRepair].sort(
+        (left, right) => left - right,
+      )) {
+        this.tabsRequiringDurableRemoval.add(tabId);
+        await this.vectorDatabase.ensureTabDocumentsRemoved(tabId);
+        this.tabsRequiringDurableRemoval.delete(tabId);
+      }
+
+      const repairedInspection =
+        await this.vectorDatabase.inspectTabPageState();
+      if (repairedInspection.repairTabIds.length > 0) {
+        throw new Error(
+          `Semantic page repair did not complete for tabs ${repairedInspection.repairTabIds.join(", ")}`,
+        );
+      }
+      const hydratedPages = new Map<number, string>();
+      for (const page of repairedInspection.completedPages) {
+        hydratedPages.set(page.tabId, page.pageKey);
+      }
+      this.indexedPageByTab = hydratedPages;
+
       this.setupTabEventListeners();
 
       this.isInitialized = true;
     } catch (error) {
       console.error("ContentIndexer: Initialization failed:", error);
+      this.indexedPageByTab.clear();
       this.isInitialized = false;
       throw error;
     }
@@ -467,6 +499,11 @@ export class ContentIndexer {
               `ContentIndexer: Indexed chunk ${chunk.index} with label ${label}`,
             );
           }
+          await this.vectorDatabase.commitTabPage(
+            tabId,
+            tab.url!,
+            tab.title || "",
+          );
         } catch (error) {
           this.indexedPageByTab.delete(tabId);
           this.tabsRequiringDurableRemoval.add(tabId);
