@@ -57,6 +57,21 @@ const MAX_ACTIVE_REQUESTS_PER_DOCUMENT = 1;
 /** Global safety bound for MV3 timers, keepalives, listeners, and subscriptions. */
 const MAX_ACTIVE_REQUESTS = 32;
 
+export const QUICK_PANEL_AGENT_LIMITS = Object.freeze({
+  maxInstructionBytes: 32 * 1_024,
+  maxPageUrlBytes: 4 * 1_024,
+  maxSelectedTextBytes: 16 * 1_024,
+  maxElementInfoBytes: 32 * 1_024,
+  maxContextBytes: 64 * 1_024,
+  maxContextDepth: 12,
+  maxContextValues: 512,
+  maxContainerEntries: 128,
+  maxContextKeyBytes: 128,
+  maxContextStringBytes: 16 * 1_024,
+  maxIdentifierBytes: 256,
+  maxErrorBytes: 4 * 1_024,
+});
+
 /** Flag indicating SSE connection timed out but we should continue */
 const SSE_TIMEOUT = Symbol('SSE_TIMEOUT');
 
@@ -107,25 +122,148 @@ function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function readBoundedString(value: unknown, label: string, maxBytes: number): string {
+  if (typeof value !== 'string') return '';
+  if (value.length > maxBytes || utf8Length(value) > maxBytes) {
+    throw new Error(`${label} exceeds the ${maxBytes}-byte limit`);
+  }
+  return value.trim();
+}
+
+function truncateOutputString(value: unknown, maxBytes: number): string {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  if (text.length <= maxBytes && utf8Length(text) <= maxBytes) return text;
+  const encoded = new TextEncoder().encode(text.slice(0, maxBytes));
+  return new TextDecoder().decode(encoded.slice(0, maxBytes));
+}
+
+interface JsonCloneBudget {
+  values: number;
+  bytes: number;
+  seen: WeakSet<object>;
+}
+
+function cloneBoundedContextValue(
+  value: unknown,
+  label: string,
+  budget: JsonCloneBudget,
+  depth = 0,
+): unknown {
+  budget.values += 1;
+  if (budget.values > QUICK_PANEL_AGENT_LIMITS.maxContextValues) {
+    throw new Error(`${label} contains too many values`);
+  }
+  if (depth > QUICK_PANEL_AGENT_LIMITS.maxContextDepth) {
+    throw new Error(`${label} exceeds the nesting depth limit`);
+  }
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error(`${label} contains a non-finite number`);
+    return value;
+  }
+  if (typeof value === 'string') {
+    if (
+      value.length > QUICK_PANEL_AGENT_LIMITS.maxContextStringBytes ||
+      utf8Length(value) > QUICK_PANEL_AGENT_LIMITS.maxContextStringBytes
+    ) {
+      throw new Error(`${label} contains an oversized string`);
+    }
+    budget.bytes += utf8Length(value);
+    if (budget.bytes > QUICK_PANEL_AGENT_LIMITS.maxElementInfoBytes) {
+      throw new Error(`${label} exceeds the byte limit`);
+    }
+    return value;
+  }
+  if (typeof value !== 'object') {
+    throw new Error(`${label} must contain only JSON values`);
+  }
+  if (budget.seen.has(value)) throw new Error(`${label} must not contain cycles`);
+  budget.seen.add(value);
+
+  if (Array.isArray(value)) {
+    if (value.length > QUICK_PANEL_AGENT_LIMITS.maxContainerEntries) {
+      throw new Error(`${label} array exceeds the entry limit`);
+    }
+    const result = value.map((item) => cloneBoundedContextValue(item, label, budget, depth + 1));
+    budget.seen.delete(value);
+    return result;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error(`${label} must contain only plain objects`);
+  }
+  const entries = Object.entries(value);
+  if (entries.length > QUICK_PANEL_AGENT_LIMITS.maxContainerEntries) {
+    throw new Error(`${label} object exceeds the property limit`);
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of entries) {
+    if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
+      throw new Error(`${label} contains a forbidden property`);
+    }
+    if (
+      key.length > QUICK_PANEL_AGENT_LIMITS.maxContextKeyBytes ||
+      utf8Length(key) > QUICK_PANEL_AGENT_LIMITS.maxContextKeyBytes
+    ) {
+      throw new Error(`${label} contains an oversized property name`);
+    }
+    budget.bytes += utf8Length(key);
+    if (budget.bytes > QUICK_PANEL_AGENT_LIMITS.maxElementInfoBytes) {
+      throw new Error(`${label} exceeds the byte limit`);
+    }
+    result[key] = cloneBoundedContextValue(item, label, budget, depth + 1);
+  }
+  budget.seen.delete(value);
+  return result;
+}
+
 function normalizeQuickPanelContext(value: unknown): AgentActRequest['context'] | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
   }
 
   const raw = value as Record<string, unknown>;
-  const pageUrl = normalizeString(raw.pageUrl).trim();
-  const selectedText = normalizeString(raw.selectedText).trim();
-  const elementInfo = raw.elementInfo;
+  const pageUrl = readBoundedString(
+    raw.pageUrl,
+    'Quick Panel pageUrl',
+    QUICK_PANEL_AGENT_LIMITS.maxPageUrlBytes,
+  );
+  const selectedText = readBoundedString(
+    raw.selectedText,
+    'Quick Panel selectedText',
+    QUICK_PANEL_AGENT_LIMITS.maxSelectedTextBytes,
+  );
+  const elementInfo =
+    raw.elementInfo === undefined
+      ? undefined
+      : cloneBoundedContextValue(
+          raw.elementInfo,
+          'Quick Panel elementInfo',
+          { values: 0, bytes: 0, seen: new WeakSet() },
+        );
 
   if (!pageUrl && !selectedText && elementInfo === undefined) {
     return undefined;
   }
 
-  return {
+  const context = {
     ...(pageUrl ? { pageUrl } : {}),
     ...(selectedText ? { selectedText } : {}),
     ...(elementInfo !== undefined ? { elementInfo } : {}),
-  };
+  } as AgentActRequest['context'];
+  const encoded = JSON.stringify(context);
+  if (
+    encoded.length > QUICK_PANEL_AGENT_LIMITS.maxContextBytes ||
+    utf8Length(encoded) > QUICK_PANEL_AGENT_LIMITS.maxContextBytes
+  ) {
+    throw new Error('Quick Panel context exceeds the byte limit');
+  }
+  return context;
 }
 
 function createRequestId(): string {
@@ -158,7 +296,7 @@ function toPromise<T>(value: Promise<T> | T): Promise<T> {
 function createErrorEvent(sessionId: string, requestId: string, error: string): RealtimeEvent {
   return {
     type: 'error',
-    error: error || 'Unknown error',
+    error: truncateOutputString(error || 'Unknown error', QUICK_PANEL_AGENT_LIMITS.maxErrorBytes),
     data: { sessionId, requestId },
   };
 }
@@ -656,14 +794,22 @@ async function handleSendToAI(
     return { success: false, error: 'Quick Panel authorization is missing or expired.' };
   }
 
-  const instruction = normalizeString(message?.payload?.instruction).trim();
+  const instruction = readBoundedString(
+    message?.payload?.instruction,
+    'Quick Panel instruction',
+    QUICK_PANEL_AGENT_LIMITS.maxInstructionBytes,
+  );
   if (!instruction) {
     return { success: false, error: 'instruction is required' };
   }
   const context = normalizeQuickPanelContext(message?.payload?.context);
 
   const stored = await chrome.storage.local.get([STORAGE_KEY_SELECTED_SESSION]);
-  const sessionId = normalizeString(stored?.[STORAGE_KEY_SELECTED_SESSION]).trim();
+  const sessionId = readBoundedString(
+    stored?.[STORAGE_KEY_SELECTED_SESSION],
+    'Quick Panel sessionId',
+    QUICK_PANEL_AGENT_LIMITS.maxIdentifierBytes,
+  );
 
   if (!sessionId) {
     // No session selected: open sidepanel for user to select/create one
@@ -764,8 +910,16 @@ async function handleCancelAI(
     };
   }
 
-  const requestId = normalizeString(message?.payload?.requestId).trim();
-  const fallbackSessionId = normalizeString(message?.payload?.sessionId).trim();
+  const requestId = readBoundedString(
+    message?.payload?.requestId,
+    'Quick Panel requestId',
+    QUICK_PANEL_AGENT_LIMITS.maxIdentifierBytes,
+  );
+  const fallbackSessionId = readBoundedString(
+    message?.payload?.sessionId,
+    'Quick Panel sessionId',
+    QUICK_PANEL_AGENT_LIMITS.maxIdentifierBytes,
+  );
 
   if (!requestId) {
     return { success: false, error: 'requestId is required' };
@@ -840,7 +994,10 @@ export function initQuickPanelAgentHandler(): void {
       handleSendToAI(message as QuickPanelSendToAIMessage, sender)
         .then(sendResponse)
         .catch((err) => {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = truncateOutputString(
+            err instanceof Error ? err.message : err,
+            QUICK_PANEL_AGENT_LIMITS.maxErrorBytes,
+          );
           sendResponse({ success: false, error: msg || 'Unknown error' });
         });
       return true; // Async response
@@ -851,7 +1008,10 @@ export function initQuickPanelAgentHandler(): void {
       handleCancelAI(message as QuickPanelCancelAIMessage, sender)
         .then(sendResponse)
         .catch((err) => {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = truncateOutputString(
+            err instanceof Error ? err.message : err,
+            QUICK_PANEL_AGENT_LIMITS.maxErrorBytes,
+          );
           sendResponse({ success: false, error: msg || 'Unknown error' });
         });
       return true; // Async response
