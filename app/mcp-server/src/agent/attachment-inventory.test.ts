@@ -86,6 +86,7 @@ async function createRpcRuntime(prefix: string) {
     workspaceBase,
     dataDir,
     rootDir: attachmentService.getAttachmentsRootDir(),
+    attachmentService,
     dispatchAgentRpc,
   };
 }
@@ -176,6 +177,7 @@ describe('bounded attachment inventory service', () => {
       processedProjects: 5,
       failedProjects: 0,
       skippedProjects: 0,
+      countsTruncatedProjects: 5,
       resultCount: 2,
       resultsTruncated: true,
       enumerationTruncated: false,
@@ -384,10 +386,15 @@ describe('bounded attachment inventory RPCs', () => {
 
   it('processes all cleanup directories but caps results and response bytes', async () => {
     const runtime = await createRpcRuntime('attachment-cleanup-rpc-results');
+    (
+      runtime.attachmentService as unknown as {
+        maxProjectScanEntries: number;
+      }
+    ).maxProjectScanEntries = 1;
     await createProjectInventory(
       runtime.rootDir,
       AGENT_ATTACHMENT_CLEANUP_MAX_RESULTS + 5,
-      0,
+      2,
     );
 
     const logSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -406,6 +413,9 @@ describe('bounded attachment inventory RPCs', () => {
     expect(payload.resultCount).toBe(AGENT_ATTACHMENT_CLEANUP_MAX_RESULTS);
     expect(payload.resultsTruncated).toBe(true);
     expect(payload.enumerationTruncated).toBe(false);
+    expect(payload.countsTruncatedProjects).toBe(
+      AGENT_ATTACHMENT_CLEANUP_MAX_RESULTS + 5,
+    );
     expect(Buffer.byteLength(JSON.stringify(payload), 'utf8')).toBeLessThanOrEqual(
       AGENT_RPC_JSON_RESPONSE_MAX_BYTES,
     );

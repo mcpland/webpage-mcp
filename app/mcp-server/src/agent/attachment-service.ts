@@ -100,6 +100,8 @@ export interface CleanupResult {
   processedProjects: number;
   failedProjects: number;
   skippedProjects: number;
+  /** Projects whose removedFiles/removedBytes contributions are lower bounds. */
+  countsTruncatedProjects: number;
   resultCount: number;
   resultsTruncated: boolean;
   enumerationTruncated: boolean;
@@ -571,6 +573,7 @@ export class AttachmentService {
     let processedProjects = 0;
     let failedProjects = 0;
     let skippedProjects = 0;
+    let countsTruncatedProjects = 0;
     let resultsTruncated = false;
     const enumerationState = { truncated: false };
     const continueOnError = options.continueOnError ?? !normalized.selected;
@@ -590,6 +593,9 @@ export class AttachmentService {
         );
         totalRemovedFiles = saturatingAdd(totalRemovedFiles, result.removedFiles);
         totalRemovedBytes = saturatingAdd(totalRemovedBytes, result.removedBytes);
+        if (result.countsTruncated) {
+          countsTruncatedProjects = saturatingAdd(countsTruncatedProjects, 1);
+        }
         if (results.length < this.maxCleanupResults) results.push(result);
         else resultsTruncated = true;
       } catch (error) {
@@ -616,6 +622,7 @@ export class AttachmentService {
       processedProjects,
       failedProjects,
       skippedProjects,
+      countsTruncatedProjects,
       resultCount: results.length,
       resultsTruncated,
       enumerationTruncated: enumerationState.truncated,

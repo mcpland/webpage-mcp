@@ -560,6 +560,8 @@ export interface AttachmentCleanupResponse {
   processedProjects: number;
   failedProjects: number;
   skippedProjects: number;
+  /** Number of projects whose contributions make the removal totals lower bounds. */
+  countsTruncatedProjects: number;
   resultCount: number;
   resultsTruncated: boolean;
   /** True when the attachment-root iterator failed before reaching the end. */
