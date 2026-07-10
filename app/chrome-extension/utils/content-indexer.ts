@@ -236,7 +236,7 @@ export class ContentIndexer {
       const queryEmbedding = await this.semanticEngine.getEmbedding(query);
       const results = await this.vectorDatabase.search(queryEmbedding, topK);
 
-      console.log(`ContentIndexer: Found ${results.length} results for query: "${query}"`);
+      console.log(`ContentIndexer: Found ${results.length} search results`);
       return results;
     } catch (error) {
       console.error('ContentIndexer: Search failed:', error);
@@ -250,9 +250,7 @@ export class ContentIndexer {
           const queryEmbedding = await this.semanticEngine.getEmbedding(query);
           const results = await this.vectorDatabase.search(queryEmbedding, topK);
 
-          console.log(
-            `ContentIndexer: Retry successful, found ${results.length} results for query: "${query}"`,
-          );
+          console.log(`ContentIndexer: Retry successful, found ${results.length} results`);
           return results;
         } catch (retryError) {
           console.error('ContentIndexer: Retry after reinitialization also failed:', retryError);

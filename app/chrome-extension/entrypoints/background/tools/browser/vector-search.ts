@@ -58,7 +58,7 @@ class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
         );
       }
 
-      console.log(`VectorSearchTabsContentTool: Starting vector search with query: "${query}"`);
+      console.log('VectorSearchTabsContentTool: Starting vector search');
 
       // Check semantic engine status
       if (!this.contentIndexer.isSemanticEngineReady()) {
