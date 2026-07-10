@@ -11,7 +11,10 @@ import {
   type ChildProcessExit,
   shouldDetachChildProcess,
 } from './child-process-lifecycle';
-import { boundStreamText } from './stream-output';
+import {
+  createRedactedDiagnosticError,
+  redactDiagnosticText,
+} from './diagnostic-redaction';
 import { resolveTrustedExecutable } from './trusted-executable';
 
 /** Keep a single SDK stderr callback from retaining or logging an arbitrary payload. */
@@ -85,19 +88,30 @@ export function spawnSupervisedClaudeCodeProcess(
 ): SupervisedClaudeCodeProcess {
   const platform = supervisorOptions.platform ?? process.platform;
   const spawnProcess = supervisorOptions.spawnProcess ?? spawn;
-  const executable = resolveTrustedExecutable(spawnOptions.command, {
-    env: spawnOptions.env,
-    platform,
-    untrustedCwd: spawnOptions.cwd,
-  });
-  const child = spawnProcess(executable, [...spawnOptions.args], {
-    cwd: spawnOptions.cwd,
-    env: spawnOptions.env,
-    shell: false,
-    windowsHide: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: shouldDetachChildProcess(platform),
-  });
+  let executable: string;
+  try {
+    executable = resolveTrustedExecutable(spawnOptions.command, {
+      env: spawnOptions.env,
+      platform,
+      untrustedCwd: spawnOptions.cwd,
+    });
+  } catch (error) {
+    throw createRedactedDiagnosticError(error);
+  }
+
+  let child: ChildProcess;
+  try {
+    child = spawnProcess(executable, [...spawnOptions.args], {
+      cwd: spawnOptions.cwd,
+      env: spawnOptions.env,
+      shell: false,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: shouldDetachChildProcess(platform),
+    });
+  } catch (error) {
+    throw createRedactedDiagnosticError(error);
+  }
 
   let stdin: Writable;
   let stdout: Readable;
@@ -153,12 +167,12 @@ export function spawnSupervisedClaudeCodeProcess(
   };
 
   const handleError = (error: Error): void => {
-    events.emit('error', error);
+    events.emit('error', createRedactedDiagnosticError(error));
   };
   const handleStderr = (data: Buffer | string): void => {
     if (!supervisorOptions.onStderr) return;
-    const bounded = boundStreamText(String(data).trimEnd(), CLAUDE_STDERR_CHUNK_MAX_BYTES).text;
-    if (bounded) supervisorOptions.onStderr(bounded);
+    const redacted = redactDiagnosticText(data, CLAUDE_STDERR_CHUNK_MAX_BYTES).trimEnd();
+    if (redacted) supervisorOptions.onStderr(redacted);
   };
   const handleClose = (code: number | null, signal: NodeJS.Signals | null): void => {
     if (closed) return;

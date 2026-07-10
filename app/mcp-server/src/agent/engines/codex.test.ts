@@ -356,6 +356,26 @@ describe('Codex stdin prompt delivery', () => {
 });
 
 describe('CodexEngine prompt transport', () => {
+  it('redacts a synchronous CLI spawn failure before rejecting', async () => {
+    const secret = 'codex-spawn-token-secret';
+    spawnMock.mockImplementationOnce(() => {
+      throw new Error(`spawn failed token=${secret}; executable unavailable`);
+    });
+
+    const rejection = await new CodexEngine('test-instance').initializeAndRun(
+      createEngineOptions('spawn safely'),
+      { emit: vi.fn() },
+    ).then(
+      () => null,
+      (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+    );
+
+    expect(rejection?.message).toContain(
+      'spawn failed token=[REDACTED]; executable unavailable',
+    );
+    expect(rejection?.message).not.toContain(secret);
+  });
+
   it('keeps the prompt out of argv and sends it through a closing stdin pipe', async () => {
     const stdin = new CollectingWritable();
     const child = new FakeCodexChildProcess(stdin);
@@ -430,6 +450,40 @@ describe('CodexEngine prompt transport', () => {
     await expect(execution).resolves.toBeUndefined();
   });
 
+  it('redacts project-context diagnostics before console.warn', async () => {
+    const secret = 'codex-project-path-secret';
+    const stdin = new CollectingWritable();
+    const child = new FakeCodexChildProcess(stdin);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    spawnMock.mockReturnValue(child as unknown as ChildProcess);
+
+    try {
+      const execution = new CodexEngine('test-instance').initializeAndRun(
+        {
+          ...createEngineOptions('load project safely', undefined, {
+            appendProjectContext: true,
+          }),
+          projectRoot: `/definitely-missing/password=${secret}`,
+        },
+        { emit: vi.fn() },
+      );
+
+      await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+      child.emit('spawn');
+      if (!stdin.writableFinished) await once(stdin, 'finish');
+      child.stdout.end('{"type":"turn.completed"}\n');
+      child.emit('close', 0, null);
+      await expect(execution).resolves.toBeUndefined();
+
+      const warning = JSON.stringify(warnSpy.mock.calls);
+      expect(warning).toContain('Failed to load project context');
+      expect(warning).toContain('ENOENT');
+      expect(warning).not.toContain(secret);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it('terminates on stdin failure and does not settle before process close', async () => {
     const child = new FakeCodexChildProcess(new FailingWritable());
     spawnMock.mockReturnValue(child as unknown as ChildProcess);
@@ -467,6 +521,50 @@ describe('CodexEngine prompt transport', () => {
 
     child.emit('close', null, 'SIGTERM');
     await expect(execution).rejects.toThrow('execution was cancelled');
+  });
+
+  it('redacts stderr before console output, buffering, and rejection classification', async () => {
+    const secrets = [
+      'codex-bearer-secret',
+      'codex-api-key-secret',
+      'codex-password-secret',
+      'codex-cookie-secret',
+      'codex-router-user',
+      'codex-router-password',
+    ];
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { child, execution } = await startFakeCodexExecution();
+      child.stderr.write(
+        [
+          `Authorization: Bearer ${secrets[0]}`,
+          `x-api-key=${secrets[1]}`,
+          `password=${secrets[2]}`,
+          `Cookie: sid=${secrets[3]}`,
+          `proxy=https://${secrets[4]}:${secrets[5]}@example.test/v1`,
+          'network connection refused after 3 retries',
+        ].join('\n') + '\n',
+      );
+      child.stdout.write('{"type":"error"}\n');
+
+      await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGTERM'));
+      child.emit('close', null, 'SIGTERM');
+      const rejection = await execution.then(
+        () => null,
+        (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+      );
+      const consoleOutput = JSON.stringify(errorSpy.mock.calls);
+
+      expect(rejection).toBeInstanceOf(Error);
+      expect(rejection?.message).toContain('network connection refused after 3 retries');
+      expect(consoleOutput).toContain('network connection refused after 3 retries');
+      for (const secret of secrets) {
+        expect(consoleOutput).not.toContain(secret);
+        expect(rejection?.message).not.toContain(secret);
+      }
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('terminates on an oversized unterminated stdout line without logging its contents', async () => {

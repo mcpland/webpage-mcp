@@ -31,10 +31,8 @@ import {
 } from './stream-output';
 import {
   CLAUDE_EVENT_ERROR_MAX_BYTES,
-  CLAUDE_EVENT_LOG_MAX_BYTES,
   CLAUDE_TOOL_ID_MAX_BYTES,
   boundClaudeEventText,
-  boundClaudeLogField,
   buildBoundedClaudeAuthStatus,
   buildBoundedClaudeManagementInfo,
   buildBoundedClaudeResultError,
@@ -49,6 +47,12 @@ import {
   removePrivateTempAttachment,
   writePrivateTempAttachment,
 } from './private-temp-attachment';
+import {
+  BoundedDiagnosticBuffer,
+  DIAGNOSTIC_ERROR_MAX_BYTES,
+  createRedactedDiagnosticError,
+  redactDiagnosticText,
+} from './diagnostic-redaction';
 
 export function describeClaudeAuthTokenConfiguration(
   authToken: string | undefined,
@@ -60,6 +64,32 @@ export function describeClaudeBaseUrlConfiguration(
   baseUrl: string | undefined,
 ): string | null {
   return baseUrl ? '[ClaudeEngine] ANTHROPIC_BASE_URL is configured' : null;
+}
+
+export function classifyClaudeDiagnosticError(
+  message: unknown,
+  stderrLines: readonly string[],
+): string {
+  const safeMessage = redactDiagnosticText(message, CLAUDE_EVENT_ERROR_MAX_BYTES);
+  const usefulStderr: string[] = [];
+  let scanned = 0;
+  for (
+    let index = stderrLines.length - 1;
+    index >= 0 && usefulStderr.length < 3 && scanned < 16;
+    index -= 1
+  ) {
+    scanned += 1;
+    const line = redactDiagnosticText(stderrLines[index]).trim();
+    if (line && !line.includes('Spawning Claude Code:')) {
+      usefulStderr.unshift(line);
+    }
+  }
+  return redactDiagnosticText(
+    usefulStderr.length > 0
+      ? `${safeMessage} (stderr: ${usefulStderr.join(' | ')})`
+      : safeMessage,
+    CLAUDE_EVENT_ERROR_MAX_BYTES,
+  );
 }
 
 /**
@@ -110,7 +140,7 @@ export function parseClaudeToolInputForEvent(
     Number.isSafeInteger(snapshot.retainedBytes) && snapshot.retainedBytes >= 0
       ? snapshot.retainedBytes
       : 0;
-  const boundedToolName = boundClaudeLogField(toolName, CLAUDE_TOOL_LOG_NAME_MAX_BYTES);
+  const boundedToolName = redactDiagnosticText(toolName, CLAUDE_TOOL_LOG_NAME_MAX_BYTES);
 
   return {
     input,
@@ -168,11 +198,6 @@ export class ClaudeEngine implements AgentEngine {
 
   constructor(public readonly instanceId = DEFAULT_MCP_INSTANCE_ID) {}
 
-  /**
-   * Maximum number of stderr lines to keep in memory.
-   */
-  private static readonly MAX_STDERR_LINES = 200;
-
   async initializeAndRun(options: EngineInitOptions, ctx: EngineExecutionContext): Promise<void> {
     const {
       sessionId,
@@ -216,9 +241,10 @@ export class ClaudeEngine implements AgentEngine {
       )(sdkModuleName) as Promise<any>);
       query = sdk.query;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
+      const message = redactDiagnosticText(error, DIAGNOSTIC_ERROR_MAX_BYTES);
+      throw createRedactedDiagnosticError(
         `ClaudeEngine: Failed to load Claude Agent SDK. Please install @anthropic-ai/claude-agent-sdk. Error: ${message}`,
+        CLAUDE_EVENT_ERROR_MAX_BYTES,
       );
     }
 
@@ -227,7 +253,18 @@ export class ClaudeEngine implements AgentEngine {
       model?.trim() || process.env.CLAUDE_DEFAULT_MODEL || 'claude-sonnet-4-20250514';
 
     // State management
-    const stderrBuffer: string[] = [];
+    const stderrDiagnostics = new BoundedDiagnosticBuffer();
+    const logStderrLines = (lines: string[]): void => {
+      for (const line of lines) {
+        console.error(`[ClaudeEngine][stderr] ${line}`);
+      }
+    };
+    const flushStderr = (): void => {
+      logStderrLines(stderrDiagnostics.flush());
+    };
+    const recordStderr = (data: string): void => {
+      logStderrLines(stderrDiagnostics.push(data));
+    };
     let assistantMessageId: string | null = null;
     let assistantCreatedAt: string | null = null;
     let lastAssistantEmitted: { content: string; isFinal: boolean } | null = null;
@@ -421,14 +458,22 @@ export class ClaudeEngine implements AgentEngine {
         for (const filePath of tempFiles) {
           try {
             await removePrivateTempAttachment(filePath);
-            console.error(`[ClaudeEngine] Cleaned up temp file: ${filePath}`);
+            console.error(
+              redactDiagnosticText(`[ClaudeEngine] Cleaned up temp file: ${filePath}`),
+            );
           } catch (err) {
             // Best-effort cleanup; ignore failures (file may already be deleted)
-            console.error(`[ClaudeEngine] Failed to cleanup temp file ${filePath}:`, err);
+            console.error(
+              redactDiagnosticText(
+                `[ClaudeEngine] Failed to cleanup temp file ${filePath}: ${redactDiagnosticText(err)}`,
+              ),
+            );
           }
         }
       } catch (err) {
-        console.error('[ClaudeEngine] Failed to cleanup temp files:', err);
+        console.error(
+          `[ClaudeEngine] Failed to cleanup temp files: ${redactDiagnosticText(err)}`,
+        );
       }
     };
 
@@ -438,10 +483,10 @@ export class ClaudeEngine implements AgentEngine {
     try {
       // Use console.error for logging to avoid polluting stdout (Native Messaging protocol)
       console.error(
-        `[ClaudeEngine] Starting query with model: ${boundClaudeLogField(resolvedModel)}`,
+        `[ClaudeEngine] Starting query with model: ${redactDiagnosticText(resolvedModel)}`,
       );
       console.error(
-        `[ClaudeEngine] Working directory: ${boundClaudeLogField(repoPath)}`,
+        `[ClaudeEngine] Working directory: ${redactDiagnosticText(repoPath)}`,
       );
 
       // Check for image attachments - prefer resolvedImagePaths (persisted), fallback to temp files
@@ -516,7 +561,7 @@ export class ClaudeEngine implements AgentEngine {
           const project = await getProject(projectId);
           return project?.enableWebpageMcp !== false;
         } catch (err) {
-          const message = boundClaudeLogField(err);
+          const message = redactDiagnosticText(err);
           console.error(
             `[ClaudeEngine] Failed to load project enableWebpageMcp, defaulting to enabled: ${message}`,
           );
@@ -564,16 +609,6 @@ export class ClaudeEngine implements AgentEngine {
       const internalAbortController = new AbortController();
       removeExternalAbortListener = linkAbortSignal(signal, internalAbortController);
 
-      const recordStderr = (data: string): void => {
-        const chunk = boundClaudeLogField(data, CLAUDE_EVENT_LOG_MAX_BYTES).trimEnd();
-        if (!chunk) return;
-        if (stderrBuffer.length >= ClaudeEngine.MAX_STDERR_LINES) {
-          stderrBuffer.shift();
-        }
-        stderrBuffer.push(chunk);
-        console.error(`[ClaudeEngine][stderr] ${chunk}`);
-      };
-
       const queryOptions: Record<string, unknown> = {
         cwd: repoPath,
         additionalDirectories: [repoPath],
@@ -609,7 +644,7 @@ export class ClaudeEngine implements AgentEngine {
           processCompletionOutcome = supervisedProcess.completion.then(
             (exit) => ({ exit }),
             (error: unknown) => ({
-              error: error instanceof Error ? error : new Error(String(error)),
+              error: createRedactedDiagnosticError(error),
             }),
           );
           return supervisedProcess.process;
@@ -730,7 +765,10 @@ export class ClaudeEngine implements AgentEngine {
           },
         };
         console.error(
-          `[ClaudeEngine] Webpage MCP server enabled via stdio: ${stdioConfig.command} ${stdioConfig.args.join(' ')}`,
+          redactDiagnosticText(
+            `[ClaudeEngine] Webpage MCP server enabled via stdio: ${stdioConfig.command} ${stdioConfig.args.join(' ')}`,
+            DIAGNOSTIC_ERROR_MAX_BYTES,
+          ),
         );
       } else if (
         queryOptions.mcpServers &&
@@ -754,7 +792,7 @@ export class ClaudeEngine implements AgentEngine {
       if (resumeClaudeSessionId) {
         queryOptions.resume = resumeClaudeSessionId;
         console.error(
-          `[ClaudeEngine] Resuming Claude session: ${boundClaudeLogField(resumeClaudeSessionId)}`,
+          `[ClaudeEngine] Resuming Claude session: ${redactDiagnosticText(resumeClaudeSessionId)}`,
         );
       }
 
@@ -772,7 +810,7 @@ export class ClaudeEngine implements AgentEngine {
         }
 
         console.error(
-          `[ClaudeEngine] Message type: ${boundClaudeLogField(message.type)}`,
+          `[ClaudeEngine] Message type: ${redactDiagnosticText(message.type)}`,
         );
 
         if (message.type === 'stream_event') {
@@ -1081,7 +1119,7 @@ export class ClaudeEngine implements AgentEngine {
               resultRecord.result,
             );
             console.error(
-              `[ClaudeEngine] Result error: ${boundClaudeLogField(errorMsg)}`,
+              `[ClaudeEngine] Result error: ${redactDiagnosticText(errorMsg)}`,
             );
 
             // Check if this is a resume failure
@@ -1132,18 +1170,20 @@ export class ClaudeEngine implements AgentEngine {
             }
 
             if (claudeSessionId) {
-              console.error(`[ClaudeEngine] Session initialized: ${claudeSessionId}`);
+              console.error(
+                `[ClaudeEngine] Session initialized: ${redactDiagnosticText(claudeSessionId)}`,
+              );
 
               // Persist the session ID if callback is provided and projectId exists
               if (ctx.persistClaudeSessionId && projectId) {
                 try {
                   await ctx.persistClaudeSessionId(claudeSessionId);
                   console.error(
-                    `[ClaudeEngine] Session ID persisted for project: ${boundClaudeLogField(projectId)}`,
+                    `[ClaudeEngine] Session ID persisted for project: ${redactDiagnosticText(projectId)}`,
                   );
                 } catch (persistError) {
                   console.error(
-                    `[ClaudeEngine] Failed to persist session ID: ${boundClaudeLogField(persistError)}`,
+                    `[ClaudeEngine] Failed to persist session ID: ${redactDiagnosticText(persistError)}`,
                   );
                 }
               }
@@ -1161,7 +1201,7 @@ export class ClaudeEngine implements AgentEngine {
                 );
               } catch (persistError) {
                 console.error(
-                  `[ClaudeEngine] Failed to persist management info: ${boundClaudeLogField(persistError)}`,
+                  `[ClaudeEngine] Failed to persist management info: ${redactDiagnosticText(persistError)}`,
                 );
               }
             }
@@ -1169,7 +1209,7 @@ export class ClaudeEngine implements AgentEngine {
             // system:status - log for debugging (e.g., compacting)
             const statusText = this.pickFirstString(record.status);
             console.error(
-              `[ClaudeEngine] System status: ${boundClaudeLogField(statusText || 'unknown')}`,
+              `[ClaudeEngine] System status: ${redactDiagnosticText(statusText || 'unknown')}`,
             );
           }
         } else if (message.type === 'auth_status') {
@@ -1234,7 +1274,7 @@ export class ClaudeEngine implements AgentEngine {
             const elapsedStr =
               elapsedTimeSeconds !== undefined ? ` (${elapsedTimeSeconds.toFixed(1)}s)` : '';
             console.error(
-              `[ClaudeEngine] Tool progress: ${boundClaudeLogField(displayName)}${elapsedStr}`,
+              `[ClaudeEngine] Tool progress: ${redactDiagnosticText(displayName)}${elapsedStr}`,
             );
 
             // Use tool_use_id as message id if available, so UI can update the same progress entry
@@ -1272,21 +1312,24 @@ export class ClaudeEngine implements AgentEngine {
         emitAssistant(true);
       }
 
+      flushStderr();
       console.error('[ClaudeEngine] Query completed successfully');
     } catch (error) {
       caughtExecutionError = true;
-      const message = boundClaudeLogField(error, CLAUDE_EVENT_ERROR_MAX_BYTES);
+      flushStderr();
+      const message = redactDiagnosticText(error, CLAUDE_EVENT_ERROR_MAX_BYTES);
+      const stderrLines = stderrDiagnostics.snapshot();
 
       // Log full stderr for debugging
       console.error(`[ClaudeEngine] Error: ${message}`);
-      if (stderrBuffer.length > 0) {
-        console.error(`[ClaudeEngine] Stderr (${stderrBuffer.length} lines):`);
-        stderrBuffer.slice(-10).forEach((line) => console.error(`  ${line}`));
+      if (stderrLines.length > 0) {
+        console.error(`[ClaudeEngine] Stderr (${stderrLines.length} lines):`);
+        stderrLines.slice(-10).forEach((line) => console.error(`  ${line}`));
       }
 
       // Check if this is a resume failure from stderr
       const isResumeFailure =
-        stderrBuffer.some(
+        stderrLines.some(
           (line) =>
             line.includes('No conversation found') ||
             line.includes('Failed to resume session') ||
@@ -1305,12 +1348,13 @@ export class ClaudeEngine implements AgentEngine {
       }
 
       // Classify errors for better UX
-      const errorMessage = boundClaudeEventText(
-        this.classifyError(message, stderrBuffer),
+      const errorMessage = classifyClaudeDiagnosticError(message, stderrLines);
+      executionError = createRedactedDiagnosticError(
+        `ClaudeEngine: ${errorMessage}`,
         CLAUDE_EVENT_ERROR_MAX_BYTES,
-      ).text;
-      executionError = new Error(`ClaudeEngine: ${errorMessage}`);
+      );
     } finally {
+      flushStderr();
       removeExternalAbortListener?.();
       removeExternalAbortListener = null;
 
@@ -1339,7 +1383,10 @@ export class ClaudeEngine implements AgentEngine {
           processOutcome.error.message === 'ClaudeEngine: execution was cancelled' ||
           processOutcome.error.message === 'ClaudeEngine: execution timed out')
       ) {
-        supervisedCompletionError = processOutcome.error;
+        supervisedCompletionError = createRedactedDiagnosticError(
+          processOutcome.error,
+          CLAUDE_EVENT_ERROR_MAX_BYTES,
+        );
       }
     }
 
@@ -1386,25 +1433,6 @@ export class ClaudeEngine implements AgentEngine {
    */
   private pickFirstString(value: unknown): string | undefined {
     return pickBoundedClaudeString(value);
-  }
-
-  /**
-   * Format error message for user display.
-   * Preserves the original error message and only appends stderr context if useful.
-   */
-  private classifyError(message: string, stderrBuffer: string[]): string {
-    // Always preserve the original error message
-    // Only append stderr context if it contains useful information beyond the spawn line
-    const usefulStderr = stderrBuffer.filter(
-      (line) => !line.includes('Spawning Claude Code:') && line.trim().length > 0,
-    );
-
-    if (usefulStderr.length > 0) {
-      const lastLines = usefulStderr.slice(-3).join(' | ');
-      return `${message} (stderr: ${lastLines})`;
-    }
-
-    return message;
   }
 
   /**

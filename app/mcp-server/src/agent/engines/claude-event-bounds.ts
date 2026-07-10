@@ -5,6 +5,7 @@ import {
   AGENT_MESSAGE_METADATA_MAX_JSON_BYTES,
 } from 'webpage-mcp-shared';
 import type { ClaudeManagementInfo } from './types';
+import { redactDiagnosticText } from './diagnostic-redaction';
 
 export const CLAUDE_EVENT_FIELD_MAX_BYTES = 16 * 1024;
 export const CLAUDE_EVENT_LOG_MAX_BYTES = 16 * 1024;
@@ -445,15 +446,19 @@ export function buildBoundedClaudeAuthStatus(
       raw,
       Math.min(CLAUDE_AUTH_OUTPUT_ENTRY_MAX_BYTES, remaining),
     );
-    output.push(bounded.text);
-    outputBytes += separatorBytes + bounded.retainedBytes;
+    const safeText = redactDiagnosticText(
+      bounded.text,
+      Math.min(CLAUDE_AUTH_OUTPUT_ENTRY_MAX_BYTES, remaining),
+    );
+    output.push(safeText);
+    outputBytes += separatorBytes + Buffer.byteLength(safeText, 'utf8');
     if (bounded.truncated) {
       truncation.push({
         field: 'authOutputEntry',
         maximumBytes: CLAUDE_AUTH_OUTPUT_ENTRY_MAX_BYTES,
       });
     }
-    const lower = bounded.text.toLowerCase();
+    const lower = safeText.toLowerCase();
     if (lower.includes('login') || lower.includes('authenticate') || lower.includes('sign in')) {
       outputContainsLoginHint = true;
     }
@@ -468,11 +473,15 @@ export function buildBoundedClaudeAuthStatus(
 
   const rawError = pickBoundedClaudeString(record.error, CLAUDE_AUTH_ERROR_MAX_BYTES);
   let authError = rawError
-    ? boundMetadataText(rawError, CLAUDE_AUTH_ERROR_MAX_BYTES).text.trim() || undefined
+    ? redactDiagnosticText(
+        boundMetadataText(rawError, CLAUDE_AUTH_ERROR_MAX_BYTES).text,
+        CLAUDE_AUTH_ERROR_MAX_BYTES,
+      ).trim() || undefined
     : undefined;
   if (typeof record.error === 'string') {
     const boundedError = boundMetadataText(record.error, CLAUDE_AUTH_ERROR_MAX_BYTES);
-    authError = boundedError.text.trim() || undefined;
+    authError =
+      redactDiagnosticText(boundedError.text, CLAUDE_AUTH_ERROR_MAX_BYTES).trim() || undefined;
     if (boundedError.truncated) {
       truncation.push({
         field: 'authError',

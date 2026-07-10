@@ -47,6 +47,12 @@ import {
   BoundedNdjsonDecoder,
   IpcLineTooLargeError,
 } from '../../ipc/bounded-ndjson';
+import {
+  BoundedDiagnosticBuffer,
+  DIAGNOSTIC_ERROR_MAX_BYTES,
+  createRedactedDiagnosticError,
+  redactDiagnosticText,
+} from './diagnostic-redaction';
 
 /** Resource budgets for the optional top-level project directory summary. */
 export const CODEX_PROJECT_CONTEXT_MAX_ENTRIES = 1_000;
@@ -489,11 +495,6 @@ export class CodexEngine implements AgentEngine {
   public readonly supportsMcp = false;
   constructor(public readonly instanceId = DEFAULT_MCP_INSTANCE_ID) {}
 
-  /**
-   * Maximum number of stderr lines to keep in memory to avoid unbounded growth.
-   */
-  private static readonly MAX_STDERR_LINES = 200;
-
   async initializeAndRun(
     options: EngineInitOptions,
     ctx: EngineExecutionContext,
@@ -555,7 +556,7 @@ export class CodexEngine implements AgentEngine {
         const project = await getProject(projectId);
         return project?.enableWebpageMcp !== false;
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = redactDiagnosticText(err, DIAGNOSTIC_ERROR_MAX_BYTES);
         console.error(
           `[CodexEngine] Failed to load project enableWebpageMcp, defaulting to enabled: ${message}`,
         );
@@ -573,7 +574,12 @@ export class CodexEngine implements AgentEngine {
     );
 
     const codexEnv = this.buildCodexEnv();
-    const spawnSpec = buildCodexSpawnSpec(repoPath, codexEnv);
+    let spawnSpec: ReturnType<typeof buildCodexSpawnSpec>;
+    try {
+      spawnSpec = buildCodexSpawnSpec(repoPath, codexEnv);
+    } catch (error) {
+      throw createRedactedDiagnosticError(error);
+    }
     const args: string[] = [
       'exec',
       '--json',
@@ -608,7 +614,10 @@ export class CodexEngine implements AgentEngine {
         );
       }
       console.error(
-        `[CodexEngine] Webpage MCP server enabled via stdio: ${stdioConfig.command} ${stdioConfig.args.join(' ')}`,
+        redactDiagnosticText(
+          `[CodexEngine] Webpage MCP server enabled via stdio: ${stdioConfig.command} ${stdioConfig.args.join(' ')}`,
+          DIAGNOSTIC_ERROR_MAX_BYTES,
+        ),
       );
     } else {
       console.error('[CodexEngine] Webpage MCP server disabled');
@@ -641,8 +650,7 @@ export class CodexEngine implements AgentEngine {
             args.push('--image', tempFile);
           } catch (err) {
             console.error(
-              '[CodexEngine] Failed to write attachment to temp file:',
-              err,
+              `[CodexEngine] Failed to write attachment to temp file: ${redactDiagnosticText(err)}`,
             );
           }
         }
@@ -656,16 +664,30 @@ export class CodexEngine implements AgentEngine {
 
     // Use explicit Promise wrapping to ensure child process errors are properly rejected.
     return new Promise<void>((resolve, reject) => {
-      const child = spawn(spawnSpec.command, args, {
-        cwd: repoPath,
-        env: codexEnv,
-        shell: spawnSpec.shell,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: shouldDetachChildProcess(),
-      });
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = spawn(spawnSpec.command, args, {
+          cwd: repoPath,
+          env: codexEnv,
+          shell: spawnSpec.shell,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          detached: shouldDetachChildProcess(),
+        });
+      } catch (error) {
+        reject(createRedactedDiagnosticError(error));
+        return;
+      }
 
       // State management
-      const stderrBuffer: string[] = [];
+      const stderrDiagnostics = new BoundedDiagnosticBuffer();
+      const logStderrLines = (lines: string[]): void => {
+        for (const line of lines) {
+          console.error('[CodexEngine][stderr]', line);
+        }
+      };
+      const flushStderr = (): void => {
+        logStderrLines(stderrDiagnostics.flush());
+      };
       let hasCompleted = false;
       let terminalError: Error | null = null;
       let finishPromise: Promise<void> | null = null;
@@ -726,12 +748,15 @@ export class CodexEngine implements AgentEngine {
         for (const filePath of tempFiles) {
           try {
             await removePrivateTempAttachment(filePath);
-            console.error(`[CodexEngine] Cleaned up temp file: ${filePath}`);
+            console.error(
+              redactDiagnosticText(`[CodexEngine] Cleaned up temp file: ${filePath}`),
+            );
           } catch (err) {
             // Ignore errors during cleanup - file may already be deleted
             console.error(
-              `[CodexEngine] Failed to cleanup temp file ${filePath}:`,
-              err,
+              redactDiagnosticText(
+                `[CodexEngine] Failed to cleanup temp file ${filePath}: ${redactDiagnosticText(err)}`,
+              ),
             );
           }
         }
@@ -745,9 +770,7 @@ export class CodexEngine implements AgentEngine {
         const normalizedError =
           error === undefined
             ? null
-            : error instanceof Error
-              ? error
-              : new Error(String(error));
+            : createRedactedDiagnosticError(error);
         if (normalizedError && !terminalError) {
           terminalError = normalizedError;
         }
@@ -762,10 +785,7 @@ export class CodexEngine implements AgentEngine {
             exit = await processLifecycle.completion;
           } catch (lifecycleError) {
             if (!terminalError) {
-              terminalError =
-                lifecycleError instanceof Error
-                  ? lifecycleError
-                  : new Error(String(lifecycleError));
+              terminalError = createRedactedDiagnosticError(lifecycleError);
             }
           }
 
@@ -777,10 +797,7 @@ export class CodexEngine implements AgentEngine {
               await promptDeliveryPromise;
             } catch (promptError) {
               if (!terminalError) {
-                terminalError =
-                  promptError instanceof Error
-                    ? promptError
-                    : new Error(String(promptError));
+                terminalError = createRedactedDiagnosticError(promptError);
               }
             }
           }
@@ -812,10 +829,7 @@ export class CodexEngine implements AgentEngine {
             assistantStream?.flushFinal();
           } catch (flushError) {
             if (!terminalError) {
-              terminalError =
-                flushError instanceof Error
-                  ? flushError
-                  : new Error(String(flushError));
+              terminalError = createRedactedDiagnosticError(flushError);
             }
           } finally {
             assistantStream?.cancel();
@@ -826,6 +840,7 @@ export class CodexEngine implements AgentEngine {
           } catch {
             // Ignore stdout cleanup errors after the child has closed.
           }
+          flushStderr();
 
           // The process is now closed (or never spawned), so temporary files
           // cannot still be in use by Codex.
@@ -865,22 +880,10 @@ export class CodexEngine implements AgentEngine {
         }
       });
 
-      // Collect stderr with bounded buffer
-      child.stderr?.on('data', (chunk) => {
-        const text = String(chunk).trim();
-        if (!text) return;
-
-        stderrBuffer.push(text);
-        // Keep only the most recent lines to prevent memory growth
-        if (stderrBuffer.length > CodexEngine.MAX_STDERR_LINES) {
-          stderrBuffer.splice(
-            0,
-            stderrBuffer.length - CodexEngine.MAX_STDERR_LINES,
-          );
-        }
-
-        console.error('[CodexEngine][stderr]', text);
+      child.stderr?.on('data', (chunk: Buffer | string) => {
+        logStderrLines(stderrDiagnostics.push(chunk));
       });
+      child.stderr?.once('end', flushStderr);
       /**
        * Reset assistant buffers after emitting a final message.
        */
@@ -1227,7 +1230,7 @@ export class CodexEngine implements AgentEngine {
               this.pickFirstString(
                 (event as { message?: unknown }).message,
               ) ||
-              stderrBuffer.slice(-5).join('\n') ||
+              stderrDiagnostics.snapshot().slice(-5).join('\n') ||
               'Codex execution error';
             hasCompleted = true;
             throw new Error(msg);
@@ -1329,7 +1332,9 @@ export class CodexEngine implements AgentEngine {
       const directory = await fs.opendir(repoPath);
       return await buildCodexProjectContext(directory);
     } catch (error) {
-      console.warn('[CodexEngine] Failed to load project context:', error);
+      console.warn(
+        `[CodexEngine] Failed to load project context: ${redactDiagnosticText(error)}`,
+      );
       return '';
     }
   }

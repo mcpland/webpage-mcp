@@ -49,6 +49,33 @@ afterEach(() => {
 });
 
 describe('Claude process supervision', () => {
+  it('redacts a synchronous CLI spawn failure before it leaves the supervisor', () => {
+    const secret = 'claude-spawn-password-secret';
+
+    expect(() =>
+      spawnSupervisedClaudeCodeProcess(createSpawnOptions(), {
+        timeoutMs: 1_000,
+        platform: 'linux',
+        spawnProcess: () => {
+          throw new Error(`spawn failed password=${secret}; executable unavailable`);
+        },
+      }),
+    ).toThrow('spawn failed password=[REDACTED]; executable unavailable');
+
+    try {
+      spawnSupervisedClaudeCodeProcess(createSpawnOptions(), {
+        timeoutMs: 1_000,
+        platform: 'linux',
+        spawnProcess: () => {
+          throw new Error(`spawn failed password=${secret}; executable unavailable`);
+        },
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain(secret);
+    }
+  });
+
   it('uses safe pipe spawning and a detached POSIX process group', async () => {
     vi.useFakeTimers();
     const child = new FakeClaudeChildProcess();
@@ -262,6 +289,33 @@ describe('Claude process supervision', () => {
     await supervised.completion;
     child.stderr.emit('data', Buffer.from('after close'));
     expect(onStderr).toHaveBeenCalledTimes(1);
+  });
+
+  it('redacts child stderr before forwarding it to the SDK callback', async () => {
+    vi.useFakeTimers();
+    const child = new FakeClaudeChildProcess();
+    const onStderr = vi.fn();
+    const supervised = spawnSupervisedClaudeCodeProcess(createSpawnOptions(), {
+      timeoutMs: 1_000,
+      platform: 'linux',
+      onStderr,
+      spawnProcess: () => child as unknown as ChildProcess,
+    });
+    const secret = 'claude-process-bearer-secret';
+
+    child.emit('spawn');
+    child.stderr.emit(
+      'data',
+      Buffer.from(`Authorization: Bearer ${secret}\nconnection reset by peer`),
+    );
+
+    expect(onStderr).toHaveBeenCalledTimes(1);
+    expect(onStderr.mock.calls[0][0]).not.toContain(secret);
+    expect(onStderr.mock.calls[0][0]).toContain('Authorization: [REDACTED]');
+    expect(onStderr.mock.calls[0][0]).toContain('connection reset by peer');
+
+    child.emit('close', 0, null);
+    await supervised.completion;
   });
 });
 
