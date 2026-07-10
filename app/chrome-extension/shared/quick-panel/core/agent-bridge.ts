@@ -32,12 +32,14 @@ import type { RealtimeEvent } from 'webpage-mcp-shared';
 
 import {
   BACKGROUND_MESSAGE_TYPES,
+  PRIVILEGED_UI_ACTIONS,
   TOOL_MESSAGE_TYPES,
   type QuickPanelAIEventMessage,
   type QuickPanelCancelAIResponse,
   type QuickPanelSendToAIPayload,
   type QuickPanelSendToAIResponse,
 } from '@/common/message-types';
+import { authorizePrivilegedUiAction } from '@/utils/privileged-ui-authorization';
 
 // ============================================================
 // Types
@@ -237,8 +239,12 @@ export class QuickPanelAgentBridge {
     }
 
     try {
+      const authorizationToken = await authorizePrivilegedUiAction(
+        PRIVILEGED_UI_ACTIONS.QUICK_PANEL_CANCEL,
+      );
       const response = await chrome.runtime.sendMessage({
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_CANCEL_AI,
+        authorizationToken,
         payload: { requestId, sessionId },
       });
 

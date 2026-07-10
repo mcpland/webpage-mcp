@@ -53,8 +53,13 @@ describe('privileged in-page UI authorization', () => {
   it('rejects action confusion, expiry, foreign extensions, and child frames', () => {
     const wrongActionToken = store.issue(PRIVILEGED_UI_ACTIONS.QUICK_PANEL_SEND, sender(), 3_000);
     expect(
-      store.consume(wrongActionToken, PRIVILEGED_UI_ACTIONS.WEB_EDITOR_APPLY, sender(), 3_001),
+      store.consume(wrongActionToken, PRIVILEGED_UI_ACTIONS.QUICK_PANEL_CANCEL, sender(), 3_001),
     ).toBe(false);
+
+    const cancelToken = store.issue(PRIVILEGED_UI_ACTIONS.QUICK_PANEL_CANCEL, sender(), 3_100);
+    expect(
+      store.consume(cancelToken, PRIVILEGED_UI_ACTIONS.QUICK_PANEL_CANCEL, sender(), 3_101),
+    ).toBe(true);
 
     const expiredToken = store.issue(PRIVILEGED_UI_ACTIONS.QUICK_PANEL_SEND, sender(), 4_000);
     expect(

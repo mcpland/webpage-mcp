@@ -210,6 +210,7 @@ export type ToolMessageType = (typeof TOOL_MESSAGE_TYPES)[keyof typeof TOOL_MESS
  */
 export const PRIVILEGED_UI_ACTIONS = {
   QUICK_PANEL_SEND: 'quick_panel_send',
+  QUICK_PANEL_CANCEL: 'quick_panel_cancel',
   WEB_EDITOR_APPLY: 'web_editor_apply',
 } as const;
 
@@ -318,6 +319,8 @@ export type QuickPanelCancelAIResponse = { success: true } | { success: false; e
  */
 export interface QuickPanelCancelAIMessage {
   type: typeof BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_CANCEL_AI;
+  /** One-time document-bound authorization for cancellation. */
+  authorizationToken: string;
   payload: QuickPanelCancelAIPayload;
 }
 

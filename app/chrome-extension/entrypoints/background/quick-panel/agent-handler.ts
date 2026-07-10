@@ -73,7 +73,8 @@ interface ActiveRequest {
   readonly context?: AgentActRequest['context'];
   readonly tabId: number;
   readonly windowId?: number;
-  readonly frameId?: number;
+  readonly frameId: number;
+  readonly documentId: string;
   readonly createdAt: number;
   readonly abortController: AbortController;
   readonly releaseKeepalive: () => void;
@@ -615,7 +616,8 @@ async function handleSendToAI(
 ): Promise<QuickPanelSendToAIResponse> {
   const tabId = sender?.tab?.id;
   const windowId = sender?.tab?.windowId;
-  const frameId = typeof sender?.frameId === 'number' ? sender.frameId : undefined;
+  const frameId = typeof sender?.frameId === 'number' ? sender.frameId : 0;
+  const documentId = typeof sender?.documentId === 'string' ? sender.documentId : '';
 
   if (typeof tabId !== 'number') {
     return { success: false, error: 'Quick Panel request must originate from a tab.' };
@@ -679,6 +681,7 @@ async function handleSendToAI(
     tabId,
     windowId: typeof windowId === 'number' ? windowId : undefined,
     frameId,
+    documentId,
     createdAt: Date.now(),
     abortController,
     releaseKeepalive,
@@ -702,10 +705,24 @@ async function handleCancelAI(
   sender: chrome.runtime.MessageSender,
 ): Promise<QuickPanelCancelAIResponse> {
   const tabId = sender?.tab?.id;
-  const frameId = typeof sender?.frameId === 'number' ? sender.frameId : undefined;
+  const frameId = typeof sender?.frameId === 'number' ? sender.frameId : 0;
+  const documentId = typeof sender?.documentId === 'string' ? sender.documentId : '';
 
   if (typeof tabId !== 'number') {
     return { success: false, error: 'Cancel request must originate from a tab.' };
+  }
+
+  if (
+    !consumePrivilegedUiAuthorization(
+      message?.authorizationToken,
+      PRIVILEGED_UI_ACTIONS.QUICK_PANEL_CANCEL,
+      sender,
+    )
+  ) {
+    return {
+      success: false,
+      error: 'Quick Panel cancellation authorization is missing or expired.',
+    };
   }
 
   const requestId = normalizeString(message?.payload?.requestId).trim();
@@ -716,6 +733,14 @@ async function handleCancelAI(
   }
 
   const activeRequest = activeRequests.get(requestId);
+  if (
+    activeRequest &&
+    (activeRequest.tabId !== tabId ||
+      activeRequest.frameId !== frameId ||
+      activeRequest.documentId !== documentId)
+  ) {
+    return { success: false, error: 'Quick Panel request belongs to a different document.' };
+  }
   const sessionId = activeRequest?.sessionId || fallbackSessionId;
 
   if (!sessionId) {
@@ -746,10 +771,7 @@ async function handleCancelAI(
     event: cancelledEvent,
   };
 
-  const sendOptions = typeof frameId === 'number' ? { frameId } : undefined;
-  const sendPromise = sendOptions
-    ? chrome.tabs.sendMessage(tabId, eventMessage, sendOptions)
-    : chrome.tabs.sendMessage(tabId, eventMessage);
+  const sendPromise = chrome.tabs.sendMessage(tabId, eventMessage, { frameId });
 
   sendPromise
     .catch(() => {})
