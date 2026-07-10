@@ -1,4 +1,5 @@
 import console from "node:console";
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { gunzipSync, inflateRawSync } from "node:zlib";
 import { lstat, readFile, readdir } from "node:fs/promises";
@@ -10,6 +11,7 @@ import {
   resolveChromeExtensionPublicKey,
   validateChromeExtensionPublicKey,
 } from "./extension-public-key.mjs";
+import { validateUnifiedReleaseVersion } from "./unified-release-version.mjs";
 
 const RELEASE_PACKAGES = [
   {
@@ -22,8 +24,6 @@ const RELEASE_PACKAGES = [
   },
 ];
 
-const SEMVER_PATTERN =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const MAX_ARCHIVE_METADATA_BYTES = 1024 * 1024;
 
@@ -58,11 +58,7 @@ function normalizeReleaseTag(tag) {
     `Release tag must use the v<version> form, received: ${String(tag)}`,
   );
   const version = tag.slice(1);
-  invariant(
-    SEMVER_PATTERN.test(version),
-    `Release tag must contain a valid semantic version, received: ${tag}`,
-  );
-  return version;
+  return validateUnifiedReleaseVersion(version, "Release tag version");
 }
 
 export async function verifyReleaseMetadata({
@@ -83,11 +79,11 @@ export async function verifyReleaseMetadata({
       pkg.name === releasePackage.name,
       `${releasePackage.path} must have name ${releasePackage.name}, received: ${String(pkg.name)}`,
     );
-    invariant(
-      typeof pkg.version === "string" && SEMVER_PATTERN.test(pkg.version),
-      `${releasePackage.path} must contain a valid semantic version, received: ${String(pkg.version)}`,
+    const version = validateUnifiedReleaseVersion(
+      pkg.version,
+      `${releasePackage.path} version`,
     );
-    packages.push({ ...releasePackage, version: pkg.version });
+    packages.push({ ...releasePackage, version });
   }
 
   const expectedVersion = packages[0].version;
@@ -383,9 +379,13 @@ export async function verifyReleaseArtifacts({
     packedPackage.name === "webpage-mcp",
     "npm tarball package name must be webpage-mcp",
   );
+  const packedPackageVersion = validateUnifiedReleaseVersion(
+    packedPackage.version,
+    "npm tarball package version",
+  );
   invariant(
-    packedPackage.version === metadata.version,
-    `npm tarball version ${String(packedPackage.version)} does not match release version ${metadata.version}`,
+    packedPackageVersion === metadata.version,
+    `npm tarball version ${packedPackageVersion} does not match release version ${metadata.version}`,
   );
 
   const extensionManifest = readZipEntryJson(
@@ -393,9 +393,13 @@ export async function verifyReleaseArtifacts({
     "manifest.json",
     "extension zip manifest.json",
   );
+  const packedExtensionVersion = validateUnifiedReleaseVersion(
+    extensionManifest.version,
+    "Extension manifest version",
+  );
   invariant(
-    extensionManifest.version === metadata.version,
-    `Extension manifest version ${String(extensionManifest.version)} does not match release version ${metadata.version}`,
+    packedExtensionVersion === metadata.version,
+    `Extension manifest version ${packedExtensionVersion} does not match release version ${metadata.version}`,
   );
   const packedExtensionPublicKey =
     extensionManifest.key === undefined

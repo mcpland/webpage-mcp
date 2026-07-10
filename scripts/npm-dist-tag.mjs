@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 const SEMVER_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
+// Standalone npm-only helper. The unified Chrome/npm release rejects all
+// prerelease versions and intentionally does not call this utility.
 export function resolveNpmDistTag(version) {
   const match = SEMVER_PATTERN.exec(version);
   if (!match) throw new Error(`Invalid semantic version: ${String(version)}`);

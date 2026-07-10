@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -219,6 +220,41 @@ test("release metadata requires aligned package and tag versions", async (t) => 
   );
 });
 
+test("release metadata accepts only stable Chrome-safe versions", async (t) => {
+  const stableBoundaryRoot = await createReleaseRoot(t, {
+    mcp: "65535.65535.65535",
+    extension: "65535.65535.65535",
+  });
+  const stableBoundary = await verifyReleaseMetadata({
+    rootDir: stableBoundaryRoot,
+    tag: "v65535.65535.65535",
+  });
+  assert.equal(stableBoundary.version, "65535.65535.65535");
+
+  for (const [version, expectedError] of [
+    ["1.2.3-rc.1", /prerelease versions are not supported/],
+    ["1.2.3+build.1", /build metadata is not supported/],
+    ["65536.0.1", /between 0 and 65535/],
+    ["0.0.0", /cannot be 0\.0\.0/],
+  ]) {
+    const rootDir = await createReleaseRoot(t, {
+      mcp: version,
+      extension: version,
+    });
+    await assert.rejects(verifyReleaseMetadata({ rootDir }), expectedError);
+  }
+
+  const stableRoot = await createReleaseRoot(t);
+  await assert.rejects(
+    verifyReleaseMetadata({ rootDir: stableRoot, tag: "v1.2.3-rc.1" }),
+    /prerelease versions are not supported/,
+  );
+  await assert.rejects(
+    verifyReleaseMetadata({ rootDir: stableRoot, tag: "v1.2.3+build.1" }),
+    /build metadata is not supported/,
+  );
+});
+
 test("extension identity accepts only a canonical public DER key", () => {
   assert.equal(
     validateChromeExtensionPublicKey(TEST_EXTENSION_PUBLIC_KEY),
@@ -402,6 +438,35 @@ test("release artifact verification fails closed", async (t) => {
     );
   });
 
+  await t.test(
+    "on prerelease metadata embedded in either archive",
+    async (t) => {
+      const npmRoot = await createReleaseRoot(t);
+      const npmArtifacts = await createArtifacts(npmRoot, {
+        mcpVersion: "1.2.3-rc.1",
+      });
+      await assert.rejects(
+        verifyReleaseArtifacts({
+          rootDir: npmRoot,
+          artifactsDir: npmArtifacts.artifactsDir,
+        }),
+        /npm tarball package version: prerelease versions are not supported/,
+      );
+
+      const extensionRoot = await createReleaseRoot(t);
+      const extensionArtifacts = await createArtifacts(extensionRoot, {
+        extensionVersion: "1.2.3-beta.1",
+      });
+      await assert.rejects(
+        verifyReleaseArtifacts({
+          rootDir: extensionRoot,
+          artifactsDir: extensionArtifacts.artifactsDir,
+        }),
+        /Extension manifest version: prerelease versions are not supported/,
+      );
+    },
+  );
+
   await t.test("on a corrupt checksum", async (t) => {
     const rootDir = await createReleaseRoot(t);
     const { artifactsDir } = await createArtifacts(rootDir);
@@ -520,8 +585,13 @@ test("release workflow verifies before either publish mutation", async () => {
   );
   assert.match(
     workflow.slice(npmJob, npmPublish + 300),
-    /DIST_TAG=.*npm-dist-tag\.mjs[\s\S]*npm publish[\s\S]*--tag "\$DIST_TAG"/,
-    "npm prereleases must use an explicit semver-derived dist-tag",
+    /npm publish[\s\S]*--tag latest/,
+    "the stable-only unified release must publish to latest explicitly",
+  );
+  assert.doesNotMatch(
+    workflow,
+    /npm-dist-tag\.mjs|DIST_TAG=/,
+    "the unified release must not imply npm-only prerelease support",
   );
   assert.doesNotMatch(
     buildJobBody,

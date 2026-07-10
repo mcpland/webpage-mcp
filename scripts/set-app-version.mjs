@@ -1,30 +1,53 @@
+import console from "node:console";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import process from "node:process";
+import { pathToFileURL } from "node:url";
 
-const nextVersion = process.argv[2]?.trim();
+import { validateUnifiedReleaseVersion } from "./unified-release-version.mjs";
 
-if (!nextVersion) {
-  console.error("Usage: node ./scripts/set-app-version.mjs <version>");
-  process.exit(1);
+export async function setAppVersion({ rootDir = process.cwd(), version } = {}) {
+  const nextVersion = validateUnifiedReleaseVersion(
+    version,
+    "Unified app version",
+  );
+  const packageJsonPaths = [
+    resolve(rootDir, "app/chrome-extension/package.json"),
+    resolve(rootDir, "app/mcp-server/package.json"),
+  ];
+  const packages = await Promise.all(
+    packageJsonPaths.map(async (packageJsonPath) => ({
+      packageJsonPath,
+      pkg: JSON.parse(await readFile(packageJsonPath, "utf8")),
+    })),
+  );
+
+  for (const { packageJsonPath, pkg } of packages) {
+    pkg.version = nextVersion;
+    await writeFile(
+      packageJsonPath,
+      `${JSON.stringify(pkg, null, 2)}\n`,
+      "utf8",
+    );
+    console.log(`Updated ${packageJsonPath} -> ${nextVersion}`);
+  }
 }
 
-const VERSION_PATTERN =
-  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-
-if (!VERSION_PATTERN.test(nextVersion)) {
-  console.error(`Invalid version: ${nextVersion}`);
-  process.exit(1);
+async function main() {
+  const nextVersion = process.argv[2]?.trim();
+  if (!nextVersion) {
+    throw new Error("Usage: node ./scripts/set-app-version.mjs <stable-x.y.z>");
+  }
+  await setAppVersion({ version: nextVersion });
 }
 
-const packageJsonPaths = [
-  resolve("app/chrome-extension/package.json"),
-  resolve("app/mcp-server/package.json"),
-];
+const isMain =
+  process.argv[1] !== undefined &&
+  pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 
-for (const packageJsonPath of packageJsonPaths) {
-  const source = await readFile(packageJsonPath, "utf8");
-  const pkg = JSON.parse(source);
-  pkg.version = nextVersion;
-  await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
-  console.log(`Updated ${packageJsonPath} -> ${nextVersion}`);
+if (isMain) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
 }

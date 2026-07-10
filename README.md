@@ -513,6 +513,7 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 **`release.yml`**
 
 - Trigger: tag push `v*` and manual dispatch
+- Unified releases accept stable `x.y.z` versions only. Prerelease (`-rc.1`, `-beta.1`) and build-metadata (`+build.1`) versions are rejected before any artifact or publish step because Chrome's update version is numeric and must stay aligned with the npm package version.
 - Builds release assets:
   - Chrome extension zip (`app/chrome-extension/.output/webpage-mcp-connector-<version>-chrome-extension.zip`)
   - MCP server npm tarball (`.tgz`)
@@ -520,6 +521,7 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 - On tag pushes, creates a GitHub Release and uploads assets
 - On tag pushes (`v*`), publishes `webpage-mcp` to npm (requires `NPM_AUTH_TOKEN` secret)
 - Manual npm publish available via `workflow_dispatch` with `publish_npm=true`
+- `scripts/npm-dist-tag.mjs` remains an npm-only utility; it is not used by `release.yml` and does not imply unified prerelease support.
 - Formal release builds require the Actions repository variable `CHROME_EXTENSION_PUBLIC_KEY`. It must contain the single-line base64 DER public-key body from Chrome Web Store, never a PEM or private key, and must derive the configured official extension ID. Local builds may omit it, but then unpacked builds do not use the official stable extension ID.
 
 </details>
@@ -532,7 +534,7 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 - Agent project/session selection and missing-selection routing: `pnpm --filter webpage-mcp-connector exec vitest run tests/utils/agent-selection.test.ts tests/background/sidepanel-utils.test.ts tests/background/quick-panel-agent-handler.test.ts`.
 - Safe session defaults and explicit dangerous-mode confirmation: `app/mcp-server/src/agent/session-security.test.ts` via `pnpm --filter webpage-mcp test`.
 - Localized extension strings: `pnpm --filter webpage-mcp-connector i18n:check`.
-- Release artifact and npm channel rules: `pnpm test:release`.
+- Stable-only unified release, artifact, version-setting, and standalone npm channel rules: `pnpm test:release`.
 
 Human review is still required for the unresolved documentation owner (`NEEDS_OWNER`) and for installed-browser bootstrap behavior on each supported operating system.
 
