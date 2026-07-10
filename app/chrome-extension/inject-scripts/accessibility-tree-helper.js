@@ -607,6 +607,15 @@
       if (structuralTokens > 128) {
         throw new Error('XPath exceeds the structural complexity limit');
       }
+      // XPath evaluation itself is synchronous and cannot be interrupted. Refuse
+      // to invoke it when a bounded preflight cannot cover the whole page.
+      const pageBudget = createTargetScanBudget();
+      for (const _node of walkTargetNodesDeep(document, pageBudget)) {
+        // Traversal alone is the preflight.
+      }
+      if (pageBudget.truncated) {
+        throw new Error('XPath page scan exceeds the bounded traversal budget');
+      }
       if (allowMultiple) {
         const result = document.evaluate(
           normalized,

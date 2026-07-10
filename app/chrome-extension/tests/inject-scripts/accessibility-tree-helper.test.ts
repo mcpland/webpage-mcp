@@ -185,6 +185,26 @@ describe('accessibility-tree-helper resource boundaries', () => {
     );
   });
 
+  it('refuses synchronous XPath evaluation when the page exceeds the scan budget', async () => {
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < 12_100; index += 1) {
+      fragment.append(document.createElement('script'));
+    }
+    document.body.append(fragment);
+    const evaluate = vi.spyOn(document, 'evaluate');
+    loadHelper();
+
+    const response = await dispatch(getRuntimeListener(), {
+      action: 'ensureRefForSelector',
+      selector: '//button',
+      isXPath: true,
+    });
+
+    expect(response).toMatchObject({ success: false });
+    expect(response.error).toContain('bounded traversal budget');
+    expect(evaluate).not.toHaveBeenCalled();
+  });
+
   it('resolves text incrementally without reading subtree textContent', async () => {
     const button = document.createElement('button');
     button.append(document.createTextNode('Bounded target'));
