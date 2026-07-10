@@ -23,9 +23,11 @@ const hnswMocks = vi.hoisted(() => {
   const pendingWriteSyncs: Array<() => void> = [];
   const instances: Array<{ count: number; fileName?: string }> = [];
   let populateSnapshot: Map<string, number | LabelSnapshot> | null = null;
+  let autoCompleteSyncFS = true;
   let syncShouldSucceed = true;
   let synced = true;
   let autoCompleteWriteSync = true;
+  let completeWriteSyncSynchronously = false;
   let markDeleteFailuresRemaining = 0;
   let vectorFloatDeleteCalls = 0;
   let searchFailuresRemaining = 0;
@@ -195,7 +197,8 @@ const hnswMocks = vi.hoisted(() => {
       const complete = () => {
         synced = syncShouldSucceed;
       };
-      if (autoCompleteWriteSync) queueMicrotask(complete);
+      if (completeWriteSyncSynchronously) complete();
+      else if (autoCompleteWriteSync) queueMicrotask(complete);
       else pendingWriteSyncs.push(complete);
     }
   }
@@ -207,7 +210,7 @@ const hnswMocks = vi.hoisted(() => {
     syncFS: vi.fn((populate: boolean, callback: () => void) => {
       syncCalls.push(populate);
       synced = false;
-      queueMicrotask(() => {
+      const complete = () => {
         synced = syncShouldSucceed;
         if (populate && synced) {
           files.clear();
@@ -240,7 +243,8 @@ const hnswMocks = vi.hoisted(() => {
           }
         }
         callback();
-      });
+      };
+      if (autoCompleteSyncFS) queueMicrotask(complete);
     }),
   };
 
@@ -256,9 +260,11 @@ const hnswMocks = vi.hoisted(() => {
       syncShouldSucceed = value;
     },
     resetSyncState() {
+      autoCompleteSyncFS = true;
       syncShouldSucceed = true;
       synced = true;
       autoCompleteWriteSync = true;
+      completeWriteSyncSynchronously = false;
       markDeleteFailuresRemaining = 0;
       pendingWriteSyncs.length = 0;
       searchCalls.length = 0;
@@ -268,6 +274,15 @@ const hnswMocks = vi.hoisted(() => {
     },
     setAutoCompleteWriteSync(value: boolean) {
       autoCompleteWriteSync = value;
+    },
+    setAutoCompleteSyncFS(value: boolean) {
+      autoCompleteSyncFS = value;
+    },
+    setCompleteWriteSyncSynchronously(value: boolean) {
+      completeWriteSyncSynchronously = value;
+    },
+    setSynced(value: boolean) {
+      synced = value;
     },
     setWriteFailures(value: number) {
       writeFailuresRemaining = value;
@@ -769,6 +784,24 @@ describe("vector database cleanup", () => {
     expect(chrome.storage.local.remove).toHaveBeenCalledTimes(2);
   });
 
+  it("bounds the initial wait when the HNSW filesystem never becomes idle", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    hnswMocks.setSynced(false);
+    const database = new VectorDatabase({
+      dimension: 3,
+      indexFileName: `idle-timeout-${crypto.randomUUID()}.dat`,
+    });
+
+    const initialization = database.initialize();
+    const rejection = expect(initialization).rejects.toThrow(
+      "Timed out after 30000ms waiting for HNSW filesystem to become idle",
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    await rejection;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("replaces an initialized index with a supported empty HNSW index", async () => {
     chrome.storage.local.get = vi.fn(
       async () => ({}),
@@ -800,6 +833,24 @@ describe("vector database cleanup", () => {
     expect(hnswMocks.syncCalls.filter((populate) => !populate)).toHaveLength(0);
     expect("deleteFile" in hnswMocks.manager).toBe(false);
     expect("deleteIndex" in hnswMocks.HierarchicalNSW.prototype).toBe(false);
+  });
+
+  it("bounds a syncFS call whose completion callback never arrives", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    hnswMocks.setAutoCompleteSyncFS(false);
+    const database = new VectorDatabase({
+      dimension: 3,
+      indexFileName: `sync-callback-timeout-${crypto.randomUUID()}.dat`,
+    });
+
+    const initialization = database.initialize();
+    const rejection = expect(initialization).rejects.toThrow(
+      "Timed out after 30000ms waiting for syncFS callback",
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    await rejection;
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("rejects when a syncFS callback reports an unsuccessful IDBFS sync", async () => {
@@ -842,6 +893,84 @@ describe("vector database cleanup", () => {
 
     hnswMocks.completeNextWriteSync();
     await Promise.all([first, second]);
+  });
+
+  it("accepts a write sync that completes before its first state observation", async () => {
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({
+      dimension: 3,
+      indexFileName: `fast-write-sync-${crypto.randomUUID()}.dat`,
+    });
+    await database.initialize();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    hnswMocks.setCompleteWriteSyncSynchronously(true);
+
+    await expect(database.clear()).resolves.toBeUndefined();
+
+    expect(hnswMocks.writeCalls).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("bounds a write sync when the filesystem manager never becomes idle", async () => {
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({
+      dimension: 3,
+      indexFileName: `write-timeout-${crypto.randomUUID()}.dat`,
+    });
+    await database.initialize();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    hnswMocks.setAutoCompleteWriteSync(false);
+
+    const clearing = database.clear();
+    const capturedFailure = clearing.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    const failure = await capturedFailure;
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors.map(String)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "Timed out after 30000ms waiting for writeIndex filesystem synchronization",
+        ),
+      ]),
+    );
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("bounds both the original write and its rollback persistence", async () => {
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({
+      dimension: 3,
+      indexFileName: `rollback-write-timeout-${crypto.randomUUID()}.dat`,
+    });
+    await database.initialize();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    hnswMocks.setAutoCompleteWriteSync(false);
+
+    const addition = database.addDocument(
+      7,
+      "https://example.test/page",
+      "Page",
+      { text: "private", source: "content", index: 0, wordCount: 1 },
+      new Float32Array([1, 0, 0]),
+    );
+    const capturedFailure = addition.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    const failure = await capturedFailure;
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).message).toContain(
+      "rollback did not complete",
+    );
+    expect((failure as AggregateError).errors.map(String)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "Timed out after 30000ms waiting for writeIndex filesystem synchronization",
+        ),
+      ]),
+    );
+    expect(hnswMocks.writeCalls).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("loads an HNSW index only after matching durable metadata is validated", async () => {

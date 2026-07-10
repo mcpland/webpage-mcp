@@ -89,6 +89,8 @@ const STORE_NAME = "documentMappings";
 const HNSW_DB_NAME = "/hnswlib-index";
 const VECTOR_MAPPING_SCHEMA_VERSION = 2;
 const MAX_HNSW_LABEL = 0xffffffff;
+const HNSW_FILESYSTEM_WAIT_TIMEOUT_MS = 30_000;
+const HNSW_FILESYSTEM_POLL_INTERVAL_MS = 25;
 const HNSW_INDEX_FILES = [
   "tab_content_index.dat",
   "content_index.dat",
@@ -104,6 +106,15 @@ function errorMessage(error: unknown): string {
 
 function cleanupError(step: string, error: unknown): Error {
   return new Error(`${step}: ${errorMessage(error)}`, { cause: error });
+}
+
+class HnswFileSystemTimeoutError extends Error {
+  constructor(operation: string) {
+    super(
+      `Timed out after ${HNSW_FILESYSTEM_WAIT_TIMEOUT_MS}ms waiting for ${operation}`,
+    );
+    this.name = "HnswFileSystemTimeoutError";
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -429,9 +440,15 @@ async function syncGlobalHnswFileSystemNow(populate: boolean): Promise<void> {
     const finish = (error?: unknown) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       if (error) reject(cleanupError("Failed to sync HNSW filesystem", error));
       else resolve();
     };
+
+    const deadline = setTimeout(
+      () => finish(new HnswFileSystemTimeoutError("syncFS callback")),
+      HNSW_FILESYSTEM_WAIT_TIMEOUT_MS,
+    );
 
     try {
       manager.syncFS(populate, () => {
@@ -459,54 +476,95 @@ async function syncGlobalHnswFileSystem(populate: boolean): Promise<void> {
  * which can overwrite the library's static callback.
  */
 async function waitForGlobalHnswFileSystemSync(
-  pollIntervalMs = 25,
+  pollIntervalMs = HNSW_FILESYSTEM_POLL_INTERVAL_MS,
 ): Promise<void> {
   if (!globalHnswlib) throw new Error("HNSW module is not initialized");
 
   const manager = globalHnswlib.EmscriptenFileSystemManager;
   await new Promise<void>((resolve, reject) => {
-    let observedUnsynced = false;
+    let settled = false;
+    let poll: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (poll !== undefined) clearTimeout(poll);
+      if (error) {
+        reject(cleanupError("Failed to wait for HNSW filesystem sync", error));
+      } else {
+        resolve();
+      }
+    };
+
+    const deadline = setTimeout(() => {
+      finish(
+        new HnswFileSystemTimeoutError("writeIndex filesystem synchronization"),
+      );
+    }, HNSW_FILESYSTEM_WAIT_TIMEOUT_MS);
+
     const check = () => {
       try {
-        if (manager.isSynced() !== true) {
-          observedUnsynced = true;
-        } else if (observedUnsynced) {
-          resolve();
+        // writeIndex starts its sync before returning. A true state here can
+        // therefore mean either that the operation completed synchronously or
+        // that a very fast false -> true transition happened before our first
+        // observation; requiring an observed false transition would hang.
+        if (manager.isSynced() === true) {
+          finish();
           return;
         }
       } catch (error) {
-        reject(
+        finish(
           cleanupError("Failed to inspect HNSW filesystem sync state", error),
         );
         return;
       }
 
-      setTimeout(check, pollIntervalMs);
+      poll = setTimeout(check, pollIntervalMs);
     };
     check();
   });
 }
 
 async function waitForGlobalHnswFileSystemIdle(
-  pollIntervalMs = 25,
+  pollIntervalMs = HNSW_FILESYSTEM_POLL_INTERVAL_MS,
 ): Promise<void> {
   if (!globalHnswlib) throw new Error("HNSW module is not initialized");
 
   const manager = globalHnswlib.EmscriptenFileSystemManager;
   await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let poll: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (poll !== undefined) clearTimeout(poll);
+      if (error) {
+        reject(cleanupError("Failed to wait for idle HNSW filesystem", error));
+      } else {
+        resolve();
+      }
+    };
+
+    const deadline = setTimeout(() => {
+      finish(new HnswFileSystemTimeoutError("HNSW filesystem to become idle"));
+    }, HNSW_FILESYSTEM_WAIT_TIMEOUT_MS);
+
     const check = () => {
       try {
         if (manager.isSynced() === true) {
-          resolve();
+          finish();
           return;
         }
       } catch (error) {
-        reject(
+        finish(
           cleanupError("Failed to inspect HNSW filesystem sync state", error),
         );
         return;
       }
-      setTimeout(check, pollIntervalMs);
+      poll = setTimeout(check, pollIntervalMs);
     };
     check();
   });
