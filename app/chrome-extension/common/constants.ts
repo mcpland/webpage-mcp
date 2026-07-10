@@ -231,6 +231,7 @@ export const STORAGE_KEYS = {
   NATIVE_FIRST_CONNECT_NOTIFICATION_SHOWN:
     "nativeFirstConnectNotificationShown",
   SEMANTIC_MODEL: "selectedModel",
+  SEMANTIC_CLEANUP_REQUIRED: "semanticCleanupRequired",
   SEMANTIC_PENDING_TAB_INVALIDATIONS: "semanticPendingTabInvalidations",
   USER_PREFERENCES: "userPreferences",
   VECTOR_INDEX: "vectorIndex",

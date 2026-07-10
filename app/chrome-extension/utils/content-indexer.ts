@@ -16,6 +16,14 @@ import {
   PREDEFINED_MODELS,
 } from "./semantic-similarity-engine";
 import { getStoredSemanticModelSelection } from "./semantic-similarity-boundaries";
+import {
+  SemanticMaintenanceMarkerValidationError,
+  armSemanticMaintenance,
+  completeSemanticMaintenance,
+  readSemanticMaintenanceMarker,
+  type RequiredSemanticMaintenanceMarker,
+  type SemanticMaintenanceKind,
+} from "./semantic-maintenance-marker";
 import { STORAGE_KEYS } from "@/common/constants";
 import { TOOL_MESSAGE_TYPES } from "@/common/message-types";
 
@@ -158,11 +166,20 @@ export interface ContentIndexerActivity {
 export type ContentIndexerMaintenance = ContentIndexerActivity;
 
 interface MaintenanceJob<T = unknown> {
-  kind: "index" | "data-cleanup" | "index-recovery" | "tab-invalidation";
+  kind:
+    | "index"
+    | "index-rebuild"
+    | "data-cleanup"
+    | "index-recovery"
+    | "tab-invalidation";
   operation: (activity: ContentIndexerMaintenance) => Promise<T>;
   resolve: (value: T) => void;
   reject: (error: unknown) => void;
+  markerPreparation?: Promise<RequiredSemanticMaintenanceMarker>;
+  markerAttemptStarted?: boolean;
 }
+
+type DurableGateState = "unknown" | "clear" | "required";
 
 export class ContentIndexer {
   private textChunker: TextChunker;
@@ -190,6 +207,11 @@ export class ContentIndexer {
   private failedTabInvalidation: Error | null = null;
   private dataCleanupPromise: Promise<void> | null = null;
   private dataCleanupEpoch = 0;
+  private durableGateState: DurableGateState = "unknown";
+  private durableGateLoadPromise: Promise<void> | null = null;
+  private durableGateError: Error | null = null;
+  private durableGateRequiredKind: SemanticMaintenanceKind | null = null;
+  private durableGateRevision = 0;
   private persistentStatsKnownEmpty = false;
   private tabInvalidationJournalKnown = false;
   private tabInvalidationEpoch = 0;
@@ -243,6 +265,17 @@ export class ContentIndexer {
   }
 
   /**
+   * Run an explicitly destructive clear/rebuild transaction. A failed rebuild
+   * may retry itself, but it can never supersede a privacy cleanup or model
+   * recovery marker.
+   */
+  public runExclusiveIndexRebuild<T>(
+    operation: (activity: ContentIndexerMaintenance) => Promise<T>,
+  ): Promise<T> {
+    return this.enqueueMaintenance("index-rebuild", operation);
+  }
+
+  /**
    * Run a fail-closed index rebuild. Unlike normal maintenance, a retry is
    * allowed after an earlier cleanup/rebuild failure so it can recover the
    * gate. Privacy cleanup remains an equivalent recovery path.
@@ -292,11 +325,71 @@ export class ContentIndexer {
       if (this.failedDataCleanup || this.failedTabInvalidation) {
         throw this.cleanupBlockedError();
       }
-      if (!this.maintenanceRequested && !this.maintenanceRunning) {
-        this.activeIndexActivities += 1;
-        return;
+      if (this.maintenanceRequested || this.maintenanceRunning) {
+        await new Promise<void>((resolve) => this.activityWaiters.add(resolve));
+        continue;
       }
-      await new Promise<void>((resolve) => this.activityWaiters.add(resolve));
+      if (this.durableGateState !== "clear") {
+        await this.ensureDurableGateClear();
+        // Loading storage yielded to other tasks. Re-check every epoch and
+        // maintenance flag before acquiring the shared lease.
+        continue;
+      }
+      this.activeIndexActivities += 1;
+      return;
+    }
+  }
+
+  private async ensureDurableGateClear(): Promise<void> {
+    if (this.durableGateState === "clear") return;
+    if (this.durableGateState === "required") {
+      throw this.cleanupBlockedError();
+    }
+
+    if (!this.durableGateLoadPromise) {
+      const expectedRevision = this.durableGateRevision;
+      const load = (async () => {
+        try {
+          const gate = await readSemanticMaintenanceMarker();
+          if (expectedRevision !== this.durableGateRevision) return;
+          if (gate.state === "required") {
+            this.durableGateState = "required";
+            this.durableGateRequiredKind = gate.marker.kind;
+            this.durableGateError = new Error(
+              `Interrupted semantic ${gate.marker.kind} attempt ${gate.marker.attemptId} requires recovery`,
+            );
+            return;
+          }
+          this.durableGateState = "clear";
+          this.durableGateRequiredKind = null;
+          this.durableGateError = null;
+        } catch (error) {
+          if (expectedRevision !== this.durableGateRevision) return;
+          this.durableGateState =
+            error instanceof SemanticMaintenanceMarkerValidationError
+              ? "required"
+              : "unknown";
+          this.durableGateRequiredKind = null;
+          this.durableGateError =
+            error instanceof Error ? error : new Error(String(error));
+          throw error;
+        }
+      })();
+      const tracked = load.finally(() => {
+        if (this.durableGateLoadPromise === tracked) {
+          this.durableGateLoadPromise = null;
+        }
+      });
+      this.durableGateLoadPromise = tracked;
+    }
+
+    try {
+      await this.durableGateLoadPromise;
+    } catch {
+      throw this.cleanupBlockedError();
+    }
+    if ((this.durableGateState as DurableGateState) !== "clear") {
+      throw this.cleanupBlockedError();
     }
   }
 
@@ -325,14 +418,25 @@ export class ContentIndexer {
   }
 
   private pumpMaintenanceQueue(): void {
-    if (this.maintenanceRunning || this.activeIndexActivities > 0) return;
+    if (this.maintenanceRunning) return;
 
-    const job = this.maintenanceQueue.shift();
+    const job = this.maintenanceQueue[0];
     if (!job) {
       this.maintenanceRequested = false;
       this.notifyActivityWaiters();
       return;
     }
+
+    if (this.isDurableMaintenance(job.kind) && !job.markerPreparation) {
+      job.markerPreparation = this.prepareDurableMaintenance(job);
+      // The queue will await and propagate this rejection after existing shared
+      // activities drain. Attach now so a long drain cannot create an unhandled
+      // rejection in the meantime.
+      void job.markerPreparation.catch(() => undefined);
+    }
+
+    if (this.activeIndexActivities > 0) return;
+    this.maintenanceQueue.shift();
 
     // A rebuild/reinitialize may have been queued while privacy cleanup was
     // still running. Re-check at execution time so a failed cleanup cannot be
@@ -352,19 +456,40 @@ export class ContentIndexer {
     let result: unknown;
     let failure: unknown;
     Promise.resolve()
-      .then(() => job.operation(this.createActivityFacade()))
+      .then(async () => {
+        let marker: RequiredSemanticMaintenanceMarker | null = null;
+        if (job.markerPreparation) {
+          marker = await job.markerPreparation;
+        } else if (job.kind === "index") {
+          // Generic maintenance is not itself classified as destructive, but it
+          // must never bypass an interrupted privacy cleanup/recovery.
+          await this.ensureDurableGateClear();
+        }
+
+        const value = await job.operation(this.createActivityFacade());
+        if (marker) {
+          await completeSemanticMaintenance(marker);
+          this.durableGateRevision += 1;
+          this.durableGateState = "clear";
+          this.durableGateRequiredKind = null;
+          this.durableGateError = null;
+          this.failedDataCleanup = null;
+        }
+        return value;
+      })
       .then(
         (value) => {
-          if (job.kind === "data-cleanup" || job.kind === "index-recovery") {
-            this.failedDataCleanup = null;
-          }
           succeeded = true;
           result = value;
         },
         (error) => {
-          if (job.kind === "data-cleanup" || job.kind === "index-recovery") {
-            this.failedDataCleanup =
-              error instanceof Error ? error : new Error(String(error));
+          if (this.isDurableMaintenance(job.kind)) {
+            if (job.markerAttemptStarted) {
+              this.durableGateState = "required";
+              this.durableGateError =
+                error instanceof Error ? error : new Error(String(error));
+              this.failedDataCleanup = this.durableGateError;
+            }
           } else if (job.kind === "tab-invalidation") {
             // Set this before releasing the maintenance gate so a waiter can
             // never slip through after an invalidation failed.
@@ -382,6 +507,66 @@ export class ContentIndexer {
       });
   }
 
+  private isDurableMaintenance(
+    kind: MaintenanceJob["kind"],
+  ): kind is SemanticMaintenanceKind {
+    return (
+      kind === "data-cleanup" ||
+      kind === "index-recovery" ||
+      kind === "index-rebuild"
+    );
+  }
+
+  private async prepareDurableMaintenance(
+    job: MaintenanceJob,
+  ): Promise<RequiredSemanticMaintenanceMarker> {
+    if (!this.isDurableMaintenance(job.kind)) {
+      throw new Error("Semantic maintenance job is not durable");
+    }
+    const kind = job.kind;
+    if (kind === "index-rebuild") {
+      // Rebuild is allowed to retry only its own interrupted marker. Always
+      // refresh storage here so a stale in-memory config can never supersede a
+      // privacy cleanup or model-recovery requirement.
+      this.durableGateRevision += 1;
+      try {
+        const gate = await readSemanticMaintenanceMarker();
+        this.durableGateState = gate.state;
+        this.durableGateRequiredKind =
+          gate.state === "required" ? gate.marker.kind : null;
+        this.durableGateError =
+          gate.state === "required"
+            ? new Error(
+                `Interrupted semantic ${gate.marker.kind} attempt ${gate.marker.attemptId} requires recovery`,
+              )
+            : null;
+      } catch (error) {
+        this.durableGateState =
+          error instanceof SemanticMaintenanceMarkerValidationError
+            ? "required"
+            : "unknown";
+        this.durableGateRequiredKind = null;
+        this.durableGateError =
+          error instanceof Error ? error : new Error(String(error));
+        throw this.cleanupBlockedError();
+      }
+      if (
+        this.durableGateState === "required" &&
+        this.durableGateRequiredKind !== "index-rebuild"
+      ) {
+        throw this.cleanupBlockedError();
+      }
+    } else {
+      this.durableGateRevision += 1;
+    }
+
+    job.markerAttemptStarted = true;
+    this.durableGateState = "required";
+    this.durableGateRequiredKind = kind;
+    this.durableGateError = null;
+    return armSemanticMaintenance(kind);
+  }
+
   private notifyActivityWaiters(): void {
     for (const resolve of this.activityWaiters) resolve();
     this.activityWaiters.clear();
@@ -392,7 +577,10 @@ export class ContentIndexer {
       "Semantic index access is blocked because the last cleanup or reinitialization did not complete, or a tab invalidation is still unsafe. Retry Clear All Data or model reinitialization.",
       {
         cause:
-          this.failedDataCleanup ?? this.failedTabInvalidation ?? undefined,
+          this.failedDataCleanup ??
+          this.failedTabInvalidation ??
+          this.durableGateError ??
+          undefined,
       },
     );
   }
@@ -437,7 +625,10 @@ export class ContentIndexer {
         await this.retryUndurableTabInvalidationWrites();
         // A cold event must stay cheap. Initialization will drain the durable
         // journal before it exposes the index.
-        if (this.failedDataCleanup) return;
+        if (this.failedDataCleanup || this.durableGateState !== "clear") {
+          await this.verifyColdTabInvalidationsAreDurable();
+          return;
+        }
         if (!this.isInitialized) {
           await this.verifyColdTabInvalidationsAreDurable();
           return;
@@ -1317,6 +1508,16 @@ export class ContentIndexer {
   /**
    * Get indexing statistics
    */
+  public async getVerifiedStats(): Promise<ContentIndexerStats> {
+    try {
+      await this.ensureDurableGateClear();
+    } catch {
+      // The snapshot below remains explicitly unavailable. Callers must honor
+      // `available` and redact counts rather than treating unloaded data as zero.
+    }
+    return this.getStats();
+  }
+
   public getStats(): ContentIndexerStats {
     const vectorStats = this.vectorDatabase
       ? this.vectorDatabase.getStats()
@@ -1324,21 +1525,27 @@ export class ContentIndexer {
           totalDocuments: 0,
           totalTabs: 0,
           indexSize: 0,
+          isInitialized: false,
         };
+    const vectorStateSafe =
+      !this.vectorDatabase || vectorStats.isInitialized !== false;
+    const effectiveInitialized = this.isInitialized && vectorStateSafe;
 
     return {
       ...vectorStats,
       available:
-        (this.isInitialized || this.persistentStatsKnownEmpty) &&
+        (effectiveInitialized || this.persistentStatsKnownEmpty) &&
+        vectorStateSafe &&
         !this.maintenanceRequested &&
         !this.maintenanceRunning &&
         !this.failedDataCleanup &&
         !this.failedTabInvalidation &&
+        this.durableGateState === "clear" &&
         this.tabInvalidationJournalKnown &&
         this.pendingTabInvalidations.size === 0 &&
         this.undurableTabInvalidations.size === 0,
       indexedPages: this.indexedPageByTab.size,
-      isInitialized: this.isInitialized,
+      isInitialized: effectiveInitialized,
       semanticEngineReady: this.isSemanticEngineReady(),
       semanticEngineInitializing: this.isSemanticEngineInitializing(),
     };
@@ -1348,7 +1555,7 @@ export class ContentIndexer {
    * Clear all indexes
    */
   public clearAllIndexes(): Promise<void> {
-    return this.runExclusiveIndexMaintenance((activity) =>
+    return this.runExclusiveIndexRebuild((activity) =>
       activity.clearAllIndexes(),
     );
   }

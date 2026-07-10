@@ -29,7 +29,7 @@ export async function handleGetStorageStats(): Promise<{
     // ContentIndexer will be initialized when user manually triggers semantic engine initialization
 
     // Get statistics
-    const stats = contentIndexer.getStats();
+    const stats = await contentIndexer.getVerifiedStats();
     const available = stats.available === true;
     const count = (value: unknown): number | null =>
       available && typeof value === "number" && Number.isFinite(value)

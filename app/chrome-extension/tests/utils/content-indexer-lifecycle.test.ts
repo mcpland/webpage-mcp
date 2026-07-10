@@ -50,6 +50,20 @@ interface TestPage {
 }
 
 const TAB_INVALIDATION_KEY = "semanticPendingTabInvalidations";
+const MAINTENANCE_KEY = "semanticCleanupRequired";
+
+function requiredMaintenanceMarker(
+  attemptId = "interrupted-attempt",
+  kind: "data-cleanup" | "index-recovery" = "data-cleanup",
+) {
+  return {
+    schemaVersion: 1,
+    state: "required",
+    attemptId,
+    kind,
+    startedAt: 100,
+  };
+}
 
 function installLocalStorage(initial: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = { ...initial };
@@ -93,7 +107,12 @@ describe("ContentIndexer tab/page lifecycle", () => {
     clear: mocks.clearVectorDatabase,
     commitTabPage: mocks.commitTabPage,
     ensureTabDocumentsRemoved: mocks.ensureTabDocumentsRemoved,
-    getStats: vi.fn(() => ({ totalDocuments: 0, totalTabs: 0, indexSize: 0 })),
+    getStats: vi.fn(() => ({
+      totalDocuments: 0,
+      totalTabs: 0,
+      indexSize: 0,
+      isInitialized: true,
+    })),
     initialize: mocks.initializeVectorDatabase,
     inspectTabPageState: mocks.inspectTabPageState,
     removeTabDocuments: mocks.removeTabDocuments,
@@ -122,8 +141,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
     mocks.removeTabDocuments.mockResolvedValue(undefined);
     mocks.resetGlobalVectorDatabase.mockResolvedValue(undefined);
 
-    chrome.storage.local.get = vi.fn().mockResolvedValue({});
-    chrome.storage.local.remove = vi.fn().mockResolvedValue(undefined);
+    installLocalStorage();
     chrome.tabs.get = vi.fn(async (tabId: number) => {
       const page = pagesByTab.get(tabId);
       if (!page) throw new Error(`No tab with id ${tabId}`);
@@ -173,6 +191,27 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(mocks.initializeEngine).not.toHaveBeenCalled();
     expect(mocks.getGlobalVectorDatabase).not.toHaveBeenCalled();
     expect(mocks.initializeVectorDatabase).not.toHaveBeenCalled();
+    expect(mocks.ensureTabDocumentsRemoved).not.toHaveBeenCalled();
+    expect(indexer.getStats().available).toBe(false);
+  });
+
+  it("persists a cold invalidation without applying HNSW while maintenance is required", async () => {
+    const state = installLocalStorage({
+      [MAINTENANCE_KEY]: requiredMaintenanceMarker(),
+    });
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    indexer.handleTabInvalidationEvent(91);
+
+    await vi.waitFor(() =>
+      expect(state[TAB_INVALIDATION_KEY]).toMatchObject({
+        entries: [[91, 1]],
+      }),
+    );
+    expect(state[MAINTENANCE_KEY]).toEqual(requiredMaintenanceMarker());
+    expect(mocks.initializeEngine).not.toHaveBeenCalled();
+    expect(mocks.getGlobalVectorDatabase).not.toHaveBeenCalled();
     expect(mocks.ensureTabDocumentsRemoved).not.toHaveBeenCalled();
     expect(indexer.getStats().available).toBe(false);
   });
@@ -552,6 +591,22 @@ describe("ContentIndexer tab/page lifecycle", () => {
     });
   });
 
+  it("redacts stats when the vector database reports an unsafe initialized state", async () => {
+    const indexer = await createIndexer();
+    vectorDatabase.getStats.mockReturnValueOnce({
+      totalDocuments: 4,
+      totalTabs: 2,
+      indexSize: 100,
+      isInitialized: false,
+    });
+
+    expect(indexer.getStats()).toMatchObject({
+      available: false,
+      isInitialized: false,
+      totalDocuments: 4,
+    });
+  });
+
   it("rechecks the live tab URL and never extracts non-HTTP content", async () => {
     pagesByTab.set(30, {
       url: "data:text/html,private",
@@ -814,6 +869,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
   });
 
   it("waits for in-flight initialization before starting exclusive cleanup", async () => {
+    const state = installLocalStorage();
     const initialization = deferred();
     mocks.initializeVectorDatabase.mockReturnValueOnce(initialization.promise);
     const { ContentIndexer } = await import("@/utils/content-indexer");
@@ -831,12 +887,52 @@ describe("ContentIndexer tab/page lifecycle", () => {
 
     await Promise.resolve();
     expect(cleanupStarted).toBe(false);
+    await vi.waitFor(() =>
+      expect(state[MAINTENANCE_KEY]).toMatchObject({
+        state: "required",
+        kind: "data-cleanup",
+      }),
+    );
     initialization.resolve();
     await initialize;
     await cleanup;
 
     expect(cleanupStarted).toBe(true);
     expect(mocks.clearAllVectorData).toHaveBeenCalledOnce();
+  });
+
+  it("rechecks the maintenance gate after an asynchronous marker read", async () => {
+    const state = installLocalStorage();
+    const markerRead = deferred<Record<string, unknown>>();
+    const storageGet = vi.mocked(chrome.storage.local.get);
+    const defaultGet = storageGet.getMockImplementation()!;
+    storageGet
+      .mockImplementationOnce(() => markerRead.promise)
+      .mockImplementation(defaultGet);
+    const cleanupHold = deferred();
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    const initialize = indexer.initialize();
+    await vi.waitFor(() => expect(storageGet).toHaveBeenCalledOnce());
+    const cleanup = indexer.runExclusiveDataCleanup(
+      async () => cleanupHold.promise,
+    );
+    await vi.waitFor(() =>
+      expect(state[MAINTENANCE_KEY]).toMatchObject({
+        state: "required",
+        kind: "data-cleanup",
+      }),
+    );
+
+    markerRead.resolve({});
+    await expect(initialize).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+    expect(mocks.initializeEngine).not.toHaveBeenCalled();
+
+    cleanupHold.resolve();
+    await cleanup;
   });
 
   it("waits for every shared activity before applying a live tab invalidation", async () => {
@@ -1073,5 +1169,270 @@ describe("ContentIndexer tab/page lifecycle", () => {
       indexedPages: 0,
       isInitialized: true,
     });
+  });
+
+  it("blocks every shared operation in a fresh worker when durable maintenance is required", async () => {
+    installLocalStorage({
+      [MAINTENANCE_KEY]: requiredMaintenanceMarker(),
+    });
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    await expect(indexer.initialize()).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+    await expect(indexer.indexTabContent(92)).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+    await expect(indexer.searchContent("blocked")).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+    await expect(indexer.removeTabIndex(92)).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+    await expect(
+      indexer.runExclusiveIndexMaintenance(async () => undefined),
+    ).rejects.toThrow("last cleanup or reinitialization did not complete");
+    await expect(indexer.getVerifiedStats()).resolves.toMatchObject({
+      available: false,
+    });
+
+    expect(mocks.initializeEngine).not.toHaveBeenCalled();
+    expect(mocks.getGlobalVectorDatabase).not.toHaveBeenCalled();
+    expect(mocks.initializeVectorDatabase).not.toHaveBeenCalled();
+    expect(mocks.getEmbedding).not.toHaveBeenCalled();
+    expect(chrome.tabs.get).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "malformed",
+      install: () =>
+        installLocalStorage({
+          [MAINTENANCE_KEY]: {
+            schemaVersion: 99,
+            state: "clear",
+            attemptId: "future",
+            completedAt: 100,
+          },
+        }),
+    },
+    {
+      label: "unreadable",
+      install: () => {
+        installLocalStorage();
+        chrome.storage.local.get = vi
+          .fn()
+          .mockRejectedValue(new Error("maintenance marker read failed"));
+      },
+    },
+  ])(
+    "fails closed before loading the engine when the durable marker is $label",
+    async ({ install }) => {
+      install();
+      const { ContentIndexer } = await import("@/utils/content-indexer");
+      const indexer = new ContentIndexer();
+
+      await expect(indexer.initialize()).rejects.toThrow(
+        "last cleanup or reinitialization did not complete",
+      );
+      await expect(indexer.getVerifiedStats()).resolves.toMatchObject({
+        available: false,
+      });
+      expect(mocks.initializeEngine).not.toHaveBeenCalled();
+      expect(mocks.getGlobalVectorDatabase).not.toHaveBeenCalled();
+    },
+  );
+
+  it("allows privacy cleanup to replace an interrupted marker and clears it only after success", async () => {
+    const state = installLocalStorage({
+      [MAINTENANCE_KEY]: requiredMaintenanceMarker(),
+    });
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+    const observedMarker = vi.fn();
+
+    await indexer.runExclusiveDataCleanup(async (activity) => {
+      observedMarker(state[MAINTENANCE_KEY]);
+      await activity.clearAllIndexes();
+    });
+
+    expect(observedMarker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: "required",
+        kind: "data-cleanup",
+        attemptId: expect.not.stringMatching(/^interrupted-attempt$/),
+      }),
+    );
+    expect(state[MAINTENANCE_KEY]).toMatchObject({
+      schemaVersion: 1,
+      state: "clear",
+      attemptId: expect.any(String),
+      completedAt: expect.any(Number),
+    });
+    await expect(indexer.initialize()).resolves.toBeUndefined();
+  });
+
+  it("does not run a destructive callback when the required marker cannot be armed", async () => {
+    const state = installLocalStorage();
+    vi.mocked(chrome.storage.local.set).mockRejectedValueOnce(
+      new Error("marker arm failed"),
+    );
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+    const destructive = vi.fn(async () => undefined);
+
+    await expect(indexer.runExclusiveDataCleanup(destructive)).rejects.toThrow(
+      "marker arm failed",
+    );
+
+    expect(destructive).not.toHaveBeenCalled();
+    expect(mocks.clearAllVectorData).not.toHaveBeenCalled();
+    expect(state).not.toHaveProperty(MAINTENANCE_KEY);
+    await expect(indexer.getVerifiedStats()).resolves.toMatchObject({
+      available: false,
+    });
+  });
+
+  it("keeps the marker and stats blocked when the final clear write fails", async () => {
+    const state = installLocalStorage();
+    const storageSet = vi.mocked(chrome.storage.local.set);
+    const defaultSet = storageSet.getMockImplementation()!;
+    storageSet
+      .mockImplementationOnce(defaultSet)
+      .mockRejectedValueOnce(new Error("marker clear failed"));
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+    const destructive = vi.fn(async () => undefined);
+
+    await expect(indexer.runExclusiveDataCleanup(destructive)).rejects.toThrow(
+      "marker clear failed",
+    );
+
+    expect(destructive).toHaveBeenCalledOnce();
+    expect(state[MAINTENANCE_KEY]).toMatchObject({
+      state: "required",
+      kind: "data-cleanup",
+    });
+    expect(indexer.getStats().available).toBe(false);
+    await expect(indexer.getVerifiedStats()).resolves.toMatchObject({
+      available: false,
+    });
+  });
+
+  it("keeps the marker required for the whole in-flight cleanup and clears it after late success", async () => {
+    const state = installLocalStorage();
+    const hold = deferred();
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    const cleanup = indexer.runExclusiveDataCleanup(async () => hold.promise);
+    await vi.waitFor(() =>
+      expect(state[MAINTENANCE_KEY]).toMatchObject({
+        state: "required",
+        kind: "data-cleanup",
+      }),
+    );
+    expect(indexer.getStats().available).toBe(false);
+
+    hold.resolve();
+    await cleanup;
+    expect(state[MAINTENANCE_KEY]).toMatchObject({ state: "clear" });
+  });
+
+  it("leaves a failed reinitialization required across instances and lets a new recovery retry clear it", async () => {
+    const state = installLocalStorage();
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const first = new ContentIndexer();
+    await first.initialize();
+    mocks.resetGlobalVectorDatabase.mockRejectedValueOnce(
+      new Error("restart reset failed"),
+    );
+
+    await expect(first.reinitialize()).rejects.toThrow("restart reset failed");
+    expect(state[MAINTENANCE_KEY]).toMatchObject({
+      state: "required",
+      kind: "index-recovery",
+    });
+
+    const restarted = new ContentIndexer();
+    const engineCalls = mocks.initializeEngine.mock.calls.length;
+    await expect(restarted.initialize()).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+    expect(mocks.initializeEngine).toHaveBeenCalledTimes(engineCalls);
+
+    await expect(restarted.reinitialize()).resolves.toBeUndefined();
+    expect(state[MAINTENANCE_KEY]).toMatchObject({ state: "clear" });
+    expect(restarted.getStats()).toMatchObject({
+      available: true,
+      isInitialized: true,
+    });
+  });
+
+  it("does not let an index rebuild supersede a privacy-cleanup requirement", async () => {
+    const original = requiredMaintenanceMarker("privacy-attempt");
+    const state = installLocalStorage({ [MAINTENANCE_KEY]: original });
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+    const rebuild = vi.fn(async () => undefined);
+
+    await expect(indexer.runExclusiveIndexRebuild(rebuild)).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+
+    expect(rebuild).not.toHaveBeenCalled();
+    expect(state[MAINTENANCE_KEY]).toEqual(original);
+  });
+
+  it("retries an index rebuild after a transient pre-arm marker read failure", async () => {
+    const state = installLocalStorage();
+    const storageGet = vi.mocked(chrome.storage.local.get);
+    const defaultGet = storageGet.getMockImplementation()!;
+    storageGet
+      .mockRejectedValueOnce(new Error("transient marker read failure"))
+      .mockImplementation(defaultGet);
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+    const rebuild = vi.fn(async () => undefined);
+
+    await expect(indexer.runExclusiveIndexRebuild(rebuild)).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+    expect(rebuild).not.toHaveBeenCalled();
+    expect(state).not.toHaveProperty(MAINTENANCE_KEY);
+
+    await expect(
+      indexer.runExclusiveIndexRebuild(rebuild),
+    ).resolves.toBeUndefined();
+    expect(rebuild).toHaveBeenCalledOnce();
+    expect(state[MAINTENANCE_KEY]).toMatchObject({ state: "clear" });
+  });
+
+  it("persists a failed index rebuild across workers and lets only a rebuild retry clear it", async () => {
+    const state = installLocalStorage();
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const first = new ContentIndexer();
+
+    await expect(
+      first.runExclusiveIndexRebuild(async () => {
+        throw new Error("rebuild interrupted");
+      }),
+    ).rejects.toThrow("rebuild interrupted");
+    expect(state[MAINTENANCE_KEY]).toMatchObject({
+      state: "required",
+      kind: "index-rebuild",
+    });
+
+    const restarted = new ContentIndexer();
+    await expect(restarted.initialize()).rejects.toThrow(
+      "last cleanup or reinitialization did not complete",
+    );
+    const retry = vi.fn(async () => undefined);
+    await expect(
+      restarted.runExclusiveIndexRebuild(retry),
+    ).resolves.toBeUndefined();
+    expect(retry).toHaveBeenCalledOnce();
+    expect(state[MAINTENANCE_KEY]).toMatchObject({ state: "clear" });
   });
 });

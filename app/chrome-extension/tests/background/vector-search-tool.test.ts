@@ -28,9 +28,20 @@ function createIndexer() {
     isSemanticEngineInitializing: vi.fn(() => false),
     searchContent: vi.fn(async () => [] as SearchResult[]),
     getStats: vi.fn(() => ({
+      available: true,
       totalDocuments: 10,
       totalTabs: 3,
       indexedPages: 3,
+      semanticEngineReady: true,
+      semanticEngineInitializing: false,
+    })),
+    getVerifiedStats: vi.fn(async () => ({
+      available: true,
+      totalDocuments: 10,
+      totalTabs: 3,
+      indexSize: 100,
+      indexedPages: 3,
+      isInitialized: true,
       semanticEngineReady: true,
       semanticEngineInitializing: false,
     })),
@@ -39,6 +50,7 @@ function createIndexer() {
     removeTabIndex: vi.fn(async (_tabId: number) => undefined),
     runWithIndexActivity: vi.fn(),
     runExclusiveIndexMaintenance: vi.fn(),
+    runExclusiveIndexRebuild: vi.fn(),
   };
   indexer.runWithIndexActivity.mockImplementation(
     async (operation: (activity: typeof indexer) => Promise<unknown>) => {
@@ -55,6 +67,14 @@ function createIndexer() {
     },
   );
   indexer.runExclusiveIndexMaintenance.mockImplementation(
+    async (operation: (activity: typeof indexer) => Promise<unknown>) => {
+      if (activeActivities > 0) {
+        await new Promise<void>((resolve) => idleWaiters.add(resolve));
+      }
+      return operation(indexer);
+    },
+  );
+  indexer.runExclusiveIndexRebuild.mockImplementation(
     async (operation: (activity: typeof indexer) => Promise<unknown>) => {
       if (activeActivities > 0) {
         await new Promise<void>((resolve) => idleWaiters.add(resolve));
@@ -306,7 +326,7 @@ describe("VectorSearchTabsContentTool resource bounds", () => {
     await Promise.all([first, second, rebuild]);
 
     expect(indexer.clearAllIndexes).toHaveBeenCalledTimes(1);
-    expect(indexer.runExclusiveIndexMaintenance).toHaveBeenCalledOnce();
+    expect(indexer.runExclusiveIndexRebuild).toHaveBeenCalledOnce();
     expect(indexer.runWithIndexActivity).toHaveBeenCalledTimes(2);
     expect(indexer.indexTabContent).toHaveBeenCalledTimes(
       VECTOR_REBUILD_MAX_TABS * 2,
@@ -349,5 +369,32 @@ describe("VectorSearchTabsContentTool resource bounds", () => {
     expect(indexer.runWithIndexActivity).toHaveBeenCalledOnce();
     expect(indexer.initialize).toHaveBeenCalledBefore(indexer.indexTabContent);
     expect(indexer.indexTabContent).toHaveBeenCalledWith(77);
+  });
+
+  it("redacts durable statistics while the semantic index gate is unavailable", async () => {
+    const indexer = createIndexer();
+    indexer.getVerifiedStats.mockResolvedValueOnce({
+      available: false,
+      totalDocuments: 10,
+      totalTabs: 3,
+      indexSize: 100,
+      indexedPages: 3,
+      isInitialized: true,
+      semanticEngineReady: true,
+      semanticEngineInitializing: false,
+    });
+    const tool = new VectorSearchTabsContentTool(
+      indexer as unknown as ContentIndexer,
+    );
+    await tool.indexTab(77);
+
+    await expect(tool.getIndexStats()).resolves.toMatchObject({
+      available: false,
+      totalDocuments: null,
+      totalTabs: null,
+      indexSize: null,
+      indexedPages: null,
+    });
+    expect(indexer.getVerifiedStats).toHaveBeenCalledOnce();
   });
 });

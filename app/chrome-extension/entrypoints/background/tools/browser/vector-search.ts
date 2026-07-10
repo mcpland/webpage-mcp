@@ -453,7 +453,17 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
         semanticEngineInitializing: false,
       };
     }
-    return this.contentIndexer.getStats();
+    const stats = await this.contentIndexer.getVerifiedStats();
+    if (!stats.available) {
+      return {
+        ...stats,
+        totalDocuments: null,
+        totalTabs: null,
+        indexSize: null,
+        indexedPages: null,
+      };
+    }
+    return stats;
   }
 
   /**
@@ -470,30 +480,28 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
   }
 
   private performRebuildIndex(): Promise<void> {
-    return this.contentIndexer.runExclusiveIndexMaintenance(
-      async (activity) => {
-        try {
-          if (!this.isInitialized) await this.initializeIndexer(activity);
+    return this.contentIndexer.runExclusiveIndexRebuild(async (activity) => {
+      try {
+        if (!this.isInitialized) await this.initializeIndexer(activity);
 
-          await activity.clearAllIndexes();
-          const tabs = await chrome.tabs.query({});
-          const { tabIds: validTabIds, scannedTabs } =
-            this.selectIndexableTabIds(tabs);
-          await this.ensureTabsIndexed(validTabIds, activity);
+        await activity.clearAllIndexes();
+        const tabs = await chrome.tabs.query({});
+        const { tabIds: validTabIds, scannedTabs } =
+          this.selectIndexableTabIds(tabs);
+        await this.ensureTabsIndexed(validTabIds, activity);
 
-          console.log(
-            `VectorSearchTabsContentTool: Rebuilt index for ${validTabIds.length} tabs ` +
-              `(scanned ${scannedTabs}, limits ${VECTOR_REBUILD_MAX_TABS}/${VECTOR_REBUILD_MAX_TAB_SCAN})`,
-          );
-        } catch (error) {
-          console.error(
-            "VectorSearchTabsContentTool: Failed to rebuild index:",
-            error,
-          );
-          throw error;
-        }
-      },
-    );
+        console.log(
+          `VectorSearchTabsContentTool: Rebuilt index for ${validTabIds.length} tabs ` +
+            `(scanned ${scannedTabs}, limits ${VECTOR_REBUILD_MAX_TABS}/${VECTOR_REBUILD_MAX_TAB_SCAN})`,
+        );
+      } catch (error) {
+        console.error(
+          "VectorSearchTabsContentTool: Failed to rebuild index:",
+          error,
+        );
+        throw error;
+      }
+    });
   }
 
   /**

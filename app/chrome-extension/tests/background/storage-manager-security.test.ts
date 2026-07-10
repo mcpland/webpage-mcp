@@ -1,17 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import { STORAGE_KEYS } from "@/common/constants";
 import { CLEAR_DATA_RESPONSE_TIMEOUT_MS } from "@/entrypoints/background/storage-manager";
+import {
+  armSemanticMaintenance,
+  completeSemanticMaintenance,
+} from "@/utils/semantic-maintenance-marker";
 
 const indexerMocks = vi.hoisted(() => ({
   clearAllIndexes: vi.fn(),
-  getStats: vi.fn(),
+  getVerifiedStats: vi.fn(),
   runExclusiveDataCleanup: vi.fn(),
 }));
 
 vi.mock("@/utils/content-indexer", () => ({
   getGlobalContentIndexer: () => ({
     clearAllIndexes: indexerMocks.clearAllIndexes,
-    getStats: indexerMocks.getStats,
+    getVerifiedStats: indexerMocks.getVerifiedStats,
     runExclusiveDataCleanup: indexerMocks.runExclusiveDataCleanup,
   }),
 }));
@@ -26,13 +31,15 @@ describe("storage manager authorization", () => {
   let listener: RuntimeListener;
   let storageRemove: ReturnType<typeof vi.fn>;
   let storageGet: ReturnType<typeof vi.fn>;
+  let storageSet: ReturnType<typeof vi.fn>;
+  let storageState: Record<string, unknown>;
   let activeCleanup: Promise<void> | null;
 
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
     indexerMocks.clearAllIndexes.mockResolvedValue(undefined);
-    indexerMocks.getStats.mockReturnValue({
+    indexerMocks.getVerifiedStats.mockResolvedValue({
       available: true,
       indexedPages: 3,
       totalDocuments: 4,
@@ -55,8 +62,30 @@ describe("storage manager authorization", () => {
         return tracked;
       },
     );
-    storageRemove = vi.fn().mockResolvedValue(undefined);
-    storageGet = vi.fn().mockResolvedValue({});
+    storageState = {};
+    storageRemove = vi.fn(async (keys: string | string[]) => {
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        delete storageState[key];
+      }
+    });
+    storageGet = vi.fn(async (keys?: unknown) => {
+      const names = Array.isArray(keys)
+        ? keys
+        : typeof keys === "string"
+          ? [keys]
+          : Object.keys((keys as Record<string, unknown>) ?? storageState);
+      return Object.fromEntries(
+        names
+          .filter((name): name is string => typeof name === "string")
+          .filter((name) =>
+            Object.prototype.hasOwnProperty.call(storageState, name),
+          )
+          .map((name) => [name, storageState[name]]),
+      );
+    });
+    storageSet = vi.fn(async (items: Record<string, unknown>) => {
+      Object.assign(storageState, items);
+    });
 
     vi.stubGlobal("chrome", {
       runtime: {
@@ -70,7 +99,9 @@ describe("storage manager authorization", () => {
           }),
         },
       },
-      storage: { local: { get: storageGet, remove: storageRemove } },
+      storage: {
+        local: { get: storageGet, remove: storageRemove, set: storageSet },
+      },
     });
 
     const { initStorageManagerListener } =
@@ -117,7 +148,7 @@ describe("storage manager authorization", () => {
       success: false,
       error: "Storage management requires an extension page",
     });
-    expect(indexerMocks.getStats).not.toHaveBeenCalled();
+    expect(indexerMocks.getVerifiedStats).not.toHaveBeenCalled();
     expect(indexerMocks.clearAllIndexes).not.toHaveBeenCalled();
     expect(indexerMocks.runExclusiveDataCleanup).not.toHaveBeenCalled();
     expect(storageRemove).not.toHaveBeenCalled();
@@ -133,11 +164,11 @@ describe("storage manager authorization", () => {
       success: true,
       stats: { indexedPages: 3, totalDocuments: 4 },
     });
-    expect(indexerMocks.getStats).toHaveBeenCalledOnce();
+    expect(indexerMocks.getVerifiedStats).toHaveBeenCalledOnce();
   });
 
   it("does not report unloaded persistent statistics as zero after a worker restart", async () => {
-    indexerMocks.getStats.mockReturnValueOnce({
+    indexerMocks.getVerifiedStats.mockResolvedValueOnce({
       available: false,
       indexedPages: 0,
       totalDocuments: 0,
@@ -174,6 +205,9 @@ describe("storage manager authorization", () => {
     expect(indexerMocks.runExclusiveDataCleanup).toHaveBeenCalledOnce();
     expect(storageRemove).toHaveBeenCalledOnce();
     expect(storageGet).toHaveBeenCalledOnce();
+    expect(storageRemove.mock.calls[0][0]).not.toContain(
+      STORAGE_KEYS.SEMANTIC_CLEANUP_REQUIRED,
+    );
   });
 
   it.each([
@@ -228,6 +262,27 @@ describe("storage manager authorization", () => {
         finishIndexCleanup = resolve;
       }),
     );
+    indexerMocks.runExclusiveDataCleanup.mockImplementation(
+      (
+        operation: (activity: {
+          clearAllIndexes: typeof indexerMocks.clearAllIndexes;
+        }) => Promise<void>,
+      ) => {
+        if (activeCleanup) return activeCleanup;
+        const cleanup = (async () => {
+          const marker = await armSemanticMaintenance("data-cleanup");
+          await operation({
+            clearAllIndexes: indexerMocks.clearAllIndexes,
+          });
+          await completeSemanticMaintenance(marker);
+        })();
+        const tracked = cleanup.finally(() => {
+          if (activeCleanup === tracked) activeCleanup = null;
+        });
+        activeCleanup = tracked;
+        return tracked;
+      },
+    );
 
     const firstResponse = dispatch(
       { type: BACKGROUND_MESSAGE_TYPES.CLEAR_ALL_DATA },
@@ -238,6 +293,10 @@ describe("storage manager authorization", () => {
     await expect(firstResponse).resolves.toMatchObject({
       success: false,
       error: expect.stringContaining("still in progress"),
+    });
+    expect(storageState[STORAGE_KEYS.SEMANTIC_CLEANUP_REQUIRED]).toMatchObject({
+      state: "required",
+      kind: "data-cleanup",
     });
     expect(storageRemove).not.toHaveBeenCalled();
 
@@ -253,6 +312,9 @@ describe("storage manager authorization", () => {
     await vi.runAllTicks();
     await expect(retryResponse).resolves.toEqual({ success: true });
     expect(storageRemove).toHaveBeenCalledOnce();
+    expect(storageState[STORAGE_KEYS.SEMANTIC_CLEANUP_REQUIRED]).toMatchObject({
+      state: "clear",
+    });
   });
 
   it("ignores unrelated and malformed messages", async () => {
