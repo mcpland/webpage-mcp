@@ -212,6 +212,7 @@ export const PRIVILEGED_UI_ACTIONS = {
   QUICK_PANEL_SEND: 'quick_panel_send',
   QUICK_PANEL_CANCEL: 'quick_panel_cancel',
   WEB_EDITOR_APPLY: 'web_editor_apply',
+  WEB_EDITOR_CANCEL: 'web_editor_cancel',
 } as const;
 
 export type PrivilegedUiAction =

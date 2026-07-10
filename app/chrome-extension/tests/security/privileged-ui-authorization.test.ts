@@ -61,6 +61,11 @@ describe('privileged in-page UI authorization', () => {
       store.consume(cancelToken, PRIVILEGED_UI_ACTIONS.QUICK_PANEL_CANCEL, sender(), 3_101),
     ).toBe(true);
 
+    const editorCancelToken = store.issue(PRIVILEGED_UI_ACTIONS.WEB_EDITOR_CANCEL, sender(), 3_200);
+    expect(
+      store.consume(editorCancelToken, PRIVILEGED_UI_ACTIONS.WEB_EDITOR_CANCEL, sender(), 3_201),
+    ).toBe(true);
+
     const expiredToken = store.issue(PRIVILEGED_UI_ACTIONS.QUICK_PANEL_SEND, sender(), 4_000);
     expect(
       store.consume(expiredToken, PRIVILEGED_UI_ACTIONS.QUICK_PANEL_SEND, sender(), 34_001),

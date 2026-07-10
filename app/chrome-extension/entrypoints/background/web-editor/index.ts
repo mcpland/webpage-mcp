@@ -44,6 +44,75 @@ interface ExecutionStatusEntry {
 }
 const executionStatusCache = new Map<string, ExecutionStatusEntry>();
 const STATUS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const MAX_EXECUTION_OWNERS = 100;
+
+interface ExecutionOwner {
+  readonly sessionId: string;
+  readonly tabId: number;
+  readonly frameId: number;
+  readonly documentId: string;
+  updatedAt: number;
+}
+
+const executionOwners = new Map<string, ExecutionOwner>();
+
+function getExecutionSenderScope(
+  sender: chrome.runtime.MessageSender,
+): Omit<ExecutionOwner, 'sessionId' | 'updatedAt'> | null {
+  const tabId = sender.tab?.id;
+  if (
+    sender.id !== chrome.runtime.id ||
+    typeof tabId !== 'number' ||
+    sender.frameId !== 0
+  ) {
+    return null;
+  }
+  return {
+    tabId,
+    frameId: 0,
+    documentId: typeof sender.documentId === 'string' ? sender.documentId : '',
+  };
+}
+
+function rememberExecutionOwner(
+  requestId: string,
+  sessionId: string,
+  sender: chrome.runtime.MessageSender,
+): void {
+  const scope = getExecutionSenderScope(sender);
+  if (!scope) return;
+  executionOwners.delete(requestId);
+  executionOwners.set(requestId, { ...scope, sessionId, updatedAt: Date.now() });
+  while (executionOwners.size > MAX_EXECUTION_OWNERS) {
+    const oldestRequestId = executionOwners.keys().next().value as string | undefined;
+    if (!oldestRequestId) break;
+    executionOwners.delete(oldestRequestId);
+  }
+}
+
+function getExecutionOwner(requestId: string): ExecutionOwner | undefined {
+  const owner = executionOwners.get(requestId);
+  if (owner && Date.now() - owner.updatedAt > STATUS_CACHE_TTL) {
+    executionOwners.delete(requestId);
+    return undefined;
+  }
+  return owner;
+}
+
+function isExecutionOwner(
+  owner: ExecutionOwner,
+  sessionId: string,
+  sender: chrome.runtime.MessageSender,
+): boolean {
+  const scope = getExecutionSenderScope(sender);
+  return (
+    scope !== null &&
+    owner.sessionId === sessionId &&
+    owner.tabId === scope.tabId &&
+    owner.frameId === scope.frameId &&
+    owner.documentId === scope.documentId
+  );
+}
 
 function cleanupExpiredStatuses(): void {
   const now = Date.now();
@@ -60,6 +129,8 @@ function setExecutionStatus(
   message?: string,
   result?: ExecutionStatusEntry['result'],
 ): void {
+  const owner = executionOwners.get(requestId);
+  if (owner) owner.updatedAt = Date.now();
   executionStatusCache.set(requestId, {
     status,
     message,
@@ -837,6 +908,9 @@ export function initWebEditorListeners(): void {
       ];
       chrome.storage.session.remove(keys).catch(() => {});
     } catch {}
+    for (const [requestId, owner] of executionOwners) {
+      if (owner.tabId === tabId) executionOwners.delete(requestId);
+    }
     void releasePropsAgentEarlyInjection(tabId).catch(() => {});
   });
 
@@ -1246,9 +1320,14 @@ export function initWebEditorListeners(): void {
           }
 
           const json: any = resp.json || {};
-          const requestId = json?.requestId as string | undefined;
+          const requestId = normalizeString(json?.requestId).trim() || undefined;
 
           if (requestId) {
+            rememberExecutionOwner(
+              requestId,
+              sessionId,
+              _sender as chrome.runtime.MessageSender,
+            );
             // Start SSE subscription for status updates (fire and forget)
             subscribeToSessionStatus(sessionId, requestId).catch(() => {});
           }
@@ -1457,9 +1536,10 @@ export function initWebEditorListeners(): void {
           }
 
           const json: any = resp.json || {};
-          const requestId = json?.requestId as string | undefined;
+          const requestId = normalizeString(json?.requestId).trim() || undefined;
 
           if (requestId) {
+            rememberExecutionOwner(requestId, sessionId, sender);
             // Start SSE subscription for status updates (fire and forget)
             subscribeToSessionStatus(sessionId, requestId).catch(() => {});
           }
@@ -1477,6 +1557,16 @@ export function initWebEditorListeners(): void {
         const { requestId } = message;
         if (!requestId || typeof requestId !== 'string') {
           sendResponse({ success: false, error: 'requestId is required' });
+          return false;
+        }
+
+        const sessionId = normalizeString(message.sessionId).trim();
+        const owner = getExecutionOwner(requestId);
+        if (!owner || !isExecutionOwner(owner, sessionId, _sender)) {
+          sendResponse({
+            success: false,
+            error: 'Web Editor execution belongs to another document.',
+          });
           return false;
         }
 
@@ -1516,6 +1606,29 @@ export function initWebEditorListeners(): void {
             sendResponse({
               success: false,
               error: 'requestId is required',
+            } as WebEditorCancelExecutionResponse);
+            return;
+          }
+
+          if (
+            !consumePrivilegedUiAuthorization(
+              message?.authorizationToken,
+              PRIVILEGED_UI_ACTIONS.WEB_EDITOR_CANCEL,
+              _sender as chrome.runtime.MessageSender,
+            )
+          ) {
+            sendResponse({
+              success: false,
+              error: 'Web Editor cancellation authorization is missing or expired.',
+            } as WebEditorCancelExecutionResponse);
+            return;
+          }
+
+          const owner = getExecutionOwner(requestId);
+          if (!owner || !isExecutionOwner(owner, sessionId, _sender)) {
+            sendResponse({
+              success: false,
+              error: 'Web Editor execution belongs to another document.',
             } as WebEditorCancelExecutionResponse);
             return;
           }

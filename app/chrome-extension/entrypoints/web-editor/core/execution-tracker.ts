@@ -10,7 +10,8 @@
  * - Disposer pattern for cleanup
  */
 
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { BACKGROUND_MESSAGE_TYPES, PRIVILEGED_UI_ACTIONS } from '@/common/message-types';
+import { authorizePrivilegedUiAction } from '@/utils/privileged-ui-authorization';
 import { Disposer } from '../utils/disposables';
 
 // =============================================================================
@@ -183,8 +184,12 @@ export class ExecutionTracker {
 
     // Send cancel request to background
     try {
+      const authorizationToken = await authorizePrivilegedUiAction(
+        PRIVILEGED_UI_ACTIONS.WEB_EDITOR_CANCEL,
+      );
       const response = await chrome.runtime.sendMessage({
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CANCEL_EXECUTION,
+        authorizationToken,
         payload: {
           sessionId: state.sessionId,
           requestId: state.requestId,
