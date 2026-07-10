@@ -35,6 +35,11 @@ overrides:
   ws: 8.21.0
   yaml: 2.8.3
 
+patchedDependencies:
+  '@xenova/transformers@2.17.2':
+    hash: 262aa63ab2e21aa2c33c033870e775e376dd0dbbc35a0d3d9e80be2c8b1293e2
+    path: patches/@xenova__transformers@2.17.2.patch
+
 importers:
 
   .:
@@ -95,7 +100,7 @@ importers:
         version: 1.29.0(zod@3.25.76)
       '@xenova/transformers':
         specifier: ^2.17.2
-        version: 2.17.2
+        version: 2.17.2(patch_hash=262aa63ab2e21aa2c33c033870e775e376dd0dbbc35a0d3d9e80be2c8b1293e2)
       '@xyflow/react':
         specifier: ^12.10.1
         version: 12.10.1(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -6180,7 +6185,7 @@ snapshots:
       async-mutex: 0.5.0
       dequal: 2.0.3
 
-  '@xenova/transformers@2.17.2':
+  '@xenova/transformers@2.17.2(patch_hash=262aa63ab2e21aa2c33c033870e775e376dd0dbbc35a0d3d9e80be2c8b1293e2)':
     dependencies:
       '@huggingface/jinja': 0.2.2
       onnxruntime-web: 1.14.0
