@@ -107,13 +107,15 @@ export function ElementMarkerManagement() {
     [load],
   );
 
-  const highlightInTab = useCallback(async (marker: ElementMarker) => {
+  const highlightInTab = useCallback(async (marker: ElementMarker, targetTabId?: number) => {
     try {
-      const tabs = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      const tabId = tabs[0]?.id;
+      const tabs = targetTabId
+        ? []
+        : await chrome.tabs.query({
+            active: true,
+            currentWindow: true,
+          });
+      const tabId = targetTabId ?? tabs[0]?.id;
       if (!tabId) return;
 
       try {
@@ -140,8 +142,13 @@ export function ElementMarkerManagement() {
   const validate = useCallback(
     async (marker: ElementMarker) => {
       try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tabId = tabs[0]?.id;
+        if (!tabId) return;
+
         const response: any = await chrome.runtime.sendMessage({
           type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_VALIDATE,
+          tabId,
           selector: marker.selector,
           selectorType: marker.selectorType || "css",
           action: "hover",
@@ -149,7 +156,7 @@ export function ElementMarkerManagement() {
         });
 
         if (response?.tool?.ok !== false) {
-          await highlightInTab(marker);
+          await highlightInTab(marker, tabId);
         }
       } catch {
         // ignore

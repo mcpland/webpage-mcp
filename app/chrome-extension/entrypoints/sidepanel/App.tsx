@@ -564,8 +564,15 @@ export default function SidepanelApp() {
 
   async function validateMarker(marker: ElementMarker): Promise<void> {
     try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tabId = tabs[0]?.id;
+      if (!tabId) {
+        return;
+      }
+
       const response = await chrome.runtime.sendMessage({
         type: BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_VALIDATE,
+        tabId,
         selector: marker.selector,
         selectorType: marker.selectorType || "css",
         action: "hover",
@@ -573,7 +580,7 @@ export default function SidepanelApp() {
       });
 
       if (response?.tool?.ok !== false) {
-        await highlightInTab(marker);
+        await highlightInTab(marker, tabId);
       }
     } catch (error) {
       console.error("Failed to validate marker:", error);
@@ -592,13 +599,15 @@ export default function SidepanelApp() {
     }
   }
 
-  async function highlightInTab(marker: ElementMarker): Promise<void> {
+  async function highlightInTab(marker: ElementMarker, targetTabId?: number): Promise<void> {
     try {
-      const tabs = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      const tabId = tabs[0]?.id;
+      const tabs = targetTabId
+        ? []
+        : await chrome.tabs.query({
+            active: true,
+            currentWindow: true,
+          });
+      const tabId = targetTabId ?? tabs[0]?.id;
       if (!tabId) {
         return;
       }

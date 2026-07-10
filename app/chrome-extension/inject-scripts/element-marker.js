@@ -1572,6 +1572,7 @@
 
   const STATE = {
     active: false,
+    markerSessionId: null,
     hoverEl: null,
     selectedEl: null,
     box: null,
@@ -2179,6 +2180,7 @@
 
       const payload = {
         type: 'element_marker_validate',
+        markerSessionId: STATE.markerSessionId,
         selector,
         selectorType: effectiveType,
         action,
@@ -2443,8 +2445,10 @@
   // Lifecycle Management
   // ============================================================================
 
-  function start() {
-    if (STATE.active) return;
+  function start(markerSessionId) {
+    if (!IS_MAIN || typeof markerSessionId !== 'string' || !markerSessionId) return false;
+    STATE.markerSessionId = markerSessionId;
+    if (STATE.active) return true;
     STATE.active = true;
 
     if (IS_MAIN) {
@@ -2460,10 +2464,13 @@
     attachPointerListeners();
     attachKeyboardListener();
     syncInteractionMode();
+    return true;
   }
 
   function stop() {
+    const markerSessionId = STATE.markerSessionId;
     STATE.active = false;
+    STATE.markerSessionId = null;
 
     detachPointerListeners();
     detachKeyboardListener();
@@ -2494,6 +2501,12 @@
     // Clear rect pool to release DOM references
     STATE.rectPool.length = 0;
     STATE.rectPoolUsed = 0;
+
+    if (IS_MAIN && markerSessionId) {
+      chrome.runtime
+        .sendMessage({ type: 'element_marker_stop', markerSessionId })
+        .catch(() => {});
+    }
   }
 
   // ============================================================================
@@ -2513,7 +2526,20 @@
 
     // Verify (highlight only) & Execute (real action)
     host.querySelector('#__em_verify')?.addEventListener('click', verifyHighlightOnly);
-    host.querySelector('#__em_execute')?.addEventListener('click', verifySelectorNow);
+    host.querySelector('#__em_execute')?.addEventListener('click', (event) => {
+      // The host page can see the open shadow root and call element.click(),
+      // but only a real browser-generated user gesture may dispatch an action.
+      if (!event.isTrusted) {
+        StateStore.set({
+          validation: {
+            status: 'failure',
+            message: 'Execute requires a trusted user gesture',
+          },
+        });
+        return;
+      }
+      void verifySelectorNow();
+    });
 
     // Copy
     host.querySelector('#__em_copy')?.addEventListener('click', copySelectorNow);
@@ -2781,8 +2807,12 @@
 
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request?.action === 'element_marker_start') {
-      start();
-      sendResponse({ ok: true });
+      const started = start(request.markerSessionId);
+      sendResponse(
+        started
+          ? { ok: true }
+          : { ok: false, error: 'marker start requires a top-frame session' },
+      );
       return true;
     } else if (request?.action === 'element_marker_ping') {
       sendResponse({ status: 'pong' });

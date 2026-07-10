@@ -17,6 +17,84 @@ import { clickTool } from '@/entrypoints/background/tools/browser/interaction';
 import { keyboardTool } from '@/entrypoints/background/tools/browser/keyboard';
 
 const CONTEXT_MENU_ID = 'element_marker_mark';
+const TOP_FRAME_ID = 0;
+
+interface MarkerDocumentTarget {
+  tabId: number;
+  frameId: number;
+  documentId: string;
+}
+
+interface MarkerSession extends MarkerDocumentTarget {
+  sessionId: string;
+}
+
+// Marker validation can cause real browser input. Keep a fail-closed,
+// document-scoped capability for the in-page overlay instead of trusting the
+// tab that happens to be active when the message reaches the service worker.
+const markerSessions = new Map<number, MarkerSession>();
+
+function isExtensionPageSender(sender: chrome.runtime.MessageSender): boolean {
+  if (sender.tab || sender.id !== chrome.runtime.id) return false;
+
+  const extensionRoot = chrome.runtime.getURL('');
+  const extensionOrigin = new URL(extensionRoot).origin;
+  return sender.origin === extensionOrigin || sender.url?.startsWith(extensionRoot) === true;
+}
+
+async function getTopDocumentTarget(tabId: number): Promise<MarkerDocumentTarget> {
+  const frames = await chrome.webNavigation.getAllFrames({ tabId });
+  const topFrame = frames?.find((frame) => frame.frameId === TOP_FRAME_ID);
+  const documentId = topFrame?.documentId;
+
+  if (!documentId) {
+    throw new Error('marker target document is unavailable');
+  }
+
+  return { tabId, frameId: TOP_FRAME_ID, documentId };
+}
+
+async function assertTargetIsCurrent(target: MarkerDocumentTarget): Promise<void> {
+  const current = await getTopDocumentTarget(target.tabId);
+  if (current.frameId !== target.frameId || current.documentId !== target.documentId) {
+    markerSessions.delete(target.tabId);
+    throw new Error('marker target document changed; start the marker again');
+  }
+}
+
+function isSenderBoundToSession(
+  sender: chrome.runtime.MessageSender,
+  session: MarkerSession,
+  sessionId: unknown,
+): boolean {
+  return (
+    sessionId === session.sessionId &&
+    sender.tab?.id === session.tabId &&
+    sender.frameId === session.frameId &&
+    sender.documentId === session.documentId
+  );
+}
+
+async function authorizeValidationTarget(
+  request: MarkerValidationRequest,
+  sender: chrome.runtime.MessageSender,
+): Promise<MarkerDocumentTarget> {
+  if (sender.tab) {
+    const tabId = sender.tab.id;
+    const session = typeof tabId === 'number' ? markerSessions.get(tabId) : undefined;
+    if (!session || !isSenderBoundToSession(sender, session, request.markerSessionId)) {
+      throw new Error('marker session does not match the sender document');
+    }
+    await assertTargetIsCurrent(session);
+    return session;
+  }
+
+  if (!isExtensionPageSender(sender) || typeof request.tabId !== 'number') {
+    throw new Error('marker validation requires an explicit target tab');
+  }
+
+  return getTopDocumentTarget(request.tabId);
+}
 
 /**
  * Extract error message from MCP tool result
@@ -66,10 +144,14 @@ async function ensureContextMenu() {
  * Check if element-marker.js is already injected in the tab
  * Uses a short timeout to avoid hanging on unresponsive tabs
  */
-async function isMarkerInjected(tabId: number): Promise<boolean> {
+async function isMarkerInjected(target: MarkerDocumentTarget): Promise<boolean> {
   try {
     const response = await Promise.race([
-      chrome.tabs.sendMessage(tabId, { action: 'element_marker_ping' }),
+      chrome.tabs.sendMessage(
+        target.tabId,
+        { action: 'element_marker_ping' },
+        { documentId: target.documentId },
+      ),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 300)),
     ]);
     return response?.status === 'pong';
@@ -81,28 +163,47 @@ async function isMarkerInjected(tabId: number): Promise<boolean> {
 /**
  * Inject element-marker.js into the tab if not already injected
  */
-async function injectMarkerHelper(tabId: number) {
+async function injectMarkerHelper(tabId: number): Promise<MarkerSession> {
+  const initialTarget = await getTopDocumentTarget(tabId);
+
   // Check if already injected via ping
-  const alreadyInjected = await isMarkerInjected(tabId);
+  const alreadyInjected = await isMarkerInjected(initialTarget);
 
   if (!alreadyInjected) {
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId, allFrames: true },
-        files: ['inject-scripts/element-marker.js'],
-        world: 'ISOLATED',
-      } as any);
-    } catch (e) {
-      // Script injection may fail on some pages (e.g., chrome:// URLs)
-      console.warn('ElementMarker: script injection failed:', e);
-    }
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ['inject-scripts/element-marker.js'],
+      world: 'ISOLATED',
+    } as any);
   }
 
+  // The tab may have navigated while the helper was being injected. Resolve
+  // it again and refuse to start against a different document.
+  await assertTargetIsCurrent(initialTarget);
+  const session: MarkerSession = {
+    ...initialTarget,
+    sessionId: crypto.randomUUID(),
+  };
+  markerSessions.set(tabId, session);
+
   try {
-    await chrome.tabs.sendMessage(tabId, { action: 'element_marker_start' } as any);
+    const response = await chrome.tabs.sendMessage(
+      tabId,
+      { action: 'element_marker_start', markerSessionId: session.sessionId } as any,
+      { documentId: session.documentId },
+    );
+    if (response?.ok !== true) {
+      throw new Error(response?.error || 'marker overlay did not start');
+    }
   } catch (e) {
-    console.warn('ElementMarker: start overlay failed:', e);
+    if (markerSessions.get(tabId)?.sessionId === session.sessionId) {
+      markerSessions.delete(tabId);
+    }
+    throw e;
   }
+
+  await assertTargetIsCurrent(session);
+  return session;
 }
 
 export function initElementMarkerListeners() {
@@ -110,20 +211,37 @@ export function initElementMarkerListeners() {
   ensureContextMenu().catch(() => {});
 
   // Respond to RR triggers refresh by re-ensuring our menu a bit later
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       switch (message?.type) {
         // Handle element marker start from popup
         case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_START: {
+          if (!isExtensionPageSender(sender)) {
+            sendResponse({ success: false, error: 'marker start requires an extension page' });
+            return true;
+          }
           const tabId = message.tabId;
           if (typeof tabId !== 'number') {
             sendResponse({ success: false, error: 'invalid tabId' });
             return true;
           }
           injectMarkerHelper(tabId)
-            .then(() => sendResponse({ success: true }))
+            .then((session) =>
+              sendResponse({ success: true, markerSessionId: session.sessionId }),
+            )
             .catch((e) => sendResponse({ success: false, error: e?.message || String(e) }));
           return true;
+        }
+        case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_STOP: {
+          const session =
+            typeof sender.tab?.id === 'number' ? markerSessions.get(sender.tab.id) : undefined;
+          if (!session || !isSenderBoundToSession(sender, session, message.markerSessionId)) {
+            sendResponse({ success: false, error: 'marker session does not match the sender document' });
+            return true;
+          }
+          markerSessions.delete(session.tabId);
+          sendResponse({ success: true });
+          return false;
         }
         case BACKGROUND_MESSAGE_TYPES.ELEMENT_MARKER_LIST_ALL: {
           listAllMarkers()
@@ -171,14 +289,20 @@ export function initElementMarkerListeners() {
             const selectorType = (req.selectorType || 'css') as 'css' | 'xpath';
             const action = req.action as MarkerValidationAction;
             if (!selector) return sendResponse({ success: false, error: 'selector is required' });
-            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-            const tab = tabs[0];
-            if (!tab?.id) return sendResponse({ success: false, error: 'active tab not found' });
+            let target: MarkerDocumentTarget;
+            try {
+              target = await authorizeValidationTarget(req, sender);
+            } catch (error) {
+              return sendResponse({
+                success: false,
+                error: String(error instanceof Error ? error.message : error),
+              });
+            }
 
             // 1) Ensure helper
             try {
               await chrome.scripting.executeScript({
-                target: { tabId: tab.id, allFrames: true },
+                target: { tabId: target.tabId, allFrames: true },
                 files: ['inject-scripts/accessibility-tree-helper.js'],
                 world: 'ISOLATED',
               } as any);
@@ -187,12 +311,16 @@ export function initElementMarkerListeners() {
             // 2) Resolve selector -> ref/center via helper (same as tools)
             let ensured: any;
             try {
-              ensured = await chrome.tabs.sendMessage(tab.id, {
-                action: 'ensureRefForSelector',
-                selector,
-                isXPath: selectorType === 'xpath',
-                allowMultiple: !!req.listMode,
-              } as any);
+              ensured = await chrome.tabs.sendMessage(
+                target.tabId,
+                {
+                  action: 'ensureRefForSelector',
+                  selector,
+                  isXPath: selectorType === 'xpath',
+                  allowMultiple: !!req.listMode,
+                } as any,
+                { documentId: target.documentId },
+              );
             } catch (e) {
               return sendResponse({
                 success: false,
@@ -203,6 +331,15 @@ export function initElementMarkerListeners() {
               return sendResponse({
                 success: false,
                 error: ensured?.error || 'failed to resolve selector',
+              });
+            }
+
+            try {
+              await assertTargetIsCurrent(target);
+            } catch (error) {
+              return sendResponse({
+                success: false,
+                error: String(error instanceof Error ? error.message : error),
               });
             }
 
@@ -237,8 +374,8 @@ export function initElementMarkerListeners() {
                 case 'hover': {
                   const r = await computerTool.execute(
                     coords
-                      ? { action: 'hover', coordinates: coords }
-                      : ({ action: 'hover', ref: ensured.ref } as any),
+                      ? { action: 'hover', coordinates: coords, tabId: target.tabId }
+                      : ({ action: 'hover', ref: ensured.ref, tabId: target.tabId } as any),
                   );
                   const error = r.isError ? extractToolError(r) : undefined;
                   base.tool = { name: 'computer.hover', ok: !r.isError, error };
@@ -255,6 +392,7 @@ export function initElementMarkerListeners() {
                     timeout,
                     button: (req.button || 'left') as any,
                     modifiers: req.modifiers || {},
+                    tabId: target.tabId,
                   } as any);
                   const error = r.isError ? extractToolError(r) : undefined;
                   base.tool = { name: 'interaction.click', ok: !r.isError, error };
@@ -272,6 +410,7 @@ export function initElementMarkerListeners() {
                     timeout,
                     button: (req.button || 'left') as any,
                     modifiers: req.modifiers || {},
+                    tabId: target.tabId,
                   } as any);
                   const error = r.isError ? extractToolError(r) : undefined;
                   base.tool = { name: 'interaction.click(double)', ok: !r.isError, error };
@@ -288,6 +427,7 @@ export function initElementMarkerListeners() {
                     timeout,
                     button: 'right',
                     modifiers: req.modifiers || {},
+                    tabId: target.tabId,
                   } as any);
                   const error = r.isError ? extractToolError(r) : undefined;
                   base.tool = { name: 'interaction.click(right)', ok: !r.isError, error };
@@ -304,12 +444,14 @@ export function initElementMarkerListeners() {
                         scrollDirection: direction,
                         scrollAmount: amount,
                         coordinates: coords,
+                        tabId: target.tabId,
                       }
                     : ({
                         action: 'scroll',
                         scrollDirection: direction,
                         scrollAmount: amount,
                         ref: ensured.ref,
+                        tabId: target.tabId,
                       } as any);
                   const r = await computerTool.execute(payload as any);
                   const error = r.isError ? extractToolError(r) : undefined;
@@ -318,7 +460,12 @@ export function initElementMarkerListeners() {
                 }
                 case 'type_text': {
                   const text = String(req.text || '');
-                  const r = await computerTool.execute({ action: 'type', ref: ensured.ref, text });
+                  const r = await computerTool.execute({
+                    action: 'type',
+                    ref: ensured.ref,
+                    text,
+                    tabId: target.tabId,
+                  });
                   const error = r.isError ? extractToolError(r) : undefined;
                   base.tool = { name: 'computer.type', ok: !r.isError, error };
                   break;
@@ -331,9 +478,14 @@ export function initElementMarkerListeners() {
                       ref: ensured.ref,
                       waitForNavigation: false,
                       timeout: 2000,
+                      tabId: target.tabId,
                     });
                   } catch {}
-                  const r = await keyboardTool.execute({ keys, delay: 0 } as any);
+                  const r = await keyboardTool.execute({
+                    keys,
+                    delay: 0,
+                    tabId: target.tabId,
+                  } as any);
                   const error = r.isError ? extractToolError(r) : undefined;
                   base.tool = { name: 'keyboard.simulate', ok: !r.isError, error };
                   break;
@@ -378,6 +530,16 @@ export function initElementMarkerListeners() {
       sendResponse({ success: false, error: (e as any)?.message || String(e) });
     }
     return false;
+  });
+
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    markerSessions.delete(tabId);
+  });
+
+  chrome.webNavigation.onCommitted.addListener((details) => {
+    if (details.frameId === TOP_FRAME_ID) {
+      markerSessions.delete(details.tabId);
+    }
   });
 
   // Context menu click routing

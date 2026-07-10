@@ -49,6 +49,10 @@ export interface MarkerValidationRequest {
   selectorType?: 'css' | 'xpath';
   action: MarkerValidationAction;
   listMode?: boolean;
+  // Extension pages must identify the tab they intend to validate. Content
+  // scripts are instead authorized by the marker session fields below.
+  tabId?: number;
+  markerSessionId?: string;
   // Optional payload for certain actions
   text?: string; // for type_text
   keys?: string; // for press_keys

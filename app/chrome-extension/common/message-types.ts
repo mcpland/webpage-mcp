@@ -65,6 +65,7 @@ export const BACKGROUND_MESSAGE_TYPES = {
   ELEMENT_MARKER_UPDATE: 'element_marker_update',
   ELEMENT_MARKER_DELETE: 'element_marker_delete',
   ELEMENT_MARKER_VALIDATE: 'element_marker_validate',
+  ELEMENT_MARKER_STOP: 'element_marker_stop',
   ELEMENT_MARKER_START: 'element_marker_start_from_popup',
   // Element picker (human-in-the-loop element selection)
   ELEMENT_PICKER_UI_EVENT: 'element_picker_ui_event',
