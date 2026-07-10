@@ -582,9 +582,9 @@ export class NativeMessagingHost {
 
   private setupMessageHandling(): void {
     const decoder = new NativeMessageFrameDecoder();
-    const directiveQueue = new NativeDirectiveQueue<any>(
+    const directiveQueue = new NativeDirectiveQueue<Buffer>(
       NATIVE_MAX_PENDING_DIRECTIVES,
-      (message) => this.handleMessage(message),
+      (messageBuffer) => this.handleMessage(JSON.parse(messageBuffer.toString('utf8'))),
       (error) => {
         this.sendError(
           `Failed to handle directive message: ${error instanceof Error ? error.message : String(error)}`,
@@ -603,7 +603,9 @@ export class NativeMessagingHost {
               // Extension responses unblock active directives and must never wait behind them.
               void this.handleMessage(message);
             } else {
-              directiveQueue.enqueue(message);
+              // Retain the original frame rather than a parsed object so the
+              // queue's byte budget exactly matches the memory it owns.
+              directiveQueue.enqueue(messageBuffer);
             }
           });
         } catch (error) {
@@ -632,6 +634,7 @@ export class NativeMessagingHost {
     stdin.on('end', onEnd);
     stdin.on('error', onError);
     this.messageHandlingCleanup = () => {
+      directiveQueue.close();
       stdin.removeListener('readable', onReadable);
       stdin.removeListener('end', onEnd);
       stdin.removeListener('error', onError);
