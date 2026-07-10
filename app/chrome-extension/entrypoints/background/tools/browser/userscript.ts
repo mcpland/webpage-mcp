@@ -193,35 +193,72 @@ function normalizeMatches(matches?: string[], currentUrl?: string): string[] {
   }
 }
 
-// Simple URL match using chrome match patterns subset
-function matchUrl(patterns: string[], url?: string): boolean {
-  if (!url) return false;
+const MAX_MATCH_PATTERNS = 100;
+const MAX_MATCH_PATTERN_LENGTH = 2_048;
+const MAX_MATCH_URL_LENGTH = 16_384;
+
+function matchWildcardPath(pattern: string, value: string): boolean {
+  if (!pattern.includes('*')) return pattern === value;
+  const startsWithWildcard = pattern.startsWith('*');
+  const endsWithWildcard = pattern.endsWith('*');
+  const segments = pattern.split('*').filter(Boolean);
+  if (segments.length === 0) return true;
+
+  let segmentIndex = 0;
+  let valueIndex = 0;
+  if (!startsWithWildcard) {
+    const first = segments[0];
+    if (!value.startsWith(first)) return false;
+    valueIndex = first.length;
+    segmentIndex = 1;
+  }
+
+  const middleEnd = endsWithWildcard ? segments.length : Math.max(segmentIndex, segments.length - 1);
+  for (; segmentIndex < middleEnd; segmentIndex += 1) {
+    const foundAt = value.indexOf(segments[segmentIndex], valueIndex);
+    if (foundAt < 0) return false;
+    valueIndex = foundAt + segments[segmentIndex].length;
+  }
+
+  if (endsWithWildcard) return true;
+  const last = segments[segments.length - 1];
+  const lastStart = value.length - last.length;
+  return lastStart >= valueIndex && value.endsWith(last);
+}
+
+function matchPatternHost(pattern: string, hostname: string): boolean {
+  const normalizedPattern = pattern.toLowerCase();
+  const normalizedHost = hostname.toLowerCase();
+  if (normalizedPattern === '*') return normalizedHost.length > 0;
+  if (normalizedPattern.startsWith('*.')) {
+    const suffix = normalizedPattern.slice(2);
+    return normalizedHost === suffix || normalizedHost.endsWith(`.${suffix}`);
+  }
+  return normalizedHost === normalizedPattern;
+}
+
+// Deterministic Chrome match-pattern subset. The wildcard matcher is linear
+// and does not compile user-controlled patterns into backtracking regexes.
+export function matchUrl(patterns: string[], url?: string): boolean {
+  if (!url || url.length > MAX_MATCH_URL_LENGTH || !Array.isArray(patterns)) return false;
   try {
     const u = new URL(url);
-    for (const p of patterns) {
+    for (const rawPattern of patterns.slice(0, MAX_MATCH_PATTERNS)) {
+      if (typeof rawPattern !== 'string' || rawPattern.length > MAX_MATCH_PATTERN_LENGTH) continue;
+      const p = rawPattern;
       if (p === '<all_urls>') return true;
-      const m = p.match(/^(\*|https?:)\/\/([^/]+)\/(.*)$/);
-      if (!m) continue;
-      const proto = m[1];
-      const host = m[2];
-      const path = m[3];
-      if (proto !== '*' && proto !== u.protocol.replace(':', '')) continue;
-      // host wildcard
-      const hostRegex = new RegExp(
-        '^' +
-          host
-            .split('.')
-            .map((h) => (h === '*' ? '[^.]+' : h.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')))
-            .join('\\.') +
-          '$',
-      );
-      if (!hostRegex.test(u.hostname)) continue;
-      // path wildcard
-      const pathRegex = new RegExp(
-        '^' + path.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$',
-      );
+      const schemeEnd = p.indexOf('://');
+      if (schemeEnd <= 0) continue;
+      const scheme = p.slice(0, schemeEnd);
+      const hostAndPath = p.slice(schemeEnd + 3);
+      const pathStart = hostAndPath.indexOf('/');
+      if (pathStart < 0) continue;
+      const host = hostAndPath.slice(0, pathStart);
+      const path = hostAndPath.slice(pathStart + 1);
+      if (scheme !== '*' && `${scheme}:` !== u.protocol) continue;
+      if (!matchPatternHost(host, u.hostname)) continue;
       const testPath = (u.pathname + (u.search || '') + (u.hash || '')).replace(/^\//, '');
-      if (pathRegex.test(testPath)) return true;
+      if (matchWildcardPath(path, testPath)) return true;
     }
   } catch {
     return false;
