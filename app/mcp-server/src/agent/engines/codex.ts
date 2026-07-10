@@ -39,6 +39,10 @@ import {
   createBoundedAgentMessage,
   type AssistantStreamSnapshot,
 } from './stream-output';
+import {
+  removePrivateTempAttachment,
+  writePrivateTempAttachment,
+} from './private-temp-attachment';
 
 /** Resource budgets for the optional top-level project directory summary. */
 export const CODEX_PROJECT_CONTEXT_MAX_ENTRIES = 1_000;
@@ -620,10 +624,9 @@ export class CodexEngine implements AgentEngine {
       const cleanupTempFiles = async (): Promise<void> => {
         if (tempFiles.length === 0) return;
 
-        const fs = await import('node:fs/promises');
         for (const filePath of tempFiles) {
           try {
-            await fs.unlink(filePath);
+            await removePrivateTempAttachment(filePath);
             console.error(`[CodexEngine] Cleaned up temp file: ${filePath}`);
           } catch (err) {
             // Ignore errors during cleanup - file may already be deleted
@@ -1215,19 +1218,10 @@ export class CodexEngine implements AgentEngine {
     mimeType: string;
     dataBase64: string;
   }): Promise<string> {
-    const os = await import('node:os');
-    const fs = await import('node:fs/promises');
-
-    const tempDir = os.tmpdir();
-    const ext = attachment.mimeType.split('/')[1] || 'bin';
-    const sanitizedName = attachment.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const fileName = `mcp-agent-${Date.now()}-${sanitizedName}.${ext}`;
-    const filePath = path.join(tempDir, fileName);
-
-    const buffer = Buffer.from(attachment.dataBase64, 'base64');
-    await fs.writeFile(filePath, buffer);
-
-    return filePath;
+    return writePrivateTempAttachment({
+      ...attachment,
+      type: 'image',
+    });
   }
 
   private buildCodexEnv(): NodeJS.ProcessEnv {

@@ -44,6 +44,10 @@ import {
   pickBoundedClaudeIdentifier,
   pickBoundedClaudeString,
 } from './claude-event-bounds';
+import {
+  removePrivateTempAttachment,
+  writePrivateTempAttachment,
+} from './private-temp-attachment';
 
 // Images are provided to Claude Code via local file paths referenced in the prompt text.
 // Claude Code CLI reads images from local paths, so we write base64 images to temp files and reference them.
@@ -342,10 +346,9 @@ export class ClaudeEngine implements AgentEngine {
       if (tempFiles.length === 0) return;
 
       try {
-        const fs = await import('node:fs/promises');
         for (const filePath of tempFiles) {
           try {
-            await fs.unlink(filePath);
+            await removePrivateTempAttachment(filePath);
             console.error(`[ClaudeEngine] Cleaned up temp file: ${filePath}`);
           } catch (err) {
             // Best-effort cleanup; ignore failures (file may already be deleted)
@@ -1402,18 +1405,9 @@ export class ClaudeEngine implements AgentEngine {
     mimeType: string;
     dataBase64: string;
   }): Promise<string> {
-    const os = await import('node:os');
-    const fs = await import('node:fs/promises');
-
-    const tempDir = os.tmpdir();
-    const ext = attachment.mimeType.split('/')[1] || 'bin';
-    const sanitizedName = attachment.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const fileName = `mcp-agent-${Date.now()}-${sanitizedName}.${ext}`;
-    const filePath = path.join(tempDir, fileName);
-
-    const buffer = Buffer.from(attachment.dataBase64, 'base64');
-    await fs.writeFile(filePath, buffer);
-
-    return filePath;
+    return writePrivateTempAttachment({
+      ...attachment,
+      type: 'image',
+    });
   }
 }
