@@ -47,11 +47,7 @@ export class OffscreenManager {
         throw new Error('Offscreen API not available. Chrome 109+ required.');
       }
 
-      const existingContexts = await (chrome.runtime as any).getContexts({
-        contextTypes: ['OFFSCREEN_DOCUMENT'],
-      });
-
-      if (existingContexts && existingContexts.length > 0) {
+      if (await this._hasOffscreenDocument()) {
         console.log('OffscreenManager: Offscreen document already exists');
         this.isCreated = true;
         return;
@@ -70,6 +66,42 @@ export class OffscreenManager {
       this.isCreated = false;
       throw error;
     }
+  }
+
+  /**
+   * Detect an existing document across the full Chrome 109+ support range.
+   * runtime.getContexts was added in Chrome 116, so older service workers
+   * must inspect their controlled clients instead.
+   */
+  private async _hasOffscreenDocument(): Promise<boolean> {
+    const runtime = chrome.runtime as typeof chrome.runtime & {
+      getContexts?: (filter: {
+        contextTypes: string[];
+      }) => Promise<Array<{ contextType?: string }>>;
+    };
+
+    if (typeof runtime.getContexts === 'function') {
+      const existingContexts = await runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+      });
+      return existingContexts.length > 0;
+    }
+
+    const serviceWorkerClients = (
+      globalThis as typeof globalThis & {
+        clients?: {
+          matchAll: () => Promise<ArrayLike<{ url: string }>>;
+        };
+      }
+    ).clients;
+
+    if (typeof serviceWorkerClients?.matchAll !== 'function') {
+      return false;
+    }
+
+    const offscreenUrl = chrome.runtime.getURL('offscreen.html');
+    const existingClients = await serviceWorkerClients.matchAll();
+    return Array.from(existingClients).some((client) => client.url === offscreenUrl);
   }
 
   /**
