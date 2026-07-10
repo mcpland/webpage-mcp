@@ -11,6 +11,7 @@ import { eq, asc, and, count } from 'drizzle-orm';
 import type { AgentRole, AgentStoredMessage } from 'webpage-mcp-shared';
 import { getDb, messages, type MessageRow } from './db';
 import { sanitizeAgentMessageForPublicRead } from './public-message-sanitizer';
+import { validateStoredMessagePayload } from './payload-limits';
 
 // ============================================================
 // Types
@@ -112,22 +113,38 @@ export async function getMessagesCountByProjectId(projectId: string): Promise<nu
 export async function createMessage(
   input: CreateAgentStoredMessageInput,
 ): Promise<AgentStoredMessage> {
-  const db = getDb();
   const now = new Date().toISOString();
-
-  const messageData: MessageRow = {
-    id: input.id?.trim() || randomUUID(),
+  const id = input.id?.trim() || randomUUID();
+  const createdAt = input.createdAt || now;
+  const validated = validateStoredMessagePayload({
+    id,
     projectId: input.projectId,
     sessionId: input.sessionId || '',
     conversationId: input.conversationId ?? null,
     role: input.role,
     content: input.content,
     messageType: input.messageType,
-    metadata: input.metadata ? JSON.stringify(input.metadata) : null,
+    metadata: input.metadata,
     cliSource: input.cliSource ?? null,
     requestId: input.requestId ?? null,
-    createdAt: input.createdAt || now,
+    createdAt,
+  });
+
+  const messageData: MessageRow = {
+    id,
+    projectId: input.projectId,
+    sessionId: input.sessionId || '',
+    conversationId: input.conversationId ?? null,
+    role: input.role,
+    content: input.content,
+    messageType: input.messageType,
+    metadata: validated.metadataJson ?? null,
+    cliSource: input.cliSource ?? null,
+    requestId: input.requestId ?? null,
+    createdAt,
   };
+
+  const db = getDb();
 
   if (input.upsertById === true) {
     await db

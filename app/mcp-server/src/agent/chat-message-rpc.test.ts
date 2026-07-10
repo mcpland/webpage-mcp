@@ -3,6 +3,12 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentChatService } from './chat-service';
+import {
+  AGENT_IDENTIFIER_MAX_BYTES,
+  AGENT_MESSAGE_CONTENT_MAX_BYTES,
+  AGENT_MESSAGE_METADATA_MAX_JSON_BYTES,
+  AGENT_STORED_MESSAGE_MAX_JSON_BYTES,
+} from 'webpage-mcp-shared';
 
 const originalAllowedWorkspaceBase = process.env.MCP_ALLOWED_WORKSPACE_BASE;
 const originalAgentDataDir = process.env.WEBPAGE_MCP_AGENT_DATA_DIR;
@@ -108,6 +114,132 @@ afterEach(async () => {
 });
 
 describe('agent.chat.messages.create', () => {
+  it('rejects oversized content before RPC or central message persistence writes', async () => {
+    const workspaceBase = await createTempDir('message-limit-workspace-');
+    const dataDir = await createTempDir('message-limit-data-');
+    const dbFile = path.join(dataDir, 'agent.db');
+    const projectRoot = path.join(workspaceBase, 'project-root');
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    process.env.MCP_ALLOWED_WORKSPACE_BASE = workspaceBase;
+    process.env.WEBPAGE_MCP_AGENT_DATA_DIR = dataDir;
+    process.env.WEBPAGE_MCP_AGENT_DB_FILE = dbFile;
+
+    const { upsertProject, createMessage, getMessagesByProjectId, dispatchAgentRpc } =
+      await loadAgentModules();
+    const project = await upsertProject({
+      name: 'Message Payload Limits',
+      rootPath: projectRoot,
+      allowCreate: true,
+    });
+    const content = 'a'.repeat(AGENT_MESSAGE_CONTENT_MAX_BYTES + 1);
+
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.chat.messages.create',
+        params: { projectId: project.id },
+        body: { content },
+      },
+      createRpcDeps(),
+    );
+
+    expect(response.statusCode).toBe(413);
+    expect(response.json).toEqual({
+      error: `content is too large (${AGENT_MESSAGE_CONTENT_MAX_BYTES + 1} bytes; maximum ${AGENT_MESSAGE_CONTENT_MAX_BYTES} bytes)`,
+      code: 'AGENT_PAYLOAD_TOO_LARGE',
+      field: 'content',
+      actualBytes: AGENT_MESSAGE_CONTENT_MAX_BYTES + 1,
+      maximumBytes: AGENT_MESSAGE_CONTENT_MAX_BYTES,
+    });
+    expect(await getMessagesByProjectId(project.id)).toHaveLength(0);
+
+    await expect(
+      createMessage({
+        projectId: project.id,
+        role: 'user',
+        messageType: 'chat',
+        content,
+      }),
+    ).rejects.toMatchObject({
+      code: 'AGENT_PAYLOAD_TOO_LARGE',
+      field: 'content',
+    });
+    expect(await getMessagesByProjectId(project.id)).toHaveLength(0);
+
+    const emptyMetadataBytes = Buffer.byteLength(JSON.stringify({ padding: '' }), 'utf8');
+    const exactMetadata = {
+      padding: 'a'.repeat(AGENT_MESSAGE_METADATA_MAX_JSON_BYTES - emptyMetadataBytes),
+    };
+    expect(Buffer.byteLength(JSON.stringify(exactMetadata), 'utf8')).toBe(
+      AGENT_MESSAGE_METADATA_MAX_JSON_BYTES,
+    );
+    const exactContent = 'a'.repeat(AGENT_MESSAGE_CONTENT_MAX_BYTES);
+    const combinedResponse = await dispatchAgentRpc(
+      {
+        operation: 'agent.chat.messages.create',
+        params: { projectId: project.id },
+        body: { content: exactContent, metadata: exactMetadata },
+      },
+      createRpcDeps(),
+    );
+    expect(combinedResponse.statusCode).toBe(413);
+    expect(combinedResponse.json).toMatchObject({
+      code: 'AGENT_PAYLOAD_TOO_LARGE',
+      field: 'message',
+      maximumBytes: AGENT_STORED_MESSAGE_MAX_JSON_BYTES,
+    });
+    expect(await getMessagesByProjectId(project.id)).toHaveLength(0);
+
+    await expect(
+      createMessage({
+        projectId: project.id,
+        role: 'user',
+        messageType: 'chat',
+        content: exactContent,
+        metadata: exactMetadata,
+      }),
+    ).rejects.toMatchObject({
+      code: 'AGENT_PAYLOAD_TOO_LARGE',
+      field: 'message',
+      maximumBytes: AGENT_STORED_MESSAGE_MAX_JSON_BYTES,
+    });
+    expect(await getMessagesByProjectId(project.id)).toHaveLength(0);
+
+    const oversizedIdResponse = await dispatchAgentRpc(
+      {
+        operation: 'agent.chat.messages.create',
+        params: { projectId: project.id },
+        body: {
+          content: 'small content',
+          requestId: 'a'.repeat(AGENT_IDENTIFIER_MAX_BYTES + 1),
+        },
+      },
+      createRpcDeps(),
+    );
+    expect(oversizedIdResponse.statusCode).toBe(413);
+    expect(oversizedIdResponse.json).toMatchObject({
+      code: 'AGENT_PAYLOAD_TOO_LARGE',
+      field: 'requestId',
+      actualBytes: AGENT_IDENTIFIER_MAX_BYTES + 1,
+      maximumBytes: AGENT_IDENTIFIER_MAX_BYTES,
+    });
+    expect(await getMessagesByProjectId(project.id)).toHaveLength(0);
+
+    await expect(
+      createMessage({
+        projectId: project.id,
+        role: 'user',
+        messageType: 'chat',
+        content: 'small content',
+        requestId: 'a'.repeat(AGENT_IDENTIFIER_MAX_BYTES + 1),
+      }),
+    ).rejects.toMatchObject({
+      code: 'AGENT_PAYLOAD_TOO_LARGE',
+      field: 'requestId',
+    });
+    expect(await getMessagesByProjectId(project.id)).toHaveLength(0);
+  });
+
   it('rejects caller-specified ids instead of overwriting existing messages', async () => {
     const workspaceBase = await createTempDir('message-rpc-workspace-');
     const dataDir = await createTempDir('message-rpc-data-');
@@ -282,6 +414,57 @@ describe('agent.sessions.history', () => {
 });
 
 describe('agent.chat.act', () => {
+  it('rejects oversized payloads before invoking chat-service reservation or side effects', async () => {
+    const handleAct = vi.fn();
+    const { dispatchAgentRpc } = await loadAgentModules();
+    const response = await dispatchAgentRpc(
+      {
+        operation: 'agent.chat.act',
+        params: { sessionId: 'unread-session' },
+        body: {
+          instruction: 'a'.repeat(AGENT_MESSAGE_CONTENT_MAX_BYTES + 1),
+        },
+      },
+      {
+        chatService: {
+          getEngineInfos: () => [],
+          handleAct,
+        } as unknown as AgentChatService,
+      },
+    );
+
+    expect(response.statusCode).toBe(413);
+    expect(response.json).toEqual({
+      error: `instruction is too large (${AGENT_MESSAGE_CONTENT_MAX_BYTES + 1} bytes; maximum ${AGENT_MESSAGE_CONTENT_MAX_BYTES} bytes)`,
+      code: 'AGENT_PAYLOAD_TOO_LARGE',
+      field: 'instruction',
+      actualBytes: AGENT_MESSAGE_CONTENT_MAX_BYTES + 1,
+      maximumBytes: AGENT_MESSAGE_CONTENT_MAX_BYTES,
+    });
+    expect(handleAct).not.toHaveBeenCalled();
+
+    const invalidResponse = await dispatchAgentRpc(
+      {
+        operation: 'agent.chat.act',
+        params: { sessionId: 'unread-session' },
+        body: { instruction: { invalid: true } },
+      },
+      {
+        chatService: {
+          getEngineInfos: () => [],
+          handleAct,
+        } as unknown as AgentChatService,
+      },
+    );
+    expect(invalidResponse.statusCode).toBe(400);
+    expect(invalidResponse.json).toEqual({
+      error: 'instruction has an invalid type or is not JSON serializable',
+      code: 'AGENT_PAYLOAD_INVALID',
+      field: 'instruction',
+    });
+    expect(handleAct).not.toHaveBeenCalled();
+  });
+
   it('rejects file attachments instead of silently dropping them', async () => {
     const { dispatchAgentRpc } = await loadAgentModules();
     const handleAct = vi.fn();

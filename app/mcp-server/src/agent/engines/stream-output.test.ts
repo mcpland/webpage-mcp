@@ -6,6 +6,7 @@ import {
   BoundedSet,
   BoundedTextAccumulator,
   STREAM_AGENT_MESSAGE_MAX_JSON_BYTES,
+  STREAM_AGENT_PERSISTENCE_HEADROOM_BYTES,
   STREAM_DEDUPE_MAX_ENTRIES,
   STREAM_PENDING_TOOL_INPUT_MAX_BYTES,
   STREAM_SNAPSHOT_INTERVAL_MS,
@@ -13,6 +14,14 @@ import {
   type AssistantStreamSnapshot,
   type SnapshotScheduler,
 } from './stream-output';
+import {
+  AGENT_CLI_SOURCE_MAX_BYTES,
+  AGENT_CREATED_AT_MAX_BYTES,
+  AGENT_IDENTIFIER_MAX_BYTES,
+  AGENT_MESSAGE_METADATA_MAX_JSON_BYTES,
+  AGENT_STORED_MESSAGE_MAX_JSON_BYTES,
+} from 'webpage-mcp-shared';
+import { validateStoredMessagePayload } from '../payload-limits';
 
 class ManualScheduler implements SnapshotScheduler {
   private nextId = 1;
@@ -146,6 +155,72 @@ describe('BoundedAssistantStream', () => {
 });
 
 describe('stream output bounds', () => {
+  it('reserves enough persisted-message headroom for maximum bounded engine output', () => {
+    const bounded = createBoundedAgentMessage(
+      {
+        ...createMessage('\u0000'.repeat(400_000), {
+          output: '\u0000'.repeat(100_000),
+        }),
+        id: 'i'.repeat(AGENT_IDENTIFIER_MAX_BYTES),
+        sessionId: 's'.repeat(AGENT_IDENTIFIER_MAX_BYTES),
+        requestId: 'r'.repeat(AGENT_IDENTIFIER_MAX_BYTES),
+        cliSource: 'c'.repeat(AGENT_CLI_SOURCE_MAX_BYTES),
+        createdAt: 'd'.repeat(AGENT_CREATED_AT_MAX_BYTES),
+      },
+    );
+
+    expect(
+      STREAM_AGENT_MESSAGE_MAX_JSON_BYTES + STREAM_AGENT_PERSISTENCE_HEADROOM_BYTES,
+    ).toBe(AGENT_STORED_MESSAGE_MAX_JSON_BYTES);
+    expect(() =>
+      validateStoredMessagePayload({
+        id: bounded.id,
+        projectId: 'p'.repeat(AGENT_IDENTIFIER_MAX_BYTES),
+        sessionId: bounded.sessionId,
+        conversationId: 'v'.repeat(AGENT_IDENTIFIER_MAX_BYTES),
+        role: bounded.role,
+        content: bounded.content,
+        messageType: bounded.messageType,
+        metadata: bounded.metadata,
+        cliSource: bounded.cliSource ?? null,
+        requestId: bounded.requestId ?? null,
+        createdAt: bounded.createdAt,
+      }),
+    ).not.toThrow();
+  });
+
+  it('keeps summarized metadata inside its JSON budget after escaping hostile fields', () => {
+    const metadata = Object.fromEntries([
+      ['k'.repeat(AGENT_MESSAGE_METADATA_MAX_JSON_BYTES), 'oversized key'],
+      ['__proto__', { polluted: true }],
+      ...Array.from({ length: 40 }, (_, index) => [
+        `control-${index}`,
+        '\u0000'.repeat(4_000),
+      ]),
+    ]) as Record<string, unknown>;
+    const bounded = createBoundedAgentMessage(createMessage('bounded content', metadata));
+
+    expect(Buffer.byteLength(JSON.stringify(bounded.metadata), 'utf8')).toBeLessThanOrEqual(
+      AGENT_MESSAGE_METADATA_MAX_JSON_BYTES,
+    );
+    expect(bounded.metadata?.truncated).toBe(true);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(() =>
+      validateStoredMessagePayload({
+        id: bounded.id,
+        projectId: 'project-1',
+        sessionId: bounded.sessionId,
+        role: bounded.role,
+        content: bounded.content,
+        messageType: bounded.messageType,
+        metadata: bounded.metadata,
+        cliSource: bounded.cliSource,
+        requestId: bounded.requestId,
+        createdAt: bounded.createdAt,
+      }),
+    ).not.toThrow();
+  });
+
   it('bounds UTF-8 text and reports retained and original bytes', () => {
     const accumulator = new BoundedTextAccumulator(128);
     for (let index = 0; index < 1_000; index++) accumulator.append('🚀');

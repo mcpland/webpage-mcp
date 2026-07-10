@@ -1,15 +1,20 @@
 import type { AgentMessage } from '../types';
+import {
+  AGENT_MESSAGE_CONTENT_MAX_BYTES,
+  AGENT_MESSAGE_METADATA_MAX_JSON_BYTES,
+  AGENT_STORED_MESSAGE_MAX_JSON_BYTES,
+} from 'webpage-mcp-shared';
 
 /** Coalesce cumulative UI snapshots instead of serializing one after every token. */
 export const STREAM_SNAPSHOT_INTERVAL_MS = 50;
 
 /** Hard in-memory limits for one assistant turn. */
-export const STREAM_ASSISTANT_TEXT_MAX_BYTES = 192 * 1024;
+export const STREAM_ASSISTANT_TEXT_MAX_BYTES = AGENT_MESSAGE_CONTENT_MAX_BYTES;
 export const STREAM_THINKING_TEXT_MAX_BYTES = 64 * 1024;
 
 /** Hard limits for tool events and streamed Claude tool input. */
-export const STREAM_TOOL_CONTENT_MAX_BYTES = 192 * 1024;
-export const STREAM_TOOL_METADATA_MAX_BYTES = 64 * 1024;
+export const STREAM_TOOL_CONTENT_MAX_BYTES = AGENT_MESSAGE_CONTENT_MAX_BYTES;
+export const STREAM_TOOL_METADATA_MAX_BYTES = AGENT_MESSAGE_METADATA_MAX_JSON_BYTES;
 export const STREAM_PENDING_TOOL_INPUT_MAX_BYTES = 64 * 1024;
 export const STREAM_TOOL_FIELD_MAX_BYTES = 16 * 1024;
 
@@ -19,10 +24,12 @@ export const STREAM_ACTIVE_COMMAND_MAX_ENTRIES = 128;
 export const STREAM_PENDING_TOOL_MAX_ENTRIES = 64;
 
 /**
- * Keep the serialized AgentMessage well below Chrome's 1 MiB native-message
- * ceiling. The remaining space is reserved for the subscription envelope.
+ * Keep engine output below the persisted-message budget. The headroom covers
+ * project and database-only fields added after the streamed message is built.
  */
-export const STREAM_AGENT_MESSAGE_MAX_JSON_BYTES = 512 * 1024;
+export const STREAM_AGENT_PERSISTENCE_HEADROOM_BYTES = 4 * 1024;
+export const STREAM_AGENT_MESSAGE_MAX_JSON_BYTES =
+  AGENT_STORED_MESSAGE_MAX_JSON_BYTES - STREAM_AGENT_PERSISTENCE_HEADROOM_BYTES;
 
 const TRUNCATION_MARKER = '\n\n… [truncated]';
 const METADATA_SUMMARY_MAX_KEYS = 32;
@@ -394,19 +401,36 @@ function boundMetadata(metadata: Record<string, unknown> | undefined): {
     return { metadata };
   }
 
-  const summary: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(metadata).slice(0, METADATA_SUMMARY_MAX_KEYS)) {
+  const summary = Object.create(null) as Record<string, unknown>;
+  summary.truncated = true;
+  let entries: [string, unknown][] = [];
+  try {
+    entries = Object.entries(metadata).slice(0, METADATA_SUMMARY_MAX_KEYS);
+  } catch {
+    // A hostile Proxy can throw while enumerating. The bounded marker below is
+    // still safe to stream and persist.
+  }
+  for (const [key, value] of entries) {
+    if (key === 'truncated') continue;
+    let summarizedValue: unknown;
     if (key === 'truncation' && value && typeof value === 'object') {
       const truncationBytes = serializedBytes(value);
-      summary[key] =
+      summarizedValue =
         truncationBytes !== null && truncationBytes <= METADATA_SUMMARY_STRING_MAX_BYTES
           ? value
           : '[truncated object]';
-      continue;
+    } else {
+      summarizedValue = summarizeMetadataValue(value);
     }
-    summary[key] = summarizeMetadataValue(value);
+
+    // String byte limits alone are insufficient because JSON escaping can
+    // expand control characters six-fold and property names are untrusted.
+    const candidate = { ...summary, [key]: summarizedValue };
+    const candidateBytes = serializedBytes(candidate);
+    if (candidateBytes !== null && candidateBytes <= STREAM_TOOL_METADATA_MAX_BYTES) {
+      summary[key] = summarizedValue;
+    }
   }
-  summary.truncated = true;
 
   const retainedBytes = serializedBytes(summary) ?? 0;
   return {
@@ -485,11 +509,16 @@ export function createBoundedAgentMessage(
 
   const firstMetadata = boundMetadata(withTruncationMetadata(message.metadata, truncation));
   if (firstMetadata.truncation) truncation.push(firstMetadata.truncation);
+  // Adding truncation diagnostics can itself cross the metadata budget. Bound
+  // once more after all diagnostics have been attached.
+  const finalInitialMetadata = boundMetadata(
+    withTruncationMetadata(firstMetadata.metadata, truncation),
+  );
 
   let candidate: AgentMessage = {
     ...message,
     content: content.text,
-    metadata: withTruncationMetadata(firstMetadata.metadata, truncation),
+    metadata: finalInitialMetadata.metadata,
   };
   let fitted = fitMessageContentToBudget(candidate);
 

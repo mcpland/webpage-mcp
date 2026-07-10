@@ -22,6 +22,7 @@ import {
 } from './session-service';
 import { attachmentService, type SavedAttachment } from './attachment-service';
 import { validateAgentAttachments } from './attachment-limits';
+import { validateAgentActPayload, validateFinalAgentPrompt } from './payload-limits';
 
 export interface AgentChatServiceOptions {
   engines: AgentEngine[];
@@ -65,7 +66,7 @@ function buildInstructionWithContext(
     try {
       const serialized = JSON.stringify(context.elementInfo);
       if (typeof serialized === 'string' && serialized !== '{}' && serialized !== '[]') {
-        elementInfoText = serialized.slice(0, 1000);
+        elementInfoText = serialized;
       }
     } catch {
       // Ignore unserializable element info
@@ -135,6 +136,7 @@ export class AgentChatService {
   }
 
   async handleAct(sessionId: string, payload: AgentActRequest): Promise<{ requestId: string }> {
+    validateAgentActPayload(payload, { sessionId });
     const trimmed = payload.instruction?.trim();
     if (!trimmed) {
       throw new Error('instruction is required');
@@ -142,6 +144,7 @@ export class AgentChatService {
     const attachmentError = validateAgentAttachments(payload.attachments);
     if (attachmentError) throw new Error(attachmentError);
     const engineInstruction = buildInstructionWithContext(trimmed, payload.context);
+    validateFinalAgentPrompt(engineInstruction);
 
     const requestId = payload.requestId || randomUUID();
     const execution = this.reserveExecution(sessionId, requestId, payload);

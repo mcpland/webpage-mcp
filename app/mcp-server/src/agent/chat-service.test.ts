@@ -2,6 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEngine, EngineInitOptions } from './engines/types';
 import { AgentStreamManager } from './stream-manager';
 import type { AgentSession } from './session-service';
+import {
+  AGENT_CLIENT_META_MAX_JSON_BYTES,
+  AGENT_DISPLAY_TEXT_MAX_BYTES,
+  AGENT_MESSAGE_CONTENT_MAX_BYTES,
+} from 'webpage-mcp-shared';
+import { AGENT_PAYLOAD_INVALID, AGENT_PAYLOAD_TOO_LARGE } from './payload-limits';
 
 const projectServiceMocks = vi.hoisted(() => ({
   getProject: vi.fn(),
@@ -134,6 +140,67 @@ describe('AgentChatService', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each([
+    {
+      name: 'oversized UTF-8 input',
+      payload: { instruction: 'a'.repeat(AGENT_MESSAGE_CONTENT_MAX_BYTES + 1) },
+      code: AGENT_PAYLOAD_TOO_LARGE,
+      field: 'instruction',
+    },
+    {
+      name: 'unserializable metadata',
+      payload: (() => {
+        const clientMeta: Record<string, unknown> = {};
+        clientMeta.self = clientMeta;
+        return { instruction: 'hello', clientMeta };
+      })(),
+      code: AGENT_PAYLOAD_INVALID,
+      field: 'clientMeta',
+    },
+    {
+      name: 'oversized canonical metadata',
+      payload: {
+        instruction: 'hello',
+        projectId: 'project-1',
+        clientMeta: {
+          value: 'a'.repeat(
+            AGENT_CLIENT_META_MAX_JSON_BYTES - JSON.stringify({ value: '' }).length,
+          ),
+        },
+        displayText: '\u0000'.repeat(AGENT_DISPLAY_TEXT_MAX_BYTES),
+        attachments: [
+          {
+            type: 'image' as const,
+            name: 'context.png',
+            mimeType: 'image/png',
+            dataBase64: 'eA==',
+          },
+        ],
+      },
+      code: AGENT_PAYLOAD_TOO_LARGE,
+      field: 'metadata',
+    },
+  ])('rejects $name before reserving or producing side effects', async ({ payload, code, field }) => {
+    const run = vi.fn();
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: unknown[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({
+      engines: [{ name: 'claude', supportsMcp: true, initializeAndRun: run }],
+      streamManager,
+    });
+
+    await expect(service.handleAct(legacySession.id, payload)).rejects.toMatchObject({ code, field });
+
+    expect(service.getRunningExecutions()).toHaveLength(0);
+    expect(sessionServiceMocks.getSession).not.toHaveBeenCalled();
+    expect(projectServiceMocks.getProject).not.toHaveBeenCalled();
+    expect(attachmentServiceMocks.saveAttachment).not.toHaveBeenCalled();
+    expect(messageServiceMocks.createMessage).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(streamedEvents).toEqual([]);
   });
 
   it('does not forward legacy engine-specific state when migrating a session onto Claude', async () => {

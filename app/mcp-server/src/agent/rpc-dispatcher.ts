@@ -43,6 +43,14 @@ import type { EngineName } from './engines/types';
 import { attachmentService } from './attachment-service';
 import { openProjectDirectory, openFileInVSCode } from './open-project';
 import {
+  AGENT_PAYLOAD_TOO_LARGE,
+  isAgentPayloadLimitError,
+  toAgentPayloadErrorResponse,
+  validateAgentActPayload,
+  validateAgentMessageFields,
+  validateStoredMessagePayload,
+} from './payload-limits';
+import {
   AGENT_ATTACHMENT_MAX_BYTES,
   AGENT_ATTACHMENT_RPC_CHUNK_BYTES,
   AGENT_ATTACHMENT_RPC_INLINE_BYTES,
@@ -762,13 +770,11 @@ export async function dispatchAgentRpc(
         if (!projectId) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: 'projectId is required' });
         }
-        const project = await getProject(projectId);
-        if (!project) {
-          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
-        }
 
         const payload = bodyAsRecord(body);
-        const content = (readString(payload.content) || '').trim();
+        const rawContent = readString(payload.content) || '';
+        const content = rawContent.trim();
+        validateAgentMessageFields(rawContent, payload.metadata);
         if (!content) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, {
             success: false,
@@ -800,6 +806,25 @@ export async function dispatchAgentRpc(
             error: 'id is not allowed for agent.chat.messages.create',
           });
         }
+
+        const messageInput = {
+          projectId,
+          role,
+          messageType,
+          content,
+          metadata,
+          sessionId: targetSessionId,
+          conversationId: readString(payload.conversationId),
+          cliSource: readString(payload.cliSource),
+          requestId: readString(payload.requestId),
+          createdAt: readString(payload.createdAt),
+        };
+        validateStoredMessagePayload(messageInput);
+
+        const project = await getProject(projectId);
+        if (!project) {
+          return jsonResponse(HTTP_STATUS.NOT_FOUND, { error: 'Project not found' });
+        }
         if (targetSessionId) {
           const session = await getSession(targetSessionId);
           if (!session) {
@@ -816,18 +841,7 @@ export async function dispatchAgentRpc(
           }
         }
 
-        const stored = await createStoredMessage({
-          projectId,
-          role,
-          messageType,
-          content,
-          metadata,
-          sessionId: targetSessionId,
-          conversationId: readString(payload.conversationId),
-          cliSource: readString(payload.cliSource),
-          requestId: readString(payload.requestId),
-          createdAt: readString(payload.createdAt),
-        });
+        const stored = await createStoredMessage(messageInput);
 
         return jsonResponse(HTTP_STATUS.CREATED, { success: true, data: stored });
       }
@@ -862,6 +876,7 @@ export async function dispatchAgentRpc(
           });
         }
         const payloadRecord = payload as Record<string, unknown>;
+        validateAgentActPayload(payloadRecord, { sessionId });
         const attachmentError = validateAgentAttachments(payloadRecord.attachments);
         if (attachmentError) {
           return jsonResponse(HTTP_STATUS.BAD_REQUEST, { error: attachmentError });
@@ -1157,6 +1172,14 @@ export async function dispatchAgentRpc(
         });
     }
   } catch (error) {
+    if (isAgentPayloadLimitError(error)) {
+      return jsonResponse(
+        error.code === AGENT_PAYLOAD_TOO_LARGE
+          ? HTTP_STATUS.PAYLOAD_TOO_LARGE
+          : HTTP_STATUS.BAD_REQUEST,
+        toAgentPayloadErrorResponse(error),
+      );
+    }
     return jsonResponse(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
       error: normalizeError(error) || ERROR_MESSAGES.INTERNAL_SERVER_ERROR,
     });
