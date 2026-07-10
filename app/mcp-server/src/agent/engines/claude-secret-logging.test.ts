@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   describeClaudeAuthTokenConfiguration,
+  describeClaudeBaseUrlConfiguration,
   parseClaudeToolInputForEvent,
 } from './claude';
 
@@ -17,6 +18,28 @@ describe('Claude secret logging', () => {
   it('does not log an absent token', () => {
     expect(describeClaudeAuthTokenConfiguration(undefined)).toBeNull();
     expect(describeClaudeAuthTokenConfiguration('')).toBeNull();
+  });
+
+  it('reports a base URL without exposing credentials, query parameters, or fragments', () => {
+    const baseUrl =
+      'https://router-user:router-password@example.test/v1?api_key=query-secret#fragment-secret';
+    const message = describeClaudeBaseUrlConfiguration(baseUrl);
+
+    expect(message).toBe('[ClaudeEngine] ANTHROPIC_BASE_URL is configured');
+    for (const sensitiveText of [
+      'router-user',
+      'router-password',
+      'example.test',
+      'query-secret',
+      'fragment-secret',
+    ]) {
+      expect(message).not.toContain(sensitiveText);
+    }
+  });
+
+  it('does not log an absent base URL', () => {
+    expect(describeClaudeBaseUrlConfiguration(undefined)).toBeNull();
+    expect(describeClaudeBaseUrlConfiguration('')).toBeNull();
   });
 
   it('logs only metadata for valid tool input containing a secret', () => {

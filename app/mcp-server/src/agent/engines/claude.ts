@@ -56,6 +56,12 @@ export function describeClaudeAuthTokenConfiguration(
   return authToken ? '[ClaudeEngine] ANTHROPIC_AUTH_TOKEN is configured' : null;
 }
 
+export function describeClaudeBaseUrlConfiguration(
+  baseUrl: string | undefined,
+): string | null {
+  return baseUrl ? '[ClaudeEngine] ANTHROPIC_BASE_URL is configured' : null;
+}
+
 /**
  * Resolve the Claude SDK filesystem setting sources without trusting the repository.
  *
@@ -1358,11 +1364,8 @@ export class ClaudeEngine implements AgentEngine {
     // Log configured Anthropic env vars without exposing any token material.
     const baseUrl = env.ANTHROPIC_BASE_URL;
     const authToken = env.ANTHROPIC_AUTH_TOKEN;
-    if (baseUrl) {
-      console.error(
-        `[ClaudeEngine] Using ANTHROPIC_BASE_URL: ${boundClaudeLogField(baseUrl)}`,
-      );
-    }
+    const baseUrlStatus = describeClaudeBaseUrlConfiguration(baseUrl);
+    if (baseUrlStatus) console.error(baseUrlStatus);
     const authTokenStatus = describeClaudeAuthTokenConfiguration(authToken);
     if (authTokenStatus) console.error(authTokenStatus);
 

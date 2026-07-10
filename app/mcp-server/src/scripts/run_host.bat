@@ -206,7 +206,7 @@ if exist "%NODE_MODULES_PATH_FILE%" (
 REM Log Claude Code Router (CCR) related env vars for debugging
 REM These are set via System Properties or PowerShell profile
 if defined ANTHROPIC_BASE_URL (
-    echo ANTHROPIC_BASE_URL is set: %ANTHROPIC_BASE_URL% >> "%WRAPPER_LOG%"
+    echo ANTHROPIC_BASE_URL is set (value hidden) >> "%WRAPPER_LOG%"
 )
 if defined ANTHROPIC_AUTH_TOKEN (
     echo ANTHROPIC_AUTH_TOKEN is set (value hidden) >> "%WRAPPER_LOG%"

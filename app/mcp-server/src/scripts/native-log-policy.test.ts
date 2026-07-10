@@ -155,6 +155,19 @@ describe("native host wrappers", () => {
       expect(script).toContain("WEBPAGE_MCP_STDERR_LOG_MAX_BYTES");
       expect(script).toContain("WEBPAGE_MCP_LOG_RETENTION_COUNT");
       expect(script).not.toMatch(/2>>\s*["']?[%$][{(]?STDERR_LOG/);
+
+      const baseUrlOutputLines = script
+        .split(/\r?\n/)
+        .filter(
+          (line) =>
+            line.includes("echo") && line.includes("ANTHROPIC_BASE_URL"),
+        );
+      expect(baseUrlOutputLines).toHaveLength(1);
+      expect(baseUrlOutputLines[0]).toContain(
+        "ANTHROPIC_BASE_URL is set (value hidden)",
+      );
+      expect(baseUrlOutputLines[0]).not.toContain("${ANTHROPIC_BASE_URL}");
+      expect(baseUrlOutputLines[0]).not.toContain("%ANTHROPIC_BASE_URL%");
     },
   );
 });

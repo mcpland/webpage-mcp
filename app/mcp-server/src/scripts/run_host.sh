@@ -279,7 +279,7 @@ fi
 # Log Claude Code Router (CCR) related env vars for debugging
 # These are set by `eval "$(ccr activate)"` or in shell profile
 if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
-    echo "ANTHROPIC_BASE_URL is set: ${ANTHROPIC_BASE_URL}" >> "${WRAPPER_LOG}"
+    echo "ANTHROPIC_BASE_URL is set (value hidden)" >> "${WRAPPER_LOG}"
 fi
 if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
     echo "ANTHROPIC_AUTH_TOKEN is set (value hidden)" >> "${WRAPPER_LOG}"
