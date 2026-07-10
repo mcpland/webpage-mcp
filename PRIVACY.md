@@ -24,25 +24,27 @@ communicates with the companion process through Chrome Native Messaging, and
 the companion communicates with an MCP client through local IPC and stdio.
 
 Local transport does not mean that every operation is offline. Data leaves the
-device when the user invokes a feature that sends it to a connected MCP client,
-an optional AI provider, a requested website or endpoint, or a model-artifact
-host. The user controls which clients, providers, pages, and actions are placed
-inside that boundary.
+device when the user invokes a feature that sends it externally or when a
+workflow or trigger the user previously enabled runs an action that sends data
+to a connected MCP client, an optional AI provider, a requested website or
+endpoint, or a model-artifact host. The user controls which clients, providers,
+pages, actions, workflows, and triggers are placed inside that boundary.
 
 ## Data handled
 
 Webpage MCP may handle the following data when it is necessary for a feature the
-user invokes:
+user invokes or for a workflow or trigger the user previously enabled that later
+runs:
 
-| Category                          | Examples                                                                                                                  | When it is handled                                                           |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Website content and form data     | Page text, DOM and accessibility data, selected text, element metadata, form values, page titles, and URLs                | Reading, searching, editing, recording, replaying, or automating a page      |
-| Images and media                  | Page or element screenshots, image attachments, and generated GIF recordings                                              | A screenshot, attachment, visual Agent, or recording feature is used         |
-| Browser activity and organization | Open tabs and windows, browsing history, bookmarks, navigation state, and download metadata                               | The corresponding browser tool or workflow is invoked                        |
-| Network and developer data        | Request and response URLs, headers, bodies, timing, status, errors, console output, and performance traces                | Network capture, console, debugging, or performance tools are invoked        |
-| Files and workspace data          | User-selected uploads, downloads, attachment contents, file names, workspace paths, and code-editing context              | A file, download, Agent attachment, or apply-to-code feature is used         |
-| Agent and MCP content             | Prompts, tool inputs and results, project and session metadata, messages, model selections, and engine configuration      | The user connects an MCP client or starts a Claude or Codex Agent action     |
-| Settings and diagnostics          | Extension preferences, workflow definitions, feature state, error details, bounded logs, and generated diagnostic reports | The product is configured, a workflow is saved, or diagnostics are requested |
+| Category                          | Examples                                                                                                                                             | When it is handled                                                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Website content and form data     | Page text, DOM and accessibility data, selected text, element metadata, form values, page titles, and URLs                                           | Reading, searching, editing, recording, replaying, or automating a page, including during an enabled trigger run |
+| Images and media                  | Page or element screenshots, image attachments, generated GIF recordings, and workflow screenshot artifacts                                          | A screenshot, attachment, visual Agent, recording, or screenshot-enabled workflow runs                           |
+| Browser activity and organization | Open tabs and windows, browsing history, bookmarks, navigation state, and download metadata                                                          | The corresponding browser tool runs or a previously enabled workflow or trigger accesses it                      |
+| Network and developer data        | Request and response URLs, headers, bodies, timing, status, errors, console output, and performance traces                                           | Network capture, console, debugging, performance, or workflow HTTP actions run                                   |
+| Files and workspace data          | User-selected uploads, downloads, attachment contents, file names, workspace paths, and code-editing context                                         | A file, download, Agent attachment, apply-to-code feature, or enabled workflow upload or download runs           |
+| Agent and MCP content             | Prompts, tool inputs and results, project and session metadata, messages, model selections, and engine configuration                                 | The user connects an MCP client or starts a Claude or Codex Agent action                                         |
+| Settings and diagnostics          | Extension preferences, workflow and trigger definitions, workflow run and event history, feature state, errors, bounded logs, and diagnostic reports | The product is configured, a workflow or trigger is saved or runs, or diagnostics are requested                  |
 
 Some browser tools operate in the user's existing signed-in browser context.
 Websites may therefore receive the cookies and credentials Chrome would
@@ -57,9 +59,10 @@ and returned data as potentially sensitive.
 ### Local extension and native processing
 
 Browser tools run in the extension and return results through the local native
-bridge. Saved workflows, preferences, semantic indexes, model caches, and Agent
-state may be processed and stored locally. The developer does not receive this
-local product data by default.
+bridge. Saved workflows and triggers, workflow run history and artifacts,
+preferences, semantic indexes, model caches, and Agent state may be processed
+and stored locally. The developer does not receive this local product data by
+default.
 
 ### Connected MCP clients
 
@@ -82,8 +85,10 @@ by the provider and the user's account or endpoint configuration.
 
 Navigation, form submission, browser fetch, upload, download, and workflow
 actions send data to the website or endpoint named by the user or workflow.
-Those destinations receive the same categories of information needed to
-perform the requested action and apply their own privacy practices.
+These actions may run immediately when the user invokes them or later when a
+workflow or trigger the user previously enabled fires. Those destinations
+receive the same categories of information needed to perform the action and
+apply their own privacy practices.
 
 ### Model artifacts
 
@@ -108,10 +113,12 @@ the corresponding GitHub or email service.
 
 ## Local storage and retention
 
-- Chrome-managed storage may contain preferences, saved workflows, recording
-  data, semantic indexes, search metadata, and cached model artifacts. It remains
-  until the user clears it, clears the Chrome profile, or uninstalls the
-  extension, subject to Chrome's own storage behavior.
+- Extension storage within the Chrome profile may contain preferences, saved
+  workflows and trigger definitions, workflow run and event history, recording
+  data, screenshot artifacts, semantic indexes, search metadata, and cached
+  model artifacts. It remains until the user clears it, clears the Chrome
+  profile, or uninstalls the extension, subject to Chrome's own storage
+  behavior.
 - Agent projects, sessions, messages, attachments, and workspace state are kept
   locally under `~/.webpage-mcp-agent` by default, or at a path the user
   configures. They remain until the user deletes the corresponding data or the
@@ -131,8 +138,9 @@ the corresponding GitHub or email service.
 - Native-host logs are stored in the platform log directory with restrictive
   file permissions, per-file size limits, and bounded rotation. They are not
   uploaded automatically.
-- Files explicitly downloaded, exported, or copied by the user remain in the
-  destination selected by Chrome or the user until removed there.
+- Files downloaded, exported, or copied by a user-invoked action or a previously
+  enabled workflow or trigger remain in the destination selected by Chrome, the
+  user, or the workflow until removed there.
 - Connected clients, providers, websites, artifact hosts, GitHub, and email
   services control their own retention. This project cannot delete data held by
   those independent services; users must use each service's controls.
@@ -165,8 +173,8 @@ provider or endpoint receives whatever the user sends to it.
 
 Users should connect only trusted MCP clients and providers, keep Agent sandbox
 and permission settings constrained, avoid sensitive pages when they are not
-needed, review high-impact workflow actions, and keep Chrome and Webpage MCP up
-to date.
+needed, review workflow actions and destinations before running them or enabling
+their triggers, and keep Chrome and Webpage MCP up to date.
 
 ## User controls
 
@@ -176,6 +184,7 @@ Users can:
   native bridge to stop further processing;
 - revoke extension permissions and avoid enabling optional user-script, Agent,
   semantic-search, capture, or debugging features;
+- disable or delete workflow triggers to stop their future automatic runs;
 - choose the MCP client, Claude or Codex engine, compatible endpoint, model, and
   Agent permission or sandbox settings;
 - use **Clear All Data** in the extension to remove semantic page indexes,
@@ -223,6 +232,11 @@ sensitive information in a public issue.
   [`app/mcp-server/src/agent/engines/claude.ts`](app/mcp-server/src/agent/engines/claude.ts)
   and
   [`app/mcp-server/src/agent/engines/codex.ts`](app/mcp-server/src/agent/engines/codex.ts).
+- Automatic workflow trigger kinds and their enabled-state boundary are defined
+  in
+  [`app/chrome-extension/entrypoints/background/record-replay-v3/domain/triggers.ts`](app/chrome-extension/entrypoints/background/record-replay-v3/domain/triggers.ts)
+  and
+  [`app/chrome-extension/entrypoints/background/record-replay-v3/engine/triggers/trigger-manager.ts`](app/chrome-extension/entrypoints/background/record-replay-v3/engine/triggers/trigger-manager.ts).
 - Semantic data deletion is implemented in
   [`app/chrome-extension/entrypoints/background/storage-manager.ts`](app/chrome-extension/entrypoints/background/storage-manager.ts).
 - Semantic asset revision and ONNX integrity boundaries are defined in

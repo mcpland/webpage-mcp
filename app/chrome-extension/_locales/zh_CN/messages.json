@@ -2818,7 +2818,7 @@
     "description": "Webpage MCP 隐私政策链接"
   },
   "welcomePrivacySummary": {
-    "message": "Webpage MCP 通过本机 Native Messaging 和 MCP 桥接处理浏览器数据。当您调用工具或 Agent 功能时，已连接的 MCP 客户端或您配置的 AI 服务提供商可能会接收完成该操作所需的页面内容、屏幕截图、浏览历史记录、书签或网络数据。",
+    "message": "Webpage MCP 通过本机 Native Messaging 和 MCP 桥接处理浏览器数据。当您调用工具或 Agent 功能，或您之前启用的工作流或触发器运行时，它可能会读取页面内容、截取屏幕截图、访问浏览历史记录、书签或网络数据，并发送 HTTP 请求或上传或下载文件。已连接的 MCP 客户端、您配置的 AI 服务提供商或所请求的网站或端点可能会接收完成该操作所需的数据。",
     "description": "首次安装时说明本地和外部数据流"
   },
   "welcomePrivacyTitle": {

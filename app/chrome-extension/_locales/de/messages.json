@@ -2818,7 +2818,7 @@
     "description": "Link zur Datenschutzerklärung von Webpage MCP"
   },
   "welcomePrivacySummary": {
-    "message": "Webpage MCP verarbeitet Browserdaten lokal über seine Native-Messaging- und MCP-Verbindung. Wenn Sie ein Tool oder eine Agent-Funktion aufrufen, kann der verbundene MCP-Client oder Ihr konfigurierter KI-Anbieter die für diese Aktion erforderlichen Seiteninhalte, Screenshots, den Browserverlauf, Lesezeichen oder Netzwerkdaten erhalten.",
+    "message": "Webpage MCP verarbeitet Browserdaten lokal über seine Native-Messaging- und MCP-Verbindung. Wenn Sie ein Tool oder eine Agent-Funktion aufrufen oder ein zuvor von Ihnen aktivierter Workflow bzw. Trigger ausgeführt wird, kann Webpage MCP Seiteninhalte lesen, Screenshots aufnehmen, auf Browserverlauf, Lesezeichen oder Netzwerkdaten zugreifen sowie HTTP-Anfragen senden oder Dateien hoch- bzw. herunterladen. Der verbundene MCP-Client, Ihr konfigurierter KI-Anbieter oder die angeforderte Website bzw. der Endpunkt kann die für diese Aktion erforderlichen Daten erhalten.",
     "description": "Hinweis bei der Erstinstallation zu lokalen und externen Datenflüssen"
   },
   "welcomePrivacyTitle": {

@@ -144,7 +144,7 @@ export default function WelcomeApp() {
               <p className="welcome-muted welcome-text-sm welcome-mt-2">
                 {t(
                   "welcomePrivacySummary",
-                  "Webpage MCP processes browser data locally through its Native Messaging and MCP bridge. When you invoke a tool or Agent feature, the connected MCP client or your configured AI provider may receive page content, screenshots, browsing history, bookmarks, or network data needed for that action.",
+                  "Webpage MCP processes browser data locally through its Native Messaging and MCP bridge. When you invoke a tool or Agent feature, or when a workflow or trigger you previously enabled runs, it may read page content, capture screenshots, access browsing history, bookmarks, or network data, and make HTTP requests or upload or download files. The connected MCP client, your configured AI provider, or the requested website or endpoint may receive the data needed for that action.",
                 )}
               </p>
               <a
