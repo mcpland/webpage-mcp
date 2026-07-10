@@ -56,6 +56,10 @@ import { getDefaultWorkspaceDir, getDefaultProjectRoot } from './storage';
 import { openDirectoryPicker } from './directory-picker';
 import type { EngineName } from './engines/types';
 import { attachmentService } from './attachment-service';
+import {
+  normalizeAttachmentCleanupRequest,
+  parseAttachmentStatsPageValue,
+} from './attachment-inventory-limits';
 import { openProjectDirectory, openFileInVSCode } from './open-project';
 import {
   AGENT_PAYLOAD_TOO_LARGE,
@@ -69,8 +73,8 @@ import {
   AGENT_ATTACHMENT_MAX_BYTES,
   AGENT_ATTACHMENT_RPC_CHUNK_BYTES,
   AGENT_ATTACHMENT_RPC_INLINE_BYTES,
+  AGENT_PROJECT_NAME_MAX_BYTES,
   type AgentRpcRequestPayload,
-  type AttachmentCleanupRequest,
   type AttachmentCleanupResponse,
   type AttachmentStatsResponse,
   type OpenProjectTarget,
@@ -1152,10 +1156,32 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.attachments.stats': {
-        const stats = await attachmentService.getAttachmentStats();
-        const projects = await listProjects();
-        const projectMap = new Map(projects.map((p) => [p.id, p.name]));
-        const dbProjectIds = new Set(projects.map((p) => p.id));
+        const limit = parseAttachmentStatsPageValue(
+          readQueryValue(query, 'limit'),
+          'limit',
+        );
+        const offset = parseAttachmentStatsPageValue(
+          readQueryValue(query, 'offset'),
+          'offset',
+        );
+        const stats = await attachmentService.getAttachmentStats({ limit, offset });
+        const pageProjects = await Promise.all(
+          stats.projects.map((entry) => getProject(entry.projectId)),
+        );
+        const dbProjectIds = new Set(
+          pageProjects.flatMap((project) => (project ? [project.id] : [])),
+        );
+        const projectMap = new Map(
+          pageProjects.flatMap((project) => {
+            if (
+              !project ||
+              jsonUtf8Bytes(project.name) > AGENT_PROJECT_NAME_MAX_BYTES
+            ) {
+              return [];
+            }
+            return [[project.id, project.name] as const];
+          }),
+        );
 
         const enrichedProjects = stats.projects.map((p) => ({
           ...p,
@@ -1174,10 +1200,15 @@ export async function dispatchAgentRpc(
           pathRedacted: true,
           totalFiles: stats.totalFiles,
           totalBytes: stats.totalBytes,
+          inventoryTruncated: stats.inventoryTruncated,
+          truncatedProjects: stats.truncatedProjects,
+          pagination: stats.pagination,
           projects: enrichedProjects,
           orphanProjectIds,
         };
-
+        if (jsonUtf8Bytes(response) > AGENT_RPC_JSON_RESPONSE_MAX_BYTES) {
+          throw new RangeError('Attachment stats response exceeds its JSON byte budget');
+        }
         return jsonResponse(HTTP_STATUS.OK, response);
       }
 
@@ -1300,7 +1331,10 @@ export async function dispatchAgentRpc(
       }
 
       case 'agent.attachments.deleteByProject': {
-        const projectId = readParam(params, 'projectId');
+        const cleanupRequest = normalizeAttachmentCleanupRequest({
+          projectIds: [params?.projectId],
+        });
+        const projectId = cleanupRequest.projectIds?.[0] ?? '';
         const result = await attachmentService.cleanupAttachments({ projectIds: [projectId] });
 
         const response: AttachmentCleanupResponse = {
@@ -1309,35 +1343,51 @@ export async function dispatchAgentRpc(
           pathRedacted: true,
           removedFiles: result.removedFiles,
           removedBytes: result.removedBytes,
+          processedProjects: result.processedProjects,
+          failedProjects: result.failedProjects,
+          skippedProjects: result.skippedProjects,
+          resultCount: result.resultCount,
+          resultsTruncated: result.resultsTruncated,
+          enumerationTruncated: result.enumerationTruncated,
           results: result.results.map((entry) => ({
             ...entry,
             dirPath: toPublicAttachmentDirPath(entry.projectId),
           })),
         };
-
+        if (jsonUtf8Bytes(response) > AGENT_RPC_JSON_RESPONSE_MAX_BYTES) {
+          throw new RangeError('Attachment cleanup response exceeds its JSON byte budget');
+        }
         return jsonResponse(HTTP_STATUS.OK, response);
       }
 
       case 'agent.attachments.deleteAll': {
-        const payload = bodyAsRecord(body) as AttachmentCleanupRequest;
-        const projectIds = Array.isArray(payload.projectIds) ? payload.projectIds : undefined;
-
+        const cleanupRequest = normalizeAttachmentCleanupRequest(normalizeBody(body));
+        const projectIds = cleanupRequest.projectIds;
         const result = await attachmentService.cleanupAttachments(
-          projectIds ? { projectIds } : undefined,
+          cleanupRequest.selected ? { projectIds: projectIds ?? [] } : undefined,
+          { continueOnError: true },
         );
 
         const response: AttachmentCleanupResponse = {
           success: true,
-          scope: projectIds && projectIds.length > 0 ? 'selected' : 'all',
+          scope: cleanupRequest.selected ? 'selected' : 'all',
           pathRedacted: true,
           removedFiles: result.removedFiles,
           removedBytes: result.removedBytes,
+          processedProjects: result.processedProjects,
+          failedProjects: result.failedProjects,
+          skippedProjects: result.skippedProjects,
+          resultCount: result.resultCount,
+          resultsTruncated: result.resultsTruncated,
+          enumerationTruncated: result.enumerationTruncated,
           results: result.results.map((entry) => ({
             ...entry,
             dirPath: toPublicAttachmentDirPath(entry.projectId),
           })),
         };
-
+        if (jsonUtf8Bytes(response) > AGENT_RPC_JSON_RESPONSE_MAX_BYTES) {
+          throw new RangeError('Attachment cleanup response exceeds its JSON byte budget');
+        }
         return jsonResponse(HTTP_STATUS.OK, response);
       }
 

@@ -49,6 +49,16 @@ export const AGENT_ATTACHMENT_RPC_CHUNK_BYTES = 512 * 1024;
  * extra headroom is reserved for Base64 expansion and the JSON envelope.
  */
 export const AGENT_ATTACHMENT_RPC_INLINE_BYTES = 700 * 1024;
+export const AGENT_ATTACHMENT_STATS_DEFAULT_LIMIT = 50;
+export const AGENT_ATTACHMENT_STATS_MAX_LIMIT = 100;
+export const AGENT_ATTACHMENT_STATS_ROOT_SCAN_MAX_ENTRIES = 1_000;
+/** Offset is capped to one root-scan budget; a stats call examines at most two budgets. */
+export const AGENT_ATTACHMENT_STATS_MAX_OFFSET =
+  AGENT_ATTACHMENT_STATS_ROOT_SCAN_MAX_ENTRIES;
+export const AGENT_ATTACHMENT_PROJECT_SCAN_MAX_ENTRIES = 1_024;
+export const AGENT_ATTACHMENT_CLEANUP_MAX_PROJECT_IDS = 256;
+export const AGENT_ATTACHMENT_CLEANUP_PROJECT_IDS_MAX_JSON_BYTES = 64 * 1024;
+export const AGENT_ATTACHMENT_CLEANUP_MAX_RESULTS = 100;
 export const AGENT_RPC_OPERATION_MAX_BYTES = 128;
 
 function isUtf8LengthAtMost(value: string, maximumBytes: number): boolean {

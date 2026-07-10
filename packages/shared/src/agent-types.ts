@@ -477,6 +477,10 @@ export interface AttachmentProjectStats {
   exists: boolean;
   fileCount: number;
   totalBytes: number;
+  /** Directory entries examined while computing this bounded snapshot. */
+  scannedEntries: number;
+  /** True when the scan budget was reached or an entry could not be inventoried. */
+  inventoryTruncated: boolean;
   /** Last modification timestamp (only when exists is true) */
   lastModifiedAt?: string;
 }
@@ -491,6 +495,26 @@ export interface CleanupProjectResult {
   existed: boolean;
   removedFiles: number;
   removedBytes: number;
+  /** True when removedFiles/removedBytes are lower-bound counts from a bounded scan. */
+  countsTruncated: boolean;
+  /** Present only for best-effort bulk cleanup failures. */
+  error?: string;
+}
+
+export interface AttachmentInventoryPagination {
+  limit: number;
+  /**
+   * Raw attachment-root directory entry offset used for incremental scanning.
+   * Pagination is best-effort when the directory changes between calls.
+   */
+  offset: number;
+  count: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+  /** Root directory entries examined after the requested offset. */
+  scannedEntries: number;
+  /** True when root traversal stopped at a scan/cursor bound or an iterator failed. */
+  scanTruncated: boolean;
 }
 
 /**
@@ -503,6 +527,10 @@ export interface AttachmentStatsResponse {
   pathRedacted: boolean;
   totalFiles: number;
   totalBytes: number;
+  /** Totals cover only the returned page and each project's bounded scan prefix. */
+  inventoryTruncated: boolean;
+  truncatedProjects: number;
+  pagination: AttachmentInventoryPagination;
   projects: Array<
     AttachmentProjectStats & {
       projectName?: string;
@@ -516,7 +544,7 @@ export interface AttachmentStatsResponse {
  * Request body for attachment cleanup endpoint.
  */
 export interface AttachmentCleanupRequest {
-  /** If provided, cleanup only these projects. Otherwise cleanup all. */
+  /** If provided, cleanup only these projects. An empty array cleans none. */
   projectIds?: string[];
 }
 
@@ -529,6 +557,13 @@ export interface AttachmentCleanupResponse {
   pathRedacted: boolean;
   removedFiles: number;
   removedBytes: number;
+  processedProjects: number;
+  failedProjects: number;
+  skippedProjects: number;
+  resultCount: number;
+  resultsTruncated: boolean;
+  /** True when the attachment-root iterator failed before reaching the end. */
+  enumerationTruncated: boolean;
   results: CleanupProjectResult[];
 }
 

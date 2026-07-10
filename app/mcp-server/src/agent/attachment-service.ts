@@ -14,8 +14,15 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
   AgentAttachment,
+  AttachmentInventoryPagination,
   AttachmentMetadata,
   AttachmentProjectStats,
+} from 'webpage-mcp-shared';
+import {
+  AGENT_ATTACHMENT_CLEANUP_MAX_RESULTS,
+  AGENT_ATTACHMENT_PROJECT_SCAN_MAX_ENTRIES,
+  AGENT_ATTACHMENT_STATS_MAX_OFFSET,
+  AGENT_ATTACHMENT_STATS_ROOT_SCAN_MAX_ENTRIES,
 } from 'webpage-mcp-shared';
 import { getAgentDataDir, PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE } from './storage';
 import {
@@ -24,6 +31,11 @@ import {
   MAX_PROJECT_ATTACHMENT_BYTES,
   MAX_PROJECT_ATTACHMENT_FILES,
 } from './attachment-limits';
+import {
+  isValidAttachmentProjectId,
+  normalizeAttachmentCleanupRequest,
+  normalizeAttachmentStatsPageOptions,
+} from './attachment-inventory-limits';
 
 // ============================================================
 // Types
@@ -50,6 +62,9 @@ export interface AttachmentStats {
   totalFiles: number;
   totalBytes: number;
   projects: AttachmentProjectStats[];
+  inventoryTruncated: boolean;
+  truncatedProjects: number;
+  pagination: AttachmentInventoryPagination;
 }
 
 export interface AttachmentReadChunk {
@@ -63,18 +78,31 @@ export interface CleanupAttachmentsInput {
   projectIds?: string[];
 }
 
+export interface CleanupAttachmentsOptions {
+  /** Continue after per-project failures. Defaults to true only for all-project cleanup. */
+  continueOnError?: boolean;
+}
+
 export interface CleanupProjectResult {
   projectId: string;
   dirPath: string;
   existed: boolean;
   removedFiles: number;
   removedBytes: number;
+  countsTruncated: boolean;
+  error?: string;
 }
 
 export interface CleanupResult {
   rootDir: string;
   removedFiles: number;
   removedBytes: number;
+  processedProjects: number;
+  failedProjects: number;
+  skippedProjects: number;
+  resultCount: number;
+  resultsTruncated: boolean;
+  enumerationTruncated: boolean;
   results: CleanupProjectResult[];
 }
 
@@ -87,6 +115,9 @@ const ATTACHMENTS_DIR_NAME = 'attachments';
 export interface AttachmentServiceOptions {
   maxProjectBytes?: number;
   maxProjectFiles?: number;
+  maxProjectScanEntries?: number;
+  maxStatsRootScanEntries?: number;
+  maxCleanupResults?: number;
 }
 
 // ============================================================
@@ -144,9 +175,14 @@ function isValidFilename(filename: string): boolean {
  * Validate projectId to prevent path traversal attacks.
  */
 function isValidProjectId(projectId: string): boolean {
-  if (!projectId) return false;
-  // UUID format or alphanumeric with dashes
-  return /^[a-zA-Z0-9_-]+$/.test(projectId);
+  return isValidAttachmentProjectId(projectId);
+}
+
+function saturatingAdd(current: number, addition: number): number {
+  if (!Number.isSafeInteger(addition) || addition < 0) return Number.MAX_SAFE_INTEGER;
+  return addition > Number.MAX_SAFE_INTEGER - current
+    ? Number.MAX_SAFE_INTEGER
+    : current + addition;
 }
 
 // ============================================================
@@ -156,16 +192,52 @@ function isValidProjectId(projectId: string): boolean {
 export class AttachmentService {
   private readonly maxProjectBytes: number;
   private readonly maxProjectFiles: number;
+  private readonly maxProjectScanEntries: number;
+  private readonly maxStatsRootScanEntries: number;
+  private readonly maxCleanupResults: number;
   private readonly projectWriteTails = new Map<string, Promise<void>>();
 
   constructor(options: AttachmentServiceOptions = {}) {
     this.maxProjectBytes = options.maxProjectBytes ?? MAX_PROJECT_ATTACHMENT_BYTES;
     this.maxProjectFiles = options.maxProjectFiles ?? MAX_PROJECT_ATTACHMENT_FILES;
+    this.maxProjectScanEntries =
+      options.maxProjectScanEntries ?? AGENT_ATTACHMENT_PROJECT_SCAN_MAX_ENTRIES;
+    this.maxStatsRootScanEntries =
+      options.maxStatsRootScanEntries ?? AGENT_ATTACHMENT_STATS_ROOT_SCAN_MAX_ENTRIES;
+    this.maxCleanupResults =
+      options.maxCleanupResults ?? AGENT_ATTACHMENT_CLEANUP_MAX_RESULTS;
     if (!Number.isSafeInteger(this.maxProjectBytes) || this.maxProjectBytes <= 0) {
       throw new RangeError('maxProjectBytes must be a positive safe integer');
     }
     if (!Number.isSafeInteger(this.maxProjectFiles) || this.maxProjectFiles <= 0) {
       throw new RangeError('maxProjectFiles must be a positive safe integer');
+    }
+    if (
+      !Number.isSafeInteger(this.maxProjectScanEntries) ||
+      this.maxProjectScanEntries <= 0 ||
+      this.maxProjectScanEntries > AGENT_ATTACHMENT_PROJECT_SCAN_MAX_ENTRIES
+    ) {
+      throw new RangeError(
+        `maxProjectScanEntries must be between 1 and ${AGENT_ATTACHMENT_PROJECT_SCAN_MAX_ENTRIES}`,
+      );
+    }
+    if (
+      !Number.isSafeInteger(this.maxStatsRootScanEntries) ||
+      this.maxStatsRootScanEntries <= 0 ||
+      this.maxStatsRootScanEntries > AGENT_ATTACHMENT_STATS_ROOT_SCAN_MAX_ENTRIES
+    ) {
+      throw new RangeError(
+        `maxStatsRootScanEntries must be between 1 and ${AGENT_ATTACHMENT_STATS_ROOT_SCAN_MAX_ENTRIES}`,
+      );
+    }
+    if (
+      !Number.isSafeInteger(this.maxCleanupResults) ||
+      this.maxCleanupResults <= 0 ||
+      this.maxCleanupResults > AGENT_ATTACHMENT_CLEANUP_MAX_RESULTS
+    ) {
+      throw new RangeError(
+        `maxCleanupResults must be between 1 and ${AGENT_ATTACHMENT_CLEANUP_MAX_RESULTS}`,
+      );
     }
   }
 
@@ -252,6 +324,9 @@ export class AttachmentService {
         ]);
       }
       const projectStats = await this.getProjectStats(projectId, projectDir);
+      if (projectStats.inventoryTruncated) {
+        throw new Error('Project attachment inventory exceeds the safe scan limit');
+      }
       if (projectStats.fileCount >= this.maxProjectFiles) {
         throw new Error(`Project attachment file limit (${this.maxProjectFiles}) reached`);
       }
@@ -326,44 +401,79 @@ export class AttachmentService {
   /**
    * Get statistics for all attachments.
    */
-  async getAttachmentStats(): Promise<AttachmentStats> {
+  async getAttachmentStats(
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<AttachmentStats> {
+    const page = normalizeAttachmentStatsPageOptions(options);
     const rootDir = this.getAttachmentsRootDir();
     const projects: AttachmentProjectStats[] = [];
     let totalFiles = 0;
     let totalBytes = 0;
+    let truncatedProjects = 0;
+    let scannedEntries = 0;
+    let entryIndex = 0;
+    let hasMore = false;
+    let nextOffset: number | null = null;
+    let scanTruncated = false;
 
     try {
-      // Check if root directory exists
-      await fs.access(rootDir);
-
-      // Read all project directories
-      const entries = await fs.readdir(rootDir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-
+      const directory = await fs.opendir(rootDir);
+      for await (const entry of directory) {
+        const currentIndex = entryIndex;
+        entryIndex += 1;
+        if (currentIndex < page.offset) continue;
+        if (
+          projects.length >= page.limit ||
+          scannedEntries >= this.maxStatsRootScanEntries
+        ) {
+          if (currentIndex <= AGENT_ATTACHMENT_STATS_MAX_OFFSET) {
+            hasMore = true;
+            nextOffset = currentIndex;
+          } else {
+            // Never advertise a cursor that the request validator will reject.
+            scanTruncated = true;
+          }
+          scanTruncated ||= scannedEntries >= this.maxStatsRootScanEntries;
+          break;
+        }
+        scannedEntries += 1;
+        if (!entry.isDirectory() || !isValidProjectId(entry.name)) continue;
         const projectId = entry.name;
         const dirPath = path.join(rootDir, projectId);
-
         try {
           const stats = await this.getProjectStats(projectId, dirPath);
           projects.push(stats);
-          totalFiles += stats.fileCount;
-          totalBytes += stats.totalBytes;
+          totalFiles = saturatingAdd(totalFiles, stats.fileCount);
+          totalBytes = saturatingAdd(totalBytes, stats.totalBytes);
+          if (stats.inventoryTruncated) truncatedProjects += 1;
         } catch (error) {
-          // Skip directories we can't read
+          scanTruncated = true;
           console.error(`[AttachmentService] Failed to stat project ${projectId}:`, error);
         }
       }
-    } catch {
-      // Root directory doesn't exist - return empty stats
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+        scanTruncated = true;
+      }
     }
 
+    const pagination: AttachmentInventoryPagination = {
+      limit: page.limit,
+      offset: page.offset,
+      count: projects.length,
+      hasMore,
+      nextOffset,
+      scannedEntries,
+      scanTruncated,
+    };
     return {
       rootDir,
       totalFiles,
       totalBytes,
       projects,
+      inventoryTruncated: hasMore || scanTruncated || truncatedProjects > 0,
+      truncatedProjects,
+      pagination,
     };
   }
 
@@ -378,98 +488,154 @@ export class AttachmentService {
     let totalBytes = 0;
     let lastModifiedAt: string | undefined;
     let latestMtime = 0;
+    let scannedEntries = 0;
+    let inventoryTruncated = false;
+
+    let directory: Awaited<ReturnType<typeof fs.opendir>>;
+    try {
+      directory = await fs.opendir(dirPath);
+    } catch (error) {
+      const missing = (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+      return {
+        projectId,
+        dirPath,
+        exists: !missing,
+        fileCount: 0,
+        totalBytes: 0,
+        scannedEntries: 0,
+        inventoryTruncated: !missing,
+      };
+    }
 
     try {
-      const files = await fs.readdir(dirPath);
-
-      for (const file of files) {
-        const filePath = path.join(dirPath, file);
+      for await (const entry of directory) {
+        if (scannedEntries >= this.maxProjectScanEntries) {
+          inventoryTruncated = true;
+          break;
+        }
+        scannedEntries += 1;
+        if (!entry.isFile()) continue;
+        const filePath = path.join(dirPath, entry.name);
         try {
           const stat = await fs.stat(filePath);
           if (stat.isFile()) {
+            if (!Number.isSafeInteger(stat.size) || stat.size < 0) {
+              inventoryTruncated = true;
+              continue;
+            }
             fileCount++;
-            totalBytes += stat.size;
+            totalBytes = saturatingAdd(totalBytes, stat.size);
             if (stat.mtimeMs > latestMtime) {
               latestMtime = stat.mtimeMs;
               lastModifiedAt = stat.mtime.toISOString();
             }
           }
         } catch {
-          // Skip files we can't stat
+          inventoryTruncated = true;
         }
       }
-
-      return {
-        projectId,
-        dirPath,
-        exists: true,
-        fileCount,
-        totalBytes,
-        lastModifiedAt,
-      };
     } catch {
-      return {
-        projectId,
-        dirPath,
-        exists: false,
-        fileCount: 0,
-        totalBytes: 0,
-      };
+      inventoryTruncated = true;
     }
+
+    return {
+      projectId,
+      dirPath,
+      exists: true,
+      fileCount,
+      totalBytes,
+      scannedEntries,
+      inventoryTruncated,
+      lastModifiedAt,
+    };
   }
 
   /**
    * Cleanup attachments for specified projects or all projects.
    */
-  async cleanupAttachments(input?: CleanupAttachmentsInput): Promise<CleanupResult> {
+  async cleanupAttachments(
+    input?: CleanupAttachmentsInput,
+    options: CleanupAttachmentsOptions = {},
+  ): Promise<CleanupResult> {
+    const normalized = normalizeAttachmentCleanupRequest(input);
     const rootDir = this.getAttachmentsRootDir();
     const results: CleanupProjectResult[] = [];
     let totalRemovedFiles = 0;
     let totalRemovedBytes = 0;
+    let processedProjects = 0;
+    let failedProjects = 0;
+    let skippedProjects = 0;
+    let resultsTruncated = false;
+    const enumerationState = { truncated: false };
+    const continueOnError = options.continueOnError ?? !normalized.selected;
+    const projectIds: AsyncIterable<string> | Iterable<string> = normalized.selected
+      ? (normalized.projectIds ?? [])
+      : this.iterateAttachmentProjectIds(rootDir, enumerationState);
 
-    // Determine which projects to clean
-    let projectIds: string[];
-
-    if (input?.projectIds && input.projectIds.length > 0) {
-      // Clean specific projects
-      projectIds = input.projectIds;
-    } else {
-      // Clean all projects - enumerate from filesystem
-      try {
-        const entries = await fs.readdir(rootDir, { withFileTypes: true });
-        projectIds = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-      } catch {
-        // Root doesn't exist - nothing to clean
-        return {
-          rootDir,
-          removedFiles: 0,
-          removedBytes: 0,
-          results: [],
-        };
-      }
-    }
-
-    // Clean each project
-    for (const projectId of projectIds) {
+    for await (const projectId of projectIds) {
       if (!isValidProjectId(projectId)) {
-        console.error(`[AttachmentService] Skipping invalid projectId: ${projectId}`);
+        skippedProjects = saturatingAdd(skippedProjects, 1);
         continue;
       }
-
-      const result = await this.withProjectWriteLock(projectId, () =>
-        this.cleanupProject(projectId),
-      );
-      results.push(result);
-      totalRemovedFiles += result.removedFiles;
-      totalRemovedBytes += result.removedBytes;
+      processedProjects = saturatingAdd(processedProjects, 1);
+      try {
+        const result = await this.withProjectWriteLock(projectId, () =>
+          this.cleanupProject(projectId),
+        );
+        totalRemovedFiles = saturatingAdd(totalRemovedFiles, result.removedFiles);
+        totalRemovedBytes = saturatingAdd(totalRemovedBytes, result.removedBytes);
+        if (results.length < this.maxCleanupResults) results.push(result);
+        else resultsTruncated = true;
+      } catch (error) {
+        if (!continueOnError) throw error;
+        failedProjects = saturatingAdd(failedProjects, 1);
+        const failedResult: CleanupProjectResult = {
+          projectId,
+          dirPath: this.getProjectAttachmentsDir(projectId),
+          existed: true,
+          removedFiles: 0,
+          removedBytes: 0,
+          countsTruncated: false,
+          error: 'Failed to clean attachment directory',
+        };
+        if (results.length < this.maxCleanupResults) results.push(failedResult);
+        else resultsTruncated = true;
+      }
     }
 
     return {
       rootDir,
       removedFiles: totalRemovedFiles,
       removedBytes: totalRemovedBytes,
+      processedProjects,
+      failedProjects,
+      skippedProjects,
+      resultCount: results.length,
+      resultsTruncated,
+      enumerationTruncated: enumerationState.truncated,
       results,
     };
+  }
+
+  private async *iterateAttachmentProjectIds(
+    rootDir: string,
+    state: { truncated: boolean },
+  ): AsyncGenerator<string> {
+    let directory: Awaited<ReturnType<typeof fs.opendir>>;
+    try {
+      directory = await fs.opendir(rootDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') state.truncated = true;
+      return;
+    }
+    try {
+      for await (const entry of directory) {
+        if (entry.isDirectory()) yield entry.name;
+      }
+    } catch (error) {
+      state.truncated = true;
+      console.error('[AttachmentService] Failed while enumerating attachment projects:', error);
+    }
   }
 
   /**
@@ -488,6 +654,7 @@ export class AttachmentService {
           existed: false,
           removedFiles: 0,
           removedBytes: 0,
+          countsTruncated: false,
         };
       }
       throw error;
@@ -500,19 +667,15 @@ export class AttachmentService {
       // Remove directory and all contents
       await fs.rm(dirPath, { recursive: true, force: true });
 
-      console.error(
-        `[AttachmentService] Cleaned up ${stats.fileCount} files (${stats.totalBytes} bytes) for project ${projectId}`,
-      );
-
       return {
         projectId,
         dirPath,
         existed: true,
         removedFiles: stats.fileCount,
         removedBytes: stats.totalBytes,
+        countsTruncated: stats.inventoryTruncated,
       };
     } catch (error) {
-      console.error(`[AttachmentService] Failed to cleanup project ${projectId}:`, error);
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(`Failed to cleanup attachments for project ${projectId}: ${reason}`);
     }
