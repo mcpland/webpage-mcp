@@ -1806,21 +1806,26 @@ export const TOOL_SCHEMAS: Tool[] = [
       properties: {
         text: {
           type: 'string',
+          maxLength: 4096,
           description:
             'Text to search for in history URLs and titles. Leave empty to retrieve all history entries within the time range.',
         },
         startTime: {
           type: 'string',
+          maxLength: 128,
           description:
             'Start time as a date string. Supports ISO format (e.g., "2023-10-01", "2023-10-01T14:30:00"), relative times (e.g., "1 day ago", "2 weeks ago", "3 months ago", "1 year ago"), and special keywords ("now", "today", "yesterday"). Default: 24 hours ago',
         },
         endTime: {
           type: 'string',
+          maxLength: 128,
           description:
             'End time as a date string. Supports ISO format (e.g., "2023-10-31", "2023-10-31T14:30:00"), relative times (e.g., "1 day ago", "2 weeks ago", "3 months ago", "1 year ago"), and special keywords ("now", "today", "yesterday"). Default: current time',
         },
         maxResults: {
           type: 'number',
+          minimum: 1,
+          maximum: 500,
           description:
             'Maximum number of history entries to return. Use this to limit results for performance or to focus on the most relevant entries. (default: 100)',
         },

@@ -3,6 +3,12 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { hasDisallowedPublicUrlScheme } from './common';
 import {
+  measureJsonBytes,
+  measureUtf8Bytes,
+  normalizeBoundedInteger,
+  truncateJsonString,
+} from './bounded-tool-output';
+import {
   parseISO,
   subDays,
   subWeeks,
@@ -41,7 +47,19 @@ interface HistoryResult {
     endTimeFormatted: string;
   };
   query?: string;
+  truncated?: true;
 }
+
+export const HISTORY_MAX_RESULTS = 500;
+export const HISTORY_MAX_QUERY_UTF8_BYTES = 4 * 1024;
+export const HISTORY_MAX_TIME_INPUT_UTF8_BYTES = 128;
+export const HISTORY_MAX_OUTPUT_UTF8_BYTES = 1024 * 1024;
+const HISTORY_MAX_ID_JSON_BYTES = 512;
+const HISTORY_MAX_URL_JSON_BYTES = 8 * 1024;
+const HISTORY_MAX_TITLE_JSON_BYTES = 4 * 1024;
+const HISTORY_MAX_OPEN_TABS_SCAN = 2_000;
+const HISTORY_OUTPUT_ENVELOPE_RESERVE_BYTES = 4 * 1024;
+const HISTORY_MAX_RELATIVE_AMOUNT = 10_000;
 
 function isPublicHistoryUrl(url?: string | null): url is string {
   return typeof url === 'string' && url.trim().length > 0 && !hasDisallowedPublicUrlScheme(url);
@@ -78,6 +96,9 @@ class HistoryTool extends BaseBrowserToolExecutor {
     );
     if (relativeMatch) {
       const amount = parseInt(relativeMatch[1], 10);
+      if (!Number.isSafeInteger(amount) || amount > HISTORY_MAX_RELATIVE_AMOUNT) {
+        return null;
+      }
       const unit = relativeMatch[2];
       let resultDate: Date;
       if (unit.startsWith('day')) resultDate = subDays(now, amount);
@@ -85,7 +106,7 @@ class HistoryTool extends BaseBrowserToolExecutor {
       else if (unit.startsWith('month')) resultDate = subMonths(now, amount);
       else if (unit.startsWith('year')) resultDate = subYears(now, amount);
       else return null; // Should not happen with the regex
-      return resultDate.getTime();
+      return isValid(resultDate) ? resultDate.getTime() : null;
     }
 
     // Try parsing as ISO or other common date string formats
@@ -117,12 +138,38 @@ class HistoryTool extends BaseBrowserToolExecutor {
 
   async execute(args: HistoryToolParams): Promise<ToolResult> {
     try {
+      const text = typeof args.text === 'string' ? args.text : '';
+      if (
+        measureUtf8Bytes(text, HISTORY_MAX_QUERY_UTF8_BYTES) >
+        HISTORY_MAX_QUERY_UTF8_BYTES
+      ) {
+        return createErrorResponse(
+          `History query exceeds the ${HISTORY_MAX_QUERY_UTF8_BYTES}-byte limit.`,
+        );
+      }
+      for (const [field, value] of [
+        ['startTime', args.startTime],
+        ['endTime', args.endTime],
+      ] as const) {
+        if (
+          value !== undefined &&
+          (typeof value !== 'string' ||
+            measureUtf8Bytes(value, HISTORY_MAX_TIME_INPUT_UTF8_BYTES) >
+              HISTORY_MAX_TIME_INPUT_UTF8_BYTES)
+        ) {
+          return createErrorResponse(
+            `${field} must be a string no larger than ${HISTORY_MAX_TIME_INPUT_UTF8_BYTES} UTF-8 bytes.`,
+          );
+        }
+      }
 
-      const {
-        text = '',
-        maxResults = 100, // Default to 100 results
-        excludeCurrentTabs = false,
-      } = args;
+      const maxResults = normalizeBoundedInteger(
+        args.maxResults,
+        100,
+        1,
+        HISTORY_MAX_RESULTS,
+      );
+      const excludeCurrentTabs = args.excludeCurrentTabs === true;
 
       const now = Date.now();
       let startTimeMs: number;
@@ -133,7 +180,7 @@ class HistoryTool extends BaseBrowserToolExecutor {
         const parsedStart = this.parseDateString(args.startTime);
         if (parsedStart === null) {
           return createErrorResponse(
-            `Invalid format for start time: "${args.startTime}". Supported formats: ISO (YYYY-MM-DD), "today", "yesterday", "X days/weeks/months/years ago".`,
+            'Invalid start time. Supported formats: ISO (YYYY-MM-DD), "today", "yesterday", "X days/weeks/months/years ago".',
           );
         }
         startTimeMs = parsedStart;
@@ -147,7 +194,7 @@ class HistoryTool extends BaseBrowserToolExecutor {
         const parsedEnd = this.parseDateString(args.endTime);
         if (parsedEnd === null) {
           return createErrorResponse(
-            `Invalid format for end time: "${args.endTime}". Supported formats: ISO (YYYY-MM-DD), "today", "yesterday", "X days/weeks/months/years ago".`,
+            'Invalid end time. Supported formats: ISO (YYYY-MM-DD), "today", "yesterday", "X days/weeks/months/years ago".',
           );
         }
         endTimeMs = parsedEnd;
@@ -174,36 +221,58 @@ class HistoryTool extends BaseBrowserToolExecutor {
 
       console.log(`Found ${historyItems.length} history items before filtering current tabs.`);
 
-      let filteredItems = historyItems.filter((item) => isPublicHistoryUrl(item.url));
+      const openUrls = new Set<string>();
       if (excludeCurrentTabs && historyItems.length > 0) {
         const currentTabs = await chrome.tabs.query({});
-        const openUrls = new Set<string>();
-
-        currentTabs.forEach((tab) => {
+        const tabScanLimit = Math.min(currentTabs.length, HISTORY_MAX_OPEN_TABS_SCAN);
+        for (let index = 0; index < tabScanLimit; index += 1) {
+          const tab = currentTabs[index];
           const { url } = tab;
           if (isPublicHistoryUrl(url)) {
             openUrls.add(url);
           }
-        });
-
-        if (openUrls.size > 0) {
-          filteredItems = filteredItems.filter((item) => !(item.url && openUrls.has(item.url)));
-          console.log(
-            `Filtered out ${historyItems.length - filteredItems.length} items that are currently open. ${filteredItems.length} items remaining.`,
-          );
         }
       }
 
+      const items: HistoryItem[] = [];
+      let itemBytes = 2;
+      let truncated = historyItems.length >= maxResults;
+      const scanLimit = Math.min(historyItems.length, maxResults);
+      for (let index = 0; index < scanLimit; index += 1) {
+        const item = historyItems[index];
+        if (!isPublicHistoryUrl(item.url) || openUrls.has(item.url)) continue;
+        const boundedItem: HistoryItem = {
+          id: truncateJsonString(item.id, HISTORY_MAX_ID_JSON_BYTES),
+          url: truncateJsonString(item.url, HISTORY_MAX_URL_JSON_BYTES),
+          title: truncateJsonString(item.title, HISTORY_MAX_TITLE_JSON_BYTES),
+          lastVisitTime:
+            typeof item.lastVisitTime === 'number' && Number.isFinite(item.lastVisitTime)
+              ? item.lastVisitTime
+              : undefined,
+          visitCount:
+            typeof item.visitCount === 'number' && Number.isFinite(item.visitCount)
+              ? item.visitCount
+              : undefined,
+          typedCount:
+            typeof item.typedCount === 'number' && Number.isFinite(item.typedCount)
+              ? item.typedCount
+              : undefined,
+        };
+        const nextBytes = measureJsonBytes(boundedItem) + (items.length > 0 ? 1 : 0);
+        if (
+          itemBytes + nextBytes >
+          HISTORY_MAX_OUTPUT_UTF8_BYTES - HISTORY_OUTPUT_ENVELOPE_RESERVE_BYTES
+        ) {
+          truncated = true;
+          break;
+        }
+        items.push(boundedItem);
+        itemBytes += nextBytes;
+      }
+
       const result: HistoryResult = {
-        items: filteredItems.map((item) => ({
-          id: item.id,
-          url: item.url,
-          title: item.title,
-          lastVisitTime: item.lastVisitTime,
-          visitCount: item.visitCount,
-          typedCount: item.typedCount,
-        })),
-        totalCount: filteredItems.length,
+        items,
+        totalCount: items.length,
         timeRange: {
           startTime: startTimeMs,
           endTime: endTimeMs,
@@ -213,14 +282,27 @@ class HistoryTool extends BaseBrowserToolExecutor {
       };
 
       if (text) {
-        result.query = text;
+        result.query = truncateJsonString(text, HISTORY_MAX_QUERY_UTF8_BYTES);
+      }
+      if (truncated) result.truncated = true;
+
+      let serialized = JSON.stringify(result);
+      while (
+        measureUtf8Bytes(serialized, HISTORY_MAX_OUTPUT_UTF8_BYTES) >
+          HISTORY_MAX_OUTPUT_UTF8_BYTES &&
+        result.items.length > 0
+      ) {
+        result.items.pop();
+        result.totalCount = result.items.length;
+        result.truncated = true;
+        serialized = JSON.stringify(result);
       }
 
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(result, null, 2),
+            text: serialized,
           },
         ],
         isError: false,

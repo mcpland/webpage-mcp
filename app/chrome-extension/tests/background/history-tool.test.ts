@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { historyTool } from '@/entrypoints/background/tools/browser/history';
+import {
+  HISTORY_MAX_OUTPUT_UTF8_BYTES,
+  HISTORY_MAX_QUERY_UTF8_BYTES,
+  HISTORY_MAX_RESULTS,
+  HISTORY_MAX_TIME_INPUT_UTF8_BYTES,
+  historyTool,
+} from '@/entrypoints/background/tools/browser/history';
+import { measureUtf8Bytes } from '@/entrypoints/background/tools/browser/bounded-tool-output';
 
 describe('historyTool', () => {
   beforeEach(() => {
@@ -86,5 +93,44 @@ describe('historyTool', () => {
         title: 'Docs',
       },
     ]);
+  });
+
+  it('clamps result count and bounds browser-controlled output bytes', async () => {
+    const search = chrome.history.search as ReturnType<typeof vi.fn>;
+    const huge = 'x'.repeat(20_000);
+    search.mockResolvedValue(
+      Array.from({ length: HISTORY_MAX_RESULTS + 100 }, (_, index) => ({
+        id: `${index}-${huge}`,
+        url: `https://example.com/${index}/${huge}`,
+        title: huge,
+      })),
+    );
+
+    const result = await historyTool.execute({ maxResults: Number.MAX_SAFE_INTEGER });
+    const text = String((result.content[0] as { text?: string })?.text || '');
+    const payload = JSON.parse(text);
+
+    expect(result.isError).toBe(false);
+    expect(search).toHaveBeenCalledWith(
+      expect.objectContaining({ maxResults: HISTORY_MAX_RESULTS }),
+    );
+    expect(payload.items.length).toBeLessThanOrEqual(HISTORY_MAX_RESULTS);
+    expect(payload.truncated).toBe(true);
+    expect(measureUtf8Bytes(text)).toBeLessThanOrEqual(HISTORY_MAX_OUTPUT_UTF8_BYTES);
+  });
+
+  it('rejects oversized query and time strings before calling Chrome', async () => {
+    const search = chrome.history.search as ReturnType<typeof vi.fn>;
+
+    const queryResult = await historyTool.execute({
+      text: 'q'.repeat(HISTORY_MAX_QUERY_UTF8_BYTES + 1),
+    });
+    const timeResult = await historyTool.execute({
+      startTime: '2'.repeat(HISTORY_MAX_TIME_INPUT_UTF8_BYTES + 1),
+    });
+
+    expect(queryResult.isError).toBe(true);
+    expect(timeResult.isError).toBe(true);
+    expect(search).not.toHaveBeenCalled();
   });
 });
