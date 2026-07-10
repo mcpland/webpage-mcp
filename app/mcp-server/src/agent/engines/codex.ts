@@ -78,10 +78,32 @@ function escapePromptXmlText(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function replaceInvalidXmlControls(value: string): string {
+  let sanitized = '';
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    const isInvalid =
+      codePoint <= 0x08 ||
+      codePoint === 0x0b ||
+      codePoint === 0x0c ||
+      (codePoint >= 0x0e && codePoint <= 0x1f) ||
+      (codePoint >= 0x7f && codePoint <= 0x9f);
+    sanitized += isInvalid ? '\uFFFD' : character;
+  }
+  return sanitized;
+}
+
 function sanitizePromptXmlText(value: string): string {
-  return value
-    .replace(/\r\n?/g, '\n')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '\uFFFD');
+  return replaceInvalidXmlControls(value.replace(/\r\n?/g, '\n'));
+}
+
+function sanitizeProjectContextName(value: string): string {
+  let sanitized = '';
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    sanitized += codePoint <= 0x1f || codePoint === 0x7f ? '\uFFFD' : character;
+  }
+  return sanitized;
 }
 
 function assertCodexAutoInstructionsLimit(autoInstructions: string): void {
@@ -185,10 +207,7 @@ export async function buildCodexProjectContext(
 
     // Control and XML structure characters in a filename must not be able to
     // create prompt instructions. Apply the byte limit to the escaped form.
-    const sanitizedName = entry.name.replace(
-      /[\u0000-\u001f\u007f]/g,
-      '\uFFFD',
-    );
+    const sanitizedName = sanitizeProjectContextName(entry.name);
     const escapedName = escapePromptXmlText(sanitizedName);
     const boundedName = boundProjectEntryName(escapedName);
     visibleNames.push(boundedName.text);
