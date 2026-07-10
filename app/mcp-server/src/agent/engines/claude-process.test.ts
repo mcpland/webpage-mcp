@@ -23,7 +23,7 @@ class FakeClaudeChildProcess extends EventEmitter {
 
 function createSpawnOptions(signal = new AbortController().signal) {
   return {
-    command: '/usr/local/bin/node',
+    command: process.execPath,
     args: ['/sdk/cli.js', '--output-format', 'stream-json'],
     cwd: '/workspace/project',
     env: { PATH: '/usr/local/bin' },
@@ -60,7 +60,7 @@ describe('Claude process supervision', () => {
     });
 
     expect(spawnProcess).toHaveBeenCalledWith(
-      '/usr/local/bin/node',
+      process.execPath,
       ['/sdk/cli.js', '--output-format', 'stream-json'],
       expect.objectContaining({
         cwd: '/workspace/project',

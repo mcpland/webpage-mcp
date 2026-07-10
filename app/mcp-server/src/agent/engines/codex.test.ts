@@ -8,9 +8,15 @@ import {
   type CodexEngineConfig,
 } from 'webpage-mcp-shared';
 
-const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
+const { resolveTrustedExecutableMock, spawnMock } = vi.hoisted(() => ({
+  resolveTrustedExecutableMock: vi.fn(() => '/trusted/bin/codex'),
+  spawnMock: vi.fn(),
+}));
 
 vi.mock('cross-spawn', () => ({ default: spawnMock }));
+vi.mock('./trusted-executable', () => ({
+  resolveTrustedExecutable: resolveTrustedExecutableMock,
+}));
 
 import {
   CODEX_AUTO_INSTRUCTIONS_MAX_BYTES,
@@ -111,8 +117,17 @@ afterEach(() => {
 });
 
 describe('buildCodexSpawnSpec', () => {
-  it('uses cross-spawn without a shell so Windows cmd shims are escaped safely', () => {
-    expect(buildCodexSpawnSpec()).toEqual({ command: 'codex', shell: false });
+  it('resolves an absolute executable before entering the project cwd', () => {
+    const env = { PATH: '/trusted/bin' };
+
+    expect(buildCodexSpawnSpec('/untrusted/project', env)).toEqual({
+      command: '/trusted/bin/codex',
+      shell: false,
+    });
+    expect(resolveTrustedExecutableMock).toHaveBeenCalledWith('codex', {
+      env,
+      untrustedCwd: '/untrusted/project',
+    });
   });
 });
 

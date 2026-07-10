@@ -43,6 +43,7 @@ import {
   removePrivateTempAttachment,
   writePrivateTempAttachment,
 } from './private-temp-attachment';
+import { resolveTrustedExecutable } from './trusted-executable';
 
 /** Resource budgets for the optional top-level project directory summary. */
 export const CODEX_PROJECT_CONTEXT_MAX_ENTRIES = 1_000;
@@ -360,10 +361,15 @@ export function buildCodexSandboxArgs(
   return ['--sandbox', config.sandboxMode, '--ask-for-approval', 'never'];
 }
 
-export function buildCodexSpawnSpec(): { command: string; shell: false } {
+export function buildCodexSpawnSpec(
+  repoPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { command: string; shell: false } {
   return {
-    // cross-spawn resolves npm's codex.cmd shim on Windows.
-    command: 'codex',
+    command: resolveTrustedExecutable('codex', {
+      env,
+      untrustedCwd: repoPath,
+    }),
     // Keep user-controlled prompt text out of cmd.exe command parsing.
     shell: false,
   };
@@ -480,7 +486,8 @@ export class CodexEngine implements AgentEngine {
       projectContext,
     );
 
-    const spawnSpec = buildCodexSpawnSpec();
+    const codexEnv = this.buildCodexEnv();
+    const spawnSpec = buildCodexSpawnSpec(repoPath, codexEnv);
     const args: string[] = [
       'exec',
       '--json',
@@ -565,7 +572,7 @@ export class CodexEngine implements AgentEngine {
     return new Promise<void>((resolve, reject) => {
       const child = spawn(spawnSpec.command, args, {
         cwd: repoPath,
-        env: this.buildCodexEnv(),
+        env: codexEnv,
         shell: spawnSpec.shell,
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: shouldDetachChildProcess(),

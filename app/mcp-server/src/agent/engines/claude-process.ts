@@ -12,6 +12,7 @@ import {
   shouldDetachChildProcess,
 } from './child-process-lifecycle';
 import { boundStreamText } from './stream-output';
+import { resolveTrustedExecutable } from './trusted-executable';
 
 /** Keep a single SDK stderr callback from retaining or logging an arbitrary payload. */
 export const CLAUDE_STDERR_CHUNK_MAX_BYTES = 16 * 1024;
@@ -84,7 +85,12 @@ export function spawnSupervisedClaudeCodeProcess(
 ): SupervisedClaudeCodeProcess {
   const platform = supervisorOptions.platform ?? process.platform;
   const spawnProcess = supervisorOptions.spawnProcess ?? spawn;
-  const child = spawnProcess(spawnOptions.command, [...spawnOptions.args], {
+  const executable = resolveTrustedExecutable(spawnOptions.command, {
+    env: spawnOptions.env,
+    platform,
+    untrustedCwd: spawnOptions.cwd,
+  });
+  const child = spawnProcess(executable, [...spawnOptions.args], {
     cwd: spawnOptions.cwd,
     env: spawnOptions.env,
     shell: false,
