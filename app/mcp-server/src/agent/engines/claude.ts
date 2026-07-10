@@ -27,6 +27,7 @@ import {
   boundStreamText,
   createBoundedAgentMessage,
   type AssistantStreamSnapshot,
+  type BoundedTextSnapshot,
 } from './stream-output';
 import {
   CLAUDE_EVENT_ERROR_MAX_BYTES,
@@ -66,6 +67,52 @@ export function describeClaudeAuthTokenConfiguration(
 export function resolveClaudeSettingSources(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.includes('user') ? ['user'] : [];
+}
+
+const CLAUDE_TOOL_LOG_NAME_MAX_BYTES = 256;
+
+export interface ParsedClaudeToolInput {
+  input: Record<string, unknown>;
+  logMessage: string;
+}
+
+/** Parse streamed tool input while keeping its persisted diagnostic log metadata-only. */
+export function parseClaudeToolInputForEvent(
+  toolName: unknown,
+  snapshot: BoundedTextSnapshot,
+): ParsedClaudeToolInput {
+  let input: Record<string, unknown> = {};
+  let parseStatus: 'empty' | 'invalid' | 'parsed' | 'skipped-truncated' = snapshot.truncated
+    ? 'skipped-truncated'
+    : 'empty';
+
+  if (snapshot.text && !snapshot.truncated) {
+    try {
+      input = JSON.parse(snapshot.text) as Record<string, unknown>;
+      parseStatus = 'parsed';
+    } catch {
+      // JSON parse errors can echo the input near the failure position. Do not log them.
+      parseStatus = 'invalid';
+    }
+  }
+
+  const originalBytes =
+    Number.isSafeInteger(snapshot.originalBytes) && snapshot.originalBytes >= 0
+      ? snapshot.originalBytes
+      : 0;
+  const retainedBytes =
+    Number.isSafeInteger(snapshot.retainedBytes) && snapshot.retainedBytes >= 0
+      ? snapshot.retainedBytes
+      : 0;
+  const boundedToolName = boundClaudeLogField(toolName, CLAUDE_TOOL_LOG_NAME_MAX_BYTES);
+
+  return {
+    input,
+    logMessage:
+      `[ClaudeEngine] content_block_stop - toolName: ${boundedToolName}, ` +
+      `inputBytes: ${originalBytes}, retainedBytes: ${retainedBytes}, ` +
+      `truncated: ${snapshot.truncated}, parseStatus: ${parseStatus}`,
+  };
 }
 
 // Images are provided to Claude Code via local file paths referenced in the prompt text.
@@ -814,23 +861,13 @@ export class ClaudeEngine implements AgentEngine {
                 const pending = pendingToolInputs.get(blockIndex)!;
                 pendingToolInputs.delete(blockIndex);
 
-                // Parse the accumulated JSON
                 const inputSnapshot = pending.inputJson.snapshot();
-                const fullJsonStr = inputSnapshot.text;
-                let input: Record<string, unknown> = {};
-                try {
-                  if (fullJsonStr && !inputSnapshot.truncated) {
-                    input = JSON.parse(fullJsonStr);
-                  }
-                } catch (e) {
-                  console.error(
-                    `[ClaudeEngine] Failed to parse tool input JSON: ${boundClaudeLogField(e)}`,
-                  );
-                }
-
-                console.error(
-                  `[ClaudeEngine] content_block_stop - toolName: ${pending.toolName}, input: ${JSON.stringify(input).slice(0, 500)}`,
+                const parsedToolInput = parseClaudeToolInputForEvent(
+                  pending.toolName,
+                  inputSnapshot,
                 );
+                const input = parsedToolInput.input;
+                console.error(parsedToolInput.logMessage);
 
                 // Build metadata with full input
                 const metadata = buildToolMetadata({
