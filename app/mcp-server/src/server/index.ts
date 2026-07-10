@@ -20,6 +20,7 @@ import {
   DEFAULT_MCP_INSTANCE_ID,
   type AgentRpcRequestPayload,
 } from 'webpage-mcp-shared';
+import { resolveInstanceId } from '../instance-id';
 
 interface ServerOptions {
   instanceId?: string;
@@ -42,7 +43,7 @@ export class Server {
   private agentChatService: AgentChatService;
 
   constructor(options: ServerOptions = {}) {
-    this.instanceId = options.instanceId?.trim() || DEFAULT_MCP_INSTANCE_ID;
+    this.instanceId = resolveInstanceId(options.instanceId);
     this.agentStreamManager = new AgentStreamManager();
     this.agentChatService = new AgentChatService({
       engines: [new CodexEngine(), new ClaudeEngine()],

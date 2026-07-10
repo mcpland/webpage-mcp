@@ -45,6 +45,7 @@ import {
   isNativeMessageEncodingError,
   NativeMessageWriter,
 } from './native-message-output';
+import { resolveInstanceId } from './instance-id';
 
 interface PendingRequest {
   resolve: (value: any) => void;
@@ -59,7 +60,6 @@ interface AgentStreamSubscription {
   dispose: () => void;
 }
 
-const INSTANCE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
 const IPC_MAX_REQUEST_LINE_BYTES = 1024 * 1024;
 const IPC_MAX_RESPONSE_LINE_BYTES = 16 * 1024 * 1024;
 const IPC_MAX_IN_FLIGHT_REQUESTS = 4;
@@ -68,22 +68,12 @@ const IPC_PAUSE_HIGH_WATERMARK = 8;
 const IPC_RESUME_LOW_WATERMARK = 4;
 const NATIVE_MAX_PENDING_DIRECTIVES = 64;
 
-function normalizeInstanceId(raw: unknown): string {
-  if (typeof raw === 'string') {
-    const trimmed = raw.trim();
-    if (trimmed && INSTANCE_ID_REGEX.test(trimmed)) {
-      return trimmed;
-    }
-  }
-  return DEFAULT_MCP_INSTANCE_ID;
-}
-
 function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
   if (!raw || typeof raw !== 'object') {
     return null;
   }
   const obj = raw as Record<string, unknown>;
-  const instanceId = normalizeInstanceId(obj.instanceId);
+  const instanceId = resolveInstanceId(obj.instanceId);
 
   return {
     instanceId,
@@ -129,7 +119,7 @@ export class NativeMessagingHost {
   public constructor(private readonly messageWriter = new NativeMessageWriter(stdout)) {}
 
   public setServer(serverInstance: Server): void {
-    const instanceId = normalizeInstanceId(serverInstance.instanceId);
+    const instanceId = resolveInstanceId(serverInstance.instanceId);
     this.servers.set(instanceId, serverInstance);
     serverInstance.setNativeHost(this);
     this.instanceStatuses.set(instanceId, {
@@ -497,7 +487,7 @@ export class NativeMessagingHost {
   private async handleIpcRequest(request: any, signal?: AbortSignal): Promise<unknown> {
     const method = typeof request?.method === 'string' ? request.method : '';
     const params = request?.params && typeof request.params === 'object' ? request.params : {};
-    const instanceId = normalizeInstanceId((params as Record<string, unknown>).instanceId);
+    const instanceId = resolveInstanceId((params as Record<string, unknown>).instanceId);
     const sessionIdRaw = (params as Record<string, unknown>).sessionId;
     const sessionId =
       typeof sessionIdRaw === 'string' && sessionIdRaw.trim() ? sessionIdRaw.trim() : uuidv4();
@@ -593,7 +583,7 @@ export class NativeMessagingHost {
   }
 
   private getOrCreateServer(instanceId: string): Server {
-    const normalized = normalizeInstanceId(instanceId);
+    const normalized = resolveInstanceId(instanceId);
     let server = this.servers.get(normalized);
     if (server) {
       return server;
@@ -610,7 +600,7 @@ export class NativeMessagingHost {
   }
 
   private snapshotInstanceStatus(instanceId: string): McpServerInstanceStatus {
-    const normalized = normalizeInstanceId(instanceId);
+    const normalized = resolveInstanceId(instanceId);
     const server = this.servers.get(normalized);
     const status: McpServerInstanceStatus = {
       instanceId: normalized,
@@ -634,7 +624,7 @@ export class NativeMessagingHost {
   }
 
   private async startServer(instanceId: string): Promise<McpServerInstanceStatus> {
-    const normalized = normalizeInstanceId(instanceId);
+    const normalized = resolveInstanceId(instanceId);
     const server = this.getOrCreateServer(normalized);
 
     if (server.isRunning) {
@@ -663,7 +653,7 @@ export class NativeMessagingHost {
   }
 
   private async stopServer(instanceId: string): Promise<McpServerInstanceStatus> {
-    const normalized = normalizeInstanceId(instanceId);
+    const normalized = resolveInstanceId(instanceId);
     const server = this.servers.get(normalized);
 
     if (server?.isRunning) {
@@ -712,7 +702,7 @@ export class NativeMessagingHost {
     if (payload && typeof payload === 'object') {
       const obj = payload as Record<string, unknown>;
       return {
-        instanceId: normalizeInstanceId(obj.instanceId),
+        instanceId: resolveInstanceId(obj.instanceId),
       };
     }
 
@@ -725,7 +715,7 @@ export class NativeMessagingHost {
     if (payload && typeof payload === 'object') {
       const obj = payload as Record<string, unknown>;
       return {
-        instanceId: normalizeInstanceId(obj.instanceId),
+        instanceId: resolveInstanceId(obj.instanceId),
       };
     }
     return {
@@ -788,7 +778,7 @@ export class NativeMessagingHost {
   }
 
   private cleanupStreamSubscriptionsForInstance(instanceId: string): void {
-    const normalized = normalizeInstanceId(instanceId);
+    const normalized = resolveInstanceId(instanceId);
     for (const [subscriptionId, item] of this.streamSubscriptions.entries()) {
       if (item.instanceId !== normalized) {
         continue;
@@ -807,7 +797,7 @@ export class NativeMessagingHost {
     request: AgentRpcRequestPayload;
   } {
     const raw = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
-    const explicitInstanceId = normalizeInstanceId(raw.instanceId);
+    const explicitInstanceId = resolveInstanceId(raw.instanceId);
 
     if (!isAgentRpcRequestPayload(raw)) {
       throw new Error('agent_rpc payload must include operation');
@@ -870,7 +860,7 @@ export class NativeMessagingHost {
       message?.payload && typeof message.payload === 'object'
         ? (message.payload as Record<string, unknown>)
         : {};
-    const instanceId = normalizeInstanceId(payload.instanceId);
+    const instanceId = resolveInstanceId(payload.instanceId);
     const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
     if (!sessionId) {
       this.sendRequestResponse(requestId, undefined, 'sessionId is required');
