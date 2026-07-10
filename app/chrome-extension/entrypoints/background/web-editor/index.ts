@@ -1,4 +1,5 @@
 import { BACKGROUND_MESSAGE_TYPES, PRIVILEGED_UI_ACTIONS } from '@/common/message-types';
+import { isExtensionPageSender } from '@/common/runtime-sender-auth';
 import {
   WEB_EDITOR_ACTIONS,
   type ElementChangeSummary,
@@ -29,6 +30,37 @@ import {
 
 const CONTEXT_MENU_ID = 'web_editor_toggle';
 const COMMAND_KEY = 'toggle_web_editor';
+
+const WEB_EDITOR_CONTENT_MESSAGE_TYPES = new Set<string>([
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
+]);
+
+const WEB_EDITOR_EXTENSION_PAGE_MESSAGE_TYPES = new Set<string>([
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TOGGLE,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CLEAR_SELECTION,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_HIGHLIGHT_ELEMENT,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_REVERT_ELEMENT,
+]);
+
+function isWebEditorContentSender(sender: chrome.runtime.MessageSender): boolean {
+  return (
+    sender.id === chrome.runtime.id &&
+    typeof sender.tab?.id === 'number' &&
+    sender.frameId === 0
+  );
+}
+
+function isBackgroundRebroadcast(sender: chrome.runtime.MessageSender): boolean {
+  return (
+    sender.id === chrome.runtime.id &&
+    sender.tab === undefined &&
+    sender.url === undefined &&
+    sender.origin === undefined
+  );
+}
 
 /** Storage key prefix for TX change session data (per-tab isolation) */
 const WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX = 'web-editor-tx-changed-';
@@ -917,6 +949,29 @@ export function initWebEditorListeners(): void {
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
+      const messageType = typeof message?.type === 'string' ? message.type : '';
+      if (WEB_EDITOR_CONTENT_MESSAGE_TYPES.has(messageType)) {
+        if (
+          isBackgroundRebroadcast(_sender) &&
+          (messageType === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED ||
+            messageType === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED)
+        ) {
+          return false;
+        }
+        if (!isWebEditorContentSender(_sender)) {
+          sendResponse({ success: false, error: 'Web Editor page message sender is not trusted' });
+          return false;
+        }
+      }
+
+      if (
+        WEB_EDITOR_EXTENSION_PAGE_MESSAGE_TYPES.has(messageType) &&
+        !isExtensionPageSender(_sender)
+      ) {
+        sendResponse({ success: false, error: 'Web Editor control requires an extension page' });
+        return false;
+      }
+
       // Phase 7.1.6: Handle early injection registration request
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION) {
         (async () => {
