@@ -216,6 +216,59 @@ describe('ChildProcessLifecycle', () => {
     await expect(lifecycle.completion).rejects.toThrow('cancelled');
   });
 
+  it('falls back to direct SIGKILL when taskkill hangs', async () => {
+    vi.useFakeTimers();
+    const child = new FakeChildProcess(9876);
+    const taskkill = new FakeTaskkillProcess();
+    const spawnCommand = vi.fn(() => taskkill);
+    const abortController = new AbortController();
+    const lifecycle = new ChildProcessLifecycle(child, {
+      signal: abortController.signal,
+      timeoutMs: 1_000,
+      terminationGraceMs: 100,
+      abortError: () => new Error('cancelled'),
+      timeoutError: () => new Error('timed out'),
+      platform: 'win32',
+      spawnCommand,
+    });
+
+    child.emit('spawn');
+    abortController.abort();
+    await vi.advanceTimersByTimeAsync(99);
+    expect(child.kill).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+
+    child.emit('close', null, 'SIGKILL');
+    await expect(lifecycle.completion).rejects.toThrow('cancelled');
+  });
+
+  it('cancels the Windows fallback after taskkill succeeds', async () => {
+    vi.useFakeTimers();
+    const child = new FakeChildProcess(9876);
+    const taskkill = new FakeTaskkillProcess();
+    const abortController = new AbortController();
+    const lifecycle = new ChildProcessLifecycle(child, {
+      signal: abortController.signal,
+      timeoutMs: 1_000,
+      terminationGraceMs: 100,
+      abortError: () => new Error('cancelled'),
+      timeoutError: () => new Error('timed out'),
+      platform: 'win32',
+      spawnCommand: vi.fn(() => taskkill),
+    });
+
+    child.emit('spawn');
+    abortController.abort();
+    taskkill.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(child.kill).not.toHaveBeenCalled();
+    child.emit('close', null, 'SIGKILL');
+    await expect(lifecycle.completion).rejects.toThrow('cancelled');
+  });
+
   it('settles an idempotent spawn failure without waiting for close', async () => {
     vi.useFakeTimers();
     const child = new FakeChildProcess(undefined);

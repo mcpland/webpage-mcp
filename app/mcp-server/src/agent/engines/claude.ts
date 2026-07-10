@@ -8,6 +8,12 @@ import { resolveClaudePermissionSettings } from '../session-security';
 import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
 import { createAgentEventDedupKey } from './event-dedupe';
 import {
+  linkAbortSignal,
+  resolveClaudeEngineTimeoutMs,
+  spawnSupervisedClaudeCodeProcess,
+  type SupervisedClaudeCodeProcess,
+} from './claude-process';
+import {
   BoundedAssistantStream,
   BoundedMap,
   BoundedSet,
@@ -395,6 +401,15 @@ export class ClaudeEngine implements AgentEngine {
 
     // State for temp file cleanup
     const tempFiles: string[] = [];
+    let supervisedProcess: SupervisedClaudeCodeProcess | null = null;
+    let processCompletionOutcome: Promise<{
+      exit?: unknown;
+      error?: Error;
+    }> | null = null;
+    let removeExternalAbortListener: (() => void) | null = null;
+    let caughtExecutionError = false;
+    let executionError: Error | null = null;
+    let supervisedCompletionError: Error | null = null;
     const cleanupTempFiles = async (): Promise<void> => {
       if (tempFiles.length === 0) return;
 
@@ -563,23 +578,21 @@ export class ClaudeEngine implements AgentEngine {
         return undefined;
       })();
 
-      // Create internal AbortController that mirrors the external signal
-      // SDK expects abortController option, not raw AbortSignal
+      // The SDK owns this controller. The custom process supervisor listens to
+      // the same signal, while the external listener is explicitly removed in
+      // finally so completed executions cannot retain request state.
       const internalAbortController = new AbortController();
-      if (signal) {
-        // Propagate external abort to internal controller
-        if (signal.aborted) {
-          internalAbortController.abort();
-        } else {
-          signal.addEventListener(
-            'abort',
-            () => {
-              internalAbortController.abort();
-            },
-            { once: true },
-          );
+      removeExternalAbortListener = linkAbortSignal(signal, internalAbortController);
+
+      const recordStderr = (data: string): void => {
+        const chunk = String(data).trimEnd();
+        if (!chunk) return;
+        if (stderrBuffer.length >= ClaudeEngine.MAX_STDERR_LINES) {
+          stderrBuffer.shift();
         }
-      }
+        stderrBuffer.push(chunk);
+        console.error(`[ClaudeEngine][stderr] ${chunk}`);
+      };
 
       const queryOptions: Record<string, unknown> = {
         cwd: repoPath,
@@ -599,14 +612,27 @@ export class ClaudeEngine implements AgentEngine {
         abortController: internalAbortController,
         // Pass merged env through to Claude SDK.
         env: claudeEnv,
-        stderr: (data: string) => {
-          const line = String(data).trimEnd();
-          if (!line) return;
-          if (stderrBuffer.length > ClaudeEngine.MAX_STDERR_LINES) {
-            stderrBuffer.shift();
+        stderr: recordStderr,
+        spawnClaudeCodeProcess: (
+          spawnOptions: Parameters<typeof spawnSupervisedClaudeCodeProcess>[0],
+        ) => {
+          if (supervisedProcess) {
+            throw new Error('ClaudeEngine: attempted to spawn Claude Code more than once');
           }
-          stderrBuffer.push(line);
-          console.error(`[ClaudeEngine][stderr] ${line}`);
+          supervisedProcess = spawnSupervisedClaudeCodeProcess(spawnOptions, {
+            timeoutMs: resolveClaudeEngineTimeoutMs(),
+            onStderr: recordStderr,
+            // Timeout and SDK-requested termination must also unblock SDK
+            // reads. Re-aborting is idempotent for external cancellation.
+            onTerminationRequested: () => internalAbortController.abort(),
+          });
+          processCompletionOutcome = supervisedProcess.completion.then(
+            (exit) => ({ exit }),
+            (error: unknown) => ({
+              error: error instanceof Error ? error : new Error(String(error)),
+            }),
+          );
+          return supervisedProcess.process;
         },
       };
 
@@ -1253,6 +1279,7 @@ export class ClaudeEngine implements AgentEngine {
 
       console.error('[ClaudeEngine] Query completed successfully');
     } catch (error) {
+      caughtExecutionError = true;
       const message = error instanceof Error ? error.message : String(error);
 
       // Log full stderr for debugging
@@ -1282,15 +1309,42 @@ export class ClaudeEngine implements AgentEngine {
 
       // Classify errors for better UX
       const errorMessage = this.classifyError(message, stderrBuffer);
-      throw new Error(`ClaudeEngine: ${errorMessage}`);
+      executionError = new Error(`ClaudeEngine: ${errorMessage}`);
     } finally {
+      removeExternalAbortListener?.();
+      removeExternalAbortListener = null;
+
+      // The adapter delays SDK `exit` until Node `close`, and the lifecycle
+      // promise independently observes that same close. Await both before
+      // releasing temporary inputs or settling ClaudeEngine.
+      const capturedCompletion = processCompletionOutcome as Promise<{
+        exit?: unknown;
+        error?: Error;
+      }> | null;
+      const processOutcome = capturedCompletion ? await capturedCompletion : undefined;
+
       // Preserve the last accumulated state on success, error, and abort, and
       // guarantee no coalescing timer survives the engine execution.
-      assistantStream.flushFinal();
-      assistantStream.cancel();
-      // Always cleanup temp files, even on error
-      await cleanupTempFiles();
+      try {
+        assistantStream.flushFinal();
+      } finally {
+        assistantStream.cancel();
+        // Always cleanup temp files, even if the final stream flush fails.
+        await cleanupTempFiles();
+      }
+
+      if (
+        processOutcome?.error &&
+        (!caughtExecutionError ||
+          processOutcome.error.message === 'ClaudeEngine: execution was cancelled' ||
+          processOutcome.error.message === 'ClaudeEngine: execution timed out')
+      ) {
+        supervisedCompletionError = processOutcome.error;
+      }
     }
+
+    if (supervisedCompletionError) throw supervisedCompletionError;
+    if (executionError) throw executionError;
   }
 
   /**

@@ -268,6 +268,10 @@ export class ChildProcessLifecycle {
     const fallback = (): void => {
       if (fallbackUsed || this.closed) return;
       fallbackUsed = true;
+      if (this.forceKillHandle) {
+        this.scheduler.clearTimeout(this.forceKillHandle);
+        this.forceKillHandle = null;
+      }
       this.killWindowsChildFallback();
     };
 
@@ -279,8 +283,20 @@ export class ChildProcessLifecycle {
       });
       taskkill.once('error', fallback);
       taskkill.once('close', (code) => {
-        if (code !== 0) fallback();
+        if (code !== 0) {
+          fallback();
+          return;
+        }
+        if (this.forceKillHandle) {
+          this.scheduler.clearTimeout(this.forceKillHandle);
+          this.forceKillHandle = null;
+        }
       });
+      // taskkill itself can hang (for example when Windows management
+      // services are unhealthy). Do not let that prevent the direct child
+      // from receiving a final, unhandleable signal.
+      this.forceKillHandle = this.scheduler.setTimeout(fallback, this.terminationGraceMs);
+      this.forceKillHandle.unref?.();
     } catch {
       fallback();
     }
