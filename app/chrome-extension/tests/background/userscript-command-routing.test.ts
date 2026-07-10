@@ -17,6 +17,7 @@ const TAB = {
 
 describe('userscript command routing', () => {
   let runtimeListeners: RuntimeListener[];
+  let installedListeners: Array<(details: chrome.runtime.InstalledDetails) => void>;
   let storage: Record<string, any>;
   let storageChangeListeners: Array<
     (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => void
@@ -73,6 +74,7 @@ describe('userscript command routing', () => {
   beforeEach(async () => {
     vi.resetModules();
     runtimeListeners = [];
+    installedListeners = [];
     storage = {};
     storageChangeListeners = [];
     registeredScripts = new Map();
@@ -84,6 +86,9 @@ describe('userscript command routing', () => {
           removeListener: vi.fn((listener: RuntimeListener) => {
             runtimeListeners = runtimeListeners.filter((candidate) => candidate !== listener);
           }),
+        },
+        onInstalled: {
+          addListener: vi.fn((listener) => installedListeners.push(listener)),
         },
       },
       storage: {
@@ -322,5 +327,21 @@ describe('userscript command routing', () => {
     expect(registeredScripts.has(id)).toBe(false);
     expect(chrome.userScripts.execute).not.toHaveBeenCalled();
     expect((await sendCommand(id, 'after-enable')).result.isError).toBe(true);
+  });
+
+  it('restores persistent registrations after an extension update clears them', async () => {
+    const id = await createScript(
+      'update-restore',
+      'ISOLATED',
+      `globalThis.__userscript_onCommand__ = () => 'restored';`,
+    );
+    expect(registeredScripts.has(id)).toBe(true);
+
+    registeredScripts.clear();
+    for (const listener of installedListeners) {
+      listener({ reason: 'update', previousVersion: '0.8.0' });
+    }
+
+    await vi.waitFor(() => expect(registeredScripts.has(id)).toBe(true));
   });
 });

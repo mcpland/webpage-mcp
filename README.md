@@ -147,7 +147,7 @@ A strong local setup is to use Chrome DevTools MCP as the debugging engine and W
 
 `webpage-mcp-stdio` now performs silent bootstrap on startup: it checks Native Messaging manifest/runtime and auto-registers user-level host when needed.
 
-The user-script manager requires Chrome 135 or newer. On Chrome 138 or newer, open the extension's Details page in `chrome://extensions` and enable **Allow User Scripts** before using that feature.
+The user-script manager requires Chrome 135 or newer. In Chrome 135–137, enable **Developer mode** on `chrome://extensions`; in Chrome 138 or newer, open the extension's Details page and enable **Allow User Scripts** before using that feature.
 
 **4.** If extension still cannot connect, use fallback recovery:
 

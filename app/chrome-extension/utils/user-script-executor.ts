@@ -29,7 +29,7 @@ function getUserScriptsApi(): UserScriptsApi {
   const api = (chrome as typeof chrome & { userScripts?: UserScriptsApi }).userScripts;
   if (!api || typeof api.execute !== 'function') {
     throw new Error(
-      'Chrome User Scripts API is unavailable. In Chrome 138+, open the extension details page and enable Allow User Scripts.',
+      'Chrome User Scripts API is unavailable. In Chrome 135–137 enable Developer mode; in Chrome 138+ enable Allow User Scripts on the extension details page.',
     );
   }
   return api;

@@ -546,6 +546,14 @@ async function synchronizeRegisteredUserScripts(): Promise<void> {
   }
 }
 
+let synchronizationQueue: Promise<void> = Promise.resolve();
+
+function queueRegisteredUserScriptSynchronization(): Promise<void> {
+  const next = synchronizationQueue.catch(() => undefined).then(synchronizeRegisteredUserScripts);
+  synchronizationQueue = next;
+  return next;
+}
+
 async function reinjectForTab(tabId: number, url?: string) {
   // Emergency global switch
   const flag = (await chrome.storage.local.get([STORAGE_KEYS.USERSCRIPTS_DISABLED]))[
@@ -625,7 +633,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.storage.onChanged?.addListener((changes, areaName) => {
   if (areaName !== 'local' || !(STORAGE_KEYS.USERSCRIPTS_DISABLED in changes)) return;
   void (async () => {
-    await synchronizeRegisteredUserScripts();
+    await queueRegisteredUserScriptSynchronization();
     const records = await loadAllRecords();
     const disabled = Boolean(changes[STORAGE_KEYS.USERSCRIPTS_DISABLED]?.newValue);
     if (disabled) {
@@ -641,10 +649,17 @@ chrome.storage.onChanged?.addListener((changes, areaName) => {
 });
 
 if ((chrome as typeof chrome & { userScripts?: unknown }).userScripts) {
-  void synchronizeRegisteredUserScripts().catch((error) =>
+  void queueRegisteredUserScriptSynchronization().catch((error) =>
     console.warn('Failed to synchronize registered user scripts:', error),
   );
 }
+
+chrome.runtime.onInstalled?.addListener((details) => {
+  if (details.reason !== 'update') return;
+  void queueRegisteredUserScriptSynchronization().catch((error) =>
+    console.warn('Failed to restore registered user scripts after update:', error),
+  );
+});
 
 class UserscriptTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.USERSCRIPT;
@@ -668,6 +683,7 @@ class UserscriptTool extends BaseBrowserToolExecutor {
 
   async execute(params: UserscriptArgsBase): Promise<ToolResult> {
     try {
+      await synchronizationQueue.catch(() => undefined);
       const { action } = params;
       const args = params.args || {};
 

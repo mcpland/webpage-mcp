@@ -106,7 +106,7 @@ describe('user script executor', () => {
     vi.stubGlobal('chrome', {});
 
     await expect(executeUserScript({ tabId: 7, code: '1' })).rejects.toThrow(
-      'enable Allow User Scripts',
+      'enable Developer mode',
     );
   });
 });
