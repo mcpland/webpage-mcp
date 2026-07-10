@@ -125,6 +125,9 @@ function createInMemoryRunsStore(): { store: RunsStore; byId: Map<RunId, RunReco
         updatedAt: Date.now(),
       });
     },
+    delete: async (id) => {
+      byId.delete(id);
+    },
   };
   return { store, byId };
 }

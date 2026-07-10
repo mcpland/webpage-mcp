@@ -150,6 +150,9 @@ describe('V3 TriggerManager', () => {
           const existing = runsMap.get(id);
           if (existing) runsMap.set(id, { ...existing, ...patch });
         }),
+        delete: vi.fn(async (id: string) => {
+          runsMap.delete(id);
+        }),
       },
       queue: {
         enqueue: vi.fn(async (input) => {

@@ -8,6 +8,7 @@ import type { FlowV3 } from "../../domain/flow";
 import type { FlowListOptions } from "../../domain/flow-limits";
 import type { RunEvent, RunEventInput, RunRecordV3 } from "../../domain/events";
 import type { EventListOptions } from "../../domain/event-limits";
+import type { RunListOptions } from "../../domain/run-limits";
 import type {
   PersistentVarRecord,
   PersistentVariableName,
@@ -34,14 +35,16 @@ export interface FlowsStore {
  * RunsStore interface
  */
 export interface RunsStore {
-  /** List all Run records */
-  list(): Promise<RunRecordV3[]>;
+  /** List run records in bounded newest-first pages. */
+  list(options?: RunListOptions): Promise<RunRecordV3[]>;
   /** Get a single Run record */
   get(id: RunId): Promise<RunRecordV3 | null>;
   /** Save run record */
   save(record: RunRecordV3): Promise<void>;
   /** Partially updated Run record */
   patch(id: RunId, patch: Partial<RunRecordV3>): Promise<void>;
+  /** Delete a run and its queue, event, and artifact records. */
+  delete(id: RunId): Promise<void>;
 }
 
 /**

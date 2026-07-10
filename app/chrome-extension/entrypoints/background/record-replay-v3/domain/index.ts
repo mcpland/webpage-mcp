@@ -26,6 +26,7 @@ export * from "./flow-limits";
 // event type
 export * from "./events";
 export * from "./event-limits";
+export * from "./run-limits";
 
 // Debugger type
 export * from "./debug";
