@@ -135,4 +135,25 @@ describe('networkCaptureTool', () => {
     expect(payload.commonRequestHeaders).toEqual({});
     expect(payload.commonResponseHeaders).toEqual({});
   });
+
+  it('normalizes non-positive lifecycle values before delegating capture', async () => {
+    const { networkCaptureTool } = await loadNetworkCaptureTool();
+    mocks.webRequestStartExecute.mockResolvedValue({
+      content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
+      isError: false,
+    });
+
+    await networkCaptureTool.execute({
+      action: 'start',
+      maxCaptureTime: 0,
+      inactivityTimeout: -1,
+    });
+
+    expect(mocks.webRequestStartExecute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxCaptureTime: 3 * 60 * 1_000,
+        inactivityTimeout: 60 * 1_000,
+      }),
+    );
+  });
 });

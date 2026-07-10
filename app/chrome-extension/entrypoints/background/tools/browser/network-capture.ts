@@ -3,6 +3,11 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { networkCaptureStartTool, networkCaptureStopTool } from './network-capture-web-request';
 import { networkDebuggerStartTool, networkDebuggerStopTool } from './network-capture-debugger';
+import {
+  NETWORK_CAPTURE_LIMITS,
+  normalizeCaptureTimings,
+  utf8ByteLength,
+} from './network-capture-limits';
 
 type NetworkCaptureBackend = 'webRequest' | 'debugger';
 
@@ -127,6 +132,9 @@ function sanitizePublicCaptureResult(result: ToolResult): ToolResult {
  * Check if debugger-based capture is active
  */
 function isDebuggerCaptureActive(): boolean {
+  if (typeof (networkDebuggerStartTool as any).hasAvailableCapture === 'function') {
+    return (networkDebuggerStartTool as any).hasAvailableCapture();
+  }
   const captureData = (
     networkDebuggerStartTool as unknown as { captureData?: Map<number, unknown> }
   ).captureData;
@@ -137,7 +145,9 @@ function isDebuggerCaptureActive(): boolean {
  * Check if webRequest-based capture is active
  */
 function isWebRequestCaptureActive(): boolean {
-  return networkCaptureStartTool.captureData.size > 0;
+  return typeof (networkCaptureStartTool as any).hasAvailableCapture === 'function'
+    ? (networkCaptureStartTool as any).hasAvailableCapture()
+    : networkCaptureStartTool.captureData.size > 0;
 }
 
 /**
@@ -185,6 +195,12 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
     if (typeof args.url === 'string' && hasDisallowedPublicPageScheme(args.url)) {
       return createErrorResponse(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);
     }
+    if (
+      typeof args.url === 'string' &&
+      utf8ByteLength(args.url) > NETWORK_CAPTURE_LIMITS.maxUrlBytes
+    ) {
+      return createErrorResponse('Network capture URL is too long.');
+    }
 
     const explicitTab = await this.tryGetTab(args.tabId);
     const targetTab = explicitTab || (await this.getActiveTabInWindow(args.windowId));
@@ -194,11 +210,12 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
 
     const delegate = wantBody ? networkDebuggerStartTool : networkCaptureStartTool;
     const backend: NetworkCaptureBackend = wantBody ? 'debugger' : 'webRequest';
+    const timings = normalizeCaptureTimings(args);
 
     const result = await delegate.execute({
       url: args.url,
-      maxCaptureTime: args.maxCaptureTime,
-      inactivityTimeout: args.inactivityTimeout,
+      maxCaptureTime: timings.maxCaptureTime,
+      inactivityTimeout: timings.inactivityTimeout,
       includeStatic: args.includeStatic,
       tabId: args.tabId,
       windowId: args.windowId,
