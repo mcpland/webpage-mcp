@@ -23,6 +23,7 @@ import {
 } from '@/entrypoints/background/tools/browser/gif-auto-capture';
 import { getGifCaptureOwner } from '@/entrypoints/background/tools/browser/gif-capture-owner';
 import { OFFSCREEN_MESSAGE_TYPES } from '@/common/message-types';
+import { GIF_TRANSPORT_LIMITS } from '@/common/gif-transport';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 function makeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
@@ -75,6 +76,17 @@ describe('gifRecorderTool', () => {
             })),
           };
         }
+
+        async convertToBlob() {
+          const bytes = new Uint8Array([137, 80, 78, 71]);
+          const blob = new Blob([bytes], {
+            type: 'image/png',
+          });
+          Object.defineProperty(blob, 'arrayBuffer', {
+            value: async () => bytes.buffer.slice(0),
+          });
+          return blob;
+        }
       },
     );
 
@@ -98,7 +110,12 @@ describe('gifRecorderTool', () => {
           case OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME:
             return { success: true };
           case OFFSCREEN_MESSAGE_TYPES.GIF_FINISH:
-            return { success: true, gifData: [1, 2, 3], byteLength: 3 };
+            return {
+              success: true,
+              protocolVersion: 2,
+              gifBase64: 'AQID',
+              byteLength: 3,
+            };
           default:
             return { success: true };
         }
@@ -204,6 +221,64 @@ describe('gifRecorderTool', () => {
       'auto-capture GIF capture is already active on tab 7',
     );
     expect(getGifCaptureOwner()).toEqual({ mode: 'auto_capture', tabId: 7 });
+  });
+
+  it('sends fixed-FPS frames as bounded protocol-v2 base64 instead of number arrays', async () => {
+    mockTabResolution();
+
+    const result = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      width: 10,
+      height: 10,
+    });
+
+    expect(result.isError).toBe(false);
+    const addFrameMessage = (
+      chrome.runtime.sendMessage as ReturnType<typeof vi.fn>
+    ).mock.calls
+      .map(([message]) => message)
+      .find(
+        (message) => message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
+      );
+    expect(addFrameMessage).toMatchObject({
+      protocolVersion: 2,
+      frameEncoding: 'png',
+      frameBase64: expect.any(String),
+      frameByteLength: 4,
+      width: 10,
+      height: 10,
+    });
+    expect(addFrameMessage).not.toHaveProperty('imageData');
+  });
+
+  it('sends auto-capture frames as bounded protocol-v2 base64 instead of number arrays', async () => {
+    mockTabResolution();
+
+    const result = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 7,
+      width: 10,
+      height: 10,
+    });
+
+    expect(result.isError).toBe(false);
+    const addFrameMessage = (
+      chrome.runtime.sendMessage as ReturnType<typeof vi.fn>
+    ).mock.calls
+      .map(([message]) => message)
+      .find(
+        (message) => message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME,
+      );
+    expect(addFrameMessage).toMatchObject({
+      protocolVersion: 2,
+      frameEncoding: 'png',
+      frameBase64: expect.any(String),
+      frameByteLength: 4,
+      width: 10,
+      height: 10,
+    });
+    expect(addFrameMessage).not.toHaveProperty('imageData');
   });
 
   it('rolls back the owner when startup fails so another mode can start', async () => {
@@ -329,6 +404,121 @@ describe('gifRecorderTool', () => {
 
     expect(getGifCaptureOwner()).toBeNull();
     expect(cdpSessionManager.detach).toHaveBeenCalledWith(7, 'gif-recorder');
+  });
+
+  it('accepts a legacy gifData finish response in fixed-FPS mode', async () => {
+    mockTabResolution();
+    (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (message) =>
+        message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_FINISH
+          ? { success: true, gifData: [1, 2, 3], byteLength: 3 }
+          : { success: true },
+    );
+
+    const start = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      width: 10,
+      height: 10,
+    });
+    const stop = await gifRecorderTool.execute({ action: 'stop' });
+
+    expect(start.isError).toBe(false);
+    expect(stop.isError).toBe(false);
+    expect(responsePayload(stop as any).byteLength).toBe(3);
+  });
+
+  it('accepts a legacy gifData finish response in auto-capture mode', async () => {
+    mockTabResolution();
+    (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (message) =>
+        message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_FINISH
+          ? { success: true, gifData: [1, 2, 3], byteLength: 3 }
+          : { success: true },
+    );
+
+    const start = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 7,
+      maxFrames: 1,
+      width: 10,
+      height: 10,
+    });
+    const stop = await gifRecorderTool.execute({ action: 'stop' });
+
+    expect(start.isError).toBe(false);
+    expect(stop.isError).toBe(false);
+    expect(responsePayload(stop as any).byteLength).toBe(3);
+  });
+
+  it('rejects an oversized declared GIF output in fixed-FPS mode before download', async () => {
+    mockTabResolution();
+    (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (message) =>
+        message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_FINISH
+          ? {
+              success: true,
+              gifBase64: 'AQID',
+              byteLength: GIF_TRANSPORT_LIMITS.maxOutputBytes + 1,
+            }
+          : { success: true },
+    );
+
+    const start = await gifRecorderTool.execute({
+      action: 'start',
+      tabId: 7,
+      width: 10,
+      height: 10,
+    });
+    const stop = await gifRecorderTool.execute({ action: 'stop' });
+
+    expect(start.isError).toBe(false);
+    expect(stop.isError).toBe(true);
+    expect(responsePayload(stop as any).error).toContain('byteLength');
+    expect(getGifCaptureOwner()).toBeNull();
+    expect(chrome.downloads.download).not.toHaveBeenCalled();
+  });
+
+  it('rejects an oversized declared GIF output in auto mode and releases capture state', async () => {
+    mockTabResolution();
+    (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (message) =>
+        message?.type === OFFSCREEN_MESSAGE_TYPES.GIF_FINISH
+          ? {
+              success: true,
+              gifBase64: 'AQID',
+              byteLength: GIF_TRANSPORT_LIMITS.maxOutputBytes + 1,
+            }
+          : { success: true },
+    );
+
+    const start = await gifRecorderTool.execute({
+      action: 'auto_start',
+      tabId: 7,
+      maxFrames: 1,
+      width: 10,
+      height: 10,
+    });
+    const stop = await gifRecorderTool.execute({ action: 'stop' });
+
+    expect(start.isError).toBe(false);
+    expect(stop.isError).toBe(true);
+    expect(responsePayload(stop as any).error).toContain('byteLength');
+    expect(getGifCaptureOwner()).toBeNull();
+    expect(isAutoCaptureActive(7)).toBe(false);
+    expect(chrome.downloads.download).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized auto-capture dimensions before acquiring resources', async () => {
+    const result = await startAutoCapture(7, {
+      width: GIF_TRANSPORT_LIMITS.maxWidth + 1,
+      height: 1,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('dimensions exceed');
+    expect(getGifCaptureOwner()).toBeNull();
+    expect(cdpSessionManager.attach).not.toHaveBeenCalled();
   });
 
   it('releases an idle auto capture after its absolute TTL', async () => {

@@ -17,6 +17,13 @@ import { OFFSCREEN_MESSAGE_TYPES, MessageTarget } from '@/common/message-types';
 import { offscreenManager } from '@/utils/offscreen-manager';
 import { createImageBitmapFromUrl } from '@/utils/image-utils';
 import {
+  GifBudgetError,
+  decodeGifFinishPayload,
+  getBoundedGifFrameCount,
+  getGifFramePixels,
+  nextGifBudgetSnapshot,
+} from '@/common/gif-transport';
+import {
   acquireGifCaptureOwner,
   describeGifCaptureOwner,
   isGifCaptureOwner,
@@ -34,6 +41,7 @@ import {
   type GifEnhancedRenderingConfig,
   type ResolvedGifEnhancedRenderingConfig,
 } from './gif-enhanced-renderer';
+import { encodeGifCanvasFrame } from './gif-frame-transport';
 
 // Re-export types for consumers
 export type {
@@ -75,6 +83,9 @@ interface TabCaptureState {
   config: AutoCaptureConfig;
   rendering: ResolvedGifEnhancedRenderingConfig;
   frameCount: number;
+  totalPixels: number;
+  totalInputBytes: number;
+  budgetExhausted: boolean;
   startTime: number;
   canvas: OffscreenCanvas;
   ctx: OffscreenCanvasRenderingContext2D;
@@ -117,6 +128,17 @@ let completedAutoCapture: CompletedAutoCapture | null = null;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function assertIntegerInRange(
+  value: number,
+  min: number,
+  max: number,
+  label: string,
+): void {
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw new Error(`${label} must be an integer between ${min} and ${max}`);
+  }
 }
 
 function normalizeActionMetadata(
@@ -239,7 +261,13 @@ function finalizeAutoCaptureState(
     let encoderFinalized = false;
     let result: AutoCaptureResult;
     try {
-      if (state.pendingCapture) await state.pendingCapture;
+      if (state.pendingCapture) {
+        try {
+          await state.pendingCapture;
+        } catch {
+          // Preserve frames already encoded before a capture/budget failure.
+        }
+      }
 
       const frameCount = state.frameCount;
       const durationMs = Date.now() - state.startTime;
@@ -256,28 +284,21 @@ function finalizeAutoCaptureState(
       } else {
         const response = await sendToOffscreen<{
           success: boolean;
+          gifBase64?: string;
           gifData?: number[];
           byteLength?: number;
           error?: string;
         }>(OFFSCREEN_MESSAGE_TYPES.GIF_FINISH, {});
         encoderFinalized = true;
+        const gifData = decodeGifFinishPayload(response);
 
-        result =
-          response.gifData && response.gifData.length > 0
-            ? {
-                success: true,
-                gifData: new Uint8Array(response.gifData),
-                frameCount,
-                durationMs,
-                actions,
-              }
-            : {
-                success: false,
-                error: 'Failed to encode GIF',
-                frameCount,
-                durationMs,
-                actions,
-              };
+        result = {
+          success: true,
+          gifData,
+          frameCount,
+          durationMs,
+          actions,
+        };
       }
     } catch (error) {
       result = {
@@ -331,10 +352,10 @@ async function abortAutoCaptureState(state: TabCaptureState): Promise<void> {
 // Frame Capture
 // ============================================================================
 
-async function captureFrameData(
+async function renderFrameToCanvas(
   tabId: number,
   state: TabCaptureState,
-): Promise<Uint8ClampedArray> {
+): Promise<void> {
   const width = state.config.width;
   const height = state.config.height;
   const ctx = state.ctx;
@@ -394,8 +415,6 @@ async function captureFrameData(
     });
     pruneActionEventsInPlace(state.actionEvents, nowMs, state.rendering);
   }
-
-  return ctx.getImageData(0, 0, width, height).data;
 }
 
 // ============================================================================
@@ -410,6 +429,35 @@ export async function startAutoCapture(
   tabId: number,
   config?: Partial<AutoCaptureConfig>,
 ): Promise<{ success: boolean; error?: string }> {
+  let finalConfig: AutoCaptureConfig;
+  try {
+    const width = config?.width ?? DEFAULT_WIDTH;
+    const height = config?.height ?? DEFAULT_HEIGHT;
+    const maxColors = config?.maxColors ?? DEFAULT_MAX_COLORS;
+    const frameDelayCs = config?.frameDelayCs ?? DEFAULT_FRAME_DELAY_CS;
+    const captureDelayMs = config?.captureDelayMs ?? DEFAULT_CAPTURE_DELAY_MS;
+    const requestedMaxFrames = config?.maxFrames ?? 100;
+
+    getGifFramePixels(width, height);
+    assertIntegerInRange(maxColors, 2, 256, 'GIF maxColors');
+    assertIntegerInRange(frameDelayCs, 1, 6_000, 'GIF frameDelayCs');
+    assertIntegerInRange(captureDelayMs, 0, 5_000, 'GIF captureDelayMs');
+    finalConfig = {
+      width,
+      height,
+      maxColors,
+      frameDelayCs,
+      captureDelayMs,
+      maxFrames: getBoundedGifFrameCount(width, height, requestedMaxFrames),
+      enhancedRendering: config?.enhancedRendering,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
   const acquisition = acquireGifCaptureOwner('auto_capture', tabId);
   if (!acquisition.ok) {
     return {
@@ -419,16 +467,6 @@ export async function startAutoCapture(
   }
   const owner = acquisition.owner;
   clearCompletedAutoCapture();
-
-  const finalConfig: AutoCaptureConfig = {
-    width: config?.width ?? DEFAULT_WIDTH,
-    height: config?.height ?? DEFAULT_HEIGHT,
-    maxColors: config?.maxColors ?? DEFAULT_MAX_COLORS,
-    frameDelayCs: config?.frameDelayCs ?? DEFAULT_FRAME_DELAY_CS,
-    captureDelayMs: config?.captureDelayMs ?? DEFAULT_CAPTURE_DELAY_MS,
-    maxFrames: config?.maxFrames ?? 100,
-    enhancedRendering: config?.enhancedRendering,
-  };
 
   let attached = false;
   let encoderTouched = false;
@@ -460,6 +498,9 @@ export async function startAutoCapture(
         finalConfig.enhancedRendering,
       ),
       frameCount: 0,
+      totalPixels: 0,
+      totalInputBytes: 0,
+      budgetExhausted: false,
       startTime: Date.now(),
       canvas,
       ctx,
@@ -625,28 +666,55 @@ export async function captureFrameOnAction(
       if (activeState.frameCount >= activeState.config.maxFrames) return;
 
       try {
-        const frameData = await captureFrameData(tabId, activeState);
+        await renderFrameToCanvas(tabId, activeState);
         if (!isActiveAutoCaptureState(activeState)) return;
+
+        const frame = await encodeGifCanvasFrame(
+          activeState.canvas,
+          activeState.ctx,
+          activeState.config.width,
+          activeState.config.height,
+        );
+        if (!isActiveAutoCaptureState(activeState)) return;
+        const nextBudget = nextGifBudgetSnapshot(
+          activeState,
+          activeState.config.width,
+          activeState.config.height,
+          frame.inputBytes,
+        );
 
         // Use animation delay for intermediate frames, regular delay for final frame
         const delayCs =
           i < plan.frames - 1 ? plan.delayCs : activeState.config.frameDelayCs;
 
-        await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
-          imageData: Array.from(frameData),
-          width: activeState.config.width,
-          height: activeState.config.height,
-          delay: delayCs,
-          maxColors: activeState.config.maxColors,
-        });
+        try {
+          await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
+            protocolVersion: 2,
+            frameBase64: frame.frameBase64,
+            frameEncoding: frame.frameEncoding,
+            frameByteLength: frame.inputBytes,
+            width: activeState.config.width,
+            height: activeState.config.height,
+            delay: delayCs,
+            maxColors: activeState.config.maxColors,
+          });
+        } catch (error) {
+          activeState.budgetExhausted = true;
+          throw error;
+        }
 
         if (
           tabStates.get(tabId) === activeState &&
           isGifCaptureOwner(activeState.owner)
         ) {
-          activeState.frameCount += 1;
+          activeState.frameCount = nextBudget.frameCount;
+          activeState.totalPixels = nextBudget.totalPixels;
+          activeState.totalInputBytes = nextBudget.totalInputBytes;
         }
       } catch (error) {
+        if (error instanceof GifBudgetError) {
+          activeState.budgetExhausted = true;
+        }
         console.error('[GIF Auto-Capture] Frame capture failed:', error);
         throw error;
       }
@@ -671,6 +739,9 @@ export async function captureFrameOnAction(
     }
     return { success: true, frameNumber };
   } catch (error) {
+    if (state.budgetExhausted && tabStates.get(tabId) === state) {
+      await finalizeAutoCaptureState(state, true);
+    }
     return {
       success: false,
       error: error instanceof Error ? error.message : String(error),

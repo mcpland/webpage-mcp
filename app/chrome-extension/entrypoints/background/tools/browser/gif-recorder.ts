@@ -27,6 +27,15 @@ import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { offscreenManager } from '@/utils/offscreen-manager';
 import { createImageBitmapFromUrl } from '@/utils/image-utils';
 import {
+  GIF_TRANSPORT_LIMITS,
+  GifBudgetError,
+  decodeGifFinishPayload,
+  encodeBytesToBase64,
+  getBoundedGifFrameCount,
+  getGifFramePixels,
+  nextGifBudgetSnapshot,
+} from '@/common/gif-transport';
+import {
   startAutoCapture,
   stopAutoCapture,
   isAutoCaptureActive,
@@ -47,6 +56,7 @@ import {
   releaseGifCaptureOwner,
   type GifCaptureOwner,
 } from './gif-capture-owner';
+import { encodeGifCanvasFrame } from './gif-frame-transport';
 import { getResolvedViewportCoordinates } from './target-resolution';
 
 // ============================================================================
@@ -112,6 +122,9 @@ interface RecordingState {
   maxFrames: number;
   maxColors: number;
   frameCount: number;
+  totalPixels: number;
+  totalInputBytes: number;
+  budgetExhausted: boolean;
   startTime: number;
   captureTimer: ReturnType<typeof setTimeout> | null;
   ttlTimer: ReturnType<typeof setTimeout> | null;
@@ -295,7 +308,7 @@ async function captureFrame(
   width: number,
   height: number,
   ctx: OffscreenCanvasRenderingContext2D,
-): Promise<Uint8ClampedArray> {
+): Promise<void> {
   // Get viewport metrics
   const metrics: {
     layoutViewport?: { clientWidth: number; clientHeight: number };
@@ -331,31 +344,52 @@ async function captureFrame(
   } finally {
     imageBitmap.close();
   }
-
-  const imageData = ctx.getImageData(0, 0, width, height);
-  return imageData.data;
 }
 
 async function captureAndEncodeFrame(state: RecordingState): Promise<void> {
-  const frameData = await captureFrame(
-    state.tabId,
-    state.width,
-    state.height,
-    state.ctx,
-  );
+  if (!isActiveFixedState(state) || state.frameCount >= state.maxFrames) return;
 
-  if (!isActiveFixedState(state)) return;
+  try {
+    await captureFrame(state.tabId, state.width, state.height, state.ctx);
+    if (!isActiveFixedState(state)) return;
 
-  await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
-    imageData: Array.from(frameData),
-    width: state.width,
-    height: state.height,
-    delay: state.frameDelayCs,
-    maxColors: state.maxColors,
-  });
+    const frame = await encodeGifCanvasFrame(
+      state.canvas,
+      state.ctx,
+      state.width,
+      state.height,
+    );
+    if (recordingState !== state || !isGifCaptureOwner(state.owner)) return;
+    const nextBudget = nextGifBudgetSnapshot(
+      state,
+      state.width,
+      state.height,
+      frame.inputBytes,
+    );
+    try {
+      await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
+        protocolVersion: 2,
+        frameBase64: frame.frameBase64,
+        frameEncoding: frame.frameEncoding,
+        frameByteLength: frame.inputBytes,
+        width: state.width,
+        height: state.height,
+        delay: state.frameDelayCs,
+        maxColors: state.maxColors,
+      });
+    } catch (error) {
+      state.budgetExhausted = true;
+      throw error;
+    }
 
-  if (recordingState === state && isGifCaptureOwner(state.owner)) {
-    state.frameCount += 1;
+    if (recordingState === state && isGifCaptureOwner(state.owner)) {
+      state.frameCount = nextBudget.frameCount;
+      state.totalPixels = nextBudget.totalPixels;
+      state.totalInputBytes = nextBudget.totalInputBytes;
+    }
+  } catch (error) {
+    if (error instanceof GifBudgetError) state.budgetExhausted = true;
+    throw error;
   }
 }
 
@@ -365,7 +399,11 @@ async function captureTick(state: RecordingState): Promise<void> {
   }
 
   const elapsed = Date.now() - state.startTime;
-  if (elapsed >= state.durationMs || state.frameCount >= state.maxFrames) {
+  if (
+    elapsed >= state.durationMs ||
+    state.frameCount >= state.maxFrames ||
+    state.budgetExhausted
+  ) {
     await stopRecording();
     return;
   }
@@ -388,7 +426,11 @@ async function captureTick(state: RecordingState): Promise<void> {
   }
 
   const elapsedAfter = Date.now() - state.startTime;
-  if (elapsedAfter >= state.durationMs || state.frameCount >= state.maxFrames) {
+  if (
+    elapsedAfter >= state.durationMs ||
+    state.frameCount >= state.maxFrames ||
+    state.budgetExhausted
+  ) {
     await stopRecording();
     return;
   }
@@ -415,6 +457,18 @@ async function startRecording(
   maxColors: number,
   filename?: string,
 ): Promise<GifResult> {
+  let boundedMaxFrames: number;
+  try {
+    getGifFramePixels(width, height);
+    boundedMaxFrames = getBoundedGifFrameCount(width, height, maxFrames);
+  } catch (error) {
+    return {
+      success: false,
+      action: 'start',
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
   const acquisition = acquireGifCaptureOwner('fixed_fps', tabId);
   if (!acquisition.ok) {
     return {
@@ -465,9 +519,12 @@ async function startRecording(
       durationMs,
       frameIntervalMs,
       frameDelayCs,
-      maxFrames,
+      maxFrames: boundedMaxFrames,
       maxColors,
       frameCount: 0,
+      totalPixels: 0,
+      totalInputBytes: 0,
+      budgetExhausted: false,
       startTime: Date.now(),
       captureTimer: null,
       ttlTimer: null,
@@ -553,30 +610,45 @@ async function stopRecording(): Promise<GifResult> {
       // ignore
     }
 
-    // Best-effort final frame capture to preserve end state
-    try {
-      const frameData = await captureFrame(
-        state.tabId,
-        state.width,
-        state.height,
-        state.ctx,
-      );
-      if (!isGifCaptureOwner(state.owner)) {
-        throw new Error('GIF capture owner changed while stopping');
+    // Best-effort final frame capture to preserve end state without exceeding budgets.
+    if (!state.budgetExhausted && state.frameCount < state.maxFrames) {
+      try {
+        await captureFrame(state.tabId, state.width, state.height, state.ctx);
+        if (!isGifCaptureOwner(state.owner)) {
+          throw new Error('GIF capture owner changed while stopping');
+        }
+        const frame = await encodeGifCanvasFrame(
+          state.canvas,
+          state.ctx,
+          state.width,
+          state.height,
+        );
+        const nextBudget = nextGifBudgetSnapshot(
+          state,
+          state.width,
+          state.height,
+          frame.inputBytes,
+        );
+        await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
+          protocolVersion: 2,
+          frameBase64: frame.frameBase64,
+          frameEncoding: frame.frameEncoding,
+          frameByteLength: frame.inputBytes,
+          width: state.width,
+          height: state.height,
+          delay: state.frameDelayCs,
+          maxColors: state.maxColors,
+        });
+        state.frameCount = nextBudget.frameCount;
+        state.totalPixels = nextBudget.totalPixels;
+        state.totalInputBytes = nextBudget.totalInputBytes;
+      } catch (error) {
+        if (error instanceof GifBudgetError) state.budgetExhausted = true;
+        console.warn(
+          'GIF recorder: Final frame capture error (non-fatal):',
+          error,
+        );
       }
-      await sendToOffscreen(OFFSCREEN_MESSAGE_TYPES.GIF_ADD_FRAME, {
-        imageData: Array.from(frameData),
-        width: state.width,
-        height: state.height,
-        delay: state.frameDelayCs,
-        maxColors: state.maxColors,
-      });
-      state.frameCount += 1;
-    } catch (error) {
-      console.warn(
-        'GIF recorder: Final frame capture error (non-fatal):',
-        error,
-      );
     }
 
     const frameCount = state.frameCount;
@@ -602,24 +674,12 @@ async function stopRecording(): Promise<GifResult> {
 
       const response = await sendToOffscreen<{
         success: boolean;
+        gifBase64?: string;
         gifData?: number[];
         byteLength?: number;
       }>(OFFSCREEN_MESSAGE_TYPES.GIF_FINISH, {});
       encoderFinalized = true;
-
-      if (!response.gifData || response.gifData.length === 0) {
-        return {
-          success: false,
-          action: 'stop' as const,
-          tabId,
-          frameCount,
-          durationMs,
-          error: 'No frames captured',
-        };
-      }
-
-      // Convert to Uint8Array and create blob
-      const gifBytes = new Uint8Array(response.gifData);
+      const gifBytes = decodeGifFinishPayload(response);
 
       // Cache for later export
       lastRecordedGif = {
@@ -634,7 +694,9 @@ async function stopRecording(): Promise<GifResult> {
         createdAt: Date.now(),
       };
 
-      const blob = new Blob([gifBytes], { type: 'image/gif' });
+      const blob = new Blob([toBlobArrayBuffer(gifBytes)], {
+        type: 'image/gif',
+      });
       const dataUrl = await blobToDataUrl(blob);
 
       // Save GIF file
@@ -657,7 +719,7 @@ async function stopRecording(): Promise<GifResult> {
         tabId,
         frameCount,
         durationMs,
-        byteLength: response.byteLength ?? gifBytes.byteLength,
+        byteLength: gifBytes.byteLength,
         downloadId,
         ...toPublicDownloadLocation({ filename: fullFilename }),
       };
@@ -1250,10 +1312,10 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             }
 
             // Prepare GIF data as base64
-            const gifBase64 = btoa(
-              Array.from(lastRecordedGif.gifData)
-                .map((b) => String.fromCharCode(b))
-                .join(''),
+            const gifBase64 = encodeBytesToBase64(
+              lastRecordedGif.gifData,
+              GIF_TRANSPORT_LIMITS.maxOutputBytes,
+              'Encoded GIF output',
             );
 
             // Resolve drop target coordinates
