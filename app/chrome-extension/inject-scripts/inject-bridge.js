@@ -29,6 +29,7 @@
           detail: {
             action: request.action,
             payload: request.payload,
+            scriptId: request.scriptId,
             requestId: requestId,
           },
         }),
