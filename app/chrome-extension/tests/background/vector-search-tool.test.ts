@@ -132,7 +132,7 @@ describe("VectorSearchTabsContentTool resource bounds", () => {
     });
 
     expect(result.isError).toBe(false);
-    expect(lease).toHaveBeenCalledOnce();
+    expect(lease).toHaveBeenCalledTimes(3);
     expect(activity.isSemanticEngineReady).toHaveBeenCalled();
     expect(activity.indexTabContent).toHaveBeenCalledWith(42);
     expect(activity.searchContent).toHaveBeenCalledWith("shared index", 50);
@@ -218,7 +218,7 @@ describe("VectorSearchTabsContentTool resource bounds", () => {
     const result = await tool.execute({ query: "explicit search" });
 
     expect(result.isError).toBe(false);
-    expect(indexer.runWithIndexActivity).toHaveBeenCalledOnce();
+    expect(indexer.runWithIndexActivity).toHaveBeenCalledTimes(2);
     const indexedTabIds = indexer.indexTabContent.mock.calls.map(([tabId]) =>
       Number(tabId),
     );
@@ -234,6 +234,35 @@ describe("VectorSearchTabsContentTool resource bounds", () => {
     expect(indexer.searchContent).toHaveBeenCalledAfter(
       indexer.indexTabContent,
     );
+  });
+
+  it("uses the public indexing orchestrator outside the search activity lease", async () => {
+    const indexer = createIndexer();
+    const activityIndexTabContent = vi.fn(async () => undefined);
+    indexer.runWithIndexActivity.mockImplementation(
+      async (operation: (activity: typeof indexer) => Promise<unknown>) =>
+        operation({
+          ...indexer,
+          indexTabContent: activityIndexTabContent,
+        }),
+    );
+    vi.mocked(chrome.tabs.query).mockResolvedValue([
+      {
+        id: 77,
+        index: 0,
+        windowId: 1,
+        url: "https://example.test/capacity",
+      },
+    ] as chrome.tabs.Tab[]);
+    const tool = new VectorSearchTabsContentTool(
+      indexer as unknown as ContentIndexer,
+    );
+
+    const result = await tool.execute({ query: "capacity orchestration" });
+
+    expect(result.isError).toBe(false);
+    expect(indexer.indexTabContent).toHaveBeenCalledWith(77);
+    expect(activityIndexTabContent).not.toHaveBeenCalled();
   });
 
   it("does not scan past the explicit-search tab budget", async () => {
@@ -327,7 +356,7 @@ describe("VectorSearchTabsContentTool resource bounds", () => {
 
     expect(indexer.clearAllIndexes).toHaveBeenCalledTimes(1);
     expect(indexer.runExclusiveIndexRebuild).toHaveBeenCalledOnce();
-    expect(indexer.runWithIndexActivity).toHaveBeenCalledTimes(2);
+    expect(indexer.runWithIndexActivity).toHaveBeenCalledTimes(4);
     expect(indexer.indexTabContent).toHaveBeenCalledTimes(
       VECTOR_REBUILD_MAX_TABS * 2,
     );

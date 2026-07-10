@@ -108,35 +108,30 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
 
       console.log("VectorSearchTabsContentTool: Starting vector search");
 
+      const readinessError = await this.contentIndexer.runWithIndexActivity(
+        async (activity) => {
+          if (activity.isSemanticEngineReady()) return null;
+          if (activity.isSemanticEngineInitializing()) {
+            return "Vector search engine is still initializing (model downloading). Please wait a moment and try again.";
+          }
+          console.log(
+            "VectorSearchTabsContentTool: Initializing content indexer...",
+          );
+          await this.initializeIndexer(activity);
+          return activity.isSemanticEngineReady()
+            ? null
+            : "Failed to initialize vector search engine";
+        },
+      );
+      if (readinessError) return createErrorResponse(readinessError);
+
+      // Explicit page collection uses ContentIndexer's public orchestrator.
+      // Each tab therefore releases its shared lease before a capacity error
+      // arms the exclusive compaction marker.
+      await this.indexCurrentTabsForSearch();
+
       return await this.contentIndexer.runWithIndexActivity(
         async (activity) => {
-          // Check semantic engine status
-          if (!activity.isSemanticEngineReady()) {
-            if (activity.isSemanticEngineInitializing()) {
-              return createErrorResponse(
-                "Vector search engine is still initializing (model downloading). Please wait a moment and try again.",
-              );
-            } else {
-              // Try to initialize
-              console.log(
-                "VectorSearchTabsContentTool: Initializing content indexer...",
-              );
-              await this.initializeIndexer(activity);
-
-              // Check semantic engine status again
-              if (!activity.isSemanticEngineReady()) {
-                return createErrorResponse(
-                  "Failed to initialize vector search engine",
-                );
-              }
-            }
-          }
-
-          // Page text is collected only as a direct consequence of this explicit
-          // tool invocation. Concurrent searches share the same bounded indexing
-          // pass, and ContentIndexer skips pages already indexed in this session.
-          await this.indexCurrentTabsForSearch(activity);
-
           // Execute vector search, get more results for deduplication
           const searchResults = await activity.searchContent(
             query,
@@ -241,7 +236,7 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
    */
   private async ensureTabsIndexed(
     tabIds: number[],
-    activity: ContentIndexerActivity,
+    indexTab: (tabId: number) => Promise<void>,
   ): Promise<void> {
     let nextIndex = 0;
     const workerCount = Math.min(VECTOR_REBUILD_MAX_CONCURRENCY, tabIds.length);
@@ -249,7 +244,7 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
       while (nextIndex < tabIds.length) {
         const tabId = tabIds[nextIndex++];
         try {
-          await activity.indexTabContent(tabId);
+          await indexTab(tabId);
         } catch (error) {
           console.warn(
             `VectorSearchTabsContentTool: Failed to index tab ${tabId}:`,
@@ -305,12 +300,10 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
     return { tabIds, scannedTabs };
   }
 
-  private indexCurrentTabsForSearch(
-    activity: ContentIndexerActivity,
-  ): Promise<void> {
+  private indexCurrentTabsForSearch(): Promise<void> {
     if (this.explicitIndexPromise) return this.explicitIndexPromise;
 
-    const operation = this.performExplicitIndexPass(activity);
+    const operation = this.performExplicitIndexPass();
     const tracked = operation.finally(() => {
       if (this.explicitIndexPromise === tracked)
         this.explicitIndexPromise = null;
@@ -319,12 +312,12 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
     return tracked;
   }
 
-  private async performExplicitIndexPass(
-    activity: ContentIndexerActivity,
-  ): Promise<void> {
+  private async performExplicitIndexPass(): Promise<void> {
     const tabs = await chrome.tabs.query({});
     const { tabIds, scannedTabs } = this.selectIndexableTabIds(tabs);
-    await this.ensureTabsIndexed(tabIds, activity);
+    await this.ensureTabsIndexed(tabIds, (tabId) =>
+      this.contentIndexer.indexTabContent(tabId),
+    );
 
     console.log(
       `VectorSearchTabsContentTool: Explicitly indexed ${tabIds.length} tabs ` +
@@ -488,7 +481,9 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
         const tabs = await chrome.tabs.query({});
         const { tabIds: validTabIds, scannedTabs } =
           this.selectIndexableTabIds(tabs);
-        await this.ensureTabsIndexed(validTabIds, activity);
+        await this.ensureTabsIndexed(validTabIds, (tabId) =>
+          activity.indexTabContent(tabId),
+        );
 
         console.log(
           `VectorSearchTabsContentTool: Rebuilt index for ${validTabIds.length} tabs ` +
@@ -508,10 +503,12 @@ export class VectorSearchTabsContentTool extends BaseBrowserToolExecutor {
    * Manually index specified tab
    */
   public async indexTab(tabId: number): Promise<void> {
-    await this.contentIndexer.runWithIndexActivity(async (activity) => {
-      if (!this.isInitialized) await this.initializeIndexer(activity);
-      await activity.indexTabContent(tabId);
-    });
+    if (!this.isInitialized) {
+      await this.contentIndexer.runWithIndexActivity((activity) =>
+        this.initializeIndexer(activity),
+      );
+    }
+    await this.contentIndexer.indexTabContent(tabId);
   }
 
   /**

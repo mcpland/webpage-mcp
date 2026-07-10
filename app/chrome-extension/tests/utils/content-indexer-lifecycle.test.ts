@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   chunkText: vi.fn(),
   clearAllVectorData: vi.fn(),
   clearVectorDatabase: vi.fn(),
+  compactVectorIndex: vi.fn(),
   commitTabPage: vi.fn(),
   getEmbedding: vi.fn(),
   getGlobalVectorDatabase: vi.fn(),
@@ -59,6 +60,15 @@ vi.mock("@/utils/semantic-similarity-engine", () => ({
 
 vi.mock("@/utils/vector-database", () => ({
   VectorDatabase: class {},
+  VectorCompactionRequiredError: class VectorCompactionRequiredError extends Error {
+    constructor(
+      readonly physicalCount: number,
+      readonly maxElements: number,
+    ) {
+      super("vector compaction required");
+      this.name = "VectorCompactionRequiredError";
+    }
+  },
   clearAllVectorData: mocks.clearAllVectorData,
   getGlobalVectorDatabase: mocks.getGlobalVectorDatabase,
   resetGlobalVectorDatabase: mocks.resetGlobalVectorDatabase,
@@ -74,7 +84,7 @@ const MAINTENANCE_KEY = "semanticCleanupRequired";
 
 function requiredMaintenanceMarker(
   attemptId = "interrupted-attempt",
-  kind: "data-cleanup" | "index-recovery" = "data-cleanup",
+  kind: "data-cleanup" | "index-recovery" | "index-rebuild" = "data-cleanup",
 ) {
   return {
     schemaVersion: 1,
@@ -125,6 +135,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
   const vectorDatabase = {
     addDocument: mocks.addDocument,
     clear: mocks.clearVectorDatabase,
+    compactForPendingAdd: mocks.compactVectorIndex,
     commitTabPage: mocks.commitTabPage,
     ensureTabDocumentsRemoved: mocks.ensureTabDocumentsRemoved,
     getStats: vi.fn(() => ({
@@ -155,6 +166,11 @@ describe("ContentIndexer tab/page lifecycle", () => {
     });
     mocks.clearVectorDatabase.mockImplementation(async () => {
       mocks.completedPagesByTab.clear();
+    });
+    mocks.compactVectorIndex.mockResolvedValue({
+      compacted: false,
+      evictedTabIds: [],
+      retainedCompletedPages: [],
     });
     mocks.commitTabPage.mockImplementation(
       async (tabId: number, url: string, title: string) => {
@@ -587,6 +603,160 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(indexer.getStats()).toMatchObject({
       available: true,
       indexedPages: 1,
+    });
+  });
+
+  it("releases every shared lease before durable compaction, refreshes cache, and retries once", async () => {
+    const retainedPage = {
+      tabId: 41,
+      pageKey: "https://example.test/retained\u0000Retained",
+      url: "https://example.test/retained",
+      title: "Retained",
+      expectedCount: 1,
+    };
+    const evictedPage = {
+      tabId: 40,
+      pageKey: "https://example.test/evicted\u0000Evicted",
+      url: "https://example.test/evicted",
+      title: "Evicted",
+      expectedCount: 1,
+    };
+    mocks.completedPagesByTab.set(40, evictedPage);
+    mocks.completedPagesByTab.set(41, retainedPage);
+    mocks.inspectTabPageState.mockResolvedValue({
+      completedPages: [evictedPage, retainedPage],
+      repairTabIds: [],
+    });
+    pagesByTab.set(18, {
+      url: "https://example.test/capacity-retry",
+      title: "Capacity retry",
+    });
+    const { VectorCompactionRequiredError } =
+      await import("@/utils/vector-database");
+    mocks.addDocument
+      .mockRejectedValueOnce(new VectorCompactionRequiredError(2, 2))
+      .mockResolvedValueOnce(3);
+    const state = installLocalStorage();
+    mocks.compactVectorIndex.mockImplementationOnce(async () => {
+      expect(state[MAINTENANCE_KEY]).toMatchObject({
+        state: "required",
+        kind: "index-rebuild",
+        attemptId: expect.any(String),
+      });
+      mocks.completedPagesByTab.delete(40);
+      return {
+        compacted: true,
+        evictedTabIds: [40],
+        retainedCompletedPages: [retainedPage],
+      };
+    });
+    const indexer = await createIndexer();
+    const blocker = deferred();
+    const blockerEntered = vi.fn();
+    const activeLease = indexer.runWithIndexActivity(async () => {
+      blockerEntered();
+      await blocker.promise;
+    });
+    await vi.waitFor(() => expect(blockerEntered).toHaveBeenCalledOnce());
+
+    const indexing = indexer.indexTabContent(18);
+    await vi.waitFor(() => expect(mocks.addDocument).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(state[MAINTENANCE_KEY]).toMatchObject({
+        state: "required",
+        kind: "index-rebuild",
+      }),
+    );
+    expect(mocks.compactVectorIndex).not.toHaveBeenCalled();
+
+    blocker.resolve();
+    await activeLease;
+    await indexing;
+
+    expect(mocks.compactVectorIndex).toHaveBeenCalledOnce();
+    expect(mocks.addDocument).toHaveBeenCalledTimes(2);
+    expect(state[MAINTENANCE_KEY]).toMatchObject({ state: "clear" });
+    const cache = (
+      indexer as unknown as { indexedPageByTab: Map<number, string> }
+    ).indexedPageByTab;
+    expect([...cache.keys()].sort((left, right) => left - right)).toEqual([
+      18, 41,
+    ]);
+  });
+
+  it("clears the rebuild marker before surfacing a safely rolled-back compaction failure", async () => {
+    pagesByTab.set(19, {
+      url: "https://example.test/safe-rollback",
+      title: "Safe rollback",
+    });
+    const { VectorCompactionRequiredError } =
+      await import("@/utils/vector-database");
+    mocks.addDocument.mockRejectedValueOnce(
+      new VectorCompactionRequiredError(2, 2),
+    );
+    mocks.compactVectorIndex.mockResolvedValueOnce({
+      compacted: false,
+      evictedTabIds: [],
+      retainedCompletedPages: [],
+      failure: new Error("candidate mappings failed but rollback succeeded"),
+    });
+    const state = installLocalStorage();
+    const indexer = await createIndexer();
+
+    await expect(indexer.indexTabContent(19)).rejects.toThrow(
+      "rollback succeeded",
+    );
+
+    expect(mocks.addDocument).toHaveBeenCalledOnce();
+    expect(state[MAINTENANCE_KEY]).toMatchObject({ state: "clear" });
+  });
+
+  it("keeps the rebuild marker required when compaction persistence is unsafe", async () => {
+    pagesByTab.set(20, {
+      url: "https://example.test/unsafe-compaction",
+      title: "Unsafe compaction",
+    });
+    const { VectorCompactionRequiredError } =
+      await import("@/utils/vector-database");
+    mocks.addDocument.mockRejectedValueOnce(
+      new VectorCompactionRequiredError(2, 2),
+    );
+    mocks.compactVectorIndex.mockRejectedValueOnce(
+      new Error("candidate index persistence outcome unknown"),
+    );
+    const state = installLocalStorage();
+    const indexer = await createIndexer();
+
+    await expect(indexer.indexTabContent(20)).rejects.toThrow(
+      "outcome unknown",
+    );
+
+    expect(state[MAINTENANCE_KEY]).toMatchObject({
+      state: "required",
+      kind: "index-rebuild",
+    });
+  });
+
+  it("does not guess how to resume an interrupted compaction marker", async () => {
+    const state = installLocalStorage({
+      [MAINTENANCE_KEY]: requiredMaintenanceMarker(
+        "interrupted-compaction",
+        "index-rebuild",
+      ),
+    });
+    const { ContentIndexer } = await import("@/utils/content-indexer");
+    const indexer = new ContentIndexer();
+
+    await expect(
+      indexer.runExclusiveIndexRebuild((activity) =>
+        activity.compactVectorIndex(),
+      ),
+    ).rejects.toThrow("cannot be resumed safely");
+
+    expect(mocks.compactVectorIndex).not.toHaveBeenCalled();
+    expect(state[MAINTENANCE_KEY]).toMatchObject({
+      state: "required",
+      kind: "index-rebuild",
     });
   });
 

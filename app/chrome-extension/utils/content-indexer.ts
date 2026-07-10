@@ -6,8 +6,10 @@
 import { TextChunker } from "./text-chunker";
 import {
   VectorDatabase,
+  VectorCompactionRequiredError,
   getGlobalVectorDatabase,
   resetGlobalVectorDatabase,
+  type VectorCompactionResult,
   type SearchResult,
 } from "./vector-database";
 import {
@@ -171,6 +173,7 @@ export interface ContentIndexerActivity {
 export interface ContentIndexerMaintenance extends ContentIndexerActivity {
   readonly maintenanceAttemptId?: string;
   readonly recoveryRequired?: boolean;
+  compactVectorIndex(): Promise<VectorCompactionResult>;
 }
 
 export interface ContentIndexerModelTransition {
@@ -613,6 +616,7 @@ export class ContentIndexer {
       ) {
         throw this.cleanupBlockedError();
       }
+      job.recoveryRequired = this.durableGateState === "required";
     } else if (kind === "index-recovery") {
       // Capture the gate state only when this job reaches the front of the
       // maintenance queue. A read error or malformed marker is treated as an
@@ -1053,10 +1057,40 @@ export class ContentIndexer {
       removeTabIndex: (tabId) =>
         this.removeTabIndexInternal(tabId, expectedTabInvalidationEpoch),
       clearAllIndexes: () => this.clearAllIndexesInternal(),
+      compactVectorIndex: () =>
+        this.compactVectorIndexInternal(recoveryRequired === true),
       getStats: () => this.getStats(),
       isSemanticEngineReady: () => this.isSemanticEngineReady(),
       isSemanticEngineInitializing: () => this.isSemanticEngineInitializing(),
     };
+  }
+
+  private async compactVectorIndexInternal(
+    recoveryRequired: boolean,
+  ): Promise<VectorCompactionResult> {
+    if (recoveryRequired) {
+      throw new Error(
+        "Interrupted vector compaction cannot be resumed safely; semantic model recovery or Clear All Data is required",
+      );
+    }
+    if (!this.isInitialized || !this.vectorDatabase) {
+      throw new Error("ContentIndexer must be initialized before compaction");
+    }
+
+    const result = await this.vectorDatabase.compactForPendingAdd();
+    if (!result.failure) {
+      const retainedPages = new Map<number, string>();
+      for (const page of result.retainedCompletedPages) {
+        if (
+          !this.pendingTabInvalidations.has(page.tabId) &&
+          !this.tabsRequiringDurableRemoval.has(page.tabId)
+        ) {
+          retainedPages.set(page.tabId, page.pageKey);
+        }
+      }
+      this.indexedPageByTab = retainedPages;
+    }
+    return result;
   }
 
   /**
@@ -1226,10 +1260,27 @@ export class ContentIndexer {
   /**
    * Index content of specified tab
    */
-  public indexTabContent(tabId: number): Promise<void> {
-    return this.runWithIndexActivity((activity) =>
-      activity.indexTabContent(tabId),
-    );
+  public async indexTabContent(tabId: number): Promise<void> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.runWithIndexActivity((activity) =>
+          activity.indexTabContent(tabId),
+        );
+        return;
+      } catch (error) {
+        if (!(error instanceof VectorCompactionRequiredError) || attempt > 0) {
+          throw error;
+        }
+
+        // The shared lease above has been released by its finally block. Only
+        // now may the durable rebuild marker be armed; nesting this exclusive
+        // operation inside an activity would deadlock maintenance drainage.
+        const result = await this.runExclusiveIndexRebuild((activity) =>
+          activity.compactVectorIndex(),
+        );
+        if (result.failure) throw result.failure;
+      }
+    }
   }
 
   private async indexTabContentInternal(

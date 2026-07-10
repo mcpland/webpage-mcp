@@ -95,6 +95,47 @@ export interface VectorDatabaseStats {
   isInitialized: boolean;
 }
 
+export class VectorCompactionRequiredError extends Error {
+  constructor(
+    readonly physicalCount: number,
+    readonly maxElements: number,
+  ) {
+    super(
+      `Vector index physical capacity is exhausted (${physicalCount}/${maxElements}); durable compaction is required before adding another vector`,
+    );
+    this.name = "VectorCompactionRequiredError";
+  }
+}
+
+export interface VectorCompactionResult {
+  compacted: boolean;
+  evictedTabIds: number[];
+  retainedCompletedPages: CompletedTabPageIdentity[];
+  /** A safe, fully rolled-back failure that callers must throw after marker clear. */
+  failure?: Error;
+}
+
+interface VectorStateSnapshot {
+  documents: Map<number, VectorDocument>;
+  tabDocuments: Map<number, Set<number>>;
+  completedTabPages: Map<number, PersistedTabPageCompletion>;
+  nextLabel: number;
+}
+
+interface VectorCompactionPage {
+  tabId: number;
+  pageKey: string;
+  labels: number[];
+  newestTimestamp: number;
+  expired: boolean;
+}
+
+interface VectorCompactionPlan {
+  candidate: VectorStateSnapshot;
+  evictedTabIds: number[];
+  retainedCompletedPages: CompletedTabPageIdentity[];
+}
+
 interface PersistedVectorMappings {
   schemaVersion: number;
   revision: number;
@@ -149,6 +190,24 @@ class HnswFileSystemTimeoutError extends Error {
       `Timed out after ${HNSW_FILESYSTEM_WAIT_TIMEOUT_MS}ms waiting for ${operation}`,
     );
     this.name = "HnswFileSystemTimeoutError";
+  }
+}
+
+class HnswIndexPersistenceUncertainError extends Error {
+  constructor(error: unknown) {
+    super(`HNSW index persistence outcome is unknown: ${errorMessage(error)}`, {
+      cause: error,
+    });
+    this.name = "HnswIndexPersistenceUncertainError";
+  }
+}
+
+class VectorCompactionInsufficientCapacityError extends Error {
+  constructor(protectedCount: number, targetCount: number) {
+    super(
+      `Vector compaction cannot reach its ${targetCount}-vector target without evicting ${protectedCount} protected incomplete vectors`,
+    );
+    this.name = "VectorCompactionInsufficientCapacityError";
   }
 }
 
@@ -640,7 +699,14 @@ async function persistHnswIndex(index: any, fileName: string): Promise<void> {
     // The runtime declaration says Promise<boolean>, but 0.8.5 returns void
     // after starting its own asynchronous syncFS(false).
     index.writeIndex(fileName);
-    await waitForGlobalHnswFileSystemSync();
+    try {
+      await waitForGlobalHnswFileSystemSync();
+    } catch (error) {
+      // Once writeIndex returned, a wait failure cannot distinguish an old file
+      // from a fully or partially persisted replacement. Callers must never
+      // issue a second non-idempotent index write in the same worker.
+      throw new HnswIndexPersistenceUncertainError(error);
+    }
   });
 }
 
@@ -997,6 +1063,12 @@ class IndexedDBHelper {
  */
 async function initializeGlobalHnswlib(): Promise<any> {
   if (globalHnswlibInitialized && globalHnswlib) {
+    // A prior write may still be settling even though the WASM module itself is
+    // initialized. Every new database instance joins the serialized filesystem
+    // boundary before reading or replacing an index.
+    await enqueueHnswFileSystemOperation(() =>
+      waitForGlobalHnswFileSystemIdle(),
+    );
     return globalHnswlib;
   }
 
@@ -1048,6 +1120,7 @@ export class VectorDatabase {
   private mappingSaveQueue: Promise<void> = Promise.resolve();
   private mutationQueue: Promise<void> = Promise.resolve();
   private unsafeMutationState: Error | null = null;
+  private unsafeIndexPersistenceOutcome = false;
 
   private readonly config: VectorDatabaseConfig;
 
@@ -1394,7 +1467,11 @@ export class VectorDatabase {
       }
       await this.verifyPersistedEmptyMappings(persistedMappingRevision);
       this.unsafeMutationState = null;
+      this.unsafeIndexPersistenceOutcome = false;
     } catch (error) {
+      if (error instanceof HnswIndexPersistenceUncertainError) {
+        this.unsafeIndexPersistenceOutcome = true;
+      }
       const failure = cleanupError("replace unsafe vector state", error);
       this.unsafeMutationState = failure;
       throw failure;
@@ -1585,6 +1662,17 @@ export class VectorDatabase {
         }
       }
 
+      // HNSW capacity is physical: tombstoned labels still occupy slots until
+      // a durable rebuild. Refuse the mutation before reserving a label,
+      // crossing addPoint, or writing either persistence backend.
+      const physicalCount = this.inspectHnswActiveLabels().usedLabels.size;
+      if (physicalCount + 1 > this.config.maxElements) {
+        throw new VectorCompactionRequiredError(
+          physicalCount,
+          this.config.maxElements,
+        );
+      }
+
       const cleanEmbedding = new Float32Array(embedding);
 
       // Select and fully construct one binding-compatible representation
@@ -1670,11 +1758,6 @@ export class VectorDatabase {
       await this.saveIndex();
       await this.saveDocumentMappings();
 
-      // Check if auto cleanup is needed
-      if (this.config.enableAutoCleanup) {
-        await this.checkAndPerformAutoCleanup();
-      }
-
       const invariantFailure = this.activeLabelInvariantFailure(
         this.documents.keys(),
         this.nextLabel,
@@ -1713,6 +1796,15 @@ export class VectorDatabase {
         isFloat32Array: embedding instanceof Float32Array,
         firstFewValues: embedding ? Array.from(embedding.slice(0, 5)) : null,
       });
+      if (error instanceof HnswIndexPersistenceUncertainError) {
+        const failure = cleanupError(
+          "persist added vector index with unknown outcome",
+          error,
+        );
+        this.unsafeMutationState = failure;
+        this.unsafeIndexPersistenceOutcome = true;
+        throw failure;
+      }
       if (pointAdded && label !== null) {
         await this.rollbackAddedDocument(label, tabId, error);
       } else if (addPointFailedAmbiguously && label !== null) {
@@ -1776,6 +1868,9 @@ export class VectorDatabase {
     try {
       await this.saveIndex();
     } catch (error) {
+      if (error instanceof HnswIndexPersistenceUncertainError) {
+        this.unsafeIndexPersistenceOutcome = true;
+      }
       persistenceFailures.push(
         cleanupError("persist ambiguous vector index recovery", error),
       );
@@ -1842,6 +1937,9 @@ export class VectorDatabase {
     try {
       await this.saveIndex();
     } catch (error) {
+      if (error instanceof HnswIndexPersistenceUncertainError) {
+        this.unsafeIndexPersistenceOutcome = true;
+      }
       rollbackFailures.push(
         cleanupError("persist rolled-back vector index", error),
       );
@@ -2185,6 +2283,7 @@ export class VectorDatabase {
     tabId: number,
     forcePersistence: boolean,
   ): Promise<void> {
+    if (this.unsafeIndexPersistenceOutcome) this.assertSafeMutationState();
     const documentLabels = Array.from(this.tabDocuments.get(tabId) ?? []);
     if (documentLabels.length === 0 && !forcePersistence) return;
 
@@ -2206,6 +2305,15 @@ export class VectorDatabase {
     try {
       await this.saveIndex();
     } catch (error) {
+      if (error instanceof HnswIndexPersistenceUncertainError) {
+        const failure = cleanupError(
+          "persist tab-deleted vector index with unknown outcome",
+          error,
+        );
+        this.unsafeMutationState = failure;
+        this.unsafeIndexPersistenceOutcome = true;
+        throw failure;
+      }
       failures.push(cleanupError("persist tab-deleted vector index", error));
     }
 
@@ -2259,6 +2367,7 @@ export class VectorDatabase {
     // failure. Reaching this boundary means index, mappings, readback, and the
     // active-label invariant all agree again.
     this.unsafeMutationState = null;
+    this.unsafeIndexPersistenceOutcome = false;
 
     console.log(
       `VectorDatabase: Removed ${documentLabels.length} documents for tab ${tabId}`,
@@ -2712,6 +2821,18 @@ export class VectorDatabase {
   }
 
   private async clearInternal(persistIndex: boolean): Promise<void> {
+    if (persistIndex && this.unsafeIndexPersistenceOutcome) {
+      this.assertSafeMutationState();
+    }
+    if (!persistIndex && this.unsafeIndexPersistenceOutcome) {
+      // Privacy/model recovery is the only operation allowed after an
+      // uncertain write, but it still must not race that write's late IDBFS
+      // completion. If the manager never becomes idle, fail closed instead of
+      // starting a second filesystem operation.
+      await enqueueHnswFileSystemOperation(() =>
+        waitForGlobalHnswFileSystemIdle(),
+      );
+    }
     console.log("VectorDatabase: Starting complete database clear...");
 
     this.documents.clear();
@@ -2753,6 +2874,9 @@ export class VectorDatabase {
           );
         }
       } catch (error) {
+        if (error instanceof HnswIndexPersistenceUncertainError) {
+          this.unsafeIndexPersistenceOutcome = true;
+        }
         failures.push(cleanupError("replace active HNSW index", error));
       }
     }
@@ -2800,6 +2924,7 @@ export class VectorDatabase {
         this.assertActiveLabelInvariant(this.documents.keys(), this.nextLabel);
       }
       this.unsafeMutationState = null;
+      this.unsafeIndexPersistenceOutcome = false;
     } catch (error) {
       const failure = cleanupError(
         "verify active-label invariant after vector clear",
@@ -2815,151 +2940,490 @@ export class VectorDatabase {
   }
 
   /**
-   * Check and perform auto cleanup
+   * Rebuild the current native handle around whole durable pages. The caller
+   * must hold ContentIndexer's durable index-rebuild marker for this complete
+   * operation, including any rollback.
    */
-  private async checkAndPerformAutoCleanup(): Promise<void> {
+  public async compactForPendingAdd(): Promise<VectorCompactionResult> {
+    if (!this.isInitialized) await this.initialize();
+    return this.enqueueMutation(() => this.compactForPendingAddInternal());
+  }
+
+  private async compactForPendingAddInternal(): Promise<VectorCompactionResult> {
+    this.assertSafeMutationState();
+    const now = Date.now();
+    const original = this.captureVectorState();
+    const originalPages = this.completedPageIdentitiesForCurrentState(now);
+    let plan: VectorCompactionPlan | null;
     try {
-      const currentCount = this.documents.size;
-      const maxElements = this.config.maxElements;
+      plan = this.planVectorCompaction(original, now);
+    } catch (error) {
+      return {
+        compacted: false,
+        evictedTabIds: [],
+        retainedCompletedPages: originalPages,
+        failure: cleanupError("plan vector compaction", error),
+      };
+    }
 
-      console.log(
-        `VectorDatabase: Auto cleanup check - current: ${currentCount}, max: ${maxElements}`,
-      );
+    if (!plan) {
+      return {
+        compacted: false,
+        evictedTabIds: [],
+        retainedCompletedPages: originalPages,
+      };
+    }
 
-      // Check if maximum element count is exceeded
-      if (currentCount >= maxElements) {
-        console.log(
-          "VectorDatabase: Document count reached limit, performing cleanup...",
+    try {
+      this.rebuildNativeIndex(plan.candidate);
+    } catch (candidateBuildError) {
+      try {
+        this.rebuildNativeIndex(original);
+      } catch (restoreError) {
+        const failure = new AggregateError(
+          [
+            cleanupError("build compacted vector index", candidateBuildError),
+            cleanupError(
+              "restore original in-memory vector index",
+              restoreError,
+            ),
+          ],
+          "Vector compaction candidate failed and the original in-memory index could not be restored",
         );
-        await this.performLRUCleanup(Math.floor(maxElements * 0.2)); // Clean up 20% of data
+        this.unsafeMutationState = failure;
+        throw failure;
       }
-
-      // Check if there's expired data
-      if (this.config.maxRetentionDays && this.config.maxRetentionDays > 0) {
-        await this.performTimeBasedCleanup();
-      }
-    } catch (error) {
-      console.error("VectorDatabase: Auto cleanup failed:", error);
+      return {
+        compacted: false,
+        evictedTabIds: [],
+        retainedCompletedPages: originalPages,
+        failure: cleanupError(
+          "build compacted vector index",
+          candidateBuildError,
+        ),
+      };
     }
-  }
 
-  /**
-   * Perform LRU-based cleanup (delete oldest documents)
-   */
-  private async performLRUCleanup(cleanupCount: number): Promise<void> {
     try {
-      console.log(
-        `VectorDatabase: Starting LRU cleanup, removing ${cleanupCount} oldest documents`,
-      );
-
-      // Get all documents and sort by timestamp
-      const allDocuments = Array.from(this.documents.entries());
-      allDocuments.sort((a, b) => a[1].timestamp - b[1].timestamp);
-
-      // Select documents to delete
-      const documentsToDelete = allDocuments.slice(0, cleanupCount);
-
-      for (const [label, _document] of documentsToDelete) {
-        await this.removeDocumentByLabel(label);
-      }
-
-      // Save updated index and mappings
       await this.saveIndex();
-      await this.saveDocumentMappings();
+    } catch (candidateIndexError) {
+      if (candidateIndexError instanceof HnswIndexPersistenceUncertainError) {
+        const failure = cleanupError(
+          "persist compacted vector index with unknown outcome",
+          candidateIndexError,
+        );
+        this.unsafeMutationState = failure;
+        this.unsafeIndexPersistenceOutcome = true;
+        throw failure;
+      }
+      try {
+        this.rebuildNativeIndex(original);
+      } catch (restoreError) {
+        const failure = new AggregateError(
+          [
+            cleanupError("persist compacted vector index", candidateIndexError),
+            cleanupError(
+              "restore original in-memory vector index",
+              restoreError,
+            ),
+          ],
+          "Vector compaction index write failed and the original in-memory index could not be restored",
+        );
+        this.unsafeMutationState = failure;
+        throw failure;
+      }
+      return {
+        compacted: false,
+        evictedTabIds: [],
+        retainedCompletedPages: originalPages,
+        failure: cleanupError(
+          "persist compacted vector index",
+          candidateIndexError,
+        ),
+      };
+    }
 
-      console.log(
-        `VectorDatabase: LRU cleanup completed, removed ${documentsToDelete.length} documents`,
+    this.applyVectorState(plan.candidate);
+    try {
+      const revision = await this.saveDocumentMappings();
+      await this.verifyPersistedVectorState(plan.candidate, revision);
+      this.assertActiveLabelInvariant(
+        plan.candidate.documents.keys(),
+        plan.candidate.nextLabel,
       );
-    } catch (error) {
-      console.error("VectorDatabase: LRU cleanup failed:", error);
+      this.unsafeMutationState = null;
+      this.unsafeIndexPersistenceOutcome = false;
+      return {
+        compacted: true,
+        evictedTabIds: [...plan.evictedTabIds],
+        retainedCompletedPages: plan.retainedCompletedPages.map((page) => ({
+          ...page,
+        })),
+      };
+    } catch (candidateMappingError) {
+      return this.rollbackPersistedCompaction(
+        original,
+        originalPages,
+        candidateMappingError,
+      );
     }
   }
 
-  /**
-   * Perform time-based cleanup (delete expired documents)
-   */
-  private async performTimeBasedCleanup(): Promise<void> {
+  private planVectorCompaction(
+    original: VectorStateSnapshot,
+    now: number,
+  ): VectorCompactionPlan | null {
+    this.assertActiveLabelInvariant(
+      original.documents.keys(),
+      original.nextLabel,
+    );
+    const { usedLabels } = this.inspectHnswActiveLabels();
+    const underPressure = usedLabels.size + 1 > this.config.maxElements;
+    const cutoff = this.retentionCutoff(now);
+    const pages: VectorCompactionPage[] = [];
+    const completeLabels = new Set<number>();
+
+    const tabIds = new Set([
+      ...original.tabDocuments.keys(),
+      ...original.completedTabPages.keys(),
+    ]);
+    for (const tabId of tabIds) {
+      const exact = this.getExactCompletedPage(tabId);
+      if (!exact) continue;
+      const newestTimestamp = Math.max(
+        ...exact.labels.map(
+          (label) => original.documents.get(label)!.timestamp,
+        ),
+      );
+      const expired =
+        cutoff !== null &&
+        exact.labels.some(
+          (label) => original.documents.get(label)!.timestamp < cutoff,
+        );
+      pages.push({
+        tabId,
+        pageKey: exact.completion.pageKey,
+        labels: [...exact.labels],
+        newestTimestamp,
+        expired,
+      });
+      for (const label of exact.labels) completeLabels.add(label);
+    }
+
+    const expiredPages = pages.filter((page) => page.expired);
+    if (!underPressure && expiredPages.length === 0) return null;
+
+    const oldestFirst = (
+      left: VectorCompactionPage,
+      right: VectorCompactionPage,
+    ) =>
+      left.newestTimestamp - right.newestTimestamp ||
+      left.tabId - right.tabId ||
+      left.pageKey.localeCompare(right.pageKey);
+    expiredPages.sort(oldestFirst);
+    const livePages = pages.filter((page) => !page.expired).sort(oldestFirst);
+    const evictedPages: VectorCompactionPage[] = [...expiredPages];
+    const evictedLabels = new Set(evictedPages.flatMap((page) => page.labels));
+    let retainedCount = original.documents.size - evictedLabels.size;
+
+    if (underPressure) {
+      const headroom = Math.max(1, Math.ceil(this.config.maxElements * 0.2));
+      const targetCount = Math.max(0, this.config.maxElements - headroom);
+      for (const page of livePages) {
+        if (retainedCount <= targetCount) break;
+        evictedPages.push(page);
+        for (const label of page.labels) evictedLabels.add(label);
+        retainedCount -= page.labels.length;
+      }
+      if (retainedCount > targetCount) {
+        const protectedCount = [...original.documents.keys()].filter(
+          (label) => !completeLabels.has(label),
+        ).length;
+        throw new VectorCompactionInsufficientCapacityError(
+          protectedCount,
+          targetCount,
+        );
+      }
+    }
+
+    const evictedTabs = new Set(evictedPages.map((page) => page.tabId));
+    const candidateDocuments = new Map<number, VectorDocument>();
+    for (const [label, document] of original.documents) {
+      if (!evictedLabels.has(label)) {
+        // VectorDocument and its embedding are immutable after add/load. Share
+        // them across planning snapshots so a 100k-vector compaction does not
+        // duplicate hundreds of megabytes of Float32Array data.
+        candidateDocuments.set(label, document);
+      }
+    }
+    const candidateTabDocuments = new Map<number, Set<number>>();
+    for (const [tabId, labels] of original.tabDocuments) {
+      const retainedLabels = [...labels].filter((label) =>
+        candidateDocuments.has(label),
+      );
+      if (retainedLabels.length > 0) {
+        candidateTabDocuments.set(tabId, new Set(retainedLabels));
+      }
+    }
+    const candidateCompletions = new Map<number, PersistedTabPageCompletion>();
+    for (const page of livePages) {
+      if (evictedTabs.has(page.tabId)) continue;
+      const completion = original.completedTabPages.get(page.tabId)!;
+      candidateCompletions.set(page.tabId, {
+        ...completion,
+        labels: [...completion.labels],
+      });
+    }
+    const candidate: VectorStateSnapshot = {
+      documents: candidateDocuments,
+      tabDocuments: candidateTabDocuments,
+      completedTabPages: candidateCompletions,
+      nextLabel: original.nextLabel,
+    };
+    const retainedCompletedPages = [...candidateCompletions.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([tabId, completion]) =>
+        this.completedPageIdentity(tabId, completion),
+      );
+
+    return {
+      candidate,
+      evictedTabIds: [...evictedTabs].sort((left, right) => left - right),
+      retainedCompletedPages,
+    };
+  }
+
+  private captureVectorState(): VectorStateSnapshot {
+    return {
+      documents: new Map(this.documents),
+      tabDocuments: new Map(
+        [...this.tabDocuments.entries()].map(([tabId, labels]) => [
+          tabId,
+          new Set(labels),
+        ]),
+      ),
+      completedTabPages: new Map(
+        [...this.completedTabPages.entries()].map(([tabId, completion]) => [
+          tabId,
+          { ...completion, labels: [...completion.labels] },
+        ]),
+      ),
+      nextLabel: this.nextLabel,
+    };
+  }
+
+  private applyVectorState(state: VectorStateSnapshot): void {
+    this.documents = new Map(state.documents);
+    this.tabDocuments = new Map(
+      [...state.tabDocuments.entries()].map(([tabId, labels]) => [
+        tabId,
+        new Set(labels),
+      ]),
+    );
+    this.completedTabPages = new Map(
+      [...state.completedTabPages.entries()].map(([tabId, completion]) => [
+        tabId,
+        { ...completion, labels: [...completion.labels] },
+      ]),
+    );
+    this.nextLabel = state.nextLabel;
+  }
+
+  private rebuildNativeIndex(state: VectorStateSnapshot): void {
+    this.index.initIndex(
+      this.config.maxElements,
+      this.config.M,
+      this.config.efConstruction,
+      200,
+    );
+    this.index.setEfSearch(this.config.efSearch);
+    for (const [label, document] of [...state.documents.entries()].sort(
+      ([left], [right]) => left - right,
+    )) {
+      this.addPointToRebuiltIndex(document.embedding, label);
+    }
+    this.assertActiveLabelInvariant(state.documents.keys(), state.nextLabel);
+  }
+
+  private addPointToRebuiltIndex(embedding: Float32Array, label: number): void {
+    let ownedVector: any = null;
     try {
-      const maxRetentionMs =
-        this.config.maxRetentionDays! * 24 * 60 * 60 * 1000;
-      const cutoffTime = Date.now() - maxRetentionMs;
-
-      console.log(
-        `VectorDatabase: Starting time-based cleanup, removing documents older than ${this.config.maxRetentionDays} days`,
-      );
-
-      const documentsToDelete: number[] = [];
-
-      for (const [label, document] of this.documents.entries()) {
-        if (document.timestamp < cutoffTime) {
-          documentsToDelete.push(label);
-        }
+      let vector: any;
+      if (globalHnswlib?.VectorFloat) {
+        ownedVector = new globalHnswlib.VectorFloat();
+        for (const value of embedding) ownedVector.push_back(value);
+        vector = ownedVector;
+      } else {
+        vector = Array.from(embedding);
       }
-
-      for (const label of documentsToDelete) {
-        await this.removeDocumentByLabel(label);
+      this.index.addPoint(vector, label, false);
+    } finally {
+      if (ownedVector && typeof ownedVector.delete === "function") {
+        ownedVector.delete();
       }
-
-      // Save updated index and mappings
-      if (documentsToDelete.length > 0) {
-        await this.saveIndex();
-        await this.saveDocumentMappings();
-      }
-
-      console.log(
-        `VectorDatabase: Time-based cleanup completed, removed ${documentsToDelete.length} expired documents`,
-      );
-    } catch (error) {
-      console.error("VectorDatabase: Time-based cleanup failed:", error);
     }
   }
 
-  /**
-   * Remove single document by label
-   */
-  private async removeDocumentByLabel(label: number): Promise<void> {
+  private completedPageIdentitiesForCurrentState(
+    now: number,
+  ): CompletedTabPageIdentity[] {
+    const pages: CompletedTabPageIdentity[] = [];
+    for (const tabId of [...this.completedTabPages.keys()].sort(
+      (left, right) => left - right,
+    )) {
+      const state = this.classifyTabPage(tabId, now);
+      if (state.state === "complete") {
+        pages.push(this.completedPageIdentity(tabId, state.completion));
+      }
+    }
+    return pages;
+  }
+
+  private async rollbackPersistedCompaction(
+    original: VectorStateSnapshot,
+    originalPages: CompletedTabPageIdentity[],
+    candidateMappingError: unknown,
+  ): Promise<VectorCompactionResult> {
+    const rollbackFailures: Error[] = [];
     try {
-      const document = this.documents.get(label);
-      if (!document) {
-        console.warn(`VectorDatabase: Document with label ${label} not found`);
-        return;
-      }
-
-      // Remove vector from HNSW index
-      if (this.index) {
-        try {
-          this.index.markDelete(label);
-        } catch (indexError) {
-          console.warn(
-            `VectorDatabase: Failed to mark delete in index for label ${label}:`,
-            indexError,
-          );
-        }
-      }
-
-      // Remove from memory mapping
-      this.completedTabPages.delete(document.tabId);
-      this.documents.delete(label);
-
-      // Remove from tab mapping
-      const tabId = document.tabId;
-      if (this.tabDocuments.has(tabId)) {
-        this.tabDocuments.get(tabId)!.delete(label);
-        // If tab has no other documents, delete entire tab mapping
-        if (this.tabDocuments.get(tabId)!.size === 0) {
-          this.tabDocuments.delete(tabId);
-        }
-      }
-
-      console.log(
-        `VectorDatabase: Removed document with label ${label} from tab ${tabId}`,
-      );
+      this.rebuildNativeIndex(original);
+      await this.saveIndex();
     } catch (error) {
-      console.error(
-        `VectorDatabase: Failed to remove document with label ${label}:`,
-        error,
+      if (error instanceof HnswIndexPersistenceUncertainError) {
+        this.unsafeIndexPersistenceOutcome = true;
+      }
+      rollbackFailures.push(
+        cleanupError("restore original persisted vector index", error),
       );
     }
+
+    if (rollbackFailures.length === 0) {
+      this.applyVectorState(original);
+      try {
+        const revision = await this.saveDocumentMappings();
+        await this.verifyPersistedVectorState(original, revision);
+        this.assertActiveLabelInvariant(
+          original.documents.keys(),
+          original.nextLabel,
+        );
+      } catch (error) {
+        rollbackFailures.push(
+          cleanupError("restore original persisted vector mappings", error),
+        );
+      }
+    }
+
+    if (rollbackFailures.length > 0) {
+      const failure = new AggregateError(
+        [
+          cleanupError(
+            "persist compacted vector mappings",
+            candidateMappingError,
+          ),
+          ...rollbackFailures,
+        ],
+        "Vector compaction failed and its persisted rollback did not complete",
+      );
+      this.unsafeMutationState = failure;
+      throw failure;
+    }
+
+    this.unsafeMutationState = null;
+    this.unsafeIndexPersistenceOutcome = false;
+    return {
+      compacted: false,
+      evictedTabIds: [],
+      retainedCompletedPages: originalPages.map((page) => ({ ...page })),
+      failure: cleanupError(
+        "persist compacted vector mappings",
+        candidateMappingError,
+      ),
+    };
+  }
+
+  private async verifyPersistedVectorState(
+    expected: VectorStateSnapshot,
+    expectedRevision: number,
+  ): Promise<void> {
+    const lookup = await this.lookupDocumentMappings();
+    if (lookup.status !== "found") {
+      throw new Error(
+        lookup.status === "invalid"
+          ? `Persisted vector mappings are invalid: ${lookup.reason}`
+          : "Persisted vector mappings are missing",
+      );
+    }
+    const actual = lookup.value;
+    if (
+      actual.revision !== expectedRevision ||
+      actual.nextLabel !== expected.nextLabel ||
+      actual.documents.length !== expected.documents.size ||
+      actual.tabDocuments.length !== expected.tabDocuments.size ||
+      actual.completedTabPages.length !== expected.completedTabPages.size
+    ) {
+      throw new Error("Persisted vector compaction metadata does not match");
+    }
+
+    const actualDocuments = new Map(actual.documents);
+    const actualTabDocuments = new Map(actual.tabDocuments);
+    const actualCompletions = new Map(actual.completedTabPages);
+    for (const [label, expectedDocument] of expected.documents) {
+      const actualDocument = actualDocuments.get(label);
+      if (
+        !actualDocument ||
+        !this.vectorDocumentsEqual(actualDocument, expectedDocument)
+      ) {
+        throw new Error(`Persisted vector document ${label} does not match`);
+      }
+    }
+    for (const [tabId, expectedLabels] of expected.tabDocuments) {
+      const actualLabels = actualTabDocuments.get(tabId);
+      const sortedExpected = [...expectedLabels].sort(
+        (left, right) => left - right,
+      );
+      if (
+        !actualLabels ||
+        actualLabels.length !== sortedExpected.length ||
+        actualLabels.some((label, index) => label !== sortedExpected[index])
+      ) {
+        throw new Error(`Persisted vector tab ${tabId} does not match`);
+      }
+    }
+    for (const [tabId, expectedCompletion] of expected.completedTabPages) {
+      const actualCompletion = actualCompletions.get(tabId);
+      if (
+        !actualCompletion ||
+        actualCompletion.pageKey !== expectedCompletion.pageKey ||
+        actualCompletion.url !== expectedCompletion.url ||
+        actualCompletion.title !== expectedCompletion.title ||
+        actualCompletion.expectedCount !== expectedCompletion.expectedCount ||
+        actualCompletion.labels.length !== expectedCompletion.labels.length ||
+        actualCompletion.labels.some(
+          (label, index) => label !== expectedCompletion.labels[index],
+        )
+      ) {
+        throw new Error(`Persisted vector completion ${tabId} does not match`);
+      }
+    }
+  }
+
+  private vectorDocumentsEqual(
+    left: VectorDocument,
+    right: VectorDocument,
+  ): boolean {
+    return (
+      left.id === right.id &&
+      left.tabId === right.tabId &&
+      left.url === right.url &&
+      left.title === right.title &&
+      left.timestamp === right.timestamp &&
+      left.chunk.text === right.chunk.text &&
+      left.chunk.source === right.chunk.source &&
+      left.chunk.index === right.chunk.index &&
+      left.chunk.wordCount === right.chunk.wordCount &&
+      left.embedding.length === right.embedding.length &&
+      left.embedding.every((value, index) => value === right.embedding[index])
+    );
   }
 
   // Private helper methods
@@ -3294,6 +3758,10 @@ async function performClearAllVectorData(): Promise<void> {
 
     await enqueueHnswFileSystemOperation(async () => {
       const manager = globalHnswlib.EmscriptenFileSystemManager;
+      // A timed-out write may still complete after its caller has failed.
+      // Recovery may proceed only after that native operation is observably
+      // idle; otherwise clearing FILE_DATA can be undone by the late write.
+      await waitForGlobalHnswFileSystemIdle();
       await clearIndexedDatabaseStore(HNSW_DB_NAME, IDBFS_STORE_NAME);
 
       // Re-populate the in-memory IDBFS mount from the now-empty persistent
