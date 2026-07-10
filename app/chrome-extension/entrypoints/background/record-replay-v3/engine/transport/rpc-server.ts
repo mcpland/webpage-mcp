@@ -29,6 +29,11 @@ import type {
   EdgeV3,
 } from "../../domain/flow";
 import { FLOW_SCHEMA_VERSION as CURRENT_FLOW_SCHEMA_VERSION } from "../../domain/flow";
+import {
+  FLOW_RESOURCE_LIMITS,
+  findFlowResourceLimitViolation,
+  type FlowListOptions,
+} from "../../domain/flow-limits";
 import type { VariableDefinition } from "../../domain/variables";
 import type {
   TriggerKind,
@@ -516,7 +521,9 @@ export class RpcServer {
       }
 
       case "rr_v3.listFlows": {
-        const flows = await this.storage.flows.list();
+        const flows = await this.storage.flows.list(
+          this.normalizeFlowListOptions(params),
+        );
         return flows as unknown as JsonValue;
       }
 
@@ -623,6 +630,10 @@ export class RpcServer {
     if (!rawFlow || typeof rawFlow !== "object" || Array.isArray(rawFlow)) {
       throw new Error("flow is required");
     }
+    const resourceViolation = findFlowResourceLimitViolation(rawFlow);
+    if (resourceViolation) {
+      throw new Error(resourceViolation);
+    }
 
     const rawId = (rawFlow as JsonObject).id;
     const save = async (): Promise<JsonValue> => {
@@ -655,6 +666,39 @@ export class RpcServer {
     }
 
     return save();
+  }
+
+  private normalizeFlowListOptions(
+    params: JsonObject | undefined,
+  ): FlowListOptions {
+    const options: FlowListOptions = {};
+    if (params?.offset !== undefined) {
+      if (
+        typeof params.offset !== "number" ||
+        !Number.isSafeInteger(params.offset) ||
+        params.offset < 0 ||
+        params.offset > FLOW_RESOURCE_LIMITS.maxStoredFlows
+      ) {
+        throw new Error(
+          `offset must be an integer between 0 and ${FLOW_RESOURCE_LIMITS.maxStoredFlows}`,
+        );
+      }
+      options.offset = params.offset;
+    }
+    if (params?.limit !== undefined) {
+      if (
+        typeof params.limit !== "number" ||
+        !Number.isSafeInteger(params.limit) ||
+        params.limit < 1 ||
+        params.limit > FLOW_RESOURCE_LIMITS.maxStoredFlows
+      ) {
+        throw new Error(
+          `limit must be an integer between 1 and ${FLOW_RESOURCE_LIMITS.maxStoredFlows}`,
+        );
+      }
+      options.limit = params.limit;
+    }
+    return options;
   }
 
   private async handleListPublishedFlows(): Promise<JsonValue> {
