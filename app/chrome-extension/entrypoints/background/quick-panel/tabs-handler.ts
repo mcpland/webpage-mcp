@@ -38,6 +38,10 @@ function isValidWindowId(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
+function isTrustedQuickPanelSender(sender: chrome.runtime.MessageSender): boolean {
+  return sender.id === chrome.runtime.id && isValidTabId(sender.tab?.id) && sender.frameId === 0;
+}
+
 function normalizeBoolean(value: unknown): boolean {
   return value === true;
 }
@@ -89,6 +93,10 @@ async function handleTabsQuery(
   sender: chrome.runtime.MessageSender,
 ): Promise<QuickPanelTabsQueryResponse> {
   try {
+    if (!isTrustedQuickPanelSender(sender)) {
+      return { success: false, error: 'Quick Panel tab request denied' };
+    }
+
     const includeAllWindows = message.payload?.includeAllWindows ?? true;
 
     // Extract current context from sender
@@ -137,8 +145,13 @@ async function handleTabsQuery(
 
 async function handleActivateTab(
   message: QuickPanelActivateTabMessage,
+  sender: chrome.runtime.MessageSender,
 ): Promise<QuickPanelActivateTabResponse> {
   try {
+    if (!isTrustedQuickPanelSender(sender)) {
+      return { success: false, error: 'Quick Panel tab request denied' };
+    }
+
     const tabId = message.payload?.tabId;
     const windowId = message.payload?.windowId;
 
@@ -170,8 +183,13 @@ async function handleActivateTab(
 
 async function handleCloseTab(
   message: QuickPanelCloseTabMessage,
+  sender: chrome.runtime.MessageSender,
 ): Promise<QuickPanelCloseTabResponse> {
   try {
+    if (!isTrustedQuickPanelSender(sender)) {
+      return { success: false, error: 'Quick Panel tab request denied' };
+    }
+
     const tabId = message.payload?.tabId;
 
     if (!isValidTabId(tabId)) {
@@ -213,13 +231,13 @@ export function initQuickPanelTabsHandler(): void {
 
     // Tab activate
     if (message?.type === BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_TAB_ACTIVATE) {
-      handleActivateTab(message as QuickPanelActivateTabMessage).then(sendResponse);
+      handleActivateTab(message as QuickPanelActivateTabMessage, sender).then(sendResponse);
       return true;
     }
 
     // Tab close
     if (message?.type === BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_TAB_CLOSE) {
-      handleCloseTab(message as QuickPanelCloseTabMessage).then(sendResponse);
+      handleCloseTab(message as QuickPanelCloseTabMessage, sender).then(sendResponse);
       return true;
     }
 
