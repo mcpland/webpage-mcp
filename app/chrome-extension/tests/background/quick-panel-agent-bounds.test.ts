@@ -34,7 +34,7 @@ describe('Quick Panel agent payload limits', () => {
     vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation((listener) => {
       if (!requestListener) requestListener = listener as RequestListener;
     });
-    vi.mocked(chrome.storage.local.get).mockResolvedValue({
+    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockResolvedValue({
       'agent-selected-session-id': 'session-1',
     });
     (chrome.tabs as typeof chrome.tabs & { sendMessage: ReturnType<typeof vi.fn> }).sendMessage = vi
@@ -106,7 +106,7 @@ describe('Quick Panel agent payload limits', () => {
   });
 
   it('rejects a corrupted oversized selected session identifier', async () => {
-    vi.mocked(chrome.storage.local.get).mockResolvedValue({
+    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockResolvedValue({
       'agent-selected-session-id': 's'.repeat(limits.maxIdentifierBytes + 1),
     });
     await expect(

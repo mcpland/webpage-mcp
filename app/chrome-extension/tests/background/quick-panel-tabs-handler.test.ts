@@ -114,16 +114,29 @@ describe('Quick Panel tabs handler', () => {
       '@/entrypoints/background/quick-panel/tabs-handler'
     );
     vi.mocked(chrome.tabs.query).mockResolvedValue(
-      Array.from({ length: QUICK_PANEL_TAB_LIMITS.maxResults + 20 }, (_, index) => ({
-        id: index + 1,
-        windowId: 3,
-        index,
-        title: 't'.repeat(QUICK_PANEL_TAB_LIMITS.maxTitleChars + 20),
-        url: `https://example.com/${'u'.repeat(QUICK_PANEL_TAB_LIMITS.maxUrlChars + 20)}`,
-        favIconUrl: `data:image/png;base64,${'a'.repeat(
-          QUICK_PANEL_TAB_LIMITS.maxFavIconUrlChars + 20,
-        )}`,
-      })),
+      Array.from(
+        { length: QUICK_PANEL_TAB_LIMITS.maxResults + 20 },
+        (_, index) =>
+          ({
+            id: index + 1,
+            windowId: 3,
+            index,
+            title: 't'.repeat(QUICK_PANEL_TAB_LIMITS.maxTitleChars + 20),
+            url: `https://example.com/${'u'.repeat(QUICK_PANEL_TAB_LIMITS.maxUrlChars + 20)}`,
+            favIconUrl: `data:image/png;base64,${'a'.repeat(
+              QUICK_PANEL_TAB_LIMITS.maxFavIconUrlChars + 20,
+            )}`,
+            pinned: false,
+            highlighted: false,
+            active: false,
+            frozen: false,
+            incognito: false,
+            selected: false,
+            discarded: false,
+            autoDiscardable: true,
+            groupId: -1,
+          }) as chrome.tabs.Tab,
+      ),
     );
     const sendResponse = vi.fn();
     const sender = {
