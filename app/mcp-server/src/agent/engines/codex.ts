@@ -11,6 +11,7 @@ import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './t
 import type { AgentMessage, RealtimeEvent } from '../types';
 import { getProject } from '../project-service';
 import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
+import { createAgentEventDedupKey } from './event-dedupe';
 
 type TodoListPhase = 'started' | 'update' | 'completed';
 
@@ -371,9 +372,9 @@ export class CodexEngine implements AgentEngine {
         const trimmed = content.trim();
         if (!trimmed) return;
 
-        const hash = this.encodeHash(
+        const hash = createAgentEventDedupKey(
           `${messageType}:${trimmed}:${JSON.stringify(metadata)}:${sessionId}:${requestId || ''}`,
-        ).slice(0, 16);
+        );
         if (streamedToolHashes.has(hash)) return;
         streamedToolHashes.add(hash);
 
@@ -968,7 +969,4 @@ Work directly in the current directory. Do not create subdirectories unless spec
     };
   }
 
-  private encodeHash(value: string): string {
-    return Buffer.from(value, 'utf-8').toString('base64');
-  }
 }

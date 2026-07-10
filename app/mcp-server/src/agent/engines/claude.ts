@@ -4,6 +4,7 @@ import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './t
 import type { AgentMessage, RealtimeEvent } from '../types';
 import { getProject } from '../project-service';
 import { resolveWebpageMcpStdioConfig } from './mcp-stdio-config';
+import { createAgentEventDedupKey } from './event-dedupe';
 
 // Images are provided to Claude Code via local file paths referenced in the prompt text.
 // Claude Code CLI reads images from local paths, so we write base64 images to temp files and reference them.
@@ -177,9 +178,9 @@ export class ClaudeEngine implements AgentEngine {
       const trimmed = content.trim();
       if (!trimmed) return;
 
-      const hash = this.encodeHash(
+      const hash = createAgentEventDedupKey(
         `${messageType}:${trimmed}:${JSON.stringify(metadata)}:${sessionId}:${requestId || ''}`,
-      ).slice(0, 16);
+      );
       if (streamedToolHashes.has(hash)) return;
       streamedToolHashes.add(hash);
 
@@ -1400,13 +1401,6 @@ export class ClaudeEngine implements AgentEngine {
       }
     }
     return undefined;
-  }
-
-  /**
-   * Encode string to base64 for hashing.
-   */
-  private encodeHash(value: string): string {
-    return Buffer.from(value, 'utf-8').toString('base64');
   }
 
   /**
