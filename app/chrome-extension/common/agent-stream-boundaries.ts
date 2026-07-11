@@ -1,15 +1,21 @@
-import type { RealtimeEvent } from 'webpage-mcp-shared';
+import {
+  AGENT_STREAM_MAX_ERROR_BYTES,
+  AGENT_STREAM_MAX_EVENTS_PER_REQUEST,
+  AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST,
+  AGENT_STREAM_MAX_STATUS_MESSAGE_BYTES,
+  type RealtimeEvent,
+} from 'webpage-mcp-shared';
 
 export const AGENT_STREAM_LIMITS = Object.freeze({
   maxRelayBytes: 128 * 1_024,
   maxMessageContentBytes: 64 * 1_024,
   maxMetadataBytes: 16 * 1_024,
-  maxStatusMessageBytes: 4 * 1_024,
-  maxErrorBytes: 8 * 1_024,
+  maxStatusMessageBytes: AGENT_STREAM_MAX_STATUS_MESSAGE_BYTES,
+  maxErrorBytes: AGENT_STREAM_MAX_ERROR_BYTES,
   maxIdentifierBytes: 256,
   maxShortTextBytes: 256,
-  maxEventsPerRequest: 512,
-  maxBytesPerRequest: 4 * 1_024 * 1_024,
+  maxEventsPerRequest: AGENT_STREAM_MAX_EVENTS_PER_REQUEST,
+  maxBytesPerRequest: AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST,
 });
 
 export interface AgentStreamRelayPayload {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { resolveClaudeSettingSources } from './claude';
+import { AGENT_SESSION_MAX_THINKING_TOKENS, AGENT_SESSION_MAX_TURNS } from 'webpage-mcp-shared';
+import {
+  ClaudeEngine,
+  resolveClaudeSettingSources,
+  validateClaudeExecutionOptionsConfig,
+} from './claude';
 
 describe('Claude setting source isolation', () => {
   it('uses SDK isolation mode by default', () => {
@@ -20,5 +25,26 @@ describe('Claude setting source isolation', () => {
     expect(resolveClaudeSettingSources(['user'])).toEqual(['user']);
     expect(resolveClaudeSettingSources(['project', 'user', 'local', 'user'])).toEqual(['user']);
     expect(resolveClaudeSettingSources(['unknown'])).toEqual([]);
+  });
+});
+
+describe('Claude persisted work-limit validation', () => {
+  it.each([
+    ['maxTurns', AGENT_SESSION_MAX_TURNS],
+    ['maxThinkingTokens', AGENT_SESSION_MAX_THINKING_TOKENS],
+  ] as const)('rejects legacy %s values before loading the SDK', async (field, maximum) => {
+    expect(() => validateClaudeExecutionOptionsConfig({ [field]: maximum })).not.toThrow();
+    await expect(
+      new ClaudeEngine('runtime-limit-test').initializeAndRun(
+        {
+          sessionId: 'legacy-session',
+          instruction: 'must fail before SDK loading',
+          requestId: 'legacy-request',
+          projectRoot: process.cwd(),
+          optionsConfig: { [field]: maximum + 1 },
+        },
+        { emit: () => {} },
+      ),
+    ).rejects.toThrow(`optionsConfig.${field}`);
   });
 });

@@ -4,6 +4,8 @@ import {
   CODEX_SANDBOX_MODES,
   DEFAULT_CLAUDE_PERMISSION_MODE,
   DEFAULT_CODEX_CONFIG,
+  AGENT_SESSION_MAX_THINKING_TOKENS,
+  AGENT_SESSION_MAX_TURNS,
   isClaudePermissionMode,
   isCodexReasoningEffort,
   isCodexSandboxMode,
@@ -73,9 +75,18 @@ export function validateCodexConfig(codexConfig: unknown): string | undefined {
     if (
       hasOwn(codexConfig, field) &&
       value !== undefined &&
-      (!Number.isInteger(value) || (value as number) <= 0)
+      (!Number.isInteger(value) ||
+        (value as number) <= 0 ||
+        (value as number) >
+          (field === 'maxTurns'
+            ? AGENT_SESSION_MAX_TURNS
+            : AGENT_SESSION_MAX_THINKING_TOKENS))
     ) {
-      return `optionsConfig.codexConfig.${field} must be a positive integer`;
+      const maximum =
+        field === 'maxTurns'
+          ? AGENT_SESSION_MAX_TURNS
+          : AGENT_SESSION_MAX_THINKING_TOKENS;
+      return `optionsConfig.codexConfig.${field} must be a positive integer no greater than ${maximum}`;
     }
   }
 

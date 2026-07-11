@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AGENT_STREAM_MAX_ERROR_BYTES,
+  AGENT_STREAM_MAX_EVENTS_PER_REQUEST,
+  AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST,
+  AGENT_STREAM_MAX_STATUS_MESSAGE_BYTES,
+} from 'webpage-mcp-shared';
+import {
   AGENT_STREAM_LIMITS,
   agentStreamUtf8Bytes,
   sanitizeAgentStreamRelayPayload,
@@ -24,6 +30,15 @@ describe('Agent stream relay boundaries', () => {
     },
   };
 
+  it('uses the shared producer/relay contract limits', () => {
+    expect(AGENT_STREAM_LIMITS).toMatchObject({
+      maxEventsPerRequest: AGENT_STREAM_MAX_EVENTS_PER_REQUEST,
+      maxBytesPerRequest: AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST,
+      maxErrorBytes: AGENT_STREAM_MAX_ERROR_BYTES,
+      maxStatusMessageBytes: AGENT_STREAM_MAX_STATUS_MESSAGE_BYTES,
+    });
+  });
+
   it('preserves a valid bounded event', () => {
     expect(sanitizeAgentStreamRelayPayload(baseMessage)).toEqual(baseMessage);
   });
@@ -36,7 +51,9 @@ describe('Agent stream relay boundaries', () => {
         data: {
           ...baseMessage.event.data,
           content: 'x'.repeat(AGENT_STREAM_LIMITS.maxMessageContentBytes + 100),
-          metadata: { note: 'm'.repeat(AGENT_STREAM_LIMITS.maxMetadataBytes + 1) },
+          metadata: {
+            note: 'm'.repeat(AGENT_STREAM_LIMITS.maxMetadataBytes + 1),
+          },
         },
       },
     });
@@ -59,7 +76,10 @@ describe('Agent stream relay boundaries', () => {
     },
     {
       subscriptionId: 's',
-      event: { type: 'status', data: { sessionId: 'session-1', status: 'forged' } },
+      event: {
+        type: 'status',
+        data: { sessionId: 'session-1', status: 'forged' },
+      },
     },
     {
       subscriptionId: 's',

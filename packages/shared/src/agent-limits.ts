@@ -27,6 +27,15 @@ export const AGENT_SESSION_OPTIONS_MAX_JSON_BYTES = 188 * 1024;
 export const AGENT_SESSION_CONFIG_MAX_JSON_BYTES = 320 * 1024;
 export const AGENT_SESSION_OPTION_STRING_MAX_BYTES = 8 * 1024;
 export const AGENT_MANAGEMENT_INFO_MAX_JSON_BYTES = 256 * 1024;
+/** Runtime work caps shared by Claude options and nested Codex options. */
+export const AGENT_SESSION_MAX_TURNS = 256;
+export const AGENT_SESSION_MAX_THINKING_TOKENS = 128 * 1024;
+
+/** Per-request agent stream limits shared by producers and downstream relays. */
+export const AGENT_STREAM_MAX_EVENTS_PER_REQUEST = 512;
+export const AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST = 4 * 1024 * 1024;
+export const AGENT_STREAM_MAX_ERROR_BYTES = 8 * 1024;
+export const AGENT_STREAM_MAX_STATUS_MESSAGE_BYTES = 4 * 1024;
 
 /** UTF-8 and JSON budgets for project persistence and project-opening RPCs. */
 export const AGENT_PROJECT_NAME_MAX_BYTES = 4 * 1024;

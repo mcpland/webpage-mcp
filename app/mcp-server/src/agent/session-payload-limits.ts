@@ -8,6 +8,8 @@ import {
   AGENT_SESSION_NAME_MAX_BYTES,
   AGENT_SESSION_OPTION_STRING_MAX_BYTES,
   AGENT_SESSION_OPTIONS_MAX_JSON_BYTES,
+  AGENT_SESSION_MAX_THINKING_TOKENS,
+  AGENT_SESSION_MAX_TURNS,
   AGENT_SYSTEM_PROMPT_CONFIG_MAX_JSON_BYTES,
   AGENT_SYSTEM_PROMPT_TEXT_MAX_BYTES,
 } from 'webpage-mcp-shared';
@@ -128,11 +130,13 @@ function validatePositiveNumber(
   value: unknown,
   field: string,
   integer: boolean,
+  maximum = Number.POSITIVE_INFINITY,
 ): void {
   if (
     typeof value !== 'number' ||
     !Number.isFinite(value) ||
     value <= 0 ||
+    value > maximum ||
     (integer && !Number.isInteger(value))
   ) {
     invalid(field);
@@ -191,7 +195,14 @@ function validateCodexConfig(value: unknown): void {
       continue;
     }
     if (key === 'maxTurns' || key === 'maxThinkingTokens') {
-      validatePositiveNumber(item, field, true);
+      validatePositiveNumber(
+        item,
+        field,
+        true,
+        key === 'maxTurns'
+          ? AGENT_SESSION_MAX_TURNS
+          : AGENT_SESSION_MAX_THINKING_TOKENS,
+      );
       continue;
     }
     if (key === 'autoInstructions') {
@@ -257,7 +268,14 @@ function validateOptionsConfig(value: unknown, allowNull: boolean): number {
     } else if (key === 'tools') {
       validateTools(item);
     } else if (key === 'maxThinkingTokens' || key === 'maxTurns') {
-      validatePositiveNumber(item, field, true);
+      validatePositiveNumber(
+        item,
+        field,
+        true,
+        key === 'maxTurns'
+          ? AGENT_SESSION_MAX_TURNS
+          : AGENT_SESSION_MAX_THINKING_TOKENS,
+      );
     } else if (key === 'maxBudgetUsd') {
       validatePositiveNumber(item, field, false);
     } else if (key === 'enableFileCheckpointing') {

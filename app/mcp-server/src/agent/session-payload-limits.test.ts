@@ -9,6 +9,8 @@ import {
   AGENT_MODEL_MAX_BYTES,
   AGENT_SESSION_NAME_MAX_BYTES,
   AGENT_SESSION_OPTIONS_MAX_JSON_BYTES,
+  AGENT_SESSION_MAX_THINKING_TOKENS,
+  AGENT_SESSION_MAX_TURNS,
   AGENT_SYSTEM_PROMPT_TEXT_MAX_BYTES,
   DEFAULT_CODEX_CONFIG,
 } from 'webpage-mcp-shared';
@@ -228,6 +230,42 @@ describe('session configuration byte validation', () => {
       expect.objectContaining({
         code: 'AGENT_PAYLOAD_INVALID',
         field: 'optionsConfig.codexConfig.keys',
+      }),
+    );
+  });
+
+  it.each([
+    ['maxTurns', AGENT_SESSION_MAX_TURNS],
+    ['maxThinkingTokens', AGENT_SESSION_MAX_THINKING_TOKENS],
+  ] as const)('hard-caps optionsConfig and Codex %s', (field, maximum) => {
+    expect(() =>
+      validateSessionCreatePayload('project', 'claude', {
+        optionsConfig: { [field]: maximum },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateSessionCreatePayload('project', 'claude', {
+        optionsConfig: { [field]: maximum + 1 },
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'AGENT_PAYLOAD_INVALID',
+        field: `optionsConfig.${field}`,
+      }),
+    );
+    expect(() =>
+      validateSessionCreatePayload('project', 'codex', {
+        optionsConfig: { codexConfig: { [field]: maximum } },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateSessionCreatePayload('project', 'codex', {
+        optionsConfig: { codexConfig: { [field]: maximum + 1 } },
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'AGENT_PAYLOAD_INVALID',
+        field: `optionsConfig.codexConfig.${field}`,
       }),
     );
   });

@@ -7,8 +7,16 @@ import {
   AGENT_CLIENT_META_MAX_JSON_BYTES,
   AGENT_DISPLAY_TEXT_MAX_BYTES,
   AGENT_MESSAGE_CONTENT_MAX_BYTES,
+  AGENT_STREAM_MAX_ERROR_BYTES,
+  AGENT_STREAM_MAX_EVENTS_PER_REQUEST,
+  AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST,
+  AGENT_STREAM_MAX_STATUS_MESSAGE_BYTES,
 } from 'webpage-mcp-shared';
-import { AGENT_PAYLOAD_INVALID, AGENT_PAYLOAD_TOO_LARGE } from './payload-limits';
+import {
+  AGENT_PAYLOAD_INVALID,
+  AGENT_PAYLOAD_TOO_LARGE,
+  getJsonByteLength,
+} from './payload-limits';
 
 const projectServiceMocks = vi.hoisted(() => ({
   getProject: vi.fn(),
@@ -53,7 +61,12 @@ vi.mock('./attachment-service', () => ({
   },
 }));
 
-import { AGENT_EXECUTION_LIMITS, AgentChatService } from './chat-service';
+import {
+  AGENT_EXECUTION_LIMITS,
+  AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE,
+  AGENT_EXECUTION_OUTPUT_LIMITS,
+  AgentChatService,
+} from './chat-service';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -63,6 +76,13 @@ function deferred<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function containsAsciiControl(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
 }
 
 describe('AgentChatService', () => {
@@ -183,26 +203,32 @@ describe('AgentChatService', () => {
       code: AGENT_PAYLOAD_TOO_LARGE,
       field: 'metadata',
     },
-  ])('rejects $name before reserving or producing side effects', async ({ payload, code, field }) => {
-    const run = vi.fn();
-    const streamManager = new AgentStreamManager();
-    const streamedEvents: unknown[] = [];
+  ])(
+    'rejects $name before reserving or producing side effects',
+    async ({ payload, code, field }) => {
+      const run = vi.fn();
+      const streamManager = new AgentStreamManager();
+      const streamedEvents: unknown[] = [];
     streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
     const service = new AgentChatService({
       engines: [{ name: 'claude', supportsMcp: true, initializeAndRun: run }],
-      streamManager,
-    });
+        streamManager,
+      });
 
-    await expect(service.handleAct(legacySession.id, payload)).rejects.toMatchObject({ code, field });
+      await expect(service.handleAct(legacySession.id, payload)).rejects.toMatchObject({
+        code,
+        field,
+      });
 
-    expect(service.getRunningExecutions()).toHaveLength(0);
-    expect(sessionServiceMocks.getSession).not.toHaveBeenCalled();
+      expect(service.getRunningExecutions()).toHaveLength(0);
+      expect(sessionServiceMocks.getSession).not.toHaveBeenCalled();
     expect(projectServiceMocks.getProject).not.toHaveBeenCalled();
     expect(attachmentServiceMocks.saveAttachment).not.toHaveBeenCalled();
-    expect(messageServiceMocks.createMessage).not.toHaveBeenCalled();
-    expect(run).not.toHaveBeenCalled();
-    expect(streamedEvents).toEqual([]);
-  });
+      expect(messageServiceMocks.createMessage).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+      expect(streamedEvents).toEqual([]);
+    },
+  );
 
   it('caps concurrent preparation for one runtime session', async () => {
     const projectGate = deferred<any>();
@@ -264,7 +290,9 @@ describe('AgentChatService', () => {
       }),
     );
     await vi.waitFor(() =>
-      expect(projectServiceMocks.getProject).toHaveBeenCalledTimes(AGENT_EXECUTION_LIMITS.maxGlobal),
+      expect(projectServiceMocks.getProject).toHaveBeenCalledTimes(
+        AGENT_EXECUTION_LIMITS.maxGlobal,
+      ),
     );
 
     await expect(
@@ -696,10 +724,7 @@ describe('AgentChatService', () => {
       }),
     ).rejects.toThrow('Failed to save attachments: disk full');
 
-    expect(attachmentServiceMocks.deleteAttachment).toHaveBeenCalledWith(
-      'project-1',
-      'first.png',
-    );
+    expect(attachmentServiceMocks.deleteAttachment).toHaveBeenCalledWith('project-1', 'first.png');
     expect(messageServiceMocks.createMessage).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
   });
@@ -711,7 +736,8 @@ describe('AgentChatService', () => {
     const streamManager = new AgentStreamManager();
     const streamedMessages: string[] = [];
     streamManager.addListener(legacySession.id, (event) => {
-      if (event.type === 'message' && event.data?.content) streamedMessages.push(event.data.content);
+      if (event.type === 'message' && event.data?.content)
+        streamedMessages.push(event.data.content);
     });
     const run = vi.fn();
     const service = new AgentChatService({
@@ -740,10 +766,7 @@ describe('AgentChatService', () => {
       }),
     ).rejects.toThrow('Failed to persist message attachments: database unavailable');
 
-    expect(attachmentServiceMocks.deleteAttachment).toHaveBeenCalledWith(
-      'project-1',
-      'first.png',
-    );
+    expect(attachmentServiceMocks.deleteAttachment).toHaveBeenCalledWith('project-1', 'first.png');
     expect(streamedMessages).not.toContain('Inspect this image');
     expect(run).not.toHaveBeenCalled();
   });
@@ -1101,7 +1124,9 @@ describe('AgentChatService', () => {
             resolve();
             return;
           }
-          options.signal?.addEventListener('abort', () => resolve(), { once: true });
+          options.signal?.addEventListener('abort', () => resolve(), {
+            once: true,
+          });
         });
       },
     };
@@ -1129,5 +1154,623 @@ describe('AgentChatService', () => {
     expect(ordering).toEqual(['assistant persisted', 'history deleted']);
     expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(2);
     expect(service.getRunningExecutions()).toHaveLength(0);
+  });
+
+  it('reserves relay headroom and emits one fixed terminal pair on event-count overflow', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'event-count-output-limit';
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        const engineEventAllowance = AGENT_EXECUTION_OUTPUT_LIMITS.maxAdmittedEvents - 3;
+        for (let index = 0; index < engineEventAllowance; index += 1) {
+          ctx.emit({
+            type: 'status',
+            data: {
+              sessionId: legacySession.id,
+              requestId,
+              status: 'ready',
+            },
+          });
+        }
+        ctx.emit({
+          type: 'status',
+          data: {
+            sessionId: legacySession.id,
+            requestId,
+            status: 'ready',
+            message: 'this overflowing engine event must not be relayed',
+          },
+        });
+        ctx.emit({
+          type: 'status',
+          data: {
+            sessionId: legacySession.id,
+            requestId,
+            status: 'completed',
+            message: 'late forged completion',
+          },
+        });
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Exercise the event-count output limit',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() =>
+      expect(streamedEvents.filter((event) => event.type === 'error')).toHaveLength(1),
+    );
+
+    expect(engineSignal?.aborted).toBe(true);
+    expect(streamedEvents).toHaveLength(AGENT_STREAM_MAX_EVENTS_PER_REQUEST);
+    expect(
+      streamedEvents.reduce(
+        (total, event) => total + Buffer.byteLength(JSON.stringify(event), 'utf8'),
+        0,
+      ),
+    ).toBeLessThanOrEqual(AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST);
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'error' && event.error === AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    expect(
+      streamedEvents.filter(
+        (event) =>
+          event.type === 'status' &&
+          event.data.status === 'error' &&
+          event.data.message === AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    expect(
+      streamedEvents.some((event) => event.type === 'status' && event.data.status === 'completed'),
+    ).toBe(false);
+    expect(
+      streamedEvents.some(
+        (event) =>
+          event.type === 'status' &&
+          event.data.message === 'this overflowing engine event must not be relayed',
+      ),
+    ).toBe(false);
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(1);
+    expect(service.cancelExecution(legacySession.id, requestId)).toBe(false);
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+  });
+
+  it('measures aggregate event JSON in UTF-8 bytes and blocks the overflowing multibyte event', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'multibyte-output-limit';
+    const multibyteContent = '界'.repeat(4_096);
+    const attemptedEvent: RealtimeEvent = {
+      type: 'message',
+      data: {
+        id: 'multibyte-stream-delta',
+        sessionId: legacySession.id,
+        role: 'assistant',
+        content: multibyteContent,
+        messageType: 'chat',
+        cliSource: 'claude',
+        requestId,
+        isStreaming: true,
+        isFinal: false,
+        createdAt: new Date(0).toISOString(),
+      },
+    };
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        for (let index = 0; index < AGENT_STREAM_MAX_EVENTS_PER_REQUEST; index += 1) {
+          ctx.emit(attemptedEvent);
+        }
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Exercise the aggregate UTF-8 output limit',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(engineSignal?.aborted).toBe(true));
+
+    const terminalEvents = streamedEvents.filter(
+      (event) =>
+        event.type === 'error' || (event.type === 'status' && event.data.status === 'error'),
+    );
+    const nonTerminalEvents = streamedEvents.filter((event) => !terminalEvents.includes(event));
+    const nonTerminalBytes = nonTerminalEvents.reduce(
+      (total, event) => total + Buffer.byteLength(JSON.stringify(event), 'utf8'),
+      0,
+    );
+    const attemptedEventBytes = Buffer.byteLength(JSON.stringify(attemptedEvent), 'utf8');
+    const admittedMultibyteEvents = streamedEvents.filter(
+      (event) => event.type === 'message' && event.data.content === multibyteContent,
+    );
+
+    expect(Buffer.byteLength(multibyteContent, 'utf8')).toBe(multibyteContent.length * 3);
+    expect(admittedMultibyteEvents.length).toBeGreaterThan(0);
+    expect(nonTerminalEvents.length).toBeLessThan(AGENT_EXECUTION_OUTPUT_LIMITS.maxAdmittedEvents);
+    expect(nonTerminalBytes).toBeLessThanOrEqual(
+      AGENT_EXECUTION_OUTPUT_LIMITS.maxAdmittedEventJsonBytes,
+    );
+    expect(nonTerminalBytes + attemptedEventBytes).toBeGreaterThan(
+      AGENT_EXECUTION_OUTPUT_LIMITS.maxAdmittedEventJsonBytes,
+    );
+    expect(terminalEvents).toHaveLength(2);
+    expect(
+      streamedEvents.reduce(
+        (total, event) => total + Buffer.byteLength(JSON.stringify(event), 'utf8'),
+        0,
+      ),
+    ).toBeLessThanOrEqual(AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST);
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('admits persistence before publish/write and settles every admitted deferred write', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'pending-persistence-output-limit';
+    const persistenceGates = Array.from(
+      { length: AGENT_EXECUTION_OUTPUT_LIMITS.maxPendingPersistence },
+      () => deferred<void>(),
+    );
+    let assistantWriteIndex = 0;
+    messageServiceMocks.createMessage.mockImplementation((input: { role?: string }) => {
+      if (input.role === 'user') return Promise.resolve(undefined);
+      const gate = persistenceGates[assistantWriteIndex];
+      assistantWriteIndex += 1;
+      return gate?.promise ?? Promise.resolve(undefined);
+    });
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        for (
+          let index = 0;
+          index < AGENT_EXECUTION_OUTPUT_LIMITS.maxPendingPersistence + 1;
+          index += 1
+        ) {
+          ctx.emit({
+            type: 'message',
+            data: {
+              id: `deferred-assistant-${index}`,
+              sessionId: legacySession.id,
+              role: 'assistant',
+              content: `deferred assistant ${index}`,
+              messageType: 'chat',
+              cliSource: 'claude',
+              requestId,
+              isStreaming: false,
+              isFinal: true,
+              createdAt: new Date(0).toISOString(),
+            },
+          });
+        }
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'late-after-persistence-limit',
+            sessionId: legacySession.id,
+            role: 'assistant',
+            content: 'late after persistence limit',
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId,
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date(0).toISOString(),
+          },
+        });
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Exercise pending persistence admission',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() =>
+      expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(
+        1 + AGENT_EXECUTION_OUTPUT_LIMITS.maxPendingPersistence,
+      ),
+    );
+
+    const assistantEvents = streamedEvents.filter(
+      (event) => event.type === 'message' && event.data.role === 'assistant',
+    );
+    expect(engineSignal?.aborted).toBe(true);
+    expect(assistantEvents).toHaveLength(AGENT_EXECUTION_OUTPUT_LIMITS.maxPendingPersistence);
+    expect(
+      assistantEvents.some((event) =>
+        event.type === 'message' ? event.data.content === 'late after persistence limit' : false,
+      ),
+    ).toBe(false);
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'error' && event.error === AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    expect(
+      streamedEvents.some((event) => event.type === 'status' && event.data.status === 'completed'),
+    ).toBe(false);
+    expect(service.cancelExecution(legacySession.id, requestId)).toBe(false);
+
+    const mutation = vi.fn().mockResolvedValue('settled');
+    const lifecyclePromise = service.withSessionLifecycleMutation(legacySession.id, mutation);
+    await Promise.resolve();
+    expect(mutation).not.toHaveBeenCalled();
+    for (const gate of persistenceGates) gate.resolve();
+    await expect(lifecyclePromise).resolves.toBe('settled');
+    expect(mutation).toHaveBeenCalledOnce();
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(
+      1 + AGENT_EXECUTION_OUTPUT_LIMITS.maxPendingPersistence,
+    );
+    expect(service.getRunningExecutions()).toHaveLength(0);
+  });
+
+  it('caps persisted message count even when writes settle between engine emissions', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'persisted-message-count-limit';
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        for (
+          let index = 0;
+          index < AGENT_EXECUTION_OUTPUT_LIMITS.maxPersistedMessages;
+          index += 1
+        ) {
+          ctx.emit({
+            type: 'message',
+            data: {
+              id: `counted-assistant-${index}`,
+              sessionId: legacySession.id,
+              role: 'assistant',
+              content: `counted assistant ${index}`,
+              messageType: 'chat',
+              cliSource: 'claude',
+              requestId,
+              isStreaming: false,
+              isFinal: true,
+              createdAt: new Date(0).toISOString(),
+            },
+          });
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Exercise persisted message count admission',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(engineSignal?.aborted).toBe(true));
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+
+    const persistedAssistantCalls = messageServiceMocks.createMessage.mock.calls.filter(
+      ([input]) => (input as { role?: string }).role === 'assistant',
+    );
+    const streamedAssistantEvents = streamedEvents.filter(
+      (event) => event.type === 'message' && event.data.role === 'assistant',
+    );
+    expect(persistedAssistantCalls).toHaveLength(
+      AGENT_EXECUTION_OUTPUT_LIMITS.maxPersistedMessages - 1,
+    );
+    expect(streamedAssistantEvents).toHaveLength(
+      AGENT_EXECUTION_OUTPUT_LIMITS.maxPersistedMessages - 1,
+    );
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'error' && event.error === AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    expect(
+      streamedEvents.some((event) => event.type === 'status' && event.data.status === 'completed'),
+    ).toBe(false);
+  });
+
+  it('caps aggregate persisted JSON bytes independently and includes the user write', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'persisted-json-byte-limit';
+    const largeContent = 'p'.repeat(188 * 1024);
+    const attemptedAssistantMessages = 16;
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        for (let index = 0; index < attemptedAssistantMessages; index += 1) {
+          ctx.emit({
+            type: 'message',
+            data: {
+              id: `aggregate-assistant-${index}`,
+              sessionId: legacySession.id,
+              role: 'assistant',
+              content: largeContent,
+              messageType: 'chat',
+              cliSource: 'claude',
+              requestId,
+              isStreaming: false,
+              isFinal: true,
+              createdAt: new Date(0).toISOString(),
+            },
+          });
+          // Keep pending persistence below its independent cap.
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Count the user write in persisted aggregate bytes',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(engineSignal?.aborted).toBe(true));
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+
+    const persistedInputs = messageServiceMocks.createMessage.mock.calls.map(
+      ([input]) => input as Record<string, unknown>,
+    );
+    const persistedAssistantInputs = persistedInputs.filter(
+      (input) => input.role === 'assistant',
+    );
+    const streamedAssistantEvents = streamedEvents.filter(
+      (event) => event.type === 'message' && event.data.role === 'assistant',
+    );
+    const admittedPersistenceBytes = persistedInputs.reduce(
+      (total, input) => total + getJsonByteLength(input),
+      0,
+    );
+    const nextPersistenceBytes = getJsonByteLength(persistedAssistantInputs[0]);
+
+    expect(persistedInputs[0].role).toBe('user');
+    expect(persistedInputs).toHaveLength(persistedAssistantInputs.length + 1);
+    expect(persistedAssistantInputs.length).toBeGreaterThan(0);
+    expect(persistedAssistantInputs.length).toBeLessThan(attemptedAssistantMessages);
+    expect(persistedInputs.length).toBeLessThan(
+      AGENT_EXECUTION_OUTPUT_LIMITS.maxPersistedMessages,
+    );
+    expect(admittedPersistenceBytes).toBeLessThanOrEqual(
+      AGENT_EXECUTION_OUTPUT_LIMITS.maxPersistedJsonBytes,
+    );
+    expect(admittedPersistenceBytes + nextPersistenceBytes).toBeGreaterThan(
+      AGENT_EXECUTION_OUTPUT_LIMITS.maxPersistedJsonBytes,
+    );
+    expect(streamedAssistantEvents).toHaveLength(persistedAssistantInputs.length);
+    expect(streamedEvents.length).toBeLessThan(
+      AGENT_EXECUTION_OUTPUT_LIMITS.maxAdmittedEvents,
+    );
+    expect(
+      streamedEvents.reduce(
+        (total, event) => total + Buffer.byteLength(JSON.stringify(event), 'utf8'),
+        0,
+      ),
+    ).toBeLessThan(AGENT_EXECUTION_OUTPUT_LIMITS.maxAdmittedEventJsonBytes);
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'error' && event.error === AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    expect(
+      streamedEvents.some(
+        (event) => event.type === 'status' && event.data.status === 'completed',
+      ),
+    ).toBe(false);
+  });
+
+  it('turns an unserializable engine event into one fixed terminal without attacker content', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'cyclic-engine-event';
+    const attackerMarker = 'ATTACKER_EVENT_CONTENT_MUST_NOT_LEAK';
+    const cyclicMetadata: Record<string, unknown> = { attackerMarker };
+    cyclicMetadata.self = cyclicMetadata;
+    let emitReturned = false;
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'cyclic-engine-message',
+            sessionId: legacySession.id,
+            role: 'assistant',
+            content: attackerMarker,
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId,
+            isStreaming: true,
+            isFinal: false,
+            createdAt: new Date(0).toISOString(),
+            metadata: cyclicMetadata,
+          },
+        });
+        emitReturned = true;
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Reject the cyclic engine event',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+
+    expect(emitReturned).toBe(true);
+    expect(engineSignal?.aborted).toBe(true);
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(1);
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'error' && event.error === AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'status' && event.data.status === 'error',
+      ),
+    ).toHaveLength(1);
+    expect(JSON.stringify(streamedEvents)).not.toContain(attackerMarker);
+    expect(
+      streamedEvents.some(
+        (event) => event.type === 'status' && event.data.status === 'completed',
+      ),
+    ).toBe(false);
+  });
+
+  it('bounds and sanitizes a huge normal engine error before terminal publication', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'huge-engine-error';
+    const hugeMessage = `${'\u0000\u001f'.repeat(32)}${'界'.repeat(10_000)}`;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun() {
+        throw new Error(hugeMessage);
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Throw one bounded terminal error',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+
+    const errors = streamedEvents.filter(
+      (event): event is Extract<RealtimeEvent, { type: 'error' }> => event.type === 'error',
+    );
+    const errorStatuses = streamedEvents.filter(
+      (event): event is Extract<RealtimeEvent, { type: 'status' }> =>
+        event.type === 'status' && event.data.status === 'error',
+    );
+    expect(errors).toHaveLength(1);
+    expect(errorStatuses).toHaveLength(1);
+    expect(Buffer.byteLength(errors[0].error, 'utf8')).toBeLessThanOrEqual(
+      AGENT_STREAM_MAX_ERROR_BYTES,
+    );
+    expect(Buffer.byteLength(errorStatuses[0].data.message ?? '', 'utf8')).toBeLessThanOrEqual(
+      AGENT_STREAM_MAX_STATUS_MESSAGE_BYTES,
+    );
+    expect(containsAsciiControl(errors[0].error)).toBe(false);
+    expect(containsAsciiControl(errorStatuses[0].data.message ?? '')).toBe(false);
+    expect(
+      streamedEvents.some((event) => event.type === 'status' && event.data.status === 'completed'),
+    ).toBe(false);
+    expect(
+      streamedEvents.reduce(
+        (total, event) => total + Buffer.byteLength(JSON.stringify(event), 'utf8'),
+        0,
+      ),
+    ).toBeLessThanOrEqual(AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST);
+  });
+
+  it('keeps the reserved completed terminal reachable at the exact admission boundary', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'completed-at-output-boundary';
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        const engineEventAllowance = AGENT_EXECUTION_OUTPUT_LIMITS.maxAdmittedEvents - 3;
+        for (let index = 0; index < engineEventAllowance; index += 1) {
+          ctx.emit({
+            type: 'status',
+            data: {
+              sessionId: legacySession.id,
+              requestId,
+              status: 'ready',
+            },
+          });
+        }
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Complete at the output boundary',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+
+    expect(engineSignal?.aborted).toBe(false);
+    expect(streamedEvents).toHaveLength(AGENT_EXECUTION_OUTPUT_LIMITS.maxAdmittedEvents + 1);
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'status' && event.data.status === 'completed',
+      ),
+    ).toHaveLength(1);
+    expect(streamedEvents.some((event) => event.type === 'error')).toBe(false);
+    expect(streamedEvents.length).toBeLessThanOrEqual(AGENT_STREAM_MAX_EVENTS_PER_REQUEST);
+    expect(
+      streamedEvents.reduce(
+        (total, event) => total + Buffer.byteLength(JSON.stringify(event), 'utf8'),
+        0,
+      ),
+    ).toBeLessThanOrEqual(AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST);
   });
 });

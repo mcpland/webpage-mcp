@@ -8,10 +8,20 @@ import type {
   RunningExecution,
 } from './engines/types';
 import type { AgentMessage, RealtimeEvent } from './types';
-import type { AttachmentMetadata } from 'webpage-mcp-shared';
+import {
+  AGENT_STORED_MESSAGE_MAX_JSON_BYTES,
+  AGENT_STREAM_MAX_ERROR_BYTES,
+  AGENT_STREAM_MAX_EVENTS_PER_REQUEST,
+  AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST,
+  AGENT_STREAM_MAX_STATUS_MESSAGE_BYTES,
+  type AttachmentMetadata,
+} from 'webpage-mcp-shared';
 import { AgentStreamManager } from './stream-manager';
 import { getProject, touchProjectActivity, updateProjectClaudeSessionId } from './project-service';
-import { createMessage as persistAgentMessage } from './message-service';
+import {
+  createMessage as persistAgentMessage,
+  type CreateAgentStoredMessageInput,
+} from './message-service';
 import {
   getSession,
   updateEngineSessionId,
@@ -22,7 +32,11 @@ import {
 } from './session-service';
 import { attachmentService, type SavedAttachment } from './attachment-service';
 import { validateAgentAttachments } from './attachment-limits';
-import { validateAgentActPayload, validateFinalAgentPrompt } from './payload-limits';
+import {
+  getJsonByteLength,
+  validateAgentActPayload,
+  validateFinalAgentPrompt,
+} from './payload-limits';
 
 export interface AgentChatServiceOptions {
   engines: AgentEngine[];
@@ -36,6 +50,29 @@ export const AGENT_EXECUTION_LIMITS = Object.freeze({
   maxPerProject: 8,
 });
 
+/**
+ * Per-execution output caps. The event limits match the downstream relay;
+ * persistence allows eight maximum-size stored messages while bounding both
+ * write amplification and concurrent database pressure. Admission reserves
+ * two event slots and 64 KiB for a bounded terminal error/status pair, so the
+ * extension's 512-event / 4-MiB hard relay boundary can always deliver it.
+ */
+export const AGENT_EXECUTION_OUTPUT_LIMITS = Object.freeze({
+  relayMaxEvents: AGENT_STREAM_MAX_EVENTS_PER_REQUEST,
+  relayMaxJsonBytes: AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST,
+  terminalEventHeadroom: 2,
+  terminalJsonByteHeadroom: 64 * 1024,
+  maxTerminalErrorBytes: AGENT_STREAM_MAX_ERROR_BYTES,
+  maxTerminalStatusMessageBytes: AGENT_STREAM_MAX_STATUS_MESSAGE_BYTES,
+  maxAdmittedEvents: AGENT_STREAM_MAX_EVENTS_PER_REQUEST - 2,
+  maxAdmittedEventJsonBytes: AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST - 64 * 1024,
+  maxPersistedMessages: 64,
+  maxPersistedJsonBytes: 8 * AGENT_STORED_MESSAGE_MAX_JSON_BYTES,
+  maxPendingPersistence: 16,
+});
+
+export const AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE = 'Agent execution output limit exceeded';
+
 type ExecutionPhase = 'preparing' | 'running' | 'settled';
 
 interface ExecutionRecord extends RunningExecution {
@@ -46,6 +83,13 @@ interface ExecutionRecord extends RunningExecution {
   scopeResolved: boolean;
   pendingPersistence: Set<Promise<void>>;
   pendingFinalAssistantPersistence: Set<Promise<void>>;
+  eventCount: number;
+  eventJsonBytes: number;
+  persistedMessageCount: number;
+  persistedMessageJsonBytes: number;
+  pendingPersistenceCount: number;
+  limitTerminal: boolean;
+  terminalPublished: boolean;
   finalAssistantPersistenceError?: Error;
   settling?: Promise<void>;
 }
@@ -56,6 +100,27 @@ function executionKey(sessionId: string, requestId: string): string {
 
 function normalizeContextString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function truncateTerminalText(value: string, maximumBytes: number): string {
+  const marker = '…';
+  const markerBytes = Buffer.byteLength(marker, 'utf8');
+  let result = '';
+  let resultBytes = 0;
+  let truncated = false;
+  for (const rawCharacter of value) {
+    const characterCode = rawCharacter.charCodeAt(0);
+    const character =
+      characterCode <= 0x1f || characterCode === 0x7f ? ' ' : rawCharacter;
+    const characterBytes = Buffer.byteLength(character, 'utf8');
+    if (resultBytes + characterBytes > maximumBytes - markerBytes) {
+      truncated = true;
+      break;
+    }
+    result += character;
+    resultBytes += characterBytes;
+  }
+  return truncated ? `${result}${marker}` : result;
 }
 
 function buildInstructionWithContext(
@@ -358,6 +423,19 @@ export class AgentChatService {
     };
 
     if (projectId) {
+      const userPersistenceInput: CreateAgentStoredMessageInput = {
+        projectId,
+        role: 'user',
+        messageType: 'chat',
+        content: trimmed,
+        sessionId,
+        cliSource: engineName,
+        requestId,
+        id: userMessage.id,
+        createdAt: userMessage.createdAt,
+        metadata: userMessageMetadata,
+        upsertById: true,
+      };
       // Persist user message into project history for later reload.
       try {
         await touchProjectActivity(projectId);
@@ -367,19 +445,15 @@ export class AgentChatService {
           await touchSessionActivity(dbSessionId);
           this.ensureExecutionActive(execution);
         }
-        await persistAgentMessage({
-          projectId,
-          role: 'user',
-          messageType: 'chat',
-          content: trimmed,
-          sessionId,
-          cliSource: engineName,
-          requestId,
-          id: userMessage.id,
-          createdAt: userMessage.createdAt,
-          metadata: userMessageMetadata,
-          upsertById: true,
-        });
+        const persistenceBytes = this.measureExecutionJsonBytes(execution, userPersistenceInput);
+        if (persistenceBytes === null || !this.admitPersistence(execution, persistenceBytes)) {
+          throw new Error(AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE);
+        }
+        try {
+          await persistAgentMessage(userPersistenceInput);
+        } finally {
+          this.releasePersistenceAdmission(execution);
+        }
         this.ensureExecutionActive(execution);
       } catch (error) {
         console.error('[AgentChatService] Failed to persist user message:', error);
@@ -397,17 +471,28 @@ export class AgentChatService {
 
     this.ensureExecutionActive(execution);
 
-    this.streamManager.publish({ type: 'message', data: userMessage });
+    if (
+      !this.publishAdmittedEvent(execution, {
+        type: 'message',
+        data: userMessage,
+      })
+    ) {
+      throw new Error(AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE);
+    }
 
-    this.streamManager.publish({
-      type: 'status',
-      data: {
-        sessionId,
-        status: 'starting',
-        requestId,
-        message: 'Agent request accepted',
-      },
-    });
+    if (
+      !this.publishAdmittedEvent(execution, {
+        type: 'status',
+        data: {
+          sessionId,
+          status: 'starting',
+          requestId,
+          message: 'Agent request accepted',
+        },
+      })
+    ) {
+      throw new Error(AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE);
+    }
 
     execution.engineName = engineName;
 
@@ -416,65 +501,66 @@ export class AgentChatService {
         if (!this.isExecutionCurrent(execution)) {
           return;
         }
-        this.streamManager.publish(event);
 
-        if (!projectId) {
+        let persistenceInput: CreateAgentStoredMessageInput | undefined;
+        let persistenceBytes: number | undefined;
+        let requiredForCompletion = false;
+        if (projectId && event.type === 'message') {
+          const msg = event.data;
+          const persistable =
+            msg &&
+            !(msg.isStreaming && !msg.isFinal) &&
+            msg.role !== 'user' &&
+            typeof msg.content === 'string' &&
+            msg.content.trim().length > 0;
+          if (persistable) {
+            const content = msg.content.trim();
+            const persistedSessionId =
+              typeof msg.sessionId === 'string' && msg.sessionId.trim().length > 0
+                ? msg.sessionId
+                : sessionId;
+            const persistedRequestId =
+              typeof msg.requestId === 'string' && msg.requestId.trim().length > 0
+                ? msg.requestId
+                : requestId;
+            if (
+              persistedSessionId === execution.sessionId &&
+              persistedRequestId === execution.requestId
+            ) {
+              persistenceInput = {
+                projectId,
+                role: msg.role,
+                messageType: msg.messageType,
+                content,
+                metadata: msg.metadata,
+                sessionId: persistedSessionId,
+                conversationId: undefined,
+                cliSource: msg.cliSource,
+                requestId: persistedRequestId,
+                id: msg.id,
+                createdAt: msg.createdAt,
+                upsertById: true,
+              };
+              const measured = this.measureExecutionJsonBytes(execution, persistenceInput);
+              if (measured === null) return;
+              persistenceBytes = measured;
+              requiredForCompletion = msg.role === 'assistant' && msg.isFinal === true;
+            }
+          }
+        }
+
+        const eventBytes = this.measureExecutionJsonBytes(execution, event);
+        if (eventBytes === null || !this.admitEvent(execution, eventBytes, persistenceBytes)) {
           return;
         }
 
-        if (event.type === 'message') {
-          const msg = event.data;
-          if (!msg) return;
-
-          // Only persist final snapshots; streaming deltas are transient.
-          if (msg.isStreaming && !msg.isFinal) {
-            return;
-          }
-
-          // User messages are already handled above.
-          if (msg.role === 'user') {
-            return;
-          }
-
-          const content = msg.content?.trim();
-          if (!content) {
-            return;
-          }
-
-          const persistedSessionId =
-            typeof msg.sessionId === 'string' && msg.sessionId.trim().length > 0
-              ? msg.sessionId
-              : sessionId;
-          const persistedRequestId =
-            typeof msg.requestId === 'string' && msg.requestId.trim().length > 0
-              ? msg.requestId
-              : requestId;
-
-          if (
-            persistedSessionId !== execution.sessionId ||
-            persistedRequestId !== execution.requestId ||
-            !this.isExecutionCurrent(execution)
-          ) {
-            return;
-          }
-
+        this.streamManager.publish(event);
+        if (persistenceInput) {
+          const admittedInput = persistenceInput;
           this.trackPersistence(
             execution,
-            persistAgentMessage({
-              projectId,
-              role: msg.role,
-              messageType: msg.messageType,
-              content,
-              metadata: msg.metadata,
-              sessionId: persistedSessionId,
-              conversationId: undefined,
-              cliSource: msg.cliSource,
-              requestId: persistedRequestId,
-              id: msg.id,
-              createdAt: msg.createdAt,
-              upsertById: true,
-            }).then(() => undefined),
-            msg.role === 'assistant' && msg.isFinal === true,
+            () => persistAgentMessage(admittedInput).then(() => undefined),
+            requiredForCompletion,
           );
         }
       },
@@ -542,23 +628,21 @@ export class AgentChatService {
   cancelExecution(sessionId: string, requestId: string): boolean {
     const key = executionKey(sessionId, requestId);
     const execution = this.runningExecutions.get(key);
-    if (!execution || execution.cancelled) {
+    if (
+      !execution ||
+      execution.cancelled ||
+      execution.limitTerminal ||
+      execution.terminalPublished
+    ) {
       return false;
     }
 
     // Keep an identity tombstone until the old engine settles. This prevents
     // immediate requestId reuse from being confused with late events/finally.
     this.cancelExecutionRecord(execution);
-
-    // Emit cancelled status
-    this.streamManager.publish({
-      type: 'status',
-      data: {
-        sessionId: execution.sessionId,
-        status: 'cancelled',
-        requestId,
-        message: 'Execution cancelled by user',
-      },
+    this.publishExecutionTerminal(execution, {
+      status: 'cancelled',
+      message: 'Execution cancelled by user',
     });
 
     return true;
@@ -571,21 +655,19 @@ export class AgentChatService {
   cancelSessionExecutions(sessionId: string): number {
     let cancelled = 0;
     for (const execution of this.runningExecutions.values()) {
-      if (this.executionMatchesSession(execution, sessionId) && !execution.cancelled) {
+      if (
+        this.executionMatchesSession(execution, sessionId) &&
+        !execution.cancelled &&
+        !execution.limitTerminal &&
+        !execution.terminalPublished
+      ) {
         this.cancelExecutionRecord(execution);
+        this.publishExecutionTerminal(execution, {
+          status: 'cancelled',
+          message: 'Execution cancelled by user',
+        });
         cancelled++;
       }
-    }
-
-    if (cancelled > 0) {
-      this.streamManager.publish({
-        type: 'status',
-        data: {
-          sessionId,
-          status: 'cancelled',
-          message: `Cancelled ${cancelled} running execution(s)`,
-        },
-      });
     }
 
     return cancelled;
@@ -598,7 +680,7 @@ export class AgentChatService {
   cancelAllExecutions(): number {
     const sessionIds = new Set<string>();
     for (const execution of this.runningExecutions.values()) {
-      if (!execution.cancelled) {
+      if (!execution.cancelled && !execution.limitTerminal && !execution.terminalPublished) {
         sessionIds.add(execution.sessionId);
       }
     }
@@ -687,7 +769,8 @@ export class AgentChatService {
    */
   getRunningExecutions(): RunningExecution[] {
     return Array.from(this.runningExecutions.values()).filter(
-      (execution) => !execution.cancelled && execution.phase !== 'settled',
+      (execution) =>
+        !execution.cancelled && !execution.limitTerminal && execution.phase !== 'settled',
     );
   }
 
@@ -704,6 +787,8 @@ export class AgentChatService {
   private isExecutionCurrent(execution: ExecutionRecord): boolean {
     return (
       !execution.cancelled &&
+      !execution.limitTerminal &&
+      !execution.terminalPublished &&
       execution.phase !== 'settled' &&
       !this.isExecutionScopeMutating(execution) &&
       this.runningExecutions.get(executionKey(execution.sessionId, execution.requestId)) ===
@@ -774,6 +859,13 @@ export class AgentChatService {
       scopeResolved: projectId !== undefined,
       pendingPersistence: new Set(),
       pendingFinalAssistantPersistence: new Set(),
+      eventCount: 0,
+      eventJsonBytes: 0,
+      persistedMessageCount: 0,
+      persistedMessageJsonBytes: 0,
+      pendingPersistenceCount: 0,
+      limitTerminal: false,
+      terminalPublished: false,
     };
 
     this.runningExecutions.set(key, execution);
@@ -889,7 +981,7 @@ export class AgentChatService {
   }
 
   private cancelExecutionRecord(execution: ExecutionRecord): void {
-    if (execution.cancelled) {
+    if (execution.cancelled || execution.limitTerminal || execution.terminalPublished) {
       return;
     }
     execution.cancelled = true;
@@ -901,45 +993,174 @@ export class AgentChatService {
   ): Promise<number> {
     const executions = Array.from(this.runningExecutions.values()).filter(predicate);
     let cancelled = 0;
-    const cancelledBySession = new Map<string, number>();
     for (const execution of executions) {
-      if (!execution.cancelled) {
+      if (!execution.cancelled && !execution.limitTerminal && !execution.terminalPublished) {
         this.cancelExecutionRecord(execution);
-        cancelled++;
-        cancelledBySession.set(
-          execution.sessionId,
-          (cancelledBySession.get(execution.sessionId) ?? 0) + 1,
-        );
-      }
-    }
-    for (const [sessionId, count] of cancelledBySession) {
-      this.streamManager.publish({
-        type: 'status',
-        data: {
-          sessionId,
+        this.publishExecutionTerminal(execution, {
           status: 'cancelled',
-          message: `Cancelled ${count} running execution(s)`,
-        },
-      });
+          message: 'Execution cancelled by lifecycle mutation',
+        });
+        cancelled++;
+      }
     }
     await Promise.all(executions.map((execution) => execution.settled));
     return cancelled;
   }
 
+  private publishExecutionTerminal(
+    execution: ExecutionRecord,
+    terminal:
+      | { status: 'completed' }
+      | { status: 'cancelled'; message: string }
+      | { status: 'error'; message: string },
+  ): boolean {
+    if (execution.terminalPublished) return false;
+    execution.terminalPublished = true;
+
+    if (terminal.status === 'completed') {
+      this.streamManager.publish({
+        type: 'status',
+        data: {
+          sessionId: execution.sessionId,
+          status: 'completed',
+          requestId: execution.requestId,
+        },
+      });
+      return true;
+    }
+
+    if (terminal.status === 'cancelled') {
+      this.streamManager.publish({
+        type: 'status',
+        data: {
+          sessionId: execution.sessionId,
+          status: 'cancelled',
+          requestId: execution.requestId,
+          message: truncateTerminalText(
+            terminal.message,
+            AGENT_EXECUTION_OUTPUT_LIMITS.maxTerminalStatusMessageBytes,
+          ),
+        },
+      });
+      return true;
+    }
+
+    const error = truncateTerminalText(
+      terminal.message,
+      AGENT_EXECUTION_OUTPUT_LIMITS.maxTerminalErrorBytes,
+    );
+    const statusMessage = truncateTerminalText(
+      terminal.message,
+      AGENT_EXECUTION_OUTPUT_LIMITS.maxTerminalStatusMessageBytes,
+    );
+    this.streamManager.publish({
+      type: 'error',
+      error,
+      data: {
+        sessionId: execution.sessionId,
+        requestId: execution.requestId,
+      },
+    });
+    this.streamManager.publish({
+      type: 'status',
+      data: {
+        sessionId: execution.sessionId,
+        status: 'error',
+        requestId: execution.requestId,
+        message: statusMessage,
+      },
+    });
+    return true;
+  }
+
+  private terminateForOutputLimit(execution: ExecutionRecord): void {
+    if (execution.limitTerminal || execution.terminalPublished) return;
+    execution.limitTerminal = true;
+    execution.abortController.abort();
+    this.publishExecutionTerminal(execution, {
+      status: 'error',
+      message: AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE,
+    });
+  }
+
+  private measureExecutionJsonBytes(execution: ExecutionRecord, value: unknown): number | null {
+    try {
+      return getJsonByteLength(value, 'agentExecutionOutput');
+    } catch {
+      this.terminateForOutputLimit(execution);
+      return null;
+    }
+  }
+
+  private admitPersistence(execution: ExecutionRecord, jsonBytes: number): boolean {
+    if (!this.isExecutionCurrent(execution)) return false;
+    if (
+      execution.persistedMessageCount >= AGENT_EXECUTION_OUTPUT_LIMITS.maxPersistedMessages ||
+      execution.persistedMessageJsonBytes + jsonBytes >
+        AGENT_EXECUTION_OUTPUT_LIMITS.maxPersistedJsonBytes ||
+      execution.pendingPersistenceCount >= AGENT_EXECUTION_OUTPUT_LIMITS.maxPendingPersistence
+    ) {
+      this.terminateForOutputLimit(execution);
+      return false;
+    }
+    execution.persistedMessageCount += 1;
+    execution.persistedMessageJsonBytes += jsonBytes;
+    execution.pendingPersistenceCount += 1;
+    return true;
+  }
+
+  private admitEvent(
+    execution: ExecutionRecord,
+    eventJsonBytes: number,
+    persistenceJsonBytes?: number,
+  ): boolean {
+    if (!this.isExecutionCurrent(execution)) return false;
+    if (
+      execution.eventCount >= AGENT_EXECUTION_OUTPUT_LIMITS.maxAdmittedEvents ||
+      execution.eventJsonBytes + eventJsonBytes >
+        AGENT_EXECUTION_OUTPUT_LIMITS.maxAdmittedEventJsonBytes
+    ) {
+      this.terminateForOutputLimit(execution);
+      return false;
+    }
+    if (
+      persistenceJsonBytes !== undefined &&
+      !this.admitPersistence(execution, persistenceJsonBytes)
+    ) {
+      return false;
+    }
+    execution.eventCount += 1;
+    execution.eventJsonBytes += eventJsonBytes;
+    return true;
+  }
+
+  private publishAdmittedEvent(execution: ExecutionRecord, event: RealtimeEvent): boolean {
+    const eventBytes = this.measureExecutionJsonBytes(execution, event);
+    if (eventBytes === null || !this.admitEvent(execution, eventBytes)) return false;
+    this.streamManager.publish(event);
+    return true;
+  }
+
+  private releasePersistenceAdmission(execution: ExecutionRecord): void {
+    execution.pendingPersistenceCount = Math.max(0, execution.pendingPersistenceCount - 1);
+  }
+
   private trackPersistence(
     execution: ExecutionRecord,
-    operation: Promise<void>,
+    operation: () => Promise<void>,
     requiredForCompletion = false,
   ): void {
-    const tracked = operation.catch((error) => {
-      console.error('[AgentChatService] Failed to persist agent message:', error);
-      if (requiredForCompletion && !execution.finalAssistantPersistenceError) {
-        const detail = error instanceof Error ? error.message : String(error);
-        execution.finalAssistantPersistenceError = new Error(
-          `Failed to persist final assistant message: ${detail}`,
-        );
-      }
-    });
+    const tracked = Promise.resolve()
+      .then(operation)
+      .catch((error) => {
+        console.error('[AgentChatService] Failed to persist agent message:', error);
+        if (requiredForCompletion && !execution.finalAssistantPersistenceError) {
+          const detail = error instanceof Error ? error.message : String(error);
+          execution.finalAssistantPersistenceError = new Error(
+            `Failed to persist final assistant message: ${detail}`,
+          );
+        }
+      });
     execution.pendingPersistence.add(tracked);
     if (requiredForCompletion) {
       execution.pendingFinalAssistantPersistence.add(tracked);
@@ -947,6 +1168,7 @@ export class AgentChatService {
     void tracked.finally(() => {
       execution.pendingPersistence.delete(tracked);
       execution.pendingFinalAssistantPersistence.delete(tracked);
+      this.releasePersistenceAdmission(execution);
     });
   }
 
@@ -999,14 +1221,18 @@ export class AgentChatService {
         return;
       }
 
-      this.streamManager.publish({
-        type: 'status',
-        data: {
-          sessionId,
-          status: 'running',
-          requestId,
-        },
-      });
+      if (
+        !this.publishAdmittedEvent(execution, {
+          type: 'status',
+          data: {
+            sessionId,
+            status: 'running',
+            requestId,
+          },
+        })
+      ) {
+        return;
+      }
 
       // Pass abort signal to engine
       const optionsWithSignal: EngineInitOptions = {
@@ -1019,14 +1245,7 @@ export class AgentChatService {
 
       // Only emit completed if not aborted
       if (this.isExecutionCurrent(execution)) {
-        this.streamManager.publish({
-          type: 'status',
-          data: {
-            sessionId,
-            status: 'completed',
-            requestId,
-          },
-        });
+        this.publishExecutionTerminal(execution, { status: 'completed' });
       }
     } catch (error) {
       // Check if this was an abort error
@@ -1036,22 +1255,7 @@ export class AgentChatService {
       }
 
       const message = error instanceof Error ? error.message : String(error);
-
-      this.streamManager.publish({
-        type: 'error',
-        error: message,
-        data: { sessionId, requestId },
-      });
-
-      this.streamManager.publish({
-        type: 'status',
-        data: {
-          sessionId,
-          status: 'error',
-          message,
-          requestId,
-        },
-      });
+      this.publishExecutionTerminal(execution, { status: 'error', message });
     } finally {
       await this.settleExecution(execution);
     }

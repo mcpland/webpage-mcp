@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { DEFAULT_MCP_INSTANCE_ID } from 'webpage-mcp-shared';
+import {
+  AGENT_SESSION_MAX_THINKING_TOKENS,
+  AGENT_SESSION_MAX_TURNS,
+  DEFAULT_MCP_INSTANCE_ID,
+} from 'webpage-mcp-shared';
 import type { AgentEngine, EngineExecutionContext, EngineInitOptions } from './types';
 import type { AgentMessage, RealtimeEvent } from '../types';
 import { getProject } from '../project-service';
@@ -64,6 +68,28 @@ export function describeClaudeBaseUrlConfiguration(
   baseUrl: string | undefined,
 ): string | null {
   return baseUrl ? '[ClaudeEngine] ANTHROPIC_BASE_URL is configured' : null;
+}
+
+export function validateClaudeExecutionOptionsConfig(optionsConfig: unknown): void {
+  if (optionsConfig === undefined || optionsConfig === null) return;
+  if (typeof optionsConfig !== 'object' || Array.isArray(optionsConfig)) {
+    throw new Error('ClaudeEngine: optionsConfig must be an object');
+  }
+  const record = optionsConfig as Record<string, unknown>;
+  for (const [field, maximum] of [
+    ['maxTurns', AGENT_SESSION_MAX_TURNS],
+    ['maxThinkingTokens', AGENT_SESSION_MAX_THINKING_TOKENS],
+  ] as const) {
+    const value = record[field];
+    if (
+      value !== undefined &&
+      (!Number.isInteger(value) || (value as number) <= 0 || (value as number) > maximum)
+    ) {
+      throw new Error(
+        `ClaudeEngine: optionsConfig.${field} must be a positive integer no greater than ${maximum}`,
+      );
+    }
+  }
 }
 
 export function classifyClaudeDiagnosticError(
@@ -215,6 +241,7 @@ export class ClaudeEngine implements AgentEngine {
       optionsConfig,
       resumeClaudeSessionId,
     } = options;
+    validateClaudeExecutionOptionsConfig(optionsConfig);
     const repoPath = this.resolveRepoPath(projectRoot);
 
     // Check if already aborted

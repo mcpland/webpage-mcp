@@ -3,6 +3,8 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  AGENT_SESSION_MAX_THINKING_TOKENS,
+  AGENT_SESSION_MAX_TURNS,
   DEFAULT_CLAUDE_PERMISSION_MODE,
   DEFAULT_CODEX_CONFIG,
 } from 'webpage-mcp-shared';
@@ -107,6 +109,28 @@ describe('safe agent permission defaults', () => {
 });
 
 describe('session security validation', () => {
+  it.each([
+    ['maxTurns', AGENT_SESSION_MAX_TURNS],
+    ['maxThinkingTokens', AGENT_SESSION_MAX_THINKING_TOKENS],
+  ] as const)('rejects Codex %s above its runtime cap', (field, maximum) => {
+    expect(
+      validateSessionSecurityConfig({
+        engineName: 'codex',
+        input: {
+          optionsConfig: { codexConfig: { [field]: maximum } },
+        },
+      }),
+    ).toBeUndefined();
+    expect(
+      validateSessionSecurityConfig({
+        engineName: 'codex',
+        input: {
+          optionsConfig: { codexConfig: { [field]: maximum + 1 } },
+        },
+      }),
+    ).toContain(`no greater than ${maximum}`);
+  });
+
   it('accepts the neutral Codex UI payload but rejects mismatched engine settings', () => {
     expect(
       validateSessionSecurityConfig({
