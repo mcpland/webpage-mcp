@@ -72,6 +72,7 @@ export const AGENT_EXECUTION_OUTPUT_LIMITS = Object.freeze({
 });
 
 export const AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE = 'Agent execution output limit exceeded';
+export const AGENT_ENGINE_PROTOCOL_ERROR_MESSAGE = 'Agent engine protocol violation';
 
 type ExecutionPhase = 'preparing' | 'running' | 'settled';
 
@@ -100,6 +101,18 @@ function executionKey(sessionId: string, requestId: string): string {
 
 function normalizeContextString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isMissingEngineOwner(value: unknown): boolean {
+  return value === undefined || value === null || value === '';
+}
+
+function matchesEngineOwner(value: unknown, expected: string): boolean {
+  return isMissingEngineOwner(value) || value === expected;
 }
 
 function truncateTerminalText(value: string, maximumBytes: number): string {
@@ -502,11 +515,16 @@ export class AgentChatService {
           return;
         }
 
+        const normalizedEvent = this.normalizeEngineEvent(execution, event);
+        if (!normalizedEvent) {
+          return;
+        }
+
         let persistenceInput: CreateAgentStoredMessageInput | undefined;
         let persistenceBytes: number | undefined;
         let requiredForCompletion = false;
-        if (projectId && event.type === 'message') {
-          const msg = event.data;
+        if (projectId && normalizedEvent.type === 'message') {
+          const msg = normalizedEvent.data;
           const persistable =
             msg &&
             !(msg.isStreaming && !msg.isFinal) &&
@@ -549,12 +567,12 @@ export class AgentChatService {
           }
         }
 
-        const eventBytes = this.measureExecutionJsonBytes(execution, event);
+        const eventBytes = this.measureExecutionJsonBytes(execution, normalizedEvent);
         if (eventBytes === null || !this.admitEvent(execution, eventBytes, persistenceBytes)) {
           return;
         }
 
-        this.streamManager.publish(event);
+        this.streamManager.publish(normalizedEvent);
         if (persistenceInput) {
           const admittedInput = persistenceInput;
           this.trackPersistence(
@@ -1007,6 +1025,96 @@ export class AgentChatService {
     return cancelled;
   }
 
+  /**
+   * Engines may emit request-scoped data, but lifecycle and routing remain
+   * owned by this service. Normalize missing owner fields before accounting,
+   * and fail closed before measure/publish/persist on any protocol violation.
+   */
+  private normalizeEngineEvent(
+    execution: ExecutionRecord,
+    event: RealtimeEvent,
+  ): RealtimeEvent | null {
+    try {
+      const candidate: unknown = event;
+      if (!isRecord(candidate) || typeof candidate.type !== 'string') {
+        this.terminateForEngineProtocolViolation(execution);
+        return null;
+      }
+      const eventType = candidate.type;
+
+      if (
+        eventType === 'message' ||
+        eventType === 'usage' ||
+        eventType === 'status'
+      ) {
+        const eventData = candidate.data;
+        const normalizedData = this.normalizeEngineEventOwner(execution, eventData);
+        if (!normalizedData) {
+          this.terminateForEngineProtocolViolation(execution);
+          return null;
+        }
+        if (
+          eventType === 'status' &&
+          normalizedData.status !== 'starting' &&
+          normalizedData.status !== 'ready' &&
+          normalizedData.status !== 'running'
+        ) {
+          this.terminateForEngineProtocolViolation(execution);
+          return null;
+        }
+        return {
+          type: eventType,
+          data: normalizedData,
+        } as unknown as RealtimeEvent;
+      }
+
+      if (eventType === 'error') {
+        const eventData = candidate.data;
+        const error = candidate.error;
+        if (
+          (eventData !== undefined &&
+            eventData !== null &&
+            !this.engineEventOwnerMatches(execution, eventData)) ||
+          typeof error !== 'string'
+        ) {
+          this.terminateForEngineProtocolViolation(execution);
+          return null;
+        }
+        this.terminateForEngineError(execution, error);
+        return null;
+      }
+
+      // connected/heartbeat and unknown event types are transport/lifecycle-owned.
+      this.terminateForEngineProtocolViolation(execution);
+      return null;
+    } catch {
+      this.terminateForEngineProtocolViolation(execution);
+      return null;
+    }
+  }
+
+  private normalizeEngineEventOwner(
+    execution: ExecutionRecord,
+    data: unknown,
+  ): Record<string, unknown> | null {
+    if (!this.engineEventOwnerMatches(execution, data) || !isRecord(data)) {
+      return null;
+    }
+    return {
+      ...data,
+      sessionId: execution.sessionId,
+      requestId: execution.requestId,
+    };
+  }
+
+  private engineEventOwnerMatches(execution: ExecutionRecord, data: unknown): boolean {
+    if (!isRecord(data)) return false;
+    return (
+      matchesEngineOwner(data.sessionId, execution.sessionId) &&
+      matchesEngineOwner(data.requestId, execution.requestId)
+    );
+  }
+
   private publishExecutionTerminal(
     execution: ExecutionRecord,
     terminal:
@@ -1071,6 +1179,19 @@ export class AgentChatService {
       },
     });
     return true;
+  }
+
+  private terminateForEngineProtocolViolation(execution: ExecutionRecord): void {
+    this.terminateForEngineError(execution, AGENT_ENGINE_PROTOCOL_ERROR_MESSAGE);
+  }
+
+  private terminateForEngineError(execution: ExecutionRecord, message: string): void {
+    if (execution.terminalPublished) return;
+    execution.abortController.abort();
+    this.publishExecutionTerminal(execution, {
+      status: 'error',
+      message,
+    });
   }
 
   private terminateForOutputLimit(execution: ExecutionRecord): void {

@@ -63,6 +63,7 @@ vi.mock('./attachment-service', () => ({
 
 import {
   AGENT_EXECUTION_LIMITS,
+  AGENT_ENGINE_PROTOCOL_ERROR_MESSAGE,
   AGENT_EXECUTION_OUTPUT_LIMIT_MESSAGE,
   AGENT_EXECUTION_OUTPUT_LIMITS,
   AgentChatService,
@@ -1719,6 +1720,467 @@ describe('AgentChatService', () => {
         0,
       ),
     ).toBeLessThanOrEqual(AGENT_STREAM_MAX_JSON_BYTES_PER_REQUEST);
+  });
+
+  it('rejects a wrong-session engine message before cross-session relay or persistence', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'wrong-session-engine-event';
+    const leakedContent = 'must never reach the victim session';
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'wrong-session-message',
+            sessionId: alternateSession.id,
+            role: 'assistant',
+            content: leakedContent,
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId,
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date(0).toISOString(),
+          },
+        });
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const ownerEvents: RealtimeEvent[] = [];
+    const victimEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => ownerEvents.push(event));
+    streamManager.addListener(alternateSession.id, (event) => victimEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Reject the cross-session event',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+
+    expect(engineSignal?.aborted).toBe(true);
+    expect(victimEvents).toEqual([]);
+    expect(JSON.stringify(ownerEvents)).not.toContain(leakedContent);
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(1);
+    expect(
+      ownerEvents.filter(
+        (event) =>
+          event.type === 'error' && event.error === AGENT_ENGINE_PROTOCOL_ERROR_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    expect(
+      ownerEvents.filter(
+        (event) =>
+          event.type === 'status' &&
+          event.data.status === 'error' &&
+          event.data.message === AGENT_ENGINE_PROTOCOL_ERROR_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    expect(
+      ownerEvents.some(
+        (event) => event.type === 'status' && event.data.status === 'completed',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects a wrong-request engine error without relaying its content', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'owner-request';
+    const forgedRequestId = 'different-request';
+    const attackerError = 'wrong-request engine error must not be relayed';
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        ctx.emit({
+          type: 'error',
+          error: attackerError,
+          data: {
+            sessionId: legacySession.id,
+            requestId: forgedRequestId,
+          },
+        });
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Reject the wrong-request error',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+
+    expect(engineSignal?.aborted).toBe(true);
+    expect(JSON.stringify(streamedEvents)).not.toContain(attackerError);
+    expect(
+      streamedEvents.some((event) => {
+        if (event.type === 'error') return event.data?.requestId === forgedRequestId;
+        return 'requestId' in event.data && event.data.requestId === forgedRequestId;
+      }),
+    ).toBe(false);
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(1);
+    expect(
+      streamedEvents.filter(
+        (event) =>
+          event.type === 'error' && event.error === AGENT_ENGINE_PROTOCOL_ERROR_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'status' && event.data.status === 'completed',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('injects missing owner IDs into accepted message, usage, and nonterminal status events', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'missing-engine-owner-ids';
+    const assistantContent = 'normalized owner reply';
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'missing-owner-message',
+            role: 'assistant',
+            content: assistantContent,
+            messageType: 'chat',
+            cliSource: 'claude',
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date(0).toISOString(),
+          },
+        } as RealtimeEvent);
+        ctx.emit({
+          type: 'usage',
+          data: {
+            inputTokens: 1,
+            outputTokens: 2,
+            totalCostUsd: 0,
+            durationMs: 3,
+            numTurns: 1,
+          },
+        } as RealtimeEvent);
+        ctx.emit({
+          type: 'status',
+          data: {
+            status: 'ready',
+          },
+        } as RealtimeEvent);
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Normalize missing owner fields',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+
+    const normalizedMessage = streamedEvents.find(
+      (event) => event.type === 'message' && event.data.content === assistantContent,
+    );
+    const normalizedUsage = streamedEvents.find((event) => event.type === 'usage');
+    const normalizedReady = streamedEvents.find(
+      (event) => event.type === 'status' && event.data.status === 'ready',
+    );
+    expect(engineSignal?.aborted).toBe(false);
+    expect(normalizedMessage).toMatchObject({
+      type: 'message',
+      data: { sessionId: legacySession.id, requestId },
+    });
+    expect(normalizedUsage).toMatchObject({
+      type: 'usage',
+      data: { sessionId: legacySession.id, requestId },
+    });
+    expect(normalizedReady).toMatchObject({
+      type: 'status',
+      data: { sessionId: legacySession.id, requestId, status: 'ready' },
+    });
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: 'assistant',
+        content: assistantContent,
+        sessionId: legacySession.id,
+        requestId,
+      }),
+    );
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'status' && event.data.status === 'completed',
+      ),
+    ).toHaveLength(1);
+    expect(streamedEvents.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('turns a forged engine completion into one fixed owner terminal and ignores later emits', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'forged-engine-completion';
+    const attackerMarker = 'FORGED_COMPLETION_CONTENT';
+    const lateContent = 'late content after forged completion';
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        ctx.emit({
+          type: 'status',
+          data: {
+            sessionId: legacySession.id,
+            requestId,
+            status: 'completed',
+            message: attackerMarker,
+          },
+        });
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'late-after-forged-completion',
+            sessionId: legacySession.id,
+            role: 'assistant',
+            content: lateContent,
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId,
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date(0).toISOString(),
+          },
+        });
+        ctx.emit({
+          type: 'error',
+          error: 'second terminal must be ignored',
+          data: { sessionId: legacySession.id, requestId },
+        });
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Reject forged lifecycle control',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+
+    expect(engineSignal?.aborted).toBe(true);
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(streamedEvents)).not.toContain(attackerMarker);
+    expect(JSON.stringify(streamedEvents)).not.toContain(lateContent);
+    expect(
+      streamedEvents.filter(
+        (event) =>
+          event.type === 'error' && event.error === AGENT_ENGINE_PROTOCOL_ERROR_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    expect(
+      streamedEvents.filter(
+        (event) => event.type === 'status' && event.data.status === 'error',
+      ),
+    ).toHaveLength(1);
+    expect(
+      streamedEvents.some(
+        (event) =>
+          event.type === 'status' &&
+          (event.data.status === 'completed' || event.data.status === 'cancelled'),
+      ),
+    ).toBe(false);
+  });
+
+  it('translates an owned engine error into one bounded owner terminal', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'owned-engine-error';
+    const hugeEngineError = `${'\u0000\u001f'.repeat(32)}${'界'.repeat(10_000)}`;
+    const lateContent = 'late content after owned engine error';
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        ctx.emit({
+          type: 'error',
+          error: hugeEngineError,
+          data: { sessionId: legacySession.id, requestId },
+        });
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'late-after-owned-engine-error',
+            sessionId: legacySession.id,
+            role: 'assistant',
+            content: lateContent,
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId,
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date(0).toISOString(),
+          },
+        });
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Translate one owned engine error',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+
+    const errors = streamedEvents.filter(
+      (event): event is Extract<RealtimeEvent, { type: 'error' }> => event.type === 'error',
+    );
+    const errorStatuses = streamedEvents.filter(
+      (event): event is Extract<RealtimeEvent, { type: 'status' }> =>
+        event.type === 'status' && event.data.status === 'error',
+    );
+    expect(engineSignal?.aborted).toBe(true);
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveLength(1);
+    expect(errorStatuses).toHaveLength(1);
+    expect(errors[0].data).toEqual({ sessionId: legacySession.id, requestId });
+    expect(errors[0].error).not.toBe(AGENT_ENGINE_PROTOCOL_ERROR_MESSAGE);
+    expect(Buffer.byteLength(errors[0].error, 'utf8')).toBeLessThanOrEqual(
+      AGENT_STREAM_MAX_ERROR_BYTES,
+    );
+    expect(Buffer.byteLength(errorStatuses[0].data.message ?? '', 'utf8')).toBeLessThanOrEqual(
+      AGENT_STREAM_MAX_STATUS_MESSAGE_BYTES,
+    );
+    expect(containsAsciiControl(errors[0].error)).toBe(false);
+    expect(JSON.stringify(streamedEvents)).not.toContain(lateContent);
+    expect(
+      streamedEvents.some(
+        (event) => event.type === 'status' && event.data.status === 'completed',
+      ),
+    ).toBe(false);
+  });
+
+  it('settles an admitted deferred write after a later engine protocol violation', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const requestId = 'protocol-terminal-deferred-write';
+    const admittedContent = 'admitted before protocol violation';
+    const lateContent = 'not admitted after protocol violation';
+    const assistantPersistence = deferred<void>();
+    messageServiceMocks.createMessage.mockImplementation((input: { role?: string }) =>
+      input.role === 'user' ? Promise.resolve(undefined) : assistantPersistence.promise,
+    );
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'admitted-before-protocol-violation',
+            sessionId: legacySession.id,
+            role: 'assistant',
+            content: admittedContent,
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId,
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date(0).toISOString(),
+          },
+        });
+        ctx.emit({
+          type: 'connected',
+          data: {
+            sessionId: legacySession.id,
+            transport: 'sse',
+            timestamp: new Date(0).toISOString(),
+          },
+        });
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'late-after-protocol-violation',
+            sessionId: legacySession.id,
+            role: 'assistant',
+            content: lateContent,
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId,
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date(0).toISOString(),
+          },
+        });
+      },
+    };
+    const streamManager = new AgentStreamManager();
+    const streamedEvents: RealtimeEvent[] = [];
+    streamManager.addListener(legacySession.id, (event) => streamedEvents.push(event));
+    const service = new AgentChatService({ engines: [engine], streamManager });
+
+    await service.handleAct(legacySession.id, {
+      instruction: 'Settle admitted persistence after protocol failure',
+      dbSessionId: legacySession.id,
+      requestId,
+    });
+    await vi.waitFor(() => expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(2));
+
+    expect(engineSignal?.aborted).toBe(true);
+    expect(JSON.stringify(streamedEvents)).toContain(admittedContent);
+    expect(JSON.stringify(streamedEvents)).not.toContain(lateContent);
+    expect(
+      streamedEvents.filter(
+        (event) =>
+          event.type === 'error' && event.error === AGENT_ENGINE_PROTOCOL_ERROR_MESSAGE,
+      ),
+    ).toHaveLength(1);
+    const mutation = vi.fn().mockResolvedValue('settled');
+    const lifecyclePromise = service.withSessionLifecycleMutation(legacySession.id, mutation);
+    await Promise.resolve();
+    expect(mutation).not.toHaveBeenCalled();
+
+    assistantPersistence.resolve();
+    await expect(lifecyclePromise).resolves.toBe('settled');
+    expect(mutation).toHaveBeenCalledOnce();
+    expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(2);
+    expect(service.getRunningExecutions()).toHaveLength(0);
   });
 
   it('keeps the reserved completed terminal reachable at the exact admission boundary', async () => {
