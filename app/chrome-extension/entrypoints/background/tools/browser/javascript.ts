@@ -2,7 +2,8 @@
  * JavaScript Tool - CDP Runtime.evaluate
  *
  * Execute JavaScript in the browser tab and return the result.
- * - Primary: CDP Runtime.evaluate (supports awaitPromise + returnByValue)
+ * - CDP Runtime.evaluate retains the raw result as a remote object.
+ * - Runtime.callFunctionOn sanitizes and serializes it under strict budgets.
  *
  * Features:
  * - Async code support (top-level await via async wrapper)
@@ -12,35 +13,38 @@
  * - Detailed error classification
  */
 
-import { createErrorResponse, ToolResult } from '@/common/tool-handler';
-import { BaseBrowserToolExecutor } from '../base-browser';
-import { TOOL_NAMES } from 'webpage-mcp-shared';
-import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { createErrorResponse, ToolResult } from "@/common/tool-handler";
+import { BaseBrowserToolExecutor } from "../base-browser";
+import { JAVASCRIPT_TOOL_LIMITS, TOOL_NAMES } from "webpage-mcp-shared";
+import { cdpSessionManager } from "@/utils/cdp-session-manager";
+import { sanitizeText } from "@/utils/output-sanitizer";
 import {
-  DEFAULT_MAX_OUTPUT_BYTES,
-  sanitizeAndLimitOutput,
-  sanitizeText,
-} from '@/utils/output-sanitizer';
+  PageSerializationEnvelope,
+  serializeJavaScriptEvaluation,
+} from "./javascript-page-serializer";
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const DEFAULT_TIMEOUT_MS = 15_000;
-const CDP_SESSION_KEY = 'javascript';
+const CDP_SESSION_KEY = "javascript";
+const MAX_ERROR_MESSAGE_CHARS = 10_000;
+const PAGE_SERIALIZER_FUNCTION_DECLARATION =
+  serializeJavaScriptEvaluation.toString();
+let objectGroupSequence = 0;
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type ExecutionEngine = 'cdp';
+type ExecutionEngine = "cdp";
 
 type ErrorKind =
-  | 'debugger_conflict'
-  | 'timeout'
-  | 'syntax_error'
-  | 'runtime_error'
-  | 'cdp_error';
+  | "debugger_conflict"
+  | "timeout"
+  | "syntax_error"
+  | "runtime_error"
+  | "cdp_error";
 
 interface JavaScriptToolParams {
   code: string;
@@ -104,20 +108,13 @@ type ExecutionResult = ExecutionSuccess | ExecutionFailure;
 class TimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`Execution timed out after ${timeoutMs}ms`);
-    this.name = 'TimeoutError';
+    this.name = "TimeoutError";
   }
 }
 
 // ============================================================================
 // Utility Functions
 // ============================================================================
-
-function normalizePositiveInt(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return fallback;
-  }
-  return Math.max(1, Math.floor(value));
-}
 
 function hasDisallowedPublicPageScheme(url: string): boolean {
   const match = url.trim().match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
@@ -126,7 +123,7 @@ function hasDisallowedPublicPageScheme(url: string): boolean {
   }
 
   const protocol = match[1]?.toLowerCase();
-  return protocol !== 'http' && protocol !== 'https';
+  return protocol !== "http" && protocol !== "https";
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -143,7 +140,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 }
 
 function isTimeoutError(error: unknown): error is TimeoutError {
-  return error instanceof Error && error.name === 'TimeoutError';
+  return error instanceof Error && error.name === "TimeoutError";
 }
 
 function isDebuggerConflictError(error: unknown): boolean {
@@ -153,11 +150,74 @@ function isDebuggerConflictError(error: unknown): boolean {
   );
 }
 
+function normalizeBoundedInteger(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+  parameterName: string,
+): number {
+  if (value === undefined) return fallback;
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new Error(
+      `Parameter [${parameterName}] must be an integer between ${minimum} and ${maximum}`,
+    );
+  }
+  return value;
+}
+
+function exceedsUtf8ByteLimit(value: string, maximumBytes: number): boolean {
+  // UTF-8 cannot be shorter than the corresponding UTF-16 code-unit count.
+  if (value.length > maximumBytes) return true;
+  return new TextEncoder().encode(value).byteLength > maximumBytes;
+}
+
+function sanitizeBoundedErrorText(value: unknown): string {
+  let raw: string;
+  try {
+    raw = value instanceof Error ? value.message : String(value);
+  } catch {
+    raw = "JavaScript execution failed";
+  }
+  const clipped =
+    raw.length > MAX_ERROR_MESSAGE_CHARS
+      ? `${raw.slice(0, MAX_ERROR_MESSAGE_CHARS)}... [error truncated]`
+      : raw;
+  return sanitizeText(clipped).text;
+}
+
+function nextObjectGroup(tabId: number): string {
+  objectGroupSequence = (objectGroupSequence + 1) % Number.MAX_SAFE_INTEGER;
+  return `webpage-mcp-javascript-${tabId}-${Date.now().toString(36)}-${objectGroupSequence.toString(36)}`;
+}
+
 /**
  * Wrap user code in an async IIFE to support top-level await and return statements.
  */
 function wrapUserCode(code: string): string {
-  return `(async () => {\n${code}\n})()`;
+  // The outer object is always retained by reference. Successful values and
+  // thrown values therefore never cross CDP until the bounded serializer has
+  // processed them in the page execution context.
+  return `(async () => {
+    try {
+      return {
+        __webpageMcpStatus: 1,
+        __webpageMcpValue: await (async () => {
+${code}
+        })()
+      };
+    } catch (__webpageMcpCaughtError) {
+      return {
+        __webpageMcpStatus: 0,
+        __webpageMcpValue: __webpageMcpCaughtError
+      };
+    }
+  })()`;
 }
 
 // ============================================================================
@@ -170,6 +230,7 @@ interface CDPRemoteObject {
   value?: unknown;
   unserializableValue?: string;
   description?: string;
+  objectId?: string;
 }
 
 interface CDPExceptionDetails {
@@ -189,40 +250,28 @@ interface CDPEvaluateResult {
   exceptionDetails?: CDPExceptionDetails;
 }
 
-function extractReturnValue(remoteObject?: CDPRemoteObject): unknown {
-  if (!remoteObject) return undefined;
-
-  if ('value' in remoteObject) return remoteObject.value;
-  if ('unserializableValue' in remoteObject)
-    return remoteObject.unserializableValue;
-  if (typeof remoteObject.description === 'string')
-    return remoteObject.description;
-
-  return undefined;
-}
-
 function parseExceptionDetails(details: CDPExceptionDetails): ExecutionError {
-  const exceptionClassName = details.exception?.className ?? '';
-  const exceptionDescription = details.exception?.description ?? '';
-  const exceptionValue = details.exception?.value ?? '';
-  const text = details.text ?? '';
+  const exceptionClassName = details.exception?.className ?? "";
+  const exceptionDescription = details.exception?.description ?? "";
+  const exceptionValue = details.exception?.value ?? "";
+  const text = details.text ?? "";
 
   // Determine the raw error message
   const rawMessage =
     exceptionDescription ||
     exceptionValue ||
     text ||
-    'JavaScript execution failed';
+    "JavaScript execution failed";
 
   // Sanitize the message
-  const message = sanitizeText(rawMessage).text;
+  const message = sanitizeBoundedErrorText(rawMessage);
 
   // Classify the error kind
   const isSyntaxError =
-    exceptionClassName === 'SyntaxError' || /SyntaxError/i.test(rawMessage);
+    exceptionClassName === "SyntaxError" || /SyntaxError/i.test(rawMessage);
 
   return {
-    kind: isSyntaxError ? 'syntax_error' : 'runtime_error',
+    kind: isSyntaxError ? "syntax_error" : "runtime_error",
     message,
     details: {
       url: details.url,
@@ -232,6 +281,47 @@ function parseExceptionDetails(details: CDPExceptionDetails): ExecutionError {
   };
 }
 
+function parseSerializerException(
+  details: CDPExceptionDetails,
+): ExecutionError {
+  const rawMessage =
+    details.exception?.description ||
+    details.exception?.value ||
+    details.text ||
+    "Bounded page serialization failed";
+  return {
+    kind: "cdp_error",
+    message: sanitizeBoundedErrorText(rawMessage),
+  };
+}
+
+function isPageSerializationEnvelope(
+  value: unknown,
+): value is PageSerializationEnvelope {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<PageSerializationEnvelope>;
+  if (candidate.version !== 1) return false;
+  if (candidate.status === "success") {
+    return (
+      typeof candidate.text === "string" &&
+      typeof candidate.truncated === "boolean" &&
+      typeof candidate.redacted === "boolean"
+    );
+  }
+  return (
+    candidate.status === "error" &&
+    (candidate.errorKind === "syntax_error" ||
+      candidate.errorKind === "runtime_error" ||
+      candidate.errorKind === "serialization_error") &&
+    typeof candidate.message === "string"
+  );
+}
+
+function isWithinUtf8ByteLimit(value: string, maximumBytes: number): boolean {
+  if (value.length > maximumBytes) return false;
+  return new TextEncoder().encode(value).byteLength <= maximumBytes;
+}
+
 async function executeViaCdp(
   tabId: number,
   code: string,
@@ -239,70 +329,150 @@ async function executeViaCdp(
 ): Promise<ExecutionResult> {
   try {
     const expression = wrapUserCode(code);
+    const objectGroup = nextObjectGroup(tabId);
 
-    const response = await withTimeout(
+    return await withTimeout(
       cdpSessionManager.withSession(tabId, CDP_SESSION_KEY, async () => {
-        return (await cdpSessionManager.sendCommand(tabId, 'Runtime.evaluate', {
-          expression,
-          returnByValue: true,
-          awaitPromise: true,
-          // CDP Built-in timeout (milliseconds), double guarantee with outer withTimeout
-          timeout: options.timeoutMs,
-        })) as CDPEvaluateResult;
+        try {
+          const response = (await cdpSessionManager.sendCommand(
+            tabId,
+            "Runtime.evaluate",
+            {
+              expression,
+              objectGroup,
+              // Never clone the holder or its potentially enormous value into
+              // the extension process.
+              returnByValue: false,
+              generatePreview: false,
+              awaitPromise: true,
+              timeout: options.timeoutMs,
+            },
+          )) as CDPEvaluateResult;
+
+          if (response?.exceptionDetails) {
+            return {
+              ok: false,
+              engine: "cdp",
+              error: parseExceptionDetails(response.exceptionDetails),
+            };
+          }
+
+          const objectId = response?.result?.objectId;
+          if (!objectId) {
+            return {
+              ok: false,
+              engine: "cdp",
+              error: {
+                kind: "cdp_error",
+                message: "CDP did not retain the JavaScript result holder",
+              },
+            };
+          }
+
+          const serializedResponse = (await cdpSessionManager.sendCommand(
+            tabId,
+            "Runtime.callFunctionOn",
+            {
+              objectId,
+              functionDeclaration: PAGE_SERIALIZER_FUNCTION_DECLARATION,
+              arguments: [{ value: options.maxOutputBytes }],
+              returnByValue: true,
+              generatePreview: false,
+              awaitPromise: false,
+              timeout: options.timeoutMs,
+            },
+          )) as CDPEvaluateResult;
+
+          if (serializedResponse?.exceptionDetails) {
+            return {
+              ok: false,
+              engine: "cdp",
+              error: parseSerializerException(
+                serializedResponse.exceptionDetails,
+              ),
+            };
+          }
+
+          const envelope = serializedResponse?.result?.value;
+          if (!isPageSerializationEnvelope(envelope)) {
+            return {
+              ok: false,
+              engine: "cdp",
+              error: {
+                kind: "cdp_error",
+                message: "Bounded page serializer returned an invalid response",
+              },
+            };
+          }
+
+          if (envelope.status === "error") {
+            return {
+              ok: false,
+              engine: "cdp",
+              error: {
+                kind:
+                  envelope.errorKind === "serialization_error"
+                    ? "cdp_error"
+                    : envelope.errorKind,
+                message: sanitizeBoundedErrorText(envelope.message),
+              },
+            };
+          }
+
+          if (!isWithinUtf8ByteLimit(envelope.text, options.maxOutputBytes)) {
+            return {
+              ok: false,
+              engine: "cdp",
+              error: {
+                kind: "cdp_error",
+                message:
+                  "Bounded page serializer exceeded the requested output limit",
+              },
+            };
+          }
+
+          return {
+            ok: true,
+            engine: "cdp",
+            output: envelope.text,
+            truncated: envelope.truncated,
+            redacted: envelope.redacted,
+          };
+        } finally {
+          // Release the holder even after page exceptions, serializer errors,
+          // timeouts, or malformed responses. Object groups also cover any
+          // temporary remote objects created by Runtime.evaluate.
+          await cdpSessionManager
+            .sendCommand(tabId, "Runtime.releaseObjectGroup", { objectGroup })
+            .catch(() => undefined);
+        }
       }),
       // The outer timeout is slightly longer, giving CDP a little margin to handle the timeout response.
       options.timeoutMs + 1000,
     );
-
-    // Check for exception
-    if (response?.exceptionDetails) {
-      return {
-        ok: false,
-        engine: 'cdp',
-        error: parseExceptionDetails(response.exceptionDetails),
-      };
-    }
-
-    // Extract and sanitize the result
-    const value = extractReturnValue(response?.result);
-    const sanitized = sanitizeAndLimitOutput(value, {
-      maxBytes: options.maxOutputBytes,
-    });
-
-    return {
-      ok: true,
-      engine: 'cdp',
-      output: sanitized.text,
-      truncated: sanitized.truncated,
-      redacted: sanitized.redacted,
-    };
   } catch (error) {
     if (isTimeoutError(error)) {
       return {
         ok: false,
-        engine: 'cdp',
-        error: { kind: 'timeout', message: error.message },
+        engine: "cdp",
+        error: { kind: "timeout", message: error.message },
       };
     }
 
     if (isDebuggerConflictError(error)) {
-      const message = sanitizeText(
-        error instanceof Error ? error.message : String(error),
-      ).text;
+      const message = sanitizeBoundedErrorText(error);
       return {
         ok: false,
-        engine: 'cdp',
-        error: { kind: 'debugger_conflict', message },
+        engine: "cdp",
+        error: { kind: "debugger_conflict", message },
       };
     }
 
-    const message = sanitizeText(
-      error instanceof Error ? error.message : String(error),
-    ).text;
+    const message = sanitizeBoundedErrorText(error);
     return {
       ok: false,
-      engine: 'cdp',
-      error: { kind: 'cdp_error', message },
+      engine: "cdp",
+      error: { kind: "cdp_error", message },
     };
   }
 }
@@ -319,39 +489,60 @@ class JavaScriptTool extends BaseBrowserToolExecutor {
 
     try {
       // Validate required parameter
-      const code = typeof args?.code === 'string' ? args.code.trim() : '';
+      const rawCode = typeof args?.code === "string" ? args.code : "";
+      if (
+        exceedsUtf8ByteLimit(rawCode, JAVASCRIPT_TOOL_LIMITS.MAX_CODE_BYTES)
+      ) {
+        return createErrorResponse(
+          `Parameter [code] exceeds the ${JAVASCRIPT_TOOL_LIMITS.MAX_CODE_BYTES}-byte UTF-8 limit`,
+        );
+      }
+      const code = rawCode.trim();
       if (!code) {
-        return createErrorResponse('Parameter [code] is required');
+        return createErrorResponse("Parameter [code] is required");
+      }
+
+      let options: ExecutionOptions;
+      try {
+        options = {
+          timeoutMs: normalizeBoundedInteger(
+            args.timeoutMs,
+            JAVASCRIPT_TOOL_LIMITS.DEFAULT_TIMEOUT_MS,
+            JAVASCRIPT_TOOL_LIMITS.MIN_TIMEOUT_MS,
+            JAVASCRIPT_TOOL_LIMITS.MAX_TIMEOUT_MS,
+            "timeoutMs",
+          ),
+          maxOutputBytes: normalizeBoundedInteger(
+            args.maxOutputBytes,
+            JAVASCRIPT_TOOL_LIMITS.DEFAULT_MAX_OUTPUT_BYTES,
+            JAVASCRIPT_TOOL_LIMITS.MIN_OUTPUT_BYTES,
+            JAVASCRIPT_TOOL_LIMITS.MAX_OUTPUT_BYTES,
+            "maxOutputBytes",
+          ),
+        };
+      } catch (error) {
+        return createErrorResponse(sanitizeBoundedErrorText(error));
       }
 
       // Resolve target tab
       const tab = await this.resolveTargetTab(args.tabId);
       if (!tab) {
         return createErrorResponse(
-          typeof args.tabId === 'number'
+          typeof args.tabId === "number"
             ? `Tab not found: ${args.tabId}`
-            : 'No active tab found',
+            : "No active tab found",
         );
       }
 
       if (!tab.id) {
-        return createErrorResponse('Tab has no ID');
+        return createErrorResponse("Tab has no ID");
       }
-      if (hasDisallowedPublicPageScheme(String(tab.url || ''))) {
+      if (hasDisallowedPublicPageScheme(String(tab.url || ""))) {
         return createErrorResponse(
-          'Only http:// and https:// pages are supported by chrome_javascript',
+          "Only http:// and https:// pages are supported by chrome_javascript",
         );
       }
       const tabId = tab.id;
-
-      // Normalize options
-      const options: ExecutionOptions = {
-        timeoutMs: normalizePositiveInt(args.timeoutMs, DEFAULT_TIMEOUT_MS),
-        maxOutputBytes: normalizePositiveInt(
-          args.maxOutputBytes,
-          DEFAULT_MAX_OUTPUT_BYTES,
-        ),
-      };
 
       const warnings: string[] = [];
 
@@ -363,18 +554,18 @@ class JavaScriptTool extends BaseBrowserToolExecutor {
       }
 
       // If not a debugger conflict, return the CDP error
-      if (cdpResult.error.kind !== 'debugger_conflict') {
+      if (cdpResult.error.kind !== "debugger_conflict") {
         return this.buildErrorResponse(tabId, cdpResult, startTime);
       }
 
       warnings.push(
-        'JavaScript was not executed because DevTools or another extension owns the debugger session. Close that debugger and retry.',
+        "JavaScript was not executed because DevTools or another extension owns the debugger session. Close that debugger and retry.",
       );
       return this.buildErrorResponse(tabId, cdpResult, startTime, warnings);
     } catch (error) {
-      console.error('JavaScriptTool.execute error:', error);
+      console.error("JavaScriptTool.execute error:", error);
       return createErrorResponse(
-        `JavaScript tool error: ${error instanceof Error ? error.message : String(error)}`,
+        `JavaScript tool error: ${sanitizeBoundedErrorText(error)}`,
       );
     }
   }
@@ -382,7 +573,7 @@ class JavaScriptTool extends BaseBrowserToolExecutor {
   private async resolveTargetTab(
     tabId?: number,
   ): Promise<chrome.tabs.Tab | null> {
-    if (typeof tabId === 'number') {
+    if (typeof tabId === "number") {
       return this.tryGetTab(tabId);
     }
     try {
@@ -410,7 +601,7 @@ class JavaScriptTool extends BaseBrowserToolExecutor {
     };
 
     return {
-      content: [{ type: 'text', text: JSON.stringify(payload) }],
+      content: [{ type: "text", text: JSON.stringify(payload) }],
       isError: false,
     };
   }
@@ -431,7 +622,7 @@ class JavaScriptTool extends BaseBrowserToolExecutor {
     };
 
     return {
-      content: [{ type: 'text', text: JSON.stringify(payload) }],
+      content: [{ type: "text", text: JSON.stringify(payload) }],
       isError: true,
     };
   }
