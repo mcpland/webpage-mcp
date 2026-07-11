@@ -122,9 +122,10 @@ function tokenize(input: string): Token[] {
 }
 
 // Recursive descent parser
-export function evalExpression(
+function evaluateExpression(
   expr: string,
   scope: { vars: Record<string, any> },
+  throwOnError: boolean,
 ): any {
   try {
     const tokens = tokenize(expr);
@@ -323,7 +324,33 @@ export function evalExpression(
     if (i !== tokens.length)
       throw new Error("Expression contains trailing tokens");
     return result;
-  } catch {
+  } catch (error) {
+    if (throwOnError) throw error;
     return false;
+  }
+}
+
+export function evalExpression(
+  expr: string,
+  scope: { vars: Record<string, any> },
+): any {
+  return evaluateExpression(expr, scope, false);
+}
+
+export type ExpressionEvaluation =
+  | { ok: true; value: any }
+  | { ok: false; error: string };
+
+export function tryEvalExpression(
+  expr: string,
+  scope: { vars: Record<string, any> },
+): ExpressionEvaluation {
+  try {
+    return { ok: true, value: evaluateExpression(expr, scope, true) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Invalid expression",
+    };
   }
 }

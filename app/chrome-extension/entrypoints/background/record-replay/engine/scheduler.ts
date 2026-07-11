@@ -30,8 +30,9 @@ import {
 } from './execution-mode';
 import { createExecutor, type StepExecutorInterface } from './runners/step-executor';
 import { createReplayActionRegistry } from '../actions/handlers';
+import { evaluateCondition as evaluateActionCondition } from '../actions/handlers/control-flow';
 import { compareScreenshotBase64 } from './utils/screenshot-compare';
-import type { ExecutionFlags } from '../actions/types';
+import type { Condition, ExecutionFlags } from '../actions/types';
 
 export interface RunOptions {
   tabTarget?: 'current' | 'new';
@@ -192,6 +193,36 @@ function clampSimilarityThreshold(value: unknown, fallback = 0.92): number {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(0, Math.min(1, n));
+}
+
+/** Evaluate both structured Action conditions and legacy scheduler conditions. */
+export function evaluateSchedulerCondition(
+  cond: unknown,
+  vars: Record<string, any>,
+): boolean {
+  try {
+    if (cond && typeof cond === 'object' && 'kind' in cond && typeof cond.kind === 'string') {
+      const result = evaluateActionCondition(cond as Condition, vars);
+      return result.ok && result.value;
+    }
+    if (
+      cond &&
+      typeof cond === 'object' &&
+      'expression' in cond &&
+      typeof cond.expression === 'string' &&
+      cond.expression.trim()
+    ) {
+      return !!evalExpression(cond.expression, { vars });
+    }
+    if (cond && typeof cond === 'object' && 'var' in cond && typeof cond.var === 'string') {
+      const value = vars[cond.var];
+      if ('equals' in cond) return String(value) === String(cond.equals);
+      return !!value;
+    }
+  } catch {
+    // Invalid or unsupported conditions fail closed.
+  }
+  return false;
 }
 
 /**
@@ -985,19 +1016,7 @@ class ExecutionOrchestrator {
   }
 
   private evalCondition(cond: any): boolean {
-    try {
-      if (cond && typeof cond.expression === 'string' && cond.expression.trim()) {
-        return !!evalExpression(String(cond.expression), { vars: this.vars });
-      }
-      if (cond && typeof cond.var === 'string') {
-        const v = this.vars[cond.var];
-        if ('equals' in cond) return String(v) === String(cond.equals);
-        return !!v;
-      }
-    } catch {
-      // ignore: cleanup guard
-    }
-    return false;
+    return evaluateSchedulerCondition(cond, this.vars);
   }
 
   private async cleanup() {

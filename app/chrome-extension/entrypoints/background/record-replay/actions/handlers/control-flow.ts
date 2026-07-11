@@ -27,6 +27,7 @@ import type {
   VariableStore,
 } from '../types';
 import { testWorkflowRegex } from '../../workflow-regex';
+import { tryEvalExpression } from '../../engine/utils/expression';
 
 /** Default max iterations for while loops */
 const DEFAULT_MAX_ITERATIONS = 1000;
@@ -38,7 +39,7 @@ const DEFAULT_MAX_ITERATIONS = 1000;
 /**
  * Evaluate a condition against variables
  */
-type ConditionEvaluation =
+export type ConditionEvaluation =
   | { ok: true; value: boolean }
   | { ok: false; error: string };
 
@@ -46,12 +47,27 @@ function evaluated(value: boolean): ConditionEvaluation {
   return { ok: true, value };
 }
 
-function evaluateCondition(condition: Condition, vars: VariableStore): ConditionEvaluation {
+export function evaluateCondition(
+  condition: Condition,
+  vars: VariableStore,
+): ConditionEvaluation {
   switch (condition.kind) {
     case 'expr': {
-      // Expression evaluation not supported in default resolver
-      // Return false for safety
-      return evaluated(false);
+      const expression = condition.expr;
+      if (!expression || typeof expression !== 'object') {
+        return { ok: false, error: 'Expression condition requires an expression object' };
+      }
+      if (expression.language !== 'rr') {
+        return { ok: false, error: 'Expression conditions only support the "rr" language' };
+      }
+      if (typeof expression.code !== 'string') {
+        return { ok: false, error: 'Expression condition code must be a string' };
+      }
+
+      const result = tryEvalExpression(expression.code, { vars });
+      return result.ok
+        ? evaluated(Boolean(result.value))
+        : { ok: false, error: `Invalid rr expression: ${result.error}` };
     }
 
     case 'compare': {
@@ -144,6 +160,34 @@ function evaluateCondition(condition: Condition, vars: VariableStore): Condition
   }
 }
 
+function validateConditionSyntax(condition: Condition): string | null {
+  if (!condition || typeof condition !== 'object') {
+    return 'Condition must be an object';
+  }
+
+  switch (condition.kind) {
+    case 'expr': {
+      const result = evaluateCondition(condition, {});
+      return result.ok ? null : result.error;
+    }
+    case 'not':
+      return validateConditionSyntax(condition.condition);
+    case 'and':
+    case 'or': {
+      if (!Array.isArray(condition.conditions) || condition.conditions.length === 0) {
+        return `${condition.kind} condition requires at least one nested condition`;
+      }
+      for (const nested of condition.conditions) {
+        const error = validateConditionSyntax(nested);
+        if (error) return error;
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
 // ================================
 // if Handler
 // ================================
@@ -158,9 +202,15 @@ export const ifHandler: ActionHandler<'if'> = {
       if (!params.condition) {
         return invalid('Binary if requires a condition');
       }
+      const conditionError = validateConditionSyntax(params.condition);
+      if (conditionError) return invalid(conditionError);
     } else if (params.mode === 'branches') {
       if (!params.branches || params.branches.length === 0) {
         return invalid('Branches if requires at least one branch');
+      }
+      for (const [index, branch] of params.branches.entries()) {
+        const conditionError = validateConditionSyntax(branch.condition);
+        if (conditionError) return invalid(`Branch ${index + 1}: ${conditionError}`);
       }
     } else {
       return invalid(`Unknown if mode: ${String((params as { mode: string }).mode)}`);
@@ -272,6 +322,9 @@ export const whileHandler: ActionHandler<'while'> = {
     if (!params.condition) {
       return invalid('while requires a condition');
     }
+
+    const conditionError = validateConditionSyntax(params.condition);
+    if (conditionError) return invalid(conditionError);
 
     if (!params.subflowId) {
       return invalid('while requires a subflowId');

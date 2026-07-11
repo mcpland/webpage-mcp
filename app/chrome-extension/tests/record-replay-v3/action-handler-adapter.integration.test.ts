@@ -223,6 +223,39 @@ describe('V2 Action Adapter Integration', () => {
       expect(succeeded.next).toEqual({ kind: 'edgeLabel', label: 'no' });
     });
 
+    it('evaluates rr expression conditions through the V3 adapter', async () => {
+      const nodeDef = adaptActionHandlerToNodeDefinition(ifHandler);
+      const mockCtx = {
+        runId: 'run-1',
+        flow: { policy: {} } as any,
+        nodeId: 'if-node',
+        tabId: 1,
+        vars: { total: 7 },
+        log: vi.fn(),
+        chooseNext: (label: string) => ({ kind: 'edgeLabel' as const, label }),
+        artifacts: { screenshot: vi.fn() },
+        persistent: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      };
+      const node = {
+        id: 'if-node',
+        kind: 'if',
+        config: {
+          mode: 'binary',
+          condition: {
+            kind: 'expr',
+            expr: { language: 'rr', code: 'vars.total >= 5' },
+          },
+          trueLabel: 'yes',
+          falseLabel: 'no',
+        },
+      };
+
+      const result = await nodeDef.execute(mockCtx as any, node as any);
+
+      const succeeded = assertSucceeded(result);
+      expect(succeeded.next).toEqual({ kind: 'edgeLabel', label: 'yes' });
+    });
+
     it('handles compare condition (eq)', async () => {
       const nodeDef = adaptActionHandlerToNodeDefinition(ifHandler);
 
