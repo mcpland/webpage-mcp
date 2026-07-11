@@ -37,12 +37,23 @@ describe('extension coverage policy', () => {
 
   it('runs the coverage gate in CI and formal releases', () => {
     const repositoryRoot = path.resolve(__dirname, '../../../..');
-    for (const workflowName of ['ci.yml', 'release.yml']) {
-      const workflow = fs.readFileSync(
-        path.join(repositoryRoot, '.github/workflows', workflowName),
-        'utf8',
-      );
-      expect(workflow).toMatch(/ENFORCE_COVERAGE:\s*["']true["']/);
-    }
+    const ciWorkflow = fs.readFileSync(
+      path.join(repositoryRoot, '.github/workflows/ci.yml'),
+      'utf8',
+    );
+    const releaseWorkflow = fs.readFileSync(
+      path.join(repositoryRoot, '.github/workflows/release.yml'),
+      'utf8',
+    );
+
+    expect(ciWorkflow).toMatch(/ENFORCE_COVERAGE:\s*["']true["']/);
+    expect(releaseWorkflow).toContain(
+      "ENFORCE_COVERAGE: ${{ matrix.enforce_coverage && 'true' || 'false' }}",
+    );
+    expect(releaseWorkflow).toMatch(
+      /platform: Linux\s*\n\s+os: ubuntu-latest\s*\n\s+enforce_coverage: true/,
+    );
+    expect(releaseWorkflow.match(/enforce_coverage:\s*true/g)).toHaveLength(1);
+    expect(releaseWorkflow.match(/enforce_coverage:\s*false/g)).toHaveLength(2);
   });
 });
