@@ -1185,6 +1185,14 @@ test("release workflow verifies before either publish mutation", async () => {
     "uses: softprops/action-gh-release@",
     githubJob,
   );
+  const githubTagShaReverify = workflow.indexOf(
+    "      - name: Reverify release tag commit",
+    githubJob,
+  );
+  const githubPublishStep = workflow.indexOf(
+    "      - name: Publish GitHub Release",
+    githubJob,
+  );
   const npmJob = workflow.indexOf("  publish-npm:");
   const githubJobBody = workflow.slice(githubJob, npmJob);
   const npmJobBody = workflow.slice(npmJob);
@@ -1202,6 +1210,14 @@ test("release workflow verifies before either publish mutation", async () => {
   );
   const npmPreflight = workflow.indexOf(
     "      - name: Reverify release metadata and artifacts",
+    npmJob,
+  );
+  const npmTagShaReverify = workflow.indexOf(
+    "      - name: Reverify release tag commit",
+    npmJob,
+  );
+  const npmPublishStep = workflow.indexOf(
+    "      - name: Publish package",
     npmJob,
   );
   const npmPublish = workflow.indexOf('          npm publish "', npmJob);
@@ -1393,6 +1409,32 @@ test("release workflow verifies before either publish mutation", async () => {
     workflow.slice(githubJob, githubPublish),
     /needs: build-assets[\s\S]*Reverify release metadata and artifacts/,
   );
+  assert.ok(
+    githubTagShaReverify > githubJob &&
+      githubPublishStep > githubTagShaReverify &&
+      githubPublish > githubPublishStep,
+    "GitHub release publishing must re-fetch and bind the remote tag immediately before mutation",
+  );
+  assert.equal(
+    githubJobBody.match(/- name: Reverify release tag commit/g)?.length,
+    1,
+    "the GitHub publish job must perform exactly one final remote tag check",
+  );
+  assert.match(
+    githubJobBody,
+    /- name: Reverify release tag commit\s*\n\s+env:\s*\n\s+EXPECTED_RELEASE_SHA: \$\{\{ needs\.build-assets\.outputs\.release_sha \}\}\s*\n\s+run: node scripts\/verify-release-tag-sha\.mjs --tag "\$GITHUB_REF_NAME" --expected-sha "\$EXPECTED_RELEASE_SHA"\s*\n\s*\n\s+- name: Publish GitHub Release\s*\n\s+uses: softprops\/action-gh-release@/,
+    "the GitHub tag check must be the step immediately before the release mutation",
+  );
+  assert.match(
+    githubJobBody,
+    /uses: softprops\/action-gh-release@[a-f0-9]{40}[\s\S]*?with:\s*\n\s+tag_name: \$\{\{ github\.ref_name \}\}\s*\n\s+target_commitish: \$\{\{ needs\.build-assets\.outputs\.release_sha \}\}/,
+    "the GitHub release action must explicitly bind both its tag and gated target commit",
+  );
+  assert.match(
+    githubJobBody,
+    /Setup Node\.js for publish verification[\s\S]*uses: actions\/setup-node@[a-f0-9]{40}[\s\S]*node-version: 24[\s\S]*Reverify release metadata and artifacts/,
+    "the GitHub publish job must pin Node 24 before its final JavaScript verification",
+  );
   for (const publishJobBody of [githubJobBody, npmJobBody]) {
     assert.match(
       publishJobBody,
@@ -1413,6 +1455,22 @@ test("release workflow verifies before either publish mutation", async () => {
   assert.ok(
     npmPreflight > npmJob && npmPublish > npmPreflight,
     "npm publish must follow preflight",
+  );
+  assert.ok(
+    npmTagShaReverify > npmPreflight &&
+      npmPublishStep > npmTagShaReverify &&
+      npmPublish > npmPublishStep,
+    "npm publishing must re-fetch and bind the remote tag immediately before mutation",
+  );
+  assert.equal(
+    npmJobBody.match(/- name: Reverify release tag commit/g)?.length,
+    1,
+    "the npm publish job must perform exactly one final remote tag check",
+  );
+  assert.match(
+    npmJobBody,
+    /- name: Reverify release tag commit\s*\n\s+env:\s*\n\s+EXPECTED_RELEASE_SHA: \$\{\{ needs\.build-assets\.outputs\.release_sha \}\}\s*\n\s+run: node scripts\/verify-release-tag-sha\.mjs --tag "\$GITHUB_REF_NAME" --expected-sha "\$EXPECTED_RELEASE_SHA"\s*\n\s*\n\s+- name: Publish package\s*\n\s+run:/,
+    "the npm tag check must be the step immediately before npm publish",
   );
   assert.match(
     npmJobHeader,
