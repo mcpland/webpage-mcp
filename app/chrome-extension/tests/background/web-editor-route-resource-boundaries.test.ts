@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import {
+  BACKGROUND_MESSAGE_TYPES,
+  PRIVILEGED_UI_ACTIONS,
+} from "@/common/message-types";
 
 const nativeHostMocks = vi.hoisted(() => ({
   requestAgentRpcFetch: vi.fn(),
@@ -136,10 +139,39 @@ describe("Web Editor route resource boundaries", () => {
     return sendResponse.mock.calls[0]![0] as Record<string, unknown>;
   }
 
+  it("requires a one-time OPEN_SOURCE authorization before calling the Agent", async () => {
+    authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValueOnce(
+      false,
+    );
+    const sender = contentSender();
+    const response = await sendAsync(
+      {
+        type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE,
+        authorizationToken: "open-source-token",
+        payload: { debugSource: { file: "src/Button.tsx", line: 12 } },
+      },
+      sender,
+    );
+
+    expect(response).toEqual({
+      success: false,
+      error: "Open source authorization is missing or expired.",
+    });
+    expect(
+      authorizationMocks.consumePrivilegedUiAuthorization,
+    ).toHaveBeenCalledWith(
+      "open-source-token",
+      PRIVILEGED_UI_ACTIONS.WEB_EDITOR_OPEN_SOURCE,
+      sender,
+    );
+    expect(nativeHostMocks.requestAgentRpcFetch).not.toHaveBeenCalled();
+  });
+
   it("bounds OPEN_SOURCE fields before JSON serialization", async () => {
     const oversized = await sendAsync(
       {
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE,
+        authorizationToken: "oversized-source-token",
         payload: { debugSource: { file: "x".repeat(8 * 1024 + 1), line: 1 } },
       },
       contentSender(),
@@ -153,6 +185,7 @@ describe("Web Editor route resource boundaries", () => {
     const valid = await sendAsync(
       {
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE,
+        authorizationToken: "valid-source-token",
         payload: {
           debugSource: { file: "src/Button.tsx", line: 12, column: 4 },
           ignored: { object: true },
@@ -161,6 +194,13 @@ describe("Web Editor route resource boundaries", () => {
       contentSender(),
     );
     expect(valid).toEqual({ success: true });
+    expect(
+      authorizationMocks.consumePrivilegedUiAuthorization,
+    ).toHaveBeenLastCalledWith(
+      "valid-source-token",
+      PRIVILEGED_UI_ACTIONS.WEB_EDITOR_OPEN_SOURCE,
+      expect.objectContaining({ documentId: "document-a" }),
+    );
     const request = nativeHostMocks.requestAgentRpcFetch.mock.calls[0]![0];
     expect(JSON.parse(request.body)).toEqual({
       filePath: "src/Button.tsx",

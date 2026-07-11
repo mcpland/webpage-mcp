@@ -17,7 +17,11 @@
  */
 
 import type { ElementLocator } from '@/common/web-editor-types';
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { BACKGROUND_MESSAGE_TYPES, PRIVILEGED_UI_ACTIONS } from '@/common/message-types';
+import {
+  authorizePrivilegedUiAction,
+  isTrustedPrivilegedUiEvent,
+} from '@/utils/privileged-ui-authorization';
 import { createElementLocator } from '../../core/locator';
 import type {
   FrameworkType,
@@ -929,8 +933,9 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
   /**
    * Send message to background to open source file in VSCode.
    */
-  async function openSourceInVSCode(): Promise<void> {
+  async function openSourceInVSCode(activationEvent: Event): Promise<void> {
     if (disposer.isDisposed) return;
+    if (!isTrustedPrivilegedUiEvent(activationEvent)) return;
 
     const debugSource = lastData?.debugSource;
     if (!debugSource || !formatDebugSource(debugSource)) return;
@@ -942,8 +947,12 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     }
 
     try {
+      const authorizationToken = await authorizePrivilegedUiAction(
+        PRIVILEGED_UI_ACTIONS.WEB_EDITOR_OPEN_SOURCE,
+      );
       const resp = await chrome.runtime.sendMessage({
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE,
+        authorizationToken,
         payload: { debugSource },
       });
 
@@ -995,7 +1004,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
 
   disposer.listen(openSourceBtn, 'click', (e) => {
     e.preventDefault();
-    void openSourceInVSCode();
+    void openSourceInVSCode(e);
   });
 
   // Delegate input events within the list

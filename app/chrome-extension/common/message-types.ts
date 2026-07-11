@@ -234,6 +234,7 @@ export const PRIVILEGED_UI_ACTIONS = {
   QUICK_PANEL_CANCEL: "quick_panel_cancel",
   WEB_EDITOR_APPLY: "web_editor_apply",
   WEB_EDITOR_CANCEL: "web_editor_cancel",
+  WEB_EDITOR_OPEN_SOURCE: "web_editor_open_source",
 } as const;
 
 export type PrivilegedUiAction =

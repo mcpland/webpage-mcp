@@ -1599,6 +1599,19 @@ export function initWebEditorListeners(): void {
       if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE) {
         (async () => {
           try {
+            if (
+              !consumePrivilegedUiAuthorization(
+                message?.authorizationToken,
+                PRIVILEGED_UI_ACTIONS.WEB_EDITOR_OPEN_SOURCE,
+                _sender as chrome.runtime.MessageSender,
+              )
+            ) {
+              return sendResponse({
+                success: false,
+                error: "Open source authorization is missing or expired.",
+              });
+            }
+
             const source = normalizeOpenSourcePayload(message.payload);
 
             const stored = await chrome.storage.local.get([
