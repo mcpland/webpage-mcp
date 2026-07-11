@@ -6,12 +6,19 @@
  * to the content script in the active tab.
  */
 
+import { PRIVILEGED_UI_SURFACES } from '@/common/message-types';
+import {
+  startPrivilegedUiSurfaceSession,
+  stopPrivilegedUiSurfaceSession,
+} from '../privileged-ui-authorization';
+
 // ============================================================
 // Constants
 // ============================================================
 
 const COMMAND_KEY = 'toggle_quick_panel';
 const LOG_PREFIX = '[QuickPanelCommands]';
+const quickPanelToggleQueues = new Map<number, Promise<void>>();
 
 // ============================================================
 // Helpers
@@ -59,13 +66,7 @@ function isValidTabUrl(url?: string): boolean {
 /**
  * Toggle Quick Panel in the active tab
  */
-async function toggleQuickPanelInActiveTab(): Promise<void> {
-  const tabId = await getActiveTabId();
-  if (tabId === null) {
-    console.warn(`${LOG_PREFIX} No active tab found`);
-    return;
-  }
-
+async function toggleQuickPanelInTabUnlocked(tabId: number): Promise<void> {
   // Get tab info to check URL validity
   try {
     const tab = await chrome.tabs.get(tabId);
@@ -79,19 +80,71 @@ async function toggleQuickPanelInActiveTab(): Promise<void> {
   }
 
   // Send toggle message to content script
+  let startedSurfaceSessionId: string | null = null;
   try {
-    const response = await chrome.tabs.sendMessage(tabId, { action: 'toggle_quick_panel' });
+    const privilegedSurfaceSessionId = await startPrivilegedUiSurfaceSession(
+      PRIVILEGED_UI_SURFACES.QUICK_PANEL,
+      tabId,
+    );
+    startedSurfaceSessionId = privilegedSurfaceSessionId;
+    const response = await chrome.tabs.sendMessage(tabId, {
+      action: 'toggle_quick_panel',
+      privilegedSurfaceSessionId,
+    });
     if (response?.success) {
       console.log(`${LOG_PREFIX} Quick Panel toggled, visible: ${response.visible}`);
+      if (response.visible !== true) {
+        await stopPrivilegedUiSurfaceSession(
+          PRIVILEGED_UI_SURFACES.QUICK_PANEL,
+          tabId,
+          privilegedSurfaceSessionId,
+        );
+        startedSurfaceSessionId = null;
+      }
     } else {
       console.warn(`${LOG_PREFIX} Toggle failed:`, response?.error);
+      await stopPrivilegedUiSurfaceSession(
+        PRIVILEGED_UI_SURFACES.QUICK_PANEL,
+        tabId,
+        privilegedSurfaceSessionId,
+      );
+      startedSurfaceSessionId = null;
     }
   } catch (err) {
+    if (startedSurfaceSessionId) {
+      await stopPrivilegedUiSurfaceSession(
+        PRIVILEGED_UI_SURFACES.QUICK_PANEL,
+        tabId,
+        startedSurfaceSessionId,
+      );
+    }
     // Content script may not be loaded yet; this is expected on some pages
     console.warn(
       `${LOG_PREFIX} Failed to send toggle message (content script may not be loaded):`,
       err,
     );
+  }
+}
+
+async function toggleQuickPanelInActiveTab(): Promise<void> {
+  const tabId = await getActiveTabId();
+  if (tabId === null) {
+    console.warn(`${LOG_PREFIX} No active tab found`);
+    return;
+  }
+  const previous = quickPanelToggleQueues.get(tabId) ?? Promise.resolve();
+  const operation = previous
+    .catch(() => undefined)
+    .then(() => toggleQuickPanelInTabUnlocked(tabId));
+  const queued = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  quickPanelToggleQueues.set(tabId, queued);
+  try {
+    await operation;
+  } finally {
+    if (quickPanelToggleQueues.get(tabId) === queued) quickPanelToggleQueues.delete(tabId);
   }
 }
 

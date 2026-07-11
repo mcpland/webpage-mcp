@@ -1,15 +1,23 @@
 import {
   BACKGROUND_MESSAGE_TYPES,
+  PRIVILEGED_UI_ACTION_SURFACES,
   PRIVILEGED_UI_ACTIONS,
+  PRIVILEGED_UI_SURFACES,
   type PrivilegedUiAction,
   type PrivilegedUiAuthorizeMessage,
   type PrivilegedUiAuthorizeResponse,
+  type PrivilegedUiSurface,
+  type PrivilegedUiSurfaceCloseMessage,
 } from '@/common/message-types';
 
 const AUTHORIZATION_TTL_MS = 30_000;
 const MAX_PENDING_AUTHORIZATIONS = 256;
+const MAX_ACTIVE_SURFACES = 512;
+const SURFACE_SESSION_PATTERN = /^[a-f0-9]{64}$/;
+const ACTIVE_SURFACE_STORAGE_KEY = 'privileged-ui-active-surfaces-v1';
 
 const VALID_ACTIONS = new Set<PrivilegedUiAction>(Object.values(PRIVILEGED_UI_ACTIONS));
+const VALID_SURFACES = new Set<PrivilegedUiSurface>(Object.values(PRIVILEGED_UI_SURFACES));
 
 interface SenderScope {
   extensionId: string;
@@ -20,7 +28,39 @@ interface SenderScope {
 
 interface AuthorizationGrant extends SenderScope {
   action: PrivilegedUiAction;
+  surface: PrivilegedUiSurface;
+  surfaceSessionId: string;
   expiresAt: number;
+}
+
+interface ActiveSurfaceSession {
+  surface: PrivilegedUiSurface;
+  surfaceSessionId: string;
+  tabId: number;
+  documentId?: string;
+}
+
+interface StoredActiveSurfaceState {
+  version: 1;
+  sessions: ActiveSurfaceSession[];
+}
+
+interface ActiveSurfaceValidationResult {
+  valid: boolean;
+  documentBound: boolean;
+}
+
+interface AuthorizationIssueResult {
+  token: string;
+  documentBound: boolean;
+}
+
+function activeSurfaceKey(surface: PrivilegedUiSurface, tabId: number): string {
+  return `${surface}:${tabId}`;
+}
+
+function isSurfaceSessionId(value: unknown): value is string {
+  return typeof value === 'string' && SURFACE_SESSION_PATTERN.test(value);
 }
 
 function getSenderScope(sender: chrome.runtime.MessageSender): SenderScope | null {
@@ -28,6 +68,7 @@ function getSenderScope(sender: chrome.runtime.MessageSender): SenderScope | nul
   const expectedExtensionId = chrome.runtime.id;
   const tabId = sender.tab?.id;
   const frameId = sender.frameId;
+  const documentId = typeof sender.documentId === 'string' ? sender.documentId : '';
 
   // Privileged in-page UI is only injected by this extension into the top frame.
   if (
@@ -36,7 +77,9 @@ function getSenderScope(sender: chrome.runtime.MessageSender): SenderScope | nul
     typeof tabId !== 'number' ||
     !Number.isInteger(tabId) ||
     tabId < 0 ||
-    frameId !== 0
+    frameId !== 0 ||
+    !documentId ||
+    documentId.length > 512
   ) {
     return null;
   }
@@ -45,7 +88,7 @@ function getSenderScope(sender: chrome.runtime.MessageSender): SenderScope | nul
     extensionId,
     tabId,
     frameId,
-    documentId: typeof sender.documentId === 'string' ? sender.documentId : '',
+    documentId,
   };
 }
 
@@ -55,17 +98,183 @@ function createAuthorizationToken(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/** Short-lived one-time capability store, exported for focused security tests. */
+/**
+ * Short-lived one-time capability store, exported for focused security tests.
+ *
+ * Surface sessions enforce least privilege between the normal Web Editor,
+ * Quick Panel, and Element Picker bundles. They are a defense against confused
+ * deputies and accidental cross-surface calls, not a sandbox against arbitrary
+ * code execution inside this extension's isolated world; such code could
+ * observe another bundle's runtime messages and is already extension-privileged.
+ */
 export class PrivilegedUiAuthorizationStore {
   private readonly grants = new Map<string, AuthorizationGrant>();
+  private readonly activeSurfaces = new Map<string, ActiveSurfaceSession>();
+
+  activateSurface(
+    surface: PrivilegedUiSurface,
+    tabId: number,
+    surfaceSessionId: string,
+  ): boolean {
+    if (
+      !VALID_SURFACES.has(surface) ||
+      !Number.isInteger(tabId) ||
+      tabId < 0 ||
+      !isSurfaceSessionId(surfaceSessionId)
+    ) {
+      return false;
+    }
+    this.deactivateSurface(surface, tabId);
+    while (this.activeSurfaces.size >= MAX_ACTIVE_SURFACES) {
+      const oldestKey = this.activeSurfaces.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      this.activeSurfaces.delete(oldestKey);
+    }
+    this.activeSurfaces.set(activeSurfaceKey(surface, tabId), {
+      surface,
+      surfaceSessionId,
+      tabId,
+    });
+    return true;
+  }
+
+  deactivateSurface(surface: PrivilegedUiSurface, tabId: number): void {
+    this.activeSurfaces.delete(activeSurfaceKey(surface, tabId));
+    for (const [token, grant] of this.grants) {
+      if (grant.surface === surface && grant.tabId === tabId) this.grants.delete(token);
+    }
+  }
+
+  deactivateSurfaceIfSession(
+    surface: PrivilegedUiSurface,
+    tabId: number,
+    expectedSurfaceSessionId?: string,
+  ): boolean {
+    if (
+      expectedSurfaceSessionId !== undefined &&
+      !isSurfaceSessionId(expectedSurfaceSessionId)
+    ) {
+      return false;
+    }
+    const active = this.activeSurfaces.get(activeSurfaceKey(surface, tabId));
+    if (!active) return false;
+    if (
+      expectedSurfaceSessionId !== undefined &&
+      active.surfaceSessionId !== expectedSurfaceSessionId
+    ) {
+      return false;
+    }
+    this.deactivateSurface(surface, tabId);
+    return true;
+  }
+
+  deactivateTab(tabId: number): void {
+    for (const surface of VALID_SURFACES) this.deactivateSurface(surface, tabId);
+  }
+
+  exportActiveSurfaceSessions(): ActiveSurfaceSession[] {
+    return Array.from(this.activeSurfaces.values(), (session) => ({ ...session }));
+  }
+
+  restoreActiveSurfaceSessions(value: unknown): void {
+    this.grants.clear();
+    this.activeSurfaces.clear();
+    if (!Array.isArray(value)) return;
+
+    for (const candidate of value.slice(0, MAX_ACTIVE_SURFACES)) {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+      const session = candidate as Partial<ActiveSurfaceSession>;
+      if (
+        !VALID_SURFACES.has(session.surface as PrivilegedUiSurface) ||
+        !Number.isInteger(session.tabId) ||
+        (session.tabId as number) < 0 ||
+        !isSurfaceSessionId(session.surfaceSessionId) ||
+        (session.documentId !== undefined &&
+          (typeof session.documentId !== 'string' ||
+            !session.documentId ||
+            session.documentId.length > 512))
+      ) {
+        continue;
+      }
+      const normalized: ActiveSurfaceSession = {
+        surface: session.surface as PrivilegedUiSurface,
+        surfaceSessionId: session.surfaceSessionId,
+        tabId: session.tabId as number,
+        ...(session.documentId !== undefined ? { documentId: session.documentId } : {}),
+      };
+      this.activeSurfaces.set(activeSurfaceKey(normalized.surface, normalized.tabId), normalized);
+    }
+  }
+
+  deactivateSurfaceFromSender(
+    surface: PrivilegedUiSurface,
+    surfaceSessionId: string,
+    sender: chrome.runtime.MessageSender,
+  ): boolean {
+    const scope = getSenderScope(sender);
+    if (!scope || !VALID_SURFACES.has(surface) || !isSurfaceSessionId(surfaceSessionId)) {
+      return false;
+    }
+    const active = this.activeSurfaces.get(activeSurfaceKey(surface, scope.tabId));
+    if (!active || active.surfaceSessionId !== surfaceSessionId) return false;
+    if (active.documentId !== undefined && active.documentId !== scope.documentId) return false;
+    this.deactivateSurface(surface, scope.tabId);
+    return true;
+  }
+
+  validateActiveSurfaceSession(
+    surface: PrivilegedUiSurface,
+    surfaceSessionId: string,
+    sender: chrome.runtime.MessageSender,
+  ): ActiveSurfaceValidationResult {
+    const scope = getSenderScope(sender);
+    if (!scope || !VALID_SURFACES.has(surface) || !isSurfaceSessionId(surfaceSessionId)) {
+      return { valid: false, documentBound: false };
+    }
+    const active = this.activeSurfaces.get(activeSurfaceKey(surface, scope.tabId));
+    if (!active || active.surfaceSessionId !== surfaceSessionId) {
+      return { valid: false, documentBound: false };
+    }
+    if (active.documentId === undefined) {
+      active.documentId = scope.documentId;
+      return { valid: true, documentBound: true };
+    }
+    return { valid: active.documentId === scope.documentId, documentBound: false };
+  }
 
   issue(
     action: PrivilegedUiAction,
+    surface: PrivilegedUiSurface,
+    surfaceSessionId: string,
     sender: chrome.runtime.MessageSender,
     now = Date.now(),
   ): string | null {
+    return this.issueWithBindingState(action, surface, surfaceSessionId, sender, now)?.token ?? null;
+  }
+
+  issueWithBindingState(
+    action: PrivilegedUiAction,
+    surface: PrivilegedUiSurface,
+    surfaceSessionId: string,
+    sender: chrome.runtime.MessageSender,
+    now = Date.now(),
+  ): AuthorizationIssueResult | null {
     const scope = getSenderScope(sender);
-    if (!scope || !VALID_ACTIONS.has(action)) return null;
+    if (
+      !scope ||
+      !VALID_ACTIONS.has(action) ||
+      !VALID_SURFACES.has(surface) ||
+      PRIVILEGED_UI_ACTION_SURFACES[action] !== surface ||
+      !isSurfaceSessionId(surfaceSessionId)
+    ) {
+      return null;
+    }
+
+    const active = this.activeSurfaces.get(activeSurfaceKey(surface, scope.tabId));
+    if (!active || active.surfaceSessionId !== surfaceSessionId) return null;
+    const documentBound = active.documentId === undefined;
+    if (documentBound) active.documentId = scope.documentId;
+    if (active.documentId !== scope.documentId) return null;
 
     this.prune(now);
     while (this.grants.size >= MAX_PENDING_AUTHORIZATIONS) {
@@ -78,9 +287,11 @@ export class PrivilegedUiAuthorizationStore {
     this.grants.set(token, {
       ...scope,
       action,
+      surface,
+      surfaceSessionId,
       expiresAt: now + AUTHORIZATION_TTL_MS,
     });
-    return token;
+    return { token, documentBound };
   }
 
   consume(
@@ -98,8 +309,18 @@ export class PrivilegedUiAuthorizationStore {
     const scope = getSenderScope(sender);
     if (!grant || !scope || grant.expiresAt < now) return false;
 
+    const active = this.activeSurfaces.get(activeSurfaceKey(grant.surface, scope.tabId));
+    if (
+      !active ||
+      active.surfaceSessionId !== grant.surfaceSessionId ||
+      active.documentId !== scope.documentId
+    ) {
+      return false;
+    }
+
     return (
       grant.action === action &&
+      PRIVILEGED_UI_ACTION_SURFACES[action] === grant.surface &&
       grant.extensionId === scope.extensionId &&
       grant.tabId === scope.tabId &&
       grant.frameId === scope.frameId &&
@@ -107,8 +328,13 @@ export class PrivilegedUiAuthorizationStore {
     );
   }
 
+  revoke(token: string): void {
+    this.grants.delete(token);
+  }
+
   clear(): void {
     this.grants.clear();
+    this.activeSurfaces.clear();
   }
 
   private prune(now: number): void {
@@ -120,6 +346,105 @@ export class PrivilegedUiAuthorizationStore {
 
 const authorizationStore = new PrivilegedUiAuthorizationStore();
 let initialized = false;
+let activeSurfacesHydrated = false;
+let surfaceOperationQueue: Promise<void> = Promise.resolve();
+
+async function hydrateActiveSurfaces(): Promise<void> {
+  if (activeSurfacesHydrated) return;
+  const stored = await chrome.storage.session.get(ACTIVE_SURFACE_STORAGE_KEY);
+  const state = stored[ACTIVE_SURFACE_STORAGE_KEY] as Partial<StoredActiveSurfaceState> | undefined;
+  authorizationStore.restoreActiveSurfaceSessions(
+    state?.version === 1 && Array.isArray(state.sessions) ? state.sessions : [],
+  );
+  activeSurfacesHydrated = true;
+}
+
+async function persistActiveSurfaces(): Promise<void> {
+  const state: StoredActiveSurfaceState = {
+    version: 1,
+    sessions: authorizationStore.exportActiveSurfaceSessions(),
+  };
+  await chrome.storage.session.set({ [ACTIVE_SURFACE_STORAGE_KEY]: state });
+}
+
+function runSurfaceOperation<T>(operation: () => Promise<T> | T): Promise<T> {
+  const result = surfaceOperationQueue.then(async () => {
+    await hydrateActiveSurfaces();
+    return operation();
+  });
+  surfaceOperationQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+export async function startPrivilegedUiSurfaceSession(
+  surface: PrivilegedUiSurface,
+  tabId: number,
+): Promise<string> {
+  return runSurfaceOperation(async () => {
+    const previous = authorizationStore.exportActiveSurfaceSessions();
+    const surfaceSessionId = createAuthorizationToken();
+    if (!authorizationStore.activateSurface(surface, tabId, surfaceSessionId)) {
+      throw new Error('Unable to activate privileged UI surface');
+    }
+    try {
+      await persistActiveSurfaces();
+      return surfaceSessionId;
+    } catch (error) {
+      authorizationStore.restoreActiveSurfaceSessions(previous);
+      throw error;
+    }
+  });
+}
+
+export async function stopPrivilegedUiSurfaceSession(
+  surface: PrivilegedUiSurface,
+  tabId: number,
+  expectedSurfaceSessionId?: string,
+): Promise<boolean> {
+  return runSurfaceOperation(async () => {
+    const previous = authorizationStore.exportActiveSurfaceSessions();
+    const deactivated = authorizationStore.deactivateSurfaceIfSession(
+      surface,
+      tabId,
+      expectedSurfaceSessionId,
+    );
+    if (!deactivated) return false;
+    try {
+      await persistActiveSurfaces();
+      return true;
+    } catch (error) {
+      authorizationStore.restoreActiveSurfaceSessions(previous);
+      throw error;
+    }
+  });
+}
+
+export async function validatePrivilegedUiSurfaceSession(
+  surface: PrivilegedUiSurface,
+  surfaceSessionId: string,
+  sender: chrome.runtime.MessageSender,
+): Promise<boolean> {
+  return runSurfaceOperation(async () => {
+    const previous = authorizationStore.exportActiveSurfaceSessions();
+    const validation = authorizationStore.validateActiveSurfaceSession(
+      surface,
+      surfaceSessionId,
+      sender,
+    );
+    if (!validation.valid) return false;
+    if (!validation.documentBound) return true;
+    try {
+      await persistActiveSurfaces();
+      return true;
+    } catch (error) {
+      authorizationStore.restoreActiveSurfaceSessions(previous);
+      throw error;
+    }
+  });
+}
 
 export function consumePrivilegedUiAuthorization(
   token: unknown,
@@ -135,14 +460,76 @@ export function initPrivilegedUiAuthorization(): void {
   initialized = true;
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type === BACKGROUND_MESSAGE_TYPES.PRIVILEGED_UI_SURFACE_CLOSE) {
+      const payload = (message as PrivilegedUiSurfaceCloseMessage).payload;
+      void runSurfaceOperation(async () => {
+        const previous = authorizationStore.exportActiveSurfaceSessions();
+        const success = authorizationStore.deactivateSurfaceFromSender(
+          payload?.surface,
+          payload?.surfaceSessionId,
+          sender,
+        );
+        if (!success) return false;
+        try {
+          await persistActiveSurfaces();
+          return true;
+        } catch (error) {
+          authorizationStore.restoreActiveSurfaceSessions(previous);
+          throw error;
+        }
+      })
+        .then((success) => sendResponse({ success }))
+        .catch(() => sendResponse({ success: false }));
+      return true;
+    }
     if (message?.type !== BACKGROUND_MESSAGE_TYPES.PRIVILEGED_UI_AUTHORIZE) return false;
 
-    const action = (message as PrivilegedUiAuthorizeMessage).payload?.action;
-    const token = authorizationStore.issue(action, sender);
-    const response: PrivilegedUiAuthorizeResponse = token
-      ? { success: true, authorizationToken: token }
-      : { success: false, error: 'Privileged action authorization denied' };
-    sendResponse(response);
-    return false;
+    const payload = (message as PrivilegedUiAuthorizeMessage).payload;
+    void runSurfaceOperation(async () => {
+      const previous = authorizationStore.exportActiveSurfaceSessions();
+      const issued = authorizationStore.issueWithBindingState(
+        payload?.action,
+        payload?.surface,
+        payload?.surfaceSessionId,
+        sender,
+      );
+      if (!issued) return null;
+      if (!issued.documentBound) return issued.token;
+      try {
+        await persistActiveSurfaces();
+        return issued.token;
+      } catch (error) {
+        authorizationStore.revoke(issued.token);
+        authorizationStore.restoreActiveSurfaceSessions(previous);
+        throw error;
+      }
+    })
+      .then((token) => {
+        const response: PrivilegedUiAuthorizeResponse = token
+          ? { success: true, authorizationToken: token }
+          : { success: false, error: 'Privileged action authorization denied' };
+        sendResponse(response);
+      })
+      .catch(() =>
+        sendResponse({ success: false, error: 'Privileged action authorization denied' }),
+      );
+    return true;
   });
+
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    void runSurfaceOperation(async () => {
+      const previous = authorizationStore.exportActiveSurfaceSessions();
+      authorizationStore.deactivateTab(tabId);
+      try {
+        await persistActiveSurfaces();
+      } catch (error) {
+        authorizationStore.restoreActiveSurfaceSessions(previous);
+        throw error;
+      }
+    }).catch(() => {});
+  });
+
+  // Start recovery immediately. All later operations share the same queue, so
+  // an old storage read can never overwrite a newer activation or close.
+  void runSurfaceOperation(() => undefined).catch(() => {});
 }

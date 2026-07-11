@@ -14,6 +14,13 @@ import type {
   WebEditorStopResponse,
 } from '@/common/web-editor-types';
 import { WEB_EDITOR_ACTIONS } from '@/common/web-editor-types';
+import { PRIVILEGED_UI_SURFACES } from '@/common/message-types';
+import {
+  clearPrivilegedUiSurfaceSession,
+  closePrivilegedUiSurfaceSession,
+  configurePrivilegedUiSurfaceSession,
+  matchesPrivilegedUiSurfaceSession,
+} from '@/utils/privileged-ui-authorization';
 import { locateElement } from './locator';
 
 // =============================================================================
@@ -94,6 +101,13 @@ function isEditorRequest(request: unknown): request is WebEditorRequest {
     action === WEB_EDITOR_ACTIONS.START ||
     action === WEB_EDITOR_ACTIONS.STOP
   );
+}
+
+function readPrivilegedSurfaceSessionId(request: unknown): string | null {
+  if (!request || typeof request !== 'object') return null;
+  const value = (request as { privilegedSurfaceSessionId?: unknown })
+    .privilegedSurfaceSessionId;
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) ? value : null;
 }
 
 /**
@@ -295,7 +309,7 @@ export function installMessageListener(api: WebEditorApi): RemoveMessageListener
       case WEB_EDITOR_ACTIONS.PING: {
         const response: WebEditorPingResponse = {
           status: 'pong',
-          active: api.getState().active,
+          active: api.getState().active || api.getState().stopping === true,
           version: api.getState().version,
         };
         sendResponse(response);
@@ -303,29 +317,96 @@ export function installMessageListener(api: WebEditorApi): RemoveMessageListener
       }
 
       case WEB_EDITOR_ACTIONS.TOGGLE: {
-        const response: WebEditorToggleResponse = {
-          active: api.toggle(),
-        };
+        const surfaceSessionId = readPrivilegedSurfaceSessionId(request);
+        const editorState = api.getState();
+        if (editorState.stopping) {
+          sendResponse({ active: false, error: 'Web Editor is still stopping' });
+          return false;
+        }
+        if (editorState.active) {
+          void api.stop().then(
+            () => sendResponse({ active: false } satisfies WebEditorToggleResponse),
+            () => sendResponse({ active: false } satisfies WebEditorToggleResponse),
+          );
+          return true;
+        }
+        clearPrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.WEB_EDITOR);
+        if (
+          !surfaceSessionId ||
+            !configurePrivilegedUiSurfaceSession(
+              PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+              surfaceSessionId,
+            )
+        ) {
+          sendResponse({ active: false, error: 'Privileged Web Editor session is required' });
+          return false;
+        }
+        api.start(surfaceSessionId);
+        const response: WebEditorToggleResponse = { active: api.getState().active };
+        if (!response.active) {
+          void closePrivilegedUiSurfaceSession(
+            PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+            surfaceSessionId,
+          );
+        }
         sendResponse(response);
         return false;
       }
 
       case WEB_EDITOR_ACTIONS.START: {
-        api.start();
+        const surfaceSessionId = readPrivilegedSurfaceSessionId(request);
+        const editorState = api.getState();
+        if (editorState.stopping) {
+          sendResponse({ active: false, error: 'Web Editor is still stopping' });
+          return false;
+        }
+        if (editorState.active) {
+          const sameSession =
+            Boolean(surfaceSessionId) &&
+            matchesPrivilegedUiSurfaceSession(
+              PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+              surfaceSessionId as string,
+            );
+          sendResponse({
+            active: sameSession,
+            ...(sameSession ? {} : { error: 'A different Web Editor session is already active' }),
+          });
+          return false;
+        }
+        if (
+          !surfaceSessionId ||
+          !configurePrivilegedUiSurfaceSession(
+            PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+            surfaceSessionId,
+          )
+        ) {
+          sendResponse({ active: false, error: 'Privileged Web Editor session is required' });
+          return false;
+        }
+        api.start(surfaceSessionId);
+        const active = api.getState().active;
+        if (!active) {
+          void closePrivilegedUiSurfaceSession(
+            PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+            surfaceSessionId,
+          );
+        }
         const response: WebEditorStartResponse = {
-          active: true,
+          active,
         };
         sendResponse(response);
         return false;
       }
 
       case WEB_EDITOR_ACTIONS.STOP: {
-        api.stop();
-        const response: WebEditorStopResponse = {
-          active: false,
-        };
-        sendResponse(response);
-        return false;
+        void api.stop().then(
+          () => {
+            const response: WebEditorStopResponse = { active: false };
+            sendResponse(response);
+          },
+          () => sendResponse({ active: false }),
+        );
+        return true;
       }
 
       default:

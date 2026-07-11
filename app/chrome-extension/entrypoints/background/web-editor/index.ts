@@ -1,6 +1,7 @@
 import {
   BACKGROUND_MESSAGE_TYPES,
   PRIVILEGED_UI_ACTIONS,
+  PRIVILEGED_UI_SURFACES,
 } from "@/common/message-types";
 import {
   isExtensionPageSender,
@@ -19,7 +20,11 @@ import {
   subscribeAgentStream,
   unsubscribeAgentStream,
 } from "../native-host";
-import { consumePrivilegedUiAuthorization } from "../privileged-ui-authorization";
+import {
+  consumePrivilegedUiAuthorization,
+  startPrivilegedUiSurfaceSession,
+  stopPrivilegedUiSurfaceSession,
+} from "../privileged-ui-authorization";
 import {
   getDurableAgentRequestOwner,
   listDurableAgentRequestOwners,
@@ -78,6 +83,8 @@ const WEB_EDITOR_EXTENSION_PAGE_MESSAGE_TYPES = new Set<string>([
   BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_HIGHLIGHT_ELEMENT,
   BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_REVERT_ELEMENT,
 ]);
+
+const webEditorToggleQueues = new Map<number, Promise<void>>();
 
 function isWebEditorContentSender(
   sender: chrome.runtime.MessageSender,
@@ -983,7 +990,7 @@ async function recoverWebEditorRequests(): Promise<void> {
 /** Script path for the active editor runtime (WXT unlisted script output). */
 const WEB_EDITOR_SCRIPT_PATH = "web-editor.js";
 
-/** Script path for Phase 7 props agent (MAIN world) */
+/** Script path for Phase 7 props agent (MAIN world). */
 const PROPS_AGENT_SCRIPT_PATH = "inject-scripts/props-agent.js";
 
 /**
@@ -1348,9 +1355,7 @@ async function ensureEditorInjected(tabId: number): Promise<void> {
   }
 }
 
-/**
- * Inject props agent into MAIN world for Phase 7 Props editing
- */
+/** Inject the existing props agent before the editor starts. */
 async function ensurePropsAgentInjected(tabId: number): Promise<void> {
   try {
     await chrome.scripting.executeScript({
@@ -1359,58 +1364,86 @@ async function ensurePropsAgentInjected(tabId: number): Promise<void> {
       world: "MAIN",
     });
   } catch (error) {
-    // Best-effort: some pages (chrome://, extensions, PDF) block injection
     console.warn("[WebEditor] Failed to inject props agent:", error);
   }
 }
 
-/**
- * Send cleanup event to props agent
- */
-async function sendPropsAgentCleanup(tabId: number): Promise<void> {
+async function toggleEditorInTabUnlocked(tabId: number): Promise<{ active?: boolean }> {
+  await ensureEditorInjected(tabId);
+  let startedSurfaceSessionId: string | null = null;
+
   try {
-    // Dispatch cleanup event in ISOLATED world
-    // CustomEvent crosses worlds and is observed by MAIN agent
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        try {
-          window.dispatchEvent(new CustomEvent("web-editor-props:cleanup"));
-        } catch {
-          // ignore
-        }
+    const status: { active?: boolean } = await chrome.tabs.sendMessage(
+      tabId,
+      { action: WEB_EDITOR_ACTIONS.PING },
+      { frameId: 0 },
+    );
+    if (status?.active === true) {
+      try {
+        await chrome.tabs.sendMessage(
+          tabId,
+          { action: WEB_EDITOR_ACTIONS.STOP },
+          { frameId: 0 },
+        );
+      } finally {
+        await stopPrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.WEB_EDITOR, tabId);
+      }
+      await releasePropsAgentEarlyInjection(tabId);
+      return { active: false };
+    }
+
+    await ensurePropsAgentInjected(tabId);
+
+    const privilegedSurfaceSessionId = await startPrivilegedUiSurfaceSession(
+      PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      tabId,
+    );
+    startedSurfaceSessionId = privilegedSurfaceSessionId;
+    const response: { active?: boolean } = await chrome.tabs.sendMessage(
+      tabId,
+      {
+        action: WEB_EDITOR_ACTIONS.START,
+        privilegedSurfaceSessionId,
       },
-      world: "ISOLATED",
-    });
+      { frameId: 0 },
+    );
+    if (response?.active !== true) {
+      await stopPrivilegedUiSurfaceSession(
+        PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+        tabId,
+        privilegedSurfaceSessionId,
+      );
+      startedSurfaceSessionId = null;
+      return { active: false };
+    }
+    return { active: true };
   } catch (error) {
-    // Best-effort cleanup; ignore failures if tab is gone or injection blocked
-    console.warn("[WebEditor] Failed to send props agent cleanup:", error);
+    if (startedSurfaceSessionId) {
+      await stopPrivilegedUiSurfaceSession(
+        PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+        tabId,
+        startedSurfaceSessionId,
+      );
+    }
+    console.warn("[WebEditor] Failed to toggle editor in tab:", error);
+    return {};
   }
 }
 
 async function toggleEditorInTab(tabId: number): Promise<{ active?: boolean }> {
-  await ensureEditorInjected(tabId);
-
+  const previous = webEditorToggleQueues.get(tabId) ?? Promise.resolve();
+  const operation = previous
+    .catch(() => undefined)
+    .then(() => toggleEditorInTabUnlocked(tabId));
+  const queued = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  webEditorToggleQueues.set(tabId, queued);
   try {
-    const resp: { active?: boolean } = await chrome.tabs.sendMessage(
-      tabId,
-      { action: WEB_EDITOR_ACTIONS.TOGGLE },
-      { frameId: 0 },
-    );
-    const active = typeof resp?.active === "boolean" ? resp.active : undefined;
-
-    // Phase 7: Inject props agent on start; cleanup on stop
-    if (active === true) {
-      await ensurePropsAgentInjected(tabId);
-    } else if (active === false) {
-      await sendPropsAgentCleanup(tabId);
-      await releasePropsAgentEarlyInjection(tabId);
-    }
-
-    return { active };
-  } catch (error) {
-    console.warn("[WebEditor] Failed to toggle editor in tab:", error);
-    return {};
+    return await operation;
+  } finally {
+    if (webEditorToggleQueues.get(tabId) === queued) webEditorToggleQueues.delete(tabId);
   }
 }
 

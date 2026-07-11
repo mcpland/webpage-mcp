@@ -16,8 +16,15 @@ import type {
   WebEditorTxChangeAction,
   WebEditorApi,
 } from '@/common/web-editor-types';
-import { BACKGROUND_MESSAGE_TYPES, PRIVILEGED_UI_ACTIONS } from '@/common/message-types';
-import { authorizePrivilegedUiAction } from '@/utils/privileged-ui-authorization';
+import {
+  BACKGROUND_MESSAGE_TYPES,
+  PRIVILEGED_UI_ACTIONS,
+  PRIVILEGED_UI_SURFACES,
+} from '@/common/message-types';
+import {
+  authorizePrivilegedUiAction,
+  closePrivilegedUiSurfaceSession,
+} from '@/utils/privileged-ui-authorization';
 import { WEB_EDITOR_VERSION, WEB_EDITOR_LOG_PREFIX } from '../constants';
 import { mountShadowHost, type ShadowHostManager } from '../ui/shadow-host';
 import { createToolbar, type Toolbar } from '../ui/toolbar';
@@ -158,6 +165,8 @@ export function createWebEditor(): WebEditorApi {
     verificationInFlightRequestId: null,
     verificationEpoch: 0,
   };
+  let activeSurfaceSessionId: string | null = null;
+  let stopInFlight: Promise<void> | null = null;
 
   /** Default modifiers for programmatic selection (e.g., from breadcrumbs) */
   const DEFAULT_MODIFIERS: EventModifiers = {
@@ -1115,7 +1124,11 @@ export function createWebEditor(): WebEditorApi {
   /**
    * Start the editor
    */
-  function start(): void {
+  function start(surfaceSessionId: string): void {
+    if (stopInFlight) {
+      console.warn(`${WEB_EDITOR_LOG_PREFIX} Stop is still draining props mutations`);
+      return;
+    }
     if (state.active) {
       console.log(`${WEB_EDITOR_LOG_PREFIX} Already active`);
       return;
@@ -1415,6 +1428,7 @@ export function createWebEditor(): WebEditorApi {
       clampFloatingUi();
 
       state.active = true;
+      activeSurfaceSessionId = surfaceSessionId;
       console.log(`${WEB_EDITOR_LOG_PREFIX} Started`);
     } catch (error) {
       // Cleanup on failure (reverse order)
@@ -1455,6 +1469,7 @@ export function createWebEditor(): WebEditorApi {
       state.verificationInFlightRequestId = null;
       state.verificationEpoch = 0;
       state.active = false;
+      activeSurfaceSessionId = null;
 
       console.error(`${WEB_EDITOR_LOG_PREFIX} Failed to start:`, error);
     }
@@ -1463,12 +1478,16 @@ export function createWebEditor(): WebEditorApi {
   /**
    * Stop the editor
    */
-  function stop(): void {
+  function stop(): Promise<void> {
+    if (stopInFlight) return stopInFlight;
     if (!state.active) {
-      return;
+      return Promise.resolve();
     }
 
     state.active = false;
+    const closingSurfaceSessionId = activeSurfaceSessionId;
+    activeSurfaceSessionId = null;
+    const propsCleanup = state.propsBridge?.cleanup() ?? Promise.resolve();
 
     // Cancel pending debounced broadcasts (Phase 1.4)
     if (txChangedBroadcastTimer !== null) {
@@ -1496,8 +1515,8 @@ export function createWebEditor(): WebEditorApi {
       state.tokensService?.dispose();
       state.tokensService = null;
 
-      // Cleanup Props Bridge (Phase 7) - best effort cleanup
-      void state.propsBridge?.cleanup();
+      // Cleanup Props Bridge (Phase 7). Its accepted mutation queue continues
+      // draining before the surface capability is closed below.
       state.propsBridge = null;
 
       // Cleanup Breadcrumbs UI
@@ -1583,16 +1602,34 @@ export function createWebEditor(): WebEditorApi {
       // Always broadcast clear state to sidepanel (removes chips)
       broadcastEditorCleared();
     }
+    const completion = propsCleanup
+      .catch((error) => {
+        console.warn(`${WEB_EDITOR_LOG_PREFIX} Props cleanup failed:`, error);
+      })
+      .then(() =>
+        closePrivilegedUiSurfaceSession(
+          PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+          closingSurfaceSessionId ?? undefined,
+        ),
+      )
+      .then(() => undefined);
+    const trackedStop = completion.finally(() => {
+      if (stopInFlight === trackedStop) stopInFlight = null;
+    });
+    stopInFlight = trackedStop;
+    return trackedStop;
   }
 
   /**
    * Toggle the editor on/off
    */
-  function toggle(): boolean {
+  function toggle(surfaceSessionId?: string): boolean {
     if (state.active) {
       stop();
+    } else if (/^[a-f0-9]{64}$/.test(surfaceSessionId ?? '')) {
+      start(surfaceSessionId as string);
     } else {
-      start();
+      console.warn(`${WEB_EDITOR_LOG_PREFIX} Privileged Web Editor session is required`);
     }
     return state.active;
   }
@@ -1604,6 +1641,7 @@ export function createWebEditor(): WebEditorApi {
     return {
       active: state.active,
       version: WEB_EDITOR_VERSION,
+      stopping: stopInFlight !== null,
     };
   }
 

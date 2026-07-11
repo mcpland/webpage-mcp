@@ -96,6 +96,7 @@ export const BACKGROUND_MESSAGE_TYPES = {
   WEB_EDITOR_OPEN_SOURCE: "web_editor_open_source",
   // Quick Panel <-> AgentChat integration
   PRIVILEGED_UI_AUTHORIZE: "privileged_ui_authorize",
+  PRIVILEGED_UI_SURFACE_CLOSE: "privileged_ui_surface_close",
   QUICK_PANEL_SEND_TO_AI: "quick_panel_send_to_ai",
   QUICK_PANEL_CANCEL_AI: "quick_panel_cancel_ai",
   AGENT_RPC_FETCH: "agent_rpc_fetch",
@@ -240,9 +241,39 @@ export const PRIVILEGED_UI_ACTIONS = {
 export type PrivilegedUiAction =
   (typeof PRIVILEGED_UI_ACTIONS)[keyof typeof PRIVILEGED_UI_ACTIONS];
 
+export const PRIVILEGED_UI_SURFACES = {
+  QUICK_PANEL: "quick_panel",
+  WEB_EDITOR: "web_editor",
+} as const;
+
+export type PrivilegedUiSurface =
+  (typeof PRIVILEGED_UI_SURFACES)[keyof typeof PRIVILEGED_UI_SURFACES];
+
+export const PRIVILEGED_UI_ACTION_SURFACES: Readonly<
+  Record<PrivilegedUiAction, PrivilegedUiSurface>
+> = {
+  [PRIVILEGED_UI_ACTIONS.QUICK_PANEL_SEND]: PRIVILEGED_UI_SURFACES.QUICK_PANEL,
+  [PRIVILEGED_UI_ACTIONS.QUICK_PANEL_CANCEL]: PRIVILEGED_UI_SURFACES.QUICK_PANEL,
+  [PRIVILEGED_UI_ACTIONS.WEB_EDITOR_APPLY]: PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+  [PRIVILEGED_UI_ACTIONS.WEB_EDITOR_CANCEL]: PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+  [PRIVILEGED_UI_ACTIONS.WEB_EDITOR_OPEN_SOURCE]: PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+};
+
 export interface PrivilegedUiAuthorizeMessage {
   type: typeof BACKGROUND_MESSAGE_TYPES.PRIVILEGED_UI_AUTHORIZE;
-  payload: { action: PrivilegedUiAction };
+  payload: {
+    action: PrivilegedUiAction;
+    surface: PrivilegedUiSurface;
+    surfaceSessionId: string;
+  };
+}
+
+export interface PrivilegedUiSurfaceCloseMessage {
+  type: typeof BACKGROUND_MESSAGE_TYPES.PRIVILEGED_UI_SURFACE_CLOSE;
+  payload: {
+    surface: PrivilegedUiSurface;
+    surfaceSessionId: string;
+  };
 }
 
 export type PrivilegedUiAuthorizeResponse =

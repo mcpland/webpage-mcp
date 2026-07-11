@@ -17,6 +17,8 @@ export interface WebEditorState {
   active: boolean;
   /** Runtime version for diagnostics */
   version: number;
+  /** A stop is draining previously accepted props mutations. */
+  stopping?: boolean;
 }
 
 // =============================================================================
@@ -72,6 +74,8 @@ export interface WebEditorToggleResponse {
 /** Start request */
 export interface WebEditorStartRequest {
   action: typeof WEB_EDITOR_ACTIONS.START;
+  /** Background-owned least-privilege session for Web Editor actions. */
+  privilegedSurfaceSessionId: string;
 }
 
 /** Start response */
@@ -488,11 +492,11 @@ export interface WebEditorCancelExecutionResponse {
  */
 export interface WebEditorApi {
   /** Start the editor */
-  start: () => void;
+  start: (surfaceSessionId: string) => void;
   /** Stop the editor */
-  stop: () => void;
+  stop: () => Promise<void>;
   /** Toggle editor on/off, returns new state */
-  toggle: () => boolean;
+  toggle: (surfaceSessionId?: string) => boolean;
   /** Get current state */
   getState: () => WebEditorState;
   /**

@@ -29,6 +29,8 @@
  */
 
 import { createAgentBridge, type QuickPanelAgentBridge } from './core/agent-bridge';
+import { PRIVILEGED_UI_SURFACES } from '@/common/message-types';
+import { closePrivilegedUiSurfaceSession } from '@/utils/privileged-ui-authorization';
 import {
   mountQuickPanelShadowHost,
   mountQuickPanelAiChatPanel,
@@ -199,6 +201,7 @@ export function createQuickPanelController(
   function hide(): void {
     if (disposed) return;
     disposeUI();
+    void closePrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.QUICK_PANEL);
   }
 
   /**
@@ -229,6 +232,7 @@ export function createQuickPanelController(
     disposed = true;
 
     disposeUI();
+    void closePrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.QUICK_PANEL);
 
     if (agentBridge) {
       try {

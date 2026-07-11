@@ -14,6 +14,11 @@
  */
 
 import { createQuickPanelController, type QuickPanelController } from '@/shared/quick-panel';
+import { PRIVILEGED_UI_SURFACES } from '@/common/message-types';
+import {
+  closePrivilegedUiSurfaceSession,
+  configurePrivilegedUiSurfaceSession,
+} from '@/utils/privileged-ui-authorization';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -45,17 +50,33 @@ export default defineContentScript({
       _sender: chrome.runtime.MessageSender,
       sendResponse: (response?: unknown) => void,
     ): boolean | void {
-      const msg = message as { action?: string } | undefined;
+      const msg = message as
+        | { action?: string; privilegedSurfaceSessionId?: unknown }
+        | undefined;
 
       if (msg?.action === 'toggle_quick_panel') {
         console.log('[QuickPanelContentScript] Received toggle_quick_panel message');
         try {
+          if (
+            typeof msg.privilegedSurfaceSessionId !== 'string' ||
+            !configurePrivilegedUiSurfaceSession(
+              PRIVILEGED_UI_SURFACES.QUICK_PANEL,
+              msg.privilegedSurfaceSessionId,
+            )
+          ) {
+            sendResponse({ success: false, error: 'Privileged Quick Panel session is required' });
+            return true;
+          }
           const ctrl = ensureController();
           ctrl.toggle();
           const visible = ctrl.isVisible();
+          if (!visible) {
+            void closePrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.QUICK_PANEL);
+          }
           console.log('[QuickPanelContentScript] Toggle completed, visible:', visible);
           sendResponse({ success: true, visible });
         } catch (err) {
+          void closePrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.QUICK_PANEL);
           console.error('[QuickPanelContentScript] Toggle error:', err);
           sendResponse({ success: false, error: String(err) });
         }
@@ -64,10 +85,27 @@ export default defineContentScript({
 
       if (msg?.action === 'show_quick_panel') {
         try {
+          if (
+            typeof msg.privilegedSurfaceSessionId !== 'string' ||
+            !configurePrivilegedUiSurfaceSession(
+              PRIVILEGED_UI_SURFACES.QUICK_PANEL,
+              msg.privilegedSurfaceSessionId,
+            )
+          ) {
+            sendResponse({ success: false, error: 'Privileged Quick Panel session is required' });
+            return true;
+          }
           const ctrl = ensureController();
           ctrl.show();
-          sendResponse({ success: true });
+          const visible = ctrl.isVisible();
+          if (!visible) {
+            void closePrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.QUICK_PANEL);
+            sendResponse({ success: false, visible: false, error: 'Quick Panel failed to open' });
+          } else {
+            sendResponse({ success: true, visible: true });
+          }
         } catch (err) {
+          void closePrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.QUICK_PANEL);
           console.error('[QuickPanelContentScript] Show error:', err);
           sendResponse({ success: false, error: String(err) });
         }
@@ -79,6 +117,7 @@ export default defineContentScript({
           if (controller) {
             controller.hide();
           }
+          void closePrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.QUICK_PANEL);
           sendResponse({ success: true });
         } catch (err) {
           console.error('[QuickPanelContentScript] Hide error:', err);
@@ -110,6 +149,7 @@ export default defineContentScript({
         controller.dispose();
         controller = null;
       }
+      void closePrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.QUICK_PANEL);
     });
   },
 });

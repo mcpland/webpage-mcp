@@ -8,6 +8,8 @@ const nativeHostMocks = vi.hoisted(() => ({
 }));
 const authorizationMocks = vi.hoisted(() => ({
   consumePrivilegedUiAuthorization: vi.fn(),
+  startPrivilegedUiSurfaceSession: vi.fn(),
+  stopPrivilegedUiSurfaceSession: vi.fn(),
 }));
 const sidepanelMocks = vi.hoisted(() => ({ openAgentSetupSidepanel: vi.fn() }));
 const propsInjectionMocks = vi.hoisted(() => ({
@@ -33,10 +35,13 @@ type RequestListener = (
 
 describe('Web Editor listener role authorization', () => {
   let requestListener: RequestListener;
+  let commandListener: (command: string) => Promise<void>;
 
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    authorizationMocks.startPrivilegedUiSurfaceSession.mockResolvedValue('a'.repeat(64));
+    authorizationMocks.stopPrivilegedUiSurfaceSession.mockResolvedValue(undefined);
     propsInjectionMocks.pruneOrphanedPropsAgentEarlyInjections.mockResolvedValue(undefined);
     propsInjectionMocks.registerPropsAgentEarlyInjection.mockResolvedValue({ id: 'script-1' });
     propsInjectionMocks.releasePropsAgentEarlyInjection.mockResolvedValue(undefined);
@@ -56,8 +61,19 @@ describe('Web Editor listener role authorization', () => {
     (chrome.tabs as typeof chrome.tabs & { reload: ReturnType<typeof vi.fn> }).reload = vi
       .fn()
       .mockResolvedValue(undefined);
+    chrome.tabs.query = vi.fn(async () => [
+      { id: 7, url: 'https://example.com/' } as chrome.tabs.Tab,
+    ]);
+    (
+      chrome as unknown as {
+        scripting: { executeScript: ReturnType<typeof vi.fn> };
+      }
+    ).scripting = { executeScript: vi.fn().mockResolvedValue([]) };
     vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation((candidate) => {
       requestListener = candidate as RequestListener;
+    });
+    vi.mocked(chrome.commands.onCommand.addListener).mockImplementation((candidate) => {
+      commandListener = candidate as (command: string) => Promise<void>;
     });
 
     const { initWebEditorListeners } = await import('@/entrypoints/background/web-editor');
@@ -169,5 +185,40 @@ describe('Web Editor listener role authorization', () => {
       ),
     ).toBe(false);
     expect(sendResponse).not.toHaveBeenCalled();
+  });
+
+  it('serializes concurrent toggles for the same editor tab', async () => {
+    let resolveFirstPing!: (value: unknown) => void;
+    const firstPing = new Promise((resolve) => {
+      resolveFirstPing = resolve;
+    });
+    let pingCount = 0;
+    vi.mocked(chrome.tabs.sendMessage).mockImplementation(
+      ((...args: unknown[]) => {
+        const message = args[1] as { action?: string };
+        if (message.action === 'web_editor_ping') {
+          pingCount += 1;
+          if (pingCount === 1) return firstPing;
+          if (pingCount === 2) return Promise.resolve({ status: 'pong', active: false });
+          if (pingCount === 3) return Promise.resolve({ status: 'pong' });
+          return Promise.resolve({ status: 'pong', active: true });
+        }
+        if (message.action === 'web_editor_start') return Promise.resolve({ active: true });
+        if (message.action === 'web_editor_stop') return Promise.resolve({ active: false });
+        return Promise.resolve({});
+      }) as typeof chrome.tabs.sendMessage,
+    );
+
+    const firstToggle = commandListener('toggle_web_editor');
+    const secondToggle = commandListener('toggle_web_editor');
+    await vi.waitFor(() => expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(1));
+    expect(authorizationMocks.startPrivilegedUiSurfaceSession).not.toHaveBeenCalled();
+
+    resolveFirstPing({ status: 'pong' });
+    await Promise.all([firstToggle, secondToggle]);
+
+    expect(pingCount).toBe(4);
+    expect(authorizationMocks.startPrivilegedUiSurfaceSession).toHaveBeenCalledOnce();
+    expect(authorizationMocks.stopPrivilegedUiSurfaceSession).toHaveBeenCalledOnce();
   });
 });
