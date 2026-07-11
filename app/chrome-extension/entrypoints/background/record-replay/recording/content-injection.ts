@@ -73,6 +73,7 @@ export async function broadcastControlToTab(
   tabId: number,
   cmd: RecorderCmd,
   meta?: unknown,
+  expectedTopDocumentId?: string,
 ): Promise<boolean> {
   try {
     const res = (await chrome.webNavigation.getAllFrames({ tabId })) as
@@ -80,14 +81,27 @@ export async function broadcastControlToTab(
       | null
       | undefined;
     const targets = Array.isArray(res) && res.length ? res : [{ frameId: 0 }];
+    if (expectedTopDocumentId) {
+      const top = targets.find((frame) => frame.frameId === 0);
+      if (top?.documentId !== expectedTopDocumentId) return false;
+    }
     let topFrameAccepted = false;
     await Promise.all(
       targets.map(async (f) => {
+        const documentId =
+          typeof f.documentId === "string" &&
+          f.documentId.length > 0 &&
+          f.documentId.length <= 128
+            ? f.documentId
+            : undefined;
+        if (expectedTopDocumentId && !documentId) return;
         try {
           const response = await chrome.tabs.sendMessage(
             tabId,
             { action: TOOL_MESSAGE_TYPES.RR_RECORDER_CONTROL, cmd, meta },
-            { frameId: f.frameId },
+            expectedTopDocumentId && documentId
+              ? { documentId }
+              : { frameId: f.frameId },
           );
           if (f.frameId === 0) topFrameAccepted = response?.success === true;
         } catch {
