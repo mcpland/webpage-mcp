@@ -103,6 +103,10 @@ const EXTENSION_REQUIRED_PERMISSIONS = [
   "sidePanel",
 ];
 const DEFAULT_EXTENSION_BUILD_DIR = "app/chrome-extension/.output/chrome-mv3";
+const EXTENSION_VERIFICATION_BUILD_MATCH = "build-match";
+const EXTENSION_VERIFICATION_ARCHIVE_ONLY = "archive-only";
+const RELEASE_PREFLIGHT_USAGE =
+  "Usage: release-preflight.mjs <metadata|artifacts|npm-publish> [artifacts-dir] [--tag <vX.Y.Z>] [--ref <refs/tags/vX.Y.Z>] [--require-build-match|--archive-only]";
 
 function invariant(condition, message) {
   if (!condition) {
@@ -913,18 +917,22 @@ function verifyExtensionManifest({ manifest, zipEntries }) {
   }
 }
 
-async function inspectOptionalBuildDirectory(path, { required }) {
+async function requireBuildDirectory(path) {
+  let stats;
   try {
-    const stats = await lstat(path);
-    invariant(
-      stats.isDirectory(),
-      `Extension build path must be a directory: ${path}`,
-    );
-    return true;
+    stats = await lstat(path);
   } catch (error) {
-    if (!required && error?.code === "ENOENT") return false;
+    if (error?.code === "ENOENT") {
+      throw new Error(
+        `Extension build directory is required for ZIP-to-build verification but was not found: ${path}`,
+      );
+    }
     throw error;
   }
+  invariant(
+    stats.isDirectory(),
+    `Extension build path must be a directory: ${path}`,
+  );
 }
 
 async function verifyExtensionBuildMatchesZip({
@@ -932,13 +940,11 @@ async function verifyExtensionBuildMatchesZip({
   extensionBuildDir,
   zipEntries,
 }) {
-  const required = extensionBuildDir !== undefined;
   const buildRoot = resolve(
     rootDir,
     extensionBuildDir ?? DEFAULT_EXTENSION_BUILD_DIR,
   );
-  if (!(await inspectOptionalBuildDirectory(buildRoot, { required })))
-    return false;
+  await requireBuildDirectory(buildRoot);
 
   const buildFiles = await listFiles(buildRoot);
   const zipFiles = [...zipEntries.values()]
@@ -1063,10 +1069,16 @@ export async function verifyReleaseArtifacts({
   rootDir = process.cwd(),
   artifactsDir,
   extensionBuildDir,
+  extensionVerificationMode = EXTENSION_VERIFICATION_BUILD_MATCH,
   tag,
   environment = process.env,
 } = {}) {
   invariant(artifactsDir, "artifactsDir is required");
+  invariant(
+    extensionVerificationMode === EXTENSION_VERIFICATION_BUILD_MATCH ||
+      extensionVerificationMode === EXTENSION_VERIFICATION_ARCHIVE_ONLY,
+    `extensionVerificationMode must be ${EXTENSION_VERIFICATION_BUILD_MATCH} or ${EXTENSION_VERIFICATION_ARCHIVE_ONLY}`,
+  );
   const metadata = await verifyReleaseMetadata({ rootDir, tag, environment });
   const mcpRelativePath = `mcp/webpage-mcp-${metadata.version}.tgz`;
   const extensionRelativePath = `extension/webpage-mcp-connector-${metadata.version}-chrome-extension.zip`;
@@ -1144,11 +1156,14 @@ export async function verifyReleaseArtifacts({
     );
   }
   verifyExtensionManifest({ manifest: extensionManifest, zipEntries });
-  const extensionBuildCompared = await verifyExtensionBuildMatchesZip({
-    rootDir,
-    extensionBuildDir,
-    zipEntries,
-  });
+  const extensionBuildCompared =
+    extensionVerificationMode === EXTENSION_VERIFICATION_BUILD_MATCH
+      ? await verifyExtensionBuildMatchesZip({
+          rootDir,
+          extensionBuildDir,
+          zipEntries,
+        })
+      : false;
 
   const checksumSource = await readFile(
     join(artifactRoot, "SHA256SUMS.txt"),
@@ -1174,6 +1189,7 @@ export async function verifyReleaseArtifacts({
     ...metadata,
     artifactsDir: artifactRoot,
     files: actualFiles,
+    extensionVerificationMode,
     extensionBuildCompared,
   };
 }
@@ -1184,11 +1200,12 @@ function parseCliArguments(argv) {
     command === "metadata" ||
       command === "artifacts" ||
       command === "npm-publish",
-    "Usage: release-preflight.mjs <metadata|artifacts|npm-publish> [artifacts-dir] [--tag <vX.Y.Z>] [--ref <refs/tags/vX.Y.Z>]",
+    RELEASE_PREFLIGHT_USAGE,
   );
   let artifactsDir;
   let tag;
   let ref;
+  let extensionVerificationMode;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--tag") {
@@ -1203,8 +1220,23 @@ function parseCliArguments(argv) {
       index += 1;
       continue;
     }
+    if (argument === "--require-build-match" || argument === "--archive-only") {
+      invariant(
+        command === "artifacts",
+        `${argument} is supported only by the artifacts command`,
+      );
+      invariant(
+        extensionVerificationMode === undefined,
+        "Extension verification mode may be specified only once",
+      );
+      extensionVerificationMode =
+        argument === "--require-build-match"
+          ? EXTENSION_VERIFICATION_BUILD_MATCH
+          : EXTENSION_VERIFICATION_ARCHIVE_ONLY;
+      continue;
+    }
     invariant(
-      command === "artifacts" && !artifactsDir,
+      command === "artifacts" && !artifactsDir && !argument.startsWith("--"),
       `Unexpected argument: ${argument}`,
     );
     artifactsDir = argument;
@@ -1225,24 +1257,36 @@ function parseCliArguments(argv) {
     command !== "npm-publish" || tag === undefined,
     "--tag is not supported by the npm-publish command; use --ref",
   );
-  return { command, artifactsDir, tag, ref };
+  return {
+    command,
+    artifactsDir,
+    tag,
+    ref,
+    extensionVerificationMode:
+      extensionVerificationMode ?? EXTENSION_VERIFICATION_BUILD_MATCH,
+  };
 }
 
 async function main() {
-  const { command, artifactsDir, tag, ref } = parseCliArguments(
-    process.argv.slice(2),
-  );
+  const { command, artifactsDir, tag, ref, extensionVerificationMode } =
+    parseCliArguments(process.argv.slice(2));
   const result =
     command === "metadata"
       ? await verifyReleaseMetadata({ tag })
       : command === "artifacts"
-        ? await verifyReleaseArtifacts({ artifactsDir, tag })
+        ? await verifyReleaseArtifacts({
+            artifactsDir,
+            tag,
+            extensionVerificationMode,
+          })
         : await verifyNpmPublishRef({ ref });
   console.log(
     command === "metadata"
       ? `Release metadata verified for version ${result.version}.`
       : command === "artifacts"
-        ? `Release metadata and artifacts verified for version ${result.version}.`
+        ? result.extensionBuildCompared
+          ? `Release metadata and artifacts verified for version ${result.version}, including extension ZIP-to-build byte comparison.`
+          : `Release metadata and archived payloads verified for version ${result.version}; extension ZIP-to-build comparison was explicitly skipped.`
         : `npm publish ref verified for version ${result.version}.`,
   );
 }

@@ -686,7 +686,145 @@ test("release artifacts must contain matching package metadata and checksums", a
     `extension/webpage-mcp-connector-${VERSION}-chrome-extension.zip`,
     `mcp/webpage-mcp-${VERSION}.tgz`,
   ]);
+  assert.equal(result.extensionVerificationMode, "build-match");
   assert.equal(result.extensionBuildCompared, true);
+});
+
+test("extension build verification is fail-closed unless archive-only is explicit", async (t) => {
+  const rootDir = await createReleaseRoot(t);
+  const { artifactsDir } = await createArtifacts(rootDir, {
+    skipExtensionBuild: true,
+  });
+
+  await assert.rejects(
+    verifyReleaseArtifacts({ rootDir, artifactsDir }),
+    /Extension build directory is required for ZIP-to-build verification but was not found/,
+  );
+
+  const archiveOnlyResult = await verifyReleaseArtifacts({
+    rootDir,
+    artifactsDir,
+    extensionVerificationMode: "archive-only",
+  });
+  assert.equal(archiveOnlyResult.extensionVerificationMode, "archive-only");
+  assert.equal(archiveOnlyResult.extensionBuildCompared, false);
+});
+
+test("release artifact API rejects unknown extension verification modes", async () => {
+  await assert.rejects(
+    verifyReleaseArtifacts({
+      artifactsDir: "unused",
+      extensionVerificationMode: "automatic",
+    }),
+    /extensionVerificationMode must be build-match or archive-only/,
+  );
+});
+
+test("release artifact CLI reports its extension verification mode", async (t) => {
+  const rootDir = await createReleaseRoot(t);
+  await createArtifacts(rootDir, { skipExtensionBuild: true });
+  const environment = { ...process.env };
+  for (const name of [
+    EXTENSION_EXPECTED_ID_ENV,
+    EXTENSION_PUBLIC_KEY_ENV,
+    LEGACY_EXTENSION_KEY_ENV,
+    REQUIRE_EXTENSION_PUBLIC_KEY_ENV,
+  ]) {
+    delete environment[name];
+  }
+  const scriptPath = join(REPOSITORY_ROOT, "scripts/release-preflight.mjs");
+
+  const defaultMode = spawnSync(
+    process.execPath,
+    [scriptPath, "artifacts", "artifacts", "--tag", `v${VERSION}`],
+    { cwd: rootDir, encoding: "utf8", env: environment },
+  );
+  assert.notEqual(defaultMode.status, 0);
+  assert.match(
+    defaultMode.stderr,
+    /Extension build directory is required for ZIP-to-build verification but was not found/,
+  );
+
+  const buildMatch = spawnSync(
+    process.execPath,
+    [
+      scriptPath,
+      "artifacts",
+      "artifacts",
+      "--require-build-match",
+      "--tag",
+      `v${VERSION}`,
+    ],
+    { cwd: rootDir, encoding: "utf8", env: environment },
+  );
+  assert.notEqual(buildMatch.status, 0);
+  assert.match(
+    buildMatch.stderr,
+    /Extension build directory is required for ZIP-to-build verification but was not found/,
+  );
+
+  const archiveOnly = spawnSync(
+    process.execPath,
+    [
+      scriptPath,
+      "artifacts",
+      "artifacts",
+      "--archive-only",
+      "--tag",
+      `v${VERSION}`,
+    ],
+    { cwd: rootDir, encoding: "utf8", env: environment },
+  );
+  assert.equal(archiveOnly.status, 0, archiveOnly.stderr);
+  assert.match(
+    archiveOnly.stdout,
+    /Release metadata and archived payloads verified for version 1\.2\.3/,
+  );
+  assert.match(
+    archiveOnly.stdout,
+    /extension ZIP-to-build comparison was explicitly skipped/,
+  );
+  assert.doesNotMatch(archiveOnly.stdout, /including extension ZIP-to-build/);
+});
+
+test("release artifact CLI rejects conflicting and repeated verification modes", () => {
+  const scriptPath = join(REPOSITORY_ROOT, "scripts/release-preflight.mjs");
+  const invalidModeArguments = [
+    ["--require-build-match", "--archive-only"],
+    ["--archive-only", "--require-build-match"],
+    ["--require-build-match", "--require-build-match"],
+    ["--archive-only", "--archive-only"],
+  ];
+
+  for (const modeArguments of invalidModeArguments) {
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, "artifacts", "artifacts", ...modeArguments],
+      { cwd: REPOSITORY_ROOT, encoding: "utf8" },
+    );
+    assert.notEqual(result.status, 0, modeArguments.join(" "));
+    assert.match(
+      result.stderr,
+      /Extension verification mode may be specified only once/,
+    );
+  }
+});
+
+test("release artifact CLI rejects verification modes for other commands", () => {
+  const scriptPath = join(REPOSITORY_ROOT, "scripts/release-preflight.mjs");
+  const invalidCommands = [
+    ["metadata", "--archive-only"],
+    ["npm-publish", "--ref", `refs/tags/v${VERSION}`, "--require-build-match"],
+  ];
+
+  for (const arguments_ of invalidCommands) {
+    const result = spawnSync(process.execPath, [scriptPath, ...arguments_], {
+      cwd: REPOSITORY_ROOT,
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0, arguments_.join(" "));
+    assert.match(result.stderr, /is supported only by the artifacts command/);
+  }
 });
 
 test("formal release artifacts bind the configured public key", async (t) => {
@@ -1254,6 +1392,20 @@ test("release workflow verifies before either publish mutation", async () => {
   assert.ok(
     buildJob >= 0 && artifactPreflight > buildJob,
     "build job must run artifact preflight",
+  );
+  assert.deepEqual(
+    Array.from(
+      workflow.matchAll(
+        /^\s+run: node scripts\/release-preflight\.mjs artifacts artifacts (.+)$/gm,
+      ),
+      (match) => match[1],
+    ),
+    [
+      '--require-build-match --tag "$RELEASE_TAG"',
+      '--archive-only --tag "$GITHUB_REF_NAME"',
+      '--archive-only --tag "$RELEASE_TAG"',
+    ],
+    "the build job must require ZIP-to-build matching while clean publish checkouts explicitly verify archives only",
   );
   assert.ok(
     releaseIdentityJob >= 0 &&
