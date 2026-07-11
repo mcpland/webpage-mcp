@@ -1,0 +1,3764 @@
+{
+  "schemaVersion": 1,
+  "artifact": "extension",
+  "importer": "app/chrome-extension",
+  "scope": "pnpm-production-closure",
+  "firstPartyWorkspacePackages": [
+    "webpage-mcp-shared"
+  ],
+  "components": [
+    {
+      "name": "@emnapi/runtime",
+      "version": "1.9.2",
+      "resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.9.2.tgz",
+      "integrity": "sha512-3U4+MIWHImeyu1wnmVygh5WlgfYDtyf0k8AbLhMFxOipihf6nrWC4syIm/SwEeec0mNSafiiNnMJwbza/Is6Lw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "783a4243ae3e07e07c33f9c8388147a60b18fad3f948d677d9181f37cb977697",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "2088f55c6731498410b20c95ebd345ed4a4a800bf74c0fba4d282fd2a021daaa"
+        }
+      ],
+      "sourceUrl": "https://github.com/toyobayashi/emnapi",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@eslint-community/regexpp",
+      "version": "4.12.2",
+      "resolved": "https://registry.npmjs.org/@eslint-community/regexpp/-/regexpp-4.12.2.tgz",
+      "integrity": "sha512-EriSTlt5OC9/7SXkRSCAhfSxxoSUgBm33OH+IkwbdpgoqsSsUg7y3uh+IICI/Qg4BBWr3U2i39RpmycbxMq4ew==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "63a3c5c082235b46ac213fe91d4b8869d16b0e90d8047f5fe50aefa2dd11d292",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "fcf6eabf68ca96988a6b506b4fdc6cc32535d80eb2e11c79724af5ac6f50262b"
+        }
+      ],
+      "sourceUrl": "https://github.com/eslint-community/regexpp",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@floating-ui/core",
+      "version": "1.7.4",
+      "resolved": "https://registry.npmjs.org/@floating-ui/core/-/core-1.7.4.tgz",
+      "integrity": "sha512-C3HlIdsBxszvm5McXlB8PeOEWfBhcGBTZGkGlWc2U0KFY5IwG5OQEuQ8rq52DZmcHDlPLd+YFBK+cZcytwIFWg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "3663ee62b8b9867d35a818fe17453ac89b59cb880da2a65aa376fdb1eeb80a21",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ],
+      "sourceUrl": "https://github.com/floating-ui/floating-ui",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@floating-ui/dom",
+      "version": "1.7.5",
+      "resolved": "https://registry.npmjs.org/@floating-ui/dom/-/dom-1.7.5.tgz",
+      "integrity": "sha512-N0bD2kIPInNHUHehXhMke1rBGs1dwqvC9O9KYMyyjK7iXt7GAhnro7UlcuYcGdS/yYOlq0MAVgrow8IbWJwyqg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "dfcf7471a707dbeaa08b7033372c888fbaa9a2835e3f5ef7a87b67a50447855f",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ],
+      "sourceUrl": "https://github.com/floating-ui/floating-ui",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@floating-ui/utils",
+      "version": "0.2.10",
+      "resolved": "https://registry.npmjs.org/@floating-ui/utils/-/utils-0.2.10.tgz",
+      "integrity": "sha512-aGTxbpbg8/b5JfU1HXSrbH3wXZuLPJcNEcZQFMxLs3oSzgtVu6nFPkbbGGUvBcUjKV2YyB9Wxxabo+HEH9tcRQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "d03a131cd80aa033696cc2f3d89786eb271a901eab4380e5253b6bfdf2248ea2",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ],
+      "sourceUrl": "https://github.com/floating-ui/floating-ui",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@hono/node-server",
+      "version": "1.19.13",
+      "resolved": "https://registry.npmjs.org/@hono/node-server/-/node-server-1.19.13.tgz",
+      "integrity": "sha512-TsQLe4i2gvoTtrHje625ngThGBySOgSK3Xo2XRYOdqGN1teR8+I7vchQC46uLJi8OF62YTYA3AhSpumtkhsaKQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "2c1710a70e52e9c829e6bd66db6c9dd4ec13b737790ccaf9eb68bf2172ecbbd3",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733"
+        }
+      ],
+      "sourceUrl": "https://github.com/honojs/node-server",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@huggingface/jinja",
+      "version": "0.2.2",
+      "resolved": "https://registry.npmjs.org/@huggingface/jinja/-/jinja-0.2.2.tgz",
+      "integrity": "sha512-/KPde26khDUIPkTGU82jdtTW9UAuvUTumCAbFs/7giR0SxsvZC4hru51PBvpijH6BVkHcROcvZM/lpy5h1jRRA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "98729e00629e3ef8f504387694bdce4481dfd6491329893bec8bba9d87c0ef6c",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "d6e7b19451c1b3d1d66353bb4b1274138953b3bfd9ae60c56e77b1f548796982"
+        }
+      ],
+      "sourceUrl": "https://github.com/huggingface/huggingface.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@img/colour",
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/@img/colour/-/colour-1.1.0.tgz",
+      "integrity": "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "bc38c5097693ed53b91c32f35fb0a52569736c7854ba2eb6d080f3252071f75c",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.md",
+          "sha256": "e2eaa4603c14cb26f301e88648c12a853fa3f0f5da6d4b0972958c666e7f2ab8"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/colour",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@img/sharp-darwin-arm64",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-arm64/-/sharp-darwin-arm64-0.34.5.tgz",
+      "integrity": "sha512-imtQ3WMJXbMY4fxb/Ndp6HBTNVtWCUI0WdobyheGf5+ad6xX8VIDO8u2xE4qc/fr08CKG/7dDseFtn6M6g/r3w==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "58155bcbf12d3937751d3003794b6a54a64c973949be71ae036c9e2cfd993392",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "ef448bf7ac130f0c6b51dbfbadc617b046a200d082de8648ab090784c5db0c3d"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-darwin-x64",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-x64/-/sharp-darwin-x64-0.34.5.tgz",
+      "integrity": "sha512-YNEFAF/4KQ/PeW0N+r+aVVsoIY0/qxxikF2SWdp+NRkmMB7y9LBZAVqQ4yhGCm/H3H270OSykqmQMKLBhBJDEw==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "370a918f10b552256d9f367007053540fb4579a30797f0747cff2a0d3849b167",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "1b3dbcb9a61421084e5cadfdf2838a393d5488f53461cbc83cab62b351076c36"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-darwin-arm64",
+      "version": "1.2.4",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.2.4.tgz",
+      "integrity": "sha512-zqjjo7RatFfFoP0MkQ51jfuFZBnVE2pRiaydKJ1G/rHZvnsrHAOcQALIi9sA5co5xenQdTugCvtb1cuf78Vf4g==",
+      "declaredLicense": "LGPL-3.0-or-later",
+      "concludedLicense": "LGPL-3.0-or-later",
+      "packageJsonSha256": "36961cede2dd16bfac3ba20dbd340162e5f06ff0a4c766fb640a3aad2241940b",
+      "licenseEvidence": [
+        {
+          "path": "README.md",
+          "sha256": "47c37432ea30fcf5767611bca7c054d141f7584479ce8b58b5de6b88f9008d1d"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp-libvips",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-darwin-x64",
+      "version": "1.2.4",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.2.4.tgz",
+      "integrity": "sha512-1IOd5xfVhlGwX+zXv2N93k0yMONvUlANylbJw1eTah8K/Jtpi15KC+WSiaX/nBmbm2HxRM1gZ0nSdjSsrZbGKg==",
+      "declaredLicense": "LGPL-3.0-or-later",
+      "concludedLicense": "LGPL-3.0-or-later",
+      "packageJsonSha256": "691aea0e6739dbe349f8555757c1db28f991043fea9eafcf74359edd607c5649",
+      "licenseEvidence": [
+        {
+          "path": "README.md",
+          "sha256": "52285e4c80313e1908d0e06242e5a92b41d1c41da4265839fa9504e094aa754a"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp-libvips",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-linux-arm64",
+      "version": "1.2.4",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm64/-/sharp-libvips-linux-arm64-1.2.4.tgz",
+      "integrity": "sha512-excjX8DfsIcJ10x1Kzr4RcWe1edC9PquDRRPx3YVCvQv+U5p7Yin2s32ftzikXojb1PIFc/9Mt28/y+iRklkrw==",
+      "declaredLicense": "LGPL-3.0-or-later",
+      "concludedLicense": "LGPL-3.0-or-later",
+      "packageJsonSha256": "f0383b3d469797a6253f5327c773bf03eaf1a809535e8905b0e4f063312220ff",
+      "licenseEvidence": [
+        {
+          "path": "README.md",
+          "sha256": "de09df342530281cba5657f97d8cbf1b356a8e83c09407595b7843ff8aab014f"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp-libvips",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-linux-arm",
+      "version": "1.2.4",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm/-/sharp-libvips-linux-arm-1.2.4.tgz",
+      "integrity": "sha512-bFI7xcKFELdiNCVov8e44Ia4u2byA+l3XtsAj+Q8tfCwO6BQ8iDojYdvoPMqsKDkuoOo+X6HZA0s0q11ANMQ8A==",
+      "declaredLicense": "LGPL-3.0-or-later",
+      "concludedLicense": "LGPL-3.0-or-later",
+      "packageJsonSha256": "67f3a722c0f4c3e1dd09f94b8c7cd5edd4d455f0c17cf7c4c83b3a77ec48e111",
+      "licenseEvidence": [
+        {
+          "path": "README.md",
+          "sha256": "37cb710e8ee2b708014c141a46155504291a48c5b8fa47b8a26a8cad37f02f29"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp-libvips",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-linux-ppc64",
+      "version": "1.2.4",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-ppc64/-/sharp-libvips-linux-ppc64-1.2.4.tgz",
+      "integrity": "sha512-FMuvGijLDYG6lW+b/UvyilUWu5Ayu+3r2d1S8notiGCIyYU/76eig1UfMmkZ7vwgOrzKzlQbFSuQfgm7GYUPpA==",
+      "declaredLicense": "LGPL-3.0-or-later",
+      "concludedLicense": "LGPL-3.0-or-later",
+      "packageJsonSha256": "cd176e54e518e9b01f8c5a523ff65484a607c2e542f42f12d0e1352ba1dace68",
+      "licenseEvidence": [
+        {
+          "path": "README.md",
+          "sha256": "0d5b31366a119f91cb894b265178db7aa6956b304acf19a0382c2ec274ec0858"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp-libvips",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-linux-riscv64",
+      "version": "1.2.4",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-riscv64/-/sharp-libvips-linux-riscv64-1.2.4.tgz",
+      "integrity": "sha512-oVDbcR4zUC0ce82teubSm+x6ETixtKZBh/qbREIOcI3cULzDyb18Sr/Wcyx7NRQeQzOiHTNbZFF1UwPS2scyGA==",
+      "declaredLicense": "LGPL-3.0-or-later",
+      "concludedLicense": "LGPL-3.0-or-later",
+      "packageJsonSha256": "43448f97e2ee7b71547f0c8ea06868471e8ad350c04847f59be6941f07dc0fd3",
+      "licenseEvidence": [
+        {
+          "path": "README.md",
+          "sha256": "c48e949a04ec12f560bfdaf61bc64f5ec8cf866f51d4796ee2c85e8b2e6ca0e2"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp-libvips",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-linux-s390x",
+      "version": "1.2.4",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-s390x/-/sharp-libvips-linux-s390x-1.2.4.tgz",
+      "integrity": "sha512-qmp9VrzgPgMoGZyPvrQHqk02uyjA0/QrTO26Tqk6l4ZV0MPWIW6LTkqOIov+J1yEu7MbFQaDpwdwJKhbJvuRxQ==",
+      "declaredLicense": "LGPL-3.0-or-later",
+      "concludedLicense": "LGPL-3.0-or-later",
+      "packageJsonSha256": "0447fbe2075719d3cf02de4a4a3fa077fc786c9c7dc5d617786043c5eb727f02",
+      "licenseEvidence": [
+        {
+          "path": "README.md",
+          "sha256": "0c5d9a5743e4d28e8d3bfddb175d17a15f937cff6e739c9516d4a0382c42dfb5"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp-libvips",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-linux-x64",
+      "version": "1.2.4",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.2.4.tgz",
+      "integrity": "sha512-tJxiiLsmHc9Ax1bz3oaOYBURTXGIRDODBqhveVHonrHJ9/+k89qbLl0bcJns+e4t4rvaNBxaEZsFtSfAdquPrw==",
+      "declaredLicense": "LGPL-3.0-or-later",
+      "concludedLicense": "LGPL-3.0-or-later",
+      "packageJsonSha256": "d45b80cb79391bbfe21e935e599d30c545b62f5c255d96fee2cb7b6f0b171f5a",
+      "licenseEvidence": [
+        {
+          "path": "README.md",
+          "sha256": "cabdbb8c9c67431d964dabd29630f07813cd58a0e090f280a88a58887757821d"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp-libvips",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-linuxmusl-arm64",
+      "version": "1.2.4",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-arm64/-/sharp-libvips-linuxmusl-arm64-1.2.4.tgz",
+      "integrity": "sha512-FVQHuwx1IIuNow9QAbYUzJ+En8KcVm9Lk5+uGUQJHaZmMECZmOlix9HnH7n1TRkXMS0pGxIJokIVB9SuqZGGXw==",
+      "declaredLicense": "LGPL-3.0-or-later",
+      "concludedLicense": "LGPL-3.0-or-later",
+      "packageJsonSha256": "aedb492773955b0078e6a0fc5c5411ab914db1edb7504118fc945767a62140ce",
+      "licenseEvidence": [
+        {
+          "path": "README.md",
+          "sha256": "65fbbdcf0f5a01f58739c80b21d95918cc7163a3f6829c57dcc0af27e7c3b5e1"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp-libvips",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-linuxmusl-x64",
+      "version": "1.2.4",
+      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-x64/-/sharp-libvips-linuxmusl-x64-1.2.4.tgz",
+      "integrity": "sha512-+LpyBk7L44ZIXwz/VYfglaX/okxezESc6UxDSoyo2Ks6Jxc4Y7sGjpgU9s4PMgqgjj1gZCylTieNamqA1MF7Dg==",
+      "declaredLicense": "LGPL-3.0-or-later",
+      "concludedLicense": "LGPL-3.0-or-later",
+      "packageJsonSha256": "c1d9859ac56602e92577bbaee7d4acd788d12e92fa8c715440aa2c6c683107cb",
+      "licenseEvidence": [
+        {
+          "path": "README.md",
+          "sha256": "f510368e3bbdeea893b6828e2b1fb8d657c1095cc209d05f3191c9b652487512"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp-libvips",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-linux-arm64",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm64/-/sharp-linux-arm64-0.34.5.tgz",
+      "integrity": "sha512-bKQzaJRY/bkPOXyKx5EVup7qkaojECG6NLYswgktOZjaXecSAeCWiZwwiFf3/Y+O1HrauiE3FVsGxFg8c24rZg==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "4a360ebe68ad386feba74fe73f17f15be11ab80752fa1343351e16e8f7dfb997",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "ccc883ec303dac4dbe86e7e255d86c62263323aec600978761e57353c55cd63e"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-linux-arm",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm/-/sharp-linux-arm-0.34.5.tgz",
+      "integrity": "sha512-9dLqsvwtg1uuXBGZKsxem9595+ujv0sJ6Vi8wcTANSFpwV/GONat5eCkzQo/1O6zRIkh0m/8+5BjrRr7jDUSZw==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "04355122e45a9cd4d1413461f30a553adcb70067e667fc4688e2ca3afc30ae33",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "f71dbcc9dc73279a7c47d851153f5be343eabb6d152ee7e2cd3cd1c1d276c3bd"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-linux-ppc64",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-linux-ppc64/-/sharp-linux-ppc64-0.34.5.tgz",
+      "integrity": "sha512-7zznwNaqW6YtsfrGGDA6BRkISKAAE1Jo0QdpNYXNMHu2+0dTrPflTLNkpc8l7MUP5M16ZJcUvysVWWrMefZquA==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "d16280c29cefee71588f72d5d9f6292b7c1025c8d8bec915e7e88811af1a6600",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "bdafeda99223a1086e9bb39755a20d221d3a1f11086186dac49a96aed00c0af1"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-linux-riscv64",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-linux-riscv64/-/sharp-linux-riscv64-0.34.5.tgz",
+      "integrity": "sha512-51gJuLPTKa7piYPaVs8GmByo7/U7/7TZOq+cnXJIHZKavIRHAP77e3N2HEl3dgiqdD/w0yUfiJnII77PuDDFdw==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "4e5d1b378233b8452fc72870e200e869a4081e5cc2f716448c0ef58be339d6bf",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "876f8a4847f39f3eab8d0ae03c594d098d59bc1f887ff42778d7da1034eabe94"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-linux-s390x",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-linux-s390x/-/sharp-linux-s390x-0.34.5.tgz",
+      "integrity": "sha512-nQtCk0PdKfho3eC5MrbQoigJ2gd1CgddUMkabUj+rBevs8tZ2cULOx46E7oyX+04WGfABgIwmMC0VqieTiR4jg==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "f80b70af5b64f9bc2e21c34173a8e3084c212859481a896b91f9bd3569da0963",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "3b381a4b06f57c22ef4b8320f0095d1c379e971d1c657b7ce26b4a71230f6043"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-linux-x64",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.34.5.tgz",
+      "integrity": "sha512-MEzd8HPKxVxVenwAa+JRPwEC7QFjoPWuS5NZnBt6B3pu7EG2Ge0id1oLHZpPJdn3OQK+BQDiw9zStiHBTJQQQQ==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "049911809cbabb4496f28fbf6e6b4d854fff7b8699a225dcec779d81a72e9781",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "8f8f907a15368c3ab82e675dde406263c321e1d14533285f6827da72b2bb7f55"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-linuxmusl-arm64",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-arm64/-/sharp-linuxmusl-arm64-0.34.5.tgz",
+      "integrity": "sha512-fprJR6GtRsMt6Kyfq44IsChVZeGN97gTD331weR1ex1c1rypDEABN6Tm2xa1wE6lYb5DdEnk03NZPqA7Id21yg==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "d9d65c3f043b047ee62f50575c5e918569bf97fc5b7e531b37a615ad696a5369",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "dd8ec01c9950cf6996d1b6baea0036aeb48c2f7f53f8dd52d92dde4d8ce9d074"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-linuxmusl-x64",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-x64/-/sharp-linuxmusl-x64-0.34.5.tgz",
+      "integrity": "sha512-Jg8wNT1MUzIvhBFxViqrEhWDGzqymo3sV7z7ZsaWbZNDLXRJZoRGrjulp60YYtV4wfY8VIKcWidjojlLcWrd8Q==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "2616e8b2d6371f498f3cc8cc687bc3b9c4b8181cfbd058b6c97775d9205559c3",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "711a113a4feee4312861aaa9d0bacb8693a37ff1614861f21302a1e500e63744"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-wasm32",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.34.5.tgz",
+      "integrity": "sha512-OdWTEiVkY2PHwqkbBI8frFxQQFekHaSSkUIJkwzclWZe64O1X4UlUjqqqLaPbUpMOQk6FBu/HtlGXNblIs0huw==",
+      "declaredLicense": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
+      "concludedLicense": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
+      "packageJsonSha256": "a619114d72bf5675d8b48657b72c329c2ffa75417f3c84a5cdb554b063031b64",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "5bc125eb20621a634d815adf064072479cd088ebc6c8702caeb24b5cf6e45cb7"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-win32-arm64",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-win32-arm64/-/sharp-win32-arm64-0.34.5.tgz",
+      "integrity": "sha512-WQ3AgWCWYSb2yt+IG8mnC6Jdk9Whs7O0gxphblsLvdhSpSTtmu69ZG1Gkb6NuvxsNACwiPV6cNSZNzt0KPsw7g==",
+      "declaredLicense": "Apache-2.0 AND LGPL-3.0-or-later",
+      "concludedLicense": "Apache-2.0 AND LGPL-3.0-or-later",
+      "packageJsonSha256": "014942af28f1a463877467da615c062071e0f0f9af8ef2211c75aa8fb8c27094",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "dc1f5d2d43c5531dfe0acaf4e950ea5dbe3e61e1850cf0e983bda7efc10d6693"
+        },
+        {
+          "path": "README.md",
+          "sha256": "f815d8bd4bb148114b6323cb5796a03cdd25638599aa60f88510b5e5f4a317cb"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-win32-ia32",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-win32-ia32/-/sharp-win32-ia32-0.34.5.tgz",
+      "integrity": "sha512-FV9m/7NmeCmSHDD5j4+4pNI8Cp3aW+JvLoXcTUo0IqyjSfAZJ8dIUmijx1qaJsIiU+Hosw6xM5KijAWRJCSgNg==",
+      "declaredLicense": "Apache-2.0 AND LGPL-3.0-or-later",
+      "concludedLicense": "Apache-2.0 AND LGPL-3.0-or-later",
+      "packageJsonSha256": "eafa0388f22f225125395105b4c83bc34f5b536f0f9dd1f56199676ac5bcea19",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "dc1f5d2d43c5531dfe0acaf4e950ea5dbe3e61e1850cf0e983bda7efc10d6693"
+        },
+        {
+          "path": "README.md",
+          "sha256": "091496a408bff5cc42b34158d41eb22638d5fadbd74bc2928fd30e3920005096"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@img/sharp-win32-x64",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.34.5.tgz",
+      "integrity": "sha512-+29YMsqY2/9eFEiW93eqWnuLcWcufowXewwSNIT6UwZdUUCrM3oFjMWH/Z6/TMmb4hlFenmfAVbpWeup2jryCw==",
+      "declaredLicense": "Apache-2.0 AND LGPL-3.0-or-later",
+      "concludedLicense": "Apache-2.0 AND LGPL-3.0-or-later",
+      "packageJsonSha256": "3421485756b0a25573ee62e147a62908608e3014a2bfed64381473a22e9351d2",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "dc1f5d2d43c5531dfe0acaf4e950ea5dbe3e61e1850cf0e983bda7efc10d6693"
+        },
+        {
+          "path": "README.md",
+          "sha256": "c416cd0af88256407c36a0613f189ac4257221c7206d0324f7ef5563c66f1125"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-lgpl-platform",
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "@modelcontextprotocol/sdk",
+      "version": "1.29.0",
+      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.29.0.tgz",
+      "integrity": "sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "7ab20eba8fee70f316516b5b3fc45837294caee7e4dd36f2a1593210b0f003ac",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "5e13dbbc1d120fc2a03cecde7c91424ae2d7de11b63d58ded2f4431e261ee50d"
+        }
+      ],
+      "sourceUrl": "https://github.com/modelcontextprotocol/typescript-sdk",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@protobufjs/aspromise",
+      "version": "1.1.2",
+      "resolved": "https://registry.npmjs.org/@protobufjs/aspromise/-/aspromise-1.1.2.tgz",
+      "integrity": "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "4a39ee1c94f6ee038d2944196aa6167785d3429a91727f828a1274262919e2d8",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/protobuf.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@protobufjs/base64",
+      "version": "1.1.2",
+      "resolved": "https://registry.npmjs.org/@protobufjs/base64/-/base64-1.1.2.tgz",
+      "integrity": "sha512-AZkcAA5vnN/v4PDqKyMR5lx7hZttPDgClv83E//FMNhR2TMcLUhfRUBHCmSl0oi9zMgDDqRUJkSxO3wm85+XLg==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "7ff6a89f566b95c0f21a5a9cb12df5718f0b06ef96d4186a92d650c0849fa2c5",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/protobuf.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@protobufjs/codegen",
+      "version": "2.0.5",
+      "resolved": "https://registry.npmjs.org/@protobufjs/codegen/-/codegen-2.0.5.tgz",
+      "integrity": "sha512-zgXFLzW3Ap33e6d0Wlj4MGIm6Ce8O89n/apUaGNB/jx+hw+ruWEp7EwGUshdLKVRCxZW12fp9r40E1mQrf/34g==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "818bf10387c19ab09b3814004ec672ab8d975302cdaf2dd65466bdb604764d65",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/protobuf.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@protobufjs/eventemitter",
+      "version": "1.1.1",
+      "resolved": "https://registry.npmjs.org/@protobufjs/eventemitter/-/eventemitter-1.1.1.tgz",
+      "integrity": "sha512-vW1GmwMZNnL+gMRaovlh9yZX74kc+TTU3FObkkurpMaRtBfLP3ldjS9KQWlwZgraRE0+dheEEoAxdzcJQ8eXZg==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "d157d364fe4aee21cfd517abff35bca312ff51e6e6e90abdbec16225057e5914",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/protobuf.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@protobufjs/fetch",
+      "version": "1.1.1",
+      "resolved": "https://registry.npmjs.org/@protobufjs/fetch/-/fetch-1.1.1.tgz",
+      "integrity": "sha512-GpptLrs57adMSuHi3VNj0mAF8dwh36LMaYF6XyJ6JMWlVsc+t42tm1HSEDmOs3A8fC9yyeisgLhsTVQokOZ0zw==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "52f997898a745acce5d68751883aad6296bcc2f152468ced0ed30e3c3c5a1c72",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/protobuf.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@protobufjs/float",
+      "version": "1.0.2",
+      "resolved": "https://registry.npmjs.org/@protobufjs/float/-/float-1.0.2.tgz",
+      "integrity": "sha512-Ddb+kVXlXst9d+R9PfTIxh1EdNkgoRe5tOX6t01f1lYWOvJnSPDBlG241QLzcyPdoNTsblLUdujGSE4RzrTZGQ==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "1cae4ded1bc97375a67fe4608f87ee59990734ea738fabb98e9061ab23669cdf",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/protobuf.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@protobufjs/inquire",
+      "version": "1.1.2",
+      "resolved": "https://registry.npmjs.org/@protobufjs/inquire/-/inquire-1.1.2.tgz",
+      "integrity": "sha512-pa0vFRuws4wkvaXKK1uXZMAwAX4/t8ANaJo45iw/oQHNQ9q5xUzwgFmVJGXiga2BeN+zpX7Vf9vmsiIa2J+MUw==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "7709e69864f333ef09bf1f644f32b7d8f3e4b4c0bd97f107ee7bfbc6e2735965",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/protobuf.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@protobufjs/path",
+      "version": "1.1.2",
+      "resolved": "https://registry.npmjs.org/@protobufjs/path/-/path-1.1.2.tgz",
+      "integrity": "sha512-6JOcJ5Tm08dOHAbdR3GrvP+yUUfkjG5ePsHYczMFLq3ZmMkAD98cDgcT2iA1lJ9NVwFd4tH/iSSoe44YWkltEA==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "b19802dd696ceb8a4aa4839f35ab1c8312e97693d93485ff3c3e4f19cca183c4",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/protobuf.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@protobufjs/pool",
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/@protobufjs/pool/-/pool-1.1.0.tgz",
+      "integrity": "sha512-0kELaGSIDBKvcgS4zkjz1PeddatrjYcmMWOlAuAPwAeccUrPHdUqo/J6LiymHHEiJT5NrF1UVwxY14f+fy4WQw==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "7a33b609e770020fe1e09690cfebc23bbdd6e1306e3f0dd98ba5048966cb7fec",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/protobuf.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@protobufjs/utf8",
+      "version": "1.1.1",
+      "resolved": "https://registry.npmjs.org/@protobufjs/utf8/-/utf8-1.1.1.tgz",
+      "integrity": "sha512-oOAWABowe8EAbMyWKM0tYDKi8Yaox52D+HWZhAIJqQXbqe0xI/GV7FhLWqlEKreMkfDjshR5FKgi3mnle0h6Eg==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "0487ccf34c45f9a65ebc1cc553a9898df191e3f9cd530bf2aea7ad341c02afdc",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/protobuf.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@types/d3-color",
+      "version": "3.1.3",
+      "resolved": "https://registry.npmjs.org/@types/d3-color/-/d3-color-3.1.3.tgz",
+      "integrity": "sha512-iO90scth9WAbmgv7ogoq57O9YpKmFBbmoEoCHDB2xMBY0+/KVrqAaCDyCE16dUspeOvIxFFRI+0sEtqDqy2b4A==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "409ac013405caa33f42ed394d92b357fde96b950ee4d5bbfb7de8d6dbebe6f37",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "sourceUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@types/d3-drag",
+      "version": "3.0.7",
+      "resolved": "https://registry.npmjs.org/@types/d3-drag/-/d3-drag-3.0.7.tgz",
+      "integrity": "sha512-HE3jVKlzU9AaMazNufooRJ5ZpWmLIoc90A37WU2JMmeq28w1FQqCZswHZ3xR+SuxYftzHq6WU6KJHvqxKzTxxQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "8d2695642e6eaf9da61aac7a1044aa23b42167ddd3eae3bbad7ed4a422e997a4",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "sourceUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@types/d3-interpolate",
+      "version": "3.0.4",
+      "resolved": "https://registry.npmjs.org/@types/d3-interpolate/-/d3-interpolate-3.0.4.tgz",
+      "integrity": "sha512-mgLPETlrpVV1YRJIglr4Ez47g7Yxjl1lj7YKsiMCb27VJH9W8NVM6Bb9d8kkpG/uAQS5AmbA48q2IAolKKo1MA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "751bcbf0a81dc0b5e507e535e29d9c27b7132b74b3b950594391f9eea0b46a76",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "sourceUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@types/d3-selection",
+      "version": "3.0.11",
+      "resolved": "https://registry.npmjs.org/@types/d3-selection/-/d3-selection-3.0.11.tgz",
+      "integrity": "sha512-bhAXu23DJWsrI45xafYpkQ4NtcKMwWnAC/vKrd2l+nxMFuvOT3XMYTIj2opv8vq8AO5Yh7Qac/nSeP/3zjTK0w==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "4d7bc2d92b94604f71f7eede9800b6d6f546906d27807b540b4aa25946417781",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "sourceUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@types/d3-transition",
+      "version": "3.0.9",
+      "resolved": "https://registry.npmjs.org/@types/d3-transition/-/d3-transition-3.0.9.tgz",
+      "integrity": "sha512-uZS5shfxzO3rGlu0cC3bjmMFKsXv+SmZZcgp0KD22ts4uGXp5EVYGzu/0YdwZeKmddhcAccYtREJKkPfXkZuCg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "cd880a8ea664d612d89e8e33b3abd7511e655306e72567ef31e26e760ce6d052",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "sourceUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@types/d3-zoom",
+      "version": "3.0.8",
+      "resolved": "https://registry.npmjs.org/@types/d3-zoom/-/d3-zoom-3.0.8.tgz",
+      "integrity": "sha512-iqMC4/YlFCSlO8+2Ii1GGGliCAY4XdeG748w5vQUbevlbDu0zSjH/+jojorQVBK/se0j6DUFNPBGSqD3YWYnDw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "14b452dbc4b6aae9fec09aa243b76f359bf4defa05be5e2dc2e0e045ec82ebff",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "sourceUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@types/node",
+      "version": "22.19.11",
+      "resolved": "https://registry.npmjs.org/@types/node/-/node-22.19.11.tgz",
+      "integrity": "sha512-BH7YwL6rA93ReqeQS1c4bsPpcfOmJasG+Fkr6Y59q83f9M1WcBRHR2vM+P9eOisYRcN3ujQoiZY8uk5W+1WL8w==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "b1ae5900a068d8cd9539a7ccd633d63dd9f46dc5c0b9b31bd356682edfcf4ed7",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "sourceUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@types/prop-types",
+      "version": "15.7.15",
+      "resolved": "https://registry.npmjs.org/@types/prop-types/-/prop-types-15.7.15.tgz",
+      "integrity": "sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "ec2aa770e306720d83d14e146d2fa59df6bd2a379a206f9a492e4d5f87e12179",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "sourceUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@types/react",
+      "version": "18.3.28",
+      "resolved": "https://registry.npmjs.org/@types/react/-/react-18.3.28.tgz",
+      "integrity": "sha512-z9VXpC7MWrhfWipitjNdgCauoMLRdIILQsAEV+ZesIzBq/oUlxk0m3ApZuMFCXdnS4U7KrI+l3WRUEGQ8K1QKw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "be92045d849a5cadcdae48f1cd53c094a6645359380b3aea911a23a9e83c77e7",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "sourceUrl": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@xenova/transformers",
+      "version": "2.17.2",
+      "resolved": "https://registry.npmjs.org/@xenova/transformers/-/transformers-2.17.2.tgz",
+      "integrity": "sha512-lZmHqzrVIkSvZdKZEx7IYY51TK0WDrC8eR0c5IMnBsO8di8are1zzw8BlLhyO2TklZKLN5UffNGs1IJwT6oOqQ==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "0d605ca8d31ccbcff74729534f6f5e2f722d047c534cef6f53fafd22ef0b4c3d",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "sourceUrl": "https://github.com/xenova/transformers.js",
+      "patch": {
+        "path": "patches/@xenova__transformers@2.17.2.patch",
+        "sha256": "262aa63ab2e21aa2c33c033870e775e376dd0dbbc35a0d3d9e80be2c8b1293e2"
+      },
+      "review": [
+        "transformers-local-patch"
+      ]
+    },
+    {
+      "name": "@xyflow/react",
+      "version": "12.10.1",
+      "resolved": "https://registry.npmjs.org/@xyflow/react/-/react-12.10.1.tgz",
+      "integrity": "sha512-5eSWtIK/+rkldOuFbOOz44CRgQRjtS9v5nufk77DV+XBnfCGL9HAQ8PG00o2ZYKqkEU/Ak6wrKC95Tu+2zuK3Q==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "85e4d601c37a34abfb2a92d4302ec5cb82d6bae6b4b05a107495cde2c8b5b112",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "023119ac20fb1c8c9930abe0bcd196989a1960388529a96fc43cebf96f07c9ff"
+        }
+      ],
+      "sourceUrl": "https://github.com/xyflow/xyflow",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "@xyflow/system",
+      "version": "0.0.75",
+      "resolved": "https://registry.npmjs.org/@xyflow/system/-/system-0.0.75.tgz",
+      "integrity": "sha512-iXs+AGFLi8w/VlAoc/iSxk+CxfT6o64Uw/k0CKASOPqjqz6E0rb5jFZgJtXGZCpfQI6OQpu5EnumP5fGxQheaQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "78e34895b708827ccd71a89136a83d0d091bb4283cafd514ca5465171b3ece07",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "023119ac20fb1c8c9930abe0bcd196989a1960388529a96fc43cebf96f07c9ff"
+        }
+      ],
+      "sourceUrl": "https://github.com/xyflow/xyflow",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "accepts",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/accepts/-/accepts-2.0.0.tgz",
+      "integrity": "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "c579f3f992d488ac2f4ae751df8fd4169f034f4b6f6716f9a3ddfaf130993d63",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "71f83c4c0621102a56d9853812777b85751bce7e9726f686f5b056c1f8a4b0e6"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/accepts/-/accepts-2.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "ajv-formats",
+      "version": "3.0.1",
+      "resolved": "https://registry.npmjs.org/ajv-formats/-/ajv-formats-3.0.1.tgz",
+      "integrity": "sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "402fb4bcfa457f0226813f3976ac42839dd619907c075c108efba8600d7edb69",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "9df3bb69929a3b650ed73b3bfa1756725aaff0ac296461605753547004eafeaf"
+        }
+      ],
+      "sourceUrl": "https://github.com/ajv-validator/ajv-formats",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "ajv",
+      "version": "8.18.0",
+      "resolved": "https://registry.npmjs.org/ajv/-/ajv-8.18.0.tgz",
+      "integrity": "sha512-PlXPeEWMXMZ7sPYOHqmDyCJzcfNrUr3fGNKtezX14ykXOEIvyK81d+qydx89KY5O71FKMPaQ2vBfBFI5NHR63A==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "720f862de3e496df05e074c33df5174db92c47e60726e41ab1338cfefda9754c",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a05350a88e318e4f5f2c2a1ff1e2e88daa4dd38e6e78b71cccae422bdc762cc3"
+        }
+      ],
+      "sourceUrl": "https://ajv.js.org",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "body-parser",
+      "version": "2.2.2",
+      "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-2.2.2.tgz",
+      "integrity": "sha512-oP5VkATKlNwcgvxi0vM0p/D3n2C3EReYVX+DNYs5TjZFn/oQt2j+4sVJtSMr18pdRr8wjTcBl6LoV+FUwzPmNA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "d3796a4d3c8e1a7217c443a26daa4699edb78e26fd4e18922f14a7dd4f62cdb7",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "23d466b1b134b415b66fa50c6526b4cf3e7b9258554da88d3abb371721e7ce68"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/body-parser/-/body-parser-2.2.2.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "bytes",
+      "version": "3.1.2",
+      "resolved": "https://registry.npmjs.org/bytes/-/bytes-3.1.2.tgz",
+      "integrity": "sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "99b21c09ce812dc76a06cd87c4753247cb9615c6a8501c5a5a9d9caa22ea2d12",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "e3b44af066615de2ea48d18d852d0762f18c0b2efcea714fa48a6f729d405b85"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/bytes/-/bytes-3.1.2.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "call-bind-apply-helpers",
+      "version": "1.0.2",
+      "resolved": "https://registry.npmjs.org/call-bind-apply-helpers/-/call-bind-apply-helpers-1.0.2.tgz",
+      "integrity": "sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "59639b628c6846f674857c6a613fd47e2e4d2a24036cdf0f7a62ac634f4c8a5f",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/call-bind-apply-helpers",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "call-bound",
+      "version": "1.0.4",
+      "resolved": "https://registry.npmjs.org/call-bound/-/call-bound-1.0.4.tgz",
+      "integrity": "sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "dcc8abb3c4ad3774234272149020cb36d7b1a3d377a419454d1e7adb368dd9c3",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/call-bound",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "classcat",
+      "version": "5.0.5",
+      "resolved": "https://registry.npmjs.org/classcat/-/classcat-5.0.5.tgz",
+      "integrity": "sha512-JhZUT7JFcQy/EzW605k/ktHtncoo9vnyW/2GspNYwFlN1C/WmjuV/xtS04e9SOkL2sTdw0VAZ2UGCcQ9lR6p6w==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "3deeb9533e14dcea3a8a998716e3eb7d08496f71a1c699266aec7a5d39c09126",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.md",
+          "sha256": "f101c761d255d0dddc77dd8a9327733b03d381798ec54a1bb718367207b48a8e"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/classcat/-/classcat-5.0.5.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "clsx",
+      "version": "2.1.1",
+      "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+      "integrity": "sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "a5e616b9883177fb47c1fca22b6a4ab42be1c3ed6ffae8595a5c7d88630eeec2",
+      "licenseEvidence": [
+        {
+          "path": "license",
+          "sha256": "9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "content-disposition",
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/content-disposition/-/content-disposition-1.0.1.tgz",
+      "integrity": "sha512-oIXISMynqSqm241k6kcQ5UwttDILMK4BiurCfGEREw6+X9jkkpEe5T9FZaApyLGGOnFuyMWZpdolTXMtvEJ08Q==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "8161e507189638984b064df19375f7534cff7d9c98da5d933c45729f05c6a4d7",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/content-disposition/-/content-disposition-1.0.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "content-type",
+      "version": "1.0.5",
+      "resolved": "https://registry.npmjs.org/content-type/-/content-type-1.0.5.tgz",
+      "integrity": "sha512-nTjqfcBFEipKdXCv4YDQWCfmcLZKm81ldF0pAopTvyrFGVbcR6P/VAAd5G7N+0tTr8QqiU0tFadD6FK4NtJwOA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "bd78a5427ffca1966621301edc6cac2146c8c1e137f122161ba90dca7ec89f77",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/content-type/-/content-type-1.0.5.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "cookie-signature",
+      "version": "1.2.2",
+      "resolved": "https://registry.npmjs.org/cookie-signature/-/cookie-signature-1.2.2.tgz",
+      "integrity": "sha512-D76uU73ulSXrD1UXF4KE2TMxVVwhsnCgfAyTg9k8P6KGZjlXKrOLe4dJQKI3Bxi5wjesZoFXJWElNWBjPZMbhg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "c07dac3271d2ab772ac105f714c3f44bea5180a9a40bf95c2db8d6cb29bb28be",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "0dd4e47333485760cf8c265db5a5e24ae8d7401064c6f2e19793ee81a5bef42f"
+        }
+      ],
+      "sourceUrl": "https://github.com/visionmedia/node-cookie-signature",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "cookie",
+      "version": "0.7.2",
+      "resolved": "https://registry.npmjs.org/cookie/-/cookie-0.7.2.tgz",
+      "integrity": "sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "7fa781bd142e7f38b66bff64b4e3a8be9e53e340e7ddaf27caebd00322602208",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c02110eedc16c7114f1a9bdc026c65626ce1d9c7e27fd51a8e0feee8a48a6858"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/cookie/-/cookie-0.7.2.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "cors",
+      "version": "2.8.6",
+      "resolved": "https://registry.npmjs.org/cors/-/cors-2.8.6.tgz",
+      "integrity": "sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "b314218cdfc9e9442efd35c74c4176902c0bbd74700ba30d6055e70a76455174",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "1aa9a12863eefb583779b2ca0e5d73c610b6e6d07529ae0472721769a6ea0a32"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/cors/-/cors-2.8.6.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "cross-spawn",
+      "version": "7.0.6",
+      "resolved": "https://registry.npmjs.org/cross-spawn/-/cross-spawn-7.0.6.tgz",
+      "integrity": "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "2e106cd9b4ae4e34ead35218371a0d4e172da72515a4f8f97d69a2e1fe3dee82",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "aaa78451b6fecd1b9c4594c796c133c0e90cad100372ff8bc6de615e9ef9adf1"
+        }
+      ],
+      "sourceUrl": "https://github.com/moxystudio/node-cross-spawn",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "csstype",
+      "version": "3.2.3",
+      "resolved": "https://registry.npmjs.org/csstype/-/csstype-3.2.3.tgz",
+      "integrity": "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "c818b74a9bc1556488b7ec2a65399224738f6619228f9a6491c5c02ca91f849e",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "11d55bd4541c75ee7879547ac49089c489163dae49551389713c3d026cab383e"
+        }
+      ],
+      "sourceUrl": "https://github.com/frenic/csstype",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "d3-color",
+      "version": "3.1.0",
+      "resolved": "https://registry.npmjs.org/d3-color/-/d3-color-3.1.0.tgz",
+      "integrity": "sha512-zg/chbXyeBtMQ1LbD/WSoW2DpC3I0mpmPdW+ynRTj/x2DAWYrIY7qeZIHidozwV24m4iavr15lNwIwLxRmOxhA==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "3de1c3c467f09ffc0372c8b765f8981535c22e1d9f944d17a35ee37df1033516",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "faa682e3e430941f958d26180458f5934a62f58dac4d70ccdd15608c15d0f884"
+        }
+      ],
+      "sourceUrl": "https://github.com/d3/d3-color",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "d3-dispatch",
+      "version": "3.0.1",
+      "resolved": "https://registry.npmjs.org/d3-dispatch/-/d3-dispatch-3.0.1.tgz",
+      "integrity": "sha512-rzUyPU/S7rwUflMyLc1ETDeBj0NRuHKKAcvukozwhshr6g6c5d8zh4c2gQjY2bZ0dXeGLWc1PF174P2tVvKhfg==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "6d9bb49819ec45e2187304df1b25e731c246d646cd2eb5aa2fe06e6c9cc7ad84",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee"
+        }
+      ],
+      "sourceUrl": "https://github.com/d3/d3-dispatch",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "d3-drag",
+      "version": "3.0.0",
+      "resolved": "https://registry.npmjs.org/d3-drag/-/d3-drag-3.0.0.tgz",
+      "integrity": "sha512-pWbUJLdETVA8lQNJecMxoXfH6x+mO2UQo8rSmZ+QqxcbyA3hfeprFgIT//HW2nlHChWeIIMwS2Fq+gEARkhTkg==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "daecac22c0dfda72109fdd75e3817a15082a6f58d9bdc1380d77e06f7f44c218",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee"
+        }
+      ],
+      "sourceUrl": "https://github.com/d3/d3-drag",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "d3-ease",
+      "version": "3.0.1",
+      "resolved": "https://registry.npmjs.org/d3-ease/-/d3-ease-3.0.1.tgz",
+      "integrity": "sha512-wR/XK3D3XcLIZwpbvQwQ5fK+8Ykds1ip7A2Txe0yxncXSdq1L9skcG7blcedkOX+ZcgxGAmLX1FrRGbADwzi0w==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "393518c7886852c8cdeae42a54065c3ba54eddb701dd2da98c6d048f92cbc91c",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "b989d9085148d21ff64a75e14462aefa06b2589a55553b07b1460c70081c7d08"
+        }
+      ],
+      "sourceUrl": "https://github.com/d3/d3-ease",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "d3-interpolate",
+      "version": "3.0.1",
+      "resolved": "https://registry.npmjs.org/d3-interpolate/-/d3-interpolate-3.0.1.tgz",
+      "integrity": "sha512-3bYs1rOD33uo8aqJfKP3JWPAibgw8Zm2+L9vBKEHJ2Rg+viTR7o5Mmv5mZcieN+FRYaAOWX5SJATX6k1PWz72g==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "3e2ce33f9d7072b6bfedbae949c1df546e187994e44b6f4b3795abeb63914613",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee"
+        }
+      ],
+      "sourceUrl": "https://github.com/d3/d3-interpolate",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "d3-selection",
+      "version": "3.0.0",
+      "resolved": "https://registry.npmjs.org/d3-selection/-/d3-selection-3.0.0.tgz",
+      "integrity": "sha512-fmTRWbNMmsmWq6xJV8D19U/gw/bwrHfNXxrIN+HfZgnzqTHp9jOmKMhsTUjXOJnZOdZY9Q28y4yebKzqDKlxlQ==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "adbb86f6d93c60a3789af9be6f6cdc40127ce15f63187a1e94c46fe26b0776ec",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee"
+        }
+      ],
+      "sourceUrl": "https://github.com/d3/d3-selection",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "d3-timer",
+      "version": "3.0.1",
+      "resolved": "https://registry.npmjs.org/d3-timer/-/d3-timer-3.0.1.tgz",
+      "integrity": "sha512-ndfJ/JxxMd3nw31uyKoY2naivF+r29V+Lc0svZxe1JvvIRmi8hUsrMvdOwgS1o6uBHmiz91geQ0ylPP0aj1VUA==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "d2b6cb2200728b60982aa30c4caf787f0bda2c066ef9176282ab54ba656403cb",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee"
+        }
+      ],
+      "sourceUrl": "https://github.com/d3/d3-timer",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "d3-transition",
+      "version": "3.0.1",
+      "resolved": "https://registry.npmjs.org/d3-transition/-/d3-transition-3.0.1.tgz",
+      "integrity": "sha512-ApKvfjsSR6tg06xrL434C0WydLr7JewBB3V+/39RMHsaXTOG0zmt/OAXeng5M5LBm0ojmxJrpomQVZ1aPvBL4w==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "6ee7ce4fb0e59ee6be93d5a5fb33db804add32dbb3afb6c753659b99084fde84",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee"
+        }
+      ],
+      "sourceUrl": "https://github.com/d3/d3-transition",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "d3-zoom",
+      "version": "3.0.0",
+      "resolved": "https://registry.npmjs.org/d3-zoom/-/d3-zoom-3.0.0.tgz",
+      "integrity": "sha512-b8AmV3kfQaqWAuacbPuNbL6vahnOJflOhexLzMMNLga62+/nh0JzvJ0aO/5a5MVgUFGS7Hu1P9P03o3fJkDCyw==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "0adc45c5f4e5830e8c639c3953761e73e9493f1cb5f3dea6abc2249adb8ff2a9",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee"
+        }
+      ],
+      "sourceUrl": "https://github.com/d3/d3-zoom",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "date-fns",
+      "version": "4.1.0",
+      "resolved": "https://registry.npmjs.org/date-fns/-/date-fns-4.1.0.tgz",
+      "integrity": "sha512-Ukq0owbQXxa/U3EGtsdVBkR1w7KOQ5gIBqdH2hkvknzZPYvBxb/aa6E8L7tmjFtkwZBu3UXBbjIgPo/Ez4xaNg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "4569c5b08a8bc61281236014c2a43490142579e1f47550cf51297607feba4b9b",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.md",
+          "sha256": "8d3951c38967b964b1fe259bfd200c2647cc04c858b55a4414e3122a60f1ef4b"
+        }
+      ],
+      "sourceUrl": "https://github.com/date-fns/date-fns",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "debug",
+      "version": "4.4.3",
+      "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
+      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "ea8e33d63fe5f3a4c36609b6c3df8e2ef1f8b8ba2fc3a2e1e53cb27291f384af",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95"
+        }
+      ],
+      "sourceUrl": "https://github.com/debug-js/debug",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "depd",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/depd/-/depd-2.0.0.tgz",
+      "integrity": "sha512-g7nH6P6dyDioJogAAGprGpCtVImJhpPk/roCzdb3fIh61/s/nPsfR6onyMwkCAR/OlC3yBC0lESvUoQEAssIrw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "5a3659bcc2e47b25ebf9f23f38eb9452a58920bfe4b59410bfa6fe84639a3b99",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "bd134b41da59e452fb5a1d366b660886f741c87c2bf9428e93764c419fbc40f5"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/depd/-/depd-2.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "detect-libc",
+      "version": "2.1.2",
+      "resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
+      "integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "ee88e5b954fdf3a8480b1d01ef767d68d8ca2c6da269f58c5cf1c5550e9aa2a7",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/detect-libc",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "dunder-proto",
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/dunder-proto/-/dunder-proto-1.0.1.tgz",
+      "integrity": "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "24df71008e4225c858f389dd2728b76cf66b752256d42a38ed7930aacae7fe2b",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "2b770a704c15de238c3f622b01b0044ddd60b49ee30608ea6991ebf19db7a7a1"
+        }
+      ],
+      "sourceUrl": "https://github.com/es-shims/dunder-proto",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "ee-first",
+      "version": "1.1.1",
+      "resolved": "https://registry.npmjs.org/ee-first/-/ee-first-1.1.1.tgz",
+      "integrity": "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "a4eece6ff6b38bf7ac107323f381cc60500097a9cbdd473f5d5b45e68822cb89",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "965ef284f7f4c176842ec2e87fa13e79feed777d56d7a21a5a3b38f1bb6dc288"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/ee-first/-/ee-first-1.1.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "elkjs",
+      "version": "0.11.0",
+      "resolved": "https://registry.npmjs.org/elkjs/-/elkjs-0.11.0.tgz",
+      "integrity": "sha512-u4J8h9mwEDaYMqo0RYJpqNMFDoMK7f+pu4GjcV+N8jIC7TRdORgzkfSjTJemhqONFfH6fBI3wpysgWbhgVWIXw==",
+      "declaredLicense": "EPL-2.0",
+      "concludedLicense": "EPL-2.0",
+      "packageJsonSha256": "8852492ebba6784fb9bc9fb778e1e562000177ea6549a4d88dd08ec316f6f51b",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.md",
+          "sha256": "89591d4578fb1ebd91501312a3d25f021bd865a2e436641c1cf7b1bc7e3c1617"
+        }
+      ],
+      "sourceUrl": "https://github.com/kieler/elkjs",
+      "patch": null,
+      "review": [
+        "epl-source-availability"
+      ]
+    },
+    {
+      "name": "encodeurl",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/encodeurl/-/encodeurl-2.0.0.tgz",
+      "integrity": "sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "5df10798f4b086da95c24180d7519fa4f68e2057a48e2ff6b76b91d6ffed1e9b",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "7585ea7bba616ccbbe43cb54ecb67956688c3c5641bb84f3099a652a73193afe"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/encodeurl/-/encodeurl-2.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "entities",
+      "version": "4.5.0",
+      "resolved": "https://registry.npmjs.org/entities/-/entities-4.5.0.tgz",
+      "integrity": "sha512-V0hjH4dGPh9Ao5p0MoRY6BVqtwCjhz6vI5LT8AJ55H+4g9/4vbHx1I54fS0XuclLhDHArPQCiMjDxjaL8fPxhw==",
+      "declaredLicense": "BSD-2-Clause",
+      "concludedLicense": "BSD-2-Clause",
+      "packageJsonSha256": "c92f657f679669a91bc32cd98f0b4812b3f4a9c6f3b3af3022a70cb25b7efc7c",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "cb992345949ccd6e8394b2cd6c465f7b897c864f845937dbf64e8997f389e164"
+        }
+      ],
+      "sourceUrl": "https://github.com/fb55/entities",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "es-define-property",
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/es-define-property/-/es-define-property-1.0.1.tgz",
+      "integrity": "sha512-e3nRfgfUZ4rNGL232gUgX06QNyyez04KdjFrF+LTRoOXmrOgFKDg4BCdsjW8EnT69eqdYGmRpJwiPVYNrCaW3g==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "3a2cb30dae30a96705dcd9aa2d5fb190cf8200f27badccfa5a81a4374e5708b4",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/es-define-property",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "es-errors",
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/es-errors/-/es-errors-1.3.0.tgz",
+      "integrity": "sha512-Zf5H2Kxt2xjTvbJvP2ZWLEICxA6j+hAmMzIlypy4xcBg1vKVnx89Wy0GbS+kf5cwCVFFzdCFh2XSCFNULS6csw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "1a0a0bcccc76b915cb64073317312840cf6363e9144b96f406d0059774dd5278",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/es-errors",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "es-object-atoms",
+      "version": "1.1.1",
+      "resolved": "https://registry.npmjs.org/es-object-atoms/-/es-object-atoms-1.1.1.tgz",
+      "integrity": "sha512-FGgH2h8zKNim9ljj7dankFPcICIK9Cp5bm+c2gQSYePhpaG5+esrLODihIorn+Pe6FGJzWhXQotPv73jTaldXA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "9975f032714dd642d08c9b50129096f5daf878dbede1ca3544cdcdbf45b48eb0",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/es-object-atoms",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "escape-html",
+      "version": "1.0.3",
+      "resolved": "https://registry.npmjs.org/escape-html/-/escape-html-1.0.3.tgz",
+      "integrity": "sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "bd320a3e9d23249f5f7d3ce72f2fa426e28a6b2704bd2b281d0c92806a1f5223",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "255aa557a1f55224ce522f311629c0bf20854740a67955cefd798fbd1d3d1ded"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/escape-html/-/escape-html-1.0.3.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "etag",
+      "version": "1.8.1",
+      "resolved": "https://registry.npmjs.org/etag/-/etag-1.8.1.tgz",
+      "integrity": "sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "836b9a5dd1c6af638f4602e83e2568277f9ab1f457db0b95d949c2a4ddb0462a",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a7996721249a136fbcfc1c201bcb5f414f38a701d4a24f28abe65e16cfcce813"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/etag/-/etag-1.8.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "eventsource-parser",
+      "version": "3.0.6",
+      "resolved": "https://registry.npmjs.org/eventsource-parser/-/eventsource-parser-3.0.6.tgz",
+      "integrity": "sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "158c728fa5601eabd1c04a0130767f368cdd9a46e450af44a3e91c74ef395274",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "0ed3f0dbbe73375664ee877b4cf571ce3e4b2e22ebf1a9dfb352643cba41df63"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/eventsource-parser/-/eventsource-parser-3.0.6.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "eventsource",
+      "version": "3.0.7",
+      "resolved": "https://registry.npmjs.org/eventsource/-/eventsource-3.0.7.tgz",
+      "integrity": "sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "99cec0bc0f4919b5de13302b0ce28cb0dd966b316cd2c961e0e7c73f884f7524",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "f683a72ffe6a9675b5507af22fe0f448d8c8de3da1e14f139d370a7e6a54a23e"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/eventsource/-/eventsource-3.0.7.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "express-rate-limit",
+      "version": "8.2.2",
+      "resolved": "https://registry.npmjs.org/express-rate-limit/-/express-rate-limit-8.2.2.tgz",
+      "integrity": "sha512-Ybv7bqtOgA914MLwaHWVFXMpMYeR1MQu/D+z2MaLYteqBsTIp9sY3AU7mGNLMJv8eLg8uQMpE20I+L2Lv49nSg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "a5d9508a333d8b3af36a4fba7be9539ae7ec09573588571b43a4c422dbd5488c",
+      "licenseEvidence": [
+        {
+          "path": "license.md",
+          "sha256": "90021adfb24b0a7af5754cebc6085e2560555f74d29a6d44a7f9a32125f8b348"
+        }
+      ],
+      "sourceUrl": "https://github.com/express-rate-limit/express-rate-limit",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "express",
+      "version": "5.2.1",
+      "resolved": "https://registry.npmjs.org/express/-/express-5.2.1.tgz",
+      "integrity": "sha512-hIS4idWWai69NezIdRt2xFVofaF4j+6INOpJlVOLDO8zXGpUVEVzIYk12UUi2JzjEzWL3IOAxcTubgz9Po0yXw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "2980b885bad92f757a2d44674e905cf875867d5685111d8ab8f285635b11367d",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "95a5762890e5c1c9808921cef095661fc482c5e1f0bba31446ac85595df6237c"
+        }
+      ],
+      "sourceUrl": "https://expressjs.com/",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "fast-deep-equal",
+      "version": "3.1.3",
+      "resolved": "https://registry.npmjs.org/fast-deep-equal/-/fast-deep-equal-3.1.3.tgz",
+      "integrity": "sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "a5c63940db0260739be9e2ac67f3aac268df4db5770420ee4e34e493152f97d2",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a"
+        }
+      ],
+      "sourceUrl": "https://github.com/epoberezkin/fast-deep-equal",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "fast-uri",
+      "version": "3.1.2",
+      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.2.tgz",
+      "integrity": "sha512-rVjf7ArG3LTk+FS6Yw81V1DLuZl1bRbNrev6Tmd/9RaroeeRRJhAt7jg/6YFxbvAQXUCavSoZhPPj6oOx+5KjQ==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "bf5b935d03f7fd78711858e0fd05cff61cbb50169658d8df8964a75400a3e251",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786"
+        }
+      ],
+      "sourceUrl": "https://github.com/fastify/fast-uri",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "finalhandler",
+      "version": "2.1.1",
+      "resolved": "https://registry.npmjs.org/finalhandler/-/finalhandler-2.1.1.tgz",
+      "integrity": "sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "42f5503e57f067caf49dda0353d766f8eb4616429d3c43234ba673ee8acd1196",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "47dcccf62bf40469d23849b0b1dc8df9fc91bce219b880c638d4dc4596e6b5cf"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/finalhandler/-/finalhandler-2.1.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "flatbuffers",
+      "version": "1.12.0",
+      "resolved": "https://registry.npmjs.org/flatbuffers/-/flatbuffers-1.12.0.tgz",
+      "integrity": "sha512-c7CZADjRcl6j0PlvFy0ZqXQ67qSEZfrVPynmnL+2zPc+NtMvrF8Y0QceMo7QqnSPc7+uWjUIAbvCQ5WIKlMVdQ==",
+      "declaredLicense": "SEE LICENSE IN LICENSE.txt",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "a47c897a634d8ae64834774b62d30694da83215f422128977e6aabfdc8dd9549",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "sourceUrl": "https://github.com/google/flatbuffers",
+      "patch": null,
+      "review": [
+        "see-license-resolution"
+      ]
+    },
+    {
+      "name": "flatbuffers",
+      "version": "25.9.23",
+      "resolved": "https://registry.npmjs.org/flatbuffers/-/flatbuffers-25.9.23.tgz",
+      "integrity": "sha512-MI1qs7Lo4Syw0EOzUl0xjs2lsoeqFku44KpngfIduHBYvzm8h2+7K8YMQh1JtVVVrUvhLpNwqVi4DERegUJhPQ==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "dfdf01a6e56de4400a5722b8e98719cee60f55f7ff306e48fe92487ac51022ae",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "sourceUrl": "https://github.com/google/flatbuffers",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "forwarded",
+      "version": "0.2.0",
+      "resolved": "https://registry.npmjs.org/forwarded/-/forwarded-0.2.0.tgz",
+      "integrity": "sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "550a78f64b6a76bc353d6a10152af5750613d0d910f8478943176c1a6196158a",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/forwarded/-/forwarded-0.2.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "fresh",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/fresh/-/fresh-2.0.0.tgz",
+      "integrity": "sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "3895d6c15a9e65c1cca20c675db7637423ec2d087bb221ef79e09ed2e7d34ec0",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a0ec0dab16b3666f24950f86d257930ac2ad475557b4bfe245620e0817d8a45d"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/fresh/-/fresh-2.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "function-bind",
+      "version": "1.1.2",
+      "resolved": "https://registry.npmjs.org/function-bind/-/function-bind-1.1.2.tgz",
+      "integrity": "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "edb1c4faf4148e6e3d74ed8dbac1a1dc359a647ff4207aad4851396dc7a3559a",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "773e131a7684726005a7e4688a80b4620033bc08499bc1404dd1a1eb3bca725e"
+        }
+      ],
+      "sourceUrl": "https://github.com/Raynos/function-bind",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "get-intrinsic",
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/get-intrinsic/-/get-intrinsic-1.3.0.tgz",
+      "integrity": "sha512-9fSjSaos/fRIVIp+xSJlE6lfwhES7LNtKaCBIamHsjr2na1BiABJPo0mOjjz8GJDURarmCPGqaiVg5mfjb98CQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "45b14763baacc59b0fd7b39e3ad983d5d2aaf7f5ed682f2fce9edb469826c999",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "39c5ec504cf6bd5cd782a7c695828e09189df79f5d94840e4f08feb97b9fd416"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/get-intrinsic",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "get-proto",
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/get-proto/-/get-proto-1.0.1.tgz",
+      "integrity": "sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "73839e012ac7134a632c9d9fc6bdb700ac9ab5553cce39eb789ba2b65663e734",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "be46ce1e3b0479af9ce82d22b465a6d7d2ff084fca0aaf3d54172da2b5eb5781"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/get-proto",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "gifenc",
+      "version": "1.0.3",
+      "resolved": "https://registry.npmjs.org/gifenc/-/gifenc-1.0.3.tgz",
+      "integrity": "sha512-xdr6AdrfGBcfzncONUOlXMBuc5wJDtOueE3c5rdG0oNgtINLD+f2iFZltrBRZYzACRbKr+mSVU/x98zv2u3jmw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "4f2e8d4abc4e3f421211778eb43f915da3a8330cbe607dba8b7004357e08bfc9",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.md",
+          "sha256": "47bc590c39d8ccccfc544875a9faebf44bafa828ef20315b396b5d0629f0cfd6"
+        }
+      ],
+      "sourceUrl": "https://github.com/mattdesl/gifenc",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "gopd",
+      "version": "1.2.0",
+      "resolved": "https://registry.npmjs.org/gopd/-/gopd-1.2.0.tgz",
+      "integrity": "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "33ace32dc861f6da9d1fd9d0a44c66e8c6ff3b13358d070683c1c2978ff5f19f",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "d90bf0a089da4cf43d644ed240a0b3825dcdb705e64e38371d56995a4cc9e4c5"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/gopd",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "guid-typescript",
+      "version": "1.0.9",
+      "resolved": "https://registry.npmjs.org/guid-typescript/-/guid-typescript-1.0.9.tgz",
+      "integrity": "sha512-Y8T4vYhEfwJOTbouREvG+3XDsjr8E3kIr7uf+JZ0BYloFsttiHU0WfvANVsR7TxNUJa/WpCnw/Ino/p+DeBhBQ==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "ed86856ee95fe87eadd8552b6803a85b7fb4f6cce08603bf9c8385972b5badb6",
+      "licenseEvidence": [],
+      "sourceUrl": "https://github.com/NicolasDeveloper/guid-typescript",
+      "patch": null,
+      "review": [
+        "canonical-isc-fallback"
+      ]
+    },
+    {
+      "name": "has-flag",
+      "version": "3.0.0",
+      "resolved": "https://registry.npmjs.org/has-flag/-/has-flag-3.0.0.tgz",
+      "integrity": "sha512-sKJf1+ceQBr4SMkvQnBDNDtf4TXpVhVGateu0t918bl30FnbE2m4vNLX+VWe/dpjlb+HugGYzW7uQXH98HPEYw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "5f786f6d16a53e7171fda89adc83bbd9c07fc17fb9de7ea78431283972593984",
+      "licenseEvidence": [
+        {
+          "path": "license",
+          "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/has-flag/-/has-flag-3.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "has-symbols",
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/has-symbols/-/has-symbols-1.1.0.tgz",
+      "integrity": "sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "5190268c0e3308d7446d1f7c036238f329f786938453e6017cb90980b3612e7a",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "206c1adcf206dc0031b11232f5b054ec5f1662407ab1ca415247921cab2068ab"
+        }
+      ],
+      "sourceUrl": "https://github.com/inspect-js/has-symbols",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "hasown",
+      "version": "2.0.2",
+      "resolved": "https://registry.npmjs.org/hasown/-/hasown-2.0.2.tgz",
+      "integrity": "sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "e96d24e4dcec86a4f769f41174b1cc79f70b4ab77b83aac4dfe646242bf76abb",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "bf9b0d665be2a689851eea667ca9f42066ea1d903b38349c51e6a44b2577680a"
+        }
+      ],
+      "sourceUrl": "https://github.com/inspect-js/hasOwn",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "hnswlib-wasm-static",
+      "version": "0.8.5",
+      "resolved": "https://registry.npmjs.org/hnswlib-wasm-static/-/hnswlib-wasm-static-0.8.5.tgz",
+      "integrity": "sha512-jhmkHoCK6qvsiziwHmIZ5ujg9LrBnVmvgHw70Gm4k3nwnXlD8nHEQIHIQBgTD7scsHnmAvQLPm/wmC6ylPHGNQ==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "9a3a298f14b0529d42f2e6f305dbaccb523e50e55eea654d75b41458e9de8a55",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.txt",
+          "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+        }
+      ],
+      "sourceUrl": "https://github.com/shravansunder/hnswlib-wasm",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "hono",
+      "version": "4.12.25",
+      "resolved": "https://registry.npmjs.org/hono/-/hono-4.12.25.tgz",
+      "integrity": "sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "272ab6b5a27aec8f30fac242dfec9b87dcf69015411affcca7e1c193eab11993",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115"
+        }
+      ],
+      "sourceUrl": "https://github.com/honojs/hono",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "http-errors",
+      "version": "2.0.1",
+      "resolved": "https://registry.npmjs.org/http-errors/-/http-errors-2.0.1.tgz",
+      "integrity": "sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "d540721372bf8bf77b5fad31f6567a916e24d0aeeb78c81ba92b69feea9f1eef",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "dcb94ff9b1e037a847bc20589dc81a1066d041fd4c16deb18b0fa968c66cf395"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/http-errors/-/http-errors-2.0.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "iconv-lite",
+      "version": "0.7.2",
+      "resolved": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.7.2.tgz",
+      "integrity": "sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "6b82b2d7c3b90ebb2412fb135bc65ef1466c433eec92115b0336db4d61c11bd2",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "ac779f7314c74f232ef847ea86e714abe25cf6eeb5cc97b69451b74e2af6492d"
+        }
+      ],
+      "sourceUrl": "https://github.com/pillarjs/iconv-lite",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "inherits",
+      "version": "2.0.4",
+      "resolved": "https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz",
+      "integrity": "sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "be645800bc94fd8de29c8ae91690549b316cc437100108aeea7b2f347693cc80",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "5ffe28e7ade7d8f10d85d5337a73fd793dac5c462fb9a28fbf8c5046c7fbca3b"
+        }
+      ],
+      "sourceUrl": "https://github.com/isaacs/inherits",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "ip-address",
+      "version": "10.1.1",
+      "resolved": "https://registry.npmjs.org/ip-address/-/ip-address-10.1.1.tgz",
+      "integrity": "sha512-1FMu8/N15Ck1BL551Jf42NYIoin2unWjLQ2Fze/DXryJRl5twqtwNHlO39qERGbIOcKYWHdgRryhOC+NG4eaLw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "c4adfd033f010ba9d49b57c5003b992d1a7e4cda62c66ad2d7ac175444e84f74",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a"
+        }
+      ],
+      "sourceUrl": "https://github.com/beaugunderson/ip-address",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "ipaddr.js",
+      "version": "1.9.1",
+      "resolved": "https://registry.npmjs.org/ipaddr.js/-/ipaddr.js-1.9.1.tgz",
+      "integrity": "sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "fc1071893728a0e78fa40ce0dbe04c5a1021179fdcb5b229f274e3556d6a87cd",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "62568a2d1337b77171ecca9db10579163446de1ba6151678e81f06cdc199971b"
+        }
+      ],
+      "sourceUrl": "https://github.com/whitequark/ipaddr.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "is-promise",
+      "version": "4.0.0",
+      "resolved": "https://registry.npmjs.org/is-promise/-/is-promise-4.0.0.tgz",
+      "integrity": "sha512-hvpoI6korhJMnej285dSg6nu1+e6uxs7zG3BYAm5byqDsgJNWwxzM6z6iZiAgQR4TJ30JmBTOwqZUw3WlyH3AQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "ae7a1bff928cb99f0b828f8a8236f623828f5f48ce930268ac5726554e083b50",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "44191656d296391e0ec97e32f5385f0d02b6f2992694082d22ea04ba0f66f9e4"
+        }
+      ],
+      "sourceUrl": "https://github.com/then/is-promise",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "isexe",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/isexe/-/isexe-2.0.0.tgz",
+      "integrity": "sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "395c2af9abeeaafe7391974c1eacfb2a2bdeef187f21c3f5582c49e0368e59bf",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+        }
+      ],
+      "sourceUrl": "https://github.com/isaacs/isexe",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "jose",
+      "version": "6.1.3",
+      "resolved": "https://registry.npmjs.org/jose/-/jose-6.1.3.tgz",
+      "integrity": "sha512-0TpaTfihd4QMNwrz/ob2Bp7X04yuxJkjRGi4aKmOqwhov54i6u79oCv7T+C7lo70MKH6BesI3vscD1yb/yzKXQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "77d4d459a5f2f4b740a390697a5b51f00fe5f5dcc96e45b1a6638578b1f2e3f7",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.md",
+          "sha256": "8078b0829d6c3e9ecde2f003e1966e4cad3efc6e7a640efbab0313cc166b1af1"
+        }
+      ],
+      "sourceUrl": "https://github.com/panva/jose",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "js-tokens",
+      "version": "4.0.0",
+      "resolved": "https://registry.npmjs.org/js-tokens/-/js-tokens-4.0.0.tgz",
+      "integrity": "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "47345931827b3e26db9fe690abb81f856a0d040cbca8af1e69711a64cd58ce0d",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "2213d91c606205c71eb051a199478cdc2adde945893404d7f1421436dd6d5cc1"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/js-tokens/-/js-tokens-4.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "json-schema-traverse",
+      "version": "1.0.0",
+      "resolved": "https://registry.npmjs.org/json-schema-traverse/-/json-schema-traverse-1.0.0.tgz",
+      "integrity": "sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "156fb24af02845c190701360d06dfda35ef04282e34a734289ea9535ad9819ae",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a"
+        }
+      ],
+      "sourceUrl": "https://github.com/epoberezkin/json-schema-traverse",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "json-schema-typed",
+      "version": "8.0.2",
+      "resolved": "https://registry.npmjs.org/json-schema-typed/-/json-schema-typed-8.0.2.tgz",
+      "integrity": "sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA==",
+      "declaredLicense": "BSD-2-Clause",
+      "concludedLicense": "BSD-2-Clause",
+      "packageJsonSha256": "8d04cdd834382b5b4e7d3e00fbc1da5654c430d04934c3031fe8f2d79a1625d9",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.md",
+          "sha256": "bbe87b573c12bda5baf18742117330efa177e0886b3b0a278dacf8f236e1e129"
+        }
+      ],
+      "sourceUrl": "https://github.com/RemyRylan/json-schema-typed",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "linkify-it",
+      "version": "5.0.1",
+      "resolved": "https://registry.npmjs.org/linkify-it/-/linkify-it-5.0.1.tgz",
+      "integrity": "sha512-wVoTjP4Q6R0NW5hiZkVJaFZPWgtXfoGF+6LucL3/FtiNjmcHhYjEr5f1Kqjirc1nBW07J/ZuRFumqr2oqccEWg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "b9a0b402ec4b3d3d3ff5acd688fc39edc6c4c703e78b12a296979278880a0d0b",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "95e3f7f0e81e9b4940cdfaa1956aaff5e4dfd2fb1565041e7c78eb9a606f23e3"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/linkify-it/-/linkify-it-5.0.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "long",
+      "version": "4.0.0",
+      "resolved": "https://registry.npmjs.org/long/-/long-4.0.0.tgz",
+      "integrity": "sha512-XsP+KhQif4bjX1kbuSiySJFNAehNxgLb6hPRGJ9QsUr8ajHkuXGdrHmFUTUUXhDwVX2R5bY4JNZEwbUiMhV+MA==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "c1f7aeeec837c8d711279cd6d62e3fc16909f514a7a172907ce1a02f612bcc10",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/long.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "long",
+      "version": "5.3.2",
+      "resolved": "https://registry.npmjs.org/long/-/long-5.3.2.tgz",
+      "integrity": "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "982e554a35d140981c7962fbba77855563e5890de200f8dc0a249135e4d9acb8",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "sourceUrl": "https://github.com/dcodeIO/long.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "loose-envify",
+      "version": "1.4.0",
+      "resolved": "https://registry.npmjs.org/loose-envify/-/loose-envify-1.4.0.tgz",
+      "integrity": "sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "8c2e27dae366396ced36fe0f7c6d35d71a1440fd8e82df5f2005a5297888a0d4",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "4eb7543b08d955a6d23fcc224601d43ff566e775be918805e26210d7f6eb4893"
+        }
+      ],
+      "sourceUrl": "https://github.com/zertosh/loose-envify",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "markdown-it-container",
+      "version": "4.0.0",
+      "resolved": "https://registry.npmjs.org/markdown-it-container/-/markdown-it-container-4.0.0.tgz",
+      "integrity": "sha512-HaNccxUH0l7BNGYbFbjmGpf5aLHAMTinqRZQAEQbMr2cdD3z91Q6kIo1oUn1CQndkT03jat6ckrdRYuwwqLlQw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "680c2c26946c82441ce97f18665e19c5b4db0691fbb669e30ce7fe1b96f9a34d",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c91339910d300f163edcaddbfb3909f1cffae19a496b7fe3935a9a4073dc305a"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/markdown-it-container/-/markdown-it-container-4.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "markdown-it-footnote",
+      "version": "4.0.0",
+      "resolved": "https://registry.npmjs.org/markdown-it-footnote/-/markdown-it-footnote-4.0.0.tgz",
+      "integrity": "sha512-WYJ7urf+khJYl3DqofQpYfEYkZKbmXmwxQV8c8mO/hGIhgZ1wOe7R4HLFNwqx7TjILbnC98fuyeSsin19JdFcQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "509f68f7943182e700c9f3a1e6eeae1f8ba45878935e9f8113a7c11f67193f99",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "81d61236a5f25294b2dad0c866d4ad6a40b865148b28df9a71f49ba771a6c54b"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/markdown-it-footnote/-/markdown-it-footnote-4.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "markdown-it-ins",
+      "version": "4.0.0",
+      "resolved": "https://registry.npmjs.org/markdown-it-ins/-/markdown-it-ins-4.0.0.tgz",
+      "integrity": "sha512-sWbjK2DprrkINE4oYDhHdCijGT+MIDhEupjSHLXe5UXeVr5qmVxs/nTUVtgi0Oh/qtF+QKV0tNWDhQBEPxiMew==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "fe6bb391e8d0c2d326af9901becc9130774fb174bbc0aa9ac6ca3377a731ad21",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "81d61236a5f25294b2dad0c866d4ad6a40b865148b28df9a71f49ba771a6c54b"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/markdown-it-ins/-/markdown-it-ins-4.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "markdown-it-mark",
+      "version": "4.0.0",
+      "resolved": "https://registry.npmjs.org/markdown-it-mark/-/markdown-it-mark-4.0.0.tgz",
+      "integrity": "sha512-YLhzaOsU9THO/cal0lUjfMjrqSMPjjyjChYM7oyj4DnyaXEzA8gnW6cVJeyCrCVeyesrY2PlEdUYJSPFYL4Nkg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "c98f021e3a1912a905d35b183a2d0bfeef7f465c79569165814731ae6b32ef73",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "81d61236a5f25294b2dad0c866d4ad6a40b865148b28df9a71f49ba771a6c54b"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/markdown-it-mark/-/markdown-it-mark-4.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "markdown-it-sub",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/markdown-it-sub/-/markdown-it-sub-2.0.0.tgz",
+      "integrity": "sha512-iCBKgwCkfQBRg2vApy9vx1C1Tu6D8XYo8NvevI3OlwzBRmiMtsJ2sXupBgEA7PPxiDwNni3qIUkhZ6j5wofDUA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "1518499ea05bb1d3a13ad4a601c7c454a81d517d3eed5398720f279b3b05a419",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "81d61236a5f25294b2dad0c866d4ad6a40b865148b28df9a71f49ba771a6c54b"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/markdown-it-sub/-/markdown-it-sub-2.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "markdown-it-sup",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/markdown-it-sup/-/markdown-it-sup-2.0.0.tgz",
+      "integrity": "sha512-5VgmdKlkBd8sgXuoDoxMpiU+BiEt3I49GItBzzw7Mxq9CxvnhE/k09HFli09zgfFDRixDQDfDxi0mgBCXtaTvA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "cbb8b11c1f8817bb2cc029c5069c6317671743715b4c74f1cad0937c146307e7",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "81d61236a5f25294b2dad0c866d4ad6a40b865148b28df9a71f49ba771a6c54b"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/markdown-it-sup/-/markdown-it-sup-2.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "markdown-it-task-checkbox",
+      "version": "1.0.6",
+      "resolved": "https://registry.npmjs.org/markdown-it-task-checkbox/-/markdown-it-task-checkbox-1.0.6.tgz",
+      "integrity": "sha512-7pxkHuvqTOu3iwVGmDPeYjQg+AIS9VQxzyLP9JCg9lBjgPAJXGEkChK6A2iFuj3tS0GV3HG2u5AMNhcQqwxpJw==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "f65c7acbb65c877acf78f8884ce9952e60d9dc612ece28595a1743c97b197117",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "b6e486f75602c82f6939b9e04b965718cb666dfb1ba392ca0669b67fb35d1c49"
+        }
+      ],
+      "sourceUrl": "https://github.com/linsir/markdown-it-task-checkbox",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "markdown-it-ts",
+      "version": "0.0.4",
+      "resolved": "https://registry.npmjs.org/markdown-it-ts/-/markdown-it-ts-0.0.4.tgz",
+      "integrity": "sha512-p+adWZuxPWfUjBAChLNDEqctER0QcvKob2Fjuu+e+8ryLKo+4D9GXmiUGu2aWYI8ht/vnsWAxsiptaQIlr5UNA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "cd31ef4a0c69f9590f9a267b2e557a6e16dcf4f09962446a64cc1d446d3d0809",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473"
+        }
+      ],
+      "sourceUrl": "https://github.com/Simon-He95/markdown-it-ts",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "markstream-react",
+      "version": "0.0.20-beta.7",
+      "resolved": "https://registry.npmjs.org/markstream-react/-/markstream-react-0.0.20-beta.7.tgz",
+      "integrity": "sha512-bM2cW73IzS46iG1NcRS7xT0crqr0Iu/0o4H8160mgoGmCk+Sb50cRcnpfxkD9sPZZDfy184u1Zfz9MvvnuCL8g==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "4dfb694c046d61fa1a37eab4dc3f7d53510693875d6744a24e5755cabc867ff7",
+      "licenseEvidence": [],
+      "sourceUrl": "https://github.com/Simon-He95/markstream-vue",
+      "patch": null,
+      "review": [
+        "metadata-license-only"
+      ]
+    },
+    {
+      "name": "math-intrinsics",
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/math-intrinsics/-/math-intrinsics-1.1.0.tgz",
+      "integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "39d74aa5a354153130706286dd60a2d8409ce0c8f66546eff2edcac0afff17e1",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "2b770a704c15de238c3f622b01b0044ddd60b49ee30608ea6991ebf19db7a7a1"
+        }
+      ],
+      "sourceUrl": "https://github.com/es-shims/math-intrinsics",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "mdurl",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/mdurl/-/mdurl-2.0.0.tgz",
+      "integrity": "sha512-Lf+9+2r+Tdp5wXDXC4PcIBjTDtq4UKjCPMQhKIuzpJNW0b96kVqSwW0bT7FhRSfmAiFYgP+SCRvdrDozfh0U5w==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "d0e82b456515f586d16484dc262efe640481b1c05f6f2a422864b5969187c97d",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "6b6a356c4337e2446841f30f3cdf7e7023af8c5260b5e347c0f987b9f6aa2644"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/mdurl/-/mdurl-2.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "media-typer",
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/media-typer/-/media-typer-1.1.0.tgz",
+      "integrity": "sha512-aisnrDP4GNe06UcKFnV5bfMNPBUw4jsLGaWwWfnH3v02GnBuXX2MCVn5RbrWo0j3pczUilYblq7fQ7Nw2t5XKw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "9ed2fc3f9af87f2a3fbe07aff67e8cc4972f477bc06c0bf976334b5cc9c505f3",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/media-typer/-/media-typer-1.1.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "merge-descriptors",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/merge-descriptors/-/merge-descriptors-2.0.0.tgz",
+      "integrity": "sha512-Snk314V5ayFLhp3fkUREub6WtjBfPdCPY1Ln8/8munuLuiYhsABgBVWsozAG+MWMbVEvcdcpbi9R7ww22l9Q3g==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "36d6d2cd304c06d5b690625af7ecc07995d5e220eba014ee3818af8c51421fed",
+      "licenseEvidence": [
+        {
+          "path": "license",
+          "sha256": "70b126abc64d7ea06e1243349073935caa16fa47a41a571773ccf0b350b1d574"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/merge-descriptors/-/merge-descriptors-2.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "mime-db",
+      "version": "1.54.0",
+      "resolved": "https://registry.npmjs.org/mime-db/-/mime-db-1.54.0.tgz",
+      "integrity": "sha512-aU5EJuIN2WDemCcAp2vFBfp/m4EAhWJnUNSSw0ixs7/kXbd6Pg64EmwJkNdFhB8aWt1sH2CTXrLxo/iAGV3oPQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "33bdbb99915697ac01df12490b9d479a55529123842e67975e6d76d0010aa142",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "cc1dfd4dafa27271e8212cd3b274eeb3f262e40a6fdab36ddc3f9696f706f58b"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/mime-db/-/mime-db-1.54.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "mime-types",
+      "version": "3.0.2",
+      "resolved": "https://registry.npmjs.org/mime-types/-/mime-types-3.0.2.tgz",
+      "integrity": "sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "644fc05ded7d8a20c069a07c7c61373593d4859c91b1386f544cbf247e39820c",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "71f83c4c0621102a56d9853812777b85751bce7e9726f686f5b056c1f8a4b0e6"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/mime-types/-/mime-types-3.0.2.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "ms",
+      "version": "2.1.3",
+      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
+      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "1a6b4d9739790c0b94ab96c8cc0507e281c164c311ff4fbf5e57fb8d26290b40",
+      "licenseEvidence": [
+        {
+          "path": "license.md",
+          "sha256": "1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "negotiator",
+      "version": "1.0.0",
+      "resolved": "https://registry.npmjs.org/negotiator/-/negotiator-1.0.0.tgz",
+      "integrity": "sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "a33b5a293825b22957629dafe778ea4164e577499418cd907d937b874f27675a",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "553d4d20029a24e315b428a1a54a9e109eaa340f2e958a4f50a92362c2c4070b"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/negotiator/-/negotiator-1.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "object-assign",
+      "version": "4.1.1",
+      "resolved": "https://registry.npmjs.org/object-assign/-/object-assign-4.1.1.tgz",
+      "integrity": "sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "5990bbffa235fc675debd925d50f6c3f48a2b4526d8c9f7555cadec9029d0d7f",
+      "licenseEvidence": [
+        {
+          "path": "license",
+          "sha256": "6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/object-assign/-/object-assign-4.1.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "object-inspect",
+      "version": "1.13.4",
+      "resolved": "https://registry.npmjs.org/object-inspect/-/object-inspect-1.13.4.tgz",
+      "integrity": "sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "21c5c63f653705f44a60f5fe93752b231caf6ff07b01805740bd89b71b2d6d8a",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "bd40cc437e28a3ad7bef2ad34e6b72e757b182e67bda1acadbab4ef0476f8232"
+        }
+      ],
+      "sourceUrl": "https://github.com/inspect-js/object-inspect",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "on-finished",
+      "version": "2.4.1",
+      "resolved": "https://registry.npmjs.org/on-finished/-/on-finished-2.4.1.tgz",
+      "integrity": "sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "c812eca4b0dee2317cb446124cb27ae8e5b993c8fdd0144886b629ef6ef53fc1",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "8089bcc08845ec143e5761f4a101a65b8c792a0dedbfeeb90a15560c0b77f768"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/on-finished/-/on-finished-2.4.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "once",
+      "version": "1.4.0",
+      "resolved": "https://registry.npmjs.org/once/-/once-1.4.0.tgz",
+      "integrity": "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "33840d74c14c94bfb75c76374765b635531b1eacb88d7f1f2f380c94d0ea1328",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+        }
+      ],
+      "sourceUrl": "https://github.com/isaacs/once",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "onnx-proto",
+      "version": "4.0.4",
+      "resolved": "https://registry.npmjs.org/onnx-proto/-/onnx-proto-4.0.4.tgz",
+      "integrity": "sha512-aldMOB3HRoo6q/phyB6QRQxSt895HNNw82BNyZ2CMh4bjeKv7g/c+VpAFtJuEMVfYLMbRx61hbuqnKceLeDcDA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "8cd708f578db632bc4dad53e5046df20e39de1e1ae72e756bf53605ec5592706",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "bf5370fb56d5fcc347af4b4e64689a3ad0a5d4cf17a334d1cedf8c87d04e9b25"
+        }
+      ],
+      "sourceUrl": "https://github.com/chaosmail/onnx-proto",
+      "patch": null,
+      "review": [
+        "onnx-excluded-build-input"
+      ]
+    },
+    {
+      "name": "onnxruntime-common",
+      "version": "1.14.0",
+      "resolved": "https://registry.npmjs.org/onnxruntime-common/-/onnxruntime-common-1.14.0.tgz",
+      "integrity": "sha512-3LJpegM2iMNRX2wUmtYfeX/ytfOzNwAWKSq1HbRrKc9+uqG/FsEA0bbKZl1btQeZaXhC26l44NWpNUeXPII7Ew==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "654be701f79ac4f786862f931b9be402a2e8d649536359e804afa22ddd5135d8",
+      "licenseEvidence": [],
+      "sourceUrl": "https://github.com/Microsoft/onnxruntime",
+      "patch": null,
+      "review": [
+        "onnx-excluded-build-input"
+      ]
+    },
+    {
+      "name": "onnxruntime-common",
+      "version": "1.22.0",
+      "resolved": "https://registry.npmjs.org/onnxruntime-common/-/onnxruntime-common-1.22.0.tgz",
+      "integrity": "sha512-vcuaNWgtF2dGQu/EP5P8UI5rEPEYqXG2sPPe5j9lg2TY/biJF8eWklTMwlDO08iuXq48xJo0awqIpK5mPG+IxA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "172704f8f9132f41e35b35331fd607ca9a2ce0db159f5bb958e5fd0c4948b720",
+      "licenseEvidence": [],
+      "sourceUrl": "https://github.com/Microsoft/onnxruntime",
+      "patch": null,
+      "review": [
+        "onnx-vendored-runtime"
+      ]
+    },
+    {
+      "name": "onnxruntime-node",
+      "version": "1.14.0",
+      "resolved": "https://registry.npmjs.org/onnxruntime-node/-/onnxruntime-node-1.14.0.tgz",
+      "integrity": "sha512-5ba7TWomIV/9b6NH/1x/8QEeowsb+jBEvFzU6z0T4mNsFwdPqXeFUM7uxC6QeSRkEbWu3qEB0VMjrvzN/0S9+w==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "61eebd888cc23a8f477f330954c3c66b04dcb6706ed75beebec4e4462c0577c9",
+      "licenseEvidence": [],
+      "sourceUrl": "https://github.com/Microsoft/onnxruntime",
+      "patch": null,
+      "review": [
+        "onnx-excluded-build-input"
+      ]
+    },
+    {
+      "name": "onnxruntime-web",
+      "version": "1.14.0",
+      "resolved": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.14.0.tgz",
+      "integrity": "sha512-Kcqf43UMfW8mCydVGcX9OMXI2VN17c0p6XvR7IPSZzBf/6lteBzXHvcEVWDPmCKuGombl997HgLqj91F11DzXw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "c238d02785f6449ccb642e883a4d6e5f60919154328092e1a3b67f7f10a6e597",
+      "licenseEvidence": [],
+      "sourceUrl": "https://github.com/Microsoft/onnxruntime",
+      "patch": null,
+      "review": [
+        "onnx-excluded-build-input"
+      ]
+    },
+    {
+      "name": "onnxruntime-web",
+      "version": "1.22.0",
+      "resolved": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.22.0.tgz",
+      "integrity": "sha512-Ud/+EBo6mhuaQWt/OjaOk0iNWjXqJoeeMFr6xQEERZdIZH2OWpGzuujz7lfuOBjUa6TEE/sc4nb7Da5dNL34fg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "6161720a4479e5bcf3457092c96a59466123f2b5830f3e60193dbc50ed1f3040",
+      "licenseEvidence": [],
+      "sourceUrl": "https://github.com/Microsoft/onnxruntime",
+      "patch": null,
+      "review": [
+        "onnx-vendored-runtime"
+      ]
+    },
+    {
+      "name": "parseurl",
+      "version": "1.3.3",
+      "resolved": "https://registry.npmjs.org/parseurl/-/parseurl-1.3.3.tgz",
+      "integrity": "sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "98c7b953c844cac7c0be2d5abc6559c6fd3a6075fd159b04c0f1bf46145bfed2",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "11d017c3b9f1ee3f44caf7203035f0461d5b57e0db8ce1bc03a9af34fa7d3f6b"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/parseurl/-/parseurl-1.3.3.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "path-key",
+      "version": "3.1.1",
+      "resolved": "https://registry.npmjs.org/path-key/-/path-key-3.1.1.tgz",
+      "integrity": "sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "25594dab72681c910d9cc919263a4daf27d77a75e0d2c26a4d958d6d6b798f86",
+      "licenseEvidence": [
+        {
+          "path": "license",
+          "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/path-key/-/path-key-3.1.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "path-to-regexp",
+      "version": "8.4.0",
+      "resolved": "https://registry.npmjs.org/path-to-regexp/-/path-to-regexp-8.4.0.tgz",
+      "integrity": "sha512-PuseHIvAnz3bjrM2rGJtSgo1zjgxapTLZ7x2pjhzWwlp4SJQgK3f3iZIQwkpEnBaKz6seKBADpM4B4ySkuYypg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "420bceefc5f835f2161ce2b91c128900a944ad1e36d5a2083f9a792c48e0fd3a",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "4eeb3271453a891df609e5a9f4ee79a68307f730c13417a3bfeffa604ac8cf25"
+        }
+      ],
+      "sourceUrl": "https://github.com/pillarjs/path-to-regexp",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "pkce-challenge",
+      "version": "5.0.1",
+      "resolved": "https://registry.npmjs.org/pkce-challenge/-/pkce-challenge-5.0.1.tgz",
+      "integrity": "sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "74fd5b54078ebad49e15421f928d285f63926caae3220356d95a9afc6fa0e417",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "feb87a2e0c305de3464cc44077da5393c52d8ca6362d37427157d04ec6f4510d"
+        }
+      ],
+      "sourceUrl": "https://github.com/crouchcd/pkce-challenge",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "platform",
+      "version": "1.3.6",
+      "resolved": "https://registry.npmjs.org/platform/-/platform-1.3.6.tgz",
+      "integrity": "sha512-fnWVljUchTro6RiCFvCXBbNhJc2NijN7oIQxbwsyL0buWJPG85v81ehlHI9fXrJsMNgTofEoWIQeClKpgxFLrg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "ecc6885e62cf6165cc61e7f7b67e344508b6126fbbd87e4a44d918de5b9b0a1a",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "4a161ebed4f1ef933e16ccfa00d86c718703f5d015a9987ea7ce1bb72a43cd22"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/platform/-/platform-1.3.6.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "protobufjs",
+      "version": "7.6.3",
+      "resolved": "https://registry.npmjs.org/protobufjs/-/protobufjs-7.6.3.tgz",
+      "integrity": "sha512-+k0vdJKNdW+Vu+dYe8tZA/VvQb6XKNWexC6URwBFXxNnjLJz9nQJCemGyNgRAWD+B7+nGNc9qMPGwcD7s4nzUw==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "ebfd588589154daadae73f2839e88a248fdd9ad7477bf17c0042488ba39be81a",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "49d6a1c9a623784c61c6cb70f773f3457faceb1914a13c8560a9823b7631950c"
+        }
+      ],
+      "sourceUrl": "https://protobufjs.github.io/protobuf.js/",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "proxy-addr",
+      "version": "2.0.7",
+      "resolved": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.7.tgz",
+      "integrity": "sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "e490a79f8058cbb7c0e9fd3b9977013102b5cbd8d232259b93bb2ebf85834a51",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a7996721249a136fbcfc1c201bcb5f414f38a701d4a24f28abe65e16cfcce813"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.7.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "punycode.js",
+      "version": "2.3.1",
+      "resolved": "https://registry.npmjs.org/punycode.js/-/punycode.js-2.3.1.tgz",
+      "integrity": "sha512-uxFIHU0YlHYhDQtV4R9J6a52SLx28BCjT+4ieh7IGbgwVJWO+km431c4yRlREUAsAmt/uMjQUyQHNEPf0M39CA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "ce0bcedcc3d00b235770a2c49af74712e10e5dac8d3dda5ed23c433b19720c3c",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE-MIT.txt",
+          "sha256": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a"
+        }
+      ],
+      "sourceUrl": "https://github.com/mathiasbynens/punycode.js",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "qs",
+      "version": "6.15.2",
+      "resolved": "https://registry.npmjs.org/qs/-/qs-6.15.2.tgz",
+      "integrity": "sha512-Rzq0KEyX/w/tEybncDgdkZrJgVUsUMk3xjh3t5bv3S1HTAtg+uOYt72+ZfwiQwKdysThkTBdL/rTi6HDmX9Ddw==",
+      "declaredLicense": "BSD-3-Clause",
+      "concludedLicense": "BSD-3-Clause",
+      "packageJsonSha256": "79bf51639d428f4eb6c87cedb7f0d79d5c699e1870cc1dcda31f0c7d3c694611",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.md",
+          "sha256": "e7dc37bf662d7f786efcb46c545615e70c1daf458a38385521c63cf6607cdfe1"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/qs",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "range-parser",
+      "version": "1.2.1",
+      "resolved": "https://registry.npmjs.org/range-parser/-/range-parser-1.2.1.tgz",
+      "integrity": "sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "d0b5f54eaa59001dc86720a9be1fdf653bad83707d70842332fb3e8847f65a89",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "f655e6291356ec0de7a8f0e69f294961a2cea86678ec94588be1e6a492e278ab"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/range-parser/-/range-parser-1.2.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "raw-body",
+      "version": "3.0.2",
+      "resolved": "https://registry.npmjs.org/raw-body/-/raw-body-3.0.2.tgz",
+      "integrity": "sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "3072f77ab429d8b89e78c85e0cdefb6e3ef554a9fb19443d006a892a74361e78",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "37876d7de8bdf5e5b9b58a697ebc34044624e493e6f49eff5c938e5226dcac6b"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/raw-body/-/raw-body-3.0.2.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "react-dom",
+      "version": "18.3.1",
+      "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-18.3.1.tgz",
+      "integrity": "sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "d2f29e31bd48b833e48cd7bbf41f192e8ee4ff8da249fdbe10d4ac4114b8b12e",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85"
+        }
+      ],
+      "sourceUrl": "https://github.com/facebook/react",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "react",
+      "version": "18.3.1",
+      "resolved": "https://registry.npmjs.org/react/-/react-18.3.1.tgz",
+      "integrity": "sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "d4e68a5c96babb20cad1daafea8b78822eae45b341552cf5418d06a5304fa64c",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85"
+        }
+      ],
+      "sourceUrl": "https://github.com/facebook/react",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "require-from-string",
+      "version": "2.0.2",
+      "resolved": "https://registry.npmjs.org/require-from-string/-/require-from-string-2.0.2.tgz",
+      "integrity": "sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "c0002f7d4c7d7e2a885cf0f97226344902417c3a0980f2beca41962d2bc1f6d8",
+      "licenseEvidence": [
+        {
+          "path": "license",
+          "sha256": "6ee0feb1f6ef996ff5a68600f8cf98909cf412d39ef3cdceaefd87d636fa1b7f"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/require-from-string/-/require-from-string-2.0.2.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "router",
+      "version": "2.2.0",
+      "resolved": "https://registry.npmjs.org/router/-/router-2.2.0.tgz",
+      "integrity": "sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "b77062595f89476fab6acbcde5fa8dfac3be7d7b9b0b0b69d48c84ebc13c9a06",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "d0bca4e517157b7a6120c085f5fe43a35b90c095e3bbeb9e67f220c608506a16"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/router/-/router-2.2.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "safer-buffer",
+      "version": "2.1.2",
+      "resolved": "https://registry.npmjs.org/safer-buffer/-/safer-buffer-2.1.2.tgz",
+      "integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "4247a3a63c45a6a7ced1557fe4dd9d2a163af4915d594b95e5867b69a53edb52",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "4bc935e71be198c67ddf3c2b5fddb195f6edc182bfc155a96a6db61b44b494b9"
+        }
+      ],
+      "sourceUrl": "https://github.com/ChALkeR/safer-buffer",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "scheduler",
+      "version": "0.23.2",
+      "resolved": "https://registry.npmjs.org/scheduler/-/scheduler-0.23.2.tgz",
+      "integrity": "sha512-UOShsPwz7NrMUqhR6t0hWjFduvOzbtv7toDH1/hIrfRNIDBnnBWd0CwJTGvTpngVlmwGCdP9/Zl/tVrDqcuYzQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "0893643a24576d727174e639586b8833a53f2a7b4a2199a719b9cfcebe9bae88",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85"
+        }
+      ],
+      "sourceUrl": "https://github.com/facebook/react",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "semver",
+      "version": "7.8.5",
+      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
+      "integrity": "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "7c94cb7f2a53c27b20d76386ec144c062894dbcc909cfabd0f728c37874b1776",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+        }
+      ],
+      "sourceUrl": "https://github.com/npm/node-semver",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "send",
+      "version": "1.2.1",
+      "resolved": "https://registry.npmjs.org/send/-/send-1.2.1.tgz",
+      "integrity": "sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "303cfb195f13651e5174c23310e6a71e319b4bf85f9afe9e16b16567cbab02f8",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "25a328069fe771f8ed5b6f983ed4b0e6c84b3312ac0f69b28c3d52dc277962c9"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/send/-/send-1.2.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "serve-static",
+      "version": "2.2.1",
+      "resolved": "https://registry.npmjs.org/serve-static/-/serve-static-2.2.1.tgz",
+      "integrity": "sha512-xRXBn0pPqQTVQiC8wyQrKs2MOlX24zQ0POGaj0kultvoOCstBQM5yvOhAVSUwOMjQtTvsPWoNCHfPGwaaQJhTw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "4f2884fa761dee155f31cb960d792c2900dbaa6aecbe6ebcc3bcfd7e754706b8",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "63b9a188d7d43e64b0558b7115255045b9fe20a5fc3ff483421cb899e7f52bcb"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/serve-static/-/serve-static-2.2.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "setprototypeof",
+      "version": "1.2.0",
+      "resolved": "https://registry.npmjs.org/setprototypeof/-/setprototypeof-1.2.0.tgz",
+      "integrity": "sha512-E5LDX7Wrp85Kil5bhZv46j8jOeboKq5JMmYM3gVGdGH8xFpPWXUMsNrlODCrkoxMEeNi/XZIwuRvY4XNwYMJpw==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "5b39ddf23d2c12a751cb4af2ce12dd5c87314350be7526fff69b4a3ff2a2d538",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "76d6d1ea0c268da37dd3c961b4fcfb23dee8417fff9e8786d4d44c585b781b69"
+        }
+      ],
+      "sourceUrl": "https://github.com/wesleytodd/setprototypeof",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "sharp",
+      "version": "0.34.5",
+      "resolved": "https://registry.npmjs.org/sharp/-/sharp-0.34.5.tgz",
+      "integrity": "sha512-Ou9I5Ft9WNcCbXrU9cMgPBcCK8LiwLqcbywW3t4oDV37n1pzpuNLsYiAV8eODnjbtQlSDwZ2cUEeQz4E54Hltg==",
+      "declaredLicense": "Apache-2.0",
+      "concludedLicense": "Apache-2.0",
+      "packageJsonSha256": "e6be69319929151be3aa240bf1485f25a3477cb6d2286f92510b9fceb3cbef26",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        },
+        {
+          "path": "README.md",
+          "sha256": "f8e331e11a401b062776d10f4e0c0f78447edc0490b4c0f548cb210b839e5b1d"
+        }
+      ],
+      "sourceUrl": "https://github.com/lovell/sharp",
+      "patch": null,
+      "review": [
+        "sharp-platform-package"
+      ]
+    },
+    {
+      "name": "shebang-command",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/shebang-command/-/shebang-command-2.0.0.tgz",
+      "integrity": "sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "44de390ae5ed6c5f9758b8b9c90b93fa53977d5361731600429f1de08f4b3f30",
+      "licenseEvidence": [
+        {
+          "path": "license",
+          "sha256": "69dee148a2cc470554dfa7142e830662062394d0fe67cddd379aba90dc60d6b3"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/shebang-command/-/shebang-command-2.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "shebang-regex",
+      "version": "3.0.0",
+      "resolved": "https://registry.npmjs.org/shebang-regex/-/shebang-regex-3.0.0.tgz",
+      "integrity": "sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "b8018c6b8cc9900dfd1ac18a54956ba34c453fdc2da5e5fe555ee8f04133a1c5",
+      "licenseEvidence": [
+        {
+          "path": "license",
+          "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/shebang-regex/-/shebang-regex-3.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "side-channel-list",
+      "version": "1.0.0",
+      "resolved": "https://registry.npmjs.org/side-channel-list/-/side-channel-list-1.0.0.tgz",
+      "integrity": "sha512-FCLHtRD/gnpCiCHEiJLOwdmFP+wzCmDEkc9y7NsYxeF4u7Btsn1ZuwgwJGxImImHicJArLP4R0yX4c2KCrMrTA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "48b25a94e64980d573699ad6f5128ac8c521e908884a41a3835e97ef529ed584",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/side-channel-list",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "side-channel-map",
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/side-channel-map/-/side-channel-map-1.0.1.tgz",
+      "integrity": "sha512-VCjCNfgMsby3tTdo02nbjtM/ewra6jPHmpThenkTYh8pG9ucZ/1P8So4u4FGBek/BjpOVsDCMoLA/iuBKIFXRA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "914a8bd732b82523d95bb697eec3e6d95badc5eb13b196fb0772e59354a3ab25",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "5e325595b4ea8cfec3802f545b1def5d7b73e4a5b8e9ba63e32a320f67732292"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/side-channel-map",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "side-channel-weakmap",
+      "version": "1.0.2",
+      "resolved": "https://registry.npmjs.org/side-channel-weakmap/-/side-channel-weakmap-1.0.2.tgz",
+      "integrity": "sha512-WPS/HvHQTYnHisLo9McqBHOJk2FkHO/tlpvldyrnem4aeQp4hai3gythswg6p01oSoTl58rcpiFAjF2br2Ak2A==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "8c11f0a1c6cfa549588d991a5cb1b04d62953277ed29f47463d415d5946388a8",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "cfc3f455254c0af0655cc3ff46a41ed644b67599f6043346169d285bf2b3cf3b"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/side-channel-weakmap",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "side-channel",
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.0.tgz",
+      "integrity": "sha512-ZX99e6tRweoUXqR+VBrslhda51Nh5MTQwou5tnUDgbtyM0dBgmhEDtWGP/xbKn6hqfPRHujUNwz5fy/wbbhnpw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "b33b18efda612f3149f2e5102b305cb77bc5067eae372fb1c83f74c263b5b18e",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "cfc3f455254c0af0655cc3ff46a41ed644b67599f6043346169d285bf2b3cf3b"
+        }
+      ],
+      "sourceUrl": "https://github.com/ljharb/side-channel",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "statuses",
+      "version": "2.0.2",
+      "resolved": "https://registry.npmjs.org/statuses/-/statuses-2.0.2.tgz",
+      "integrity": "sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "dc2508da5568ba768d94b73126cd20a5df934bc0c651ad681022236484ca156c",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "512cfa4d5e7a7569c7ae4dd95241cb6ae2aaf648ef9ebd080c01bd24868d26e9"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/statuses/-/statuses-2.0.2.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "stream-markdown-parser",
+      "version": "0.0.60",
+      "resolved": "https://registry.npmjs.org/stream-markdown-parser/-/stream-markdown-parser-0.0.60.tgz",
+      "integrity": "sha512-YDV0TfxWakVVLj52tEaECPtJuhReVtkaTFlpVL9LPhwoVoNdOevHGcn7RlIxu9qinmHGdrOuenpBopfTuZsdyQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "4e5eef50346c369cc2c26884e70f9d81098b2d68ad160e4b6963971f973846c2",
+      "licenseEvidence": [],
+      "sourceUrl": "https://github.com/Simon-He95/markstream-vue",
+      "patch": null,
+      "review": [
+        "metadata-license-only"
+      ]
+    },
+    {
+      "name": "supports-color",
+      "version": "5.5.0",
+      "resolved": "https://registry.npmjs.org/supports-color/-/supports-color-5.5.0.tgz",
+      "integrity": "sha512-QjVjwdXIt408MIiAqCX4oUKsgU2EqAGzs2Ppkm4aQYbjm+ZEWEcW4SfFNTr4uMNZma0ey4f5lgLrkB0aX0QMow==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "34c434b27dc21bd0de7b5edca42fa0d9ebf72d2ac823c72865a334cb8fcfb9b5",
+      "licenseEvidence": [
+        {
+          "path": "license",
+          "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/supports-color/-/supports-color-5.5.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "toidentifier",
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/toidentifier/-/toidentifier-1.0.1.tgz",
+      "integrity": "sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "f34c59f784d43da6e633390d85d14ca60539b4676159444f313c62fcfc3b68dc",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a832d679750e49ab433626ab196350b89964b60eb0d3edd3341887c7d5f4c128"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/toidentifier/-/toidentifier-1.0.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "tslib",
+      "version": "2.8.1",
+      "resolved": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
+      "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
+      "declaredLicense": "0BSD",
+      "concludedLicense": "0BSD",
+      "packageJsonSha256": "f02b4851df316f29bdfcd404aa1eb41e4e216b5859015f81fcd3e91caf8be931",
+      "licenseEvidence": [
+        {
+          "path": "CopyrightNotice.txt",
+          "sha256": "da16ddb65f8ca390998fb99223d0112498b56b45784d00afd77ff8ce1ac4de8b"
+        },
+        {
+          "path": "LICENSE.txt",
+          "sha256": "210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751"
+        }
+      ],
+      "sourceUrl": "https://github.com/Microsoft/tslib",
+      "patch": null,
+      "review": [
+        "tslib-copyright-notice"
+      ]
+    },
+    {
+      "name": "type-is",
+      "version": "2.0.1",
+      "resolved": "https://registry.npmjs.org/type-is/-/type-is-2.0.1.tgz",
+      "integrity": "sha512-OZs6gsjF4vMp32qrCbiVSkrFmXtG/AZhY3t0iAMrMBiAZyV9oALtXO8hsrHbMXF9x6L3grlFuwW2oAz7cav+Gw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "11e817f67b1d56dd60089b997083d5289421ea5e757472fe7c08df38e62086e8",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "23d466b1b134b415b66fa50c6526b4cf3e7b9258554da88d3abb371721e7ce68"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/type-is/-/type-is-2.0.1.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "uc.micro",
+      "version": "2.1.0",
+      "resolved": "https://registry.npmjs.org/uc.micro/-/uc.micro-2.1.0.tgz",
+      "integrity": "sha512-ARDJmphmdvUk6Glw7y9DQ2bFkKBHwQHLi2lsaH6PPmz/Ka9sFOBsBluozhDltWmnv9u/cF6Rt87znRTPV+yp/A==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "8b60af5ea73b0bac4d26111a3f5b00844657b998f9a3fd473710d9e33d274250",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE.txt",
+          "sha256": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/uc.micro/-/uc.micro-2.1.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "undici-types",
+      "version": "6.21.0",
+      "resolved": "https://registry.npmjs.org/undici-types/-/undici-types-6.21.0.tgz",
+      "integrity": "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "11f873b423b96a5ad444a099685ca6b9de1379dcd83fd8d368e757ddb53658e4",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27"
+        }
+      ],
+      "sourceUrl": "https://github.com/nodejs/undici",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "unpipe",
+      "version": "1.0.0",
+      "resolved": "https://registry.npmjs.org/unpipe/-/unpipe-1.0.0.tgz",
+      "integrity": "sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "28b717f978d2a4fc72cd08236931443b63fe6586102df3d1967e2b21ea8c5e11",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "1a526fbe8d8577f5a4b1c2821842b55b7c0e18862531c62ae4ce69c9b19b74b6"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/unpipe/-/unpipe-1.0.0.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "use-sync-external-store",
+      "version": "1.6.0",
+      "resolved": "https://registry.npmjs.org/use-sync-external-store/-/use-sync-external-store-1.6.0.tgz",
+      "integrity": "sha512-Pp6GSwGP/NrPIrxVFAIkOQeyw8lFenOHijQWkUTrDvrF4ALqylP2C/KCkeS9dpUM3KvYRQhna5vt7IL95+ZQ9w==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "dfdead719ce161e1c5edbf0fca0ce0e7d70ba87c8a8f249856c0afde81595f24",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ],
+      "sourceUrl": "https://github.com/facebook/react",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "vary",
+      "version": "1.1.2",
+      "resolved": "https://registry.npmjs.org/vary/-/vary-1.1.2.tgz",
+      "integrity": "sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "73edaee964d527117a9f69d6360fbe6cec534abd9127794be01a6af58a139daa",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400"
+        }
+      ],
+      "sourceUrl": "https://registry.npmjs.org/vary/-/vary-1.1.2.tgz",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "which",
+      "version": "2.0.2",
+      "resolved": "https://registry.npmjs.org/which/-/which-2.0.2.tgz",
+      "integrity": "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "43010039ed5e89f7186960be682b3cb5cda5ab6cdfb06cbfd4f081cf0e7b4260",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+        }
+      ],
+      "sourceUrl": "https://github.com/isaacs/node-which",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "wrappy",
+      "version": "1.0.2",
+      "resolved": "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz",
+      "integrity": "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "712ac9c4c3cef8bc79f42cf6075ff18551f4cb768f35158214fd643853ad7abc",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+        }
+      ],
+      "sourceUrl": "https://github.com/npm/wrappy",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "zod-to-json-schema",
+      "version": "3.25.1",
+      "resolved": "https://registry.npmjs.org/zod-to-json-schema/-/zod-to-json-schema-3.25.1.tgz",
+      "integrity": "sha512-pM/SU9d3YAggzi6MtR4h7ruuQlqKtad8e9S0fmxcMi+ueAK5Korys/aWcV9LIIHTVbj01NdzxcnXSN+O74ZIVA==",
+      "declaredLicense": "ISC",
+      "concludedLicense": "ISC",
+      "packageJsonSha256": "25c60695ad0be6bfd2ecd87782b41a47081eabfc3e76909587952769b102944e",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "80d3168ad2f70f6f5bb2ab22b23414707abf6f0a392034891481ae36a1a429d4"
+        }
+      ],
+      "sourceUrl": "https://github.com/StefanTerdell/zod-to-json-schema",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "zod",
+      "version": "3.25.76",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-3.25.76.tgz",
+      "integrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "70eedbe34fd52385a4ae2f3e5759b19682189f0118ea73a6e7c32c677f61668e",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8"
+        }
+      ],
+      "sourceUrl": "https://github.com/colinhacks/zod",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "zustand",
+      "version": "4.5.7",
+      "resolved": "https://registry.npmjs.org/zustand/-/zustand-4.5.7.tgz",
+      "integrity": "sha512-CHOUy7mu3lbD6o6LJLfllpjkzhHXSBlX8B9+qPddUsIfeF5S/UZ5q0kmCsnRqT1UHFQZchNFDDzMbQsuesHWlw==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "3be250433bb3c42b82b9a8a67654fca222d3e370f703204c69b4dfa4f6c74de6",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417"
+        }
+      ],
+      "sourceUrl": "https://github.com/pmndrs/zustand",
+      "patch": null,
+      "review": []
+    }
+  ]
+}

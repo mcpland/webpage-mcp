@@ -67,7 +67,13 @@ const MCP_PACKAGE_TEMPLATE = {
     "webpage-mcp": "./dist/cli.js",
     "webpage-mcp-stdio": "./dist/mcp/mcp-server-stdio.js",
   },
-  files: ["dist", "LICENSE", "THIRD_PARTY_NOTICES.md", "!dist/node_path.txt"],
+  files: [
+    "dist",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_COMPONENTS.json",
+    "!dist/node_path.txt",
+  ],
   engines: { node: ">=22.0.0" },
   license: "MIT",
   publishConfig: { access: "public", provenance: true },
@@ -147,9 +153,11 @@ async function createReleaseRoot(t, versions = {}) {
     "LICENSE",
     "app/mcp-server/LICENSE",
     "app/mcp-server/THIRD_PARTY_NOTICES.md",
+    "app/mcp-server/THIRD_PARTY_COMPONENTS.json",
     "app/chrome-extension/public/LICENSE",
     "app/chrome-extension/public/THIRD_PARTY_NOTICES.md",
     "app/chrome-extension/public/THIRD_PARTY_LICENSES.txt",
+    "app/chrome-extension/public/THIRD_PARTY_COMPONENTS.json",
   ]) {
     const targetPath = join(rootDir, relativePath);
     await mkdir(dirname(targetPath), { recursive: true });
@@ -349,6 +357,14 @@ async function createArtifacts(rootDir, overrides = {}) {
     ...(!overrides.omitMcpNotice
       ? [[mcpLegal.archiveNotice, overrides.mcpNotice ?? mcpLegal.notice]]
       : []),
+    ...(!overrides.omitMcpInventory
+      ? [
+          [
+            mcpLegal.archiveInventory,
+            overrides.mcpInventory ?? mcpLegal.inventory,
+          ],
+        ]
+      : []),
     ...(!overrides.skeletonMcp
       ? [
           [
@@ -410,6 +426,14 @@ async function createArtifacts(rootDir, overrides = {}) {
             extensionLegal.archiveThirdPartyLicenses,
             overrides.extensionThirdPartyLicenses ??
               extensionLegal.thirdPartyLicenses,
+          ],
+        ]
+      : []),
+    ...(!overrides.omitExtensionInventory
+      ? [
+          [
+            extensionLegal.archiveInventory,
+            overrides.extensionInventory ?? extensionLegal.inventory,
           ],
         ]
       : []),
@@ -777,6 +801,31 @@ test("release artifact verification fails closed", async (t) => {
       }),
       /Missing THIRD_PARTY_LICENSES\.txt in extension zip THIRD_PARTY_LICENSES\.txt/,
     );
+
+    const npmInventoryRoot = await createReleaseRoot(t);
+    const npmInventoryArtifacts = await createArtifacts(npmInventoryRoot, {
+      omitMcpInventory: true,
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: npmInventoryRoot,
+        artifactsDir: npmInventoryArtifacts.artifactsDir,
+      }),
+      /Missing package\/THIRD_PARTY_COMPONENTS\.json in npm tarball THIRD_PARTY_COMPONENTS\.json/,
+    );
+
+    const extensionInventoryRoot = await createReleaseRoot(t);
+    const extensionInventoryArtifacts = await createArtifacts(
+      extensionInventoryRoot,
+      { omitExtensionInventory: true },
+    );
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: extensionInventoryRoot,
+        artifactsDir: extensionInventoryArtifacts.artifactsDir,
+      }),
+      /Missing THIRD_PARTY_COMPONENTS\.json in extension zip THIRD_PARTY_COMPONENTS\.json/,
+    );
   });
 
   await t.test("when either artifact corrupts a legal file", async (t) => {
@@ -814,6 +863,31 @@ test("release artifact verification fails closed", async (t) => {
         artifactsDir: licenseBundleArtifacts.artifactsDir,
       }),
       /extension zip THIRD_PARTY_LICENSES\.txt does not match the reviewed repository source/,
+    );
+
+    const npmInventoryRoot = await createReleaseRoot(t);
+    const npmInventoryArtifacts = await createArtifacts(npmInventoryRoot, {
+      mcpInventory: "tampered inventory\n",
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: npmInventoryRoot,
+        artifactsDir: npmInventoryArtifacts.artifactsDir,
+      }),
+      /npm tarball THIRD_PARTY_COMPONENTS\.json does not match the reviewed repository source/,
+    );
+
+    const extensionInventoryRoot = await createReleaseRoot(t);
+    const extensionInventoryArtifacts = await createArtifacts(
+      extensionInventoryRoot,
+      { extensionInventory: "tampered inventory\n" },
+    );
+    await assert.rejects(
+      verifyReleaseArtifacts({
+        rootDir: extensionInventoryRoot,
+        artifactsDir: extensionInventoryArtifacts.artifactsDir,
+      }),
+      /extension zip THIRD_PARTY_COMPONENTS\.json does not match the reviewed repository source/,
     );
   });
 

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { Buffer } from "node:buffer";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -7,14 +9,163 @@ import { fileURLToPath } from "node:url";
 import {
   loadReviewedLegalFiles,
   parseThirdPartyNoticeRows,
+  readBoundedLegalSource,
+  validateThirdPartyInventory,
   validateThirdPartyLicenseBundle,
+  verifyCargoNoticeClosure,
   verifyRepositoryLegalNotices,
 } from "./legal-notices.mjs";
+import { parseReviewedInventory } from "./npm-license-inventory.mjs";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+test("legal metadata reads reject symlinks and oversized files before loading", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "legal-notices-bounds-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const outside = join(root, "outside-secret");
+  const linked = join(root, "linked-license");
+  await writeFile(outside, "synthetic-secret");
+  await symlink(outside, linked);
+  await assert.rejects(
+    readBoundedLegalSource(linked, "synthetic legal file", 32),
+    /regular non-symlink file/,
+  );
+
+  const oversized = join(root, "oversized-license");
+  await writeFile(oversized, Buffer.alloc(33));
+  await assert.rejects(
+    readBoundedLegalSource(oversized, "synthetic legal file", 32),
+    /between 1 byte and 32 bytes/,
+  );
+});
+
+test("Cargo notice closure rejects both missing and stale rows", () => {
+  const cargoLockSource = `
+[[package]]
+name = "locked-component"
+version = "1.2.3"
+
+[[package]]
+name = "simd-math"
+version = "0.1.0"
+`;
+  const noticeRows = new Map([
+    [
+      "cargo:stale-component@9.9.9",
+      { ecosystem: "cargo", name: "stale-component", version: "9.9.9" },
+    ],
+  ]);
+  assert.throws(
+    () => verifyCargoNoticeClosure({ cargoLockSource, noticeRows }),
+    /missing=\[cargo:locked-component@1\.2\.3\], stale=\[cargo:stale-component@9\.9\.9\]/,
+  );
+});
+
 test("reviewed legal notices match package metadata and vendored boundaries", async () => {
-  await verifyRepositoryLegalNotices({ rootDir: REPOSITORY_ROOT });
+  const summaries = await verifyRepositoryLegalNotices({
+    rootDir: REPOSITORY_ROOT,
+  });
+  assert.equal(summaries.mcp.componentCount, 176);
+  assert.equal(summaries.extension.componentCount, 202);
+  for (const summary of Object.values(summaries)) {
+    assert.equal(
+      summary.locallyVerified + summary.locallyUnavailable,
+      summary.componentCount,
+    );
+  }
+
+  const [mcpLegal, extensionLegal] = await Promise.all([
+    loadReviewedLegalFiles({ rootDir: REPOSITORY_ROOT, artifactName: "mcp" }),
+    loadReviewedLegalFiles({
+      rootDir: REPOSITORY_ROOT,
+      artifactName: "extension",
+    }),
+  ]);
+  const mcpInventory = parseReviewedInventory(mcpLegal.inventory, "mcp");
+  const extensionInventory = parseReviewedInventory(
+    extensionLegal.inventory,
+    "extension",
+  );
+  assert.deepEqual(
+    extensionInventory.firstPartyWorkspacePackages,
+    new Set(["webpage-mcp-shared"]),
+  );
+  assert.equal(
+    mcpInventory.components.has("@img/sharp-win32-x64@0.33.5"),
+    true,
+  );
+  assert.equal(
+    extensionInventory.components.has("@img/sharp-win32-ia32@0.34.5"),
+    true,
+  );
+
+  const anthropic = mcpInventory.components.get(
+    "@anthropic-ai/claude-agent-sdk@0.1.77",
+  );
+  assert.equal(anthropic.declaredLicense, "SEE LICENSE IN README.md");
+  assert.equal(
+    anthropic.concludedLicense,
+    "LicenseRef-Anthropic-Legal-Agreements",
+  );
+  assert.deepEqual(anthropic.review, ["anthropic-non-spdx"]);
+  assert.deepEqual(
+    anthropic.licenseEvidence.map(({ path }) => path),
+    ["LICENSE.md", "README.md"],
+  );
+  assert.deepEqual(mcpInventory.components.get("drizzle-orm@0.45.2").review, [
+    "metadata-license-only",
+  ]);
+
+  const flatbuffers = extensionInventory.components.get("flatbuffers@1.12.0");
+  assert.equal(flatbuffers.concludedLicense, "Apache-2.0");
+  assert.deepEqual(flatbuffers.review, ["see-license-resolution"]);
+  for (const key of ["expand-template@2.0.3", "rc@1.2.8"]) {
+    const component = mcpInventory.components.get(key);
+    assert.equal(component.concludedLicense, "MIT");
+    assert.deepEqual(component.review, ["or-license-selection"]);
+  }
+  assert.deepEqual(extensionInventory.components.get("elkjs@0.11.0").review, [
+    "epl-source-availability",
+  ]);
+  assert.ok(
+    extensionInventory.components
+      .get("@img/sharp-libvips-linux-x64@1.2.4")
+      .review.includes("sharp-lgpl-platform"),
+  );
+  assert.ok(
+    extensionInventory.components
+      .get("tslib@2.8.1")
+      .review.includes("tslib-copyright-notice"),
+  );
+  assert.ok(
+    extensionInventory.components
+      .get("onnxruntime-web@1.14.0")
+      .review.includes("onnx-excluded-build-input"),
+  );
+  assert.ok(
+    extensionInventory.components
+      .get("onnxruntime-web@1.22.0")
+      .review.includes("onnx-vendored-runtime"),
+  );
+  const transformers = extensionInventory.components.get(
+    "@xenova/transformers@2.17.2",
+  );
+  assert.ok(transformers.review.includes("transformers-local-patch"));
+  assert.deepEqual(transformers.patch, {
+    path: "patches/@xenova__transformers@2.17.2.patch",
+    sha256: "262aa63ab2e21aa2c33c033870e775e376dd0dbbc35a0d3d9e80be2c8b1293e2",
+  });
+
+  const tamperedInventory = JSON.parse(mcpLegal.inventory.toString("utf8"));
+  tamperedInventory.components[0].packageJsonSha256 = "0".repeat(64);
+  assert.throws(
+    () =>
+      validateThirdPartyInventory(
+        Buffer.from(`${JSON.stringify(tamperedInventory, null, 2)}\n`),
+        "mcp",
+      ),
+    /does not match the reviewed digest/,
+  );
 
   const extensionNotice = await readFile(
     join(REPOSITORY_ROOT, "app/chrome-extension/public/THIRD_PARTY_NOTICES.md"),
@@ -38,10 +189,6 @@ test("reviewed legal notices match package metadata and vendored boundaries", as
     "Apache-2.0",
   );
 
-  const extensionLegal = await loadReviewedLegalFiles({
-    rootDir: REPOSITORY_ROOT,
-    artifactName: "extension",
-  });
   assert.ok(extensionLegal.thirdPartyLicenses);
   assert.equal(
     extensionLegal.archiveThirdPartyLicenses,

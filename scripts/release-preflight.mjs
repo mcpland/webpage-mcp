@@ -35,7 +35,13 @@ const MCP_PACKAGE_CONTRACT = {
     "webpage-mcp": "./dist/cli.js",
     "webpage-mcp-stdio": "./dist/mcp/mcp-server-stdio.js",
   },
-  files: ["dist", "LICENSE", "THIRD_PARTY_NOTICES.md", "!dist/node_path.txt"],
+  files: [
+    "dist",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_COMPONENTS.json",
+    "!dist/node_path.txt",
+  ],
   engines: { node: ">=22.0.0" },
   license: "MIT",
   publishConfig: { access: "public", provenance: true },
@@ -988,6 +994,15 @@ async function verifyArtifactLegalFiles({ rootDir, tarEntries, zipEntries }) {
       description: "npm tarball THIRD_PARTY_NOTICES.md",
     },
     {
+      actual: readTarEntry(
+        tarEntries,
+        mcpLegal.archiveInventory,
+        "npm tarball THIRD_PARTY_COMPONENTS.json",
+      ),
+      expected: mcpLegal.inventory,
+      description: "npm tarball THIRD_PARTY_COMPONENTS.json",
+    },
+    {
       actual: readZipEntry(
         zipEntries,
         extensionLegal.archiveLicense,
@@ -1004,6 +1019,15 @@ async function verifyArtifactLegalFiles({ rootDir, tarEntries, zipEntries }) {
       ),
       expected: extensionLegal.notice,
       description: "extension zip THIRD_PARTY_NOTICES.md",
+    },
+    {
+      actual: readZipEntry(
+        zipEntries,
+        extensionLegal.archiveInventory,
+        "extension zip THIRD_PARTY_COMPONENTS.json",
+      ),
+      expected: extensionLegal.inventory,
+      description: "extension zip THIRD_PARTY_COMPONENTS.json",
     },
     {
       actual: readZipEntry(

@@ -134,6 +134,7 @@ Record each item as `PASS`, `BLOCKED`, or `N/A` with a reason. Any unchecked or
       commit:
 
       ```bash
+      pnpm legal:check
       pnpm test:release
       pnpm --filter webpage-mcp-connector lint
       pnpm --filter webpage-mcp-connector compile
@@ -144,6 +145,12 @@ Record each item as `PASS`, `BLOCKED`, or `N/A` with a reason. Any unchecked or
 - [ ] Record the exact ZIP path, byte size, and SHA-256 digest. Inspect the ZIP
       rather than a working directory and confirm it contains no secrets,
       private keys, unreviewed source maps, test fixtures, or unrelated files.
+- [ ] Confirm the exact ZIP contains the reviewed `LICENSE`,
+      `THIRD_PARTY_NOTICES.md`, `THIRD_PARTY_COMPONENTS.json`, and
+      `THIRD_PARTY_LICENSES.txt` bytes. Treat `THIRD_PARTY_COMPONENTS.json` as
+      the complete production build-input graph, not as a claim that every
+      listed package is emitted; use the notice and license bundle to review
+      the shipped/vendored boundary.
 - [ ] On real Linux, Windows, and macOS installations, load the exact packaged
       extension, install and register the matching npm tarball, open the
       browser, and confirm the extension connects to the registered native host
@@ -193,6 +200,9 @@ Open blockers:
 - Repository artifact and version checks are implemented in
   [`scripts/release-preflight.mjs`](../scripts/release-preflight.mjs) and
   [`.github/workflows/release.yml`](../.github/workflows/release.yml).
+- Production npm closure, lock-integrity, evidence, and Cargo notice checks are
+  implemented in [`scripts/legal-notices.mjs`](../scripts/legal-notices.mjs)
+  and [`scripts/npm-license-inventory.mjs`](../scripts/npm-license-inventory.mjs).
 - Extension permissions and host access are defined in
   [`app/chrome-extension/wxt.config.ts`](../app/chrome-extension/wxt.config.ts).
 - Privacy behavior and human-review status are documented in

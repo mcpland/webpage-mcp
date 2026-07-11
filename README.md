@@ -433,6 +433,27 @@ pnpm format        # Format with Prettier
 pnpm typecheck     # TypeScript type checking
 ```
 
+### Dependency License Inventory
+
+`pnpm legal:check` verifies the committed, full production npm closures against
+the frozen pnpm graph and lockfile without using the network. It also checks
+locally available package metadata and license evidence, the exact Cargo notice
+closure, and the reviewed legal-file digests.
+
+After an intentional dependency or lockfile change, refresh the inventories
+with `node scripts/legal-notices.mjs refresh`. Refresh downloads registry
+tarballs without running dependency lifecycle scripts and accepts evidence only
+after the complete tarball matches the lockfile SHA-512 integrity. Review the
+resulting `THIRD_PARTY_COMPONENTS.json` files and notice changes before
+committing them.
+
+The machine-readable inventories describe production install/build inputs;
+they do not assert that every component is emitted into a bundle. The release
+artifacts include those inventories byte-for-byte. Human-readable
+`THIRD_PARTY_NOTICES.md` files summarize distribution boundaries, while the
+extension's `THIRD_PARTY_LICENSES.txt` covers emitted or vendored code and its
+attributions.
+
 ---
 
 ## CLI Reference
@@ -581,6 +602,9 @@ than weakening the gate.
   - Chrome extension zip (`app/chrome-extension/.output/webpage-mcp-connector-<version>-chrome-extension.zip`)
   - MCP server npm tarball (`.tgz`)
   - `SHA256SUMS.txt`
+- Verifies that each artifact contains the reviewed `LICENSE`,
+  `THIRD_PARTY_NOTICES.md`, and `THIRD_PARTY_COMPONENTS.json` bytes; the
+  extension ZIP must also contain its reviewed `THIRD_PARTY_LICENSES.txt`.
 - On tag pushes, creates a GitHub Release and uploads assets
 - On tag pushes (`v*`), publishes `webpage-mcp` to npm (requires `NPM_AUTH_TOKEN` secret)
 - Manual npm publish is available via `workflow_dispatch` with
@@ -608,7 +632,7 @@ than weakening the gate.
 - Agent project/session selection and missing-selection routing: `pnpm --filter webpage-mcp-connector exec vitest run tests/utils/agent-selection.test.ts tests/background/sidepanel-utils.test.ts tests/background/quick-panel-agent-handler.test.ts`.
 - Safe session defaults and explicit dangerous-mode confirmation: `app/mcp-server/src/agent/session-security.test.ts` via `pnpm --filter webpage-mcp test`.
 - Localized extension strings: `pnpm --filter webpage-mcp-connector i18n:check`.
-- Stable-only unified release, artifact, version-setting, and standalone npm channel rules: `pnpm test:release`.
+- Stable-only unified release, artifact, version-setting, legal inventory, and standalone npm channel rules: `pnpm test:release` and `pnpm legal:check`.
 - Production npm advisories: `pnpm audit --prod`. The scheduled Rust advisory
   check runs cargo-deny against `packages/wasm-simd/Cargo.lock` with all
   features and locked resolution.

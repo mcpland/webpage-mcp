@@ -36,6 +36,7 @@
     "dist",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_COMPONENTS.json",
     "!dist/node_path.txt"
   ],
   "engines": {

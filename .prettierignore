@@ -1,0 +1,4 @@
+# Generated canonical legal inventories are formatted and digest-checked by
+# scripts/npm-license-inventory.mjs and scripts/legal-notices.mjs.
+app/mcp-server/THIRD_PARTY_COMPONENTS.json
+app/chrome-extension/public/THIRD_PARTY_COMPONENTS.json
