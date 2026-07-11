@@ -158,6 +158,69 @@ describe('NativeMessagingHost outbound requests', () => {
     ).rejects.toMatchObject({ code: 'OUTPUT_WRITE_FAILED' });
   });
 
+  it('orders a remote cancellation after an aborted extension request', async () => {
+    const output = new ControlledWritable();
+    const host = new NativeMessagingHost(new NativeMessageWriter(output));
+    const controller = new AbortController();
+    const request = host.sendRequestToExtensionAndWait(
+      { query: 'cancel me' },
+      NativeMessageType.CALL_TOOL,
+      10_000,
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(1));
+
+    controller.abort();
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(output.chunks).toHaveLength(1);
+
+    output.completeNext();
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(2));
+    const original = decodeFrame(output.chunks[0]);
+    expect(original).toMatchObject({
+      type: NativeMessageType.CALL_TOOL,
+      requestId: expect.any(String),
+    });
+    expect(decodeFrame(output.chunks[1])).toEqual({
+      type: NativeMessageType.CANCEL_REQUEST,
+      payload: {
+        requestId: original.requestId,
+        reason: 'cancelled',
+      },
+    });
+    output.completeNext();
+  });
+
+  it('propagates a local extension-request timeout as a remote cancellation', async () => {
+    vi.useFakeTimers();
+    try {
+      const output = new CollectingWritable();
+      const host = new NativeMessagingHost(new NativeMessageWriter(output));
+      const request = host.sendRequestToExtensionAndWait(
+        { query: 'time out' },
+        NativeMessageType.CALL_TOOL,
+        100,
+      );
+      const timeoutRejection = expect(request).rejects.toThrow(
+        'Request timed out after 100ms',
+      );
+      await vi.advanceTimersByTimeAsync(100);
+
+      await timeoutRejection;
+      await vi.waitFor(() => expect(output.chunks).toHaveLength(2));
+      const original = decodeFrame(output.chunks[0]);
+      expect(decodeFrame(output.chunks[1])).toEqual({
+        type: NativeMessageType.CANCEL_REQUEST,
+        payload: {
+          requestId: original.requestId,
+          reason: 'timeout',
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects an oversized pending request instead of waiting for timeout', async () => {
     const host = new NativeMessagingHost(
       new NativeMessageWriter(new Writable({ write: (_chunk, _encoding, callback) => callback() })),

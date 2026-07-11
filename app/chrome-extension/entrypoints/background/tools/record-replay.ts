@@ -1073,7 +1073,10 @@ class RunCancelTool {
 
 class FlowRunTool {
   name = TOOL_NAMES.RECORD_REPLAY.FLOW_RUN;
-  async execute(args: any): Promise<ToolResult> {
+  async execute(
+    args: any,
+    context?: { signal?: AbortSignal },
+  ): Promise<ToolResult> {
     const normalizeScreenshotBaselines = (
       value: unknown,
     ): Record<string, string> | undefined => {
@@ -1184,8 +1187,19 @@ class FlowRunTool {
           typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
             ? Math.max(1_000, Math.floor(timeoutMs))
             : undefined,
+        signal: context?.signal,
       }));
     } catch (error) {
+      if (
+        context?.signal &&
+        (context.signal.aborted ||
+          (error &&
+            typeof error === "object" &&
+            "name" in error &&
+            (error as { name?: unknown }).name === "AbortError"))
+      ) {
+        throw error;
+      }
       if (isResourceLimitError(error)) {
         return createFlowRunResourceLimitError(flow, error);
       }

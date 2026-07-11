@@ -216,12 +216,17 @@ describe("native host port lifecycle", () => {
     await vi.waitFor(() => {
       expect(dependencyMocks.handleCallTool).toHaveBeenCalledOnce();
     });
+    const oldSignal = dependencyMocks.handleCallTool.mock.calls[0]?.[0]
+      ?.signal as AbortSignal;
+    expect(oldSignal.aborted).toBe(false);
 
     first.emitDisconnect();
+    expect(oldSignal.aborted).toBe(true);
     expect(connectNativeHost()).toBe(true);
 
-    toolResult.resolve({ content: [{ type: "text", text: "done" }] });
     await oldRequest;
+    toolResult.resolve({ content: [{ type: "text", text: "done" }] });
+    await Promise.resolve();
 
     expect(first.port.postMessage).not.toHaveBeenCalled();
     expect(second.port.postMessage).not.toHaveBeenCalled();
@@ -238,5 +243,120 @@ describe("native host port lifecycle", () => {
     expect(second.port.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ responseToRequestId: "current-request" }),
     );
+  });
+
+  it("aborts a named tool request without posting a late completion", async () => {
+    const native = createNativePort();
+    const toolResult = deferred<unknown>();
+    dependencyMocks.handleCallTool.mockReturnValueOnce(toolResult.promise);
+
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "test-extension-id",
+        lastError: null,
+        connectNative: vi.fn(() => native.port),
+        getManifest: vi.fn(() => ({ version: "0.9.0" })),
+        sendMessage: vi.fn().mockResolvedValue(undefined),
+      },
+      storage: {
+        local: {
+          get: vi.fn().mockResolvedValue({}),
+          set: vi.fn().mockResolvedValue(undefined),
+          remove: vi.fn().mockResolvedValue(undefined),
+        },
+      },
+      tabs: { onRemoved: { addListener: vi.fn(), removeListener: vi.fn() } },
+      windows: {
+        onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+    });
+
+    const { connectNativeHost } =
+      await import("@/entrypoints/background/native-host");
+    expect(connectNativeHost()).toBe(true);
+
+    const execution = native.emitMessage({
+      type: "call_tool",
+      requestId: "cancel-me",
+      payload: { name: "chrome_read_page", args: {} },
+    });
+    await vi.waitFor(() => {
+      expect(dependencyMocks.handleCallTool).toHaveBeenCalledOnce();
+    });
+    const signal = dependencyMocks.handleCallTool.mock.calls[0]?.[0]
+      ?.signal as AbortSignal;
+
+    await native.emitMessage({
+      type: "cancel_request",
+      payload: { requestId: "cancel-me", reason: "cancelled" },
+    });
+    await execution;
+
+    expect(signal.aborted).toBe(true);
+    expect(native.port.postMessage).not.toHaveBeenCalled();
+
+    toolResult.resolve({ content: [{ type: "text", text: "too late" }] });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(native.port.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("bounds active tool requests per native port", async () => {
+    const native = createNativePort();
+    const signals: AbortSignal[] = [];
+    dependencyMocks.handleCallTool.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) => {
+        signals.push(signal);
+        return new Promise(() => {});
+      },
+    );
+
+    vi.stubGlobal("chrome", {
+      runtime: {
+        id: "test-extension-id",
+        lastError: null,
+        connectNative: vi.fn(() => native.port),
+        getManifest: vi.fn(() => ({ version: "0.9.0" })),
+        sendMessage: vi.fn().mockResolvedValue(undefined),
+      },
+      storage: {
+        local: {
+          get: vi.fn().mockResolvedValue({}),
+          set: vi.fn().mockResolvedValue(undefined),
+          remove: vi.fn().mockResolvedValue(undefined),
+        },
+      },
+      tabs: { onRemoved: { addListener: vi.fn(), removeListener: vi.fn() } },
+      windows: {
+        onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+    });
+
+    const { connectNativeHost } =
+      await import("@/entrypoints/background/native-host");
+    expect(connectNativeHost()).toBe(true);
+
+    const executions = Array.from({ length: 65 }, (_, index) =>
+      native.emitMessage({
+        type: "call_tool",
+        requestId: `request-${index}`,
+        payload: { name: "chrome_read_page", args: {} },
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(dependencyMocks.handleCallTool).toHaveBeenCalledTimes(64);
+      expect(native.port.postMessage).toHaveBeenCalledWith({
+        responseToRequestId: "request-64",
+        payload: expect.objectContaining({
+          status: "error",
+          error: "Too many active native tool requests",
+        }),
+      });
+    });
+
+    native.emitDisconnect();
+    await Promise.all(executions);
+    expect(signals).toHaveLength(64);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
 });

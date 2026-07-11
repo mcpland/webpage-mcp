@@ -49,13 +49,19 @@ function createRuntime() {
           tookMs: 4,
           outputs: null,
         }),
+        patch: vi.fn().mockResolvedValue(undefined),
+      },
+      queue: {
+        get: vi.fn().mockResolvedValue(null),
+        cancel: vi.fn().mockResolvedValue(undefined),
       },
       events: {
         list: vi.fn().mockResolvedValue([]),
       },
     },
-    events: {},
+    events: { append: vi.fn().mockResolvedValue(undefined) },
     scheduler: {},
+    runners: new Map(),
   } as any;
 }
 
@@ -123,6 +129,83 @@ describe("record-replay-v3 compat", () => {
         tabId: 22,
       }),
     );
+  });
+
+  it("cancels an active workflow runner when its originating request aborts", async () => {
+    const runtime = createRuntime();
+    const cancel = vi.fn();
+    runtime.storage.runs.get.mockResolvedValue({
+      id: "run-1",
+      status: "running",
+      startedAt: 1,
+    });
+    runtime.runners.set("run-1", { cancel });
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+    asMock(chrome.tabs.get).mockResolvedValue({
+      id: 22,
+      url: "https://example.com/",
+      status: "complete",
+      windowId: 1,
+    });
+    const controller = new AbortController();
+
+    const execution = enqueueRunAndWait({
+      flowId: "flow-cancel" as any,
+      tabId: 22,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(mocks.enqueueRun).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(execution).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancel).toHaveBeenCalledWith(
+      "Canceled because the originating MCP request ended",
+    );
+    expect(runtime.storage.queue.cancel).not.toHaveBeenCalled();
+  });
+
+  it("durably cancels a queued workflow when no runner has claimed it", async () => {
+    const runtime = createRuntime();
+    runtime.storage.runs.get.mockResolvedValue({
+      id: "run-1",
+      status: "queued",
+      createdAt: 1,
+    });
+    mocks.bootstrapV3.mockResolvedValue(runtime);
+    asMock(chrome.tabs.get).mockResolvedValue({
+      id: 22,
+      url: "https://example.com/",
+      status: "complete",
+      windowId: 1,
+    });
+    const controller = new AbortController();
+
+    const execution = enqueueRunAndWait({
+      flowId: "flow-cancel-queued" as any,
+      tabId: 22,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(mocks.enqueueRun).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(execution).rejects.toMatchObject({ name: "AbortError" });
+    expect(runtime.storage.queue.cancel).toHaveBeenCalledWith(
+      "run-1",
+      expect.any(Number),
+      "Canceled because the originating MCP request ended",
+    );
+    expect(runtime.storage.runs.patch).toHaveBeenCalledWith(
+      "run-1",
+      expect.objectContaining({
+        status: "canceled",
+        finishedAt: expect.any(Number),
+      }),
+    );
+    expect(runtime.events.append).toHaveBeenCalledWith({
+      runId: "run-1",
+      type: "run.canceled",
+      reason: "Canceled because the originating MCP request ended",
+    });
   });
 
   it("preserves current quality oracle and audit enum values during normalization", () => {

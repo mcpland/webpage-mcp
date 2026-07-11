@@ -628,4 +628,45 @@ describe('handleCallTool navigation routing', () => {
       { meta: { mcpSessionId: 'session-1', source: 'mcp' } },
     );
   });
+
+  it('does not start a queued tool after its request is cancelled', async () => {
+    let releaseQueue!: () => void;
+    const queueGate = new Promise<void>((resolve) => {
+      releaseQueue = resolve;
+    });
+    mocks.runInTabQueue.mockImplementationOnce(
+      async (_tabId: number, task: () => Promise<unknown>) => {
+        await queueGate;
+        return task();
+      },
+    );
+    const controller = new AbortController();
+    const execution = handleCallTool({
+      name: TOOL_NAMES.BROWSER.CLICK,
+      args: { selector: '#danger' },
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(mocks.runInTabQueue).toHaveBeenCalledOnce());
+
+    controller.abort();
+    releaseQueue();
+
+    await expect(execution).rejects.toMatchObject({ name: 'AbortError' });
+    expect(mocks.clickExecute).not.toHaveBeenCalled();
+  });
+
+  it('passes the request signal into workflow execution', async () => {
+    const controller = new AbortController();
+
+    await handleCallTool({
+      name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
+      args: { flowId: 'flow-1' },
+      signal: controller.signal,
+    });
+
+    expect(mocks.flowRunExecute).toHaveBeenCalledWith(
+      expect.objectContaining({ flowId: 'flow-1' }),
+      { signal: controller.signal },
+    );
+  });
 });

@@ -11,6 +11,7 @@ export enum NativeMessageType {
   PROCESS_DATA_RESPONSE = 'process_data_response',
   CALL_TOOL = 'call_tool',
   CALL_TOOL_RESPONSE = 'call_tool_response',
+  CANCEL_REQUEST = 'cancel_request',
   // Additional message types used in Chrome extension
   SERVER_STARTED = 'server_started',
   SERVER_STOPPED = 'server_stopped',

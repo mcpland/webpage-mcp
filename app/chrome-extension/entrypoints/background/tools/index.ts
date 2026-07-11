@@ -115,6 +115,7 @@ const getLazyTool = async (toolName: string) => {
 export interface ToolCallParam {
   name: string;
   args: any;
+  signal?: AbortSignal;
   meta?: {
     mcpSessionId?: string;
     instanceId?: string;
@@ -131,6 +132,16 @@ export interface ToolCallParam {
           warnings?: string[];
         };
   };
+}
+
+function createToolAbortError(): Error {
+  const error = new Error('Tool execution cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfToolAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw createToolAbortError();
 }
 
 function isTabScopedTool(toolName: string): boolean {
@@ -395,10 +406,12 @@ function extractSessionPatchFromResult(
  * Handle tool execution
  */
 export const handleCallTool = async (param: ToolCallParam) => {
+  throwIfToolAborted(param.signal);
   let tool = toolsMap.get(param.name);
   if (!tool) {
     tool = await getLazyTool(param.name);
   }
+  throwIfToolAborted(param.signal);
 
   if (!tool) {
     return createErrorResponse(`Tool ${param.name} not found`);
@@ -407,25 +420,38 @@ export const handleCallTool = async (param: ToolCallParam) => {
   const sessionId = param.meta?.mcpSessionId?.trim() || undefined;
   const instanceId = param.meta?.instanceId?.trim() || undefined;
   const resolvedTarget = await resolveExecutionTarget(param.name, param.args, sessionId, instanceId);
+  throwIfToolAborted(param.signal);
   const targetMergedArgs = mergeArgsWithResolvedTarget(param.args, resolvedTarget);
   const shouldApplyMcpBackgroundDefault = param.meta?.source === 'mcp' || !!sessionId;
   const mergedArgs = shouldApplyMcpBackgroundDefault
     ? await mergeArgsWithDefaultBackground(param.name, targetMergedArgs)
     : targetMergedArgs;
+  throwIfToolAborted(param.signal);
 
   try {
     const executionContext =
-      param.meta &&
-      (param.meta.clientCapabilities !== undefined || MCP_CONTEXT_AWARE_TOOLS.has(param.name))
-        ? { meta: param.meta }
+      param.signal ||
+      (param.meta &&
+        (param.meta.clientCapabilities !== undefined || MCP_CONTEXT_AWARE_TOOLS.has(param.name)))
+        ? {
+            ...(param.meta ? { meta: param.meta } : {}),
+            ...(param.signal ? { signal: param.signal } : {}),
+          }
         : undefined;
-    const execute = async () =>
-      executionContext ? await tool.execute(mergedArgs, executionContext) : await tool.execute(mergedArgs);
+    const execute = async () => {
+      throwIfToolAborted(param.signal);
+      const result = executionContext
+        ? await tool.execute(mergedArgs, executionContext)
+        : await tool.execute(mergedArgs);
+      throwIfToolAborted(param.signal);
+      return result;
+    };
     const result =
       typeof resolvedTarget.tabId === 'number'
         ? await runInTabQueue(resolvedTarget.tabId, execute)
         : await execute();
 
+    throwIfToolAborted(param.signal);
     if (sessionId && result?.isError !== true) {
       const patch = extractSessionPatchFromResult(param.name, result);
       const tabIdToPersist =
@@ -450,6 +476,16 @@ export const handleCallTool = async (param: ToolCallParam) => {
 
     return result;
   } catch (error) {
+    if (
+      param.signal &&
+      (param.signal.aborted ||
+        (error &&
+          typeof error === 'object' &&
+          'name' in error &&
+          (error as { name?: unknown }).name === 'AbortError'))
+    ) {
+      throw error;
+    }
     console.error(`Tool execution failed for ${param.name}:`, error);
     return createErrorResponse(
       error instanceof Error ? error.message : ERROR_MESSAGES.TOOL_EXECUTION_FAILED,

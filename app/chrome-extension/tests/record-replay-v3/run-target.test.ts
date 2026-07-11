@@ -21,6 +21,7 @@ describe('resolveRunTargetTab background mode', () => {
   const tabsCreate = vi.fn();
   const tabsUpdate = vi.fn();
   const tabsReload = vi.fn();
+  const tabsRemove = vi.fn();
 
   beforeEach(() => {
     tabsGet.mockReset();
@@ -28,6 +29,7 @@ describe('resolveRunTargetTab background mode', () => {
     tabsCreate.mockReset();
     tabsUpdate.mockReset();
     tabsReload.mockReset();
+    tabsRemove.mockReset();
 
     vi.stubGlobal('chrome', {
       tabs: {
@@ -36,6 +38,7 @@ describe('resolveRunTargetTab background mode', () => {
         create: tabsCreate,
         update: tabsUpdate,
         reload: tabsReload,
+        remove: tabsRemove,
       },
     });
   });
@@ -94,5 +97,39 @@ describe('resolveRunTargetTab background mode', () => {
 
     expect(tabsCreate).not.toHaveBeenCalled();
     expect(tabsUpdate).not.toHaveBeenCalled();
+  });
+
+  it('closes a newly owned run tab when target resolution is cancelled', async () => {
+    tabsQuery.mockResolvedValueOnce([tab()]).mockResolvedValueOnce([tab()]);
+    tabsCreate.mockResolvedValue(
+      tab({
+        id: 22,
+        active: false,
+        status: 'loading',
+        url: 'https://example.com/new',
+      }),
+    );
+    tabsGet.mockResolvedValue(
+      tab({
+        id: 22,
+        active: false,
+        status: 'loading',
+        url: 'https://example.com/new',
+      }),
+    );
+    tabsRemove.mockResolvedValue(undefined);
+    const controller = new AbortController();
+
+    const resolution = resolveRunTargetTab({
+      tabTarget: 'new',
+      startUrl: 'https://example.com/new',
+      execution: { backgroundTabs: true },
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(tabsCreate).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(resolution).rejects.toMatchObject({ name: 'AbortError' });
+    expect(tabsRemove).toHaveBeenCalledWith(22);
   });
 });

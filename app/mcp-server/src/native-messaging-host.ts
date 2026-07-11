@@ -1443,6 +1443,28 @@ export class NativeMessagingHost {
     return new Promise((resolve, reject) => {
       const requestId = uuidv4(); // Generate unique request ID
       let settled = false;
+      let requestDispatched = false;
+      let remoteCancellationRequested = false;
+
+      const requestRemoteCancellation = (reason: 'cancelled' | 'timeout'): void => {
+        if (settled || !requestDispatched || remoteCancellationRequested) {
+          return;
+        }
+        remoteCancellationRequested = true;
+        // The original request and this cancellation share NativeMessageWriter's
+        // ordered queue, so the extension can never observe the cancellation
+        // before the work it names. A broken native stdout is already terminal
+        // for the local request and needs no secondary error.
+        void this.messageWriter
+          .send({
+            type: NativeMessageType.CANCEL_REQUEST,
+            payload: { requestId, reason },
+          }, {
+            coalesceKey: `extension-cancel:${requestId}`,
+            terminal: true,
+          })
+          .catch(() => {});
+      };
 
       const finish = (callback: () => void): void => {
         if (settled) {
@@ -1456,12 +1478,15 @@ export class NativeMessagingHost {
       };
 
       const handleAbort = (): void => {
+        if (settled) return;
+        requestRemoteCancellation('cancelled');
         const error = new Error('Native bridge request cancelled');
         error.name = 'AbortError';
         finish(() => reject(error));
       };
 
       const timeoutId = setTimeout(() => {
+        requestRemoteCancellation('timeout');
         finish(() => reject(new Error(`Request timed out after ${timeoutMs}ms`)));
       }, timeoutMs);
 
@@ -1480,6 +1505,7 @@ export class NativeMessagingHost {
 
       // Send message with requestId to Chrome. Encoding and stdout failures
       // reject immediately rather than leaving the request waiting for timeout.
+      requestDispatched = true;
       void this.messageWriter
         .send({
           type: messageType,

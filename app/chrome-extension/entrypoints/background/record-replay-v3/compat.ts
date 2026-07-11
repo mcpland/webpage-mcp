@@ -65,6 +65,73 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function createRunAbortError(): Error {
+  const error = new Error("Workflow run cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfRunAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw createRunAbortError();
+}
+
+function waitForRunPoll(signal?: AbortSignal): Promise<void> {
+  if (!signal) return sleep(RUN_POLL_INTERVAL_MS);
+  throwIfRunAborted(signal);
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", handleAbort);
+      if (error) reject(error);
+      else resolve();
+    };
+    const handleAbort = (): void => finish(createRunAbortError());
+    const timer = setTimeout(() => finish(), RUN_POLL_INTERVAL_MS);
+    signal.addEventListener("abort", handleAbort, { once: true });
+    if (signal.aborted) handleAbort();
+  });
+}
+
+async function cancelRunAfterAbort(
+  runtime: V3Runtime,
+  runId: RunId,
+): Promise<void> {
+  const run = await runtime.storage.runs.get(runId);
+  if (!run || isTerminalStatus(run.status)) return;
+
+  const reason = "Canceled because the originating MCP request ended";
+  const runner = runtime.runners.get(runId);
+  if (runner) {
+    runner.cancel(reason);
+    return;
+  }
+
+  const now = Date.now();
+  const tookMs =
+    typeof run.startedAt === "number"
+      ? Math.max(0, now - run.startedAt)
+      : undefined;
+  await runtime.storage.queue.cancel(runId, now, reason);
+  await runtime.storage.runs.patch(runId, {
+    status: "canceled",
+    updatedAt: now,
+    finishedAt: now,
+    ...(tookMs !== undefined ? { tookMs } : {}),
+  });
+  try {
+    await runtime.events.append({
+      runId,
+      type: "run.canceled",
+      reason,
+    });
+  } catch {
+    // The cancellation state is durable; its audit event is best-effort.
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -516,7 +583,9 @@ export async function enqueueRunAndWait(input: {
   stopBeforeNodeId?: string;
   endNodeId?: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<{ run: RunRecordV3; events: RunEvent[]; result: RunResult }> {
+  throwIfRunAborted(input.signal);
   const runtime = await ensureV3Runtime();
   const resolvedTabId = await resolveRunTargetTab({
     tabId: input.tabId,
@@ -524,7 +593,9 @@ export async function enqueueRunAndWait(input: {
     startUrl: input.startUrl,
     refresh: input.refresh,
     execution: input.execution,
+    signal: input.signal,
   });
+  throwIfRunAborted(input.signal);
   const { runId } = await enqueueRun(
     {
       storage: runtime.storage,
@@ -547,17 +618,34 @@ export async function enqueueRunAndWait(input: {
   const deadline = Date.now() + timeoutMs;
 
   let run: RunRecordV3 | null = null;
-  while (Date.now() < deadline) {
-    run = await runtime.storage.runs.get(runId as RunId);
-    if (run && isTerminalStatus(run.status)) {
-      const events = await runtime.storage.events.list(run.id);
-      return {
-        run,
-        events,
-        result: buildCompatRunResult(run, events),
-      };
+  try {
+    while (Date.now() < deadline) {
+      throwIfRunAborted(input.signal);
+      run = await runtime.storage.runs.get(runId as RunId);
+      throwIfRunAborted(input.signal);
+      if (run && isTerminalStatus(run.status)) {
+        const events = await runtime.storage.events.list(run.id);
+        return {
+          run,
+          events,
+          result: buildCompatRunResult(run, events),
+        };
+      }
+      await waitForRunPoll(input.signal);
     }
-    await sleep(RUN_POLL_INTERVAL_MS);
+  } catch (error) {
+    if (
+      input.signal &&
+      (input.signal.aborted ||
+        (error &&
+          typeof error === "object" &&
+          "name" in error &&
+          (error as { name?: unknown }).name === "AbortError"))
+    ) {
+      await cancelRunAfterAbort(runtime, runId as RunId);
+      throw createRunAbortError();
+    }
+    throw error;
   }
 
   throw new Error(`Run "${runId}" did not finish within ${timeoutMs}ms`);

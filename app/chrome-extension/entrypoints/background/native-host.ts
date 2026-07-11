@@ -38,6 +38,8 @@ const INSTANCE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
 const MAX_MANAGED_SERVER_INSTANCES = 64;
 const MAX_INSTANCE_LABEL_BYTES = 256;
 const MAX_INSTANCE_ID_INPUT_LENGTH = 128;
+const MAX_ACTIVE_NATIVE_TOOL_REQUESTS = 64;
+const MAX_NATIVE_TOOL_REQUEST_ID_BYTES = 256;
 const WORKFLOW_RUNTIME_FEATURE_FLAGS = [
   "workflow_run",
   "published_workflow_descriptors",
@@ -1421,6 +1423,17 @@ export function connectNativeHost(): boolean {
       }
     };
 
+    // CALL_TOOL work belongs to the Port that dispatched it. Keeping the
+    // controllers per Port both bounds memory and lets a disconnect cancel
+    // only that Port's in-flight work.
+    const activeToolRequests = new Map<string, AbortController>();
+    const abortActiveToolRequests = (): void => {
+      for (const controller of activeToolRequests.values()) {
+        controller.abort();
+      }
+      activeToolRequests.clear();
+    };
+
     connectedPort.onMessage.addListener(async (message) => {
       if (nativePort !== connectedPort) {
         return;
@@ -1441,6 +1454,20 @@ export function connectNativeHost(): boolean {
         }
       }
 
+      if (message.type === NativeMessageType.CANCEL_REQUEST) {
+        const requestId = message.payload?.requestId;
+        if (
+          typeof requestId === "string" &&
+          requestId.length > 0 &&
+          isUtf8LengthAtMost(requestId, MAX_NATIVE_TOOL_REQUEST_ID_BYTES)
+        ) {
+          activeToolRequests.get(requestId)?.abort();
+        }
+        // Cancellation is idempotent. Unknown, completed, and malformed
+        // request IDs do not create state or generate another response.
+        return;
+      }
+
       if (
         message.type === NativeMessageType.PROCESS_DATA &&
         message.requestId
@@ -1456,53 +1483,117 @@ export function connectNativeHost(): boolean {
             data: requestPayload,
           },
         });
-      } else if (
-        message.type === NativeMessageType.CALL_TOOL &&
-        message.requestId
-      ) {
-        const requestId = message.requestId;
-        try {
-          const payload = (message.payload || {}) as {
-            name?: string;
-            args?: any;
-            meta?: {
-              mcpSessionId?: string;
-              instanceId?: string;
-              clientCapabilities?:
-                | string[]
-                | {
-                    toolListChanged?: boolean;
-                    resourceReferences?: boolean;
-                    cancellation?: boolean;
-                    structuredErrors?: boolean;
-                    largeResults?: boolean;
-                    source?: string;
-                    warnings?: string[];
-                  };
-            };
-          };
-          const result = await handleCallTool({
-            name: String(payload.name || ""),
-            args: payload.args,
-            meta: { ...payload.meta, source: "mcp" },
-          });
-          postOnConnectedPort({
-            responseToRequestId: requestId,
-            payload: {
-              status: "success",
-              message: SUCCESS_MESSAGES.TOOL_EXECUTED,
-              data: result,
-            },
-          });
-        } catch (error) {
+      } else if (message.type === NativeMessageType.CALL_TOOL) {
+        const requestId =
+          typeof message.requestId === "string" ? message.requestId : "";
+        if (
+          !requestId ||
+          !isUtf8LengthAtMost(requestId, MAX_NATIVE_TOOL_REQUEST_ID_BYTES)
+        ) {
+          return;
+        }
+        if (activeToolRequests.has(requestId)) {
           postOnConnectedPort({
             responseToRequestId: requestId,
             payload: {
               status: "error",
               message: ERROR_MESSAGES.TOOL_EXECUTION_FAILED,
-              error: error instanceof Error ? error.message : String(error),
+              error: "Duplicate native tool request ID",
             },
           });
+          return;
+        }
+        if (activeToolRequests.size >= MAX_ACTIVE_NATIVE_TOOL_REQUESTS) {
+          postOnConnectedPort({
+            responseToRequestId: requestId,
+            payload: {
+              status: "error",
+              message: ERROR_MESSAGES.TOOL_EXECUTION_FAILED,
+              error: "Too many active native tool requests",
+            },
+          });
+          return;
+        }
+
+        const controller = new AbortController();
+        activeToolRequests.set(requestId, controller);
+        const payload = (message.payload || {}) as {
+          name?: string;
+          args?: any;
+          meta?: {
+            mcpSessionId?: string;
+            instanceId?: string;
+            clientCapabilities?:
+              | string[]
+              | {
+                  toolListChanged?: boolean;
+                  resourceReferences?: boolean;
+                  cancellation?: boolean;
+                  structuredErrors?: boolean;
+                  largeResults?: boolean;
+                  source?: string;
+                  warnings?: string[];
+                };
+          };
+        };
+
+        type ToolOutcome =
+          | { kind: "success"; result: unknown }
+          | { kind: "error"; error: unknown }
+          | { kind: "aborted" };
+        let removeAbortListener = (): void => {};
+        const abortOutcome = new Promise<ToolOutcome>((resolve) => {
+          const handleAbort = (): void => resolve({ kind: "aborted" });
+          if (controller.signal.aborted) {
+            handleAbort();
+            return;
+          }
+          controller.signal.addEventListener("abort", handleAbort, {
+            once: true,
+          });
+          removeAbortListener = () =>
+            controller.signal.removeEventListener("abort", handleAbort);
+        });
+        const toolOutcome = handleCallTool({
+          name: String(payload.name || ""),
+          args: payload.args,
+          meta: { ...payload.meta, source: "mcp" },
+          signal: controller.signal,
+        }).then<ToolOutcome, ToolOutcome>(
+          (result) => ({ kind: "success", result }),
+          (error) => ({ kind: "error", error }),
+        );
+
+        try {
+          const outcome = await Promise.race([toolOutcome, abortOutcome]);
+          if (outcome.kind === "aborted" || controller.signal.aborted) return;
+          if (outcome.kind === "success") {
+            postOnConnectedPort({
+              responseToRequestId: requestId,
+              payload: {
+                status: "success",
+                message: SUCCESS_MESSAGES.TOOL_EXECUTED,
+                data: outcome.result,
+              },
+            });
+          } else {
+            postOnConnectedPort({
+              responseToRequestId: requestId,
+              payload: {
+                status: "error",
+                message: ERROR_MESSAGES.TOOL_EXECUTION_FAILED,
+                error:
+                  outcome.error instanceof Error
+                    ? outcome.error.message
+                    : String(outcome.error),
+              },
+            });
+          }
+        } finally {
+          removeAbortListener();
+          if (activeToolRequests.get(requestId) === controller) {
+            activeToolRequests.delete(requestId);
+          }
         }
       } else if (
         message.type === "rr_list_published_flows" &&
@@ -1601,6 +1692,7 @@ export function connectNativeHost(): boolean {
     });
 
     connectedPort.onDisconnect.addListener(() => {
+      abortActiveToolRequests();
       if (nativePort !== connectedPort) {
         return;
       }
