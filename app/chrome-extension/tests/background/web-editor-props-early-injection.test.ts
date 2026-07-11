@@ -1,10 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('Web Editor props early injection registry', () => {
   let sessionData: Record<string, unknown>;
   let registeredScripts: Map<string, chrome.scripting.RegisteredContentScript>;
   let tabsById: Map<number, chrome.tabs.Tab>;
   let unregisterContentScripts: ReturnType<typeof vi.fn>;
+  let executeScript: ReturnType<typeof vi.fn>;
   let addNavigationListener: ReturnType<typeof vi.fn>;
   let addTabReplacedListener: ReturnType<typeof vi.fn>;
 
@@ -34,6 +37,14 @@ describe('Web Editor props early injection registry', () => {
         registeredScripts.delete(id);
       }
     });
+    executeScript = vi.fn(async (options: any) => [
+      {
+        frameId: 0,
+        documentId:
+          options.target.documentIds?.[0] ?? 'current-top-document',
+        result: undefined,
+      },
+    ]);
 
     chrome.storage.session = {
       get: vi.fn(async (keys?: string | string[] | null) => {
@@ -66,6 +77,7 @@ describe('Web Editor props early injection registry', () => {
         },
       ),
       unregisterContentScripts,
+      executeScript,
     } as unknown as typeof chrome.scripting;
 
     chrome.tabs.get = vi.fn(async (tabId: number) => {
@@ -73,6 +85,7 @@ describe('Web Editor props early injection registry', () => {
       if (!tab) throw new Error(`No tab with id ${tabId}`);
       return tab;
     });
+    chrome.tabs.query = vi.fn(async () => Array.from(tabsById.values()));
     chrome.webNavigation.onCommitted.addListener = addNavigationListener;
     Object.assign(chrome.webNavigation, {
       onTabReplaced: {
@@ -80,6 +93,11 @@ describe('Web Editor props early injection registry', () => {
         removeListener: vi.fn(),
       },
     });
+  });
+
+  afterEach(() => {
+    delete (window as any).__MCP_WEB_EDITOR_PROPS_AGENT__;
+    delete (window as any).__REACT_DEVTOOLS_GLOBAL_HOOK__;
   });
 
   it('registers only for the current browser session and records the requesting tab', async () => {
@@ -312,6 +330,52 @@ describe('Web Editor props early injection registry', () => {
     expect(unregisterContentScripts).toHaveBeenCalledWith({ ids: [registration.id] });
   });
 
+  it('retires an untracked legacy agent on every exact top-level document commit', async () => {
+    const propsInjection = await import(
+      '@/entrypoints/background/web-editor/props-early-injection'
+    );
+    propsInjection.initPropsAgentEarlyInjectionNavigationLifecycle();
+    const listener = addNavigationListener.mock.calls[0]?.[0] as
+      | ((details: chrome.webNavigation.WebNavigationTransitionCallbackDetails) => void)
+      | undefined;
+
+    listener?.({
+      tabId: 44,
+      frameId: 0,
+      documentId: 'new-document',
+      url: 'https://untracked.example/current',
+    } as chrome.webNavigation.WebNavigationTransitionCallbackDetails);
+    await vi.waitFor(() => expect(executeScript).toHaveBeenCalledOnce());
+
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 44, documentIds: ['new-document'] },
+        world: 'MAIN',
+      }),
+    );
+  });
+
+  it('does not attempt MAIN retirement on an unscriptable top-level URL', async () => {
+    const propsInjection = await import(
+      '@/entrypoints/background/web-editor/props-early-injection'
+    );
+    propsInjection.initPropsAgentEarlyInjectionNavigationLifecycle();
+    const listener = addNavigationListener.mock.calls[0]?.[0] as
+      | ((details: chrome.webNavigation.WebNavigationTransitionCallbackDetails) => void)
+      | undefined;
+
+    listener?.({
+      tabId: 44,
+      frameId: 0,
+      documentId: 'browser-document',
+      url: 'chrome://settings/',
+    } as chrome.webNavigation.WebNavigationTransitionCallbackDetails);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).not.toHaveBeenCalled();
+  });
+
   it('releases ownership when Chrome replaces the tab document', async () => {
     const propsInjection = await import(
       '@/entrypoints/background/web-editor/props-early-injection'
@@ -344,7 +408,7 @@ describe('Web Editor props early injection registry', () => {
     registeredScripts.set('mcp_we_props_early_orphan_example', {
       id: 'mcp_we_props_early_orphan_example',
       matches: ['*://orphan.example/*'],
-      js: ['inject-scripts/props-agent.js'],
+      js: ['inject-scripts/props-hook-bootstrap.js'],
     });
     registeredScripts.set('unrelated-script', {
       id: 'unrelated-script',
@@ -363,5 +427,166 @@ describe('Web Editor props early injection registry', () => {
     });
     expect(registeredScripts.has(kept.id)).toBe(true);
     expect(registeredScripts.has('unrelated-script')).toBe(true);
+  });
+
+  it('replaces stale legacy registration settings with the exact bootstrap config', async () => {
+    tabsById.set(21, {
+      id: 21,
+      url: 'https://stale.example/current',
+    } as chrome.tabs.Tab);
+    const propsInjection = await import(
+      '@/entrypoints/background/web-editor/props-early-injection'
+    );
+    const registration = await propsInjection.registerPropsAgentEarlyInjection(
+      21,
+      'https://stale.example/editor',
+    );
+    registeredScripts.set(registration.id, {
+      id: registration.id,
+      js: ['inject-scripts/props-agent.js'],
+      matches: ['*://stale.example/*'],
+      runAt: 'document_idle',
+      world: 'ISOLATED',
+      allFrames: true,
+      matchOriginAsFallback: true,
+      persistAcrossSessions: true,
+    });
+    unregisterContentScripts.mockClear();
+    vi.mocked(chrome.scripting.registerContentScripts).mockClear();
+
+    await propsInjection.pruneOrphanedPropsAgentEarlyInjections();
+
+    expect(unregisterContentScripts).toHaveBeenCalledWith({
+      ids: [registration.id],
+    });
+    expect(chrome.scripting.registerContentScripts).toHaveBeenCalledWith([
+      {
+        id: registration.id,
+        js: ['inject-scripts/props-hook-bootstrap.js'],
+        matches: ['*://stale.example/*'],
+        runAt: 'document_start',
+        world: 'MAIN',
+        allFrames: false,
+        matchOriginAsFallback: false,
+        persistAcrossSessions: false,
+      },
+    ]);
+  });
+
+  it('retires legacy agents in open http tabs without an early-injection record', async () => {
+    tabsById.set(31, {
+      id: 31,
+      url: 'https://ordinary.example/current',
+    } as chrome.tabs.Tab);
+    tabsById.set(32, {
+      id: 32,
+      url: 'https://discarded.example/current',
+      discarded: true,
+    } as chrome.tabs.Tab);
+    tabsById.set(33, {
+      id: 33,
+      url: 'chrome://settings/',
+    } as chrome.tabs.Tab);
+    const { pruneOrphanedPropsAgentEarlyInjections } = await import(
+      '@/entrypoints/background/web-editor/props-early-injection'
+    );
+
+    await pruneOrphanedPropsAgentEarlyInjections();
+
+    expect(executeScript).toHaveBeenCalledOnce();
+    expect(executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 31, frameIds: [0] },
+        world: 'MAIN',
+        func: expect.any(Function),
+      }),
+    );
+    expect(sessionData['web-editor-props-legacy-retirement-version']).toBe(2);
+  });
+
+  it('marks the migration only after a successful sweep and retries failures', async () => {
+    tabsById.set(31, {
+      id: 31,
+      url: 'https://retry.example/current',
+    } as chrome.tabs.Tab);
+    executeScript.mockResolvedValueOnce([]);
+    const propsInjection = await import(
+      '@/entrypoints/background/web-editor/props-early-injection'
+    );
+
+    await expect(
+      propsInjection.pruneOrphanedPropsAgentEarlyInjections(),
+    ).rejects.toThrow('must be retried');
+    expect(sessionData['web-editor-props-legacy-retirement-version']).toBeUndefined();
+
+    await propsInjection.pruneOrphanedPropsAgentEarlyInjections();
+    expect(executeScript).toHaveBeenCalledTimes(2);
+    expect(sessionData['web-editor-props-legacy-retirement-version']).toBe(2);
+  });
+
+  it('times out a stuck sweep without blocking operational registration', async () => {
+    vi.useFakeTimers();
+    try {
+      tabsById.set(31, {
+        id: 31,
+        url: 'https://stuck.example/current',
+      } as chrome.tabs.Tab);
+      executeScript.mockReturnValueOnce(new Promise(() => {}));
+      const propsInjection = await import(
+        '@/entrypoints/background/web-editor/props-early-injection'
+      );
+
+      const pruning = propsInjection.pruneOrphanedPropsAgentEarlyInjections();
+      const pruningRejection = expect(pruning).rejects.toThrow('must be retried');
+      await vi.waitFor(() => expect(executeScript).toHaveBeenCalledOnce());
+      await expect(
+        propsInjection.registerPropsAgentEarlyInjection(
+          32,
+          'https://operational.example/editor',
+        ),
+      ).resolves.toMatchObject({ host: 'operational.example' });
+
+      await vi.advanceTimersByTimeAsync(1_500);
+      await pruningRejection;
+      await expect(
+        propsInjection.releasePropsAgentEarlyInjection(32),
+      ).resolves.toBeUndefined();
+      expect(
+        sessionData['web-editor-props-legacy-retirement-version'],
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('makes the actual bootstrap safe in both legacy/new injection orders', () => {
+    const bootstrap = readFileSync(
+      join(process.cwd(), 'inject-scripts', 'props-hook-bootstrap.js'),
+      'utf8',
+    );
+    const runBootstrap = () => Function(bootstrap)();
+    const dispose = vi.fn(() => {
+      throw new Error('legacy dispose failure');
+    });
+    const cleanup = vi.fn();
+    window.addEventListener('web-editor-props:cleanup', cleanup, { once: true });
+    (window as any).__MCP_WEB_EDITOR_PROPS_AGENT__ = { version: 1, dispose };
+
+    runBootstrap();
+
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(cleanup).toHaveBeenCalledOnce();
+    const sentinel = (window as any).__MCP_WEB_EDITOR_PROPS_AGENT__;
+    expect(sentinel).toEqual({ version: 2, transport: 'background-only' });
+    expect(Object.isFrozen(sentinel)).toBe(true);
+
+    delete (window as any).__MCP_WEB_EDITOR_PROPS_AGENT__;
+    runBootstrap();
+    let legacyInstalled = false;
+    (() => {
+      if ((window as any).__MCP_WEB_EDITOR_PROPS_AGENT__) return;
+      legacyInstalled = true;
+    })();
+    expect(legacyInstalled).toBe(false);
   });
 });

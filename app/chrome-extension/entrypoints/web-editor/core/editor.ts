@@ -1366,7 +1366,7 @@ export function createWebEditor(): WebEditorApi {
       });
 
       // Initialize Props Bridge (Phase 7)
-      state.propsBridge = createPropsBridge({});
+      state.propsBridge = createPropsBridge({ surfaceSessionId });
 
       // Initialize Design Tokens Service (Phase 5.3)
       state.tokensService = createDesignTokensService();

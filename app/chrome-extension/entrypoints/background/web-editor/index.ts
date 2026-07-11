@@ -42,7 +42,9 @@ import {
   pruneOrphanedPropsAgentEarlyInjections,
   registerPropsAgentEarlyInjection,
   releasePropsAgentEarlyInjection,
+  retireLegacyPropsAgentInTab,
 } from "./props-early-injection";
+import { executeWebEditorPropsRpc } from "./props-rpc";
 import {
   ExecutionStatusCache,
   WEB_EDITOR_STATUS_CACHE_TTL_MS,
@@ -72,6 +74,7 @@ const COMMAND_KEY = "toggle_web_editor";
 
 const WEB_EDITOR_CONTENT_MESSAGE_TYPES = new Set<string>([
   BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_EXECUTE,
   BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE,
   BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
   BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
@@ -990,9 +993,6 @@ async function recoverWebEditorRequests(): Promise<void> {
 /** Script path for the active editor runtime (WXT unlisted script output). */
 const WEB_EDITOR_SCRIPT_PATH = "web-editor.js";
 
-/** Script path for Phase 7 props agent (MAIN world). */
-const PROPS_AGENT_SCRIPT_PATH = "inject-scripts/props-agent.js";
-
 /**
  * Build a batch prompt for multiple element changes.
  * Designed for Agent session integration to apply multiple visual edits at once.
@@ -1355,19 +1355,6 @@ async function ensureEditorInjected(tabId: number): Promise<void> {
   }
 }
 
-/** Inject the existing props agent before the editor starts. */
-async function ensurePropsAgentInjected(tabId: number): Promise<void> {
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: [PROPS_AGENT_SCRIPT_PATH],
-      world: "MAIN",
-    });
-  } catch (error) {
-    console.warn("[WebEditor] Failed to inject props agent:", error);
-  }
-}
-
 async function toggleEditorInTabUnlocked(tabId: number): Promise<{ active?: boolean }> {
   await ensureEditorInjected(tabId);
   let startedSurfaceSessionId: string | null = null;
@@ -1392,7 +1379,13 @@ async function toggleEditorInTabUnlocked(tabId: number): Promise<{ active?: bool
       return { active: false };
     }
 
-    await ensurePropsAgentInjected(tabId);
+    const legacyAgentRetired = await retireLegacyPropsAgentInTab(tabId);
+    if (!legacyAgentRetired) {
+      console.warn(
+        "[WebEditor] Refusing to start while a legacy MAIN-world props agent may still be active",
+      );
+      return { active: false };
+    }
 
     const privilegedSurfaceSessionId = await startPrivilegedUiSurfaceSession(
       PRIVILEGED_UI_SURFACES.WEB_EDITOR,
@@ -1576,6 +1569,20 @@ export function initWebEditorListeners(): void {
           error: "Web Editor control requires an extension page",
         });
         return false;
+      }
+
+      // Execute one bounded props operation in the authenticated sender document.
+      if (message?.type === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_EXECUTE) {
+        void executeWebEditorPropsRpc(
+          message,
+          _sender as chrome.runtime.MessageSender,
+        ).then(sendResponse, () =>
+          sendResponse({
+            success: false,
+            error: "Unable to handle Web Editor props request.",
+          }),
+        );
+        return true;
       }
 
       // Phase 7.1.6: Handle early injection registration request

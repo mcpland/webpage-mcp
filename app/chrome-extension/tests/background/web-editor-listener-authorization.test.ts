@@ -8,6 +8,7 @@ const nativeHostMocks = vi.hoisted(() => ({
 }));
 const authorizationMocks = vi.hoisted(() => ({
   consumePrivilegedUiAuthorization: vi.fn(),
+  validatePrivilegedUiSurfaceSession: vi.fn(),
   startPrivilegedUiSurfaceSession: vi.fn(),
   stopPrivilegedUiSurfaceSession: vi.fn(),
 }));
@@ -17,6 +18,7 @@ const propsInjectionMocks = vi.hoisted(() => ({
   pruneOrphanedPropsAgentEarlyInjections: vi.fn(),
   registerPropsAgentEarlyInjection: vi.fn(),
   releasePropsAgentEarlyInjection: vi.fn(),
+  retireLegacyPropsAgentInTab: vi.fn(),
 }));
 
 vi.mock('@/entrypoints/background/native-host', () => nativeHostMocks);
@@ -40,11 +42,13 @@ describe('Web Editor listener role authorization', () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    authorizationMocks.validatePrivilegedUiSurfaceSession.mockResolvedValue(true);
     authorizationMocks.startPrivilegedUiSurfaceSession.mockResolvedValue('a'.repeat(64));
-    authorizationMocks.stopPrivilegedUiSurfaceSession.mockResolvedValue(undefined);
+    authorizationMocks.stopPrivilegedUiSurfaceSession.mockResolvedValue(true);
     propsInjectionMocks.pruneOrphanedPropsAgentEarlyInjections.mockResolvedValue(undefined);
     propsInjectionMocks.registerPropsAgentEarlyInjection.mockResolvedValue({ id: 'script-1' });
     propsInjectionMocks.releasePropsAgentEarlyInjection.mockResolvedValue(undefined);
+    propsInjectionMocks.retireLegacyPropsAgentInTab.mockResolvedValue(true);
 
     Object.assign(chrome.runtime, {
       id: 'test-extension-id',
@@ -68,13 +72,32 @@ describe('Web Editor listener role authorization', () => {
       chrome as unknown as {
         scripting: { executeScript: ReturnType<typeof vi.fn> };
       }
-    ).scripting = { executeScript: vi.fn().mockResolvedValue([]) };
+    ).scripting = {
+      executeScript: vi.fn(async (options: any) => {
+        const request = options.args[0];
+        return [
+          {
+            frameId: 0,
+            documentId: options.target.documentIds[0],
+            result: {
+              response: {
+                v: 1,
+                requestId: request.requestId,
+                success: true,
+              },
+            },
+          },
+        ];
+      }),
+    };
     vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation((candidate) => {
       requestListener = candidate as RequestListener;
     });
-    vi.mocked(chrome.commands.onCommand.addListener).mockImplementation((candidate) => {
-      commandListener = candidate as (command: string) => Promise<void>;
-    });
+    vi.mocked(chrome.commands.onCommand.addListener).mockImplementation(
+      (candidate) => {
+        commandListener = candidate as (command: string) => Promise<void>;
+      },
+    );
 
     const { initWebEditorListeners } = await import('@/entrypoints/background/web-editor');
     initWebEditorListeners();
@@ -128,6 +151,7 @@ describe('Web Editor listener role authorization', () => {
 
   it.each([
     BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION,
+    BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_EXECUTE,
     BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE,
     BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
     BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
@@ -175,6 +199,32 @@ describe('Web Editor listener role authorization', () => {
     );
   });
 
+  it('routes an authenticated props operation only to the sender document', async () => {
+    const sendResponse = vi.fn();
+    expect(
+      requestListener(
+        {
+          type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_EXECUTE,
+          surfaceSessionId: 'a'.repeat(64),
+          request: { v: 1, requestId: 'request-1', op: 'probe' },
+        },
+        contentSender(),
+        sendResponse,
+      ),
+    ).toBe(true);
+    await vi.waitFor(() =>
+      expect(sendResponse).toHaveBeenCalledWith(
+        expect.objectContaining({ success: true }),
+      ),
+    );
+    expect(chrome.scripting.executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { tabId: 7, documentIds: ['document-a'] },
+        world: 'MAIN',
+      }),
+    );
+  });
+
   it('ignores background rebroadcasts of hydrated editor state', () => {
     const sendResponse = vi.fn();
     expect(
@@ -203,8 +253,12 @@ describe('Web Editor listener role authorization', () => {
           if (pingCount === 3) return Promise.resolve({ status: 'pong' });
           return Promise.resolve({ status: 'pong', active: true });
         }
-        if (message.action === 'web_editor_start') return Promise.resolve({ active: true });
-        if (message.action === 'web_editor_stop') return Promise.resolve({ active: false });
+        if (message.action === 'web_editor_start') {
+          return Promise.resolve({ active: true });
+        }
+        if (message.action === 'web_editor_stop') {
+          return Promise.resolve({ active: false });
+        }
         return Promise.resolve({});
       }) as typeof chrome.tabs.sendMessage,
     );
@@ -220,5 +274,43 @@ describe('Web Editor listener role authorization', () => {
     expect(pingCount).toBe(4);
     expect(authorizationMocks.startPrivilegedUiSurfaceSession).toHaveBeenCalledOnce();
     expect(authorizationMocks.stopPrivilegedUiSurfaceSession).toHaveBeenCalledOnce();
+  });
+
+  it('refuses to start when legacy MAIN-world retirement is unconfirmed', async () => {
+    propsInjectionMocks.retireLegacyPropsAgentInTab.mockResolvedValueOnce(false);
+    vi.mocked(chrome.tabs.sendMessage)
+      .mockResolvedValueOnce({ status: 'pong' })
+      .mockResolvedValueOnce({ status: 'pong', active: false });
+
+    await commandListener('toggle_web_editor');
+
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(2);
+    expect(authorizationMocks.startPrivilegedUiSurfaceSession).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(chrome.tabs.sendMessage).mock.calls.some(
+        ([, message]) => (message as { action?: string }).action === 'web_editor_start',
+      ),
+    ).toBe(false);
+  });
+
+  it('still stops an active editor when legacy retirement is unavailable', async () => {
+    propsInjectionMocks.retireLegacyPropsAgentInTab.mockResolvedValueOnce(false);
+    vi.mocked(chrome.tabs.sendMessage)
+      .mockResolvedValueOnce({ status: 'pong' })
+      .mockResolvedValueOnce({ status: 'pong', active: true })
+      .mockResolvedValueOnce({ active: false });
+
+    await commandListener('toggle_web_editor');
+
+    expect(chrome.tabs.sendMessage).toHaveBeenLastCalledWith(
+      7,
+      { action: 'web_editor_stop' },
+      { frameId: 0 },
+    );
+    expect(authorizationMocks.stopPrivilegedUiSurfaceSession).toHaveBeenCalledWith(
+      'web_editor',
+      7,
+    );
+    expect(propsInjectionMocks.retireLegacyPropsAgentInTab).not.toHaveBeenCalled();
   });
 });

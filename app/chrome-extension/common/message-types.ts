@@ -92,6 +92,7 @@ export const BACKGROUND_MESSAGE_TYPES = {
   // Web editor props (Phase 7.1.6 early injection)
   WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION:
     "web_editor_props_register_early_injection",
+  WEB_EDITOR_PROPS_EXECUTE: "web_editor_props_execute",
   // Web editor props - open source file in VSCode
   WEB_EDITOR_OPEN_SOURCE: "web_editor_open_source",
   // Quick Panel <-> AgentChat integration

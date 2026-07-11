@@ -1,38 +1,19 @@
-/* eslint-disable */
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 /**
- * Props Agent - MAIN World Script
+ * Execute one bounded props operation in the page MAIN world.
  *
- * Runtime hacking agent for React props editing.
- * Communicates with ISOLATED world via CustomEvent.
- *
- * Architecture:
- * - Transport: CustomEvent-based request/response
- * - Locator: Simplified ElementLocator resolution
- * - ReactAdapter: DevTools Hook detection/injection + overrideProps
- * - Serializer: Safe Props serialization with type preservation
- * - Handlers: Request operation dispatch
- *
- * @module props-agent
+ * Keep this function closure-free: Chrome serializes it for executeScript.
+ * No page-visible command listener or long-lived MAIN-world capability exists.
  */
-(() => {
+export function executePropsOperationInMain(request: unknown): unknown {
   'use strict';
 
   // =============================================================================
   // Constants & Guards
   // =============================================================================
 
-  const GLOBAL_KEY = '__MCP_WEB_EDITOR_PROPS_AGENT__';
-  if (window[GLOBAL_KEY]) return;
-
   const PROTOCOL_VERSION = 1;
-  const LOG_PREFIX = '[PropsAgent]';
-
-  const EVENT_NAME = Object.freeze({
-    REQUEST: 'web-editor-props:request',
-    RESPONSE: 'web-editor-props:response',
-    CLEANUP: 'web-editor-props:cleanup',
-  });
 
   const REACT_HOOK_NAME = '__REACT_DEVTOOLS_GLOBAL_HOOK__';
 
@@ -54,8 +35,10 @@
     maxPropPathBytes: 4 * 1024,
     maxPropSegmentBytes: 512,
     maxValueBytes: 16 * 1024,
+    maxStateDeltaBytes: 48 * 1024,
+    maxResetOriginals: 64,
   });
-  const SUPPORTED_OPERATIONS = new Set(['probe', 'read', 'write', 'reset', 'cleanup']);
+  const SUPPORTED_OPERATIONS = new Set(['probe', 'read', 'write', 'reset']);
   const NATIVE_ELEMENT_MATCHES = Element.prototype.matches;
 
   /** @type {'READY' | 'HOOK_PRESENT_NO_RENDERERS' | 'RENDERERS_NO_EDITING' | 'HOOK_MISSING'} */
@@ -71,6 +54,7 @@
     maxEntries: 100,
     maxArrayLength: 50,
     maxStringLength: 1500,
+    maxStringBytes: 4 * 1024,
     maxKeyBytes: 512,
     maxNodes: 2000,
     maxBytes: 192 * 1024,
@@ -117,8 +101,14 @@
     let bytes = 0;
     let codeUnits = 0;
     for (const character of input) {
-      const characterBytes = utf8BytesForCodePoint(character.codePointAt(0) || 0);
-      if (bytes + characterBytes > maxBytes || codeUnits + character.length > maxCodeUnits) break;
+      const characterBytes = utf8BytesForCodePoint(
+        character.codePointAt(0) || 0,
+      );
+      if (
+        bytes + characterBytes > maxBytes ||
+        codeUnits + character.length > maxCodeUnits
+      )
+        break;
       output += character;
       bytes += characterBytes;
       codeUnits += character.length;
@@ -126,41 +116,11 @@
     return output;
   }
 
-  function logWarn(...args) {
-    try {
-      console.warn(LOG_PREFIX, ...args);
-    } catch {
-      // Silently ignore
-    }
-  }
-
   // =============================================================================
   // Transport Layer
   // =============================================================================
 
   const Transport = {
-    dispatchResponse(detail) {
-      try {
-        let response = detail;
-        const encoded = JSON.stringify(detail);
-        if (
-          typeof encoded !== 'string' ||
-          utf8ByteLength(encoded, TRANSPORT_LIMITS.maxResponseBytes) >
-            TRANSPORT_LIMITS.maxResponseBytes
-        ) {
-          response = this.createResponse(
-            truncateUtf8(detail?.requestId, TRANSPORT_LIMITS.maxRequestIdBytes),
-            false,
-            undefined,
-            'Props response exceeded the resource limit',
-          );
-        }
-        window.dispatchEvent(new CustomEvent(EVENT_NAME.RESPONSE, { detail: response }));
-      } catch (err) {
-        logWarn('Failed to dispatch response:', err);
-      }
-    },
-
     createResponse(requestId, success, data, error) {
       const response = {
         v: PROTOCOL_VERSION,
@@ -178,7 +138,8 @@
       if (!isObject(detail)) return null;
       if (detail.v !== PROTOCOL_VERSION) return null;
 
-      const requestId = typeof detail.requestId === 'string' ? detail.requestId : '';
+      const requestId =
+        typeof detail.requestId === 'string' ? detail.requestId : '';
       const op = typeof detail.op === 'string' ? detail.op : '';
       if (
         !requestId ||
@@ -190,13 +151,18 @@
       }
 
       const locator =
-        detail.locator === undefined ? undefined : Locator.copyLocatorEnvelope(detail.locator);
+        detail.locator === undefined
+          ? undefined
+          : Locator.copyLocatorEnvelope(detail.locator);
       if (detail.locator !== undefined && !locator) return null;
-      if ((op === 'read' || op === 'write' || op === 'reset') && !locator) return null;
+      if (Array.isArray(locator?.frameChain) && locator.frameChain.length > 0) return null;
+      if ((op === 'read' || op === 'write' || op === 'reset') && !locator)
+        return null;
 
       let payload;
       if (op === 'write') {
         if (!isObject(detail.payload)) return null;
+        if (typeof detail.payload.captureOriginal !== 'boolean') return null;
         const propPath = normalizePropPath(detail.payload.propPath);
         if (!propPath) return null;
         const propValue = detail.payload.propValue;
@@ -211,8 +177,81 @@
         }
         payload = {
           propPath,
-          propValue: decodedValue === undefined ? { $we: 'undefined' } : decodedValue,
+          propValue:
+            decodedValue === undefined ? { $we: 'undefined' } : decodedValue,
+          captureOriginal: detail.payload.captureOriginal === true,
+          expectedTargetGuard:
+            typeof detail.payload.expectedTargetGuard === 'string'
+              ? detail.payload.expectedTargetGuard
+              : undefined,
+          stateBudgetBytes:
+            Number.isSafeInteger(detail.payload.stateBudgetBytes) &&
+            detail.payload.stateBudgetBytes >= 0 &&
+            detail.payload.stateBudgetBytes <=
+              TRANSPORT_LIMITS.maxStateDeltaBytes
+              ? detail.payload.stateBudgetBytes
+              : -1,
         };
+        if (payload.captureOriginal && payload.stateBudgetBytes <= 0)
+          return null;
+        if (!payload.captureOriginal && payload.stateBudgetBytes !== 0)
+          return null;
+        if (
+          (payload.expectedTargetGuard !== undefined &&
+            (!payload.expectedTargetGuard ||
+              utf8ByteLength(payload.expectedTargetGuard, 512) > 512)) ||
+          (!payload.captureOriginal && !payload.expectedTargetGuard)
+        ) {
+          return null;
+        }
+      } else if (op === 'reset') {
+        if (
+          !isObject(detail.payload) ||
+          !Array.isArray(detail.payload.originals)
+        )
+          return null;
+        if (
+          detail.payload.originals.length === 0 ||
+          detail.payload.originals.length > TRANSPORT_LIMITS.maxResetOriginals
+        ) {
+          return null;
+        }
+        const originals = [];
+        const originalIndexes = new Set();
+        for (const rawEntry of detail.payload.originals) {
+          if (!isObject(rawEntry)) return null;
+          const index = rawEntry.index;
+          const path = normalizePropPath(rawEntry.path);
+          const decodedValue = decodeIncomingValue(rawEntry.encodedValue);
+          const componentGuard = rawEntry.componentGuard;
+          if (
+            !Number.isSafeInteger(index) ||
+            index < 0 ||
+            index >= detail.payload.originals.length ||
+            originalIndexes.has(index) ||
+            !path ||
+            !Serializer.isEditablePrimitive(decodedValue) ||
+            (typeof decodedValue === 'string' &&
+              utf8ByteLength(decodedValue, TRANSPORT_LIMITS.maxStateDeltaBytes) >
+                TRANSPORT_LIMITS.maxStateDeltaBytes) ||
+            typeof rawEntry.existed !== 'boolean' ||
+            typeof componentGuard !== 'string' ||
+            !componentGuard ||
+            utf8ByteLength(componentGuard, 512) > 512
+          ) {
+            return null;
+          }
+          originalIndexes.add(index);
+          originals.push({
+            index,
+            path,
+            encodedValue:
+              decodedValue === undefined ? { $we: 'undefined' } : decodedValue,
+            existed: rawEntry.existed,
+            componentGuard,
+          });
+        }
+        payload = { originals };
       }
 
       const request = {
@@ -327,7 +366,9 @@
     computeFingerprint(element) {
       try {
         const parts = [];
-        const tag = element?.tagName ? String(element.tagName).toLowerCase() : 'unknown';
+        const tag = element?.tagName
+          ? String(element.tagName).toLowerCase()
+          : 'unknown';
         parts.push(tag);
         const id = element?.id ? String(element.id).trim() : '';
         if (id) parts.push(`id=${id}`);
@@ -370,7 +411,10 @@
 
     normalizeLocator(value) {
       if (!isObject(value)) return null;
-      const selectors = this.normalizeStringArray(value.selectors || [], LOCATOR_LIMITS.maxSelectors);
+      const selectors = this.normalizeStringArray(
+        value.selectors || [],
+        LOCATOR_LIMITS.maxSelectors,
+      );
       const shadowHostChain = this.normalizeStringArray(
         value.shadowHostChain || [],
         LOCATOR_LIMITS.maxShadowHosts,
@@ -379,9 +423,16 @@
         value.frameChain || [],
         LOCATOR_LIMITS.maxShadowHosts,
       );
-      if (!selectors || selectors.length === 0 || !shadowHostChain || !frameChain) return null;
+      if (
+        !selectors ||
+        selectors.length === 0 ||
+        !shadowHostChain ||
+        !frameChain
+      )
+        return null;
 
-      const fingerprint = typeof value.fingerprint === 'string' ? value.fingerprint : '';
+      const fingerprint =
+        typeof value.fingerprint === 'string' ? value.fingerprint : '';
       if (
         utf8ByteLength(fingerprint, LOCATOR_LIMITS.maxSelectorBytes) >
         LOCATOR_LIMITS.maxSelectorBytes
@@ -390,10 +441,12 @@
       }
 
       const rawPath = value.path === undefined ? [] : value.path;
-      if (!Array.isArray(rawPath) || rawPath.length > LOCATOR_LIMITS.maxDepth) return null;
+      if (!Array.isArray(rawPath) || rawPath.length > LOCATOR_LIMITS.maxDepth)
+        return null;
       const path = [];
       for (const index of rawPath) {
-        if (!Number.isSafeInteger(index) || index < 0 || index > 1000000) return null;
+        if (!Number.isSafeInteger(index) || index < 0 || index > 1000000)
+          return null;
         path.push(index);
       }
 
@@ -403,17 +456,24 @@
     copyLocatorEnvelope(value) {
       if (!isObject(value)) return null;
       const copyArray = (candidate, maximum) => {
-        if (!Array.isArray(candidate) || candidate.length > maximum) return null;
+        if (!Array.isArray(candidate) || candidate.length > maximum)
+          return null;
         const output = [];
         for (const item of candidate) output.push(item);
         return output;
       };
-      const selectors = copyArray(value.selectors || [], LOCATOR_LIMITS.maxSelectors);
+      const selectors = copyArray(
+        value.selectors || [],
+        LOCATOR_LIMITS.maxSelectors,
+      );
       const shadowHostChain = copyArray(
         value.shadowHostChain || [],
         LOCATOR_LIMITS.maxShadowHosts,
       );
-      const frameChain = copyArray(value.frameChain || [], LOCATOR_LIMITS.maxShadowHosts);
+      const frameChain = copyArray(
+        value.frameChain || [],
+        LOCATOR_LIMITS.maxShadowHosts,
+      );
       const path = copyArray(value.path || [], LOCATOR_LIMITS.maxDepth);
       if (!selectors || !shadowHostChain || !frameChain || !path) return null;
       return {
@@ -479,9 +539,6 @@
   // =============================================================================
 
   const ReactAdapter = {
-    /** Store original values for reset (fiber -> { renderer, originals: Map }) */
-    overrideStore: typeof WeakMap === 'function' ? new WeakMap() : null,
-
     /** Flag to avoid repeated hook installation attempts */
     hookInstallAttempted: false,
 
@@ -692,7 +749,10 @@
           if (inspected >= 256) break;
           if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
           inspected += 1;
-          if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
+          if (
+            key.startsWith('__reactFiber$') ||
+            key.startsWith('__reactInternalInstance$')
+          ) {
             return node[key];
           }
         }
@@ -708,7 +768,14 @@
     isComponentTag(tag) {
       // 0=FunctionComponent, 1=ClassComponent, 2=IndeterminateComponent,
       // 11=ForwardRef, 14=MemoComponent, 15=SimpleMemoComponent
-      return tag === 0 || tag === 1 || tag === 2 || tag === 11 || tag === 14 || tag === 15;
+      return (
+        tag === 0 ||
+        tag === 1 ||
+        tag === 2 ||
+        tag === 11 ||
+        tag === 14 ||
+        tag === 15
+      );
     },
 
     /**
@@ -742,6 +809,162 @@
     },
 
     /**
+     * Build a bounded identity from the component's fiber ancestry. Unlike a
+     * display name, sibling indexes/keys keep same-named component instances
+     * separate while alternate fibers remain stable across renders.
+     */
+    getComponentGuard(fiber, rendererId, targetElement) {
+      try {
+        let hashA = 0x811c9dc5;
+        let hashB = 0x9e3779b9;
+        let hashedCodeUnits = 0;
+        const hashDeadline = Date.now() + 50;
+        const updateHash = (code) => {
+          hashA = Math.imul(hashA ^ code, 0x01000193) >>> 0;
+          hashB = Math.imul(hashB ^ code, 0x85ebca6b) >>> 0;
+        };
+        const mix = (value) => {
+          const text = safeString(value);
+          if (
+            text.length > 16 * 1024 ||
+            hashedCodeUnits + text.length > 512 * 1024 ||
+            Date.now() > hashDeadline
+          ) {
+            return false;
+          }
+          // Length-prefix every field; a delimiter alone could also occur in
+          // page-controlled names and source paths.
+          updateHash(typeof value === 'number' ? 1 : 2);
+          updateHash(text.length & 0xffff);
+          updateHash((text.length >>> 16) & 0xffff);
+          for (let index = 0; index < text.length; index += 1) {
+            updateHash(text.charCodeAt(index));
+          }
+          hashedCodeUnits += text.length;
+          return true;
+        };
+        const normalizedRendererId =
+          typeof rendererId === 'string' || typeof rendererId === 'number'
+            ? safeString(rendererId)
+            : 'dom-fallback';
+        if (!normalizedRendererId || normalizedRendererId.length > 128) return null;
+        if (!mix('renderer') || !mix(normalizedRendererId)) return null;
+
+        let current = fiber;
+        let rootContainer = null;
+        let ancestryDepth = 0;
+        for (; ancestryDepth < 128 && current; ancestryDepth += 1) {
+          if (!isObject(current)) return null;
+          const type = current.type || current.elementType;
+          const name =
+            typeof type === 'string'
+              ? type
+              : safeString(type?.displayName || type?.name) || 'Anonymous';
+          const hasKey =
+            typeof current.key === 'string' || typeof current.key === 'number';
+          const key = hasKey ? safeString(current.key) : '';
+          const index = Number.isSafeInteger(current.index) ? current.index : -1;
+          const source = isObject(current._debugSource) ? current._debugSource : null;
+          if (
+            !mix('fiber') ||
+            !mix(name) ||
+            !mix(hasKey ? `key:${key}` : `index:${index}`) ||
+            !mix(source && typeof source.fileName === 'string' ? source.fileName : '') ||
+            !mix(source && Number.isSafeInteger(source.lineNumber) ? source.lineNumber : 0)
+          ) {
+            return null;
+          }
+          if (current.tag === 3 && isObject(current.stateNode)) {
+            rootContainer = current.stateNode.containerInfo || null;
+          }
+          current = current.return;
+        }
+        if (current || ancestryDepth === 0) return null;
+
+        let container = rootContainer || targetElement;
+        let containerDepth = 0;
+        let siblingVisits = 0;
+        let identityVisits = 0;
+        const hasUniqueId = (element, id) => {
+          try {
+            const scope =
+              typeof element.getRootNode === 'function'
+                ? element.getRootNode()
+                : element.ownerDocument;
+            const ownerDocument = element.ownerDocument;
+            if (
+              !scope ||
+              !ownerDocument ||
+              typeof ownerDocument.createTreeWalker !== 'function'
+            ) {
+              return null;
+            }
+            let matches = 0;
+            const visit = (node) => {
+              identityVisits += 1;
+              if (identityVisits > 12000 || Date.now() > hashDeadline) {
+                return false;
+              }
+              if (node?.nodeType === 1 && safeString(node.id) === id) {
+                matches += 1;
+              }
+              return matches <= 1;
+            };
+            if (!visit(scope)) return false;
+            const walker = ownerDocument.createTreeWalker(scope, 1);
+            let node = walker.nextNode();
+            while (node) {
+              if (!visit(node)) return false;
+              node = walker.nextNode();
+            }
+            return matches === 1;
+          } catch {
+            return null;
+          }
+        };
+        for (; containerDepth < 64 && container; containerDepth += 1) {
+          if (Date.now() > hashDeadline) return null;
+          if (container.nodeType === 9) {
+            if (!mix('document')) return null;
+            container = null;
+            break;
+          }
+          const tag = safeString(container.tagName || container.nodeName).toLowerCase();
+          const id = safeString(container.id);
+          let useStableId = false;
+          if (id) {
+            const unique = hasUniqueId(container, id);
+            if (unique === null) return null;
+            useStableId = unique;
+          }
+          if (!mix('container') || !mix(tag)) return null;
+          if (useStableId) {
+            if (!mix('unique-id') || !mix(id)) return null;
+          } else {
+            let siblingIndex = 0;
+            let sibling = container.previousElementSibling;
+            while (sibling) {
+              siblingVisits += 1;
+              if (siblingVisits > 12000 || Date.now() > hashDeadline) return null;
+              siblingIndex += 1;
+              sibling = sibling.previousElementSibling;
+            }
+            if (!mix(id ? 'duplicate-id' : 'sibling-index') || !mix(id) || !mix(siblingIndex)) {
+              return null;
+            }
+          }
+          container = container.parentElement || container.host || null;
+        }
+        if (container) return null;
+        return `fiber-v1:${hashA.toString(16).padStart(8, '0')}${hashB
+          .toString(16)
+          .padStart(8, '0')}`;
+      } catch {
+        return null;
+      }
+    },
+
+    /**
      * Extract debug source from React Fiber.
      * Walks up the fiber tree checking _debugSource and _debugOwner._debugSource.
      *
@@ -755,17 +978,27 @@
           if (!isObject(current)) break;
 
           // Try direct _debugSource first
-          const src = isObject(current._debugSource) ? current._debugSource : null;
+          const src = isObject(current._debugSource)
+            ? current._debugSource
+            : null;
           if (src) {
             const file = safeString(src.fileName).trim();
             if (file) {
-              return this.buildDebugSourceResult(file, src.lineNumber, src.columnNumber, current);
+              return this.buildDebugSourceResult(
+                file,
+                src.lineNumber,
+                src.columnNumber,
+                current,
+              );
             }
           }
 
           // Fallback to _debugOwner._debugSource
-          const owner = isObject(current._debugOwner) ? current._debugOwner : null;
-          const ownerSrc = owner && isObject(owner._debugSource) ? owner._debugSource : null;
+          const owner = isObject(current._debugOwner)
+            ? current._debugOwner
+            : null;
+          const ownerSrc =
+            owner && isObject(owner._debugSource) ? owner._debugSource : null;
           if (ownerSrc) {
             const ownerFile = safeString(ownerSrc.fileName).trim();
             if (ownerFile) {
@@ -810,10 +1043,14 @@
         const renderers = hookInfo?.renderers || [];
         for (const item of renderers) {
           const renderer = item?.renderer;
-          if (!renderer || typeof renderer.findFiberByHostInstance !== 'function') continue;
+          if (
+            !renderer ||
+            typeof renderer.findFiberByHostInstance !== 'function'
+          )
+            continue;
           try {
             const fiber = renderer.findFiberByHostInstance(element);
-            if (fiber) return { fiber, renderer };
+            if (fiber) return { fiber, renderer, rendererId: item?.id };
           } catch {
             // Try next renderer
           }
@@ -824,56 +1061,7 @@
 
       // Fallback: DOM-attached fiber reference
       const fallback = this.findFiberFromDOM(element);
-      return { fiber: fallback, renderer: null };
-    },
-
-    /**
-     * Record original value for reset
-     */
-    recordOriginal(fiber, renderer, path, existed, value) {
-      if (!this.overrideStore || !fiber) return;
-
-      try {
-        const key = JSON.stringify(path);
-        let store = this.overrideStore.get(fiber);
-
-        if (!store) {
-          store = { renderer: renderer || null, originals: new Map() };
-          this.overrideStore.set(fiber, store);
-
-          // Also store by alternate to improve reset hit rate
-          if (fiber.alternate && typeof fiber.alternate === 'object') {
-            this.overrideStore.set(fiber.alternate, store);
-          }
-        }
-
-        if (!store.originals.has(key)) {
-          store.originals.set(key, { path, existed, value });
-        }
-
-        if (!store.renderer && renderer) {
-          store.renderer = renderer;
-        }
-      } catch {
-        // Best-effort
-      }
-    },
-
-    /**
-     * Get stored originals for fiber
-     */
-    getOriginals(fiber) {
-      if (!this.overrideStore || !fiber) return null;
-      return this.overrideStore.get(fiber) || null;
-    },
-
-    /**
-     * Clear stored originals for fiber
-     */
-    clearOriginals(fiber) {
-      if (!this.overrideStore || !fiber) return;
-      const store = this.overrideStore.get(fiber);
-      if (store?.originals) store.originals.clear();
+      return { fiber: fallback, renderer: null, rendererId: null };
     },
   };
 
@@ -1029,12 +1217,21 @@
           truncated = true;
           break;
         }
-        const characterBytes = utf8BytesForCodePoint(character.codePointAt(0) || 0);
+        const characterBytes = utf8BytesForCodePoint(
+          character.codePointAt(0) || 0,
+        );
         if (codeUnits + character.length > maxLength) {
           truncated = true;
           break;
         }
-        if (!ctx || ctx.bytes + bytes + characterBytes > SERIALIZE_LIMITS.maxBytes) {
+        if (bytes + characterBytes > SERIALIZE_LIMITS.maxStringBytes) {
+          truncated = true;
+          break;
+        }
+        if (
+          !ctx ||
+          ctx.bytes + bytes + characterBytes > SERIALIZE_LIMITS.maxBytes
+        ) {
           truncated = true;
           this.markExhausted(ctx, 'bytes');
           break;
@@ -1045,7 +1242,10 @@
       }
 
       if (ctx) ctx.bytes += bytes;
-      return { value: output, truncated: truncated || output.length < input.length };
+      return {
+        value: output,
+        truncated: truncated || output.length < input.length,
+      };
     },
 
     resourceLimitValue(ctx) {
@@ -1056,7 +1256,11 @@
       };
     },
 
-    collectOwnEnumerableKeys(value, ctx, maximumEntries = SERIALIZE_LIMITS.maxEntries) {
+    collectOwnEnumerableKeys(
+      value,
+      ctx,
+      maximumEntries = SERIALIZE_LIMITS.maxEntries,
+    ) {
       const keys = [];
       let truncated = false;
       if (!ctx || ctx.exhausted) return { keys, truncated: true };
@@ -1078,12 +1282,16 @@
           }
           if (
             key.length > SERIALIZE_LIMITS.maxKeyBytes ||
-            utf8ByteLength(key, SERIALIZE_LIMITS.maxKeyBytes) > SERIALIZE_LIMITS.maxKeyBytes
+            utf8ByteLength(key, SERIALIZE_LIMITS.maxKeyBytes) >
+              SERIALIZE_LIMITS.maxKeyBytes
           ) {
             truncated = true;
             continue;
           }
-          if (ctx.bytes + utf8ByteLength(key) + 24 > SERIALIZE_LIMITS.maxBytes) {
+          if (
+            ctx.bytes + utf8ByteLength(key) + 24 >
+            SERIALIZE_LIMITS.maxBytes
+          ) {
             this.markExhausted(ctx, 'bytes');
             truncated = true;
             break;
@@ -1111,36 +1319,58 @@
         if (t === 'string') {
           const taken = this.takeString(value, ctx);
           return taken.truncated
-            ? { kind: 'string', value: taken.value, truncated: true, length: value.length }
+            ? {
+                kind: 'string',
+                value: taken.value,
+                truncated: true,
+                length: value.length,
+              }
             : { kind: 'string', value: taken.value };
         }
 
         if (t === 'number') {
           if (Number.isFinite(value)) return { kind: 'number', value };
           if (Number.isNaN(value)) return { kind: 'number', special: 'NaN' };
-          return { kind: 'number', special: value > 0 ? 'Infinity' : '-Infinity' };
+          return {
+            kind: 'number',
+            special: value > 0 ? 'Infinity' : '-Infinity',
+          };
         }
 
         if (t === 'boolean') return { kind: 'boolean', value };
         if (t === 'bigint')
-          return { kind: 'bigint', value: this.takeString(value.toString(), ctx).value };
+          return {
+            kind: 'bigint',
+            value: this.takeString(value.toString(), ctx).value,
+          };
         if (t === 'symbol')
-          return { kind: 'symbol', description: this.takeString(value, ctx).value };
+          return {
+            kind: 'symbol',
+            description: this.takeString(value, ctx).value,
+          };
         if (t === 'function')
-          return { kind: 'function', name: this.takeString(value.name, ctx).value || undefined };
+          return {
+            kind: 'function',
+            name: this.takeString(value.name, ctx).value || undefined,
+          };
 
         // Object types
         if (this.isReactElement(value)) {
           return {
             kind: 'react_element',
-            display: this.takeString(this.reactElementDisplay(value), ctx).value,
+            display: this.takeString(this.reactElementDisplay(value), ctx)
+              .value,
           };
         }
 
         if (typeof Element !== 'undefined' && value instanceof Element) {
           return {
             kind: 'dom_element',
-            tagName: this.takeString(value.tagName, ctx, 128).value.toLowerCase(),
+            tagName: this.takeString(
+              value.tagName,
+              ctx,
+              128,
+            ).value.toLowerCase(),
             id: this.takeString(value.id, ctx).value || undefined,
             className: this.takeString(value.className, ctx).value || undefined,
           };
@@ -1176,7 +1406,11 @@
         if (depth >= SERIALIZE_LIMITS.maxDepth) {
           return {
             kind: 'max_depth',
-            type: this.takeString(Object.prototype.toString.call(value), ctx, 128).value,
+            type: this.takeString(
+              Object.prototype.toString.call(value),
+              ctx,
+              128,
+            ).value,
             preview: this.takeString(value, ctx).value,
           };
         }
@@ -1256,14 +1490,19 @@
           } catch {
             raw = undefined;
           }
-          entries.push({ key, value: this.serializeValue(raw, ctx, depth + 1) });
+          entries.push({
+            key,
+            value: this.serializeValue(raw, ctx, depth + 1),
+          });
         }
 
         return {
           kind: 'object',
           name: name !== 'Object' ? name : undefined,
           truncated:
-            keyResult.truncated || ctx.exhausted || entries.length < keyResult.keys.length,
+            keyResult.truncated ||
+            ctx.exhausted ||
+            entries.length < keyResult.keys.length,
           entries,
         };
       } catch (err) {
@@ -1285,7 +1524,10 @@
       const entries = [];
       const enumMap = isObject(enumValuesByKey) ? enumValuesByKey : null;
 
-      if (!props || (typeof props !== 'object' && typeof props !== 'function')) {
+      if (
+        !props ||
+        (typeof props !== 'object' && typeof props !== 'function')
+      ) {
         return { kind: 'props', entries: [] };
       }
 
@@ -1327,7 +1569,8 @@
               boundedEnumValues.push(enumValue);
             }
           }
-          if (boundedEnumValues.length > 0) entry.enumValues = boundedEnumValues;
+          if (boundedEnumValues.length > 0)
+            entry.enumValues = boundedEnumValues;
         }
 
         entries.push(entry);
@@ -1396,7 +1639,11 @@
         const v = this.normalizeEnumValue(item);
         if (v === null) continue;
         const key =
-          typeof v === 'string' ? `s:${v}` : typeof v === 'number' ? `n:${v}` : `b:${v ? 1 : 0}`;
+          typeof v === 'string'
+            ? `s:${v}`
+            : typeof v === 'number'
+              ? `n:${v}`
+              : `b:${v ? 1 : 0}`;
         if (seen.has(key)) continue;
         seen.add(key);
         out.push(v);
@@ -1417,7 +1664,11 @@
       const t = propInfo.type;
       if (isObject(t) && t.name === 'enum' && Array.isArray(t.value)) {
         const rawList = [];
-        for (let index = 0; index < t.value.length && index < this.MAX_ENUM_VALUES; index++) {
+        for (
+          let index = 0;
+          index < t.value.length && index < this.MAX_ENUM_VALUES;
+          index++
+        ) {
           const item = t.value[index];
           rawList.push(isObject(item) && 'value' in item ? item.value : item);
         }
@@ -1428,9 +1679,17 @@
       const ts = propInfo.tsType;
       if (isObject(ts) && ts.name === 'union' && Array.isArray(ts.elements)) {
         const rawList = [];
-        for (let index = 0; index < ts.elements.length && index < this.MAX_ENUM_VALUES; index++) {
+        for (
+          let index = 0;
+          index < ts.elements.length && index < this.MAX_ENUM_VALUES;
+          index++
+        ) {
           const element = ts.elements[index];
-          rawList.push(isObject(element) && 'value' in element ? element.value : element.name);
+          rawList.push(
+            isObject(element) && 'value' in element
+              ? element.value
+              : element.name,
+          );
         }
         return this.normalizeEnumList(rawList);
       }
@@ -1453,7 +1712,8 @@
         let inspected = 0;
         for (const key in docgen.props) {
           if (inspected >= SERIALIZE_LIMITS.maxEntries) break;
-          if (!Object.prototype.hasOwnProperty.call(docgen.props, key)) continue;
+          if (!Object.prototype.hasOwnProperty.call(docgen.props, key))
+            continue;
           inspected += 1;
           const info = docgen.props[key];
           const values = this.extractDocgenEnumValues(info);
@@ -1464,7 +1724,6 @@
         return {};
       }
     },
-
   };
 
   // =============================================================================
@@ -1528,7 +1787,12 @@
         totalBytes += bytes;
         if (totalBytes > TRANSPORT_LIMITS.maxPropPathBytes) return null;
         result.push(s);
-      } else if (typeof seg === 'number' && Number.isInteger(seg) && seg >= 0 && seg <= 1e6) {
+      } else if (
+        typeof seg === 'number' &&
+        Number.isInteger(seg) &&
+        seg >= 0 &&
+        seg <= 1e6
+      ) {
         result.push(seg);
       } else {
         return null;
@@ -1539,7 +1803,14 @@
 
   function decodeIncomingValue(raw) {
     // Bridge encodes undefined as { $we: 'undefined' }
-    if (isObject(raw) && raw.$we === 'undefined') return undefined;
+    if (
+      isObject(raw) &&
+      !Array.isArray(raw) &&
+      Object.keys(raw).length === 1 &&
+      raw.$we === 'undefined'
+    ) {
+      return undefined;
+    }
     return raw;
   }
 
@@ -1558,23 +1829,27 @@
   function buildResponseData(init) {
     const data = {};
     if (init?.hookStatus) data.hookStatus = init.hookStatus;
-    if (typeof init?.needsRefresh === 'boolean') data.needsRefresh = init.needsRefresh;
+    if (typeof init?.needsRefresh === 'boolean')
+      data.needsRefresh = init.needsRefresh;
     if (init?.framework) data.framework = init.framework;
     if (init?.frameworkVersion) {
       data.frameworkVersion = truncateUtf8(init.frameworkVersion, 512);
     }
-    if (init?.componentName) data.componentName = truncateUtf8(init.componentName, 512);
+    if (init?.componentName)
+      data.componentName = truncateUtf8(init.componentName, 512);
     if (isObject(init?.debugSource)) {
       const file = truncateUtf8(init.debugSource.file, 4 * 1024);
       if (file) {
         data.debugSource = {
           file,
           line:
-            Number.isSafeInteger(init.debugSource.line) && init.debugSource.line > 0
+            Number.isSafeInteger(init.debugSource.line) &&
+            init.debugSource.line > 0
               ? init.debugSource.line
               : undefined,
           column:
-            Number.isSafeInteger(init.debugSource.column) && init.debugSource.column > 0
+            Number.isSafeInteger(init.debugSource.column) &&
+            init.debugSource.column > 0
               ? init.debugSource.column
               : undefined,
           componentName: init.debugSource.componentName
@@ -1592,6 +1867,9 @@
   // =============================================================================
   // Request Handlers
   // =============================================================================
+
+  let operationStateDelta;
+  let operationTargetGuard;
 
   const Handlers = {
     resolveTarget(locator) {
@@ -1622,7 +1900,9 @@
           : hookInfo.hookStatus;
 
       const target = this.resolveTarget(req.locator);
-      const fw = target ? FrameworkDetector.detect(target) : { framework: 'unknown', data: null };
+      const fw = target
+        ? FrameworkDetector.detect(target)
+        : { framework: 'unknown', data: null };
 
       let componentName;
       let debugSource;
@@ -1633,17 +1913,27 @@
       let frameworkVersion;
 
       if (fw.framework === 'react') {
-        const fiberInfo = ReactAdapter.resolveFiberWithRenderer(target, hookInfo);
+        const fiberInfo = ReactAdapter.resolveFiberWithRenderer(
+          target,
+          hookInfo,
+        );
         const componentFiber = fiberInfo.fiber
           ? ReactAdapter.findNearestComponentFiber(fiberInfo.fiber)
           : null;
 
-        componentName = componentFiber ? ReactAdapter.getComponentName(componentFiber) : undefined;
+        componentName = componentFiber
+          ? ReactAdapter.getComponentName(componentFiber)
+          : undefined;
         // Extract debug source from component fiber or raw fiber
         const sourceFiber = componentFiber || fiberInfo.fiber;
-        debugSource = sourceFiber ? ReactAdapter.getDebugSource(sourceFiber) : undefined;
+        debugSource = sourceFiber
+          ? ReactAdapter.getDebugSource(sourceFiber)
+          : undefined;
         // Pass specific renderer to prioritize its version in multi-renderer scenarios
-        frameworkVersion = ReactAdapter.getVersion(hookInfo, fiberInfo.renderer);
+        frameworkVersion = ReactAdapter.getVersion(
+          hookInfo,
+          fiberInfo.renderer,
+        );
         canRead = Boolean(componentFiber);
         canWrite = hookStatus === HOOK_STATUS.READY && Boolean(componentFiber);
         needsRefresh = canRead && hookStatus !== HOOK_STATUS.READY;
@@ -1655,7 +1945,11 @@
         frameworkVersion,
         componentName,
         debugSource,
-        capabilities: makeCapabilities({ canRead, canWrite, canWriteHooks: false }),
+        capabilities: makeCapabilities({
+          canRead,
+          canWrite,
+          canWriteHooks: false,
+        }),
         needsRefresh,
       });
 
@@ -1690,16 +1984,24 @@
       const fw = FrameworkDetector.detect(target);
 
       if (fw.framework === 'react') {
-        const fiberInfo = ReactAdapter.resolveFiberWithRenderer(target, hookInfo);
+        const fiberInfo = ReactAdapter.resolveFiberWithRenderer(
+          target,
+          hookInfo,
+        );
         const componentFiber = fiberInfo.fiber
           ? ReactAdapter.findNearestComponentFiber(fiberInfo.fiber)
           : null;
 
         // Extract debug source even if component fiber not found
         const sourceFiber = componentFiber || fiberInfo.fiber;
-        const debugSource = sourceFiber ? ReactAdapter.getDebugSource(sourceFiber) : undefined;
+        const debugSource = sourceFiber
+          ? ReactAdapter.getDebugSource(sourceFiber)
+          : undefined;
         // Pass specific renderer to prioritize its version in multi-renderer scenarios
-        const frameworkVersion = ReactAdapter.getVersion(hookInfo, fiberInfo.renderer);
+        const frameworkVersion = ReactAdapter.getVersion(
+          hookInfo,
+          fiberInfo.renderer,
+        );
 
         if (!componentFiber) {
           const data = buildResponseData({
@@ -1718,8 +2020,12 @@
           );
         }
 
+        operationTargetGuard =
+          ReactAdapter.getComponentGuard(componentFiber, fiberInfo.rendererId, target) || undefined;
+
         const props = componentFiber.memoizedProps;
-        const enumValuesByKey = EnumIntrospection.getReactEnumValues(componentFiber);
+        const enumValuesByKey =
+          EnumIntrospection.getReactEnumValues(componentFiber);
         const serialized = Serializer.serializeProps(props, enumValuesByKey);
         const componentName = ReactAdapter.getComponentName(componentFiber);
         const canWrite = hookStatus === HOOK_STATUS.READY;
@@ -1732,7 +2038,11 @@
           componentName,
           debugSource,
           props: serialized,
-          capabilities: makeCapabilities({ canRead: true, canWrite, canWriteHooks: false }),
+          capabilities: makeCapabilities({
+            canRead: true,
+            canWrite,
+            canWriteHooks: false,
+          }),
           needsRefresh,
         });
 
@@ -1747,7 +2057,12 @@
         needsRefresh: false,
       });
 
-      return Transport.createResponse(req.requestId, false, data, 'Not a React component');
+      return Transport.createResponse(
+        req.requestId,
+        false,
+        data,
+        'Not a React component',
+      );
     },
 
     /**
@@ -1766,7 +2081,12 @@
 
       const path = normalizePropPath(req.payload?.propPath);
       if (!path) {
-        return Transport.createResponse(req.requestId, false, undefined, 'Invalid propPath');
+        return Transport.createResponse(
+          req.requestId,
+          false,
+          undefined,
+          'Invalid propPath',
+        );
       }
 
       const rawValue = req.payload?.propValue;
@@ -1794,7 +2114,10 @@
       const fw = FrameworkDetector.detect(target);
 
       if (fw.framework === 'react') {
-        const fiberInfo = ReactAdapter.resolveFiberWithRenderer(target, hookInfo);
+        const fiberInfo = ReactAdapter.resolveFiberWithRenderer(
+          target,
+          hookInfo,
+        );
         const componentFiber = fiberInfo.fiber
           ? ReactAdapter.findNearestComponentFiber(fiberInfo.fiber)
           : null;
@@ -1803,14 +2126,19 @@
           ? ReactAdapter.getComponentName(componentFiber)
           : undefined;
         const canRead = Boolean(componentFiber);
-        const canWrite = hookStatus === HOOK_STATUS.READY && Boolean(componentFiber);
+        const canWrite =
+          hookStatus === HOOK_STATUS.READY && Boolean(componentFiber);
         const needsRefresh = canRead && hookStatus !== HOOK_STATUS.READY;
 
         const base = buildResponseData({
           hookStatus,
           framework: 'react',
           componentName,
-          capabilities: makeCapabilities({ canRead, canWrite, canWriteHooks: false }),
+          capabilities: makeCapabilities({
+            canRead,
+            canWrite,
+            canWriteHooks: false,
+          }),
           needsRefresh,
         });
 
@@ -1823,6 +2151,33 @@
           );
         }
 
+        const componentGuard = ReactAdapter.getComponentGuard(
+          componentFiber,
+          fiberInfo.rendererId,
+          target,
+        );
+        if (!componentGuard) {
+          return Transport.createResponse(
+            req.requestId,
+            false,
+            base,
+            'Component identity is unavailable',
+          );
+        }
+        operationTargetGuard = componentGuard;
+
+        if (
+          req.payload.expectedTargetGuard !== undefined &&
+          req.payload.expectedTargetGuard !== componentGuard
+        ) {
+          return Transport.createResponse(
+            req.requestId,
+            false,
+            base,
+            'Target component changed',
+          );
+        }
+
         if (hookStatus !== HOOK_STATUS.READY) {
           return Transport.createResponse(
             req.requestId,
@@ -1832,10 +2187,23 @@
           );
         }
 
-        // Check current value for editability and record original
+        // Capture the first original before mutating. The bridge gives us the
+        // exact remaining storage budget, so an un-restorable write fails closed.
         const props = componentFiber.memoizedProps;
         const read = getValueAtPath(props, path);
-        if (read.ok && read.existed && !Serializer.isEditablePrimitive(read.value)) {
+        if (!read.ok) {
+          return Transport.createResponse(
+            req.requestId,
+            false,
+            base,
+            'Target prop path is invalid',
+          );
+        }
+        if (
+          read.ok &&
+          read.existed &&
+          !Serializer.isEditablePrimitive(read.value)
+        ) {
           return Transport.createResponse(
             req.requestId,
             false,
@@ -1844,16 +2212,90 @@
           );
         }
 
+        let writeStateDelta;
+        if (req.payload.captureOriginal) {
+          writeStateDelta = {
+            kind: 'write_original',
+            path,
+            existed: Boolean(read.existed),
+            encodedValue:
+              read.value === undefined ? { $we: 'undefined' } : read.value,
+            componentGuard,
+          };
+          let stateDeltaBytes = Number.POSITIVE_INFINITY;
+          try {
+            const encodedStateDelta = JSON.stringify(writeStateDelta);
+            if (typeof encodedStateDelta === 'string') {
+              stateDeltaBytes = utf8ByteLength(
+                encodedStateDelta,
+                req.payload.stateBudgetBytes,
+              );
+            }
+          } catch {
+            // Reject below.
+          }
+          if (stateDeltaBytes > req.payload.stateBudgetBytes) {
+            return Transport.createResponse(
+              req.requestId,
+              false,
+              base,
+              'Original prop exceeds the reset storage budget',
+            );
+          }
+          try {
+            const resetWire = JSON.stringify({
+              v: PROTOCOL_VERSION,
+              requestId: req.requestId,
+              op: 'reset',
+              locator: req.locator,
+              payload: {
+                originals: [
+                  {
+                    index: 0,
+                    path,
+                    encodedValue: writeStateDelta.encodedValue,
+                    existed: writeStateDelta.existed,
+                    componentGuard,
+                  },
+                ],
+              },
+            });
+            if (
+              typeof resetWire !== 'string' ||
+              utf8ByteLength(resetWire, TRANSPORT_LIMITS.maxRequestBytes) >
+                TRANSPORT_LIMITS.maxRequestBytes
+            ) {
+              return Transport.createResponse(
+                req.requestId,
+                false,
+                base,
+                'Original prop cannot fit a reset request',
+              );
+            }
+          } catch {
+            return Transport.createResponse(
+              req.requestId,
+              false,
+              base,
+              'Original prop cannot fit a reset request',
+            );
+          }
+          // Set this before the first renderer call. Some renderers may mutate
+          // and then throw; retaining the original is safe in either outcome.
+          operationStateDelta = writeStateDelta;
+        }
+
         // Try renderers with overrideProps
         const candidates = (hookInfo.editableRenderers || [])
           .map((r) => r.renderer)
           .filter(Boolean);
         const preferred =
-          fiberInfo.renderer && typeof fiberInfo.renderer.overrideProps === 'function'
+          fiberInfo.renderer &&
+          typeof fiberInfo.renderer.overrideProps === 'function'
             ? fiberInfo.renderer
             : null;
         const ordered = preferred
-          ? [preferred, ...candidates.filter((r) => r !== preferred)]
+          ? [preferred].concat(candidates.filter((r) => r !== preferred))
           : candidates;
 
         let usedRenderer = null;
@@ -1884,13 +2326,17 @@
           );
         }
 
-        ReactAdapter.recordOriginal(componentFiber, usedRenderer, path, read.existed, read.value);
         base.meta = { write: { method: 'overrideProps' } };
 
         return Transport.createResponse(req.requestId, true, base);
       }
 
-      return Transport.createResponse(req.requestId, false, undefined, 'Not a React component');
+      return Transport.createResponse(
+        req.requestId,
+        false,
+        undefined,
+        'Not a React component',
+      );
     },
 
     /**
@@ -1921,7 +2367,10 @@
       const fw = FrameworkDetector.detect(target);
 
       if (fw.framework === 'react') {
-        const fiberInfo = ReactAdapter.resolveFiberWithRenderer(target, hookInfo);
+        const fiberInfo = ReactAdapter.resolveFiberWithRenderer(
+          target,
+          hookInfo,
+        );
         const componentFiber = fiberInfo.fiber
           ? ReactAdapter.findNearestComponentFiber(fiberInfo.fiber)
           : null;
@@ -1930,14 +2379,19 @@
           ? ReactAdapter.getComponentName(componentFiber)
           : undefined;
         const canRead = Boolean(componentFiber);
-        const canWrite = hookStatus === HOOK_STATUS.READY && Boolean(componentFiber);
+        const canWrite =
+          hookStatus === HOOK_STATUS.READY && Boolean(componentFiber);
         const needsRefresh = canRead && hookStatus !== HOOK_STATUS.READY;
 
         const base = buildResponseData({
           hookStatus,
           framework: 'react',
           componentName,
-          capabilities: makeCapabilities({ canRead, canWrite, canWriteHooks: false }),
+          capabilities: makeCapabilities({
+            canRead,
+            canWrite,
+            canWriteHooks: false,
+          }),
           needsRefresh,
         });
 
@@ -1950,11 +2404,34 @@
           );
         }
 
-        const store = ReactAdapter.getOriginals(componentFiber);
-        if (!store?.originals?.size) {
+        const currentComponentGuard = ReactAdapter.getComponentGuard(
+          componentFiber,
+          fiberInfo.rendererId,
+          target,
+        );
+        if (!currentComponentGuard) {
+          return Transport.createResponse(
+            req.requestId,
+            false,
+            base,
+            'Component identity is unavailable',
+          );
+        }
+        operationTargetGuard = currentComponentGuard;
+
+        const rawOriginals = req.payload?.originals;
+        if (!Array.isArray(rawOriginals) || rawOriginals.length === 0) {
           base.meta = { reset: { method: 'refresh', reason: 'noOverrides' } };
           base.needsRefresh = true;
           return Transport.createResponse(req.requestId, true, base);
+        }
+        if (rawOriginals.length > TRANSPORT_LIMITS.maxResetOriginals) {
+          return Transport.createResponse(
+            req.requestId,
+            false,
+            base,
+            'Too many reset originals',
+          );
         }
 
         if (hookStatus !== HOOK_STATUS.READY) {
@@ -1963,41 +2440,107 @@
           return Transport.createResponse(req.requestId, true, base);
         }
 
-        const renderer = store.renderer;
-        if (!renderer || typeof renderer.overrideProps !== 'function') {
-          base.meta = { reset: { method: 'refresh', reason: 'missingRenderer' } };
+        if (
+          rawOriginals.some(
+            (entry) => entry.componentGuard !== currentComponentGuard,
+          )
+        ) {
+          operationStateDelta = {
+            kind: 'reset_result',
+            appliedIndexes: [],
+            guardMismatch: true,
+          };
+          base.meta = {
+            reset: { method: 'refresh', reason: 'componentChanged' },
+          };
+          base.needsRefresh = true;
+          return Transport.createResponse(
+            req.requestId,
+            false,
+            base,
+            'Target component changed',
+          );
+        }
+
+        const candidates = (hookInfo.editableRenderers || [])
+          .map((r) => r.renderer)
+          .filter(Boolean);
+        const preferred =
+          fiberInfo.renderer &&
+          typeof fiberInfo.renderer.overrideProps === 'function'
+            ? fiberInfo.renderer
+            : null;
+        const ordered = preferred
+          ? [preferred].concat(candidates.filter((r) => r !== preferred))
+          : candidates;
+        if (!ordered.some((renderer) => typeof renderer.overrideProps === 'function')) {
+          base.meta = {
+            reset: { method: 'refresh', reason: 'missingRenderer' },
+          };
           base.needsRefresh = true;
           return Transport.createResponse(req.requestId, true, base);
         }
 
-        let reverted = 0;
-        for (const entry of store.originals.values()) {
-          try {
-            renderer.overrideProps(componentFiber, entry.path, entry.value);
-            reverted++;
-          } catch {
-            // Continue reverting others
+        const appliedIndexes = [];
+        for (const rawEntry of rawOriginals) {
+          const originalPath = normalizePropPath(rawEntry.path);
+          const originalValue = decodeIncomingValue(rawEntry.encodedValue);
+          if (!originalPath || !Serializer.isEditablePrimitive(originalValue))
+            continue;
+          let applied = false;
+          for (const renderer of ordered) {
+            try {
+              if (rawEntry.existed) {
+                if (typeof renderer.overrideProps !== 'function') continue;
+                renderer.overrideProps(
+                  componentFiber,
+                  originalPath,
+                  originalValue,
+                );
+              } else if (
+                typeof renderer.overridePropsDeletePath === 'function'
+              ) {
+                renderer.overridePropsDeletePath(componentFiber, originalPath);
+              } else {
+                // Setting undefined is not equivalent to deleting the original
+                // key. Try another renderer with an exact delete API.
+                continue;
+              }
+              applied = true;
+              break;
+            } catch {
+              // Try another editable renderer before leaving this entry pending.
+            }
           }
+          if (applied) appliedIndexes.push(rawEntry.index);
         }
 
-        ReactAdapter.clearOriginals(componentFiber);
-        base.meta = { reset: { method: 'overrideProps', reverted } };
+        operationStateDelta = {
+          kind: 'reset_result',
+          appliedIndexes,
+          guardMismatch: false,
+        };
+        base.meta = {
+          reset: { method: 'overrideProps', reverted: appliedIndexes.length },
+        };
+        if (appliedIndexes.length !== rawOriginals.length) base.needsRefresh = true;
 
-        return Transport.createResponse(req.requestId, true, base);
+        return Transport.createResponse(
+          req.requestId,
+          appliedIndexes.length === rawOriginals.length,
+          base,
+          appliedIndexes.length === rawOriginals.length
+            ? undefined
+            : 'Failed to reset some props',
+        );
       }
 
-      return Transport.createResponse(req.requestId, false, undefined, 'Not a React component');
-    },
-
-    /**
-     * Handle 'cleanup' operation - Dispose agent
-     */
-    handleCleanup(req) {
-      const resp = Transport.createResponse(req.requestId, true, {
-        meta: { cleanup: { ok: true } },
-      });
-      Lifecycle.dispose('request');
-      return resp;
+      return Transport.createResponse(
+        req.requestId,
+        false,
+        undefined,
+        'Not a React component',
+      );
     },
 
     /**
@@ -2013,8 +2556,6 @@
           return this.handleWrite(req);
         case 'reset':
           return this.handleReset(req);
-        case 'cleanup':
-          return this.handleCleanup(req);
         default:
           return Transport.createResponse(
             req.requestId,
@@ -2026,90 +2567,43 @@
     },
   };
 
-  // =============================================================================
-  // Lifecycle Management
-  // =============================================================================
-
-  const Lifecycle = {
-    disposed: false,
-
-    onRequestEvent(event) {
-      try {
-        if (Lifecycle.disposed) return;
-
-        const detail = event?.detail;
-        const req = Transport.normalizeRequest(detail);
-        if (!req) return;
-
-        const resp = Handlers.handle(req);
-        Transport.dispatchResponse(resp);
-      } catch (err) {
-        try {
-          const requestId = event?.detail?.requestId;
-          if (typeof requestId === 'string' && requestId) {
-            Transport.dispatchResponse(
-              Transport.createResponse(requestId, false, undefined, safeString(err)),
-            );
-          }
-        } catch {
-          // ignore
-        }
+  function finalizeExecution(response) {
+    const execution = { response };
+    if (operationTargetGuard) execution.targetGuard = operationTargetGuard;
+    if (operationStateDelta) execution.stateDelta = operationStateDelta;
+    try {
+      const encoded = JSON.stringify(execution);
+      if (
+        typeof encoded === 'string' &&
+        utf8ByteLength(encoded, TRANSPORT_LIMITS.maxResponseBytes) <=
+          TRANSPORT_LIMITS.maxResponseBytes
+      ) {
+        return execution;
       }
-    },
+    } catch {
+      // Return the bounded fallback below.
+    }
 
-    onCleanupEvent() {
-      Lifecycle.dispose('external-event');
-    },
+    const fallbackResponse = Transport.createResponse(
+      typeof response?.requestId === 'string' ? response.requestId : '',
+      false,
+      undefined,
+      'Props response exceeded the resource limit',
+    );
+    // A mutation may already have happened. Preserve its private recovery
+    // state even when page-controlled response data forces public truncation.
+    const fallbackExecution = { response: fallbackResponse };
+    if (operationTargetGuard) fallbackExecution.targetGuard = operationTargetGuard;
+    if (operationStateDelta) fallbackExecution.stateDelta = operationStateDelta;
+    return fallbackExecution;
+  }
 
-    dispose(reason) {
-      if (this.disposed) return;
-      this.disposed = true;
-
-      try {
-        window.removeEventListener(EVENT_NAME.REQUEST, this.onRequestEvent, true);
-        window.removeEventListener(EVENT_NAME.CLEANUP, this.onCleanupEvent, true);
-      } catch {
-        // ignore
-      }
-
-      try {
-        delete window[GLOBAL_KEY];
-      } catch {
-        // ignore
-      }
-
-      if (reason) {
-        logWarn('Disposed:', reason);
-      }
-    },
-
-    init() {
-      // Use capture phase to avoid page stopPropagation interfering
-      window.addEventListener(EVENT_NAME.REQUEST, this.onRequestEvent, true);
-      window.addEventListener(EVENT_NAME.CLEANUP, this.onCleanupEvent, true);
-
-      window[GLOBAL_KEY] = {
-        version: PROTOCOL_VERSION,
-        dispose: () => this.dispose('manual'),
-      };
-
-      // Early injection: install minimal hook before React loads (document_start)
-      // This is critical for capturing React renderers that initialize early
-      if (document.readyState === 'loading') {
-        try {
-          const status = ReactAdapter.detectStatus();
-          if (status.hookStatus === HOOK_STATUS.HOOK_MISSING) {
-            ReactAdapter.installMinimalHook();
-            logWarn('Installed minimal hook during early injection');
-          }
-        } catch (err) {
-          // Best-effort: early injection may fail in some environments
-          logWarn('Early hook injection failed:', err);
-        }
-      }
-    },
-  };
-
-  // Initialize
-  Lifecycle.init();
-})();
+  const normalized = Transport.normalizeRequest(request);
+  if (!normalized) {
+    return finalizeExecution(
+      Transport.createResponse('', false, undefined, 'Invalid props request'),
+    );
+  }
+  const response = Handlers.handle(normalized);
+  return finalizeExecution(response);
+}

@@ -1,8 +1,8 @@
 /**
  * Props Bridge - ISOLATED World Communication Layer
  *
- * Bridges the Web Editor UI (ISOLATED world) and the Props Agent (MAIN world)
- * using CustomEvent-based messaging.
+ * Bridges the Web Editor UI to the background worker, which authenticates the
+ * active surface and executes one bounded function in the exact MAIN document.
  *
  * Design notes:
  * - Uses requestId + pending map for request/response correlation
@@ -13,6 +13,7 @@
  */
 
 import type { DebugSource, ElementLocator } from '@/common/web-editor-types';
+import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 
 // =============================================================================
 // Types - Hook Status
@@ -156,11 +157,17 @@ export interface SerializedProps {
 // Types - Protocol Messages
 // =============================================================================
 
-export type PropsOperation = 'probe' | 'read' | 'write' | 'reset' | 'cleanup';
+export type PropsOperation = 'probe' | 'read' | 'write' | 'reset';
 
-interface PropsRequestPayload {
-  propPath?: PropPath;
-  propValue?: EncodedPropValue;
+export interface PropsOriginalEntry {
+  path: PropPath;
+  encodedValue: EncodedPropValue;
+  existed: boolean;
+  componentGuard: string;
+}
+
+export interface PropsResetOriginalEntry extends PropsOriginalEntry {
+  index: number;
 }
 
 interface PropsRequestBase {
@@ -168,7 +175,6 @@ interface PropsRequestBase {
   requestId: string;
   op: PropsOperation;
   locator?: ElementLocator;
-  payload?: PropsRequestPayload;
 }
 
 interface PropsProbeRequest extends PropsRequestBase {
@@ -186,24 +192,39 @@ interface PropsWriteRequest extends PropsRequestBase {
   payload: {
     propPath: PropPath;
     propValue: EncodedPropValue;
+    captureOriginal: boolean;
+    expectedTargetGuard?: string;
+    stateBudgetBytes: number;
   };
 }
 
 interface PropsResetRequest extends PropsRequestBase {
   op: 'reset';
   locator: ElementLocator;
+  payload: {
+    originals: PropsResetOriginalEntry[];
+  };
 }
 
-interface PropsCleanupRequest extends PropsRequestBase {
-  op: 'cleanup';
-}
-
-type PropsRequest =
+export type PropsRpcRequest =
   | PropsProbeRequest
   | PropsReadRequest
   | PropsWriteRequest
-  | PropsResetRequest
-  | PropsCleanupRequest;
+  | PropsResetRequest;
+
+export type PropsStateDelta =
+  | ({ kind: 'write_original' } & PropsOriginalEntry)
+  | {
+      kind: 'reset_result';
+      appliedIndexes: number[];
+      guardMismatch: boolean;
+    };
+
+export interface PropsExecutionEnvelope {
+  response: PropsRawResponse;
+  targetGuard?: string;
+  stateDelta?: PropsStateDelta;
+}
 
 /**
  * Response data from agent
@@ -306,17 +327,13 @@ export interface PropsBridge {
  */
 export interface PropsBridgeOptions {
   defaultTimeoutMs?: number;
+  /** Background-owned active Web Editor surface session. */
+  surfaceSessionId: string;
 }
 
 // =============================================================================
 // Constants
 // =============================================================================
-
-const EVENT_NAME = {
-  REQUEST: 'web-editor-props:request',
-  RESPONSE: 'web-editor-props:response',
-  CLEANUP: 'web-editor-props:cleanup',
-} as const;
 
 const PROTOCOL_VERSION = 1 as const;
 
@@ -347,6 +364,12 @@ export const PROPS_BRIDGE_RESOURCE_LIMITS = {
   maxSerializedEntries: 100,
   maxSerializedArray: 50,
   maxSerializedStringBytes: 4 * 1024,
+  maxOriginalEntries: 256,
+  maxOriginalBytes: 256 * 1024,
+  maxOriginalsPerLocator: 64,
+  maxOriginalBytesPerLocator: 48 * 1024,
+  maxComponentGuardBytes: 512,
+  maxTargetAliases: 512,
 } as const;
 
 // =============================================================================
@@ -427,7 +450,7 @@ function normalizeLocator(locator: unknown): ElementLocator | null {
     PROPS_BRIDGE_RESOURCE_LIMITS.maxLocatorChains,
     false,
   );
-  if (!selectors || !shadowHostChain || !frameChain) return null;
+  if (!selectors || !shadowHostChain || !frameChain || frameChain.length > 0) return null;
   if (!isBoundedString(locator.fingerprint, PROPS_BRIDGE_RESOURCE_LIMITS.maxFingerprintBytes)) {
     return null;
   }
@@ -1007,10 +1030,22 @@ function sanitizeResponseData(raw: unknown): PropsResponseData | null {
   return data;
 }
 
-function normalizeRawResponse(detail: unknown): { requestId: string; result: PropsResult } | null {
-  if (!isStructuredResponseWithinLimits(detail) || !isRecord(detail)) return null;
-  if (!hasOnlyOwnKeys(detail, new Set(['v', 'requestId', 'success', 'data', 'error']))) return null;
-  if (detail.v !== PROTOCOL_VERSION || typeof detail.success !== 'boolean') return null;
+export function normalizePropsRawResponse(detail: unknown): {
+  requestId: string;
+  response: PropsRawResponse;
+  result: PropsResult;
+} | null {
+  if (!isStructuredResponseWithinLimits(detail) || !isRecord(detail))
+    return null;
+  if (
+    !hasOnlyOwnKeys(
+      detail,
+      new Set(['v', 'requestId', 'success', 'data', 'error']),
+    )
+  )
+    return null;
+  if (detail.v !== PROTOCOL_VERSION || typeof detail.success !== 'boolean')
+    return null;
   const requestId = responseString(
     detail.requestId,
     PROPS_BRIDGE_RESOURCE_LIMITS.maxRequestIdBytes,
@@ -1040,14 +1075,383 @@ function normalizeRawResponse(detail: unknown): { requestId: string; result: Pro
     error,
   } satisfies PropsRawResponse;
   const bytes = jsonByteLength(normalized);
-  if (bytes === null || bytes > PROPS_BRIDGE_RESOURCE_LIMITS.maxResponseBytes) return null;
+  if (bytes === null || bytes > PROPS_BRIDGE_RESOURCE_LIMITS.maxResponseBytes)
+    return null;
   return {
     requestId,
+    response: normalized,
     result: {
       ok: detail.success,
       data,
       error: detail.success ? undefined : error || 'Props agent error',
     },
+  };
+}
+
+function normalizeEncodedPropValue(
+  value: unknown,
+  maxStringBytes = PROPS_BRIDGE_RESOURCE_LIMITS.maxValueBytes,
+): { value: EncodedPropValue } | null {
+  if (isEditablePrimitive(value) && value !== undefined) {
+    if (
+      typeof value === 'string' &&
+      utf8ByteLength(value, maxStringBytes) > maxStringBytes
+    ) {
+      return null;
+    }
+    return { value };
+  }
+  if (
+    isRecord(value) &&
+    hasOnlyOwnKeys(value, new Set(['$we'])) &&
+    value.$we === 'undefined'
+  ) {
+    return { value: { $we: 'undefined' } };
+  }
+  return null;
+}
+
+/** Strictly copy a page-to-background props request into a bounded wire value. */
+export function normalizePropsRpcRequest(
+  value: unknown,
+): PropsRpcRequest | null {
+  if (!isRecord(value)) return null;
+  const op = value.op;
+  const allowedKeys = new Set(['v', 'requestId', 'op', 'locator', 'payload']);
+  if (!hasOnlyOwnKeys(value, allowedKeys) || value.v !== PROTOCOL_VERSION)
+    return null;
+  if (op !== 'probe' && op !== 'read' && op !== 'write' && op !== 'reset')
+    return null;
+  const requestId = isBoundedString(
+    value.requestId,
+    PROPS_BRIDGE_RESOURCE_LIMITS.maxRequestIdBytes,
+    false,
+  )
+    ? value.requestId
+    : null;
+  if (!requestId) return null;
+
+  const locator =
+    value.locator === undefined ? undefined : normalizeLocator(value.locator);
+  if (value.locator !== undefined && !locator) return null;
+  if ((op === 'read' || op === 'write' || op === 'reset') && !locator)
+    return null;
+
+  let normalized: PropsRpcRequest;
+  if (op === 'probe') {
+    if (value.payload !== undefined) return null;
+    normalized = {
+      v: PROTOCOL_VERSION,
+      requestId,
+      op,
+      ...(locator ? { locator } : {}),
+    };
+  } else if (op === 'read') {
+    if (value.payload !== undefined) return null;
+    normalized = {
+      v: PROTOCOL_VERSION,
+      requestId,
+      op,
+      locator: locator as ElementLocator,
+    };
+  } else if (op === 'write') {
+    if (
+      !isRecord(value.payload) ||
+      !hasOnlyOwnKeys(
+        value.payload,
+        new Set([
+          'propPath',
+          'propValue',
+          'captureOriginal',
+          'expectedTargetGuard',
+          'stateBudgetBytes',
+        ]),
+      )
+    ) {
+      return null;
+    }
+    const propPath = normalizePropPath(value.payload.propPath);
+    const propValue = normalizeEncodedPropValue(value.payload.propValue);
+    const captureOriginal = value.payload.captureOriginal;
+    const expectedTargetGuard = value.payload.expectedTargetGuard;
+    const stateBudgetBytes = value.payload.stateBudgetBytes;
+    if (
+      !propPath ||
+      propValue === null ||
+      typeof captureOriginal !== 'boolean' ||
+      (expectedTargetGuard !== undefined &&
+        !isBoundedString(
+          expectedTargetGuard,
+          PROPS_BRIDGE_RESOURCE_LIMITS.maxComponentGuardBytes,
+          false,
+        )) ||
+      (!captureOriginal && expectedTargetGuard === undefined) ||
+      !Number.isSafeInteger(stateBudgetBytes) ||
+      (stateBudgetBytes as number) < 0 ||
+      (stateBudgetBytes as number) >
+        PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalBytesPerLocator ||
+      (captureOriginal
+        ? (stateBudgetBytes as number) === 0
+        : (stateBudgetBytes as number) !== 0)
+    ) {
+      return null;
+    }
+    normalized = {
+      v: PROTOCOL_VERSION,
+      requestId,
+      op,
+      locator: locator as ElementLocator,
+      payload: {
+        propPath,
+        propValue: propValue.value,
+        captureOriginal,
+        ...(expectedTargetGuard !== undefined ? { expectedTargetGuard } : {}),
+        stateBudgetBytes: stateBudgetBytes as number,
+      },
+    };
+  } else {
+    if (
+      !isRecord(value.payload) ||
+      !hasOnlyOwnKeys(value.payload, new Set(['originals'])) ||
+      !Array.isArray(value.payload.originals) ||
+      value.payload.originals.length === 0 ||
+      value.payload.originals.length >
+        PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalsPerLocator
+    ) {
+      return null;
+    }
+    const originals: PropsResetOriginalEntry[] = [];
+    const indexes = new Set<number>();
+    for (const candidate of value.payload.originals) {
+      if (
+        !isRecord(candidate) ||
+        !hasOnlyOwnKeys(
+          candidate,
+          new Set([
+            'index',
+            'path',
+            'encodedValue',
+            'existed',
+            'componentGuard',
+          ]),
+        )
+      ) {
+        return null;
+      }
+      const index = candidate.index;
+      const path = normalizePropPath(candidate.path);
+      const encodedValue = normalizeEncodedPropValue(
+        candidate.encodedValue,
+        PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalBytesPerLocator,
+      );
+      if (
+        !Number.isSafeInteger(index) ||
+        (index as number) < 0 ||
+        (index as number) >= value.payload.originals.length ||
+        indexes.has(index as number) ||
+        !path ||
+        encodedValue === null ||
+        typeof candidate.existed !== 'boolean' ||
+        !isBoundedString(
+          candidate.componentGuard,
+          PROPS_BRIDGE_RESOURCE_LIMITS.maxComponentGuardBytes,
+          false,
+        )
+      ) {
+        return null;
+      }
+      indexes.add(index as number);
+      originals.push({
+        index: index as number,
+        path,
+        encodedValue: encodedValue.value,
+        existed: candidate.existed,
+        componentGuard: candidate.componentGuard,
+      });
+    }
+    normalized = {
+      v: PROTOCOL_VERSION,
+      requestId,
+      op,
+      locator: locator as ElementLocator,
+      payload: { originals },
+    };
+  }
+
+  const bytes = jsonByteLength(
+    normalized,
+    PROPS_BRIDGE_RESOURCE_LIMITS.maxRequestBytes,
+  );
+  return bytes !== null && bytes <= PROPS_BRIDGE_RESOURCE_LIMITS.maxRequestBytes
+    ? normalized
+    : null;
+}
+
+/** Validate the private MAIN result without exposing reset state as public props data. */
+export function normalizePropsExecutionEnvelope(
+  value: unknown,
+  request: PropsRpcRequest,
+): PropsExecutionEnvelope | null {
+  const envelopeBytes = jsonByteLength(
+    value,
+    PROPS_BRIDGE_RESOURCE_LIMITS.maxResponseBytes,
+  );
+  if (
+    !isRecord(value) ||
+    !hasOnlyOwnKeys(value, new Set(['response', 'targetGuard', 'stateDelta'])) ||
+    envelopeBytes === null ||
+    envelopeBytes > PROPS_BRIDGE_RESOURCE_LIMITS.maxResponseBytes
+  ) {
+    return null;
+  }
+  const normalizedResponse = normalizePropsRawResponse(value.response);
+  if (!normalizedResponse || normalizedResponse.requestId !== request.requestId)
+    return null;
+
+  const targetGuard =
+    value.targetGuard === undefined
+      ? undefined
+      : isBoundedString(
+            value.targetGuard,
+            PROPS_BRIDGE_RESOURCE_LIMITS.maxComponentGuardBytes,
+            false,
+          )
+        ? value.targetGuard
+        : null;
+  if (targetGuard === null) return null;
+
+  let stateDelta: PropsStateDelta | undefined;
+  if (value.stateDelta !== undefined) {
+    if (
+      !isRecord(value.stateDelta) ||
+      typeof value.stateDelta.kind !== 'string'
+    )
+      return null;
+    if (request.op === 'write' && value.stateDelta.kind === 'write_original') {
+      if (
+        !request.payload.captureOriginal ||
+        !hasOnlyOwnKeys(
+          value.stateDelta,
+          new Set([
+            'kind',
+            'path',
+            'existed',
+            'encodedValue',
+            'componentGuard',
+          ]),
+        )
+      ) {
+        return null;
+      }
+      const path = normalizePropPath(value.stateDelta.path);
+      const encodedValue = normalizeEncodedPropValue(
+        value.stateDelta.encodedValue,
+        PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalBytesPerLocator,
+      );
+      if (
+        !path ||
+        JSON.stringify(path) !== JSON.stringify(request.payload.propPath) ||
+        encodedValue === null ||
+        typeof value.stateDelta.existed !== 'boolean' ||
+        !isBoundedString(
+          value.stateDelta.componentGuard,
+          PROPS_BRIDGE_RESOURCE_LIMITS.maxComponentGuardBytes,
+          false,
+        ) ||
+        value.stateDelta.componentGuard !== targetGuard
+      ) {
+        return null;
+      }
+      const deltaBytes = jsonByteLength(
+        value.stateDelta,
+        request.payload.stateBudgetBytes,
+      );
+      if (deltaBytes === null || deltaBytes > request.payload.stateBudgetBytes)
+        return null;
+      stateDelta = {
+        kind: 'write_original',
+        path,
+        encodedValue: encodedValue.value,
+        existed: value.stateDelta.existed,
+        componentGuard: value.stateDelta.componentGuard,
+      };
+    } else if (
+      request.op === 'reset' &&
+      value.stateDelta.kind === 'reset_result'
+    ) {
+      if (
+        !hasOnlyOwnKeys(
+          value.stateDelta,
+          new Set(['kind', 'appliedIndexes', 'guardMismatch']),
+        ) ||
+        !Array.isArray(value.stateDelta.appliedIndexes) ||
+        value.stateDelta.appliedIndexes.length >
+          request.payload.originals.length ||
+        typeof value.stateDelta.guardMismatch !== 'boolean'
+      ) {
+        return null;
+      }
+      const allowedIndexes = new Set(
+        request.payload.originals.map((entry) => entry.index),
+      );
+      const appliedIndexes: number[] = [];
+      const seen = new Set<number>();
+      for (const index of value.stateDelta.appliedIndexes) {
+        if (
+          !Number.isSafeInteger(index) ||
+          !allowedIndexes.has(index) ||
+          seen.has(index)
+        ) {
+          return null;
+        }
+        seen.add(index);
+        appliedIndexes.push(index);
+      }
+      if (value.stateDelta.guardMismatch && appliedIndexes.length > 0) return null;
+      stateDelta = {
+        kind: 'reset_result',
+        appliedIndexes,
+        guardMismatch: value.stateDelta.guardMismatch,
+      };
+    } else {
+      return null;
+    }
+  }
+  if (
+    request.op === 'write' &&
+    request.payload.captureOriginal &&
+    normalizedResponse.response.success &&
+    stateDelta?.kind !== 'write_original'
+  ) {
+    return null;
+  }
+  if (
+    request.op === 'write' &&
+    request.payload.expectedTargetGuard !== undefined &&
+    normalizedResponse.response.success &&
+    targetGuard !== request.payload.expectedTargetGuard
+  ) {
+    return null;
+  }
+  if (
+    request.op === 'reset' &&
+    stateDelta?.kind === 'reset_result' &&
+    !stateDelta.guardMismatch &&
+    targetGuard !== request.payload.originals[0]?.componentGuard
+  ) {
+    return null;
+  }
+  if (
+    request.op !== 'probe' &&
+    normalizedResponse.response.success &&
+    targetGuard === undefined
+  ) {
+    return null;
+  }
+  return {
+    response: normalizedResponse.response,
+    ...(targetGuard !== undefined ? { targetGuard } : {}),
+    ...(stateDelta ? { stateDelta } : {}),
   };
 }
 
@@ -1058,21 +1462,79 @@ function normalizeRawResponse(detail: unknown): { requestId: string; result: Pro
 /**
  * Create a Props Bridge instance for communicating with the MAIN world agent
  */
-export function createPropsBridge(options: PropsBridgeOptions = {}): PropsBridge {
-  const defaultTimeoutMs = boundedTimeout(options.defaultTimeoutMs, DEFAULT_TIMEOUT_MS);
+export function createPropsBridge(options: PropsBridgeOptions): PropsBridge {
+  const defaultTimeoutMs = boundedTimeout(
+    options.defaultTimeoutMs,
+    DEFAULT_TIMEOUT_MS,
+  );
+  const surfaceSessionId = options.surfaceSessionId;
+  if (!/^[a-f0-9]{64}$/.test(surfaceSessionId)) {
+    throw new PropsError('A valid Web Editor surface session is required');
+  }
 
   interface PendingEntry {
     resolve: (result: PropsResult) => void;
     timeoutId: number;
   }
 
+  interface StoredOriginal extends PropsOriginalEntry {
+    bytes: number;
+    sourceLocatorKey: string;
+  }
+
+  interface GuardOriginals {
+    entries: Map<string, StoredOriginal>;
+    bytes: number;
+  }
+
+  interface RequestHandle {
+    result: Promise<PropsResult>;
+    settled: Promise<void>;
+  }
+
   const pending = new Map<string, PendingEntry>();
-  let disposed = false;
+  const originalsByGuard = new Map<string, GuardOriginals>();
+  const targetGuardByLocator = new Map<string, string>();
+  const pinnedGuardByLocator = new Map<string, { guard: string; entries: number }>();
+  let originalEntries = 0;
+  let originalBytes = 0;
+  let inFlightTransports = 0;
+  let mutationQueue: Promise<void> = Promise.resolve();
+  let lifecycle: 'active' | 'closing' | 'disposed' = 'active';
+  let cleanupPromise: Promise<void> | null = null;
 
   function assertActive(): void {
-    if (disposed) {
-      throw new PropsError('PropsBridge is disposed');
+    if (lifecycle !== 'active') throw new PropsError('PropsBridge is disposed');
+  }
+
+  function locatorKey(locator: ElementLocator): string {
+    return JSON.stringify(locator);
+  }
+
+  function propPathKey(path: PropPath): string {
+    return JSON.stringify(path);
+  }
+
+  function clearOriginals(): void {
+    originalsByGuard.clear();
+    targetGuardByLocator.clear();
+    pinnedGuardByLocator.clear();
+    originalEntries = 0;
+    originalBytes = 0;
+  }
+
+  function targetGuardForLocator(key: string): string | undefined {
+    return pinnedGuardByLocator.get(key)?.guard ?? targetGuardByLocator.get(key);
+  }
+
+  function rememberTargetGuard(key: string, guard: string): void {
+    targetGuardByLocator.delete(key);
+    while (targetGuardByLocator.size >= PROPS_BRIDGE_RESOURCE_LIMITS.maxTargetAliases) {
+      const oldest = targetGuardByLocator.keys().next().value as string | undefined;
+      if (!oldest) break;
+      targetGuardByLocator.delete(oldest);
     }
+    targetGuardByLocator.set(key, guard);
   }
 
   function clearPending(error: string): void {
@@ -1083,124 +1545,303 @@ export function createPropsBridge(options: PropsBridgeOptions = {}): PropsBridge
     }
   }
 
-  function onResponse(event: Event): void {
-    if (disposed) return;
-    try {
-      const detail = (event as CustomEvent).detail as unknown;
-      if (!isObject(detail)) return;
-      const requestIdDescriptor = Object.getOwnPropertyDescriptor(detail, 'requestId');
-      if (!requestIdDescriptor || !('value' in requestIdDescriptor)) return;
-      const requestId = isBoundedString(
-        requestIdDescriptor.value,
-        PROPS_BRIDGE_RESOURCE_LIMITS.maxRequestIdBytes,
-        false,
-      )
-        ? requestIdDescriptor.value
-        : '';
-      if (!requestId || !pending.has(requestId)) return;
+  function absorbStateDelta(
+    request: PropsRpcRequest,
+    envelope: PropsExecutionEnvelope,
+  ): void {
+    if (lifecycle === 'disposed') return;
+    const key = request.locator ? locatorKey(request.locator) : '';
+    const delta = envelope.stateDelta;
+    if (
+      envelope.targetGuard &&
+      (envelope.response.success || delta?.kind === 'write_original')
+    ) {
+      rememberTargetGuard(key, envelope.targetGuard);
+    }
+    if (!delta) return;
 
-      const entry = pending.get(requestId);
-      if (!entry) return;
+    if (request.op === 'write' && delta.kind === 'write_original') {
+      const pathKey = propPathKey(delta.path);
+      let guardState = originalsByGuard.get(delta.componentGuard);
+      if (guardState?.entries.has(pathKey)) return;
 
-      const normalized = normalizeRawResponse(detail);
-      if (!normalized || normalized.requestId !== requestId) return;
+      const bytes = jsonByteLength(
+        delta,
+        PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalBytes,
+      );
+      if (
+        bytes === null ||
+        bytes > PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalBytesPerLocator ||
+        originalEntries >= PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalEntries ||
+        originalBytes + bytes > PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalBytes
+      ) {
+        return;
+      }
 
-      pending.delete(requestId);
-      clearTimeout(entry.timeoutId);
-      entry.resolve(normalized.result);
-    } catch {
-      // Ignore malformed page-controlled responses; the real request may still arrive.
+      if (!guardState) {
+        guardState = { entries: new Map(), bytes: 0 };
+        originalsByGuard.set(delta.componentGuard, guardState);
+      }
+      guardState.entries.set(pathKey, {
+        path: delta.path,
+        encodedValue: delta.encodedValue,
+        existed: delta.existed,
+        componentGuard: delta.componentGuard,
+        bytes,
+        sourceLocatorKey: key,
+      });
+      const pinned = pinnedGuardByLocator.get(key);
+      if (!pinned) {
+        pinnedGuardByLocator.set(key, { guard: delta.componentGuard, entries: 1 });
+      } else if (pinned.guard === delta.componentGuard) {
+        pinned.entries += 1;
+      }
+      guardState.bytes += bytes;
+      originalEntries += 1;
+      originalBytes += bytes;
+      return;
+    }
+
+    if (request.op === 'reset' && delta.kind === 'reset_result') {
+      const guard = request.payload.originals[0]?.componentGuard;
+      const guardState = guard ? originalsByGuard.get(guard) : undefined;
+      if (!guardState) return;
+      for (const index of delta.appliedIndexes) {
+        const requested = request.payload.originals.find((entry) => entry.index === index);
+        if (!requested) continue;
+        const pathKey = propPathKey(requested.path);
+        const stored = guardState.entries.get(pathKey);
+        if (
+          !stored ||
+          stored.componentGuard !== requested.componentGuard ||
+          stored.existed !== requested.existed ||
+          JSON.stringify(stored.encodedValue) !==
+            JSON.stringify(requested.encodedValue)
+        ) {
+          continue;
+        }
+        guardState.entries.delete(pathKey);
+        guardState.bytes -= stored.bytes;
+        originalEntries -= 1;
+        originalBytes -= stored.bytes;
+        const pinned = pinnedGuardByLocator.get(stored.sourceLocatorKey);
+        if (pinned?.guard === guard) {
+          if (pinned.entries <= 1) pinnedGuardByLocator.delete(stored.sourceLocatorKey);
+          else pinned.entries -= 1;
+        }
+      }
+      if (guardState.entries.size === 0 && guard) originalsByGuard.delete(guard);
     }
   }
 
-  // Register response listener
-  window.addEventListener(EVENT_NAME.RESPONSE, onResponse as EventListener);
+  function backgroundFailure(value: unknown): PropsResult {
+    if (
+      isRecord(value) &&
+      value.success === false &&
+      isBoundedString(
+        value.error,
+        PROPS_BRIDGE_RESOURCE_LIMITS.maxErrorBytes,
+        false,
+      )
+    ) {
+      return { ok: false, error: value.error };
+    }
+    return { ok: false, error: 'Invalid props response from background' };
+  }
 
-  function sendRequest<T extends PropsRequest>(
-    request: T,
+  function dispatchRequest(
+    requestValue: PropsRpcRequest,
     timeoutMs: number,
-  ): Promise<PropsResult> {
-    assertActive();
-
-    const { requestId } = request;
-    if (!isBoundedString(requestId, PROPS_BRIDGE_RESOURCE_LIMITS.maxRequestIdBytes, false)) {
-      return Promise.resolve({ ok: false, error: 'requestId is required' });
+    allowClosing = false,
+  ): RequestHandle {
+    const request = normalizePropsRpcRequest(requestValue);
+    if (!request) {
+      return {
+        result: Promise.resolve({ ok: false, error: 'Invalid props request' }),
+        settled: Promise.resolve(),
+      };
     }
-
-    if (pending.has(requestId)) {
-      return Promise.resolve({
-        ok: false,
-        error: `Duplicate requestId: ${requestId}`,
-      });
+    if (lifecycle === 'disposed' || (!allowClosing && lifecycle !== 'active')) {
+      return {
+        result: Promise.resolve({ ok: false, error: 'PropsBridge disposed' }),
+        settled: Promise.resolve(),
+      };
     }
-
-    if (pending.size >= PROPS_BRIDGE_RESOURCE_LIMITS.maxPendingRequests) {
-      return Promise.resolve({
-        ok: false,
-        error: 'Too many pending props requests',
-      });
+    if (pending.has(request.requestId)) {
+      return {
+        result: Promise.resolve({
+          ok: false,
+          error: 'Duplicate props request ID',
+        }),
+        settled: Promise.resolve(),
+      };
     }
-
-    const requestBytes = jsonByteLength(request, PROPS_BRIDGE_RESOURCE_LIMITS.maxRequestBytes);
-    if (requestBytes === null || requestBytes > PROPS_BRIDGE_RESOURCE_LIMITS.maxRequestBytes) {
-      return Promise.resolve({
-        ok: false,
-        error: 'Props request exceeds the resource limit',
-      });
+    if (inFlightTransports >= PROPS_BRIDGE_RESOURCE_LIMITS.maxPendingRequests) {
+      return {
+        result: Promise.resolve({
+          ok: false,
+          error: 'Too many pending props requests',
+        }),
+        settled: Promise.resolve(),
+      };
     }
 
     const boundedTimeoutMs = boundedTimeout(timeoutMs, defaultTimeoutMs);
-
-    return new Promise<PropsResult>((resolve) => {
-      const timeoutId = window.setTimeout(() => {
-        pending.delete(requestId);
-        resolve({
-          ok: false,
-          error: `Props agent timeout after ${boundedTimeoutMs}ms (op=${request.op})`,
-        });
-      }, boundedTimeoutMs);
-
-      pending.set(requestId, { resolve, timeoutId });
-
-      try {
-        window.dispatchEvent(new CustomEvent(EVENT_NAME.REQUEST, { detail: request }));
-      } catch (err) {
-        clearTimeout(timeoutId);
-        pending.delete(requestId);
-        resolve({
-          ok: false,
-          error: `Failed to dispatch props request: ${normalizeErrorMessage(err)}`,
-        });
-      }
+    let resolveResult!: (result: PropsResult) => void;
+    const result = new Promise<PropsResult>((resolve) => {
+      resolveResult = resolve;
     });
+    const timeoutId = window.setTimeout(() => {
+      const entry = pending.get(request.requestId);
+      if (!entry) return;
+      pending.delete(request.requestId);
+      entry.resolve({
+        ok: false,
+        error:
+          'Props agent timeout after ' +
+          boundedTimeoutMs +
+          'ms (op=' +
+          request.op +
+          ')',
+      });
+    }, boundedTimeoutMs);
+    pending.set(request.requestId, { resolve: resolveResult, timeoutId });
+    inFlightTransports += 1;
+
+    const settled = Promise.resolve()
+      .then(() =>
+        chrome.runtime.sendMessage({
+          type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_EXECUTE,
+          surfaceSessionId,
+          request,
+        }),
+      )
+      .then((rawResponse: unknown) => {
+        let publicResult: PropsResult;
+        if (
+          isRecord(rawResponse) &&
+          hasOnlyOwnKeys(rawResponse, new Set(['success', 'execution'])) &&
+          rawResponse.success === true
+        ) {
+          const envelope = normalizePropsExecutionEnvelope(
+            rawResponse.execution,
+            request,
+          );
+          if (envelope) {
+            // State is absorbed even after the UI timeout. This preserves the
+            // pre-mutation original for a late but successful MAIN operation.
+            absorbStateDelta(request, envelope);
+            publicResult =
+              normalizePropsRawResponse(envelope.response)?.result ??
+              ({
+                ok: false,
+                error: 'Invalid props response from MAIN world',
+              } as PropsResult);
+          } else {
+            publicResult = {
+              ok: false,
+              error: 'Invalid props response from MAIN world',
+            };
+          }
+        } else {
+          publicResult = backgroundFailure(rawResponse);
+        }
+
+        const entry = pending.get(request.requestId);
+        if (!entry) return;
+        pending.delete(request.requestId);
+        clearTimeout(entry.timeoutId);
+        entry.resolve(publicResult);
+      })
+      .catch((error: unknown) => {
+        const entry = pending.get(request.requestId);
+        if (!entry) return;
+        pending.delete(request.requestId);
+        clearTimeout(entry.timeoutId);
+        entry.resolve({
+          ok: false,
+          error: 'Props request failed: ' + normalizeErrorMessage(error),
+        });
+      })
+      .finally(() => {
+        inFlightTransports = Math.max(0, inFlightTransports - 1);
+      });
+
+    return { result, settled };
   }
 
-  async function probe(locator?: ElementLocator, timeoutMs?: number): Promise<PropsResult> {
+  function enqueueMutation(
+    createRequest: () => PropsRpcRequest | PropsResult,
+    timeoutMs: number,
+  ): Promise<PropsResult> {
+    let resolveResult!: (result: PropsResult) => void;
+    const result = new Promise<PropsResult>((resolve) => {
+      resolveResult = resolve;
+    });
+
+    const operation = mutationQueue.then(async () => {
+      if (lifecycle === 'disposed') {
+        resolveResult({ ok: false, error: 'PropsBridge disposed' });
+        return;
+      }
+      const request = createRequest();
+      if ('ok' in request) {
+        resolveResult(request);
+        return;
+      }
+      const handle = dispatchRequest(request, timeoutMs, true);
+      void handle.result.then(resolveResult);
+      await handle.settled;
+    });
+    mutationQueue = operation.catch(() => undefined);
+    void operation.catch((error: unknown) => {
+      resolveResult({
+        ok: false,
+        error: 'Props mutation failed: ' + normalizeErrorMessage(error),
+      });
+    });
+    return result;
+  }
+
+  async function probe(
+    locator?: ElementLocator,
+    timeoutMs?: number,
+  ): Promise<PropsResult> {
+    assertActive();
     let normalizedLocator: ElementLocator | undefined;
     if (locator !== undefined) {
       const candidate = normalizeLocator(locator);
-      if (!candidate) return { ok: false, error: 'Invalid element locator' };
+      if (!candidate)
+        return Promise.resolve({ ok: false, error: 'Invalid element locator' });
       normalizedLocator = candidate;
     }
     const request: PropsProbeRequest = {
       v: PROTOCOL_VERSION,
       requestId: createRequestId(),
       op: 'probe',
-      locator: normalizedLocator,
+      ...(normalizedLocator ? { locator: normalizedLocator } : {}),
     };
-    return sendRequest(request, boundedTimeout(timeoutMs, defaultTimeoutMs));
+    return dispatchRequest(request, boundedTimeout(timeoutMs, defaultTimeoutMs))
+      .result;
   }
 
-  async function read(locator: ElementLocator, timeoutMs?: number): Promise<PropsResult> {
+  async function read(
+    locator: ElementLocator,
+    timeoutMs?: number,
+  ): Promise<PropsResult> {
+    assertActive();
     const normalizedLocator = normalizeLocator(locator);
-    if (!normalizedLocator) return { ok: false, error: 'Invalid element locator' };
+    if (!normalizedLocator) {
+      return Promise.resolve({ ok: false, error: 'Invalid element locator' });
+    }
     const request: PropsReadRequest = {
       v: PROTOCOL_VERSION,
       requestId: createRequestId(),
       op: 'read',
       locator: normalizedLocator,
     };
-    return sendRequest(request, boundedTimeout(timeoutMs, defaultTimeoutMs));
+    return dispatchRequest(request, boundedTimeout(timeoutMs, defaultTimeoutMs))
+      .result;
   }
 
   async function write(
@@ -1209,90 +1850,186 @@ export function createPropsBridge(options: PropsBridgeOptions = {}): PropsBridge
     value: EditablePropValue,
     timeoutMs?: number,
   ): Promise<PropsResult> {
+    assertActive();
     const normalizedLocator = normalizeLocator(locator);
-    if (!normalizedLocator) return { ok: false, error: 'Invalid element locator' };
-    const normalizedPath = normalizePropPath(path);
-    if (!normalizedPath) {
-      return { ok: false, error: 'prop path is required' };
+    if (!normalizedLocator) {
+      return Promise.resolve({ ok: false, error: 'Invalid element locator' });
     }
-
+    const normalizedPath = normalizePropPath(path);
+    if (!normalizedPath)
+      return Promise.resolve({ ok: false, error: 'prop path is required' });
     if (!isEditablePrimitive(value)) {
-      return { ok: false, error: 'Only primitive prop values are supported' };
+      return Promise.resolve({
+        ok: false,
+        error: 'Only primitive prop values are supported',
+      });
     }
     if (
       typeof value === 'string' &&
       utf8ByteLength(value, PROPS_BRIDGE_RESOURCE_LIMITS.maxValueBytes) >
         PROPS_BRIDGE_RESOURCE_LIMITS.maxValueBytes
     ) {
-      return { ok: false, error: 'Prop value exceeds the resource limit' };
+      return Promise.resolve({
+        ok: false,
+        error: 'Prop value exceeds the resource limit',
+      });
     }
 
-    const request: PropsWriteRequest = {
-      v: PROTOCOL_VERSION,
-      requestId: createRequestId(),
-      op: 'write',
-      locator: normalizedLocator,
-      payload: {
-        propPath: normalizedPath,
-        propValue: encodePropValue(value),
+    return enqueueMutation(
+      () => {
+        const key = locatorKey(normalizedLocator);
+        const pathKey = propPathKey(normalizedPath);
+        const expectedTargetGuard = targetGuardForLocator(key);
+        const guardState = expectedTargetGuard
+          ? originalsByGuard.get(expectedTargetGuard)
+          : undefined;
+        const alreadyCaptured = guardState?.entries.has(pathKey) === true;
+        let stateBudgetBytes = 0;
+        if (!alreadyCaptured) {
+          if (
+            originalEntries >= PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalEntries
+          ) {
+            return {
+              ok: false,
+              error: 'Props reset storage entry limit reached',
+            };
+          }
+          stateBudgetBytes = Math.min(
+            PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalBytes - originalBytes,
+            PROPS_BRIDGE_RESOURCE_LIMITS.maxOriginalBytesPerLocator,
+          );
+          if (stateBudgetBytes <= 0) {
+            return {
+              ok: false,
+              error: 'Props reset storage byte limit reached',
+            };
+          }
+        }
+        return {
+          v: PROTOCOL_VERSION,
+          requestId: createRequestId(),
+          op: 'write',
+          locator: normalizedLocator,
+          payload: {
+            propPath: normalizedPath,
+            propValue: encodePropValue(value),
+            captureOriginal: !alreadyCaptured,
+            ...(expectedTargetGuard ? { expectedTargetGuard } : {}),
+            stateBudgetBytes,
+          },
+        };
       },
-    };
-    return sendRequest(request, boundedTimeout(timeoutMs, defaultTimeoutMs));
+      boundedTimeout(timeoutMs, defaultTimeoutMs),
+    );
   }
 
-  async function reset(locator: ElementLocator, timeoutMs?: number): Promise<PropsResult> {
+  async function reset(
+    locator: ElementLocator,
+    timeoutMs?: number,
+  ): Promise<PropsResult> {
+    assertActive();
     const normalizedLocator = normalizeLocator(locator);
-    if (!normalizedLocator) return { ok: false, error: 'Invalid element locator' };
-    const request: PropsResetRequest = {
-      v: PROTOCOL_VERSION,
-      requestId: createRequestId(),
-      op: 'reset',
-      locator: normalizedLocator,
-    };
-    return sendRequest(request, boundedTimeout(timeoutMs, defaultTimeoutMs));
+    if (!normalizedLocator) {
+      return Promise.resolve({ ok: false, error: 'Invalid element locator' });
+    }
+
+    const key = locatorKey(normalizedLocator);
+    const requestTimeoutMs = boundedTimeout(timeoutMs, defaultTimeoutMs);
+    let resolveResult!: (result: PropsResult) => void;
+    const result = new Promise<PropsResult>((resolve) => {
+      resolveResult = resolve;
+    });
+
+    const operation = mutationQueue.then(async () => {
+      if (lifecycle === 'disposed') {
+        resolveResult({ ok: false, error: 'PropsBridge disposed' });
+        return;
+      }
+      while (true) {
+        const guard = targetGuardForLocator(key);
+        if (!guard) {
+          resolveResult({ ok: true });
+          return;
+        }
+        const guardState = originalsByGuard.get(guard);
+        if (!guardState || guardState.entries.size === 0) {
+          resolveResult({ ok: true });
+          return;
+        }
+
+        const requestId = createRequestId();
+        const batch: PropsResetOriginalEntry[] = [];
+        for (const entry of guardState.entries.values()) {
+          const candidate = batch.concat({
+            index: batch.length,
+            path: entry.path,
+            encodedValue: entry.encodedValue,
+            existed: entry.existed,
+            componentGuard: entry.componentGuard,
+          });
+          const requestCandidate: PropsResetRequest = {
+            v: PROTOCOL_VERSION,
+            requestId,
+            op: 'reset',
+            locator: normalizedLocator,
+            payload: { originals: candidate },
+          };
+          if (!normalizePropsRpcRequest(requestCandidate)) break;
+          batch.push(candidate[candidate.length - 1]!);
+        }
+        if (batch.length === 0) {
+          resolveResult({ ok: false, error: 'Original prop cannot fit a reset request' });
+          return;
+        }
+
+        const before = guardState.entries.size;
+        const handle = dispatchRequest(
+          {
+            v: PROTOCOL_VERSION,
+            requestId,
+            op: 'reset',
+            locator: normalizedLocator,
+            payload: { originals: batch },
+          },
+          requestTimeoutMs,
+          true,
+        );
+        const publicResult = handle.result;
+        await handle.settled;
+        const current = originalsByGuard.get(guard);
+        if ((current?.entries.size ?? 0) >= before) {
+          resolveResult(await publicResult);
+          return;
+        }
+      }
+    });
+    mutationQueue = operation.catch(() => undefined);
+    void operation.catch((error: unknown) => {
+      resolveResult({ ok: false, error: 'Props reset failed: ' + normalizeErrorMessage(error) });
+    });
+    return result;
   }
 
-  async function cleanup(timeoutMs?: number): Promise<void> {
-    if (disposed) return;
-
-    const ms = boundedTimeout(timeoutMs, 800);
-
-    // Best-effort: ask agent to cleanup first
-    try {
-      const request: PropsCleanupRequest = {
-        v: PROTOCOL_VERSION,
-        requestId: createRequestId(),
-        op: 'cleanup',
-      };
-      await sendRequest(request, ms);
-    } catch {
-      // Ignore agent errors during cleanup
-    } finally {
-      // Dispatch cleanup event for any listeners
-      try {
-        window.dispatchEvent(new CustomEvent(EVENT_NAME.CLEANUP));
-      } catch {
-        // ignore
-      }
-      dispose();
-    }
+  function cleanup(_timeoutMs?: number): Promise<void> {
+    if (cleanupPromise) return cleanupPromise;
+    if (lifecycle === 'disposed') return Promise.resolve();
+    lifecycle = 'closing';
+    cleanupPromise = mutationQueue
+      .catch(() => undefined)
+      .then(() => {
+        lifecycle = 'disposed';
+        clearPending('PropsBridge disposed');
+        clearOriginals();
+      });
+    return cleanupPromise;
   }
 
   function dispose(): void {
-    if (disposed) return;
-    disposed = true;
-
-    try {
-      window.removeEventListener(EVENT_NAME.RESPONSE, onResponse as EventListener);
-    } catch {
-      // ignore
-    }
-
-    clearPending('PropsBridge disposed');
+    void cleanup();
   }
 
   function isDisposedFn(): boolean {
-    return disposed;
+    return lifecycle !== 'active';
   }
 
   return {

@@ -1,7 +1,13 @@
-const PROPS_AGENT_SCRIPT_PATH = 'inject-scripts/props-agent.js';
+const PROPS_AGENT_SCRIPT_PATH = 'inject-scripts/props-hook-bootstrap.js';
 const REGISTRATION_ID_PREFIX = 'mcp_we_props_early';
 const TAB_REGISTRATION_STORAGE_PREFIX = 'web-editor-props-early-tab-';
 const TAB_REGISTRATION_STORAGE_VERSION = 1;
+const LEGACY_RETIREMENT_MIGRATION_STORAGE_KEY =
+  'web-editor-props-legacy-retirement-version';
+const LEGACY_RETIREMENT_MIGRATION_VERSION = 2;
+const LEGACY_RETIREMENT_CONCURRENCY = 4;
+const LEGACY_RETIREMENT_PER_TAB_TIMEOUT_MS = 1_500;
+const LEGACY_RETIREMENT_SWEEP_TIMEOUT_MS = 6_000;
 
 interface EarlyInjectionLocation {
   host: string;
@@ -24,12 +30,189 @@ export interface EarlyInjectionResult {
   alreadyRegistered: boolean;
 }
 
+type LegacyRetirementStatus = 'retired' | 'gone' | 'retry';
+
+async function executeLegacyPropsAgentRetirement(
+  tabId: number,
+  documentId?: string,
+): Promise<LegacyRetirementStatus> {
+  if (!Number.isSafeInteger(tabId) || tabId < 0) return 'gone';
+  if (
+    documentId !== undefined &&
+    (typeof documentId !== 'string' || !documentId || documentId.length > 512)
+  ) {
+    return 'retry';
+  }
+  if (typeof chrome.scripting?.executeScript !== 'function') return 'retry';
+  try {
+    const results = await chrome.scripting.executeScript({
+      target:
+        documentId === undefined
+          ? { tabId, frameIds: [0] }
+          : { tabId, documentIds: [documentId] },
+      world: 'MAIN',
+      func: () => {
+        const legacyAgent = (window as any).__MCP_WEB_EDITOR_PROPS_AGENT__;
+        if (
+          legacyAgent &&
+          legacyAgent.version !== 2 &&
+          typeof legacyAgent.dispose === 'function'
+        ) {
+          try {
+            legacyAgent.dispose();
+          } catch {
+            // Always install the inert v2 sentinel below.
+          }
+        }
+        try {
+          window.dispatchEvent(new Event('web-editor-props:cleanup'));
+        } catch {
+          // Legacy cleanup is best-effort.
+        }
+        (window as any).__MCP_WEB_EDITOR_PROPS_AGENT__ = Object.freeze({
+          version: 2,
+          transport: 'background-only',
+        });
+      },
+    });
+    if (
+      !Array.isArray(results) ||
+      results.length !== 1 ||
+      results[0]?.frameId !== 0 ||
+      (documentId !== undefined && results[0]?.documentId !== documentId)
+    ) {
+      return 'retry';
+    }
+    return 'retired';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    if (/No tab with id|tab (?:was )?closed|The tab was closed/i.test(message)) {
+      return 'gone';
+    }
+    return 'retry';
+  }
+}
+
+function retireLegacyPropsAgentWithStatus(
+  tabId: number,
+  documentId?: string,
+): Promise<LegacyRetirementStatus> {
+  const execution = executeLegacyPropsAgentRetirement(tabId, documentId);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (status: LegacyRetirementStatus) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve(status);
+    };
+    const timeoutId = setTimeout(
+      () => finish('retry'),
+      LEGACY_RETIREMENT_PER_TAB_TIMEOUT_MS,
+    );
+    void execution.then(finish, () => finish('retry'));
+  });
+}
+
+/** Retire a legacy long-lived MAIN-world agent in the currently open document. */
+export async function retireLegacyPropsAgentInTab(
+  tabId: number,
+  documentId?: string,
+): Promise<boolean> {
+  const status = await retireLegacyPropsAgentWithStatus(tabId, documentId);
+  if (status === 'retry') {
+    // A future worker startup will repeat the versioned full-tab sweep.
+    await chrome.storage.session
+      .remove(LEGACY_RETIREMENT_MIGRATION_STORAGE_KEY)
+      .catch(() => undefined);
+  }
+  return status !== 'retry';
+}
+
+function isEligibleLegacyRetirementUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    // Browser extension galleries cannot be scripted and could never have
+    // received the legacy agent through chrome.scripting in the first place.
+    return !(
+      url.hostname === 'chromewebstore.google.com' ||
+      (url.hostname === 'chrome.google.com' && url.pathname.startsWith('/webstore')) ||
+      (url.hostname === 'microsoftedge.microsoft.com' && url.pathname.startsWith('/addons'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isEligibleLegacyRetirementTab(tab: chrome.tabs.Tab): boolean {
+  return (
+    tab.discarded !== true &&
+    Number.isSafeInteger(tab.id) &&
+    (tab.id ?? -1) >= 0 &&
+    isEligibleLegacyRetirementUrl(tab.url ?? tab.pendingUrl ?? '')
+  );
+}
+
+async function retireLegacyPropsAgentsForMigration(): Promise<boolean> {
+  const startedAt = Date.now();
+  const tabs = await chrome.tabs.query({});
+  const tabIds = Array.from(
+    new Set(
+      tabs
+        .filter(isEligibleLegacyRetirementTab)
+        .map((tab) => tab.id as number),
+    ),
+  );
+  let retryNeeded = false;
+  for (let offset = 0; offset < tabIds.length; offset += LEGACY_RETIREMENT_CONCURRENCY) {
+    if (Date.now() - startedAt >= LEGACY_RETIREMENT_SWEEP_TIMEOUT_MS) {
+      return false;
+    }
+    const statuses = await Promise.all(
+      tabIds
+        .slice(offset, offset + LEGACY_RETIREMENT_CONCURRENCY)
+        .map((tabId) => retireLegacyPropsAgentWithStatus(tabId)),
+    );
+    if (statuses.includes('retry')) retryNeeded = true;
+  }
+  return !retryNeeded;
+}
+
 let registryQueue: Promise<void> = Promise.resolve();
+let legacyRetirementQueue: Promise<void> = Promise.resolve();
 let navigationLifecycleInitialized = false;
 
 function serializeRegistryOperation<T>(operation: () => Promise<T>): Promise<T> {
   const result = registryQueue.then(operation, operation);
   registryQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+function ensureLegacyRetirementMigration(): Promise<void> {
+  const result = legacyRetirementQueue.then(async () => {
+    const stored = await chrome.storage.session.get(
+      LEGACY_RETIREMENT_MIGRATION_STORAGE_KEY,
+    );
+    if (
+      stored[LEGACY_RETIREMENT_MIGRATION_STORAGE_KEY] ===
+      LEGACY_RETIREMENT_MIGRATION_VERSION
+    ) {
+      return;
+    }
+    const retired = await retireLegacyPropsAgentsForMigration();
+    if (!retired) {
+      throw new Error('Legacy props-agent retirement sweep must be retried');
+    }
+    await chrome.storage.session.set({
+      [LEGACY_RETIREMENT_MIGRATION_STORAGE_KEY]:
+        LEGACY_RETIREMENT_MIGRATION_VERSION,
+    });
+  });
+  legacyRetirementQueue = result.then(
     () => undefined,
     () => undefined,
   );
@@ -189,8 +372,38 @@ function registeredContentScript(
     runAt: 'document_start',
     world: 'MAIN',
     allFrames: false,
+    matchOriginAsFallback: false,
     persistAcrossSessions: false,
   };
+}
+
+function matchesExpectedRegistration(
+  script: chrome.scripting.RegisteredContentScript,
+  id: string,
+  matches: string[],
+): boolean {
+  const extended = script as chrome.scripting.RegisteredContentScript & {
+    includeGlobs?: string[];
+    excludeGlobs?: string[];
+  };
+  return (
+    script.id === id &&
+    Array.isArray(script.js) &&
+    script.js.length === 1 &&
+    script.js[0] === PROPS_AGENT_SCRIPT_PATH &&
+    Array.isArray(script.matches) &&
+    script.matches.length === matches.length &&
+    script.matches.every((match, index) => match === matches[index]) &&
+    script.runAt === 'document_start' &&
+    script.world === 'MAIN' &&
+    script.allFrames === false &&
+    script.matchOriginAsFallback !== true &&
+    (!script.css || script.css.length === 0) &&
+    (!extended.includeGlobs || extended.includeGlobs.length === 0) &&
+    (!extended.excludeGlobs || extended.excludeGlobs.length === 0) &&
+    (!script.excludeMatches || script.excludeMatches.length === 0) &&
+    script.persistAcrossSessions === false
+  );
 }
 
 async function releaseStoredTabRegistration(storageKey: string, id?: string): Promise<void> {
@@ -215,7 +428,14 @@ export function registerPropsAgentEarlyInjection(
     const previousId = readStoredRegistrationId(previous[storageKey]);
 
     const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });
-    const alreadyRegistered = existing.some((script) => script.id === id);
+    const existingScript = existing.find((script) => script.id === id);
+    const alreadyRegistered = Boolean(
+      existingScript && matchesExpectedRegistration(existingScript, id, matches),
+    );
+
+    if (existingScript && !alreadyRegistered) {
+      await chrome.scripting.unregisterContentScripts({ ids: [id] });
+    }
 
     if (!alreadyRegistered) {
       await chrome.scripting.registerContentScripts([registeredContentScript(id, matches)]);
@@ -303,7 +523,12 @@ function handleTopLevelNavigation(
   details: chrome.webNavigation.WebNavigationTransitionCallbackDetails,
 ): void {
   if (details.frameId !== 0) return;
-  void reconcilePropsAgentEarlyInjectionNavigation(details.tabId, details.url).catch((error) => {
+  void (async () => {
+    if (isEligibleLegacyRetirementUrl(details.url)) {
+      await retireLegacyPropsAgentInTab(details.tabId, details.documentId);
+    }
+    await reconcilePropsAgentEarlyInjectionNavigation(details.tabId, details.url);
+  })().catch((error) => {
     console.warn('[WebEditor] Failed to reconcile props early injection after navigation:', error);
   });
 }
@@ -325,8 +550,11 @@ export function initPropsAgentEarlyInjectionNavigationLifecycle(): void {
 }
 
 /** Remove registrations left behind by older releases or interrupted setup. */
-export function pruneOrphanedPropsAgentEarlyInjections(): Promise<void> {
-  return serializeRegistryOperation(async () => {
+export async function pruneOrphanedPropsAgentEarlyInjections(): Promise<void> {
+  // Security migration is independent from the operational registration
+  // queue: stale registry state cannot delay retiring page-visible v1 agents.
+  await ensureLegacyRetirementMigration();
+  await serializeRegistryOperation(async () => {
     const [initialStored, scripts] = await Promise.all([
       chrome.storage.session.get(null),
       chrome.scripting.getRegisteredContentScripts(),
@@ -352,6 +580,7 @@ export function pruneOrphanedPropsAgentEarlyInjections(): Promise<void> {
         storageRemovals.push(key);
         continue;
       }
+      await retireLegacyPropsAgentInTab(tabId);
 
       const expectedId = await buildRegistrationId(currentLocation.host);
       const storedRecord = readStoredRegistration(value);
@@ -372,6 +601,14 @@ export function pruneOrphanedPropsAgentEarlyInjections(): Promise<void> {
         storageUpdates[key] = nextRecord;
       }
 
+      const registered = scriptsById.get(registrationId);
+      if (
+        registered &&
+        !matchesExpectedRegistration(registered, registrationId, currentLocation.matches)
+      ) {
+        await chrome.scripting.unregisterContentScripts({ ids: [registrationId] });
+        scriptsById.delete(registrationId);
+      }
       if (!scriptsById.has(registrationId)) {
         const restoredScript = registeredContentScript(registrationId, currentLocation.matches);
         await chrome.scripting.registerContentScripts([restoredScript]);
@@ -396,5 +633,6 @@ export function pruneOrphanedPropsAgentEarlyInjections(): Promise<void> {
     if (orphanedIds.length > 0) {
       await chrome.scripting.unregisterContentScripts({ ids: orphanedIds });
     }
+
   });
 }
