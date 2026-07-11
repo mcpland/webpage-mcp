@@ -18,7 +18,9 @@ function hasDisallowedPublicPageScheme(url: string): boolean {
   return protocol !== "http" && protocol !== "https";
 }
 
-function sanitizeRecordingStateSnapshot(state: ReturnType<typeof buildRecordingStateSnapshot>) {
+function sanitizeRecordingStateSnapshot(
+  state: ReturnType<typeof buildRecordingStateSnapshot>,
+) {
   if (!state.originUrl || !hasDisallowedPublicPageScheme(state.originUrl)) {
     return state;
   }
@@ -30,7 +32,9 @@ function sanitizeRecordingStateSnapshot(state: ReturnType<typeof buildRecordingS
   };
 }
 
-async function getTargetRecordingTab(tabId?: number): Promise<chrome.tabs.Tab | null> {
+async function getTargetRecordingTab(
+  tabId?: number,
+): Promise<chrome.tabs.Tab | null> {
   if (typeof tabId === "number") {
     try {
       return await chrome.tabs.get(tabId);
@@ -70,12 +74,13 @@ class RecordingStartTool {
         : "";
     const tabId = typeof args?.tabId === "number" ? args.tabId : undefined;
     const targetTab = await getTargetRecordingTab(tabId);
-    if (targetTab?.url && hasDisallowedPublicPageScheme(String(targetTab.url))) {
+    if (
+      targetTab?.url &&
+      hasDisallowedPublicPageScheme(String(targetTab.url))
+    ) {
       return createErrorResponse(RECORDING_PUBLIC_PAGE_ERROR);
     }
-    const meta = flowName
-      ? { name: flowName }
-      : undefined;
+    const meta = flowName ? { name: flowName } : undefined;
     const result = await RecorderManager.start(meta, tabId);
     if (!result.success) {
       return createErrorResponse(result.error || "Failed to start recording");
@@ -87,7 +92,9 @@ class RecordingStartTool {
           type: "text",
           text: JSON.stringify({
             success: true,
-            state: sanitizeRecordingStateSnapshot(buildRecordingStateSnapshot()),
+            state: sanitizeRecordingStateSnapshot(
+              buildRecordingStateSnapshot(),
+            ),
           }),
         },
       ],
@@ -149,7 +156,9 @@ class RecordingStopTool {
                   stepCount: countFlowSteps(flow),
                 }
               : null,
-            state: sanitizeRecordingStateSnapshot(buildRecordingStateSnapshot()),
+            state: sanitizeRecordingStateSnapshot(
+              buildRecordingStateSnapshot(),
+            ),
           }),
         },
       ],
@@ -162,13 +171,21 @@ class RecordingStatusTool {
   name = TOOL_NAMES.RECORD_REPLAY.RECORDING_STATUS;
 
   async execute(): Promise<ToolResult> {
+    const ready = (
+      RecorderManager as typeof RecorderManager & {
+        ready?: () => Promise<void>;
+      }
+    ).ready;
+    await ready?.call(RecorderManager);
     return {
       content: [
         {
           type: "text",
           text: JSON.stringify({
             success: true,
-            state: sanitizeRecordingStateSnapshot(buildRecordingStateSnapshot()),
+            state: sanitizeRecordingStateSnapshot(
+              buildRecordingStateSnapshot(),
+            ),
           }),
         },
       ],

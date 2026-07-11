@@ -4,6 +4,7 @@ import { saveFlowToV3 } from "../../record-replay-v3/compat";
 import {
   broadcastControlToTab,
   ensureRecorderInjected,
+  recoverRecorderControlInTab,
   REC_CMD,
 } from "./content-injection";
 import { recordingSession as session } from "./session-manager";
@@ -12,6 +13,7 @@ import { initBrowserEventListeners } from "./browser-event-listener";
 import { initContentMessageHandler } from "./content-message-handler";
 import { broadcastRecordingStateChanged } from "./recording-state";
 import { recordingNetworkTracker } from "./network-tracker";
+import { RECORDING_RECOVERY_ALARM } from "./recording-recovery-store";
 
 /** Timeout for waiting for the top-frame content script to acknowledge stop. */
 const STOP_BARRIER_TOP_TIMEOUT_MS = 5000;
@@ -21,6 +23,10 @@ const STOP_BARRIER_SUBFRAME_TIMEOUT_MS = 1500;
 
 /** Small grace period for in-flight messages after all ACKs. */
 const STOP_BARRIER_GRACE_MS = 150;
+const MAX_PARAMETER_SUGGESTIONS = 25;
+const MAX_PARAMETER_SUGGESTION_VALUE_LENGTH = 4_096;
+const START_ROLLBACK_FRAME_DISCOVERY_TIMEOUT_MS = 500;
+const START_ROLLBACK_STOP_TIMEOUT_MS = 1_000;
 
 /** Types for stop barrier results */
 interface StopAckStats {
@@ -87,7 +93,10 @@ function collectParameterSuggestions(flow: Flow): Array<{
         : {};
 
     if (node.type === "fill") {
-      const rawValue = typeof cfg.value === "string" ? cfg.value.trim() : "";
+      const rawValue =
+        typeof cfg.value === "string"
+          ? cfg.value.trim().slice(0, MAX_PARAMETER_SUGGESTION_VALUE_LENGTH)
+          : "";
       if (!rawValue) continue;
       if (/^\{[a-zA-Z_][a-zA-Z0-9_]*\}$/.test(rawValue)) continue;
       const selector =
@@ -104,7 +113,7 @@ function collectParameterSuggestions(flow: Flow): Array<{
         currentValue: rawValue,
       });
       seq += 1;
-      if (suggestions.length >= 25) break;
+      if (suggestions.length >= MAX_PARAMETER_SUGGESTIONS) break;
       continue;
     }
 
@@ -114,7 +123,9 @@ function collectParameterSuggestions(flow: Flow): Array<{
       try {
         const parsed = new URL(url);
         for (const [param, value] of parsed.searchParams.entries()) {
-          const trimmedValue = String(value || "").trim();
+          const trimmedValue = String(value || "")
+            .trim()
+            .slice(0, MAX_PARAMETER_SUGGESTION_VALUE_LENGTH);
           if (!trimmedValue) continue;
           suggestions.push({
             nodeId: node.id,
@@ -123,12 +134,12 @@ function collectParameterSuggestions(flow: Flow): Array<{
             currentValue: trimmedValue,
           });
           seq += 1;
-          if (suggestions.length >= 25) break;
+          if (suggestions.length >= MAX_PARAMETER_SUGGESTIONS) break;
         }
       } catch {
         // ignore invalid URLs
       }
-      if (suggestions.length >= 25) break;
+      if (suggestions.length >= MAX_PARAMETER_SUGGESTIONS) break;
     }
   }
 
@@ -160,6 +171,24 @@ async function listFrameIds(tabId: number): Promise<number[]> {
   } catch {
     return [0];
   }
+}
+
+async function withFallbackTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  fallback: T,
+): Promise<T> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: T) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(fallback), timeoutMs);
+    operation.then(finish, () => finish(fallback));
+  });
 }
 
 /**
@@ -255,28 +284,124 @@ async function stopTabWithBarrier(
   return { tabId, ok: top.ack, top, subframes };
 }
 
+/**
+ * START may have executed even when its response channel was lost. Stop every
+ * discoverable frame before clearing the durable owner so the page cannot keep
+ * recording into an idle background. Discovery and each message are bounded.
+ */
+async function rollbackUnconfirmedStart(
+  tabId: number,
+  sessionId: string,
+): Promise<void> {
+  const frameIds = await withFallbackTimeout(
+    listFrameIds(tabId),
+    START_ROLLBACK_FRAME_DISCOVERY_TIMEOUT_MS,
+    [0],
+  );
+  await Promise.all(
+    frameIds.map((frameId) =>
+      sendStopToFrameWithAck(
+        tabId,
+        sessionId,
+        frameId,
+        START_ROLLBACK_STOP_TIMEOUT_MS,
+      ),
+    ),
+  );
+}
+
 type RecordedFlow = Flow | FlowV3;
 
 class RecorderManagerImpl {
   private initialized = false;
+  private readyPromise: Promise<void> | null = null;
+  private stopPromise: Promise<{
+    success: boolean;
+    error?: string;
+    flow?: RecordedFlow;
+  }> | null = null;
 
   async init(): Promise<void> {
-    if (this.initialized) return;
+    if (this.initialized) return this.ready();
     session.setLimitHandler((reason) => {
       void this.stop().catch((error) => {
-        console.warn(`RecorderManager: automatic stop failed after ${reason} limit`, error);
+        console.warn(
+          `RecorderManager: automatic stop failed after ${reason} limit`,
+          error,
+        );
       });
     });
     initBrowserEventListeners(session);
     initContentMessageHandler(session);
     recordingNetworkTracker.init();
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name !== RECORDING_RECOVERY_ALARM) return;
+      void this.ready()
+        .then(() => {
+          if (session.getStatus() !== "idle") return this.stop();
+          return undefined;
+        })
+        .catch((error) => {
+          console.warn(
+            "RecorderManager: recovery deadline handling failed",
+            error,
+          );
+        });
+    });
     this.initialized = true;
+    this.readyPromise = session.initializeRecovery().then(async () => {
+      const status = session.getStatus();
+      if (status === "idle") return;
+
+      if (status === "recording") recordingNetworkTracker.beginSession();
+      else recordingNetworkTracker.endSession();
+
+      if (status === "recording" || status === "paused") {
+        const sessionId = session.getSession().sessionId;
+        // A paused page may need to flush before the paused checkpoint can be
+        // re-applied. Temporarily accept that drain without publishing the
+        // transient status as a recovery checkpoint.
+        if (status === "paused") session.resume();
+        for (const tabId of session.getActiveTabs()) {
+          const active = await recoverRecorderControlInTab(
+            tabId,
+            sessionId,
+            status,
+            session.getActiveTabDocument(tabId),
+          );
+          if (!active) session.removeActiveTab(tabId);
+        }
+        if (status === "paused") session.pause();
+        if (session.getActiveTabs().length === 0) session.beginStopping();
+        await session.persistRecoveryState();
+      }
+
+      broadcastRecordingStateChanged();
+      if (session.getStatus() === "stopping") {
+        // Let the initialization promise settle before stop() awaits ready().
+        setTimeout(() => {
+          void this.stop().catch((error) => {
+            console.warn(
+              "RecorderManager: recovered stop finalization failed",
+              error,
+            );
+          });
+        }, 0);
+      }
+    });
+    return this.readyPromise;
+  }
+
+  async ready(): Promise<void> {
+    if (!this.initialized) return this.init();
+    await this.readyPromise;
   }
 
   async start(
     meta?: Partial<Flow>,
     tabId?: number,
   ): Promise<{ success: boolean; error?: string }> {
+    await this.ready();
     if (session.getStatus() !== "idle")
       return { success: false, error: "Recording already active" };
     // Resolve target tab (explicit tabId preferred, otherwise active tab)
@@ -330,28 +455,41 @@ class RecorderManagerImpl {
     } catch {
       // ignore metadata enrichment errors
     }
-    await session.startSession(flow, active.id);
+    const documentId = await this.getTopDocumentId(active.id);
+    await session.startSession(flow, active.id, documentId);
     recordingNetworkTracker.beginSession();
+
+    // The initial navigation is background-owned and has no content retry. Add
+    // it to the same durable session/document checkpoint before START can make
+    // the page emit its first recorder event.
+    const url = active.url;
+    if (url) {
+      addNavigationStep(flow, url);
+      await session.persistRecoveryState();
+    }
     broadcastRecordingStateChanged();
 
     // Ensure recorder available and start listening
     await ensureRecorderInjected(active.id);
-    await broadcastControlToTab(active.id, REC_CMD.START, {
+    const started = await broadcastControlToTab(active.id, REC_CMD.START, {
       id: flow.id,
       name: flow.name,
       description: flow.description,
       sessionId: session.getSession().sessionId,
     });
-    // Track active tab for targeted STOP broadcasts
-    session.addActiveTab(active.id);
-
-    // Record first step
-    const url = active.url;
-    if (url) {
-      addNavigationStep(flow, url);
+    if (started === false) {
+      await rollbackUnconfirmedStart(
+        active.id,
+        session.getSession().sessionId,
+      ).catch(() => {});
+      await session.stopSession();
+      recordingNetworkTracker.endSession();
       broadcastRecordingStateChanged();
+      return {
+        success: false,
+        error: "Top-frame recorder did not acknowledge START",
+      };
     }
-
     return { success: true };
   }
 
@@ -370,19 +508,38 @@ class RecorderManagerImpl {
    * - Subframes finalize to top before top stops
    * - Barrier status is recorded in flow.meta for debugging
    */
-  async stop(): Promise<{ success: boolean; error?: string; flow?: RecordedFlow }> {
+  stop(): Promise<{ success: boolean; error?: string; flow?: RecordedFlow }> {
+    if (this.stopPromise) return this.stopPromise;
+    const operation = this.stopInternal();
+    this.stopPromise = operation;
+    void operation.then(
+      () => {
+        if (this.stopPromise === operation) this.stopPromise = null;
+      },
+      () => {
+        if (this.stopPromise === operation) this.stopPromise = null;
+      },
+    );
+    return operation;
+  }
+
+  private async stopInternal(): Promise<{
+    success: boolean;
+    error?: string;
+    flow?: RecordedFlow;
+  }> {
+    await this.ready();
     const currentStatus = session.getStatus();
     if (currentStatus === "idle" || !session.getFlow()) {
       return { success: false, error: "No active recording" };
     }
 
-    // Already stopping - don't double-stop
-    if (currentStatus === "stopping") {
-      return { success: false, error: "Stop already in progress" };
-    }
-
     // Step 1: Transition to stopping state
-    const sessionId = session.beginStopping();
+    const sessionId =
+      currentStatus === "stopping"
+        ? session.getSession().sessionId
+        : session.beginStopping();
+    await session.persistRecoveryState();
     broadcastRecordingStateChanged();
     const tabs = session.getActiveTabs();
 
@@ -400,14 +557,9 @@ class RecorderManagerImpl {
     // Step 3: Allow a small grace period for any final messages in flight
     await new Promise((resolve) => setTimeout(resolve, STOP_BARRIER_GRACE_MS));
 
-    // Step 4: Finalize - clear session state and save with barrier metadata
-    let flow: Flow | null;
-    try {
-      flow = await session.stopSession();
-    } finally {
-      recordingNetworkTracker.endSession();
-    }
-    broadcastRecordingStateChanged();
+    // Step 4: Enrich and durably checkpoint the final draft before publishing it.
+    // The in-memory session is intentionally not cleared until V3 save succeeds.
+    const flow = session.getFlow();
     const barrierOk =
       results.length === tabs.length && results.every((r) => r.ok || r.skipped);
     const stoppedAt = new Date().toISOString();
@@ -470,20 +622,40 @@ class RecorderManagerImpl {
         };
       } catch {}
 
+      await session.persistRecoveryState();
+
       let persistedFlow: FlowV3;
       try {
         persistedFlow = await saveFlowToV3(flow);
       } catch (error) {
+        recordingNetworkTracker.endSession();
+        broadcastRecordingStateChanged();
         warning = appendWarning(
           warning,
           `Failed to persist recorded workflow to V3: ${error instanceof Error ? error.message : String(error)}`,
         );
+        try {
+          await session.noteStopPersistenceFailure();
+        } catch (checkpointError) {
+          warning = appendWarning(
+            warning,
+            `Failed to schedule recorded workflow persistence retry: ${
+              checkpointError instanceof Error
+                ? checkpointError.message
+                : String(checkpointError)
+            }`,
+          );
+        }
         return {
-          success: true,
+          success: false,
           flow,
           ...(warning ? { error: warning } : {}),
         };
       }
+
+      await session.stopSession();
+      recordingNetworkTracker.endSession();
+      broadcastRecordingStateChanged();
 
       if (warning) {
         return {
@@ -495,6 +667,9 @@ class RecorderManagerImpl {
 
       return { success: true, flow: persistedFlow };
     }
+    await session.stopSession();
+    recordingNetworkTracker.endSession();
+    broadcastRecordingStateChanged();
     return { success: true };
   }
 
@@ -502,23 +677,35 @@ class RecorderManagerImpl {
    * Pause recording. Steps are not collected while paused.
    */
   async pause(): Promise<{ success: boolean; error?: string }> {
+    await this.ready();
     if (session.getStatus() !== "recording") {
       return { success: false, error: "Not currently recording" };
     }
 
-    session.pause();
-    recordingNetworkTracker.pauseSession();
-    broadcastRecordingStateChanged();
-
-    // Broadcast pause to all active tabs
+    // Let pages flush while the background still accepts recorder events.
     const tabs = session.getActiveTabs();
     try {
-      await Promise.all(
+      const accepted = await Promise.all(
         tabs.map((id) => broadcastControlToTab(id, REC_CMD.PAUSE)),
       );
+      if (accepted.some((result) => result === false)) {
+        return {
+          success: false,
+          error:
+            "Pause was not acknowledged by every active top-frame recorder",
+        };
+      }
     } catch (e) {
-      console.warn("RecorderManager: Error during pause broadcast:", e);
+      return {
+        success: false,
+        error: `Pause broadcast failed: ${e instanceof Error ? e.message : String(e)}`,
+      };
     }
+
+    session.pause();
+    await session.persistRecoveryState();
+    recordingNetworkTracker.pauseSession();
+    broadcastRecordingStateChanged();
 
     return { success: true };
   }
@@ -527,25 +714,68 @@ class RecorderManagerImpl {
    * Resume recording after pause.
    */
   async resume(): Promise<{ success: boolean; error?: string }> {
+    await this.ready();
     if (session.getStatus() !== "paused") {
       return { success: false, error: "Not currently paused" };
     }
 
     session.resume();
+    await session.persistRecoveryState();
     recordingNetworkTracker.resumeSession();
     broadcastRecordingStateChanged();
 
     // Broadcast resume to all active tabs
     const tabs = session.getActiveTabs();
     try {
-      await Promise.all(
+      const accepted = await Promise.all(
         tabs.map((id) => broadcastControlToTab(id, REC_CMD.RESUME)),
       );
+      if (accepted.some((result) => result === false)) {
+        // Converge every page back to paused while recorder events are still
+        // accepted, then publish the rollback checkpoint. A later resume can
+        // be retried without leaving the API and page state divergent.
+        await Promise.all(
+          tabs.map((id) => broadcastControlToTab(id, REC_CMD.PAUSE)),
+        );
+        session.pause();
+        await session.persistRecoveryState();
+        recordingNetworkTracker.pauseSession();
+        broadcastRecordingStateChanged();
+        return {
+          success: false,
+          error:
+            "Resume was not acknowledged by every active top-frame recorder",
+        };
+      }
     } catch (e) {
-      console.warn("RecorderManager: Error during resume broadcast:", e);
+      await Promise.all(
+        tabs.map((id) => broadcastControlToTab(id, REC_CMD.PAUSE)),
+      ).catch(() => {});
+      session.pause();
+      await session.persistRecoveryState();
+      recordingNetworkTracker.pauseSession();
+      broadcastRecordingStateChanged();
+      return {
+        success: false,
+        error: `Resume broadcast failed: ${e instanceof Error ? e.message : String(e)}`,
+      };
     }
 
     return { success: true };
+  }
+
+  private async getTopDocumentId(tabId: number): Promise<string | undefined> {
+    try {
+      const frames = await chrome.webNavigation.getAllFrames({ tabId });
+      const top = Array.isArray(frames)
+        ? frames.find((frame) => frame.frameId === 0)
+        : undefined;
+      return typeof top?.documentId === "string" && top.documentId.length <= 128
+        ? top.documentId
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 }
 

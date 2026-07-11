@@ -9,12 +9,12 @@
   // ================================================================
   const shared = window.__RR_RECORDER_SHARED__;
   if (!shared) {
-    console.error('Record & Replay recorder shared helpers are missing');
+    console.error("Record & Replay recorder shared helpers are missing");
     return;
   }
   const { CONFIG, FRAME_EVENT, SelectorEngine } = shared;
   const RECORDER_EVENT_PROTOCOL_VERSION = 1;
-  const RECORDER_CONTROL_REGISTER_ACTION = 'rr_register_recorder_control';
+  const RECORDER_CONTROL_REGISTER_ACTION = "rr_register_recorder_control";
   const SEND_RETRY_MAX = 2;
   const SEND_RETRY_BASE_MS = 80;
   const FRAME_LOOKUP_MAX_ELEMENTS = 12000;
@@ -24,19 +24,23 @@
     try {
       const bytes = new Uint8Array(32);
       crypto.getRandomValues(bytes);
-      return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+      return Array.from(bytes, (byte) =>
+        byte.toString(16).padStart(2, "0"),
+      ).join("");
     } catch {
       // Page-level lifecycle controls are privileged. Disable them rather than
       // minting a predictable capability when secure randomness is unavailable.
-      return '';
+      return "";
     }
   })();
   const RECORDER_DOCUMENT_ID = (() => {
     try {
-      if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+      if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
       const bytes = new Uint8Array(16);
       crypto.getRandomValues(bytes);
-      return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+      return Array.from(bytes, (byte) =>
+        byte.toString(16).padStart(2, "0"),
+      ).join("");
     } catch {
       return `doc_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
     }
@@ -58,7 +62,7 @@
       const element = entry.element;
       visited += 1;
 
-      if (element.tagName === 'IFRAME' || element.tagName === 'FRAME') {
+      if (element.tagName === "IFRAME" || element.tagName === "FRAME") {
         try {
           if (element.contentWindow === source) return element;
         } catch {
@@ -102,21 +106,21 @@
       // Keep page markup and selectors outside the recorder's control boundary. A
       // closed shadow root also prevents the page from changing privacy controls
       // and dispatching events directly at their nodes.
-      const host = document.createElement('div');
-      host.style.setProperty('all', 'initial', 'important');
-      host.style.setProperty('position', 'fixed', 'important');
-      host.style.setProperty('inset', '0', 'important');
-      host.style.setProperty('display', 'block', 'important');
-      host.style.setProperty('pointer-events', 'none', 'important');
-      host.style.setProperty('z-index', '2147483646', 'important');
-      const shadow = host.attachShadow({ mode: 'closed' });
-      const root = document.createElement('div');
+      const host = document.createElement("div");
+      host.style.setProperty("all", "initial", "important");
+      host.style.setProperty("position", "fixed", "important");
+      host.style.setProperty("inset", "0", "important");
+      host.style.setProperty("display", "block", "important");
+      host.style.setProperty("pointer-events", "none", "important");
+      host.style.setProperty("z-index", "2147483646", "important");
+      const shadow = host.attachShadow({ mode: "closed" });
+      const root = document.createElement("div");
       Object.assign(root.style, {
-        position: 'fixed',
-        top: '10px',
-        right: '10px',
-        pointerEvents: 'auto',
-        fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Arial',
+        position: "fixed",
+        top: "10px",
+        right: "10px",
+        pointerEvents: "auto",
+        fontFamily: "system-ui,-apple-system,Segoe UI,Roboto,Arial",
       });
       root.innerHTML = `
         <div data-recorder-panel style="background:rgba(220,38,38,0.95);color:#fff;padding:8px 10px;border-radius:8px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 16px rgba(0,0,0,0.2);">
@@ -136,89 +140,92 @@
       this._host = host;
       this._shadow = shadow;
       // Build timeline container just below the panel
-      const timeline = document.createElement('div');
+      const timeline = document.createElement("div");
       Object.assign(timeline.style, {
-        marginTop: '8px',
-        width: '360px',
-        maxHeight: '220px',
-        overflow: 'auto',
-        background: 'rgba(17,24,39,0.85)',
-        color: '#F9FAFB',
-        border: '1px solid rgba(255,255,255,0.2)',
-        borderRadius: '8px',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
-        padding: '8px 10px',
-        fontSize: '12px',
-        lineHeight: '1.4',
+        marginTop: "8px",
+        width: "360px",
+        maxHeight: "220px",
+        overflow: "auto",
+        background: "rgba(17,24,39,0.85)",
+        color: "#F9FAFB",
+        border: "1px solid rgba(255,255,255,0.2)",
+        borderRadius: "8px",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
+        padding: "8px 10px",
+        fontSize: "12px",
+        lineHeight: "1.4",
       });
-      const header = document.createElement('div');
-      header.textContent = 'Recorded steps';
-      header.style.opacity = '0.8';
-      header.style.marginBottom = '4px';
-      const list = document.createElement('ol');
-      list.style.listStyle = 'none';
-      list.style.margin = '0';
-      list.style.padding = '0';
-      list.style.display = 'flex';
-      list.style.flexDirection = 'column';
-      list.style.gap = '4px';
+      const header = document.createElement("div");
+      header.textContent = "Recorded steps";
+      header.style.opacity = "0.8";
+      header.style.marginBottom = "4px";
+      const list = document.createElement("ol");
+      list.style.listStyle = "none";
+      list.style.margin = "0";
+      list.style.padding = "0";
+      list.style.display = "flex";
+      list.style.flexDirection = "column";
+      list.style.gap = "4px";
       timeline.appendChild(header);
       timeline.appendChild(list);
       root.appendChild(timeline);
       this._timeline = list;
       this._timelineBox = timeline;
-      const btnPause = root.querySelector('[data-recorder-pause]');
-      const btnStop = root.querySelector('[data-recorder-stop]');
-      const hideChk = root.querySelector('[data-recorder-hide-values]');
-      const highlightChk = root.querySelector('[data-recorder-highlight]');
-      const btnToggle = root.querySelector('[data-recorder-toggle]');
-      this._badge = root.querySelector('[data-recorder-badge]');
+      const btnPause = root.querySelector("[data-recorder-pause]");
+      const btnStop = root.querySelector("[data-recorder-stop]");
+      const hideChk = root.querySelector("[data-recorder-hide-values]");
+      const highlightChk = root.querySelector("[data-recorder-highlight]");
+      const btnToggle = root.querySelector("[data-recorder-toggle]");
+      this._badge = root.querySelector("[data-recorder-badge]");
       this._pauseButton = btnPause;
       hideChk.checked = !!rec.hideInputValues;
-      hideChk.addEventListener('change', (event) => {
+      hideChk.addEventListener("change", (event) => {
         if (!event.isTrusted) return;
         rec.hideInputValues = !!hideChk.checked;
       });
       highlightChk.checked = !!rec.highlightEnabled;
-      highlightChk.addEventListener('change', (event) => {
+      highlightChk.addEventListener("change", (event) => {
         if (!event.isTrusted) return;
         rec.highlightEnabled = !!highlightChk.checked;
         rec._updateHoverListener();
       });
       if (btnToggle) {
-        btnToggle.addEventListener('click', (event) => {
+        btnToggle.addEventListener("click", (event) => {
           if (!event.isTrusted) return;
           this._collapsed = !this._collapsed;
           if (this._timelineBox)
-            this._timelineBox.style.display = this._collapsed ? 'none' : 'block';
-          btnToggle.textContent = this._collapsed ? 'Expand' : 'Collapse';
+            this._timelineBox.style.display = this._collapsed
+              ? "none"
+              : "block";
+          btnToggle.textContent = this._collapsed ? "Expand" : "Collapse";
         });
       }
-      btnPause.addEventListener('click', (event) => {
+      btnPause.addEventListener("click", (event) => {
         if (!event.isTrusted) return;
         if (!rec.isPaused) rec.pause();
         else rec.resume();
       });
-      btnStop.addEventListener('click', (event) => {
-        if (!event.isTrusted || !rec.sessionId || !RECORDER_CONTROL_CAPABILITY) return;
+      btnStop.addEventListener("click", (event) => {
+        if (!event.isTrusted || !rec.sessionId || !RECORDER_CONTROL_CAPABILITY)
+          return;
         chrome.runtime.sendMessage({
-          type: 'rr_stop_recording',
+          type: "rr_stop_recording",
           sessionId: rec.sessionId,
           controlCapability: RECORDER_CONTROL_CAPABILITY,
         });
       });
-      this._box = document.createElement('div');
+      this._box = document.createElement("div");
       Object.assign(this._box.style, {
-        position: 'fixed',
-        border: '2px solid rgba(59,130,246,0.9)',
-        borderRadius: '4px',
-        background: 'rgba(59,130,246,0.15)',
-        pointerEvents: 'none',
+        position: "fixed",
+        border: "2px solid rgba(59,130,246,0.9)",
+        borderRadius: "4px",
+        background: "rgba(59,130,246,0.15)",
+        pointerEvents: "none",
         zIndex: 2147483645,
       });
       shadow.appendChild(this._box);
       if (rec.highlightEnabled)
-        document.addEventListener('mousemove', rec._onMouseMove, {
+        document.addEventListener("mousemove", rec._onMouseMove, {
           capture: true,
           passive: true,
         });
@@ -237,16 +244,21 @@
       }
     }
     updateStatus() {
-      if (this._badge) this._badge.textContent = this.recorder.isPaused ? 'Paused' : 'Recording';
+      if (this._badge)
+        this._badge.textContent = this.recorder.isPaused
+          ? "Paused"
+          : "Recording";
       if (this._pauseButton)
-        this._pauseButton.textContent = this.recorder.isPaused ? 'Continue' : 'Pause';
+        this._pauseButton.textContent = this.recorder.isPaused
+          ? "Continue"
+          : "Pause";
     }
 
     // Reset the timeline list content
     resetTimeline() {
       this._count = 0;
       const list = this._timeline;
-      if (list) list.innerHTML = '';
+      if (list) list.innerHTML = "";
     }
 
     // Append a new recorded step into the timeline UI
@@ -254,12 +266,12 @@
       const list = this._timeline;
       if (!list) return;
       this._count += 1;
-      const item = document.createElement('li');
+      const item = document.createElement("li");
       const text = this._formatStepText(step, this._count);
-      item.setAttribute('data-step-id', step.id || '');
-      item.style.display = 'flex';
-      item.style.alignItems = 'flex-start';
-      item.style.gap = '6px';
+      item.setAttribute("data-step-id", step.id || "");
+      item.style.display = "flex";
+      item.style.alignItems = "flex-start";
+      item.style.gap = "6px";
       this._populateTimelineItem(item, this._count, text);
       list.appendChild(item);
       while (list.children.length > CONFIG.UI_MAX_STEPS) {
@@ -277,7 +289,9 @@
     applyTimelineUpdate(steps, reportedTotal) {
       try {
         if (window !== window.top) return;
-        const list = Array.isArray(steps) ? steps.slice(-CONFIG.UI_MAX_STEPS) : [];
+        const list = Array.isArray(steps)
+          ? steps.slice(-CONFIG.UI_MAX_STEPS)
+          : [];
         const total =
           Number.isSafeInteger(reportedTotal) && reportedTotal >= list.length
             ? reportedTotal
@@ -298,13 +312,14 @@
         const currentItems = this._timeline.children;
         const currentIds = [];
         for (let i = 0; i < currentItems.length; i++) {
-          currentIds.push(currentItems[i].getAttribute('data-step-id') || '');
+          currentIds.push(currentItems[i].getAttribute("data-step-id") || "");
         }
 
         // Check if we need a full rebuild or can do incremental update
-        const newIds = windowSteps.map((s) => s.id || '');
+        const newIds = windowSteps.map((s) => s.id || "");
         const needsRebuild =
-          currentIds.length !== newIds.length || currentIds.some((id, i) => id !== newIds[i]);
+          currentIds.length !== newIds.length ||
+          currentIds.some((id, i) => id !== newIds[i]);
 
         if (needsRebuild) {
           // Full rebuild: either structure changed or it's simpler to rebuild
@@ -319,7 +334,7 @@
             const item = currentItems[i];
             if (item) {
               // Update the text content for this step
-              const textSpan = item.querySelector('span:last-child');
+              const textSpan = item.querySelector("span:last-child");
               if (textSpan) {
                 const newText = this._formatStepText(step, windowStart + i + 1);
                 if (textSpan.textContent !== newText) {
@@ -340,12 +355,12 @@
     _appendStepWithIndex(step, displayIndex) {
       const list = this._timeline;
       if (!list) return;
-      const item = document.createElement('li');
+      const item = document.createElement("li");
       const text = this._formatStepText(step, displayIndex);
-      item.setAttribute('data-step-id', step.id || '');
-      item.style.display = 'flex';
-      item.style.alignItems = 'flex-start';
-      item.style.gap = '6px';
+      item.setAttribute("data-step-id", step.id || "");
+      item.style.display = "flex";
+      item.style.alignItems = "flex-start";
+      item.style.gap = "6px";
       this._populateTimelineItem(item, displayIndex, text);
       list.appendChild(item);
       const container = list.parentElement;
@@ -353,59 +368,63 @@
     }
 
     _populateTimelineItem(item, displayIndex, text) {
-      const index = document.createElement('span');
+      const index = document.createElement("span");
       Object.assign(index.style, {
-        minWidth: '20px',
-        textAlign: 'right',
-        opacity: '0.8',
+        minWidth: "20px",
+        textAlign: "right",
+        opacity: "0.8",
       });
       index.textContent = `${displayIndex}.`;
-      const description = document.createElement('span');
+      const description = document.createElement("span");
       Object.assign(description.style, {
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        maxWidth: '310px',
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        maxWidth: "310px",
       });
       // Step values and selectors originate in the page. Never parse them as markup.
-      description.textContent = String(text || '');
+      description.textContent = String(text || "");
       item.append(index, description);
     }
 
     // Create a short, human-readable text for a recorded step
     _formatStepText(step, _idx) {
       try {
-        if (!step || typeof step !== 'object') return 'Unknown step';
+        if (!step || typeof step !== "object") return "Unknown step";
         const t = step.type;
-        const sel = step.target && step.target.selector ? step.target.selector : '';
-        if (t === 'click' || t === 'dblclick') {
-          return `${t === 'dblclick' ? 'Double click' : 'Click'}: ${sel || '(document)'}`;
+        const sel =
+          step.target && step.target.selector ? step.target.selector : "";
+        if (t === "click" || t === "dblclick") {
+          return `${t === "dblclick" ? "Double click" : "Click"}: ${sel || "(document)"}`;
         }
-        if (t === 'fill') {
+        if (t === "fill") {
           const val = step.value;
-          const shown = typeof val === 'string' && val.length > 0 ? val : String(val);
+          const shown =
+            typeof val === "string" && val.length > 0 ? val : String(val);
           return `Input: ${sel} = ${shown}`;
         }
-        if (t === 'scroll') {
-          const mode = step.mode === 'container' ? 'container' : 'page';
+        if (t === "scroll") {
+          const mode = step.mode === "container" ? "container" : "page";
           const off = step.offset || {};
           return `scroll(${mode}): y=${off.y ?? 0}, x=${off.x ?? 0}`;
         }
-        if (t === 'openTab') return `Open tab: ${step.url || ''}`;
-        if (t === 'switchTab') return `Switch tabs: Contains ${step.urlContains || ''}`;
-        if (t === 'switchFrame')
-          return `Switch Frame: Contains ${step.frame && step.frame.urlContains ? step.frame.urlContains : ''}`;
-        if (t === 'waitFor' || t === 'wait') {
+        if (t === "openTab") return `Open tab: ${step.url || ""}`;
+        if (t === "switchTab")
+          return `Switch tabs: Contains ${step.urlContains || ""}`;
+        if (t === "switchFrame")
+          return `Switch Frame: Contains ${step.frame && step.frame.urlContains ? step.frame.urlContains : ""}`;
+        if (t === "waitFor" || t === "wait") {
           const condition = step.condition || {};
-          if (condition.selector) return `Wait: selector hidden ${condition.selector}`;
+          if (condition.selector)
+            return `Wait: selector hidden ${condition.selector}`;
           if (condition.text) return `Wait: text ${condition.text}`;
           if (condition.navigation) return `Wait: navigation`;
           if (condition.networkIdle) return `Wait: network idle`;
-          return `Wait: ${sel || step.until || ''}`;
+          return `Wait: ${sel || step.until || ""}`;
         }
         return `${t}`;
       } catch (_) {
-        return 'steps';
+        return "steps";
       }
     }
   }
@@ -426,7 +445,7 @@
       this.batchTimer = null;
       this.scrollTimer = null;
       // Protocol/session metadata for background ingest validation
-      this.sessionId = '';
+      this.sessionId = "";
       this._sendSeq = 0;
       this._sendNonce = 0;
       // Child-frame steps travel to background directly. postMessage carries only
@@ -488,7 +507,7 @@
       this._waitDetector = {
         armedAt: 0,
         loadingSeen: false,
-        loadingSelector: '',
+        loadingSelector: "",
         committed: false,
         baselineResourceCount: 0,
         networkProbeTimer: null,
@@ -656,14 +675,15 @@
      * @returns {string} The value to record
      */
     _getElementValue(el, existingValue) {
-      if (!el) return existingValue || '';
+      if (!el) return existingValue || "";
 
       const isContentEditable =
-        el.nodeType === 1 && /** @type {HTMLElement} */ (el).isContentEditable === true;
+        el.nodeType === 1 &&
+        /** @type {HTMLElement} */ (el).isContentEditable === true;
 
       // If existing value is already a variable placeholder, preserve it
       // Use strict pattern to avoid false positives for user input like "{abc}"
-      const existing = typeof existingValue === 'string' ? existingValue : '';
+      const existing = typeof existingValue === "string" ? existingValue : "";
       const varPlaceholderPattern =
         /^\{(?:var_[a-z0-9]{4}|file_[a-z0-9]{4}|[a-zA-Z_][a-zA-Z0-9_]*)\}$/;
       if (varPlaceholderPattern.test(existing)) {
@@ -675,7 +695,7 @@
         this.hideInputValues ||
         (!isContentEditable &&
           CONFIG.SENSITIVE_INPUT_TYPES.has(
-            ((el.getAttribute && el.getAttribute('type')) || '').toLowerCase(),
+            ((el.getAttribute && el.getAttribute("type")) || "").toLowerCase(),
           ));
 
       if (isSensitive) {
@@ -686,18 +706,18 @@
       // Read fresh value from DOM
       try {
         if (isContentEditable) {
-          return /** @type {HTMLElement} */ (el).innerText || '';
+          return /** @type {HTMLElement} */ (el).innerText || "";
         }
         if (
           el instanceof HTMLInputElement ||
           el instanceof HTMLTextAreaElement ||
           el instanceof HTMLSelectElement
         ) {
-          return el.value || '';
+          return el.value || "";
         }
       } catch {}
 
-      return existing || '';
+      return existing || "";
     }
 
     /**
@@ -715,15 +735,15 @@
       // Try merge with last step (same logic as _onScroll timer callback)
       const steps = this.sessionBuffer.steps;
       const last = steps.length ? steps[steps.length - 1] : null;
-      if (last && last.type === 'scroll') {
-        const sameDoc = isDoc && !last.target && last.mode === 'offset';
+      if (last && last.type === "scroll") {
+        const sameDoc = isDoc && !last.target && last.mode === "offset";
         const sameEl =
           !isDoc &&
           last.target &&
           last.target.selector &&
           target &&
           last.target.selector === target.selector &&
-          last.mode === 'container';
+          last.mode === "container";
         if (sameDoc || sameEl) {
           last.offset = { y: top, x: left };
           this.sessionBuffer.meta.updatedAt = new Date().toISOString();
@@ -734,15 +754,15 @@
       // Create new scroll step
       if (isDoc) {
         this._pushStep({
-          type: 'scroll',
-          mode: 'offset',
+          type: "scroll",
+          mode: "offset",
           offset: { y: top, x: left },
           screenshotOnFail: false,
         });
       } else {
         this._pushStep({
-          type: 'scroll',
-          mode: 'container',
+          type: "scroll",
+          mode: "container",
           target: target,
           offset: { y: top, x: left },
           screenshotOnFail: false,
@@ -755,11 +775,14 @@
      * @returns {Promise<boolean>} - Resolves when background acknowledges receipt
      */
     async _sendVariables() {
-      if (!this.sessionBuffer.variables || this.sessionBuffer.variables.length === 0) {
+      if (
+        !this.sessionBuffer.variables ||
+        this.sessionBuffer.variables.length === 0
+      ) {
         return true;
       }
       return this._send({
-        kind: 'variables',
+        kind: "variables",
         variables: this.sessionBuffer.variables,
       });
     }
@@ -768,7 +791,7 @@
      * Pause recording. Flushes pending data before pausing.
      */
     pause() {
-      if (!this.isRecording || this.isPaused) return;
+      if (!this.isRecording || this.isPaused) return Promise.resolve(true);
 
       // Finalize pending data before pausing
       this._finalizePendingClick();
@@ -776,9 +799,8 @@
       this._finalizePendingScroll();
 
       // Flush batched steps
-      if (this.batch.length > 0) {
-        this._flush();
-      }
+      const flushPromise =
+        this.batch.length > 0 ? this._flush() : Promise.resolve(true);
 
       // Clear timers
       if (this.batchTimer) clearTimeout(this.batchTimer);
@@ -789,6 +811,7 @@
       this.isPaused = true;
       this._detach();
       this.ui.updateStatus();
+      return flushPromise;
     }
 
     /**
@@ -806,50 +829,60 @@
 
     // DOM listeners
     _attach() {
-      document.addEventListener('click', this._onClick, true);
+      document.addEventListener("click", this._onClick, true);
       // Use focusin/out to attach input listener only to focused element
-      document.addEventListener('focusin', this._onFocusIn, true);
-      document.addEventListener('focusout', this._onFocusOut, true);
+      document.addEventListener("focusin", this._onFocusIn, true);
+      document.addEventListener("focusout", this._onFocusOut, true);
       // Document-level input capture to support Shadow DOM (custom elements)
       // Use capture phase + composedPath to find inner editable control
-      document.addEventListener('input', this._onDocInput, true);
-      document.addEventListener('change', this._onChange, true);
+      document.addEventListener("input", this._onDocInput, true);
+      document.addEventListener("change", this._onChange, true);
       // capture-phase scroll to catch non-bubbling events on any container (passive to avoid jank)
-      document.addEventListener('scroll', this._onScroll, {
+      document.addEventListener("scroll", this._onScroll, {
         capture: true,
         passive: true,
       });
       // Keyboard: record Enter and modifier combos
-      document.addEventListener('keydown', this._onKeyDown, true);
-      document.addEventListener('keyup', this._onKeyUp, true);
+      document.addEventListener("keydown", this._onKeyDown, true);
+      document.addEventListener("keyup", this._onKeyUp, true);
       // Page lifecycle: best-effort flush on navigation/close
-      window.addEventListener('pagehide', this._onPageHide, true);
-      document.addEventListener('visibilitychange', this._onVisibilityChange, true);
+      window.addEventListener("pagehide", this._onPageHide, true);
+      document.addEventListener(
+        "visibilitychange",
+        this._onVisibilityChange,
+        true,
+      );
       // Cross-frame: top window aggregates iframe-recorded steps
-      if (window === window.top) window.addEventListener('message', this._onWindowMessage, true);
+      if (window === window.top)
+        window.addEventListener("message", this._onWindowMessage, true);
       this._updateHoverListener();
       this._ensureMutationObserver();
     }
 
     _detach() {
-      document.removeEventListener('click', this._onClick, true);
-      document.removeEventListener('focusin', this._onFocusIn, true);
-      document.removeEventListener('focusout', this._onFocusOut, true);
-      document.removeEventListener('input', this._onDocInput, true);
-      document.removeEventListener('change', this._onChange, true);
-      document.removeEventListener('scroll', this._onScroll, { capture: true });
-      document.removeEventListener('keydown', this._onKeyDown, true);
-      document.removeEventListener('keyup', this._onKeyUp, true);
-      window.removeEventListener('pagehide', this._onPageHide, true);
-      document.removeEventListener('visibilitychange', this._onVisibilityChange, true);
-      document.removeEventListener('mousemove', this._onMouseMove, {
+      document.removeEventListener("click", this._onClick, true);
+      document.removeEventListener("focusin", this._onFocusIn, true);
+      document.removeEventListener("focusout", this._onFocusOut, true);
+      document.removeEventListener("input", this._onDocInput, true);
+      document.removeEventListener("change", this._onChange, true);
+      document.removeEventListener("scroll", this._onScroll, { capture: true });
+      document.removeEventListener("keydown", this._onKeyDown, true);
+      document.removeEventListener("keyup", this._onKeyUp, true);
+      window.removeEventListener("pagehide", this._onPageHide, true);
+      document.removeEventListener(
+        "visibilitychange",
+        this._onVisibilityChange,
+        true,
+      );
+      document.removeEventListener("mousemove", this._onMouseMove, {
         capture: true,
       });
       // Keep top-frame aggregator alive during pause; stop() clears isPaused and will remove it
       if (window === window.top && !this.isPaused)
-        window.removeEventListener('message', this._onWindowMessage, true);
+        window.removeEventListener("message", this._onWindowMessage, true);
       // Detach per-element input listener if any
-      if (this._focusedEl) this._focusedEl.removeEventListener('input', this._onInput, true);
+      if (this._focusedEl)
+        this._focusedEl.removeEventListener("input", this._onInput, true);
       this._focusedEl = null;
       this._disconnectMutationObserver();
       // Best-effort cleanup for timers/raf when detaching
@@ -870,11 +903,11 @@
 
     _updateHoverListener() {
       if (window !== window.top) return;
-      document.removeEventListener('mousemove', this._onMouseMove, {
+      document.removeEventListener("mousemove", this._onMouseMove, {
         capture: true,
       });
       if (this.isRecording && !this.isPaused && this.highlightEnabled) {
-        document.addEventListener('mousemove', this._onMouseMove, {
+        document.addEventListener("mousemove", this._onMouseMove, {
           capture: true,
           passive: true,
         });
@@ -882,15 +915,19 @@
     }
 
     _ensureMutationObserver() {
-      if (this._mutationObserver || typeof MutationObserver === 'undefined') return;
+      if (this._mutationObserver || typeof MutationObserver === "undefined")
+        return;
       try {
         this._mutationObserver = new MutationObserver(this._onMutations);
-        this._mutationObserver.observe(document.documentElement || document.body, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ['class', 'style', 'hidden', 'aria-busy'],
-        });
+        this._mutationObserver.observe(
+          document.documentElement || document.body,
+          {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ["class", "style", "hidden", "aria-busy"],
+          },
+        );
       } catch {
         this._mutationObserver = null;
       }
@@ -906,7 +943,7 @@
       this._clearWaitProbeTimer();
       this._waitDetector.armedAt = 0;
       this._waitDetector.loadingSeen = false;
-      this._waitDetector.loadingSelector = '';
+      this._waitDetector.loadingSelector = "";
       this._waitDetector.committed = false;
       this._waitDetector.baselineResourceCount = 0;
     }
@@ -922,32 +959,42 @@
 
     _getResourceCount() {
       try {
-        if (!window.performance || typeof window.performance.getEntriesByType !== 'function') {
+        if (
+          !window.performance ||
+          typeof window.performance.getEntriesByType !== "function"
+        ) {
           return 0;
         }
-        return window.performance.getEntriesByType('resource').length;
+        return window.performance.getEntriesByType("resource").length;
       } catch {
         return 0;
       }
     }
 
     _armWaitDetector(step) {
-      if (!step || (step.type !== 'click' && step.type !== 'dblclick')) return;
+      if (!step || (step.type !== "click" && step.type !== "dblclick")) return;
       this._clearWaitProbeTimer();
       this._waitDetector.armedAt = Date.now();
       this._waitDetector.loadingSeen = false;
-      this._waitDetector.loadingSelector = '';
+      this._waitDetector.loadingSelector = "";
       this._waitDetector.committed = false;
       this._waitDetector.baselineResourceCount = this._getResourceCount();
       this._waitDetector.networkProbeTimer = setTimeout(() => {
         const detector = this._waitDetector;
         detector.networkProbeTimer = null;
-        if (!this.isRecording || this.isPaused || detector.committed || !detector.armedAt) return;
+        if (
+          !this.isRecording ||
+          this.isPaused ||
+          detector.committed ||
+          !detector.armedAt
+        )
+          return;
         if (detector.loadingSeen) return;
-        const hasNetworkActivity = this._getResourceCount() > detector.baselineResourceCount;
+        const hasNetworkActivity =
+          this._getResourceCount() > detector.baselineResourceCount;
         if (!hasNetworkActivity) return;
         this._pushStep({
-          type: 'wait',
+          type: "wait",
           condition: { networkIdle: true },
           timeoutMs: 15000,
           screenshotOnFail: false,
@@ -959,16 +1006,16 @@
 
     _isLoadingLikeElement(el) {
       if (!(el instanceof Element)) return false;
-      const attrBusy = (el.getAttribute && el.getAttribute('aria-busy')) || '';
-      if (String(attrBusy).toLowerCase() === 'true') return true;
-      const cls = `${el.className || ''} ${el.id || ''}`.toLowerCase();
+      const attrBusy = (el.getAttribute && el.getAttribute("aria-busy")) || "";
+      if (String(attrBusy).toLowerCase() === "true") return true;
+      const cls = `${el.className || ""} ${el.id || ""}`.toLowerCase();
       if (!cls) return false;
       return (
-        cls.includes('loading') ||
-        cls.includes('spinner') ||
-        cls.includes('skeleton') ||
-        cls.includes('progress') ||
-        cls.includes('pending')
+        cls.includes("loading") ||
+        cls.includes("spinner") ||
+        cls.includes("skeleton") ||
+        cls.includes("progress") ||
+        cls.includes("pending")
       );
     }
 
@@ -983,7 +1030,7 @@
       }
 
       for (const rec of records || []) {
-        if (!detector.loadingSeen && rec.type === 'childList') {
+        if (!detector.loadingSeen && rec.type === "childList") {
           const added = Array.from(rec.addedNodes || []);
           for (const node of added) {
             if (!(node instanceof Element)) continue;
@@ -995,7 +1042,8 @@
                 );
             if (!candidate || !(candidate instanceof Element)) continue;
             const target = SelectorEngine.buildTarget(candidate);
-            const selector = target && target.selector ? String(target.selector) : '';
+            const selector =
+              target && target.selector ? String(target.selector) : "";
             if (!selector) continue;
             detector.loadingSelector = selector;
             detector.loadingSeen = true;
@@ -1003,8 +1051,12 @@
           }
         }
 
-        if (detector.loadingSeen && detector.loadingSelector && !detector.committed) {
-          if (rec.type === 'childList') {
+        if (
+          detector.loadingSeen &&
+          detector.loadingSelector &&
+          !detector.committed
+        ) {
+          if (rec.type === "childList") {
             const removed = Array.from(rec.removedNodes || []);
             const gone = removed.some((node) => {
               if (!(node instanceof Element)) return false;
@@ -1012,14 +1064,17 @@
                 if (node.matches(detector.loadingSelector)) return true;
               } catch {}
               try {
-                return !!(node.querySelector && node.querySelector(detector.loadingSelector));
+                return !!(
+                  node.querySelector &&
+                  node.querySelector(detector.loadingSelector)
+                );
               } catch {
                 return false;
               }
             });
             if (gone) {
               this._pushStep({
-                type: 'wait',
+                type: "wait",
                 condition: {
                   selector: detector.loadingSelector,
                   visible: false,
@@ -1034,7 +1089,7 @@
             }
           }
 
-          if (rec.type === 'attributes' && rec.target instanceof Element) {
+          if (rec.type === "attributes" && rec.target instanceof Element) {
             let stillThere = false;
             try {
               stillThere = rec.target.matches(detector.loadingSelector);
@@ -1042,11 +1097,11 @@
             if (stillThere) {
               const hidden =
                 rec.target.hidden === true ||
-                rec.target.getAttribute('aria-busy') === 'false' ||
-                rec.target.getAttribute('aria-hidden') === 'true';
+                rec.target.getAttribute("aria-busy") === "false" ||
+                rec.target.getAttribute("aria-hidden") === "true";
               if (hidden) {
                 this._pushStep({
-                  type: 'wait',
+                  type: "wait",
                   condition: {
                     selector: detector.loadingSelector,
                     visible: false,
@@ -1070,7 +1125,7 @@
       const nowIso = new Date().toISOString();
       return {
         id: `flow_${Date.now()}`,
-        name: 'Unnamed recording',
+        name: "Unnamed recording",
         version: 1,
         steps: [],
         variables: [],
@@ -1086,13 +1141,14 @@
       if (this.scrollTimer) clearTimeout(this.scrollTimer);
       this.scrollTimer = null;
       try {
-        if (meta && typeof meta === 'object') {
+        if (meta && typeof meta === "object") {
           if (meta.id) this.sessionBuffer.id = String(meta.id);
           if (meta.name) this.sessionBuffer.name = String(meta.name);
-          if (meta.description) this.sessionBuffer.description = String(meta.description);
-          this.sessionId = meta.sessionId ? String(meta.sessionId) : '';
+          if (meta.description)
+            this.sessionBuffer.description = String(meta.description);
+          this.sessionId = meta.sessionId ? String(meta.sessionId) : "";
         } else {
-          this.sessionId = '';
+          this.sessionId = "";
         }
       } catch {}
       this._sendSeq = 0;
@@ -1111,7 +1167,7 @@
       this._clearWaitProbeTimer();
       this._waitDetector.armedAt = 0;
       this._waitDetector.loadingSeen = false;
-      this._waitDetector.loadingSelector = '';
+      this._waitDetector.loadingSelector = "";
       this._waitDetector.committed = false;
       this._waitDetector.baselineResourceCount = 0;
       try {
@@ -1128,7 +1184,10 @@
       const prevActivityTs = this._lastInputActivityTs || 0;
       this._lastInputActivityTs = now;
       // Start a new burst if previous one expired (or this is first input)
-      if (!this._typingBurstStartTs || now - prevActivityTs > CONFIG.INPUT_DEBOUNCE_MS) {
+      if (
+        !this._typingBurstStartTs ||
+        now - prevActivityTs > CONFIG.INPUT_DEBOUNCE_MS
+      ) {
         this._typingBurstStartTs = now;
         // Start force flush timer (hard upper bound for MAX_TYPING_HOLD_MS)
         this._startForceFlushTimer();
@@ -1196,11 +1255,13 @@
     }
 
     _pushStep(step) {
-      step.id = step.id || `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      step.id =
+        step.id ||
+        `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       // Child frames send the authoritative step directly to background. The page-visible
       // postMessage that follows contains only an unguessable correlation id, never a step.
       if (window !== window.top) {
-        this._forwardIframeStep(step, 'iframeStep');
+        this._forwardIframeStep(step, "iframeStep");
         return;
       }
       // Top window: optionally insert a switchFrame if this step originated from an iframe message
@@ -1212,10 +1273,10 @@
       this.batch.push(step);
 
       // Track input activity for fill steps (to enforce flush gate)
-      if (step && step.type === 'fill') {
+      if (step && step.type === "fill") {
         this._updateInputActivity();
       }
-      if (step && (step.type === 'click' || step.type === 'dblclick')) {
+      if (step && (step.type === "click" || step.type === "dblclick")) {
         this._armWaitDetector(step);
       }
 
@@ -1226,18 +1287,20 @@
       try {
         const bytes = new Uint8Array(16);
         crypto.getRandomValues(bytes);
-        return `frame_${Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')}`;
+        return `frame_${Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")}`;
       } catch {
         // Correlation ids are capabilities. Fail closed instead of falling back
         // to predictable pseudo-randomness if Web Crypto is unavailable.
-        return '';
+        return "";
       }
     }
 
     _registerFrameEvent(frameEventId, sessionId) {
       if (window !== window.top) return false;
-      if (!/^frame_[a-f0-9]{32}$/.test(String(frameEventId || ''))) return false;
-      if (!this.sessionId || String(sessionId || '') !== this.sessionId) return false;
+      if (!/^frame_[a-f0-9]{32}$/.test(String(frameEventId || "")))
+        return false;
+      if (!this.sessionId || String(sessionId || "") !== this.sessionId)
+        return false;
       this._registeredFrameEvents.add(frameEventId);
       while (this._registeredFrameEvents.size > 1000) {
         const oldest = this._registeredFrameEvents.values().next().value;
@@ -1282,9 +1345,9 @@
             window.top.postMessage(
               {
                 type: FRAME_EVENT,
-                payload: { kind: 'iframeStepContext', frameEventId },
+                payload: { kind: "iframeStepContext", frameEventId },
               },
-              '*',
+              "*",
             );
             return true;
           } catch {
@@ -1361,10 +1424,10 @@
       if (window === window.top) return;
       try {
         const payload = {
-          kind: 'iframeFlush',
-          href: String(location && location.href ? location.href : ''),
+          kind: "iframeFlush",
+          href: String(location && location.href ? location.href : ""),
         };
-        window.top.postMessage({ type: FRAME_EVENT, payload }, '*');
+        window.top.postMessage({ type: FRAME_EVENT, payload }, "*");
       } catch {}
     }
 
@@ -1377,7 +1440,7 @@
     _syncStopBarrierToTop() {
       if (window === window.top) return Promise.resolve(true);
       const id = `sb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const href = String(location && location.href ? location.href : '');
+      const href = String(location && location.href ? location.href : "");
       const timeoutMs = 400;
 
       return new Promise((resolve) => {
@@ -1386,7 +1449,7 @@
           if (done) return;
           done = true;
           try {
-            window.removeEventListener('message', onMessage, true);
+            window.removeEventListener("message", onMessage, true);
           } catch {}
           try {
             clearTimeout(t);
@@ -1400,20 +1463,20 @@
             const d = ev && ev.data;
             if (!d || d.type !== FRAME_EVENT || !d.payload) return;
             const p = d.payload || {};
-            if (p.kind !== 'iframeStopBarrierAck' || p.id !== id) return;
+            if (p.kind !== "iframeStopBarrierAck" || p.id !== id) return;
             cleanup(p.ok !== false);
           } catch {}
         };
 
         const t = setTimeout(() => cleanup(false), timeoutMs);
         try {
-          window.addEventListener('message', onMessage, true);
+          window.addEventListener("message", onMessage, true);
           window.top.postMessage(
             {
               type: FRAME_EVENT,
-              payload: { kind: 'iframeStopBarrier', id, href },
+              payload: { kind: "iframeStopBarrier", id, href },
             },
-            '*',
+            "*",
           );
         } catch {
           cleanup(false);
@@ -1457,7 +1520,7 @@
      */
     _onVisibilityChange() {
       try {
-        if (document.visibilityState === 'hidden') {
+        if (document.visibilityState === "hidden") {
           this._bestEffortDrainAndFlush();
         }
       } catch {}
@@ -1479,7 +1542,7 @@
         const { _recordingRef, ...rest } = s || {};
         return rest;
       });
-      const ok = await this._send({ kind: 'steps', steps });
+      const ok = await this._send({ kind: "steps", steps });
 
       // On transport failure, restore batch for retry to avoid step loss.
       if (!ok) {
@@ -1502,12 +1565,12 @@
       this._sendNonce += 1;
       return {
         version: RECORDER_EVENT_PROTOCOL_VERSION,
-        sessionId: this.sessionId || '',
+        sessionId: this.sessionId || "",
         eventId: `evt_${Date.now()}_${this._sendNonce.toString(36)}`,
         seq: this._sendSeq,
         sentAt: Date.now(),
         source: {
-          href: String(location && location.href ? location.href : ''),
+          href: String(location && location.href ? location.href : ""),
           isTop: window === window.top,
           documentId: RECORDER_DOCUMENT_ID,
         },
@@ -1516,7 +1579,7 @@
 
     _send(payload) {
       const meta = this._nextRecorderMeta();
-      const envelope = { type: 'rr_recorder_event', payload, meta };
+      const envelope = { type: "rr_recorder_event", payload, meta };
       const maxAttempts = Math.max(0, SEND_RETRY_MAX);
 
       const sendAttempt = (attempt) =>
@@ -1535,16 +1598,34 @@
           try {
             chrome.runtime.sendMessage(envelope, (response) => {
               if (chrome.runtime.lastError) {
-                console.warn('Recorder: send failed', chrome.runtime.lastError.message);
+                console.warn(
+                  "Recorder: send failed",
+                  chrome.runtime.lastError.message,
+                );
+                finish(false);
+                return;
+              }
+
+              if (response && response.code === "RECORDING_PAUSED") {
+                // The PAUSE control may have been missed during navigation or
+                // worker churn. Treat the authenticated ingest response as the
+                // state repair signal; _flush will restore the unacknowledged
+                // raw batch and resume() can send it later.
+                this.isPaused = true;
+                this._detach();
+                this.ui.updateStatus();
                 finish(false);
                 return;
               }
 
               const ack = response && response.ack ? response.ack : null;
-              const ackSeq = ack && Number.isFinite(ack.seq) ? Number(ack.seq) : undefined;
+              const ackSeq =
+                ack && Number.isFinite(ack.seq) ? Number(ack.seq) : undefined;
               const seqMismatch = ackSeq !== undefined && ackSeq !== meta.seq;
               if (seqMismatch) {
-                console.warn(`Recorder: ack seq mismatch (sent=${meta.seq}, received=${ackSeq})`);
+                console.warn(
+                  `Recorder: ack seq mismatch (sent=${meta.seq}, received=${ackSeq})`,
+                );
                 finish(false);
                 return;
               }
@@ -1552,7 +1633,7 @@
               finish(!!(response && response.ok));
             });
           } catch (e) {
-            console.warn('Recorder: send exception', e);
+            console.warn("Recorder: send exception", e);
             finish(false);
           }
         });
@@ -1563,11 +1644,12 @@
     _addVariable(key, sensitive, defVal) {
       if (!this.sessionBuffer.variables) this.sessionBuffer.variables = [];
       if (this.sessionBuffer.variables.find((v) => v.key === key)) return;
-      if (this.sessionBuffer.variables.length >= CONFIG.LOCAL_MAX_VARIABLES) return;
+      if (this.sessionBuffer.variables.length >= CONFIG.LOCAL_MAX_VARIABLES)
+        return;
       this.sessionBuffer.variables.push({
         key,
         sensitive: !!sensitive,
-        default: defVal || '',
+        default: defVal || "",
       });
     }
 
@@ -1580,22 +1662,25 @@
     _onClick(e) {
       if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
       try {
-        const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+        const path =
+          typeof e.composedPath === "function" ? e.composedPath() : [];
         if (this.ui._host && path.includes(this.ui._host)) return;
       } catch {}
       const el = e.target instanceof Element ? e.target : null;
       if (!el) return;
       try {
         if (el instanceof HTMLInputElement) {
-          const t = (el.getAttribute && el.getAttribute('type')) || '';
+          const t = (el.getAttribute && el.getAttribute("type")) || "";
           const tt = String(t).toLowerCase();
-          if (tt === 'checkbox' || tt === 'radio') return; // avoid duplicate with change
+          if (tt === "checkbox" || tt === "radio") return; // avoid duplicate with change
         }
       } catch {}
 
       const target = SelectorEngine.buildTarget(el);
       try {
-        const gref = SelectorEngine._ensureGlobalRef && SelectorEngine._ensureGlobalRef(el);
+        const gref =
+          SelectorEngine._ensureGlobalRef &&
+          SelectorEngine._ensureGlobalRef(el);
         if (gref) target.ref = gref;
       } catch {}
 
@@ -1609,7 +1694,7 @@
         this._pendingClick = null;
         this._pendingClickAt = 0;
         this._pushStep({
-          type: 'dblclick',
+          type: "dblclick",
           target,
           screenshotOnFail: true,
         });
@@ -1622,10 +1707,13 @@
         clearTimeout(this._pendingClickTimer);
         const now = Date.now();
         const prevSelector =
-          this._pendingClick && this._pendingClick.target && this._pendingClick.target.selector
+          this._pendingClick &&
+          this._pendingClick.target &&
+          this._pendingClick.target.selector
             ? String(this._pendingClick.target.selector)
-            : '';
-        const nextSelector = target && target.selector ? String(target.selector) : '';
+            : "";
+        const nextSelector =
+          target && target.selector ? String(target.selector) : "";
         const isFastDuplicate =
           !!prevSelector &&
           !!nextSelector &&
@@ -1638,7 +1726,7 @@
       }
 
       this._pendingClick = {
-        type: 'click',
+        type: "click",
         target,
         screenshotOnFail: true,
       };
@@ -1659,12 +1747,13 @@
       if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
       // Avoid mid-composition spam (IME): handle final committed value
       try {
-        if (e && typeof e.isComposing === 'boolean' && e.isComposing) return;
+        if (e && typeof e.isComposing === "boolean" && e.isComposing) return;
       } catch {}
       const target = e.target;
       // Support input/textarea and contenteditable elements
       const el =
-        target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
           ? target
           : target &&
               target.nodeType === 1 &&
@@ -1679,12 +1768,12 @@
     _onDocInput(e) {
       if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
       try {
-        if (e && typeof e.isComposing === 'boolean' && e.isComposing) return;
+        if (e && typeof e.isComposing === "boolean" && e.isComposing) return;
       } catch {}
       // Avoid double handling when per-element listener already attached to same element
       if (this._focusedEl && e.target === this._focusedEl) return;
       // Find the innermost editable element from composedPath
-      const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+      const path = typeof e.composedPath === "function" ? e.composedPath() : [];
       let el = null;
       for (let i = 0; i < path.length; i++) {
         const n = path[i];
@@ -1693,7 +1782,11 @@
           break;
         }
         // Also check for contenteditable
-        if (n && n.nodeType === 1 && /** @type {HTMLElement} */ (n).isContentEditable === true) {
+        if (
+          n &&
+          n.nodeType === 1 &&
+          /** @type {HTMLElement} */ (n).isContentEditable === true
+        ) {
           el = /** @type {HTMLElement} */ (n);
           break;
         }
@@ -1704,7 +1797,10 @@
           let ae = document.activeElement;
           let guard = 0;
           while (ae && guard++ < 10) {
-            if (ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement) {
+            if (
+              ae instanceof HTMLInputElement ||
+              ae instanceof HTMLTextAreaElement
+            ) {
               el = ae;
               break;
             }
@@ -1734,31 +1830,34 @@
     // Uses Draft/Upsert model: updates are re-enqueued to ensure background gets final value
     _handleInputForElement(el) {
       try {
-        const t = (el.getAttribute && el.getAttribute('type')) || '';
+        const t = (el.getAttribute && el.getAttribute("type")) || "";
         const tt = String(t).toLowerCase();
-        if (tt === 'checkbox' || tt === 'radio' || tt === 'file') return;
+        if (tt === "checkbox" || tt === "radio" || tt === "file") return;
       } catch {}
       const elRef = this._getElRef(el);
       const target = SelectorEngine.buildTarget(el);
 
       // Check if element is contenteditable
       const isContentEditable =
-        el.nodeType === 1 && /** @type {HTMLElement} */ (el).isContentEditable === true;
+        el.nodeType === 1 &&
+        /** @type {HTMLElement} */ (el).isContentEditable === true;
 
       const isSensitive =
         this.hideInputValues ||
         (!isContentEditable &&
           CONFIG.SENSITIVE_INPUT_TYPES.has(
-            ((el.getAttribute && el.getAttribute('type')) || '').toLowerCase(),
+            ((el.getAttribute && el.getAttribute("type")) || "").toLowerCase(),
           ));
 
       // Get value: use .value for input/textarea, .innerText for contenteditable
       let value = isContentEditable
-        ? /** @type {HTMLElement} */ (el).innerText || ''
-        : el.value || '';
+        ? /** @type {HTMLElement} */ (el).innerText || ""
+        : el.value || "";
       if (isSensitive) {
-        const varKey = el.name ? el.name : `var_${Math.random().toString(36).slice(2, 6)}`;
-        this._addVariable(varKey, true, '');
+        const varKey = el.name
+          ? el.name
+          : `var_${Math.random().toString(36).slice(2, 6)}`;
+        this._addVariable(varKey, true, "");
         value = `{${varKey}}`;
       }
       const nowTs = Date.now();
@@ -1796,7 +1895,7 @@
       if (this._hasRecordedValue(elRef, value)) {
         return;
       }
-      const newStep = { type: 'fill', target, value, screenshotOnFail: true };
+      const newStep = { type: "fill", target, value, screenshotOnFail: true };
       newStep._recordingRef = elRef;
       this._rememberRecordedValue(elRef, value);
       this._pushStep(newStep);
@@ -1813,7 +1912,7 @@
       if (!step || !step.id) return;
 
       if (window !== window.top) {
-        this._forwardIframeStep(step, 'iframeStepUpsert');
+        this._forwardIframeStep(step, "iframeStepUpsert");
         return;
       }
 
@@ -1838,7 +1937,9 @@
         const val = el.value;
         const nowTs = Date.now();
         const elRef = this._getElRef(el);
-        const sameRef = !!(this.lastFill.step && this.lastFill.step._recordingRef === elRef);
+        const sameRef = !!(
+          this.lastFill.step && this.lastFill.step._recordingRef === elRef
+        );
         const within = nowTs - this.lastFill.ts <= CONFIG.INPUT_DEBOUNCE_MS;
         if (sameRef && within) {
           if (this._sameRecordedValue(this.lastFill.step.value, val)) {
@@ -1858,10 +1959,12 @@
         if (this._hasRecordedValue(elRef, val)) return;
         const target = SelectorEngine.buildTarget(el);
         try {
-          const gref = SelectorEngine._ensureGlobalRef && SelectorEngine._ensureGlobalRef(el);
+          const gref =
+            SelectorEngine._ensureGlobalRef &&
+            SelectorEngine._ensureGlobalRef(el);
           if (gref) target.ref = gref;
         } catch {}
-        const st = { type: 'fill', target, value: val, screenshotOnFail: true };
+        const st = { type: "fill", target, value: val, screenshotOnFail: true };
         st._recordingRef = elRef;
         this._rememberRecordedValue(elRef, val);
         this._pushStep(st);
@@ -1869,19 +1972,21 @@
         return;
       }
       if (el instanceof HTMLInputElement) {
-        const t = (el.getAttribute && el.getAttribute('type')) || '';
+        const t = (el.getAttribute && el.getAttribute("type")) || "";
         const tt = String(t).toLowerCase();
         const target = SelectorEngine.buildTarget(el);
         try {
-          const gref = SelectorEngine._ensureGlobalRef && SelectorEngine._ensureGlobalRef(el);
+          const gref =
+            SelectorEngine._ensureGlobalRef &&
+            SelectorEngine._ensureGlobalRef(el);
           if (gref) target.ref = gref;
         } catch {}
         const elRef = this._getElRef(el);
-        if (tt === 'checkbox') {
+        if (tt === "checkbox") {
           const val = !!el.checked;
           if (this._hasRecordedValue(elRef, val)) return;
           const st = {
-            type: 'fill',
+            type: "fill",
             target,
             value: !!el.checked,
             screenshotOnFail: true,
@@ -1891,11 +1996,11 @@
           this._pushStep(st);
           return;
         }
-        if (tt === 'radio') {
+        if (tt === "radio") {
           const val = true;
           if (this._hasRecordedValue(elRef, val)) return;
           const st = {
-            type: 'fill',
+            type: "fill",
             target,
             value: true,
             screenshotOnFail: true,
@@ -1905,14 +2010,16 @@
           this._pushStep(st);
           return;
         }
-        if (tt === 'file') {
-          const varKey = el.name ? el.name : `file_${Math.random().toString(36).slice(2, 6)}`;
-          this._addVariable(varKey, false, '');
+        if (tt === "file") {
+          const varKey = el.name
+            ? el.name
+            : `file_${Math.random().toString(36).slice(2, 6)}`;
+          this._addVariable(varKey, false, "");
           const value = `{${varKey}}`;
           if (this._hasRecordedValue(elRef, value)) return;
           this._rememberRecordedValue(elRef, value);
           this._pushStep({
-            type: 'fill',
+            type: "fill",
             target,
             value,
             screenshotOnFail: true,
@@ -1936,16 +2043,19 @@
     }
 
     _sameRecordedValue(a, b) {
-      if (typeof a === 'boolean' || typeof b === 'boolean') {
+      if (typeof a === "boolean" || typeof b === "boolean") {
         return Boolean(a) === Boolean(b);
       }
-      return String(a == null ? '' : a) === String(b == null ? '' : b);
+      return String(a == null ? "" : a) === String(b == null ? "" : b);
     }
 
     _hasRecordedValue(elRef, value) {
       if (!elRef) return false;
       if (!this._lastRecordedFieldValue.has(elRef)) return false;
-      return this._sameRecordedValue(this._lastRecordedFieldValue.get(elRef), value);
+      return this._sameRecordedValue(
+        this._lastRecordedFieldValue.get(elRef),
+        value,
+      );
     }
 
     _rememberRecordedValue(elRef, value) {
@@ -1961,11 +2071,13 @@
       const isEditable =
         el instanceof HTMLInputElement ||
         el instanceof HTMLTextAreaElement ||
-        (el && el.nodeType === 1 && /** @type {HTMLElement} */ (el).isContentEditable === true);
+        (el &&
+          el.nodeType === 1 &&
+          /** @type {HTMLElement} */ (el).isContentEditable === true);
       if (!isEditable) return;
       if (this._focusedEl && this._focusedEl !== el)
-        this._focusedEl.removeEventListener('input', this._onInput, true);
-      el.addEventListener('input', this._onInput, true);
+        this._focusedEl.removeEventListener("input", this._onInput, true);
+      el.addEventListener("input", this._onInput, true);
       this._focusedEl = el;
     }
 
@@ -1977,7 +2089,7 @@
         // Commit point: leaving an input field - finalize and flush pending input
         // This ensures we don't lose values when user tabs away or clicks elsewhere
         this._commitAndFlush();
-        el.removeEventListener('input', this._onInput, true);
+        el.removeEventListener("input", this._onInput, true);
         this._focusedEl = null;
       }
     }
@@ -2002,7 +2114,7 @@
             top: `${Math.round(r.top)}px`,
             width: `${Math.round(Math.max(0, r.width))}px`,
             height: `${Math.round(Math.max(0, r.height))}px`,
-            display: r.width > 0 && r.height > 0 ? 'block' : 'none',
+            display: r.width > 0 && r.height > 0 ? "block" : "none",
           });
         } catch {}
         this.hoverRAF = 0;
@@ -2012,25 +2124,30 @@
     _onScroll(e) {
       if (!e?.isTrusted || !this.isRecording || this.isPaused) return;
       try {
-        const path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
+        const path =
+          typeof e.composedPath === "function" ? e.composedPath() : [e.target];
         if (this.ui._host && path.includes(this.ui._host)) return;
       } catch {
         // ignore
       }
       // Determine scroll source and positions
       const isDoc = e.target === document;
-      const el = isDoc ? document.documentElement : e.target instanceof Element ? e.target : null;
+      const el = isDoc
+        ? document.documentElement
+        : e.target instanceof Element
+          ? e.target
+          : null;
       if (!el) return;
       let top = 0,
         left = 0;
       try {
         if (isDoc) {
           top =
-            typeof window.scrollY === 'number'
+            typeof window.scrollY === "number"
               ? window.scrollY
               : document.documentElement.scrollTop || 0;
           left =
-            typeof window.scrollX === 'number'
+            typeof window.scrollX === "number"
               ? window.scrollX
               : document.documentElement.scrollLeft || 0;
         } else {
@@ -2049,19 +2166,24 @@
         const pending = this._scrollPending;
         this._scrollPending = null;
         if (!pending) return;
-        const { isDoc: pDoc, target: pTarget, top: pTop, left: pLeft } = pending;
+        const {
+          isDoc: pDoc,
+          target: pTarget,
+          top: pTop,
+          left: pLeft,
+        } = pending;
         // Try merge with last step
         const steps = this.sessionBuffer.steps;
         const last = steps.length ? steps[steps.length - 1] : null;
-        if (last && last.type === 'scroll') {
-          const sameDoc = pDoc && !last.target && last.mode === 'offset';
+        if (last && last.type === "scroll") {
+          const sameDoc = pDoc && !last.target && last.mode === "offset";
           const sameEl =
             !pDoc &&
             last.target &&
             last.target.selector &&
             pTarget &&
             last.target.selector === pTarget.selector &&
-            last.mode === 'container';
+            last.mode === "container";
           if (sameDoc || sameEl) {
             last.offset = { y: pTop, x: pLeft };
             this.sessionBuffer.meta.updatedAt = new Date().toISOString();
@@ -2071,15 +2193,15 @@
         // New scroll step
         if (pDoc) {
           this._pushStep({
-            type: 'scroll',
-            mode: 'offset',
+            type: "scroll",
+            mode: "offset",
             offset: { y: pTop, x: pLeft },
             screenshotOnFail: false,
           });
         } else {
           this._pushStep({
-            type: 'scroll',
-            mode: 'container',
+            type: "scroll",
+            mode: "container",
             target: pTarget,
             offset: { y: pTop, x: pLeft },
             screenshotOnFail: false,
@@ -2094,15 +2216,19 @@
       try {
         // Ignore autorepeat to prevent spam
         if (e.repeat) return;
-        const key = String(e.key || '').toLowerCase();
-        const isModifier = key === 'shift' || key === 'control' || key === 'meta' || key === 'alt';
+        const key = String(e.key || "").toLowerCase();
+        const isModifier =
+          key === "shift" ||
+          key === "control" ||
+          key === "meta" ||
+          key === "alt";
         const isEditable =
           e.target instanceof HTMLInputElement ||
           e.target instanceof HTMLTextAreaElement ||
           (e.target &&
             e.target.nodeType === 1 &&
             /** @type {HTMLElement} */ (e.target).isContentEditable === true);
-        const enterKey = key === 'enter';
+        const enterKey = key === "enter";
 
         // Track pressed modifiers
         if (isModifier) this._pressed.add(key);
@@ -2111,10 +2237,12 @@
         if (isEditable && enterKey) {
           // Commit point: Enter may trigger form submission/navigation
           // Record explicit key action with target first
-          const target = SelectorEngine.buildTarget(/** @type {Element} */ (e.target));
-          const combo = this._formatKeysCombo(e, 'Enter');
+          const target = SelectorEngine.buildTarget(
+            /** @type {Element} */ (e.target),
+          );
+          const combo = this._formatKeysCombo(e, "Enter");
           this._pushStep({
-            type: 'key',
+            type: "key",
             keys: combo,
             target,
             screenshotOnFail: false,
@@ -2128,11 +2256,11 @@
         }
 
         // For non-text fields: record modifier combos and special keys
-        const special = enterKey || key === 'escape' || key === 'tab';
+        const special = enterKey || key === "escape" || key === "tab";
         if (special || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) {
           const comboName = this._formatKeysCombo(e, e.key);
           this._pushStep({
-            type: 'key',
+            type: "key",
             keys: comboName,
             screenshotOnFail: false,
           });
@@ -2143,28 +2271,33 @@
 
     _onKeyUp(e) {
       if (!e?.isTrusted) return;
-      const key = String(e.key || '').toLowerCase();
-      if (key === 'shift' || key === 'control' || key === 'meta' || key === 'alt')
+      const key = String(e.key || "").toLowerCase();
+      if (
+        key === "shift" ||
+        key === "control" ||
+        key === "meta" ||
+        key === "alt"
+      )
         this._pressed.delete(key);
     }
 
     _formatKeysCombo(e, mainKey) {
       const parts = [];
-      if (e.ctrlKey) parts.push('Ctrl');
-      if (e.altKey) parts.push('Alt');
-      if (e.shiftKey) parts.push('Shift');
-      if (e.metaKey) parts.push('Meta');
-      const mk = String(mainKey || '').trim();
+      if (e.ctrlKey) parts.push("Ctrl");
+      if (e.altKey) parts.push("Alt");
+      if (e.shiftKey) parts.push("Shift");
+      if (e.metaKey) parts.push("Meta");
+      const mk = String(mainKey || "").trim();
       // Normalize common names to match keyboard-helper parsing
       const norm = (s) => {
         const k = s.toLowerCase();
-        if (k === 'escape') return 'Esc';
-        if (k === ' ') return 'Space';
+        if (k === "escape") return "Esc";
+        if (k === " ") return "Space";
         if (k.length === 1) return k.toUpperCase();
         return s;
       };
       parts.push(norm(mk));
-      return parts.join('+');
+      return parts.join("+");
     }
 
     // Top-level frame-context broker. Child steps never cross postMessage; only an
@@ -2194,10 +2327,10 @@
           const selfOrigin = window.location.origin;
           const msgOrigin = ev.origin;
           // Allow same-origin, null (for sandboxed iframes), or if iframe src is same-origin
-          const frameSrc = frameEl.getAttribute('src') || '';
+          const frameSrc = frameEl.getAttribute("src") || "";
           let iframeSameOrigin = false;
           try {
-            if (!frameSrc || frameSrc === 'about:blank') {
+            if (!frameSrc || frameSrc === "about:blank") {
               iframeSameOrigin = true;
             } else {
               const frameUrl = new URL(frameSrc, selfOrigin);
@@ -2207,7 +2340,11 @@
             // Invalid URL - assume cross-origin
           }
           // If iframe is same-origin, message origin should match
-          if (iframeSameOrigin && msgOrigin !== selfOrigin && msgOrigin !== 'null') {
+          if (
+            iframeSameOrigin &&
+            msgOrigin !== selfOrigin &&
+            msgOrigin !== "null"
+          ) {
             return; // Origin mismatch for same-origin iframe - suspicious
           }
         } catch {}
@@ -2216,18 +2353,18 @@
         const kind = payload.kind;
 
         // Stop barrier sync: ACK only after every selector-context runtime send settles.
-        if (kind === 'iframeStopBarrier') {
+        if (kind === "iframeStopBarrier") {
           const id = payload.id;
           const source = ev.source;
-          if (id && source && typeof source.postMessage === 'function') {
+          if (id && source && typeof source.postMessage === "function") {
             this._drainFrameContextSends().then((ok) => {
               try {
                 source.postMessage(
                   {
                     type: FRAME_EVENT,
-                    payload: { kind: 'iframeStopBarrierAck', id, ok },
+                    payload: { kind: "iframeStopBarrierAck", id, ok },
                   },
-                  '*',
+                  "*",
                 );
               } catch {}
             });
@@ -2236,7 +2373,7 @@
         }
 
         // Handle iframe flush request after pending context sends have drained.
-        if (kind === 'iframeFlush') {
+        if (kind === "iframeFlush") {
           this._drainFrameContextSends().then(() => {
             this._lastInputActivityTs = 0;
             this._typingBurstStartTs = 0;
@@ -2248,15 +2385,15 @@
           return;
         }
 
-        if (kind !== 'iframeStepContext') return;
-        const frameEventId = String(payload.frameEventId || '');
+        if (kind !== "iframeStepContext") return;
+        const frameEventId = String(payload.frameEventId || "");
         if (!/^frame_[a-f0-9]{32}$/.test(frameEventId)) return;
         if (!this._consumeFrameEvent(frameEventId)) return;
 
         const frameTarget = SelectorEngine.buildTarget(frameEl);
-        if (!frameTarget || !String(frameTarget.selector || '').trim()) return;
+        if (!frameTarget || !String(frameTarget.selector || "").trim()) return;
         const contextSend = this._send({
-          kind: 'iframeFrameContext',
+          kind: "iframeFrameContext",
           frameEventId,
           frameTarget,
         });
@@ -2277,13 +2414,16 @@
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     try {
       if (!request || !request.action) return false;
-      if (request.action === 'rr_register_iframe_event') {
+      if (request.action === "rr_register_iframe_event") {
         const rec = getRecorder();
-        const ok = rec._registerFrameEvent(request.frameEventId, request.sessionId);
+        const ok = rec._registerFrameEvent(
+          request.frameEventId,
+          request.sessionId,
+        );
         sendResponse({ ok });
         return true;
       }
-      if (request.action === 'rr_timeline_update') {
+      if (request.action === "rr_timeline_update") {
         const rec = getRecorder();
         // Only respond to timeline updates when recording is active
         if (!rec.isRecording) {
@@ -2296,12 +2436,16 @@
         sendResponse({ ok: true });
         return true;
       }
-      if (request.action === 'rr_recorder_control') {
+      if (request.action === "rr_recorder_control") {
         const rec = getRecorder();
         const cmd = request.cmd;
-        if (cmd === 'start') {
+        if (cmd === "start") {
           rec.start(request.meta || {});
-          if (window === window.top && rec.sessionId && RECORDER_CONTROL_CAPABILITY) {
+          if (
+            window === window.top &&
+            rec.sessionId &&
+            RECORDER_CONTROL_CAPABILITY
+          ) {
             try {
               chrome.runtime.sendMessage(
                 {
@@ -2320,18 +2464,65 @@
           sendResponse({ success: true });
           return true;
         }
-        if (cmd === 'pause') {
-          rec.pause();
-          sendResponse({ success: true });
+        if (cmd === "recover") {
+          const requestedSessionId = String(request?.meta?.sessionId || "");
+          const desiredStatus =
+            request?.meta?.desiredStatus === "paused" ? "paused" : "recording";
+          const active =
+            !!requestedSessionId &&
+            !!rec.sessionId &&
+            requestedSessionId === String(rec.sessionId) &&
+            rec.isRecording === true;
+          const reconcile = active
+            ? desiredStatus === "paused"
+              ? rec.pause()
+              : (rec.resume(), Promise.resolve(true))
+            : Promise.resolve(false);
+          Promise.resolve(reconcile)
+            .then(() => {
+              if (
+                active &&
+                window === window.top &&
+                RECORDER_CONTROL_CAPABILITY
+              ) {
+                try {
+                  chrome.runtime.sendMessage(
+                    {
+                      action: RECORDER_CONTROL_REGISTER_ACTION,
+                      sessionId: rec.sessionId,
+                      controlCapability: RECORDER_CONTROL_CAPABILITY,
+                    },
+                    () => {
+                      void chrome.runtime.lastError;
+                    },
+                  );
+                } catch {}
+              }
+              // Recovery deliberately does not call start/_reset: the page-owned
+              // batch, sequence counter and pending iframe joins survive intact.
+              sendResponse({ success: true, active, state: desiredStatus });
+            })
+            .catch((error) => {
+              sendResponse({ success: false, active, error: String(error) });
+            });
           return true;
         }
-        if (cmd === 'resume') {
+        if (cmd === "pause") {
+          Promise.resolve(rec.pause())
+            .then(() => sendResponse({ success: true }))
+            .catch((error) =>
+              sendResponse({ success: false, error: String(error) }),
+            );
+          return true;
+        }
+        if (cmd === "resume") {
           rec.resume();
           sendResponse({ success: true });
           return true;
         }
-        if (cmd === 'stop') {
-          const requestedSessionId = request?.sessionId || request?.meta?.sessionId;
+        if (cmd === "stop") {
+          const requestedSessionId =
+            request?.sessionId || request?.meta?.sessionId;
           if (
             requestedSessionId &&
             rec.sessionId &&
@@ -2341,7 +2532,7 @@
               success: true,
               ack: true,
               ignored: true,
-              reason: 'session_mismatch',
+              reason: "session_mismatch",
               stats: { ack: true, steps: 0, variables: 0 },
             });
             return true;
@@ -2357,11 +2548,11 @@
             });
           return true; // Keep channel open for async response
         }
-        sendResponse({ success: false, error: 'Unknown command' });
+        sendResponse({ success: false, error: "Unknown command" });
         return true;
       }
       // Handle direct stop message with ack (sent by recorder-manager)
-      if (request.action === 'stop' && request.requireAck) {
+      if (request.action === "stop" && request.requireAck) {
         const rec = getRecorder();
         const requestedSessionId = request?.sessionId;
         if (
@@ -2372,7 +2563,7 @@
           sendResponse({
             ack: true,
             ignored: true,
-            reason: 'session_mismatch',
+            reason: "session_mismatch",
             stats: { ack: true, steps: 0, variables: 0 },
           });
           return true;
@@ -2387,8 +2578,8 @@
           });
         return true;
       }
-      if (request.action === 'rr_recorder_ping') {
-        sendResponse({ status: 'pong' });
+      if (request.action === "rr_recorder_ping") {
+        sendResponse({ status: "pong" });
         return false;
       }
     } catch (e) {
@@ -2401,5 +2592,5 @@
     return false;
   });
 
-  console.log('Record & Replay recorder.js loaded');
+  console.log("Record & Replay recorder.js loaded");
 })();

@@ -1,16 +1,16 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import { createRecorderEventMessageHandler } from '@/entrypoints/background/record-replay/recording/content-message-handler';
-import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
+import { createRecorderEventMessageHandler } from "@/entrypoints/background/record-replay/recording/content-message-handler";
+import { TOOL_MESSAGE_TYPES } from "@/common/message-types";
 
-function createSessionMock(sessionId = 'sess_test') {
+function createSessionMock(sessionId = "sess_test") {
   const state = { sessionId };
   const appendSteps = vi.fn();
   const appendVariables = vi.fn();
 
   const session = {
     canAcceptSteps: vi.fn(() => true),
-    getFlow: vi.fn(() => ({ id: 'flow-1' })),
+    getFlow: vi.fn(() => ({ id: "flow-1" })),
     getSession: vi.fn(() => state),
     hasActiveTab: vi.fn((tabId: number) => tabId === 101),
     appendSteps,
@@ -40,8 +40,8 @@ function createSender(
 function createMeta(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     version: 1,
-    sessionId: 'sess_test',
-    eventId: 'evt_1',
+    sessionId: "sess_test",
+    eventId: "evt_1",
     seq: 1,
     ...overrides,
   };
@@ -50,21 +50,21 @@ function createMeta(overrides: Partial<Record<string, unknown>> = {}) {
 function createClickStep(id: string) {
   return {
     id,
-    type: 'click',
+    type: "click",
     target: {
-      selector: '#save',
-      candidates: [{ type: 'css', value: '#save' }],
+      selector: "#save",
+      candidates: [{ type: "css", value: "#save" }],
     },
   };
 }
 
-describe('Recorder ingest protocol', () => {
+describe("Recorder ingest protocol", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (chrome.tabs as any).sendMessage = vi.fn().mockResolvedValue({ ok: true });
   });
 
-  it('accepts valid recorder event and appends steps', () => {
+  it("accepts valid recorder event and appends steps", () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
     const sendResponse = vi.fn();
@@ -72,7 +72,7 @@ describe('Recorder ingest protocol', () => {
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('s1')] },
+        payload: { kind: "steps", steps: [createClickStep("s1")] },
         meta: createMeta(),
       },
       createSender(),
@@ -85,19 +85,44 @@ describe('Recorder ingest protocol', () => {
         ok: true,
         ack: expect.objectContaining({
           seq: 1,
-          eventId: 'evt_1',
-          decision: 'accept',
+          eventId: "evt_1",
+          decision: "accept",
         }),
       }),
     );
   });
 
-  it('reports a session budget rejection explicitly without acknowledging the event', () => {
+  it("does not acknowledge an event emitted after a page missed the pause broadcast", () => {
+    const mock = createSessionMock();
+    mock.session.canAcceptSteps.mockReturnValue(false);
+    (mock.session as any).getStatus = vi.fn(() => "paused");
+    const handler = createRecorderEventMessageHandler(mock.session as any);
+    const sendResponse = vi.fn();
+
+    handler(
+      {
+        type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
+        payload: { kind: "steps", steps: [createClickStep("still-buffered")] },
+        meta: createMeta(),
+      },
+      createSender(),
+      sendResponse,
+    );
+
+    expect(mock.appendSteps).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({
+      ok: false,
+      code: "RECORDING_PAUSED",
+      error: "recording is paused; event was not acknowledged",
+    });
+  });
+
+  it("reports a session budget rejection explicitly without acknowledging the event", () => {
     const mock = createSessionMock();
     mock.appendSteps.mockReturnValue({
       accepted: 0,
       truncated: true,
-      reason: 'payload_bytes',
+      reason: "payload_bytes",
     });
     const handler = createRecorderEventMessageHandler(mock.session as any);
     const sendResponse = vi.fn();
@@ -105,7 +130,7 @@ describe('Recorder ingest protocol', () => {
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('s1')] },
+        payload: { kind: "steps", steps: [createClickStep("s1")] },
         meta: createMeta(),
       },
       createSender(),
@@ -114,12 +139,12 @@ describe('Recorder ingest protocol', () => {
 
     expect(sendResponse).toHaveBeenCalledWith({
       ok: false,
-      code: 'RECORDING_LIMIT',
-      error: 'recording limit reached: payload_bytes',
+      code: "RECORDING_LIMIT",
+      error: "recording limit reached: payload_bytes",
     });
   });
 
-  it('deduplicates repeated eventId from same source', () => {
+  it("deduplicates repeated eventId from same source", () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
 
@@ -127,7 +152,7 @@ describe('Recorder ingest protocol', () => {
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('s1')] },
+        payload: { kind: "steps", steps: [createClickStep("s1")] },
         meta: createMeta(),
       },
       createSender(),
@@ -138,7 +163,7 @@ describe('Recorder ingest protocol', () => {
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('s1')] },
+        payload: { kind: "steps", steps: [createClickStep("s1")] },
         meta: createMeta(), // same eventId + seq
       },
       createSender(),
@@ -151,22 +176,22 @@ describe('Recorder ingest protocol', () => {
         ok: true,
         deduped: true,
         ack: expect.objectContaining({
-          decision: 'duplicate',
+          decision: "duplicate",
           highWatermarkSeq: 1,
         }),
       }),
     );
   });
 
-  it('marks out-of-order lower seq as stale', () => {
+  it("marks out-of-order lower seq as stale", () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
 
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('s2')] },
-        meta: createMeta({ eventId: 'evt_2', seq: 2 }),
+        payload: { kind: "steps", steps: [createClickStep("s2")] },
+        meta: createMeta({ eventId: "evt_2", seq: 2 }),
       },
       createSender(),
       vi.fn(),
@@ -176,8 +201,8 @@ describe('Recorder ingest protocol', () => {
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('s1')] },
-        meta: createMeta({ eventId: 'evt_3', seq: 1 }),
+        payload: { kind: "steps", steps: [createClickStep("s1")] },
+        meta: createMeta({ eventId: "evt_3", seq: 1 }),
       },
       createSender(),
       staleResponse,
@@ -189,14 +214,14 @@ describe('Recorder ingest protocol', () => {
         ok: true,
         deduped: true,
         ack: expect.objectContaining({
-          decision: 'stale',
+          decision: "stale",
           highWatermarkSeq: 2,
         }),
       }),
     );
   });
 
-  it('rejects event with mismatched sessionId', () => {
+  it("rejects event with mismatched sessionId", () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
     const sendResponse = vi.fn();
@@ -204,8 +229,8 @@ describe('Recorder ingest protocol', () => {
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('s1')] },
-        meta: createMeta({ sessionId: 'another_session' }),
+        payload: { kind: "steps", steps: [createClickStep("s1")] },
+        meta: createMeta({ sessionId: "another_session" }),
       },
       createSender(),
       sendResponse,
@@ -215,12 +240,12 @@ describe('Recorder ingest protocol', () => {
     expect(sendResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         ok: false,
-        code: 'SESSION_MISMATCH',
+        code: "SESSION_MISMATCH",
       }),
     );
   });
 
-  it('rejects recorder events from tabs outside the recording membership', () => {
+  it("rejects recorder events from tabs outside the recording membership", () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
     const sendResponse = vi.fn();
@@ -228,7 +253,7 @@ describe('Recorder ingest protocol', () => {
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('foreign')] },
+        payload: { kind: "steps", steps: [createClickStep("foreign")] },
         meta: createMeta(),
       },
       createSender(999),
@@ -237,11 +262,11 @@ describe('Recorder ingest protocol', () => {
 
     expect(mock.appendSteps).not.toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith(
-      expect.objectContaining({ ok: false, code: 'INVALID_SOURCE' }),
+      expect.objectContaining({ ok: false, code: "INVALID_SOURCE" }),
     );
   });
 
-  it('rejects legacy events when authenticated session metadata is missing', () => {
+  it("rejects legacy events when authenticated session metadata is missing", () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
     const sendResponse = vi.fn();
@@ -250,8 +275,8 @@ describe('Recorder ingest protocol', () => {
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
         payload: {
-          kind: 'variables',
-          variables: [{ key: 'v1', sensitive: true }],
+          kind: "variables",
+          variables: [{ key: "v1", sensitive: true }],
         },
       },
       createSender(),
@@ -262,12 +287,12 @@ describe('Recorder ingest protocol', () => {
     expect(sendResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         ok: false,
-        code: 'INVALID_META',
+        code: "INVALID_META",
       }),
     );
   });
 
-  it('rejects event when meta is present but invalid', () => {
+  it("rejects event when meta is present but invalid", () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
     const sendResponse = vi.fn();
@@ -275,7 +300,7 @@ describe('Recorder ingest protocol', () => {
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('s1')] },
+        payload: { kind: "steps", steps: [createClickStep("s1")] },
         meta: createMeta({ seq: -1 }),
       },
       createSender(),
@@ -286,32 +311,32 @@ describe('Recorder ingest protocol', () => {
     expect(sendResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         ok: false,
-        code: 'INVALID_META',
+        code: "INVALID_META",
       }),
     );
   });
 
-  it('resets source watermark when session rotates', () => {
-    const mock = createSessionMock('sess_a');
+  it("resets source watermark when session rotates", () => {
+    const mock = createSessionMock("sess_a");
     const handler = createRecorderEventMessageHandler(mock.session as any);
 
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('sa')] },
-        meta: createMeta({ sessionId: 'sess_a', eventId: 'evt_a1', seq: 5 }),
+        payload: { kind: "steps", steps: [createClickStep("sa")] },
+        meta: createMeta({ sessionId: "sess_a", eventId: "evt_a1", seq: 5 }),
       },
       createSender(),
       vi.fn(),
     );
 
-    mock.state.sessionId = 'sess_b';
+    mock.state.sessionId = "sess_b";
     const response = vi.fn();
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('sb')] },
-        meta: createMeta({ sessionId: 'sess_b', eventId: 'evt_b1', seq: 1 }),
+        payload: { kind: "steps", steps: [createClickStep("sb")] },
+        meta: createMeta({ sessionId: "sess_b", eventId: "evt_b1", seq: 1 }),
       },
       createSender(),
       response,
@@ -321,24 +346,24 @@ describe('Recorder ingest protocol', () => {
       expect.objectContaining({
         ok: true,
         ack: expect.objectContaining({
-          decision: 'accept',
+          decision: "accept",
           highWatermarkSeq: 1,
         }),
       }),
     );
   });
 
-  it('keeps sequence watermarks separate across documents in one tab and frame', () => {
+  it("keeps sequence watermarks separate across documents in one tab and frame", () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
 
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('old-document')] },
-        meta: createMeta({ eventId: 'old-event', seq: 20 }),
+        payload: { kind: "steps", steps: [createClickStep("old-document")] },
+        meta: createMeta({ eventId: "old-event", seq: 20 }),
       },
-      createSender(101, 0, 'document-old'),
+      createSender(101, 0, "document-old"),
       vi.fn(),
     );
 
@@ -346,10 +371,10 @@ describe('Recorder ingest protocol', () => {
     handler(
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-        payload: { kind: 'steps', steps: [createClickStep('new-document')] },
-        meta: createMeta({ eventId: 'new-event', seq: 1 }),
+        payload: { kind: "steps", steps: [createClickStep("new-document")] },
+        meta: createMeta({ eventId: "new-event", seq: 1 }),
       },
-      createSender(101, 0, 'document-new'),
+      createSender(101, 0, "document-new"),
       response,
     );
 
@@ -357,13 +382,16 @@ describe('Recorder ingest protocol', () => {
     expect(response).toHaveBeenCalledWith(
       expect.objectContaining({
         ok: true,
-        ack: expect.objectContaining({ decision: 'accept', highWatermarkSeq: 1 }),
+        ack: expect.objectContaining({
+          decision: "accept",
+          highWatermarkSeq: 1,
+        }),
       }),
     );
   });
 
-  it.each(['script', 'http', 'navigate', 'openTab', 'executeFlow'])(
-    'rejects dangerous recorder step type %s',
+  it.each(["script", "http", "navigate", "openTab", "executeFlow"])(
+    "rejects dangerous recorder step type %s",
     (type) => {
       const mock = createSessionMock();
       const handler = createRecorderEventMessageHandler(mock.session as any);
@@ -373,13 +401,13 @@ describe('Recorder ingest protocol', () => {
         {
           type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
           payload: {
-            kind: 'steps',
+            kind: "steps",
             steps: [
               {
-                id: 'forged',
+                id: "forged",
                 type,
-                code: 'globalThis.pwned = true',
-                url: 'file:///tmp',
+                code: "globalThis.pwned = true",
+                url: "file:///tmp",
               },
             ],
           },
@@ -391,12 +419,12 @@ describe('Recorder ingest protocol', () => {
 
       expect(mock.appendSteps).not.toHaveBeenCalled();
       expect(response).toHaveBeenCalledWith(
-        expect.objectContaining({ ok: false, code: 'INVALID_PAYLOAD' }),
+        expect.objectContaining({ ok: false, code: "INVALID_PAYLOAD" }),
       );
     },
   );
 
-  it('rebuilds allowed steps from whitelisted fields', () => {
+  it("rebuilds allowed steps from whitelisted fields", () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
 
@@ -404,15 +432,15 @@ describe('Recorder ingest protocol', () => {
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
         payload: {
-          kind: 'steps',
+          kind: "steps",
           steps: [
             {
-              ...createClickStep('safe'),
-              code: 'globalThis.pwned = true',
-              sideEffect: { kind: 'dangerous' },
+              ...createClickStep("safe"),
+              code: "globalThis.pwned = true",
+              sideEffect: { kind: "dangerous" },
               target: {
-                ...createClickStep('safe').target,
-                frameContext: { kind: 'iframe', url: 'https://evil.test' },
+                ...createClickStep("safe").target,
+                frameContext: { kind: "iframe", url: "https://evil.test" },
               },
             },
           ],
@@ -425,33 +453,33 @@ describe('Recorder ingest protocol', () => {
 
     expect(mock.appendSteps).toHaveBeenCalledWith([
       {
-        id: 'safe',
-        type: 'click',
+        id: "safe",
+        type: "click",
         target: {
-          selector: '#save',
-          candidates: [{ type: 'css', value: '#save' }],
+          selector: "#save",
+          candidates: [{ type: "css", value: "#save" }],
         },
       },
     ]);
   });
 
-  it('joins a child-frame runtime step with top-frame selector context', async () => {
+  it("joins a child-frame runtime step with top-frame selector context", async () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
-    const frameEventId = `frame_${'a'.repeat(32)}`;
+    const frameEventId = `frame_${"a".repeat(32)}`;
 
     const childResponse = await new Promise<unknown>((resolve) => {
       handler(
         {
           type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
           payload: {
-            kind: 'iframeStep',
+            kind: "iframeStep",
             frameEventId,
-            step: createClickStep('iframe-click'),
+            step: createClickStep("iframe-click"),
           },
           meta: createMeta({
-            eventId: 'child-event',
-            source: { href: 'https://widgets.test/frame', isTop: false },
+            eventId: "child-event",
+            source: { href: "https://widgets.test/frame", isTop: false },
           }),
         },
         createSender(101, 7),
@@ -462,8 +490,8 @@ describe('Recorder ingest protocol', () => {
     expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
       101,
       {
-        action: 'rr_register_iframe_event',
-        sessionId: 'sess_test',
+        action: "rr_register_iframe_event",
+        sessionId: "sess_test",
         frameEventId,
       },
       { frameId: 0 },
@@ -475,37 +503,39 @@ describe('Recorder ingest protocol', () => {
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
         payload: {
-          kind: 'iframeFrameContext',
+          kind: "iframeFrameContext",
           frameEventId,
           frameTarget: {
-            selector: 'iframe#checkout',
-            candidates: [{ type: 'css', value: 'iframe#checkout' }],
+            selector: "iframe#checkout",
+            candidates: [{ type: "css", value: "iframe#checkout" }],
           },
         },
-        meta: createMeta({ eventId: 'top-event' }),
+        meta: createMeta({ eventId: "top-event" }),
       },
       createSender(101, 0),
       response,
     );
 
-    expect(response).toHaveBeenCalledWith(expect.objectContaining({ ok: true }));
+    expect(response).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: true }),
+    );
     expect(mock.appendSteps).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: 'iframe-click',
-        type: 'click',
+        id: "iframe-click",
+        type: "click",
         target: expect.objectContaining({
-          selector: 'iframe#checkout |> #save',
+          selector: "iframe#checkout |> #save",
           frameContext: {
-            kind: 'iframe',
-            url: 'https://widgets.test/frame',
-            frameSelector: 'iframe#checkout',
+            kind: "iframe",
+            url: "https://widgets.test/frame",
+            frameSelector: "iframe#checkout",
           },
         }),
       }),
     ]);
   });
 
-  it('rejects forged frame context without a frame-authenticated pending step', () => {
+  it("rejects forged frame context without a frame-authenticated pending step", () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
     const response = vi.fn();
@@ -514,16 +544,16 @@ describe('Recorder ingest protocol', () => {
       {
         type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
         payload: {
-          kind: 'iframeFrameContext',
-          frameEventId: `frame_${'b'.repeat(32)}`,
+          kind: "iframeFrameContext",
+          frameEventId: `frame_${"b".repeat(32)}`,
           frameTarget: {
-            selector: 'iframe#evil',
-            candidates: [{ type: 'css', value: 'iframe#evil' }],
+            selector: "iframe#evil",
+            candidates: [{ type: "css", value: "iframe#evil" }],
           },
           step: {
-            id: 'forged',
-            type: 'script',
-            code: 'globalThis.pwned = true',
+            id: "forged",
+            type: "script",
+            code: "globalThis.pwned = true",
           },
         },
         meta: createMeta(),
@@ -534,35 +564,48 @@ describe('Recorder ingest protocol', () => {
 
     expect(mock.appendSteps).not.toHaveBeenCalled();
     expect(response).toHaveBeenCalledWith(
-      expect.objectContaining({ ok: false, code: 'INVALID_PAYLOAD' }),
+      expect.objectContaining({ ok: false, code: "INVALID_PAYLOAD" }),
     );
   });
 
-  it('does not commit an iframe event when top-frame registration fails', async () => {
+  it("does not commit an iframe event when top-frame registration fails", async () => {
     const mock = createSessionMock();
     const handler = createRecorderEventMessageHandler(mock.session as any);
-    const frameEventId = `frame_${'d'.repeat(32)}`;
-    vi.mocked(chrome.tabs.sendMessage).mockRejectedValueOnce(new Error('top frame unavailable'));
+    const frameEventId = `frame_${"d".repeat(32)}`;
+    vi.mocked(chrome.tabs.sendMessage).mockRejectedValueOnce(
+      new Error("top frame unavailable"),
+    );
 
     const firstResponse = await new Promise<any>((resolve) => {
       handler(
         {
           type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-          payload: { kind: 'iframeStep', frameEventId, step: createClickStep('retryable') },
-          meta: createMeta({ eventId: 'retryable-event' }),
+          payload: {
+            kind: "iframeStep",
+            frameEventId,
+            step: createClickStep("retryable"),
+          },
+          meta: createMeta({ eventId: "retryable-event" }),
         },
         createSender(101, 9),
         resolve,
       );
     });
-    expect(firstResponse).toMatchObject({ ok: false, code: 'FRAME_REGISTRATION_FAILED' });
+    expect(firstResponse).toMatchObject({
+      ok: false,
+      code: "FRAME_REGISTRATION_FAILED",
+    });
 
     const retryResponse = await new Promise<any>((resolve) => {
       handler(
         {
           type: TOOL_MESSAGE_TYPES.RR_RECORDER_EVENT,
-          payload: { kind: 'iframeStep', frameEventId, step: createClickStep('retryable') },
-          meta: createMeta({ eventId: 'retryable-event' }),
+          payload: {
+            kind: "iframeStep",
+            frameEventId,
+            step: createClickStep("retryable"),
+          },
+          meta: createMeta({ eventId: "retryable-event" }),
         },
         createSender(101, 9),
         resolve,
@@ -570,7 +613,7 @@ describe('Recorder ingest protocol', () => {
     });
     expect(retryResponse).toMatchObject({
       ok: true,
-      ack: { decision: 'accept', highWatermarkSeq: 1 },
+      ack: { decision: "accept", highWatermarkSeq: 1 },
     });
   });
 });
