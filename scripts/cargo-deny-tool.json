@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "cargo-deny",
+  "version": "0.19.8",
+  "platform": "linux",
+  "arch": "x64",
+  "rustToolchain": "1.94.0",
+  "archive": {
+    "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.8/cargo-deny-0.19.8-x86_64-unknown-linux-musl.tar.gz",
+    "size": 4983961,
+    "sha256": "70e769ae3872e34d45132b17040859175e11401dc12dddb0303e0b8c7d088f3f"
+  },
+  "binary": {
+    "entry": "cargo-deny-0.19.8-x86_64-unknown-linux-musl/cargo-deny",
+    "filename": "cargo-deny",
+    "size": 8951120,
+    "sha256": "f84bbd8f18ca59d531b848bad2f39237b17b5980d7f9cdd373d81f6689eb685f",
+    "versionOutput": "cargo-deny 0.19.8",
+    "mode": "0755"
+  }
+}

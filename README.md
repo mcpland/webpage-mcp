@@ -578,9 +578,19 @@ live store listing.
 
 - Trigger: daily at 04:17 UTC and manual dispatch
 - Audits the committed production pnpm and Cargo lockfile graphs without
-  installing dependencies or executing dependency lifecycle scripts
+  installing project dependencies or executing dependency lifecycle scripts
 - Uses the same fail-closed npm and Rust advisory checks as CI and release, so
   newly disclosed advisories are detected even when source code is unchanged
+
+The Rust gate installs the Linux x64 musl `cargo-deny` binary described by
+`scripts/cargo-deny-tool.json`. The installer accepts only GitHub's fixed HTTPS
+release-asset redirect, streams into a bounded temporary file, verifies both
+the archive and extracted executable by exact byte count and SHA-256, installs
+mode `0755` atomically, and probes the pinned version through an absolute path.
+The workflow first validates the Cargo graph with `cargo metadata --locked`,
+then runs `cargo-deny` without its `--locked`/`--offline` flags so the RustSec
+database is refreshed on every gate; download, refresh, and scan failures remain
+fatal.
 
 Dependabot checks GitHub Actions, the root pnpm workspace, and the Rust/WASM
 crate weekly. Live advisory databases can make an unchanged commit fail a
@@ -632,10 +642,13 @@ than weakening the gate.
 - Agent project/session selection and missing-selection routing: `pnpm --filter webpage-mcp-connector exec vitest run tests/utils/agent-selection.test.ts tests/background/sidepanel-utils.test.ts tests/background/quick-panel-agent-handler.test.ts`.
 - Safe session defaults and explicit dangerous-mode confirmation: `app/mcp-server/src/agent/session-security.test.ts` via `pnpm --filter webpage-mcp test`.
 - Localized extension strings: `pnpm --filter webpage-mcp-connector i18n:check`.
-- Stable-only unified release, artifact, version-setting, legal inventory, and standalone npm channel rules: `pnpm test:release` and `pnpm legal:check`.
+- Stable-only unified release, artifact, version-setting, legal inventory,
+  verified cargo-deny installer, and standalone npm channel rules:
+  `pnpm test:release` and `pnpm legal:check`.
 - Production npm advisories: `pnpm audit --prod`. The scheduled Rust advisory
-  check runs cargo-deny against `packages/wasm-simd/Cargo.lock` with all
-  features and locked resolution.
+  check validates `packages/wasm-simd/Cargo.lock` with Rust 1.94.0, then runs
+  the verified cargo-deny 0.19.8 binary with all features and a freshly updated
+  advisory database.
 
 Human review is still required for the unresolved documentation owner (`NEEDS_OWNER`) and for installed-browser bootstrap behavior on each supported operating system.
 

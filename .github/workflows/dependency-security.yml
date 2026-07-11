@@ -38,10 +38,19 @@ jobs:
       - name: Audit production npm dependencies
         run: pnpm audit --prod
 
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal
+          rustup default 1.94.0
+          rustc --version
+
+      - name: Install verified cargo-deny
+        run: node scripts/install-cargo-deny.mjs --install-dir "$RUNNER_TEMP/webpage-mcp-cargo-deny"
+
+      # Do not pass cargo-deny's --locked flag here: that flag disables live
+      # advisory-database updates. Cargo validates the lock separately first.
       - name: Audit Rust dependencies
-        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
-        with:
-          rust-version: "1.94.0"
-          manifest-path: packages/wasm-simd/Cargo.toml
-          arguments: "--all-features --locked"
-          command: "check advisories"
+        run: |
+          cargo metadata --manifest-path packages/wasm-simd/Cargo.toml --all-features --locked --format-version 1 > /dev/null
+          "$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --manifest-path packages/wasm-simd/Cargo.toml --all-features check advisories
+          git diff --exit-code -- packages/wasm-simd/Cargo.lock

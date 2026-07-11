@@ -1294,7 +1294,8 @@ test("release workflow verifies before either publish mutation", async () => {
   for (const requiredCheck of [
     /pnpm install --frozen-lockfile/,
     /pnpm audit --prod/,
-    /uses: EmbarkStudios\/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe/,
+    /node scripts\/install-cargo-deny\.mjs --install-dir "\$RUNNER_TEMP\/webpage-mcp-cargo-deny"/,
+    /"\$RUNNER_TEMP\/webpage-mcp-cargo-deny\/cargo-deny" --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories/,
     /pnpm typecheck/,
     /pnpm --filter webpage-mcp-connector compile/,
     /pnpm test:release/,
@@ -1510,18 +1511,35 @@ test("release native wrapper smoke withholds child stderr on failure", async (t)
 });
 
 test("dependency security gates cover npm and Cargo continuously", async () => {
-  const [ciWorkflow, releaseWorkflow, securityWorkflow, dependabot] =
-    await Promise.all([
-      readFile(join(REPOSITORY_ROOT, ".github/workflows/ci.yml"), "utf8"),
-      readFile(join(REPOSITORY_ROOT, ".github/workflows/release.yml"), "utf8"),
-      readFile(
-        join(REPOSITORY_ROOT, ".github/workflows/dependency-security.yml"),
-        "utf8",
-      ),
-      readFile(join(REPOSITORY_ROOT, ".github/dependabot.yml"), "utf8"),
-    ]);
-  const cargoDenyReference =
-    "EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe";
+  const [
+    ciWorkflow,
+    releaseWorkflow,
+    securityWorkflow,
+    dependabot,
+    cargoDenyTool,
+  ] = await Promise.all([
+    readFile(join(REPOSITORY_ROOT, ".github/workflows/ci.yml"), "utf8"),
+    readFile(join(REPOSITORY_ROOT, ".github/workflows/release.yml"), "utf8"),
+    readFile(
+      join(REPOSITORY_ROOT, ".github/workflows/dependency-security.yml"),
+      "utf8",
+    ),
+    readFile(join(REPOSITORY_ROOT, ".github/dependabot.yml"), "utf8"),
+    readFile(join(REPOSITORY_ROOT, "scripts/cargo-deny-tool.json"), "utf8"),
+  ]);
+  const cargoDeny = JSON.parse(cargoDenyTool);
+  assert.equal(cargoDeny.version, "0.19.8");
+  assert.equal(cargoDeny.rustToolchain, "1.94.0");
+  assert.equal(cargoDeny.archive.size, 4_983_961);
+  assert.equal(
+    cargoDeny.archive.sha256,
+    "70e769ae3872e34d45132b17040859175e11401dc12dddb0303e0b8c7d088f3f",
+  );
+  assert.equal(cargoDeny.binary.size, 8_951_120);
+  assert.equal(
+    cargoDeny.binary.sha256,
+    "f84bbd8f18ca59d531b848bad2f39237b17b5980d7f9cdd373d81f6689eb685f",
+  );
 
   assert.match(
     ciWorkflow,
@@ -1543,21 +1561,62 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
       /pnpm audit --prod/,
       `${name} must fail on production npm advisories`,
     );
-    const actionIndex = source.indexOf(`uses: ${cargoDenyReference}`);
+    assert.doesNotMatch(
+      source,
+      /EmbarkStudios\/cargo-deny-action/,
+      `${name} must not delegate binary acquisition to a mutable action implementation`,
+    );
+    assert.match(
+      source,
+      /rustup toolchain install 1\.94\.0 --profile minimal/,
+      `${name} must install the pinned Rust toolchain`,
+    );
+    assert.match(
+      source,
+      /rustup default 1\.94\.0/,
+      `${name} must select the pinned Rust toolchain`,
+    );
+    assert.match(
+      source,
+      /node scripts\/install-cargo-deny\.mjs --install-dir "\$RUNNER_TEMP\/webpage-mcp-cargo-deny"/,
+      `${name} must install the byte-pinned cargo-deny binary`,
+    );
+    assert.match(
+      source,
+      /cargo metadata --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features --locked --format-version 1 > \/dev\/null/,
+      `${name} must validate the committed Cargo graph`,
+    );
+    const auditCommand = source
+      .split(/\r?\n/)
+      .find((line) =>
+        line.includes(
+          '"$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --manifest-path',
+        ),
+      );
     assert.ok(
-      actionIndex >= 0,
-      `${name} must run the reviewed cargo-deny action`,
+      auditCommand,
+      `${name} must execute cargo-deny through its absolute verified path`,
     );
-    const stepStart = source.lastIndexOf("      - name:", actionIndex);
-    const nextStep = source.indexOf("\n      - name:", actionIndex);
-    const actionStep = source.slice(
-      stepStart,
-      nextStep >= 0 ? nextStep : source.length,
+    assert.match(
+      auditCommand,
+      /--manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories$/,
+      `${name} must scan the complete production Rust graph`,
     );
-    assert.match(actionStep, /rust-version: ["']1\.94\.0["']/);
-    assert.match(actionStep, /manifest-path: packages\/wasm-simd\/Cargo\.toml/);
-    assert.match(actionStep, /arguments: ["']--all-features --locked["']/);
-    assert.match(actionStep, /command: ["']check advisories["']/);
+    assert.doesNotMatch(
+      auditCommand,
+      /--locked|--offline|--frozen|--disable-fetch/,
+      `${name} must leave live advisory-database refresh enabled`,
+    );
+    assert.match(
+      source,
+      /git diff --exit-code -- packages\/wasm-simd\/Cargo\.lock/,
+      `${name} must fail if scanning changes the committed lockfile`,
+    );
+    assert.match(
+      source,
+      /cargo metadata --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features --locked --format-version 1 > \/dev\/null\s*\n\s+"\$RUNNER_TEMP\/webpage-mcp-cargo-deny\/cargo-deny" --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories\s*\n\s+git diff --exit-code -- packages\/wasm-simd\/Cargo\.lock/,
+      `${name} must keep locked-graph validation, live advisory refresh, and mutation detection adjacent`,
+    );
   }
 
   assert.match(
@@ -1567,8 +1626,8 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
   );
   assert.match(
     releasePlatformGate,
-    /Audit Rust dependencies once on Linux\s*\n\s+if: matrix\.enforce_coverage\s*\n\s+uses: EmbarkStudios\/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe/,
-    "the Docker-based release Rust advisory gate must run only on Linux",
+    /Install verified cargo-deny once on Linux\s*\n\s+if: matrix\.enforce_coverage\s*\n\s+run: node scripts\/install-cargo-deny\.mjs[^\n]*\s*\n[\s\S]*?Audit Rust dependencies once on Linux\s*\n\s+if: matrix\.enforce_coverage\s*\n\s+run:/,
+    "the verified release Rust advisory gate must run only on Linux",
   );
 
   assert.match(
@@ -1594,7 +1653,7 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
   ].join("\n");
   assert.doesNotMatch(
     securityGates,
-    /continue-on-error|ignore-registry-errors/,
+    /continue-on-error|ignore-registry-errors|\|\|\s*true/,
     "dependency advisory gates must fail closed",
   );
 
@@ -1651,7 +1710,6 @@ test("CI workflows use maintained runtimes and reviewed actions", async () => {
     "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", // actions/download-artifact v8.0.1
     "fc06bc1257f339d1d5d8b3a19a8cae5388b55320", // pnpm/action-setup v5.0.0
     "718ea10b132b3b2eba29c1007bb80653f286566b", // softprops/action-gh-release v3.0.1
-    "bb137d7af7e4fb67e5f82a49c4fce4fad40782fe", // EmbarkStudios/cargo-deny-action v2.0.20
   ]);
   const actionReferences = Array.from(
     combined.matchAll(/^\s*uses:\s*([^\s#]+)/gm),
