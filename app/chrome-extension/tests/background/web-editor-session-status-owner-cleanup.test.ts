@@ -9,6 +9,7 @@ const nativeHostMocks = vi.hoisted(() => ({
 }));
 const authorizationMocks = vi.hoisted(() => ({
   consumePrivilegedUiAuthorization: vi.fn(),
+  validatePrivilegedUiSurfaceSession: vi.fn(async () => true),
 }));
 const sidepanelMocks = vi.hoisted(() => ({ openAgentSetupSidepanel: vi.fn() }));
 const propsInjectionMocks = vi.hoisted(() => ({
@@ -91,11 +92,11 @@ describe("Web Editor status owner cleanup", () => {
         tabRemovedListener = listener;
       },
     );
-    vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation(
-      (listener) => {
-        if (!requestListener) requestListener = listener as RequestListener;
-      },
-    );
+    vi.mocked(
+      chrome.runtime.onUserScriptMessage.addListener,
+    ).mockImplementation((listener) => {
+      if (!requestListener) requestListener = listener as RequestListener;
+    });
 
     const { initWebEditorListeners } =
       await import("@/entrypoints/background/web-editor");
@@ -120,6 +121,7 @@ describe("Web Editor status owner cleanup", () => {
       const keepChannelOpen = requestListener!(
         {
           type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY,
+          surfaceSessionId: "aa".repeat(32),
           authorizationToken: `apply-token-${index}`,
           payload: {
             pageUrl: "https://example.com/editor",

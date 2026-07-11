@@ -18,6 +18,10 @@ if (typeof globalThis.chrome === "undefined") {
         addListener: vi.fn(),
         removeListener: vi.fn(),
       },
+      onUserScriptMessage: {
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+      },
       connect: vi.fn().mockReturnValue({
         onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
         onDisconnect: { addListener: vi.fn(), removeListener: vi.fn() },
@@ -39,6 +43,7 @@ if (typeof globalThis.chrome === "undefined") {
     },
     tabs: {
       query: vi.fn().mockResolvedValue([]),
+      sendMessage: vi.fn().mockResolvedValue(undefined),
       get: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({ id: 1 }),
       update: vi.fn().mockResolvedValue({}),

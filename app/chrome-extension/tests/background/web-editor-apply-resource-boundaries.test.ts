@@ -14,6 +14,7 @@ const nativeHostMocks = vi.hoisted(() => ({
 }));
 const authorizationMocks = vi.hoisted(() => ({
   consumePrivilegedUiAuthorization: vi.fn(),
+  validatePrivilegedUiSurfaceSession: vi.fn(async () => true),
 }));
 const sidepanelMocks = vi.hoisted(() => ({ openAgentSetupSidepanel: vi.fn() }));
 const propsInjectionMocks = vi.hoisted(() => ({
@@ -128,11 +129,11 @@ describe("Web Editor apply resource boundaries", () => {
       set: vi.fn().mockResolvedValue(undefined),
       remove: vi.fn().mockResolvedValue(undefined),
     } as unknown as typeof chrome.storage.session;
-    vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation(
-      (listener) => {
-        if (!requestListener) requestListener = listener as RequestListener;
-      },
-    );
+    vi.mocked(
+      chrome.runtime.onUserScriptMessage.addListener,
+    ).mockImplementation((listener) => {
+      if (!requestListener) requestListener = listener as RequestListener;
+    });
 
     const { initWebEditorListeners } =
       await import("@/entrypoints/background/web-editor");
@@ -141,7 +142,16 @@ describe("Web Editor apply resource boundaries", () => {
 
   async function send(message: unknown): Promise<Record<string, unknown>> {
     const sendResponse = vi.fn();
-    expect(requestListener!(message, contentSender(), sendResponse)).toBe(true);
+    expect(
+      requestListener!(
+        {
+          ...(message as Record<string, unknown>),
+          surfaceSessionId: "aa".repeat(32),
+        },
+        contentSender(),
+        sendResponse,
+      ),
+    ).toBe(true);
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
     return sendResponse.mock.calls[0]![0] as Record<string, unknown>;
   }

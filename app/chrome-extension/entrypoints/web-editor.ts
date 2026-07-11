@@ -7,9 +7,9 @@
  * Build output: .output/chrome-mv3/web-editor.js
  */
 
-import { WEB_EDITOR_LOG_PREFIX } from './web-editor/constants';
-import { createWebEditor } from './web-editor/core/editor';
-import { installMessageListener } from './web-editor/core/message-listener';
+import { WEB_EDITOR_LOG_PREFIX } from "./web-editor/constants";
+import { createWebEditor } from "./web-editor/core/editor";
+import { installWebEditorCommandHandler } from "./web-editor/core/message-listener";
 
 export default defineUnlistedScript(() => {
   // Phase 1: Only support top frame
@@ -20,7 +20,9 @@ export default defineUnlistedScript(() => {
 
   // Singleton guard: prevent multiple instances
   if (window.__MCP_WEB_EDITOR__) {
-    console.log(`${WEB_EDITOR_LOG_PREFIX} Already installed, skipping initialization`);
+    console.log(
+      `${WEB_EDITOR_LOG_PREFIX} Already installed, skipping initialization`,
+    );
     return;
   }
 
@@ -28,8 +30,9 @@ export default defineUnlistedScript(() => {
   const api = createWebEditor();
   window.__MCP_WEB_EDITOR__ = api;
 
-  // Install message listener for background communication
-  installMessageListener(api);
+  // Background commands enter through chrome.userScripts.execute in this
+  // dedicated world. No tab-wide runtime message can disclose the session.
+  installWebEditorCommandHandler(api);
 
   console.log(`${WEB_EDITOR_LOG_PREFIX} Installed successfully`);
 });

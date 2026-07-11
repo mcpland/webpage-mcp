@@ -1,12 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   BACKGROUND_MESSAGE_TYPES,
   PRIVILEGED_UI_ACTIONS,
   PRIVILEGED_UI_SURFACES,
-} from '@/common/message-types';
+} from "@/common/message-types";
 
-const STORAGE_KEY = 'privileged-ui-active-surfaces-v1';
+const STORAGE_KEY = "privileged-ui-active-surfaces-v1";
 
 type RuntimeListener = (
   message: unknown,
@@ -14,7 +14,7 @@ type RuntimeListener = (
   sendResponse: (response: unknown) => void,
 ) => boolean | undefined;
 
-function sender(documentId = 'document-a'): chrome.runtime.MessageSender {
+function sender(documentId = "document-a"): chrome.runtime.MessageSender {
   return {
     id: chrome.runtime.id,
     tab: { id: 17 } as chrome.tabs.Tab,
@@ -23,8 +23,9 @@ function sender(documentId = 'document-a'): chrome.runtime.MessageSender {
   };
 }
 
-describe('privileged UI surface listener', () => {
-  let listener: RuntimeListener;
+describe("privileged UI surface listener", () => {
+  let contentListener: RuntimeListener;
+  let userScriptListener: RuntimeListener;
   let tabRemovedListener: (tabId: number) => void;
   let sessionData: Record<string, unknown>;
 
@@ -34,7 +35,7 @@ describe('privileged UI surface listener', () => {
     sessionData = {};
     chrome.storage.session = {
       get: vi.fn(async (key: string | string[] | null) => {
-        if (typeof key === 'string') return { [key]: sessionData[key] };
+        if (typeof key === "string") return { [key]: sessionData[key] };
         if (Array.isArray(key)) {
           return Object.fromEntries(
             key.map((item) => [item, sessionData[item]]),
@@ -55,15 +56,20 @@ describe('privileged UI surface listener', () => {
         tabRemovedListener = candidate as (tabId: number) => void;
       },
     );
-    captureNextWorkerListener();
+    captureNextWorkerListeners();
   });
 
-  function captureNextWorkerListener(): void {
+  function captureNextWorkerListeners(): void {
     vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation(
       (candidate) => {
-        listener = candidate as RuntimeListener;
+        contentListener = candidate as RuntimeListener;
       },
     );
+    vi.mocked(
+      chrome.runtime.onUserScriptMessage.addListener,
+    ).mockImplementation((candidate) => {
+      userScriptListener = candidate as RuntimeListener;
+    });
   }
 
   async function sendRuntime(
@@ -71,7 +77,7 @@ describe('privileged UI surface listener', () => {
     source = sender(),
   ): Promise<Record<string, unknown>> {
     const sendResponse = vi.fn();
-    expect(listener(message, source, sendResponse)).toBe(true);
+    expect(userScriptListener(message, source, sendResponse)).toBe(true);
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
     return sendResponse.mock.calls[0]![0] as Record<string, unknown>;
   }
@@ -98,14 +104,34 @@ describe('privileged UI surface listener', () => {
   }
 
   async function loadWorker() {
-    captureNextWorkerListener();
+    captureNextWorkerListeners();
     const authorization =
-      await import('@/entrypoints/background/privileged-ui-authorization');
+      await import("@/entrypoints/background/privileged-ui-authorization");
     authorization.initPrivilegedUiAuthorization();
     return authorization;
   }
 
-  it('hydrates the active session after worker restart and preserves close/document boundaries', async () => {
+  it("rejects a sibling content script even when it intercepted the real Web Editor session", async () => {
+    const worker = await loadWorker();
+    const sessionId = await worker.startPrivilegedUiSurfaceSession(
+      PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      17,
+    );
+    const sendResponse = vi.fn();
+
+    expect(
+      contentListener(authorizeMessage(sessionId), sender(), sendResponse),
+    ).toBe(false);
+    expect(sendResponse).toHaveBeenCalledWith({
+      success: false,
+      error: "Privileged action authorization denied",
+    });
+    expect(await sendRuntime(authorizeMessage(sessionId))).toMatchObject({
+      success: true,
+    });
+  });
+
+  it("hydrates the active session after worker restart and preserves close/document boundaries", async () => {
     const firstWorker = await loadWorker();
     const firstSessionId = await firstWorker.startPrivilegedUiSurfaceSession(
       PRIVILEGED_UI_SURFACES.WEB_EDITOR,
@@ -118,10 +144,10 @@ describe('privileged UI surface listener', () => {
     vi.resetModules();
     const restartedWorker = await loadWorker();
     expect(
-      await sendRuntime(authorizeMessage(firstSessionId), sender('document-b')),
+      await sendRuntime(authorizeMessage(firstSessionId), sender("document-b")),
     ).toEqual({
       success: false,
-      error: 'Privileged action authorization denied',
+      error: "Privileged action authorization denied",
     });
     expect(await sendRuntime(authorizeMessage(firstSessionId))).toMatchObject({
       success: true,
@@ -134,13 +160,13 @@ describe('privileged UI surface listener', () => {
       );
     expect(await sendRuntime(authorizeMessage(firstSessionId))).toEqual({
       success: false,
-      error: 'Privileged action authorization denied',
+      error: "Privileged action authorization denied",
     });
     expect(await sendRuntime(authorizeMessage(rotatedSessionId))).toMatchObject(
       { success: true },
     );
     expect(
-      await sendRuntime(closeMessage(rotatedSessionId), sender('document-b')),
+      await sendRuntime(closeMessage(rotatedSessionId), sender("document-b")),
     ).toEqual({
       success: false,
     });
@@ -152,12 +178,12 @@ describe('privileged UI surface listener', () => {
     await loadWorker();
     expect(await sendRuntime(authorizeMessage(rotatedSessionId))).toEqual({
       success: false,
-      error: 'Privileged action authorization denied',
+      error: "Privileged action authorization denied",
     });
   });
 
-  it('serializes initial hydration before activation so stale reads cannot overwrite a new session', async () => {
-    const staleSessionId = 'aa'.repeat(32);
+  it("serializes initial hydration before activation so stale reads cannot overwrite a new session", async () => {
+    const staleSessionId = "aa".repeat(32);
     let resolveHydration!: (value: Record<string, unknown>) => void;
     vi.mocked(chrome.storage.session.get).mockImplementationOnce(
       () =>
@@ -181,7 +207,7 @@ describe('privileged UI surface listener', () => {
             surface: PRIVILEGED_UI_SURFACES.WEB_EDITOR,
             surfaceSessionId: staleSessionId,
             tabId: 17,
-            documentId: 'document-a',
+            documentId: "document-a",
           },
         ],
       },
@@ -196,14 +222,14 @@ describe('privileged UI surface listener', () => {
     ]);
     expect(await sendRuntime(authorizeMessage(staleSessionId))).toEqual({
       success: false,
-      error: 'Privileged action authorization denied',
+      error: "Privileged action authorization denied",
     });
     expect(await sendRuntime(authorizeMessage(newSessionId))).toMatchObject({
       success: true,
     });
   });
 
-  it('persists only the first document binding during repeated surface validation', async () => {
+  it("persists only the first document binding during repeated surface validation", async () => {
     const worker = await loadWorker();
     const sessionId = await worker.startPrivilegedUiSurfaceSession(
       PRIVILEGED_UI_SURFACES.WEB_EDITOR,
@@ -230,7 +256,7 @@ describe('privileged UI surface listener', () => {
     expect(chrome.storage.session.set).toHaveBeenCalledTimes(1);
   });
 
-  it('does not let stale cleanup delete a rotated surface session', async () => {
+  it("does not let stale cleanup delete a rotated surface session", async () => {
     const worker = await loadWorker();
     const staleSessionId = await worker.startPrivilegedUiSurfaceSession(
       PRIVILEGED_UI_SURFACES.WEB_EDITOR,
@@ -257,7 +283,7 @@ describe('privileged UI surface listener', () => {
     ).resolves.toBe(true);
   });
 
-  it('rolls back activation, first binding, and stop when persistence fails', async () => {
+  it("rolls back activation, first binding, and stop when persistence fails", async () => {
     const worker = await loadWorker();
     const sessionId = await worker.startPrivilegedUiSurfaceSession(
       PRIVILEGED_UI_SURFACES.WEB_EDITOR,
@@ -265,14 +291,14 @@ describe('privileged UI surface listener', () => {
     );
 
     vi.mocked(chrome.storage.session.set).mockRejectedValueOnce(
-      new Error('activation persistence failed'),
+      new Error("activation persistence failed"),
     );
     await expect(
       worker.startPrivilegedUiSurfaceSession(
         PRIVILEGED_UI_SURFACES.WEB_EDITOR,
         17,
       ),
-    ).rejects.toThrow('activation persistence failed');
+    ).rejects.toThrow("activation persistence failed");
     await expect(
       worker.validatePrivilegedUiSurfaceSession(
         PRIVILEGED_UI_SURFACES.WEB_EDITOR,
@@ -286,25 +312,25 @@ describe('privileged UI surface listener', () => {
       17,
     );
     vi.mocked(chrome.storage.session.set).mockRejectedValueOnce(
-      new Error('binding persistence failed'),
+      new Error("binding persistence failed"),
     );
     await expect(
       worker.validatePrivilegedUiSurfaceSession(
         PRIVILEGED_UI_SURFACES.WEB_EDITOR,
         unboundSessionId,
-        sender('document-a'),
+        sender("document-a"),
       ),
-    ).rejects.toThrow('binding persistence failed');
+    ).rejects.toThrow("binding persistence failed");
     await expect(
       worker.validatePrivilegedUiSurfaceSession(
         PRIVILEGED_UI_SURFACES.WEB_EDITOR,
         unboundSessionId,
-        sender('document-b'),
+        sender("document-b"),
       ),
     ).resolves.toBe(true);
 
     vi.mocked(chrome.storage.session.set).mockRejectedValueOnce(
-      new Error('stop persistence failed'),
+      new Error("stop persistence failed"),
     );
     await expect(
       worker.stopPrivilegedUiSurfaceSession(
@@ -312,17 +338,17 @@ describe('privileged UI surface listener', () => {
         17,
         unboundSessionId,
       ),
-    ).rejects.toThrow('stop persistence failed');
+    ).rejects.toThrow("stop persistence failed");
     await expect(
       worker.validatePrivilegedUiSurfaceSession(
         PRIVILEGED_UI_SURFACES.WEB_EDITOR,
         unboundSessionId,
-        sender('document-b'),
+        sender("document-b"),
       ),
     ).resolves.toBe(true);
   });
 
-  it('persists tab-removal revocation across a worker restart', async () => {
+  it("persists tab-removal revocation across a worker restart", async () => {
     const firstWorker = await loadWorker();
     const sessionId = await firstWorker.startPrivilegedUiSurfaceSession(
       PRIVILEGED_UI_SURFACES.WEB_EDITOR,
@@ -336,7 +362,9 @@ describe('privileged UI surface listener', () => {
     vi.mocked(chrome.storage.session.set).mockClear();
 
     tabRemovedListener(17);
-    await vi.waitFor(() => expect(chrome.storage.session.set).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(chrome.storage.session.set).toHaveBeenCalled(),
+    );
     expect(sessionData[STORAGE_KEY]).toEqual({ version: 1, sessions: [] });
 
     vi.resetModules();

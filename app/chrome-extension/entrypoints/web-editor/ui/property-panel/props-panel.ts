@@ -16,13 +16,17 @@
  * - Only supports editing top-level primitive props
  */
 
-import type { ElementLocator } from '@/common/web-editor-types';
-import { BACKGROUND_MESSAGE_TYPES, PRIVILEGED_UI_ACTIONS } from '@/common/message-types';
+import type { ElementLocator } from "@/common/web-editor-types";
+import {
+  BACKGROUND_MESSAGE_TYPES,
+  PRIVILEGED_UI_ACTIONS,
+} from "@/common/message-types";
 import {
   authorizePrivilegedUiAction,
   isTrustedPrivilegedUiEvent,
-} from '@/utils/privileged-ui-authorization';
-import { createElementLocator } from '../../core/locator';
+} from "@/utils/privileged-ui-authorization";
+import { createElementLocator } from "../../core/locator";
+import { sendWebEditorRuntimeMessage } from "../../core/runtime-messaging";
 import type {
   FrameworkType,
   HookStatus,
@@ -30,9 +34,9 @@ import type {
   PropsResponseData,
   SerializedPropEntry,
   SerializedValue,
-} from '../../core/props-bridge';
-import { Disposer } from '../../utils/disposables';
-import type { DesignControl } from './types';
+} from "../../core/props-bridge";
+import { Disposer } from "../../utils/disposables";
+import type { DesignControl } from "./types";
 
 // =============================================================================
 // Types
@@ -54,13 +58,13 @@ export interface PropsPanel extends DesignControl {
 const WRITE_DEBOUNCE_MS = 250;
 
 const DANGEROUS_PROP_KEYS = new Set([
-  '__proto__',
-  'constructor',
-  'prototype',
-  '__defineGetter__',
-  '__defineSetter__',
-  '__lookupGetter__',
-  '__lookupSetter__',
+  "__proto__",
+  "constructor",
+  "prototype",
+  "__defineGetter__",
+  "__defineSetter__",
+  "__lookupGetter__",
+  "__lookupSetter__",
 ]);
 
 // =============================================================================
@@ -68,20 +72,23 @@ const DANGEROUS_PROP_KEYS = new Set([
 // =============================================================================
 
 function isDangerousPropKey(key: string): boolean {
-  return DANGEROUS_PROP_KEYS.has(String(key ?? '').trim());
+  return DANGEROUS_PROP_KEYS.has(String(key ?? "").trim());
 }
 
-function formatFramework(framework: FrameworkType | undefined, version?: string): string {
+function formatFramework(
+  framework: FrameworkType | undefined,
+  version?: string,
+): string {
   // Only show version for known frameworks to avoid "Unknown x.y.z" display
-  if (framework === 'react') {
+  if (framework === "react") {
     const trimmedVersion = version?.trim();
-    return trimmedVersion ? `React ${trimmedVersion}` : 'React';
+    return trimmedVersion ? `React ${trimmedVersion}` : "React";
   }
-  return 'Unknown';
+  return "Unknown";
 }
 
 function formatHookStatus(hookStatus: HookStatus | undefined): string {
-  return hookStatus ? String(hookStatus) : '';
+  return hookStatus ? String(hookStatus) : "";
 }
 
 /**
@@ -89,16 +96,17 @@ function formatHookStatus(hookStatus: HookStatus | undefined): string {
  * Returns empty string if source is invalid/missing.
  */
 function formatDebugSource(source: unknown): string {
-  if (!source || typeof source !== 'object') return '';
+  if (!source || typeof source !== "object") return "";
 
   const rec = source as Record<string, unknown>;
-  const file = typeof rec.file === 'string' ? rec.file.trim() : '';
-  if (!file) return '';
+  const file = typeof rec.file === "string" ? rec.file.trim() : "";
+  if (!file) return "";
 
   const lineRaw = Number(rec.line);
   const columnRaw = Number(rec.column);
   const line = Number.isFinite(lineRaw) && lineRaw > 0 ? lineRaw : undefined;
-  const column = Number.isFinite(columnRaw) && columnRaw > 0 ? columnRaw : undefined;
+  const column =
+    Number.isFinite(columnRaw) && columnRaw > 0 ? columnRaw : undefined;
 
   if (!line) return file;
   return column ? `${file}:${line}:${column}` : `${file}:${line}`;
@@ -106,66 +114,72 @@ function formatDebugSource(source: unknown): string {
 
 function formatSerializedValue(value: SerializedValue): string {
   switch (value.kind) {
-    case 'null':
-      return 'null';
-    case 'undefined':
-      return 'undefined';
-    case 'boolean':
-      return value.value ? 'true' : 'false';
-    case 'number':
+    case "null":
+      return "null";
+    case "undefined":
+      return "undefined";
+    case "boolean":
+      return value.value ? "true" : "false";
+    case "number":
       if (value.special) return value.special;
-      if (typeof value.value === 'number') return String(value.value);
-      return 'NaN';
-    case 'string':
-      return value.truncated ? `"${value.value}…"` : JSON.stringify(value.value);
-    case 'bigint':
+      if (typeof value.value === "number") return String(value.value);
+      return "NaN";
+    case "string":
+      return value.truncated
+        ? `"${value.value}…"`
+        : JSON.stringify(value.value);
+    case "bigint":
       return `${value.value}n`;
-    case 'symbol':
+    case "symbol":
       return `Symbol(${value.description})`;
-    case 'function':
-      return `ƒ ${value.name ?? '(anonymous)'}`;
-    case 'react_element':
+    case "function":
+      return `ƒ ${value.name ?? "(anonymous)"}`;
+    case "react_element":
       return value.display;
-    case 'dom_element': {
-      const tag = String(value.tagName ?? '').toLowerCase() || 'element';
-      const id = value.id ? `#${value.id}` : '';
+    case "dom_element": {
+      const tag = String(value.tagName ?? "").toLowerCase() || "element";
+      const id = value.id ? `#${value.id}` : "";
       const cls = value.className
-        ? `.${String(value.className).split(/\s+/).filter(Boolean).slice(0, 2).join('.')}`
-        : '';
+        ? `.${String(value.className).split(/\s+/).filter(Boolean).slice(0, 2).join(".")}`
+        : "";
       return `<${tag}${id}${cls}>`;
     }
-    case 'date':
+    case "date":
       return value.value;
-    case 'regexp':
+    case "regexp":
       return `/${value.source}/${value.flags}`;
-    case 'error':
+    case "error":
       return `${value.name}: ${value.message}`;
-    case 'circular':
+    case "circular":
       return `[Circular #${value.refId}]`;
-    case 'max_depth':
+    case "max_depth":
       return value.preview;
-    case 'array':
+    case "array":
       return `Array(${value.length})`;
-    case 'object':
-      return `${value.name ?? 'Object'} {…}`;
-    case 'map':
+    case "object":
+      return `${value.name ?? "Object"} {…}`;
+    case "map":
       return `Map(${value.size})`;
-    case 'set':
+    case "set":
       return `Set(${value.size})`;
-    case 'unknown':
+    case "unknown":
       return value.preview;
     default:
-      return String((value as { kind?: string }).kind ?? 'unknown');
+      return String((value as { kind?: string }).kind ?? "unknown");
   }
 }
 
-function canRenderEditableNumber(value: Extract<SerializedValue, { kind: 'number' }>): boolean {
+function canRenderEditableNumber(
+  value: Extract<SerializedValue, { kind: "number" }>,
+): boolean {
   if (value.special) return false;
-  if (typeof value.value !== 'number') return false;
+  if (typeof value.value !== "number") return false;
   return Number.isFinite(value.value);
 }
 
-function parseNumberInput(raw: string): { ok: true; value: number } | { ok: false } {
+function parseNumberInput(
+  raw: string,
+): { ok: true; value: number } | { ok: false } {
   const trimmed = raw.trim();
   if (!trimmed) return { ok: false };
 
@@ -205,30 +219,30 @@ function buildStatusLine(
   data: PropsResponseData | null,
   error: string | null,
 ): string {
-  if (loading) return 'Loading…';
+  if (loading) return "Loading…";
 
   if (!data) {
-    return error ? `Error • ${error}` : 'Waiting for selection…';
+    return error ? `Error • ${error}` : "Waiting for selection…";
   }
 
   const parts: string[] = [];
   const caps = data.capabilities;
 
   if (caps) {
-    parts.push(`read: ${caps.canRead ? 'yes' : 'no'}`);
-    parts.push(`write: ${caps.canWrite ? 'yes' : 'no'}`);
+    parts.push(`read: ${caps.canRead ? "yes" : "no"}`);
+    parts.push(`write: ${caps.canWrite ? "yes" : "no"}`);
   } else {
-    parts.push('read: unknown');
-    parts.push('write: unknown');
+    parts.push("read: unknown");
+    parts.push("write: unknown");
   }
 
   const hook = formatHookStatus(data.hookStatus);
   if (hook) parts.push(`hook: ${hook}`);
 
-  if (data.needsRefresh) parts.push('needs refresh');
-  if (error) parts.push('error');
+  if (data.needsRefresh) parts.push("needs refresh");
+  if (error) parts.push("error");
 
-  return parts.join(' • ');
+  return parts.join(" • ");
 }
 
 function getCanWrite(data: PropsResponseData | null): boolean {
@@ -239,32 +253,41 @@ function getCanRead(data: PropsResponseData | null): boolean {
   return Boolean(data?.capabilities?.canRead);
 }
 
-function findPropEntry(data: PropsResponseData | null, key: string): SerializedPropEntry | null {
+function findPropEntry(
+  data: PropsResponseData | null,
+  key: string,
+): SerializedPropEntry | null {
   const props = data?.props;
   if (!props || !Array.isArray(props.entries)) return null;
   return props.entries.find((e) => e.key === key) ?? null;
 }
 
-function setInputFromEntry(entry: SerializedPropEntry, input: HTMLInputElement): void {
-  input.classList.remove('we-props-input--invalid');
+function setInputFromEntry(
+  entry: SerializedPropEntry,
+  input: HTMLInputElement,
+): void {
+  input.classList.remove("we-props-input--invalid");
 
-  if (entry.value.kind === 'string') {
-    input.value = entry.value.value ?? '';
+  if (entry.value.kind === "string") {
+    input.value = entry.value.value ?? "";
     return;
   }
 
-  if (entry.value.kind === 'number') {
-    if (typeof entry.value.value === 'number' && Number.isFinite(entry.value.value)) {
+  if (entry.value.kind === "number") {
+    if (
+      typeof entry.value.value === "number" &&
+      Number.isFinite(entry.value.value)
+    ) {
       input.value = String(entry.value.value);
     } else if (entry.value.special) {
       input.value = entry.value.special;
     } else {
-      input.value = '';
+      input.value = "";
     }
     return;
   }
 
-  if (entry.value.kind === 'boolean') {
+  if (entry.value.kind === "boolean") {
     input.checked = Boolean(entry.value.value);
   }
 }
@@ -278,19 +301,19 @@ function updateLocalPrimitiveSnapshot(
   const entry = data.props.entries.find((e) => e.key === key);
   if (!entry) return;
 
-  if (typeof value === 'string') {
-    entry.value = { kind: 'string', value };
+  if (typeof value === "string") {
+    entry.value = { kind: "string", value };
     entry.editable = true;
     return;
   }
 
-  if (typeof value === 'number') {
-    entry.value = { kind: 'number', value };
+  if (typeof value === "number") {
+    entry.value = { kind: "number", value };
     entry.editable = true;
     return;
   }
 
-  entry.value = { kind: 'boolean', value };
+  entry.value = { kind: "boolean", value };
   entry.editable = true;
 }
 
@@ -306,8 +329,8 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
   // Tooltip - fixed position at shadow root level to avoid overflow clipping
   // ==========================================================================
 
-  const tooltip = document.createElement('div');
-  tooltip.className = 'we-tooltip';
+  const tooltip = document.createElement("div");
+  tooltip.className = "we-tooltip";
   tooltip.hidden = true;
 
   const rootNode = container.getRootNode();
@@ -319,7 +342,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
   disposer.add(() => tooltip.remove());
 
   function showTooltip(el: Element): void {
-    const text = el.getAttribute('data-tip');
+    const text = el.getAttribute("data-tip");
     if (!text) {
       tooltip.hidden = true;
       return;
@@ -353,48 +376,48 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
   // DOM Structure
   // ==========================================================================
 
-  const root = document.createElement('div');
-  root.className = 'we-props-panel';
+  const root = document.createElement("div");
+  root.className = "we-props-panel";
 
   // Meta section
-  const meta = document.createElement('div');
-  meta.className = 'we-props-meta';
+  const meta = document.createElement("div");
+  meta.className = "we-props-meta";
 
-  const metaTitleRow = document.createElement('div');
-  metaTitleRow.className = 'we-props-meta-title';
+  const metaTitleRow = document.createElement("div");
+  metaTitleRow.className = "we-props-meta-title";
 
-  const titleLeft = document.createElement('div');
-  titleLeft.className = 'we-props-title-left';
+  const titleLeft = document.createElement("div");
+  titleLeft.className = "we-props-title-left";
 
-  const componentEl = document.createElement('div');
-  componentEl.className = 'we-props-component';
-  componentEl.textContent = 'Props';
+  const componentEl = document.createElement("div");
+  componentEl.className = "we-props-component";
+  componentEl.textContent = "Props";
 
-  const frameworkEl = document.createElement('span');
-  frameworkEl.className = 'we-props-badge';
-  frameworkEl.textContent = 'Unknown';
+  const frameworkEl = document.createElement("span");
+  frameworkEl.className = "we-props-badge";
+  frameworkEl.textContent = "Unknown";
 
   titleLeft.append(componentEl, frameworkEl);
 
   // Action buttons in title row (icon style)
-  const titleActions = document.createElement('div');
-  titleActions.className = 'we-props-title-actions';
+  const titleActions = document.createElement("div");
+  titleActions.className = "we-props-title-actions";
 
-  const refreshBtn = document.createElement('button');
-  refreshBtn.type = 'button';
-  refreshBtn.className = 'we-props-action-btn';
-  refreshBtn.dataset.tip = 'Refresh';
-  refreshBtn.setAttribute('aria-label', 'Refresh props');
+  const refreshBtn = document.createElement("button");
+  refreshBtn.type = "button";
+  refreshBtn.className = "we-props-action-btn";
+  refreshBtn.dataset.tip = "Refresh";
+  refreshBtn.setAttribute("aria-label", "Refresh props");
   // Refresh icon (circular arrow)
   refreshBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path d="M11.5 7C11.5 9.48528 9.48528 11.5 7 11.5C4.51472 11.5 2.5 9.48528 2.5 7C2.5 4.51472 4.51472 2.5 7 2.5C8.5 2.5 9.83 3.25 10.6 4.4M10.6 2V4.4H8.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
 
-  const resetBtn = document.createElement('button');
-  resetBtn.type = 'button';
-  resetBtn.className = 'we-props-action-btn';
-  resetBtn.dataset.tip = 'Reset';
-  resetBtn.setAttribute('aria-label', 'Reset props changes');
+  const resetBtn = document.createElement("button");
+  resetBtn.type = "button";
+  resetBtn.className = "we-props-action-btn";
+  resetBtn.dataset.tip = "Reset";
+  resetBtn.setAttribute("aria-label", "Reset props changes");
   // Reset icon (undo arrow)
   resetBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path d="M3 5.5H8.5C10.1569 5.5 11.5 6.84315 11.5 8.5C11.5 10.1569 10.1569 11.5 8.5 11.5H7M3 5.5L5.5 3M3 5.5L5.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -403,35 +426,35 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
   titleActions.append(refreshBtn, resetBtn);
   metaTitleRow.append(titleLeft, titleActions);
 
-  const statusEl = document.createElement('div');
-  statusEl.className = 'we-props-status';
+  const statusEl = document.createElement("div");
+  statusEl.className = "we-props-status";
 
-  const warningEl = document.createElement('div');
-  warningEl.className = 'we-props-warning';
+  const warningEl = document.createElement("div");
+  warningEl.className = "we-props-warning";
   warningEl.hidden = true;
 
-  const errorEl = document.createElement('div');
-  errorEl.className = 'we-props-error';
+  const errorEl = document.createElement("div");
+  errorEl.className = "we-props-error";
   errorEl.hidden = true;
 
   // Source row - shows component source file location with "Open in VSCode" button
-  const sourceRow = document.createElement('div');
-  sourceRow.className = 'we-props-source';
+  const sourceRow = document.createElement("div");
+  sourceRow.className = "we-props-source";
   sourceRow.hidden = true;
 
-  const sourceLabelEl = document.createElement('span');
-  sourceLabelEl.className = 'we-props-source-label';
-  sourceLabelEl.textContent = 'Source';
+  const sourceLabelEl = document.createElement("span");
+  sourceLabelEl.className = "we-props-source-label";
+  sourceLabelEl.textContent = "Source";
 
-  const sourcePathEl = document.createElement('span');
-  sourcePathEl.className = 'we-props-source-path';
-  sourcePathEl.title = ''; // Will be set to full path on render
+  const sourcePathEl = document.createElement("span");
+  sourcePathEl.className = "we-props-source-path";
+  sourcePathEl.title = ""; // Will be set to full path on render
 
-  const openSourceBtn = document.createElement('button');
-  openSourceBtn.type = 'button';
-  openSourceBtn.className = 'we-props-source-btn';
-  openSourceBtn.dataset.tip = 'Open in VSCode';
-  openSourceBtn.setAttribute('aria-label', 'Open in VSCode');
+  const openSourceBtn = document.createElement("button");
+  openSourceBtn.type = "button";
+  openSourceBtn.className = "we-props-source-btn";
+  openSourceBtn.dataset.tip = "Open in VSCode";
+  openSourceBtn.setAttribute("aria-label", "Open in VSCode");
   // Simple arrow pointing to top-right (external link style)
   openSourceBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path d="M3.5 2.5H9.5V8.5M9 3L3 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -442,15 +465,15 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
   meta.append(metaTitleRow, statusEl, warningEl, errorEl, sourceRow);
 
   // List section
-  const list = document.createElement('div');
-  list.className = 'we-props-list';
+  const list = document.createElement("div");
+  list.className = "we-props-list";
 
-  const emptyState = document.createElement('div');
-  emptyState.className = 'we-props-empty';
-  emptyState.textContent = 'Select an element to view props.';
+  const emptyState = document.createElement("div");
+  emptyState.className = "we-props-empty";
+  emptyState.textContent = "Select an element to view props.";
 
-  const rows = document.createElement('div');
-  rows.className = 'we-props-rows';
+  const rows = document.createElement("div");
+  rows.className = "we-props-rows";
 
   list.append(emptyState, rows);
   root.append(meta, list);
@@ -521,37 +544,40 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     const frameworkVersion = lastData?.frameworkVersion;
     const componentName = lastData?.componentName;
 
-    componentEl.textContent = componentName || 'Props';
+    componentEl.textContent = componentName || "Props";
     frameworkEl.textContent = formatFramework(framework, frameworkVersion);
 
     statusEl.textContent = hasTarget
       ? buildStatusLine(loading, lastData, lastError)
-      : 'Select an element to view props.';
+      : "Select an element to view props.";
 
     // Warning messages
     warningEl.hidden = true;
-    warningEl.textContent = '';
+    warningEl.textContent = "";
 
     if (hasTarget) {
       if (lastData?.needsRefresh) {
         warningEl.hidden = false;
-        warningEl.textContent = 'A page refresh is required for full props inspection/editing.';
-      } else if (lastData?.hookStatus === 'RENDERERS_NO_EDITING') {
+        warningEl.textContent =
+          "A page refresh is required for full props inspection/editing.";
+      } else if (lastData?.hookStatus === "RENDERERS_NO_EDITING") {
         warningEl.hidden = false;
         warningEl.textContent =
-          'Editing is unavailable (likely a production build without overrideProps).';
+          "Editing is unavailable (likely a production build without overrideProps).";
       } else if (lastData?.props?.truncated) {
         warningEl.hidden = false;
-        warningEl.textContent = 'Props list is truncated.';
+        warningEl.textContent = "Props list is truncated.";
       }
     }
 
     // Error display
     errorEl.hidden = !lastError;
-    errorEl.textContent = lastError ?? '';
+    errorEl.textContent = lastError ?? "";
 
     // Source display - show component file location with Open button
-    const sourceText = hasTarget ? formatDebugSource(lastData?.debugSource) : '';
+    const sourceText = hasTarget
+      ? formatDebugSource(lastData?.debugSource)
+      : "";
     sourceRow.hidden = !sourceText;
     sourcePathEl.textContent = sourceText;
     sourcePathEl.title = sourceText; // Show full path on hover
@@ -560,29 +586,31 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     // Update refresh button state and tooltip
     const hookStatus = lastData?.hookStatus;
     const canBenefitFromEarlyInjection =
-      hookStatus === 'HOOK_MISSING' || hookStatus === 'HOOK_PRESENT_NO_RENDERERS';
-    const showEnableReload = lastData?.needsRefresh && canBenefitFromEarlyInjection;
-    refreshBtn.dataset.tip = showEnableReload ? 'Enable & Reload' : 'Refresh';
+      hookStatus === "HOOK_MISSING" ||
+      hookStatus === "HOOK_PRESENT_NO_RENDERERS";
+    const showEnableReload =
+      lastData?.needsRefresh && canBenefitFromEarlyInjection;
+    refreshBtn.dataset.tip = showEnableReload ? "Enable & Reload" : "Refresh";
     refreshBtn.disabled = !hasTarget || loading;
     resetBtn.disabled = !hasTarget || loading || !getCanWrite(lastData);
   }
 
   function renderList(): void {
-    rows.innerHTML = '';
+    rows.innerHTML = "";
 
     const hasTarget = Boolean(currentTarget && currentTarget.isConnected);
     const data = lastData;
 
     if (!hasTarget) {
       emptyState.hidden = false;
-      emptyState.classList.remove('we-loading');
-      emptyState.textContent = 'Select an element to view props.';
+      emptyState.classList.remove("we-loading");
+      emptyState.textContent = "Select an element to view props.";
       return;
     }
 
     if (loading) {
       emptyState.hidden = false;
-      emptyState.classList.add('we-loading');
+      emptyState.classList.add("we-loading");
       // Spinner icon (thin stroke) + text
       emptyState.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="animation: we-spin 0.8s linear infinite;">
         <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-dasharray="20 14" />
@@ -591,19 +619,25 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     }
 
     // Remove loading class when not loading
-    emptyState.classList.remove('we-loading');
+    emptyState.classList.remove("we-loading");
 
     const canRead = getCanRead(data);
     if (!canRead) {
       emptyState.hidden = false;
       const hook = data?.hookStatus;
-      if (data?.needsRefresh || hook === 'HOOK_MISSING' || hook === 'HOOK_PRESENT_NO_RENDERERS') {
+      if (
+        data?.needsRefresh ||
+        hook === "HOOK_MISSING" ||
+        hook === "HOOK_PRESENT_NO_RENDERERS"
+      ) {
         emptyState.textContent =
-          'Props inspection is not ready. Refresh the page in development mode.';
-      } else if (hook === 'RENDERERS_NO_EDITING') {
-        emptyState.textContent = 'Props inspection/editing is unavailable in this build.';
+          "Props inspection is not ready. Refresh the page in development mode.";
+      } else if (hook === "RENDERERS_NO_EDITING") {
+        emptyState.textContent =
+          "Props inspection/editing is unavailable in this build.";
       } else {
-        emptyState.textContent = 'Props inspection is not available for this element.';
+        emptyState.textContent =
+          "Props inspection is not available for this element.";
       }
       return;
     }
@@ -611,7 +645,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     const props = data?.props;
     if (!props || !Array.isArray(props.entries) || props.entries.length === 0) {
       emptyState.hidden = false;
-      emptyState.textContent = 'No props found.';
+      emptyState.textContent = "No props found.";
       return;
     }
 
@@ -622,124 +656,129 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
 
     const entries = props.entries;
     for (const entry of entries) {
-        const row = document.createElement('div');
-        row.className = 'we-props-row';
+      const row = document.createElement("div");
+      row.className = "we-props-row";
 
-        const keyEl = document.createElement('div');
-        keyEl.className = 'we-props-key';
-        keyEl.textContent = entry.key;
+      const keyEl = document.createElement("div");
+      keyEl.className = "we-props-key";
+      keyEl.textContent = entry.key;
 
-        const valueEl = document.createElement('div');
-        valueEl.className = 'we-props-value';
+      const valueEl = document.createElement("div");
+      valueEl.className = "we-props-value";
 
-        const keyIsDangerous = isDangerousPropKey(entry.key);
-        const entryEditable = Boolean(entry.editable) && !keyIsDangerous;
+      const keyIsDangerous = isDangerousPropKey(entry.key);
+      const entryEditable = Boolean(entry.editable) && !keyIsDangerous;
 
-        // Check if this entry has enum values (for select rendering)
-        // Filter to valid string enum values first, then check if non-empty
-        const rawEnumValues = Array.isArray(entry.enumValues) ? entry.enumValues : [];
-        const filteredEnumValues = rawEnumValues.filter(
-          (v): v is string => typeof v === 'string' && v.trim().length > 0,
-        );
-        const hasEnumValues =
-          entryEditable && entry.value.kind === 'string' && filteredEnumValues.length > 0;
+      // Check if this entry has enum values (for select rendering)
+      // Filter to valid string enum values first, then check if non-empty
+      const rawEnumValues = Array.isArray(entry.enumValues)
+        ? entry.enumValues
+        : [];
+      const filteredEnumValues = rawEnumValues.filter(
+        (v): v is string => typeof v === "string" && v.trim().length > 0,
+      );
+      const hasEnumValues =
+        entryEditable &&
+        entry.value.kind === "string" &&
+        filteredEnumValues.length > 0;
 
-        // Render editable controls for primitives
-        if (hasEnumValues) {
-          // Render Select for enum props
-          const select = document.createElement('select');
-          select.className = 'we-select we-props-input';
-          select.disabled = disableEdits;
-          select.dataset.propKey = entry.key;
-          select.dataset.propKind = 'enum';
-          select.setAttribute('aria-label', `Select prop ${entry.key}`);
+      // Render editable controls for primitives
+      if (hasEnumValues) {
+        // Render Select for enum props
+        const select = document.createElement("select");
+        select.className = "we-select we-props-input";
+        select.disabled = disableEdits;
+        select.dataset.propKey = entry.key;
+        select.dataset.propKind = "enum";
+        select.setAttribute("aria-label", `Select prop ${entry.key}`);
 
-          const currentValue = entry.value.kind === 'string' ? entry.value.value : '';
-          const seen = new Set<string>();
+        const currentValue =
+          entry.value.kind === "string" ? entry.value.value : "";
+        const seen = new Set<string>();
 
-          // Add current value first if not in enum list
-          if (currentValue && !filteredEnumValues.includes(currentValue)) {
-            const opt = document.createElement('option');
-            opt.value = currentValue;
-            opt.textContent = `${currentValue} (current)`;
-            select.append(opt);
-            seen.add(currentValue);
-          }
-
-          // Add enum values
-          for (const v of filteredEnumValues) {
-            if (seen.has(v)) continue;
-            seen.add(v);
-            const opt = document.createElement('option');
-            opt.value = v;
-            opt.textContent = v;
-            select.append(opt);
-          }
-
-          // Set current value
-          if (currentValue && seen.has(currentValue)) {
-            select.value = currentValue;
-          }
-
-          valueEl.append(select);
-        } else if (entryEditable && entry.value.kind === 'boolean') {
-          const label = document.createElement('label');
-          label.className = 'we-props-bool';
-
-          const checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.className = 'we-props-checkbox';
-          checkbox.checked = Boolean(entry.value.value);
-          checkbox.disabled = disableEdits;
-          checkbox.dataset.propKey = entry.key;
-          checkbox.dataset.propKind = 'boolean';
-          checkbox.setAttribute('aria-label', `Toggle prop ${entry.key}`);
-
-          const text = document.createElement('span');
-          text.textContent = checkbox.checked ? 'true' : 'false';
-          text.dataset.weBoolText = '1';
-
-          label.append(checkbox, text);
-          valueEl.append(label);
-        } else if (entryEditable && entry.value.kind === 'string') {
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'we-input we-props-input';
-          input.autocomplete = 'off';
-          input.spellcheck = false;
-          input.value = entry.value.value ?? '';
-          input.disabled = disableEdits;
-          input.dataset.propKey = entry.key;
-          input.dataset.propKind = 'string';
-          input.setAttribute('aria-label', `Edit prop ${entry.key}`);
-          valueEl.append(input);
-        } else if (
-          entryEditable &&
-          entry.value.kind === 'number' &&
-          canRenderEditableNumber(entry.value)
-        ) {
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.inputMode = 'decimal';
-          input.className = 'we-input we-props-input';
-          input.autocomplete = 'off';
-          input.spellcheck = false;
-          input.value = String(entry.value.value);
-          input.disabled = disableEdits;
-          input.dataset.propKey = entry.key;
-          input.dataset.propKind = 'number';
-          input.setAttribute('aria-label', `Edit prop ${entry.key}`);
-          valueEl.append(input);
-        } else {
-          // Read-only display
-          valueEl.classList.add('we-props-value--readonly');
-          valueEl.textContent = keyIsDangerous
-            ? `${formatSerializedValue(entry.value)} (blocked)`
-            : formatSerializedValue(entry.value);
+        // Add current value first if not in enum list
+        if (currentValue && !filteredEnumValues.includes(currentValue)) {
+          const opt = document.createElement("option");
+          opt.value = currentValue;
+          opt.textContent = `${currentValue} (current)`;
+          select.append(opt);
+          seen.add(currentValue);
         }
 
-        row.append(keyEl, valueEl);
-        rows.append(row);
+        // Add enum values
+        for (const v of filteredEnumValues) {
+          if (seen.has(v)) continue;
+          seen.add(v);
+          const opt = document.createElement("option");
+          opt.value = v;
+          opt.textContent = v;
+          select.append(opt);
+        }
+
+        // Set current value
+        if (currentValue && seen.has(currentValue)) {
+          select.value = currentValue;
+        }
+
+        valueEl.append(select);
+      } else if (entryEditable && entry.value.kind === "boolean") {
+        const label = document.createElement("label");
+        label.className = "we-props-bool";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "we-props-checkbox";
+        checkbox.checked = Boolean(entry.value.value);
+        checkbox.disabled = disableEdits;
+        checkbox.dataset.propKey = entry.key;
+        checkbox.dataset.propKind = "boolean";
+        checkbox.setAttribute("aria-label", `Toggle prop ${entry.key}`);
+
+        const text = document.createElement("span");
+        text.textContent = checkbox.checked ? "true" : "false";
+        text.dataset.weBoolText = "1";
+
+        label.append(checkbox, text);
+        valueEl.append(label);
+      } else if (entryEditable && entry.value.kind === "string") {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "we-input we-props-input";
+        input.autocomplete = "off";
+        input.spellcheck = false;
+        input.value = entry.value.value ?? "";
+        input.disabled = disableEdits;
+        input.dataset.propKey = entry.key;
+        input.dataset.propKind = "string";
+        input.setAttribute("aria-label", `Edit prop ${entry.key}`);
+        valueEl.append(input);
+      } else if (
+        entryEditable &&
+        entry.value.kind === "number" &&
+        canRenderEditableNumber(entry.value)
+      ) {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.inputMode = "decimal";
+        input.className = "we-input we-props-input";
+        input.autocomplete = "off";
+        input.spellcheck = false;
+        input.value = String(entry.value.value);
+        input.disabled = disableEdits;
+        input.dataset.propKey = entry.key;
+        input.dataset.propKind = "number";
+        input.setAttribute("aria-label", `Edit prop ${entry.key}`);
+        valueEl.append(input);
+      } else {
+        // Read-only display
+        valueEl.classList.add("we-props-value--readonly");
+        valueEl.textContent = keyIsDangerous
+          ? `${formatSerializedValue(entry.value)} (blocked)`
+          : formatSerializedValue(entry.value);
+      }
+
+      row.append(keyEl, valueEl);
+      rows.append(row);
     }
   }
 
@@ -783,7 +822,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
 
       lastData = mergeResponseData(lastData, probeResult.data);
       if (!probeResult.ok) {
-        lastError = probeResult.error ?? 'Props probe failed';
+        lastError = probeResult.error ?? "Props probe failed";
       }
 
       const canRead = Boolean(probeResult.data?.capabilities?.canRead);
@@ -793,7 +832,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
 
         lastData = mergeResponseData(lastData, readResult.data);
         if (!readResult.ok) {
-          lastError = readResult.error ?? 'Props read failed';
+          lastError = readResult.error ?? "Props read failed";
         }
       }
     } catch (err) {
@@ -808,7 +847,10 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     }
   }
 
-  async function commitWrite(key: string, value: string | number | boolean): Promise<void> {
+  async function commitWrite(
+    key: string,
+    value: string | number | boolean,
+  ): Promise<void> {
     if (disposer.isDisposed) return;
 
     const target = currentTarget;
@@ -816,7 +858,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     if (!target || !target.isConnected || !locator) return;
 
     if (isDangerousPropKey(key)) {
-      lastError = 'Blocked prop key (security)';
+      lastError = "Blocked prop key (security)";
       renderMeta();
       return;
     }
@@ -824,7 +866,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     const localSession = sessionId;
     const canWrite = getCanWrite(lastData);
     if (!canWrite) {
-      lastError = 'Props editing is not available for this element.';
+      lastError = "Props editing is not available for this element.";
       renderMeta();
       return;
     }
@@ -836,7 +878,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
       lastData = mergeResponseData(lastData, result.data);
 
       if (!result.ok) {
-        lastError = result.error ?? 'Props write failed';
+        lastError = result.error ?? "Props write failed";
         renderMeta();
         return;
       }
@@ -870,7 +912,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
 
       lastData = mergeResponseData(lastData, result.data);
       if (!result.ok) {
-        lastError = result.error ?? 'Props reset failed';
+        lastError = result.error ?? "Props reset failed";
       }
     } catch (err) {
       if (disposer.isDisposed || localSession !== sessionId) return;
@@ -897,30 +939,30 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     if (disposer.isDisposed) return;
 
     // Verify chrome runtime is available
-    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
-      lastError = 'Chrome runtime API not available';
+    if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+      lastError = "Chrome runtime API not available";
       renderMeta();
       return;
     }
 
     // Confirm with user
     const confirmed = window.confirm(
-      'Props editing requires early injection to capture React renderers before they initialize.\n\n' +
-        'This will:\n' +
-        '• Register a content script for this site\n' +
-        '• Reload the page immediately\n\n' +
-        'After reload, enable the editor again to access full Props functionality.\n\n' +
-        'Continue?',
+      "Props editing requires early injection to capture React renderers before they initialize.\n\n" +
+        "This will:\n" +
+        "• Register a content script for this site\n" +
+        "• Reload the page immediately\n\n" +
+        "After reload, enable the editor again to access full Props functionality.\n\n" +
+        "Continue?",
     );
     if (!confirmed) return;
 
     try {
-      const resp = await chrome.runtime.sendMessage({
+      const resp = await sendWebEditorRuntimeMessage<any>({
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION,
       });
 
       if (!resp?.success) {
-        lastError = resp?.error ?? 'Failed to register early injection';
+        lastError = resp?.error ?? "Failed to register early injection";
         renderMeta();
       }
       // If successful, page will reload automatically
@@ -940,8 +982,8 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     const debugSource = lastData?.debugSource;
     if (!debugSource || !formatDebugSource(debugSource)) return;
 
-    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
-      lastError = 'Chrome runtime API not available';
+    if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+      lastError = "Chrome runtime API not available";
       renderMeta();
       return;
     }
@@ -950,14 +992,14 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
       const authorizationToken = await authorizePrivilegedUiAction(
         PRIVILEGED_UI_ACTIONS.WEB_EDITOR_OPEN_SOURCE,
       );
-      const resp = await chrome.runtime.sendMessage({
+      const resp = await sendWebEditorRuntimeMessage<any>({
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE,
         authorizationToken,
         payload: { debugSource },
       });
 
       if (resp?.success === false) {
-        lastError = resp?.error ?? 'Failed to open source in VSCode';
+        lastError = resp?.error ?? "Failed to open source in VSCode";
         renderMeta();
       }
     } catch (err) {
@@ -972,14 +1014,14 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
 
   // Tooltip events - bind directly to elements with data-tip
   const bindTooltip = (el: HTMLElement) => {
-    disposer.listen(el, 'mouseenter', () => showTooltip(el));
-    disposer.listen(el, 'mouseleave', hideTooltip);
+    disposer.listen(el, "mouseenter", () => showTooltip(el));
+    disposer.listen(el, "mouseleave", hideTooltip);
   };
   bindTooltip(refreshBtn);
   bindTooltip(resetBtn);
   bindTooltip(openSourceBtn);
 
-  disposer.listen(refreshBtn, 'click', (e) => {
+  disposer.listen(refreshBtn, "click", (e) => {
     e.preventDefault();
     clearAllPendingWrites();
 
@@ -987,7 +1029,8 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     // (not for RENDERERS_NO_EDITING which is a production build issue)
     const hookStatus = lastData?.hookStatus;
     const canBenefitFromEarlyInjection =
-      hookStatus === 'HOOK_MISSING' || hookStatus === 'HOOK_PRESENT_NO_RENDERERS';
+      hookStatus === "HOOK_MISSING" ||
+      hookStatus === "HOOK_PRESENT_NO_RENDERERS";
 
     if (lastData?.needsRefresh && canBenefitFromEarlyInjection) {
       void registerEarlyInjectionAndReload();
@@ -997,25 +1040,25 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     void probeAndRead();
   });
 
-  disposer.listen(resetBtn, 'click', (e) => {
+  disposer.listen(resetBtn, "click", (e) => {
     e.preventDefault();
     void resetOverrides();
   });
 
-  disposer.listen(openSourceBtn, 'click', (e) => {
+  disposer.listen(openSourceBtn, "click", (e) => {
     e.preventDefault();
     void openSourceInVSCode(e);
   });
 
   // Delegate input events within the list
-  disposer.listen(rows, 'input', (e: Event) => {
+  disposer.listen(rows, "input", (e: Event) => {
     const target = e.target as HTMLElement | null;
     if (!(target instanceof HTMLInputElement)) return;
     if (target.disabled) return;
-    if (target.type === 'checkbox') return;
+    if (target.type === "checkbox") return;
 
-    const key = target.dataset.propKey ?? '';
-    const kind = target.dataset.propKind ?? '';
+    const key = target.dataset.propKey ?? "";
+    const kind = target.dataset.propKind ?? "";
     if (!key || !kind) return;
     if (isDangerousPropKey(key)) return;
 
@@ -1023,40 +1066,40 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     const ie = e as InputEvent;
     if (ie.isComposing) return;
 
-    if (kind === 'string') {
+    if (kind === "string") {
       scheduleWrite(key, target.value);
       return;
     }
 
-    if (kind === 'number') {
+    if (kind === "number") {
       const parsed = parseNumberInput(target.value);
       if (!target.value.trim()) {
         cancelPendingWrite(key);
-        target.classList.remove('we-props-input--invalid');
+        target.classList.remove("we-props-input--invalid");
         return;
       }
 
       if (!parsed.ok) {
         cancelPendingWrite(key);
-        target.classList.add('we-props-input--invalid');
+        target.classList.add("we-props-input--invalid");
         return;
       }
 
-      target.classList.remove('we-props-input--invalid');
+      target.classList.remove("we-props-input--invalid");
       scheduleWrite(key, parsed.value);
     }
   });
 
-  disposer.listen(rows, 'change', (e: Event) => {
+  disposer.listen(rows, "change", (e: Event) => {
     const target = e.target as HTMLElement | null;
     if (!target) return;
 
     // Handle Select (enum) change
     if (target instanceof HTMLSelectElement) {
       if (target.disabled) return;
-      const key = target.dataset.propKey ?? '';
-      const kind = target.dataset.propKind ?? '';
-      if (!key || kind !== 'enum') return;
+      const key = target.dataset.propKey ?? "";
+      const kind = target.dataset.propKind ?? "";
+      if (!key || kind !== "enum") return;
       if (isDangerousPropKey(key)) return;
       void commitWrite(key, target.value);
       return;
@@ -1065,31 +1108,33 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     // Handle checkbox change
     if (!(target instanceof HTMLInputElement)) return;
     if (target.disabled) return;
-    if (target.type !== 'checkbox') return;
+    if (target.type !== "checkbox") return;
 
-    const key = target.dataset.propKey ?? '';
-    const kind = target.dataset.propKind ?? '';
-    if (!key || kind !== 'boolean') return;
+    const key = target.dataset.propKey ?? "";
+    const kind = target.dataset.propKind ?? "";
+    if (!key || kind !== "boolean") return;
     if (isDangerousPropKey(key)) return;
 
     // Update the label text
-    const label = target.closest('.we-props-bool');
-    const text = label?.querySelector?.('span[data-we-bool-text="1"]') as HTMLSpanElement | null;
-    if (text) text.textContent = target.checked ? 'true' : 'false';
+    const label = target.closest(".we-props-bool");
+    const text = label?.querySelector?.(
+      'span[data-we-bool-text="1"]',
+    ) as HTMLSpanElement | null;
+    if (text) text.textContent = target.checked ? "true" : "false";
 
     void commitWrite(key, target.checked);
   });
 
-  disposer.listen(rows, 'keydown', (e: KeyboardEvent) => {
+  disposer.listen(rows, "keydown", (e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
     if (!(target instanceof HTMLInputElement)) return;
     if (target.disabled) return;
 
-    const key = target.dataset.propKey ?? '';
-    const kind = target.dataset.propKind ?? '';
+    const key = target.dataset.propKey ?? "";
+    const kind = target.dataset.propKind ?? "";
     if (!key || !kind) return;
 
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       if (e.isComposing) return;
       e.preventDefault();
       flushPendingWrite(key);
@@ -1101,7 +1146,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
       return;
     }
 
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       e.preventDefault();
       cancelPendingWrite(key);
 
@@ -1111,20 +1156,20 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     }
   });
 
-  disposer.listen(rows, 'focusout', (e: FocusEvent) => {
+  disposer.listen(rows, "focusout", (e: FocusEvent) => {
     const target = e.target as HTMLElement | null;
     if (!(target instanceof HTMLInputElement)) return;
     if (target.disabled) return;
-    const key = target.dataset.propKey ?? '';
-    const kind = target.dataset.propKind ?? '';
+    const key = target.dataset.propKey ?? "";
+    const kind = target.dataset.propKind ?? "";
     if (!key) return;
 
     // For number inputs, restore last valid value if current is empty/invalid
-    if (kind === 'number') {
+    if (kind === "number") {
       const parsed = parseNumberInput(target.value);
       if (!target.value.trim() || !parsed.ok) {
         cancelPendingWrite(key);
-        target.classList.remove('we-props-input--invalid');
+        target.classList.remove("we-props-input--invalid");
         const entry = findPropEntry(lastData, key);
         if (entry) setInputFromEntry(entry, target);
         return;

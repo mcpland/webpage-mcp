@@ -9,6 +9,7 @@ const nativeHostMocks = vi.hoisted(() => ({
 }));
 const authorizationMocks = vi.hoisted(() => ({
   consumePrivilegedUiAuthorization: vi.fn(() => true),
+  validatePrivilegedUiSurfaceSession: vi.fn(async () => true),
 }));
 const sidepanelMocks = vi.hoisted(() => ({ openAgentSetupSidepanel: vi.fn() }));
 const propsInjectionMocks = vi.hoisted(() => ({
@@ -50,6 +51,7 @@ function deferred<T>(): {
 describe("Web Editor Agent durable lifecycle", () => {
   let storageState: Record<string, unknown>;
   let runtimeListeners: RuntimeListener[];
+  let userScriptListeners: RuntimeListener[];
   let tabRemovedListeners: TabRemovedListener[];
   let alarms: Map<string, chrome.alarms.AlarmCreateInfo>;
 
@@ -58,6 +60,7 @@ describe("Web Editor Agent durable lifecycle", () => {
     vi.clearAllMocks();
     storageState = {};
     runtimeListeners = [];
+    userScriptListeners = [];
     tabRemovedListeners = [];
     alarms = new Map();
 
@@ -86,6 +89,11 @@ describe("Web Editor Agent durable lifecycle", () => {
         );
       },
     );
+    vi.mocked(
+      chrome.runtime.onUserScriptMessage.addListener,
+    ).mockImplementation((listener) => {
+      userScriptListeners.push(listener);
+    });
     vi.mocked(chrome.tabs.onRemoved.addListener).mockImplementation(
       (listener) => {
         tabRemovedListeners.push(listener);
@@ -151,9 +159,10 @@ describe("Web Editor Agent durable lifecycle", () => {
   function apply(): Promise<Record<string, unknown>> {
     return new Promise((resolve) => {
       expect(
-        runtimeListeners[0]!(
+        userScriptListeners[0]!(
           {
             type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY,
+            surfaceSessionId: "aa".repeat(32),
             authorizationToken: "apply-token",
             payload: {
               pageUrl: "https://example.com/editor",
@@ -289,9 +298,10 @@ describe("Web Editor Agent durable lifecycle", () => {
     ).toBe(false);
 
     const statusResponse = vi.fn();
-    runtimeListeners[0]!(
+    userScriptListeners[0]!(
       {
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_STATUS_QUERY,
+        surfaceSessionId: "aa".repeat(32),
         requestId,
         sessionId: "session-1",
       },

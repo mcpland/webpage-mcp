@@ -12,6 +12,7 @@ const nativeHostMocks = vi.hoisted(() => ({
 }));
 const authorizationMocks = vi.hoisted(() => ({
   consumePrivilegedUiAuthorization: vi.fn(),
+  validatePrivilegedUiSurfaceSession: vi.fn(async () => true),
 }));
 const sidepanelMocks = vi.hoisted(() => ({ openAgentSetupSidepanel: vi.fn() }));
 const propsInjectionMocks = vi.hoisted(() => ({
@@ -19,6 +20,10 @@ const propsInjectionMocks = vi.hoisted(() => ({
   pruneOrphanedPropsAgentEarlyInjections: vi.fn(),
   registerPropsAgentEarlyInjection: vi.fn(),
   releasePropsAgentEarlyInjection: vi.fn(),
+}));
+const runtimeHostMocks = vi.hoisted(() => ({
+  ensureWebEditorRuntime: vi.fn(),
+  sendWebEditorRuntimeCommand: vi.fn(),
 }));
 
 vi.mock("@/entrypoints/background/native-host", () => nativeHostMocks);
@@ -30,6 +35,10 @@ vi.mock("@/entrypoints/background/utils/sidepanel", () => sidepanelMocks);
 vi.mock(
   "@/entrypoints/background/web-editor/props-early-injection",
   () => propsInjectionMocks,
+);
+vi.mock(
+  "@/entrypoints/background/web-editor/runtime-host",
+  () => runtimeHostMocks,
 );
 
 type RequestListener = (
@@ -63,11 +72,13 @@ function extensionSender(): chrome.runtime.MessageSender {
 
 describe("Web Editor route resource boundaries", () => {
   let requestListener: RequestListener | undefined;
+  let userScriptListener: RequestListener | undefined;
 
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
     requestListener = undefined;
+    userScriptListener = undefined;
     Object.assign(chrome.runtime, {
       id: "test-extension-id",
       getURL: vi.fn(
@@ -82,6 +93,9 @@ describe("Web Editor route resource boundaries", () => {
     propsInjectionMocks.releasePropsAgentEarlyInjection.mockResolvedValue(
       undefined,
     );
+    runtimeHostMocks.sendWebEditorRuntimeCommand.mockResolvedValue({
+      ok: true,
+    });
     nativeHostMocks.subscribeAgentStream.mockResolvedValue({
       subscriptionId: "subscription-1",
     });
@@ -123,6 +137,11 @@ describe("Web Editor route resource boundaries", () => {
         if (!requestListener) requestListener = listener as RequestListener;
       },
     );
+    vi.mocked(
+      chrome.runtime.onUserScriptMessage.addListener,
+    ).mockImplementation((listener) => {
+      if (!userScriptListener) userScriptListener = listener as RequestListener;
+    });
 
     const { initWebEditorListeners } =
       await import("@/entrypoints/background/web-editor");
@@ -134,7 +153,20 @@ describe("Web Editor route resource boundaries", () => {
     sender: chrome.runtime.MessageSender,
   ): Promise<Record<string, unknown>> {
     const sendResponse = vi.fn();
-    expect(requestListener!(message, sender, sendResponse)).toBe(true);
+    const fromPage = typeof sender.tab?.id === "number";
+    const routedMessage = fromPage
+      ? {
+          ...(message as Record<string, unknown>),
+          surfaceSessionId: "aa".repeat(32),
+        }
+      : message;
+    expect(
+      (fromPage ? userScriptListener : requestListener)!(
+        routedMessage,
+        sender,
+        sendResponse,
+      ),
+    ).toBe(true);
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
     return sendResponse.mock.calls[0]![0] as Record<string, unknown>;
   }
@@ -229,17 +261,20 @@ describe("Web Editor route resource boundaries", () => {
       extensionSender(),
     );
     expect(response).toMatchObject({ success: true });
-    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(7, {
-      action: "web_editor_highlight_element",
-      locator: {
-        selectors: ["button.primary"],
-        fingerprint: "button.primary",
-        path: [0, 1],
+    expect(runtimeHostMocks.sendWebEditorRuntimeCommand).toHaveBeenCalledWith(
+      7,
+      {
+        action: "web_editor_highlight_element",
+        locator: {
+          selectors: ["button.primary"],
+          fingerprint: "button.primary",
+          path: [0, 1],
+        },
+        selector: "button.primary",
+        mode: "hover",
+        elementKey: "button-1",
       },
-      selector: "button.primary",
-      mode: "hover",
-      elementKey: "button-1",
-    });
+    );
   });
 
   it("rejects oversized HIGHLIGHT locators, including clear-mode ignored fields", async () => {
@@ -279,7 +314,7 @@ describe("Web Editor route resource boundaries", () => {
       success: false,
       error: expect.stringMatching(/raw JSON byte limit/),
     });
-    expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(runtimeHostMocks.sendWebEditorRuntimeCommand).not.toHaveBeenCalled();
   });
 
   it("bounds REVERT and CLEAR tab/key fields before forwarding", async () => {
@@ -303,15 +338,16 @@ describe("Web Editor route resource boundaries", () => {
       extensionSender(),
     );
     expect(clear).toEqual({ success: false, error: "Invalid tabId" });
-    expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+    expect(runtimeHostMocks.sendWebEditorRuntimeCommand).not.toHaveBeenCalled();
   });
 
   it("bounds status and cancellation identifiers before lookup or authorization", async () => {
     const statusResponse = vi.fn();
     expect(
-      requestListener!(
+      userScriptListener!(
         {
           type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_STATUS_QUERY,
+          surfaceSessionId: "aa".repeat(32),
           requestId: "x".repeat(1025),
           sessionId: "session-1",
         },

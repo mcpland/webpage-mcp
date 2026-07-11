@@ -12,28 +12,32 @@ import type {
   WebEditorToggleResponse,
   WebEditorStartResponse,
   WebEditorStopResponse,
-} from '@/common/web-editor-types';
-import { WEB_EDITOR_ACTIONS } from '@/common/web-editor-types';
-import { PRIVILEGED_UI_SURFACES } from '@/common/message-types';
+} from "@/common/web-editor-types";
+import { WEB_EDITOR_ACTIONS } from "@/common/web-editor-types";
+import {
+  WEB_EDITOR_RUNTIME_COMMAND_GLOBAL,
+  type WebEditorRuntimeCommandHandler,
+} from "@/common/web-editor-runtime";
+import { PRIVILEGED_UI_SURFACES } from "@/common/message-types";
 import {
   clearPrivilegedUiSurfaceSession,
   closePrivilegedUiSurfaceSession,
   configurePrivilegedUiSurfaceSession,
   matchesPrivilegedUiSurfaceSession,
-} from '@/utils/privileged-ui-authorization';
-import { locateElement } from './locator';
+} from "@/utils/privileged-ui-authorization";
+import { locateElement } from "./locator";
 
 // =============================================================================
 // Types
 // =============================================================================
 
-/** Function to remove the message listener */
-export type RemoveMessageListener = () => void;
+/** Function to remove the command handler from the dedicated runtime world. */
+export type RemoveWebEditorCommandHandler = () => void;
 
 /** Highlight element request from sidepanel */
 interface WebEditorHighlightRequest {
   action: typeof WEB_EDITOR_ACTIONS.HIGHLIGHT_ELEMENT;
-  mode: 'hover' | 'clear';
+  mode: "hover" | "clear";
   /** Full locator for Shadow DOM/iframe support */
   locator?: ElementLocator;
   /** Fallback selector for backward compatibility */
@@ -92,7 +96,7 @@ type WebEditorResponse =
  * Type guard to check if a request is a web editor request.
  */
 function isEditorRequest(request: unknown): request is WebEditorRequest {
-  if (!request || typeof request !== 'object') return false;
+  if (!request || typeof request !== "object") return false;
 
   const action = (request as { action?: unknown }).action;
   return (
@@ -104,28 +108,33 @@ function isEditorRequest(request: unknown): request is WebEditorRequest {
 }
 
 function readPrivilegedSurfaceSessionId(request: unknown): string | null {
-  if (!request || typeof request !== 'object') return null;
+  if (!request || typeof request !== "object") return null;
   const value = (request as { privilegedSurfaceSessionId?: unknown })
     .privilegedSurfaceSessionId;
-  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) ? value : null;
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value)
+    ? value
+    : null;
 }
 
 /**
  * Type guard for highlight request
  */
-function isHighlightRequest(request: unknown): request is WebEditorHighlightRequest {
-  if (!request || typeof request !== 'object') return false;
+function isHighlightRequest(
+  request: unknown,
+): request is WebEditorHighlightRequest {
+  if (!request || typeof request !== "object") return false;
   const r = request as Record<string, unknown>;
 
   if (r.action !== WEB_EDITOR_ACTIONS.HIGHLIGHT_ELEMENT) return false;
-  if (r.mode !== 'hover' && r.mode !== 'clear') return false;
+  if (r.mode !== "hover" && r.mode !== "clear") return false;
 
   // Clear mode doesn't require locator/selector
-  if (r.mode === 'clear') return true;
+  if (r.mode === "clear") return true;
 
   // Hover mode requires either locator or selector
-  const hasSelector = typeof r.selector === 'string' && r.selector.trim().length > 0;
-  const hasLocator = r.locator !== null && typeof r.locator === 'object';
+  const hasSelector =
+    typeof r.selector === "string" && r.selector.trim().length > 0;
+  const hasLocator = r.locator !== null && typeof r.locator === "object";
   return hasSelector || hasLocator;
 }
 
@@ -133,12 +142,12 @@ function isHighlightRequest(request: unknown): request is WebEditorHighlightRequ
  * Type guard for revert element request (Phase 2)
  */
 function isRevertRequest(request: unknown): request is WebEditorRevertRequest {
-  if (!request || typeof request !== 'object') return false;
+  if (!request || typeof request !== "object") return false;
   const r = request as Record<string, unknown>;
 
   return (
     r.action === WEB_EDITOR_ACTIONS.REVERT_ELEMENT &&
-    typeof r.elementKey === 'string' &&
+    typeof r.elementKey === "string" &&
     r.elementKey.trim().length > 0
   );
 }
@@ -146,8 +155,10 @@ function isRevertRequest(request: unknown): request is WebEditorRevertRequest {
 /**
  * Type guard for clear selection request
  */
-function isClearSelectionRequest(request: unknown): request is WebEditorClearSelectionRequest {
-  if (!request || typeof request !== 'object') return false;
+function isClearSelectionRequest(
+  request: unknown,
+): request is WebEditorClearSelectionRequest {
+  if (!request || typeof request !== "object") return false;
   const r = request as Record<string, unknown>;
   return r.action === WEB_EDITOR_ACTIONS.CLEAR_SELECTION;
 }
@@ -185,8 +196,8 @@ function showHighlight(element: Element): void {
   }
 
   // Create overlay element
-  const overlay = document.createElement('div');
-  overlay.setAttribute('data-web-editor-highlight', 'true');
+  const overlay = document.createElement("div");
+  overlay.setAttribute("data-web-editor-highlight", "true");
   overlay.style.cssText = `
     position: fixed;
     top: ${rect.top}px;
@@ -220,12 +231,11 @@ function findElementBySelector(selector: string): Element | null {
 }
 
 // =============================================================================
-// Message Listener
+// Dedicated runtime command handler
 // =============================================================================
 
 /**
- * Install the message listener for background communication.
- * Returns a function to remove the listener.
+ * Execute one background-owned command inside the dedicated USER_SCRIPT world.
  *
  * Handles:
  * - PING: Check if editor is active
@@ -235,191 +245,175 @@ function findElementBySelector(selector: string): Element | null {
  * - CLEAR_SELECTION: Clear current selection (from sidepanel after send)
  *
  * @param api The WebEditorApi instance to delegate commands to
- * @returns Function to remove the listener
+ * @returns A bounded command response, or null for an unknown command
  */
-export function installMessageListener(api: WebEditorApi): RemoveMessageListener {
-  const listener = (
-    request: unknown,
-    _sender: chrome.runtime.MessageSender,
-    sendResponse: (response: WebEditorResponse) => void,
-  ): boolean => {
-    // Handle highlight requests (can work even when editor is not active)
-    if (isHighlightRequest(request)) {
-      if (request.mode === 'clear') {
-        clearHighlight();
-        sendResponse({ success: true });
-      } else {
-        // mode === 'hover'
-        let element: Element | null = null;
-
-        // Prefer locator-based resolution (supports Shadow DOM host chain)
-        if (request.locator) {
-          try {
-            element = locateElement(request.locator);
-          } catch {
-            element = null;
-          }
-        }
-
-        // Fallback to selector (backward compatibility / degraded locators)
-        if (!element && typeof request.selector === 'string') {
-          element = findElementBySelector(request.selector);
-        }
-
-        if (element) {
-          showHighlight(element);
-          sendResponse({ success: true });
-        } else {
-          sendResponse({ success: false, error: 'Element not found' });
-        }
-      }
-      return false; // Synchronous
+export async function handleWebEditorCommand(
+  api: WebEditorApi,
+  request: unknown,
+): Promise<WebEditorResponse | null> {
+  if (isHighlightRequest(request)) {
+    if (request.mode === "clear") {
+      clearHighlight();
+      return { success: true };
     }
 
-    // Handle revert element requests (Phase 2 - Selective Undo)
-    if (isRevertRequest(request)) {
-      // Revert is async, so we return true and call sendResponse later
-      (async () => {
+    let element: Element | null = null;
+    if (request.locator) {
+      try {
+        element = locateElement(request.locator);
+      } catch {
+        element = null;
+      }
+    }
+    if (!element && typeof request.selector === "string") {
+      element = findElementBySelector(request.selector);
+    }
+    if (element) {
+      showHighlight(element);
+      return { success: true };
+    }
+    return { success: false, error: "Element not found" };
+  }
+
+  if (isRevertRequest(request)) {
+    try {
+      return await api.revertElement(request.elementKey);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  if (isClearSelectionRequest(request)) {
+    api.clearSelection();
+    return { success: true };
+  }
+
+  if (!isEditorRequest(request)) return null;
+
+  switch (request.action) {
+    case WEB_EDITOR_ACTIONS.PING: {
+      return {
+        status: "pong",
+        active: api.getState().active || api.getState().stopping === true,
+        version: api.getState().version,
+      } satisfies WebEditorPingResponse;
+    }
+
+    case WEB_EDITOR_ACTIONS.TOGGLE: {
+      const surfaceSessionId = readPrivilegedSurfaceSessionId(request);
+      const editorState = api.getState();
+      if (editorState.stopping) {
+        return { active: false, error: "Web Editor is still stopping" };
+      }
+      if (editorState.active) {
         try {
-          const result = await api.revertElement(request.elementKey);
-          sendResponse(result);
-        } catch (error) {
-          sendResponse({
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-          });
+          await api.stop();
+        } catch {
+          // The background still receives an inactive response and revokes the
+          // surface session independently.
         }
-      })();
-      return true; // Async response
-    }
-
-    // Handle clear selection requests (from sidepanel after send)
-    if (isClearSelectionRequest(request)) {
-      api.clearSelection();
-      sendResponse({ success: true });
-      return false; // Synchronous
-    }
-
-    // Only handle editor requests for other actions
-    if (!isEditorRequest(request)) {
-      return false;
-    }
-
-    switch (request.action) {
-      case WEB_EDITOR_ACTIONS.PING: {
-        const response: WebEditorPingResponse = {
-          status: 'pong',
-          active: api.getState().active || api.getState().stopping === true,
-          version: api.getState().version,
+        return { active: false } satisfies WebEditorToggleResponse;
+      }
+      clearPrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.WEB_EDITOR);
+      if (
+        !surfaceSessionId ||
+        !configurePrivilegedUiSurfaceSession(
+          PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+          surfaceSessionId,
+        )
+      ) {
+        return {
+          active: false,
+          error: "Privileged Web Editor session is required",
         };
-        sendResponse(response);
-        return false; // Synchronous response
       }
-
-      case WEB_EDITOR_ACTIONS.TOGGLE: {
-        const surfaceSessionId = readPrivilegedSurfaceSessionId(request);
-        const editorState = api.getState();
-        if (editorState.stopping) {
-          sendResponse({ active: false, error: 'Web Editor is still stopping' });
-          return false;
-        }
-        if (editorState.active) {
-          void api.stop().then(
-            () => sendResponse({ active: false } satisfies WebEditorToggleResponse),
-            () => sendResponse({ active: false } satisfies WebEditorToggleResponse),
-          );
-          return true;
-        }
-        clearPrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.WEB_EDITOR);
-        if (
-          !surfaceSessionId ||
-            !configurePrivilegedUiSurfaceSession(
-              PRIVILEGED_UI_SURFACES.WEB_EDITOR,
-              surfaceSessionId,
-            )
-        ) {
-          sendResponse({ active: false, error: 'Privileged Web Editor session is required' });
-          return false;
-        }
-        api.start(surfaceSessionId);
-        const response: WebEditorToggleResponse = { active: api.getState().active };
-        if (!response.active) {
-          void closePrivilegedUiSurfaceSession(
-            PRIVILEGED_UI_SURFACES.WEB_EDITOR,
-            surfaceSessionId,
-          );
-        }
-        sendResponse(response);
-        return false;
-      }
-
-      case WEB_EDITOR_ACTIONS.START: {
-        const surfaceSessionId = readPrivilegedSurfaceSessionId(request);
-        const editorState = api.getState();
-        if (editorState.stopping) {
-          sendResponse({ active: false, error: 'Web Editor is still stopping' });
-          return false;
-        }
-        if (editorState.active) {
-          const sameSession =
-            Boolean(surfaceSessionId) &&
-            matchesPrivilegedUiSurfaceSession(
-              PRIVILEGED_UI_SURFACES.WEB_EDITOR,
-              surfaceSessionId as string,
-            );
-          sendResponse({
-            active: sameSession,
-            ...(sameSession ? {} : { error: 'A different Web Editor session is already active' }),
-          });
-          return false;
-        }
-        if (
-          !surfaceSessionId ||
-          !configurePrivilegedUiSurfaceSession(
-            PRIVILEGED_UI_SURFACES.WEB_EDITOR,
-            surfaceSessionId,
-          )
-        ) {
-          sendResponse({ active: false, error: 'Privileged Web Editor session is required' });
-          return false;
-        }
-        api.start(surfaceSessionId);
-        const active = api.getState().active;
-        if (!active) {
-          void closePrivilegedUiSurfaceSession(
-            PRIVILEGED_UI_SURFACES.WEB_EDITOR,
-            surfaceSessionId,
-          );
-        }
-        const response: WebEditorStartResponse = {
-          active,
-        };
-        sendResponse(response);
-        return false;
-      }
-
-      case WEB_EDITOR_ACTIONS.STOP: {
-        void api.stop().then(
-          () => {
-            const response: WebEditorStopResponse = { active: false };
-            sendResponse(response);
-          },
-          () => sendResponse({ active: false }),
+      api.start(surfaceSessionId);
+      const response: WebEditorToggleResponse = {
+        active: api.getState().active,
+      };
+      if (!response.active) {
+        void closePrivilegedUiSurfaceSession(
+          PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+          surfaceSessionId,
         );
-        return true;
       }
-
-      default:
-        // Should never reach here due to type guard
-        return false;
+      return response;
     }
-  };
 
-  chrome.runtime.onMessage.addListener(listener);
+    case WEB_EDITOR_ACTIONS.START: {
+      const surfaceSessionId = readPrivilegedSurfaceSessionId(request);
+      const editorState = api.getState();
+      if (editorState.stopping) {
+        return { active: false, error: "Web Editor is still stopping" };
+      }
+      if (editorState.active) {
+        const sameSession =
+          Boolean(surfaceSessionId) &&
+          matchesPrivilegedUiSurfaceSession(
+            PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+            surfaceSessionId as string,
+          );
+        return {
+          active: sameSession,
+          ...(sameSession
+            ? {}
+            : { error: "A different Web Editor session is already active" }),
+        };
+      }
+      if (
+        !surfaceSessionId ||
+        !configurePrivilegedUiSurfaceSession(
+          PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+          surfaceSessionId,
+        )
+      ) {
+        return {
+          active: false,
+          error: "Privileged Web Editor session is required",
+        };
+      }
+      api.start(surfaceSessionId);
+      const active = api.getState().active;
+      if (!active) {
+        void closePrivilegedUiSurfaceSession(
+          PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+          surfaceSessionId,
+        );
+      }
+      return { active } satisfies WebEditorStartResponse;
+    }
+
+    case WEB_EDITOR_ACTIONS.STOP: {
+      try {
+        await api.stop();
+      } catch {
+        // Stop is idempotent from the background's point of view.
+      }
+      return { active: false } satisfies WebEditorStopResponse;
+    }
+
+    default:
+      return null;
+  }
+}
+
+/** Install the only command entrypoint in the dedicated USER_SCRIPT world. */
+export function installWebEditorCommandHandler(
+  api: WebEditorApi,
+): RemoveWebEditorCommandHandler {
+  const command: WebEditorRuntimeCommandHandler = (request) =>
+    handleWebEditorCommand(api, request);
+  const runtimeGlobal = globalThis as typeof globalThis &
+    Record<string, unknown>;
+  runtimeGlobal[WEB_EDITOR_RUNTIME_COMMAND_GLOBAL] = command;
 
   return () => {
-    chrome.runtime.onMessage.removeListener(listener);
-    // Clean up any highlight when listener is removed
+    if (runtimeGlobal[WEB_EDITOR_RUNTIME_COMMAND_GLOBAL] === command) {
+      delete runtimeGlobal[WEB_EDITOR_RUNTIME_COMMAND_GLOBAL];
+    }
     clearHighlight();
   };
 }

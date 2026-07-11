@@ -4,7 +4,7 @@ import {
   type PrivilegedUiAction,
   type PrivilegedUiAuthorizeResponse,
   type PrivilegedUiSurface,
-} from '@/common/message-types';
+} from "@/common/message-types";
 
 const SURFACE_SESSION_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -25,8 +25,11 @@ export function configurePrivilegedUiSurfaceSession(
   return true;
 }
 
-export function clearPrivilegedUiSurfaceSession(surface?: PrivilegedUiSurface): void {
-  if (!surface || activeSurfaceSession?.surface === surface) activeSurfaceSession = null;
+export function clearPrivilegedUiSurfaceSession(
+  surface?: PrivilegedUiSurface,
+): void {
+  if (!surface || activeSurfaceSession?.surface === surface)
+    activeSurfaceSession = null;
 }
 
 export function matchesPrivilegedUiSurfaceSession(
@@ -37,6 +40,15 @@ export function matchesPrivilegedUiSurfaceSession(
     activeSurfaceSession?.surface === surface &&
     activeSurfaceSession.surfaceSessionId === surfaceSessionId
   );
+}
+
+/** Read the capability held by the current isolated bundle/world. */
+export function getPrivilegedUiSurfaceSessionId(
+  surface: PrivilegedUiSurface,
+): string | null {
+  return activeSurfaceSession?.surface === surface
+    ? activeSurfaceSession.surfaceSessionId
+    : null;
 }
 
 /** Close the active surface in both this bundle and the background registry. */
@@ -79,11 +91,13 @@ export function isTrustedPrivilegedUiEvent(event: Event): boolean {
  * trusted browser user activation. The page cannot call this helper because it
  * runs in the content script's isolated world.
  */
-export async function authorizePrivilegedUiAction(action: PrivilegedUiAction): Promise<string> {
+export async function authorizePrivilegedUiAction(
+  action: PrivilegedUiAction,
+): Promise<string> {
   const expectedSurface = PRIVILEGED_UI_ACTION_SURFACES[action];
   const session = activeSurfaceSession;
   if (!session || session.surface !== expectedSurface) {
-    throw new Error('Privileged UI surface is not active');
+    throw new Error("Privileged UI surface is not active");
   }
 
   const response = (await chrome.runtime.sendMessage({
@@ -95,13 +109,17 @@ export async function authorizePrivilegedUiAction(action: PrivilegedUiAction): P
     },
   })) as PrivilegedUiAuthorizeResponse | undefined;
 
-  if (!response?.success || typeof response.authorizationToken !== 'string') {
-    throw new Error(response?.success === false ? response.error : 'Authorization was not granted');
+  if (!response?.success || typeof response.authorizationToken !== "string") {
+    throw new Error(
+      response?.success === false
+        ? response.error
+        : "Authorization was not granted",
+    );
   }
 
   const token = response.authorizationToken.trim();
   if (!token) {
-    throw new Error('Authorization token is missing');
+    throw new Error("Authorization token is missing");
   }
   return token;
 }

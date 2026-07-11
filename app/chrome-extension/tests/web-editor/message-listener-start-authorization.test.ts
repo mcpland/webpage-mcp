@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   WEB_EDITOR_ACTIONS,
   type WebEditorApi,
-} from '@/common/web-editor-types';
-import { installMessageListener } from '@/entrypoints/web-editor/core/message-listener';
+} from "@/common/web-editor-types";
+import { handleWebEditorCommand } from "@/entrypoints/web-editor/core/message-listener";
 
 const surfaceMocks = vi.hoisted(() => ({
   clearPrivilegedUiSurfaceSession: vi.fn(),
@@ -17,21 +17,13 @@ const surfaceMocks = vi.hoisted(() => ({
   ),
 }));
 
-vi.mock('@/utils/privileged-ui-authorization', () => surfaceMocks);
+vi.mock("@/utils/privileged-ui-authorization", () => surfaceMocks);
 
-type RuntimeListener = (
-  request: unknown,
-  sender: chrome.runtime.MessageSender,
-  sendResponse: (response: unknown) => void,
-) => boolean | undefined;
-
-describe('Web Editor start authorization lifecycle', () => {
-  let listener: RuntimeListener;
+describe("Web Editor start authorization lifecycle", () => {
   let active: boolean;
   let stopping: boolean;
   let activeSurfaceSessionId: string | null;
   let api: WebEditorApi;
-  let removeListener: () => void;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -51,11 +43,6 @@ describe('Web Editor start authorization lifecycle', () => {
     surfaceMocks.clearPrivilegedUiSurfaceSession.mockImplementation(() => {
       activeSurfaceSessionId = null;
     });
-    vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation(
-      (candidate) => {
-        listener = candidate as RuntimeListener;
-      },
-    );
     api = {
       start: vi.fn(),
       stop: vi.fn(async () => {
@@ -67,133 +54,109 @@ describe('Web Editor start authorization lifecycle', () => {
       revertElement: vi.fn(),
       clearSelection: vi.fn(),
     } as WebEditorApi;
-    removeListener = installMessageListener(api);
   });
 
-  function startRequest(surfaceSessionId = '22'.repeat(32)) {
+  function startRequest(surfaceSessionId = "22".repeat(32)) {
     return {
       action: WEB_EDITOR_ACTIONS.START,
       privilegedSurfaceSessionId: surfaceSessionId,
     };
   }
 
-  it('reports inactive and closes the background surface when editor initialization fails', () => {
-    const sendResponse = vi.fn();
+  it("reports inactive and closes the background surface when editor initialization fails", async () => {
+    await expect(handleWebEditorCommand(api, startRequest())).resolves.toEqual({
+      active: false,
+    });
 
-    expect(listener(startRequest(), {}, sendResponse)).toBe(false);
-
-    expect(api.start).toHaveBeenCalledWith('22'.repeat(32));
-    expect(sendResponse).toHaveBeenCalledWith({ active: false });
+    expect(api.start).toHaveBeenCalledWith("22".repeat(32));
     expect(surfaceMocks.closePrivilegedUiSurfaceSession).toHaveBeenCalledOnce();
-    removeListener();
   });
 
-  it('reports active only after the editor state confirms successful initialization', () => {
+  it("reports active only after the editor state confirms successful initialization", async () => {
     vi.mocked(api.start).mockImplementation(() => {
       active = true;
     });
-    const sendResponse = vi.fn();
-
-    expect(listener(startRequest(), {}, sendResponse)).toBe(false);
-
-    expect(sendResponse).toHaveBeenCalledWith({ active: true });
+    await expect(handleWebEditorCommand(api, startRequest())).resolves.toEqual({
+      active: true,
+    });
     expect(surfaceMocks.closePrivilegedUiSurfaceSession).not.toHaveBeenCalled();
-    removeListener();
   });
 
-  it('closes a configured background surface even when STOP finds the editor inactive', async () => {
-    const sendResponse = vi.fn();
-
-    expect(
-      listener({ action: WEB_EDITOR_ACTIONS.STOP }, {}, sendResponse),
-    ).toBe(true);
-
-    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
-    expect(sendResponse).toHaveBeenCalledWith({ active: false });
+  it("closes a configured background surface even when STOP finds the editor inactive", async () => {
+    await expect(
+      handleWebEditorCommand(api, { action: WEB_EDITOR_ACTIONS.STOP }),
+    ).resolves.toEqual({ active: false });
     expect(surfaceMocks.closePrivilegedUiSurfaceSession).toHaveBeenCalledOnce();
-    removeListener();
   });
 
-  it('treats START for the already active session as idempotent', () => {
-    const sessionId = '11'.repeat(32);
+  it("treats START for the already active session as idempotent", async () => {
+    const sessionId = "11".repeat(32);
     active = true;
     activeSurfaceSessionId = sessionId;
-    const sendResponse = vi.fn();
-
-    expect(listener(startRequest(sessionId), {}, sendResponse)).toBe(false);
-
-    expect(sendResponse).toHaveBeenCalledWith({ active: true });
-    expect(surfaceMocks.configurePrivilegedUiSurfaceSession).not.toHaveBeenCalled();
+    await expect(
+      handleWebEditorCommand(api, startRequest(sessionId)),
+    ).resolves.toEqual({
+      active: true,
+    });
+    expect(
+      surfaceMocks.configurePrivilegedUiSurfaceSession,
+    ).not.toHaveBeenCalled();
     expect(api.start).not.toHaveBeenCalled();
-    removeListener();
   });
 
-  it('rejects START from a different session without overwriting the active one', () => {
-    const activeSessionId = '11'.repeat(32);
-    const replacementSessionId = '33'.repeat(32);
+  it("rejects START from a different session without overwriting the active one", async () => {
+    const activeSessionId = "11".repeat(32);
+    const replacementSessionId = "33".repeat(32);
     active = true;
     activeSurfaceSessionId = activeSessionId;
-    const sendResponse = vi.fn();
-
-    expect(listener(startRequest(replacementSessionId), {}, sendResponse)).toBe(false);
-
-    expect(sendResponse).toHaveBeenCalledWith({
+    await expect(
+      handleWebEditorCommand(api, startRequest(replacementSessionId)),
+    ).resolves.toEqual({
       active: false,
-      error: 'A different Web Editor session is already active',
+      error: "A different Web Editor session is already active",
     });
     expect(surfaceMocks.clearPrivilegedUiSurfaceSession).not.toHaveBeenCalled();
-    expect(surfaceMocks.configurePrivilegedUiSurfaceSession).not.toHaveBeenCalled();
+    expect(
+      surfaceMocks.configurePrivilegedUiSurfaceSession,
+    ).not.toHaveBeenCalled();
     expect(api.start).not.toHaveBeenCalled();
     expect(activeSurfaceSessionId).toBe(activeSessionId);
-    removeListener();
   });
 
-  it('rejects START and TOGGLE while stop cleanup is in flight', () => {
+  it("rejects START and TOGGLE while stop cleanup is in flight", async () => {
     stopping = true;
-    activeSurfaceSessionId = '11'.repeat(32);
-    const startResponse = vi.fn();
-    const toggleResponse = vi.fn();
-
-    expect(listener(startRequest('33'.repeat(32)), {}, startResponse)).toBe(false);
-    expect(
-      listener(
-        {
-          action: WEB_EDITOR_ACTIONS.TOGGLE,
-          privilegedSurfaceSessionId: '33'.repeat(32),
-        },
-        {},
-        toggleResponse,
-      ),
-    ).toBe(false);
-
-    expect(startResponse).toHaveBeenCalledWith({
+    activeSurfaceSessionId = "11".repeat(32);
+    await expect(
+      handleWebEditorCommand(api, startRequest("33".repeat(32))),
+    ).resolves.toEqual({
       active: false,
-      error: 'Web Editor is still stopping',
+      error: "Web Editor is still stopping",
     });
-    expect(toggleResponse).toHaveBeenCalledWith({
+    await expect(
+      handleWebEditorCommand(api, {
+        action: WEB_EDITOR_ACTIONS.TOGGLE,
+        privilegedSurfaceSessionId: "33".repeat(32),
+      }),
+    ).resolves.toEqual({
       active: false,
-      error: 'Web Editor is still stopping',
+      error: "Web Editor is still stopping",
     });
     expect(surfaceMocks.clearPrivilegedUiSurfaceSession).not.toHaveBeenCalled();
-    expect(surfaceMocks.configurePrivilegedUiSurfaceSession).not.toHaveBeenCalled();
+    expect(
+      surfaceMocks.configurePrivilegedUiSurfaceSession,
+    ).not.toHaveBeenCalled();
     expect(api.start).not.toHaveBeenCalled();
     expect(api.stop).not.toHaveBeenCalled();
-    removeListener();
   });
 
-  it('reports stopping as active so the background cannot inject a second editor', () => {
+  it("reports stopping as active so the background cannot inject a second editor", async () => {
     stopping = true;
-    const sendResponse = vi.fn();
-
-    expect(
-      listener({ action: WEB_EDITOR_ACTIONS.PING }, {}, sendResponse),
-    ).toBe(false);
-
-    expect(sendResponse).toHaveBeenCalledWith({
-      status: 'pong',
+    await expect(
+      handleWebEditorCommand(api, { action: WEB_EDITOR_ACTIONS.PING }),
+    ).resolves.toEqual({
+      status: "pong",
       active: true,
       version: 1,
     });
-    removeListener();
   });
 });

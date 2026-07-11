@@ -24,6 +24,7 @@ import {
   consumePrivilegedUiAuthorization,
   startPrivilegedUiSurfaceSession,
   stopPrivilegedUiSurfaceSession,
+  validatePrivilegedUiSurfaceSession,
 } from "../privileged-ui-authorization";
 import {
   getDurableAgentRequestOwner,
@@ -45,6 +46,10 @@ import {
   retireLegacyPropsAgentInTab,
 } from "./props-early-injection";
 import { executeWebEditorPropsRpc } from "./props-rpc";
+import {
+  ensureWebEditorRuntime,
+  sendWebEditorRuntimeCommand,
+} from "./runtime-host";
 import {
   ExecutionStatusCache,
   WEB_EDITOR_STATUS_CACHE_TTL_MS,
@@ -80,6 +85,18 @@ const WEB_EDITOR_CONTENT_MESSAGE_TYPES = new Set<string>([
   BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
 ]);
 
+const WEB_EDITOR_USER_SCRIPT_MESSAGE_TYPES = new Set<string>([
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY_BATCH,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CANCEL_EXECUTION,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_OPEN_SOURCE,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_EXECUTE,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_STATUS_QUERY,
+  BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
+]);
+
 const WEB_EDITOR_EXTENSION_PAGE_MESSAGE_TYPES = new Set<string>([
   BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TOGGLE,
   BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CLEAR_SELECTION,
@@ -87,9 +104,17 @@ const WEB_EDITOR_EXTENSION_PAGE_MESSAGE_TYPES = new Set<string>([
   BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_REVERT_ELEMENT,
 ]);
 
+function isWebEditorRuntimeOnlyMessageType(messageType: string): boolean {
+  return (
+    WEB_EDITOR_USER_SCRIPT_MESSAGE_TYPES.has(messageType) ||
+    (messageType.startsWith("web_editor_") &&
+      !WEB_EDITOR_EXTENSION_PAGE_MESSAGE_TYPES.has(messageType))
+  );
+}
+
 const webEditorToggleQueues = new Map<number, Promise<void>>();
 
-function isWebEditorContentSender(
+function isWebEditorUserScriptSender(
   sender: chrome.runtime.MessageSender,
 ): boolean {
   return (
@@ -97,6 +122,16 @@ function isWebEditorContentSender(
     typeof sender.tab?.id === "number" &&
     sender.frameId === 0
   );
+}
+
+function readWebEditorSurfaceSessionId(message: unknown): string | null {
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    return null;
+  }
+  const value = (message as { surfaceSessionId?: unknown }).surfaceSessionId;
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value)
+    ? value
+    : null;
 }
 
 function isBackgroundRebroadcast(
@@ -739,9 +774,7 @@ function createWebEditorRequestId(): string {
   if (!cryptoApi?.getRandomValues)
     throw new Error("Secure request ID generation is unavailable");
   const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
-  return `web-editor-${[...bytes]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("")}`;
+  return `web-editor-${[...bytes].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 }
 
 async function cancelWebEditorRequest(
@@ -989,9 +1022,6 @@ async function recoverWebEditorRequests(): Promise<void> {
     );
   }
 }
-
-/** Script path for the active editor runtime (WXT unlisted script output). */
-const WEB_EDITOR_SCRIPT_PATH = "web-editor.js";
 
 /**
  * Build a batch prompt for multiple element changes.
@@ -1323,57 +1353,26 @@ async function ensureContextMenu(): Promise<void> {
   }
 }
 
-/**
- * Ensure the web editor script is injected into the tab
- */
-async function ensureEditorInjected(tabId: number): Promise<void> {
-  // Try to ping existing instance before injecting a second copy.
-  try {
-    const pong: { status?: string; version?: number } =
-      await chrome.tabs.sendMessage(
-        tabId,
-        { action: WEB_EDITOR_ACTIONS.PING },
-        { frameId: 0 },
-      );
-
-    if (pong?.status === "pong") {
-      return;
-    }
-  } catch {
-    // No existing instance, fall through to inject.
-  }
-
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: [WEB_EDITOR_SCRIPT_PATH],
-      world: "ISOLATED",
-    });
-    console.log("[WebEditor] Script injected successfully");
-  } catch (error) {
-    console.warn("[WebEditor] Failed to inject editor script:", error);
-  }
-}
-
-async function toggleEditorInTabUnlocked(tabId: number): Promise<{ active?: boolean }> {
-  await ensureEditorInjected(tabId);
+async function toggleEditorInTabUnlocked(
+  tabId: number,
+): Promise<{ active?: boolean; error?: string }> {
   let startedSurfaceSessionId: string | null = null;
 
   try {
-    const status: { active?: boolean } = await chrome.tabs.sendMessage(
-      tabId,
-      { action: WEB_EDITOR_ACTIONS.PING },
-      { frameId: 0 },
-    );
+    const runtime = await ensureWebEditorRuntime(tabId);
+    const status = runtime.status;
     if (status?.active === true) {
       try {
-        await chrome.tabs.sendMessage(
+        await sendWebEditorRuntimeCommand(
           tabId,
           { action: WEB_EDITOR_ACTIONS.STOP },
-          { frameId: 0 },
+          runtime.documentId,
         );
       } finally {
-        await stopPrivilegedUiSurfaceSession(PRIVILEGED_UI_SURFACES.WEB_EDITOR, tabId);
+        await stopPrivilegedUiSurfaceSession(
+          PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+          tabId,
+        );
       }
       await releasePropsAgentEarlyInjection(tabId);
       return { active: false };
@@ -1392,13 +1391,16 @@ async function toggleEditorInTabUnlocked(tabId: number): Promise<{ active?: bool
       tabId,
     );
     startedSurfaceSessionId = privilegedSurfaceSessionId;
-    const response: { active?: boolean } = await chrome.tabs.sendMessage(
+    const response = await sendWebEditorRuntimeCommand<{
+      active?: boolean;
+      error?: string;
+    }>(
       tabId,
       {
         action: WEB_EDITOR_ACTIONS.START,
         privilegedSurfaceSessionId,
       },
-      { frameId: 0 },
+      runtime.documentId,
     );
     if (response?.active !== true) {
       await stopPrivilegedUiSurfaceSession(
@@ -1419,11 +1421,16 @@ async function toggleEditorInTabUnlocked(tabId: number): Promise<{ active?: bool
       );
     }
     console.warn("[WebEditor] Failed to toggle editor in tab:", error);
-    return {};
+    return {
+      active: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
-async function toggleEditorInTab(tabId: number): Promise<{ active?: boolean }> {
+async function toggleEditorInTab(
+  tabId: number,
+): Promise<{ active?: boolean; error?: string }> {
   const previous = webEditorToggleQueues.get(tabId) ?? Promise.resolve();
   const operation = previous
     .catch(() => undefined)
@@ -1436,7 +1443,8 @@ async function toggleEditorInTab(tabId: number): Promise<{ active?: boolean }> {
   try {
     return await operation;
   } finally {
-    if (webEditorToggleQueues.get(tabId) === queued) webEditorToggleQueues.delete(tabId);
+    if (webEditorToggleQueues.get(tabId) === queued)
+      webEditorToggleQueues.delete(tabId);
   }
 }
 
@@ -1539,7 +1547,11 @@ export function initWebEditorListeners(): void {
     } catch {}
   });
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const dispatchWebEditorMessage = (
+    message: any,
+    _sender: chrome.runtime.MessageSender,
+    sendResponse: (response?: any) => void,
+  ): boolean => {
     try {
       const messageType = typeof message?.type === "string" ? message.type : "";
       if (WEB_EDITOR_CONTENT_MESSAGE_TYPES.has(messageType)) {
@@ -1551,7 +1563,7 @@ export function initWebEditorListeners(): void {
         ) {
           return false;
         }
-        if (!isWebEditorContentSender(_sender)) {
+        if (!isWebEditorUserScriptSender(_sender)) {
           sendResponse({
             success: false,
             error: "Web Editor page message sender is not trusted",
@@ -1842,7 +1854,7 @@ export function initWebEditorListeners(): void {
 
           // Forward to content script (web-editor)
           try {
-            await chrome.tabs.sendMessage(targetTabId, {
+            await sendWebEditorRuntimeCommand(targetTabId, {
               action: WEB_EDITOR_ACTIONS.CLEAR_SELECTION,
             });
             sendResponse({ success: true });
@@ -2089,7 +2101,7 @@ export function initWebEditorListeners(): void {
           // This prevents overlay residue when sidepanel unmounts
           if (mode === "clear") {
             try {
-              const response = await chrome.tabs.sendMessage(tabId, {
+              const response = await sendWebEditorRuntimeCommand(tabId, {
                 action: WEB_EDITOR_ACTIONS.HIGHLIGHT_ELEMENT,
                 mode: "clear",
               });
@@ -2107,7 +2119,7 @@ export function initWebEditorListeners(): void {
 
           // Forward to web-editor content script
           try {
-            const response = await chrome.tabs.sendMessage(tabId, {
+            const response = await sendWebEditorRuntimeCommand(tabId, {
               action: WEB_EDITOR_ACTIONS.HIGHLIGHT_ELEMENT,
               locator, // Full locator for Shadow DOM/iframe support
               selector: primarySelector, // Backward compatibility fallback
@@ -2143,14 +2155,12 @@ export function initWebEditorListeners(): void {
 
           // Forward to web-editor content script (frameId: 0 for main frame only)
           try {
-            const response = await chrome.tabs.sendMessage(
-              tabId,
-              {
-                action: WEB_EDITOR_ACTIONS.REVERT_ELEMENT,
-                elementKey,
-              },
-              { frameId: 0 },
-            );
+            const response = await sendWebEditorRuntimeCommand<
+              Record<string, unknown>
+            >(tabId, {
+              action: WEB_EDITOR_ACTIONS.REVERT_ELEMENT,
+              elementKey,
+            });
 
             sendResponse({ success: true, ...response });
           } catch (error) {
@@ -2406,5 +2416,62 @@ export function initWebEditorListeners(): void {
       });
     }
     return false;
+  };
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const messageType = typeof message?.type === "string" ? message.type : "";
+    if (
+      isBackgroundRebroadcast(sender) &&
+      (messageType === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED ||
+        messageType === BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED)
+    ) {
+      return false;
+    }
+    if (isWebEditorRuntimeOnlyMessageType(messageType)) {
+      sendResponse({
+        success: false,
+        error: "Web Editor requests require the dedicated runtime channel",
+      });
+      return false;
+    }
+    return dispatchWebEditorMessage(message, sender, sendResponse);
   });
+
+  chrome.runtime.onUserScriptMessage?.addListener(
+    (message, sender, sendResponse) => {
+      const messageType = typeof message?.type === "string" ? message.type : "";
+      if (!WEB_EDITOR_USER_SCRIPT_MESSAGE_TYPES.has(messageType)) return false;
+      const surfaceSessionId = readWebEditorSurfaceSessionId(message);
+      if (!surfaceSessionId || !isWebEditorUserScriptSender(sender)) {
+        sendResponse({
+          success: false,
+          error: "Web Editor user-script sender is not trusted",
+        });
+        return false;
+      }
+
+      void validatePrivilegedUiSurfaceSession(
+        PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+        surfaceSessionId,
+        sender,
+      )
+        .then((valid) => {
+          if (!valid) {
+            sendResponse({
+              success: false,
+              error: "Web Editor surface session is missing or expired",
+            });
+            return;
+          }
+          dispatchWebEditorMessage(message, sender, sendResponse);
+        })
+        .catch(() =>
+          sendResponse({
+            success: false,
+            error: "Web Editor surface session could not be validated",
+          }),
+        );
+      return true;
+    },
+  );
 }

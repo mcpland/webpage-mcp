@@ -10,17 +10,22 @@
  * - Detect tech stack (Tailwind, React) from DOM hints
  */
 
-import type { DebugSource, ElementLocator, Transaction } from '@/common/web-editor-types';
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
-import { locateElement } from './locator';
-import { findReactDebugSource } from './debug-source';
+import type {
+  DebugSource,
+  ElementLocator,
+  Transaction,
+} from "@/common/web-editor-types";
+import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import { locateElement } from "./locator";
+import { findReactDebugSource } from "./debug-source";
+import { sendWebEditorRuntimeMessage } from "./runtime-messaging";
 
 // =============================================================================
 // Types
 // =============================================================================
 
 /** Instruction type for Apply payload */
-export type ApplyInstructionType = 'update_text' | 'update_style';
+export type ApplyInstructionType = "update_text" | "update_style";
 
 /** Element fingerprint for identification */
 export interface ElementFingerprint {
@@ -51,7 +56,7 @@ export interface ApplyPayload {
   selectorCandidates?: string[];
   debugSource?: DebugSource;
   operation?: {
-    type: 'update_style';
+    type: "update_style";
     before: Record<string, string>;
     after: Record<string, string>;
     removed: string[];
@@ -75,7 +80,7 @@ export interface BuildPayloadOptions {
  * Safely access object as record
  */
 function asRecord(value: unknown): Record<string, unknown> | null {
-  if (value && typeof value === 'object') {
+  if (value && typeof value === "object") {
     return value as Record<string, unknown>;
   }
   return null;
@@ -85,7 +90,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  * Read optional string value
  */
 function readString(value: unknown): string | undefined {
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     const trimmed = value.trim();
     return trimmed || undefined;
   }
@@ -96,7 +101,7 @@ function readString(value: unknown): string | undefined {
  * Read optional number value
  */
 function readNumber(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) {
+  if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
   const parsed = Number.parseInt(String(value), 10);
@@ -107,8 +112,8 @@ function readNumber(value: unknown): number | undefined {
  * Normalize text snippet for display
  */
 function normalizeText(text: string, maxLength: number): string {
-  return String(text ?? '')
-    .replace(/\s+/g, ' ')
+  return String(text ?? "")
+    .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);
 }
@@ -121,10 +126,10 @@ function normalizeText(text: string, maxLength: number): string {
  * Build fingerprint from DOM element
  */
 function buildFingerprintFromElement(element: Element): ElementFingerprint {
-  const tag = element.tagName?.toLowerCase() ?? 'unknown';
+  const tag = element.tagName?.toLowerCase() ?? "unknown";
   const id = readString((element as HTMLElement).id);
   const classes = Array.from(element.classList ?? []).slice(0, 24);
-  const text = readString(normalizeText(element.textContent ?? '', 96));
+  const text = readString(normalizeText(element.textContent ?? "", 96));
 
   return { tag, id, classes, text };
 }
@@ -132,21 +137,23 @@ function buildFingerprintFromElement(element: Element): ElementFingerprint {
 /**
  * Build fingerprint from locator (fallback when element not available)
  */
-function buildFingerprintFromLocator(locator: ElementLocator): ElementFingerprint {
-  const raw = readString(locator.fingerprint) ?? '';
-  const parts = raw.split('|').filter(Boolean);
+function buildFingerprintFromLocator(
+  locator: ElementLocator,
+): ElementFingerprint {
+  const raw = readString(locator.fingerprint) ?? "";
+  const parts = raw.split("|").filter(Boolean);
 
-  const tag = parts[0] || 'unknown';
+  const tag = parts[0] || "unknown";
   let id: string | undefined;
   let classes: string[] = [];
   let text: string | undefined;
 
   for (const part of parts.slice(1)) {
-    if (part.startsWith('id=')) {
+    if (part.startsWith("id=")) {
       id = readString(part.slice(3));
-    } else if (part.startsWith('class=')) {
-      classes = part.slice(6).split('.').filter(Boolean);
-    } else if (part.startsWith('text=')) {
+    } else if (part.startsWith("class=")) {
+      classes = part.slice(6).split(".").filter(Boolean);
+    } else if (part.startsWith("text=")) {
       text = readString(part.slice(5));
     }
   }
@@ -207,8 +214,8 @@ function resolveComponentHints(element: Element): ComponentHints {
     // Try React
     const react = findReactDebugSource(node);
     if (react?.file) {
-      hints.add('React');
-      if (!targetFile && !react.file.includes('node_modules')) {
+      hints.add("React");
+      if (!targetFile && !react.file.includes("node_modules")) {
         targetFile = react.file;
         debugSource = react;
         break;
@@ -221,7 +228,7 @@ function resolveComponentHints(element: Element): ComponentHints {
   // Check for Tailwind
   const classes = Array.from(element.classList ?? []).slice(0, 128);
   if (detectTailwind(classes)) {
-    hints.add('Tailwind');
+    hints.add("Tailwind");
   }
 
   return {
@@ -258,8 +265,8 @@ function computeStyleDiff(tx: Transaction): StyleDiff | null {
   const removed: string[] = [];
 
   for (const key of keys) {
-    const b = String(beforeRaw[key] ?? '').trim();
-    const a = String(afterRaw[key] ?? '').trim();
+    const b = String(beforeRaw[key] ?? "").trim();
+    const a = String(afterRaw[key] ?? "").trim();
 
     if (b === a) continue;
 
@@ -289,11 +296,11 @@ function buildStyleDescription(
   maxSelectors: number,
 ): string {
   const selectors = (locator.selectors ?? []).filter(Boolean);
-  const selectorPreview = selectors.slice(0, maxSelectors).join(' | ');
+  const selectorPreview = selectors.slice(0, maxSelectors).join(" | ");
 
   const changes: string[] = [];
   for (const [prop, nextVal] of Object.entries(diff.after)) {
-    const prevVal = diff.before[prop] ?? '';
+    const prevVal = diff.before[prop] ?? "";
     if (nextVal) {
       changes.push(`${prop}: "${prevVal}" -> "${nextVal}"`);
     } else {
@@ -301,8 +308,10 @@ function buildStyleDescription(
     }
   }
 
-  const selPart = selectorPreview ? `selectors: ${selectorPreview}` : 'selectors: (unavailable)';
-  return `Update element styles (${selPart}). ${changes.join('; ')}`;
+  const selPart = selectorPreview
+    ? `selectors: ${selectorPreview}`
+    : "selectors: (unavailable)";
+  return `Update element styles (${selPart}). ${changes.join("; ")}`;
 }
 
 /**
@@ -315,12 +324,16 @@ function buildTextDescription(
   maxSelectors: number,
 ): string {
   const selectors = (locator.selectors ?? []).filter(Boolean);
-  const selectorPreview = selectors.slice(0, maxSelectors).join(' | ');
-  const selPart = selectorPreview ? `selectors: ${selectorPreview}` : 'selectors: (unavailable)';
+  const selectorPreview = selectors.slice(0, maxSelectors).join(" | ");
+  const selPart = selectorPreview
+    ? `selectors: ${selectorPreview}`
+    : "selectors: (unavailable)";
 
   // Truncate text for preview
-  const beforePreview = beforeText.length > 96 ? beforeText.slice(0, 93) + '...' : beforeText;
-  const afterPreview = afterText.length > 96 ? afterText.slice(0, 93) + '...' : afterText;
+  const beforePreview =
+    beforeText.length > 96 ? beforeText.slice(0, 93) + "..." : beforeText;
+  const afterPreview =
+    afterText.length > 96 ? afterText.slice(0, 93) + "..." : afterText;
 
   return `Update element text (${selPart}). "${beforePreview}" -> "${afterPreview}"`;
 }
@@ -337,14 +350,17 @@ export function buildApplyPayload(
   tx: Transaction,
   options: BuildPayloadOptions = {},
 ): ApplyPayload | null {
-  const pageUrl = readString(options.pageUrl ?? globalThis.location?.href) ?? '';
+  const pageUrl =
+    readString(options.pageUrl ?? globalThis.location?.href) ?? "";
   if (!pageUrl) return null;
 
   const locator = tx.targetLocator;
 
   // Resolve element
   const element =
-    options.element !== undefined ? options.element : locateElement(locator, document);
+    options.element !== undefined
+      ? options.element
+      : locateElement(locator, document);
 
   // Build fingerprint
   const fingerprint = element
@@ -357,7 +373,7 @@ export function buildApplyPayload(
   const maxSelectors = Math.max(0, options.maxSelectorsInDescription ?? 3);
 
   // Handle style transactions
-  if (tx.type === 'style') {
+  if (tx.type === "style") {
     const diff = computeStyleDiff(tx);
     if (!diff) return null;
 
@@ -369,17 +385,19 @@ export function buildApplyPayload(
       fingerprint,
       techStackHint: hints.techStackHint,
       instruction: {
-        type: 'update_style',
+        type: "update_style",
         description,
         style: Object.keys(diff.set).length > 0 ? diff.set : undefined,
       },
 
       // Extended fields
-      locator: hints.debugSource ? { ...locator, debugSource: hints.debugSource } : locator,
+      locator: hints.debugSource
+        ? { ...locator, debugSource: hints.debugSource }
+        : locator,
       selectorCandidates: locator.selectors?.slice(0, 8),
       debugSource: hints.debugSource,
       operation: {
-        type: 'update_style',
+        type: "update_style",
         before: diff.before,
         after: diff.after,
         removed: diff.removed,
@@ -390,12 +408,17 @@ export function buildApplyPayload(
   }
 
   // Handle text transactions (Phase 2.7)
-  if (tx.type === 'text') {
-    const beforeText = String(tx.before.text ?? '');
-    const afterText = String(tx.after.text ?? '');
+  if (tx.type === "text") {
+    const beforeText = String(tx.before.text ?? "");
+    const afterText = String(tx.after.text ?? "");
     if (beforeText === afterText) return null;
 
-    const description = buildTextDescription(locator, beforeText, afterText, maxSelectors);
+    const description = buildTextDescription(
+      locator,
+      beforeText,
+      afterText,
+      maxSelectors,
+    );
 
     const payload: ApplyPayload = {
       pageUrl,
@@ -403,13 +426,15 @@ export function buildApplyPayload(
       fingerprint,
       techStackHint: hints.techStackHint,
       instruction: {
-        type: 'update_text',
+        type: "update_text",
         description,
         text: afterText,
       },
 
       // Extended fields
-      locator: hints.debugSource ? { ...locator, debugSource: hints.debugSource } : locator,
+      locator: hints.debugSource
+        ? { ...locator, debugSource: hints.debugSource }
+        : locator,
       selectorCandidates: locator.selectors?.slice(0, 8),
       debugSource: hints.debugSource,
     };
@@ -427,11 +452,7 @@ export async function sendApplyPayload(
   payload: ApplyPayload,
   authorizationToken: string,
 ): Promise<unknown> {
-  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
-    throw new Error('Chrome runtime API not available');
-  }
-
-  return chrome.runtime.sendMessage({
+  return sendWebEditorRuntimeMessage({
     type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY,
     authorizationToken,
     payload,
@@ -448,7 +469,7 @@ export async function sendTransactionToAgent(
 ): Promise<unknown> {
   const payload = buildApplyPayload(tx, options);
   if (!payload) {
-    throw new Error('Unable to build payload from transaction');
+    throw new Error("Unable to build payload from transaction");
   }
   return sendApplyPayload(payload, authorizationToken);
 }

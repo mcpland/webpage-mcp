@@ -10,9 +10,13 @@
  * - Disposer pattern for cleanup
  */
 
-import { BACKGROUND_MESSAGE_TYPES, PRIVILEGED_UI_ACTIONS } from '@/common/message-types';
-import { authorizePrivilegedUiAction } from '@/utils/privileged-ui-authorization';
-import { Disposer } from '../utils/disposables';
+import {
+  BACKGROUND_MESSAGE_TYPES,
+  PRIVILEGED_UI_ACTIONS,
+} from "@/common/message-types";
+import { authorizePrivilegedUiAction } from "@/utils/privileged-ui-authorization";
+import { Disposer } from "../utils/disposables";
+import { sendWebEditorRuntimeMessage } from "./runtime-messaging";
 
 // =============================================================================
 // Types
@@ -24,16 +28,16 @@ import { Disposer } from '../utils/disposables';
  * Both 'error' and 'failed' are treated as terminal failure states.
  */
 export type ExecutionStatus =
-  | 'pending'
-  | 'starting'
-  | 'running'
-  | 'locating'
-  | 'applying'
-  | 'completed'
-  | 'failed'
-  | 'error' // Agent server uses 'error', we accept both
-  | 'timeout'
-  | 'cancelled';
+  | "pending"
+  | "starting"
+  | "running"
+  | "locating"
+  | "applying"
+  | "completed"
+  | "failed"
+  | "error" // Agent server uses 'error', we accept both
+  | "timeout"
+  | "cancelled";
 
 /** Execution state */
 export interface ExecutionState {
@@ -73,11 +77,11 @@ const DEFAULT_TIMEOUT = 120000;
 // Terminal statuses that stop polling
 // Note: 'error' is included for compatibility with AgentStatusEvent
 const TERMINAL_STATUSES: ExecutionStatus[] = [
-  'completed',
-  'failed',
-  'error',
-  'timeout',
-  'cancelled',
+  "completed",
+  "failed",
+  "error",
+  "timeout",
+  "cancelled",
 ];
 
 // =============================================================================
@@ -90,27 +94,27 @@ function isTerminalStatus(status: ExecutionStatus): boolean {
 
 function getStatusMessage(status: ExecutionStatus): string {
   switch (status) {
-    case 'pending':
-      return 'Waiting...';
-    case 'starting':
-      return 'Starting Agent...';
-    case 'running':
-      return 'Running...';
-    case 'locating':
-      return 'Locating code...';
-    case 'applying':
-      return 'Applying changes...';
-    case 'completed':
-      return 'Completed';
-    case 'failed':
-    case 'error': // Agent server uses 'error', treat same as 'failed'
-      return 'Failed';
-    case 'timeout':
-      return 'Timed out';
-    case 'cancelled':
-      return 'Cancelled';
+    case "pending":
+      return "Waiting...";
+    case "starting":
+      return "Starting Agent...";
+    case "running":
+      return "Running...";
+    case "locating":
+      return "Locating code...";
+    case "applying":
+      return "Applying changes...";
+    case "completed":
+      return "Completed";
+    case "failed":
+    case "error": // Agent server uses 'error', treat same as 'failed'
+      return "Failed";
+    case "timeout":
+      return "Timed out";
+    case "cancelled":
+      return "Cancelled";
     default:
-      return '';
+      return "";
   }
 }
 
@@ -142,8 +146,8 @@ export class ExecutionTracker {
     const state: ExecutionState = {
       requestId,
       sessionId,
-      status: 'pending',
-      message: getStatusMessage('pending'),
+      status: "pending",
+      message: getStatusMessage("pending"),
       startedAt: now,
       updatedAt: now,
     };
@@ -178,8 +182,8 @@ export class ExecutionTracker {
 
     // Update local state immediately for responsive UI
     this.updateState(requestId, {
-      status: 'cancelled',
-      message: 'Cancelling...',
+      status: "cancelled",
+      message: "Cancelling...",
     });
 
     // Send cancel request to background
@@ -187,7 +191,7 @@ export class ExecutionTracker {
       const authorizationToken = await authorizePrivilegedUiAction(
         PRIVILEGED_UI_ACTIONS.WEB_EDITOR_CANCEL,
       );
-      const response = await chrome.runtime.sendMessage({
+      const response = await sendWebEditorRuntimeMessage<any>({
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CANCEL_EXECUTION,
         authorizationToken,
         payload: {
@@ -199,23 +203,26 @@ export class ExecutionTracker {
       // Update message based on response
       if (response?.success) {
         this.updateState(requestId, {
-          status: 'cancelled',
-          message: 'Cancelled by user',
+          status: "cancelled",
+          message: "Cancelled by user",
         });
       } else {
         // Cancel request failed, but we still mark as cancelled locally
-        console.warn('[ExecutionTracker] Cancel request failed:', response?.error);
+        console.warn(
+          "[ExecutionTracker] Cancel request failed:",
+          response?.error,
+        );
         this.updateState(requestId, {
-          status: 'cancelled',
-          message: 'Cancelled (server may still be running)',
+          status: "cancelled",
+          message: "Cancelled (server may still be running)",
         });
       }
     } catch (error) {
       // Network/extension error, still mark as cancelled locally
-      console.warn('[ExecutionTracker] Cancel request error:', error);
+      console.warn("[ExecutionTracker] Cancel request error:", error);
       this.updateState(requestId, {
-        status: 'cancelled',
-        message: 'Cancelled by user',
+        status: "cancelled",
+        message: "Cancelled by user",
       });
     }
   }
@@ -228,7 +235,7 @@ export class ExecutionTracker {
     update: {
       status: ExecutionStatus;
       message?: string;
-      result?: ExecutionState['result'];
+      result?: ExecutionState["result"];
     },
   ): void {
     this.updateState(requestId, update);
@@ -252,8 +259,8 @@ export class ExecutionTracker {
       const state = this.executions.get(requestId);
       if (state && !isTerminalStatus(state.status)) {
         this.updateState(requestId, {
-          status: 'timeout',
-          message: 'Execution timed out',
+          status: "timeout",
+          message: "Execution timed out",
         });
         this.stopPolling(requestId);
       }
@@ -311,7 +318,7 @@ export class ExecutionTracker {
 
   private updateState(
     requestId: string,
-    update: Partial<Pick<ExecutionState, 'status' | 'message' | 'result'>>,
+    update: Partial<Pick<ExecutionState, "status" | "message" | "result">>,
   ): void {
     const state = this.executions.get(requestId);
     if (!state) return;
@@ -337,10 +344,10 @@ export class ExecutionTracker {
   ): Promise<{
     status: ExecutionStatus;
     message?: string;
-    result?: ExecutionState['result'];
+    result?: ExecutionState["result"];
   } | null> {
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await sendWebEditorRuntimeMessage<any>({
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_STATUS_QUERY,
         requestId,
         sessionId,
@@ -368,6 +375,8 @@ export class ExecutionTracker {
 /**
  * Create an ExecutionTracker instance
  */
-export function createExecutionTracker(options?: ExecutionTrackerOptions): ExecutionTracker {
+export function createExecutionTracker(
+  options?: ExecutionTrackerOptions,
+): ExecutionTracker {
   return new ExecutionTracker(options);
 }

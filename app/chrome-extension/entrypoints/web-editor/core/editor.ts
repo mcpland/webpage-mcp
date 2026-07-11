@@ -15,60 +15,77 @@ import type {
   WebEditorTxChangedPayload,
   WebEditorTxChangeAction,
   WebEditorApi,
-} from '@/common/web-editor-types';
+} from "@/common/web-editor-types";
 import {
   BACKGROUND_MESSAGE_TYPES,
   PRIVILEGED_UI_ACTIONS,
   PRIVILEGED_UI_SURFACES,
-} from '@/common/message-types';
+} from "@/common/message-types";
 import {
   authorizePrivilegedUiAction,
   closePrivilegedUiSurfaceSession,
-} from '@/utils/privileged-ui-authorization';
-import { WEB_EDITOR_VERSION, WEB_EDITOR_LOG_PREFIX } from '../constants';
-import { mountShadowHost, type ShadowHostManager } from '../ui/shadow-host';
-import { createToolbar, type Toolbar } from '../ui/toolbar';
-import { createBreadcrumbs, type Breadcrumbs } from '../ui/breadcrumbs';
-import { createPropertyPanel, type PropertyPanel } from '../ui/property-panel';
-import { createPropsBridge, type PropsBridge } from './props-bridge';
-import { createCanvasOverlay, type CanvasOverlay } from '../overlay/canvas-overlay';
-import { createHandlesController, type HandlesController } from '../overlay/handles-controller';
+} from "@/utils/privileged-ui-authorization";
+import { WEB_EDITOR_VERSION, WEB_EDITOR_LOG_PREFIX } from "../constants";
+import { mountShadowHost, type ShadowHostManager } from "../ui/shadow-host";
+import { createToolbar, type Toolbar } from "../ui/toolbar";
+import { createBreadcrumbs, type Breadcrumbs } from "../ui/breadcrumbs";
+import { createPropertyPanel, type PropertyPanel } from "../ui/property-panel";
+import { createPropsBridge, type PropsBridge } from "./props-bridge";
+import {
+  createCanvasOverlay,
+  type CanvasOverlay,
+} from "../overlay/canvas-overlay";
+import {
+  createHandlesController,
+  type HandlesController,
+} from "../overlay/handles-controller";
 import {
   createDragReorderController,
   type DragReorderController,
-} from '../drag/drag-reorder-controller';
+} from "../drag/drag-reorder-controller";
 import {
   createEventController,
   type EventController,
   type EventModifiers,
-} from './event-controller';
-import { createPositionTracker, type PositionTracker, type TrackedRects } from './position-tracker';
-import { createSelectionEngine, type SelectionEngine } from '../selection/selection-engine';
+} from "./event-controller";
+import {
+  createPositionTracker,
+  type PositionTracker,
+  type TrackedRects,
+} from "./position-tracker";
+import {
+  createSelectionEngine,
+  type SelectionEngine,
+} from "../selection/selection-engine";
 import {
   createTransactionManager,
   type TransactionManager,
   type TransactionChangeEvent,
-} from './transaction-manager';
-import { locateElement, createElementLocator } from './locator';
-import { sendTransactionToAgent } from './payload-builder';
-import { aggregateTransactionsByElement } from './transaction-aggregator';
+} from "./transaction-manager";
+import { locateElement, createElementLocator } from "./locator";
+import { sendTransactionToAgent } from "./payload-builder";
+import { aggregateTransactionsByElement } from "./transaction-aggregator";
 import {
   generateStableElementKey,
   generateElementLabel,
   generateFullElementLabel,
-} from './element-key';
+} from "./element-key";
 import {
   createExecutionTracker,
   type ExecutionTracker,
   type ExecutionState,
-} from './execution-tracker';
-import { createDesignTokensService, type DesignTokensService } from './design-tokens';
+} from "./execution-tracker";
+import {
+  createDesignTokensService,
+  type DesignTokensService,
+} from "./design-tokens";
 import {
   createApplyVerificationSnapshotFromSummaries,
   createApplyVerificationSnapshotFromTransaction,
   verifyApplySnapshotSettled,
   type ApplyVerificationSnapshot,
-} from './apply-verifier';
+} from "./apply-verifier";
+import { sendWebEditorRuntimeMessage } from "./runtime-messaging";
 
 // =============================================================================
 // Types
@@ -207,16 +224,16 @@ export function createWebEditor(): WebEditorApi {
     const { element, beforeContentEditable, beforeSpellcheck } = session;
 
     if (beforeContentEditable === null) {
-      element.removeAttribute('contenteditable');
+      element.removeAttribute("contenteditable");
     } else {
-      element.setAttribute('contenteditable', beforeContentEditable);
+      element.setAttribute("contenteditable", beforeContentEditable);
     }
 
     element.spellcheck = beforeSpellcheck;
 
     // Remove event listeners
-    element.removeEventListener('keydown', session.keydownHandler, true);
-    element.removeEventListener('blur', session.blurHandler, true);
+    element.removeEventListener("keydown", session.keydownHandler, true);
+    element.removeEventListener("blur", session.blurHandler, true);
   }
 
   /** Commit the current edit session */
@@ -227,7 +244,7 @@ export function createWebEditor(): WebEditorApi {
     editSession = null;
 
     const element = session.element;
-    const afterText = element.textContent ?? '';
+    const afterText = element.textContent ?? "";
 
     // Normalize to text-only to avoid structure drift from contentEditable
     element.textContent = afterText;
@@ -236,7 +253,11 @@ export function createWebEditor(): WebEditorApi {
 
     // Record transaction if text changed
     if (session.beforeText !== afterText) {
-      state.transactionManager?.recordText(element, session.beforeText, afterText);
+      state.transactionManager?.recordText(
+        element,
+        session.beforeText,
+        afterText,
+      );
     }
 
     console.log(`${WEB_EDITOR_LOG_PREFIX} Text edit committed`);
@@ -274,30 +295,30 @@ export function createWebEditor(): WebEditorApi {
       commitEdit();
     }
 
-    const beforeText = element.textContent ?? '';
-    const beforeContentEditable = element.getAttribute('contenteditable');
+    const beforeText = element.textContent ?? "";
+    const beforeContentEditable = element.getAttribute("contenteditable");
     const beforeSpellcheck = element.spellcheck;
 
     // ESC cancels editing
     const keydownHandler = (ev: KeyboardEvent) => {
-      if (ev.key !== 'Escape') return;
+      if (ev.key !== "Escape") return;
       ev.preventDefault();
       ev.stopPropagation();
       ev.stopImmediatePropagation();
       cancelEdit();
-      state.eventController?.setMode('selecting');
+      state.eventController?.setMode("selecting");
     };
 
     // Blur commits editing
     const blurHandler = () => {
       commitEdit();
-      state.eventController?.setMode('selecting');
+      state.eventController?.setMode("selecting");
     };
 
-    element.addEventListener('keydown', keydownHandler, true);
-    element.addEventListener('blur', blurHandler, true);
+    element.addEventListener("keydown", keydownHandler, true);
+    element.addEventListener("blur", blurHandler, true);
 
-    element.setAttribute('contenteditable', 'true');
+    element.setAttribute("contenteditable", "true");
     element.spellcheck = false;
 
     try {
@@ -336,7 +357,8 @@ export function createWebEditor(): WebEditorApi {
 
     // Determine if we should animate the hover rect transition
     // Only animate when switching between two valid elements (not null)
-    const shouldAnimate = prevElement !== null && element !== null && prevElement !== element;
+    const shouldAnimate =
+      prevElement !== null && element !== null && prevElement !== element;
     state.pendingHoverTransition = shouldAnimate;
 
     // Delegate position tracking to PositionTracker
@@ -384,8 +406,12 @@ export function createWebEditor(): WebEditorApi {
     broadcastSelectionChanged(element);
 
     // Log selection with modifier info for debugging
-    const modInfo = modifiers.alt ? ' (Alt: drill-up)' : '';
-    console.log(`${WEB_EDITOR_LOG_PREFIX} Selected${modInfo}:`, element.tagName, element);
+    const modInfo = modifiers.alt ? " (Alt: drill-up)" : "";
+    console.log(
+      `${WEB_EDITOR_LOG_PREFIX} Selected${modInfo}:`,
+      element.tagName,
+      element,
+    );
   }
 
   /**
@@ -449,11 +475,12 @@ export function createWebEditor(): WebEditorApi {
   // AgentChat Integration (Phase 1.4)
   // ===========================================================================
 
-  const WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX = 'web-editor-tx-changed-' as const;
+  const WEB_EDITOR_TX_CHANGED_SESSION_KEY_PREFIX =
+    "web-editor-tx-changed-" as const;
   const TX_CHANGED_BROADCAST_DEBOUNCE_MS = 100;
 
   let txChangedBroadcastTimer: number | null = null;
-  let pendingTxAction: WebEditorTxChangeAction = 'push';
+  let pendingTxAction: WebEditorTxChangeAction = "push";
 
   /**
    * Broadcast aggregated transaction state to extension UI (e.g., Sidepanel).
@@ -470,7 +497,7 @@ export function createWebEditor(): WebEditorApi {
 
     // For 'clear' action, broadcast immediately without debounce
     // This ensures UI updates instantly when user applies changes
-    const shouldBroadcastImmediately = action === 'clear';
+    const shouldBroadcastImmediately = action === "clear";
 
     if (txChangedBroadcastTimer !== null) {
       window.clearTimeout(txChangedBroadcastTimer);
@@ -496,22 +523,21 @@ export function createWebEditor(): WebEditorApi {
       };
 
       // Broadcast to extension UI (background will handle storage persistence)
-      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        chrome.runtime
-          .sendMessage({
-            type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
-            payload,
-          })
-          .catch(() => {
-            // Ignore if no listeners (e.g., sidepanel not open)
-          });
-      }
+      void sendWebEditorRuntimeMessage({
+        type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
+        payload,
+      }).catch(() => {
+        // Ignore if no listeners (e.g., sidepanel not open)
+      });
     };
 
     if (shouldBroadcastImmediately) {
       doBroadcast();
     } else {
-      txChangedBroadcastTimer = window.setTimeout(doBroadcast, TX_CHANGED_BROADCAST_DEBOUNCE_MS);
+      txChangedBroadcastTimer = window.setTimeout(
+        doBroadcast,
+        TX_CHANGED_BROADCAST_DEBOUNCE_MS,
+      );
     }
   }
 
@@ -555,16 +581,12 @@ export function createWebEditor(): WebEditorApi {
     };
 
     // Broadcast immediately (no debounce for selection changes)
-    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-      chrome.runtime
-        .sendMessage({
-          type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
-          payload,
-        })
-        .catch(() => {
-          // Ignore if no listeners (e.g., sidepanel not open)
-        });
-    }
+    void sendWebEditorRuntimeMessage({
+      type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
+      payload,
+    }).catch(() => {
+      // Ignore if no listeners (e.g., sidepanel not open)
+    });
   }
 
   /**
@@ -575,14 +597,12 @@ export function createWebEditor(): WebEditorApi {
     // Reset selection dedupe so next start can broadcast correctly
     lastBroadcastedSelectionKey = null;
 
-    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
-
     const pageUrl = window.location.href;
 
     // Send empty TX state
     const txPayload: WebEditorTxChangedPayload = {
       tabId: 0,
-      action: 'clear',
+      action: "clear",
       elements: [],
       undoCount: 0,
       redoCount: 0,
@@ -597,19 +617,15 @@ export function createWebEditor(): WebEditorApi {
       pageUrl,
     };
 
-    chrome.runtime
-      .sendMessage({
-        type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
-        payload: txPayload,
-      })
-      .catch(() => {});
+    void sendWebEditorRuntimeMessage({
+      type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TX_CHANGED,
+      payload: txPayload,
+    }).catch(() => {});
 
-    chrome.runtime
-      .sendMessage({
-        type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
-        payload: selectionPayload,
-      })
-      .catch(() => {});
+    void sendWebEditorRuntimeMessage({
+      type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_SELECTION_CHANGED,
+      payload: selectionPayload,
+    }).catch(() => {});
   }
 
   /**
@@ -626,7 +642,7 @@ export function createWebEditor(): WebEditorApi {
     state.toolbar?.setHistory(undoCount, redoCount);
 
     // Refresh property panel after undo/redo to reflect current styles
-    if (action === 'undo' || action === 'redo') {
+    if (action === "undo" || action === "redo") {
       state.propertyPanel?.refresh();
     }
 
@@ -636,7 +652,6 @@ export function createWebEditor(): WebEditorApi {
     if (!state.applyingSnapshot) {
       invalidatePendingApplyVerification();
     }
-
   }
 
   /**
@@ -650,26 +665,34 @@ export function createWebEditor(): WebEditorApi {
    * - 'stack_empty': Undo stack is empty (tx was already undone)
    * - 'tx_changed': User made new edits or tx was merged
    */
-  type ApplyTxStatus = 'ok' | 'no_snapshot' | 'tm_unavailable' | 'stack_empty' | 'tx_changed';
+  type ApplyTxStatus =
+    | "ok"
+    | "no_snapshot"
+    | "tm_unavailable"
+    | "stack_empty"
+    | "tx_changed";
 
   function checkApplyingTxStatus(): ApplyTxStatus {
     const snapshot = state.applyingSnapshot;
-    if (!snapshot) return 'no_snapshot';
+    if (!snapshot) return "no_snapshot";
 
     const tm = state.transactionManager;
-    if (!tm) return 'tm_unavailable';
+    if (!tm) return "tm_unavailable";
 
     const undoStack = tm.getUndoStack();
-    if (undoStack.length === 0) return 'stack_empty';
+    if (undoStack.length === 0) return "stack_empty";
 
     const latest = undoStack[undoStack.length - 1]!;
 
     // Check both id and timestamp to handle merged transactions
-    if (latest.id !== snapshot.txId || latest.timestamp !== snapshot.txTimestamp) {
-      return 'tx_changed';
+    if (
+      latest.id !== snapshot.txId ||
+      latest.timestamp !== snapshot.txTimestamp
+    ) {
+      return "tx_changed";
     }
 
-    return 'ok';
+    return "ok";
   }
 
   /**
@@ -684,19 +707,23 @@ export function createWebEditor(): WebEditorApi {
     const status = checkApplyingTxStatus();
 
     // Cannot rollback: TM not available or no snapshot
-    if (status === 'no_snapshot' || status === 'tm_unavailable') {
-      console.error(`${WEB_EDITOR_LOG_PREFIX} Apply failed, unable to revert (${status})`);
+    if (status === "no_snapshot" || status === "tm_unavailable") {
+      console.error(
+        `${WEB_EDITOR_LOG_PREFIX} Apply failed, unable to revert (${status})`,
+      );
       return `${originalError} (unable to revert)`;
     }
 
     // Stack is empty - tx was already undone (race condition or user action)
-    if (status === 'stack_empty') {
-      console.warn(`${WEB_EDITOR_LOG_PREFIX} Apply failed, stack empty (already reverted?)`);
+    if (status === "stack_empty") {
+      console.warn(
+        `${WEB_EDITOR_LOG_PREFIX} Apply failed, stack empty (already reverted?)`,
+      );
       return `${originalError} (already reverted)`;
     }
 
     // User made new edits during apply - don't rollback their work
-    if (status === 'tx_changed') {
+    if (status === "tx_changed") {
       console.warn(
         `${WEB_EDITOR_LOG_PREFIX} Apply failed but new edits detected, skipping auto-rollback`,
       );
@@ -707,12 +734,16 @@ export function createWebEditor(): WebEditorApi {
     const tm = state.transactionManager!;
     const undone = tm.undo();
     if (undone) {
-      console.log(`${WEB_EDITOR_LOG_PREFIX} Apply failed, changes auto-reverted`);
+      console.log(
+        `${WEB_EDITOR_LOG_PREFIX} Apply failed, changes auto-reverted`,
+      );
       return `${originalError} (changes reverted)`;
     }
 
     // undo() returned null - likely locateElement() failed
-    console.error(`${WEB_EDITOR_LOG_PREFIX} Apply failed and auto-revert also failed`);
+    console.error(
+      `${WEB_EDITOR_LOG_PREFIX} Apply failed and auto-revert also failed`,
+    );
     return `${originalError} (revert failed)`;
   }
 
@@ -727,22 +758,22 @@ export function createWebEditor(): WebEditorApi {
   ): Promise<{ requestId?: string; sessionId?: string }> {
     const tm = state.transactionManager;
     if (!tm) {
-      throw new Error('Transaction manager not ready');
+      throw new Error("Transaction manager not ready");
     }
 
     // Prevent concurrent apply operations
     if (state.applyingSnapshot) {
-      throw new Error('Apply already in progress');
+      throw new Error("Apply already in progress");
     }
 
     const undoStack = tm.getUndoStack();
     const tx = undoStack.length > 0 ? undoStack[undoStack.length - 1] : null;
     if (!tx) {
-      throw new Error('No changes to apply');
+      throw new Error("No changes to apply");
     }
 
     // Apply-to-Code currently supports only style/text transactions
-    if (tx.type !== 'style' && tx.type !== 'text') {
+    if (tx.type !== "style" && tx.type !== "text") {
       throw new Error(`Apply does not support "${tx.type}" transactions yet`);
     }
 
@@ -751,19 +782,21 @@ export function createWebEditor(): WebEditorApi {
       txId: tx.id,
       txTimestamp: tx.timestamp,
     };
-    const verificationSnapshot = createApplyVerificationSnapshotFromTransaction(tx);
+    const verificationSnapshot =
+      createApplyVerificationSnapshotFromTransaction(tx);
 
     // Markers indicating error was already processed by attemptRollbackOnFailure
     const ROLLBACK_MARKERS = [
-      '(changes reverted)',
-      '(new edits detected',
-      '(revert failed)',
-      '(unable to revert)',
-      '(already reverted)',
+      "(changes reverted)",
+      "(new edits detected",
+      "(revert failed)",
+      "(unable to revert)",
+      "(already reverted)",
     ];
 
     const isAlreadyProcessed = (err: unknown): boolean =>
-      err instanceof Error && ROLLBACK_MARKERS.some((m) => err.message.includes(m));
+      err instanceof Error &&
+      ROLLBACK_MARKERS.some((m) => err.message.includes(m));
 
     try {
       const resp = await sendTransactionToAgent(tx, authorizationToken);
@@ -775,8 +808,10 @@ export function createWebEditor(): WebEditorApi {
       } | null;
 
       if (r && r.success === true) {
-        const requestId = typeof r.requestId === 'string' ? r.requestId : undefined;
-        const sessionId = typeof r.sessionId === 'string' ? r.sessionId : undefined;
+        const requestId =
+          typeof r.requestId === "string" ? r.requestId : undefined;
+        const sessionId =
+          typeof r.sessionId === "string" ? r.sessionId : undefined;
 
         // Start tracking execution status if we have a requestId
         if (requestId && sessionId && state.executionTracker) {
@@ -787,7 +822,8 @@ export function createWebEditor(): WebEditorApi {
       }
 
       // Agent returned failure response - attempt rollback
-      const errorMsg = typeof r?.error === 'string' ? r.error : 'Agent request failed';
+      const errorMsg =
+        typeof r?.error === "string" ? r.error : "Agent request failed";
       throw new Error(attemptRollbackOnFailure(errorMsg));
     } catch (error) {
       // Re-throw if already processed by attemptRollbackOnFailure
@@ -796,7 +832,8 @@ export function createWebEditor(): WebEditorApi {
       }
 
       // Network error or other unprocessed exception - attempt rollback
-      const originalMsg = error instanceof Error ? error.message : String(error);
+      const originalMsg =
+        error instanceof Error ? error.message : String(error);
       throw new Error(attemptRollbackOnFailure(originalMsg));
     } finally {
       // Clear snapshot regardless of outcome
@@ -815,37 +852,38 @@ export function createWebEditor(): WebEditorApi {
   ): Promise<{ requestId?: string; sessionId?: string }> {
     const tm = state.transactionManager;
     if (!tm) {
-      throw new Error('Transaction manager not ready');
+      throw new Error("Transaction manager not ready");
     }
 
     // Prevent concurrent apply operations
     if (state.applyingSnapshot) {
-      throw new Error('Apply already in progress');
+      throw new Error("Apply already in progress");
     }
 
     const undoStack = tm.getUndoStack();
     if (undoStack.length === 0) {
-      throw new Error('No changes to apply');
+      throw new Error("No changes to apply");
     }
 
     // Block unsupported transaction types
     for (const tx of undoStack) {
-      if (tx.type === 'move') {
-        throw new Error('Apply does not support reorder operations yet');
+      if (tx.type === "move") {
+        throw new Error("Apply does not support reorder operations yet");
       }
-      if (tx.type === 'structure') {
-        throw new Error('Apply does not support structure operations yet');
+      if (tx.type === "structure") {
+        throw new Error("Apply does not support structure operations yet");
       }
-      if (tx.type !== 'style' && tx.type !== 'text' && tx.type !== 'class') {
+      if (tx.type !== "style" && tx.type !== "text" && tx.type !== "class") {
         throw new Error(`Apply does not support "${tx.type}" transactions`);
       }
     }
 
     const elements = aggregateTransactionsByElement(undoStack);
     if (elements.length === 0) {
-      throw new Error('No net changes to apply');
+      throw new Error("No net changes to apply");
     }
-    const verificationSnapshot = createApplyVerificationSnapshotFromSummaries(elements);
+    const verificationSnapshot =
+      createApplyVerificationSnapshotFromSummaries(elements);
 
     // Snapshot latest transaction for concurrency tracking
     const latestTx = undoStack[undoStack.length - 1]!;
@@ -855,8 +893,8 @@ export function createWebEditor(): WebEditorApi {
     };
 
     try {
-      if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
-        throw new Error('Chrome runtime API not available');
+      if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+        throw new Error("Chrome runtime API not available");
       }
 
       const payload: WebEditorApplyBatchPayload = {
@@ -866,7 +904,7 @@ export function createWebEditor(): WebEditorApi {
         pageUrl: window.location.href,
       };
 
-      const resp = await chrome.runtime.sendMessage({
+      const resp = await sendWebEditorRuntimeMessage({
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY_BATCH,
         authorizationToken,
         payload,
@@ -880,8 +918,10 @@ export function createWebEditor(): WebEditorApi {
       } | null;
 
       if (r && r.success === true) {
-        const requestId = typeof r.requestId === 'string' ? r.requestId : undefined;
-        const sessionId = typeof r.sessionId === 'string' ? r.sessionId : undefined;
+        const requestId =
+          typeof r.requestId === "string" ? r.requestId : undefined;
+        const sessionId =
+          typeof r.sessionId === "string" ? r.sessionId : undefined;
 
         // Start tracking execution status if we have a requestId
         if (requestId && sessionId && state.executionTracker) {
@@ -899,7 +939,8 @@ export function createWebEditor(): WebEditorApi {
         return { requestId, sessionId };
       }
 
-      const errorMsg = typeof r?.error === 'string' ? r.error : 'Agent request failed';
+      const errorMsg =
+        typeof r?.error === "string" ? r.error : "Agent request failed";
       throw new Error(errorMsg);
     } finally {
       state.applyingSnapshot = null;
@@ -913,18 +954,21 @@ export function createWebEditor(): WebEditorApi {
   async function revertElement(
     elementKey: WebEditorElementKey,
   ): Promise<WebEditorRevertElementResponse> {
-    const key = String(elementKey ?? '').trim();
+    const key = String(elementKey ?? "").trim();
     if (!key) {
-      return { success: false, error: 'elementKey is required' };
+      return { success: false, error: "elementKey is required" };
     }
 
     const tm = state.transactionManager;
     if (!tm) {
-      return { success: false, error: 'Transaction manager not ready' };
+      return { success: false, error: "Transaction manager not ready" };
     }
 
     if (state.applyingSnapshot) {
-      return { success: false, error: 'Cannot revert while Apply is in progress' };
+      return {
+        success: false,
+        error: "Cannot revert while Apply is in progress",
+      };
     }
 
     try {
@@ -933,32 +977,38 @@ export function createWebEditor(): WebEditorApi {
       const summary = summaries.find((s) => s.elementKey === key);
 
       if (!summary) {
-        return { success: false, error: 'Element not found in current changes' };
+        return {
+          success: false,
+          error: "Element not found in current changes",
+        };
       }
 
       const element = locateElement(summary.locator);
       if (!element || !element.isConnected) {
-        return { success: false, error: 'Failed to locate element for revert' };
+        return { success: false, error: "Failed to locate element for revert" };
       }
 
-      const reverted: NonNullable<WebEditorRevertElementResponse['reverted']> = {};
+      const reverted: NonNullable<WebEditorRevertElementResponse["reverted"]> =
+        {};
       let didRevert = false;
 
       // Revert class first so subsequent locators are based on baseline classes.
       const classChanges = summary.netEffect.classChanges;
       if (classChanges) {
-        const baselineClasses = Array.isArray(classChanges.before) ? classChanges.before : [];
+        const baselineClasses = Array.isArray(classChanges.before)
+          ? classChanges.before
+          : [];
         const beforeClasses = (() => {
           try {
             const list = (element as HTMLElement).classList;
-            if (list && typeof list[Symbol.iterator] === 'function') {
+            if (list && typeof list[Symbol.iterator] === "function") {
               return Array.from(list).filter(Boolean);
             }
           } catch {
             // Fallback for non-HTMLElement
           }
 
-          const raw = element.getAttribute('class') ?? '';
+          const raw = element.getAttribute("class") ?? "";
           return raw
             .split(/\s+/)
             .map((t) => t.trim())
@@ -975,8 +1025,8 @@ export function createWebEditor(): WebEditorApi {
       // Revert text content
       const textChange = summary.netEffect.textChange;
       if (textChange) {
-        const baselineText = String(textChange.before ?? '');
-        const beforeText = element.textContent ?? '';
+        const baselineText = String(textChange.before ?? "");
+        const beforeText = element.textContent ?? "";
 
         if (beforeText !== baselineText) {
           element.textContent = baselineText;
@@ -994,8 +1044,10 @@ export function createWebEditor(): WebEditorApi {
         const before = styleChanges.before ?? {};
         const after = styleChanges.after ?? {};
 
-        const properties = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]))
-          .map((p) => String(p ?? '').trim())
+        const properties = Array.from(
+          new Set([...Object.keys(before), ...Object.keys(after)]),
+        )
+          .map((p) => String(p ?? "").trim())
           .filter(Boolean);
 
         if (properties.length > 0) {
@@ -1012,7 +1064,7 @@ export function createWebEditor(): WebEditorApi {
       }
 
       if (!didRevert) {
-        return { success: false, error: 'No changes were reverted' };
+        return { success: false, error: "No changes were reverted" };
       }
 
       // Ensure property panel reflects reverted values immediately
@@ -1041,7 +1093,7 @@ export function createWebEditor(): WebEditorApi {
     // Use EventController to properly transition to hover mode
     // This triggers onDeselect callback → handleDeselect → broadcastSelectionChanged(null)
     if (state.eventController) {
-      state.eventController.setMode('hover');
+      state.eventController.setMode("hover");
 
       // Edge case: if setMode('hover') didn't trigger deselect (e.g., already in hover mode
       // but selectedElement was set programmatically), manually call handleDeselect
@@ -1067,8 +1119,10 @@ export function createWebEditor(): WebEditorApi {
     const requestId = state.latestExecutionRequestId;
     if (!requestId) return;
 
-    const hadPendingSnapshot = state.pendingApplyVerifications.delete(requestId);
-    const verificationInFlight = state.verificationInFlightRequestId === requestId;
+    const hadPendingSnapshot =
+      state.pendingApplyVerifications.delete(requestId);
+    const verificationInFlight =
+      state.verificationInFlightRequestId === requestId;
     if (!hadPendingSnapshot && !verificationInFlight) {
       return;
     }
@@ -1078,7 +1132,7 @@ export function createWebEditor(): WebEditorApi {
 
     if (verificationInFlight) {
       state.verificationInFlightRequestId = null;
-      state.toolbar?.setStatus('idle');
+      state.toolbar?.setStatus("idle");
     }
   }
 
@@ -1112,7 +1166,10 @@ export function createWebEditor(): WebEditorApi {
       if (state.latestExecutionRequestId !== requestId) return;
       if (state.verificationEpoch !== verificationEpoch) return;
       const message = error instanceof Error ? error.message : String(error);
-      state.toolbar?.setStatus('uncertain', message || 'Post-apply verification failed');
+      state.toolbar?.setStatus(
+        "uncertain",
+        message || "Post-apply verification failed",
+      );
     } finally {
       if (state.verificationInFlightRequestId === requestId) {
         state.verificationInFlightRequestId = null;
@@ -1126,7 +1183,9 @@ export function createWebEditor(): WebEditorApi {
    */
   function start(surfaceSessionId: string): void {
     if (stopInFlight) {
-      console.warn(`${WEB_EDITOR_LOG_PREFIX} Stop is still draining props mutations`);
+      console.warn(
+        `${WEB_EDITOR_LOG_PREFIX} Stop is still draining props mutations`,
+      );
       return;
     }
     if (state.active) {
@@ -1141,7 +1200,7 @@ export function createWebEditor(): WebEditorApi {
       // Initialize Canvas Overlay
       const elements = state.shadowHost.getElements();
       if (!elements?.overlayRoot) {
-        throw new Error('Shadow host overlayRoot not available');
+        throw new Error("Shadow host overlayRoot not available");
       }
       state.canvasOverlay = createCanvasOverlay({
         container: elements.overlayRoot,
@@ -1169,12 +1228,16 @@ export function createWebEditor(): WebEditorApi {
           const session = editSession;
           if (session?.element) {
             try {
-              const path = typeof event.composedPath === 'function' ? event.composedPath() : null;
+              const path =
+                typeof event.composedPath === "function"
+                  ? event.composedPath()
+                  : null;
               if (path?.some((node) => node === session.element)) return true;
             } catch {
               // Fallback
               const target = event.target;
-              if (target instanceof Node && session.element.contains(target)) return true;
+              if (target instanceof Node && session.element.contains(target))
+                return true;
             }
           }
           return false;
@@ -1210,9 +1273,11 @@ export function createWebEditor(): WebEditorApi {
         onDeselect: handleDeselect,
         onStartEdit: startEdit,
         findTargetForSelect: (_x, _y, modifiers, event) =>
-          state.selectionEngine?.findBestTargetFromEvent(event, modifiers) ?? null,
+          state.selectionEngine?.findBestTargetFromEvent(event, modifiers) ??
+          null,
         getSelectedElement: () => state.selectedElement,
-        onStartDrag: (ev) => state.dragReorderController?.onDragStart(ev) ?? false,
+        onStartDrag: (ev) =>
+          state.dragReorderController?.onDragStart(ev) ?? false,
         onDragMove: (ev) => state.dragReorderController?.onDragMove(ev),
         onDragEnd: (ev) => state.dragReorderController?.onDragEnd(ev),
         onDragCancel: (ev) => state.dragReorderController?.onDragCancel(ev),
@@ -1225,20 +1290,28 @@ export function createWebEditor(): WebEditorApi {
             return;
           }
 
-          const verificationInvalidated = state.invalidatedApplyRequests.has(execState.requestId);
-          if (verificationInvalidated && execState.status === 'completed') {
+          const verificationInvalidated = state.invalidatedApplyRequests.has(
+            execState.requestId,
+          );
+          if (verificationInvalidated && execState.status === "completed") {
             state.pendingApplyVerifications.delete(execState.requestId);
             state.invalidatedApplyRequests.delete(execState.requestId);
             state.toolbar?.setStatus(
-              'completed',
-              execState.message || 'Completed (post-apply verification skipped after local changes)',
+              "completed",
+              execState.message ||
+                "Completed (post-apply verification skipped after local changes)",
             );
             return;
           }
 
-          const verificationSnapshot = state.pendingApplyVerifications.get(execState.requestId);
-          if (execState.status === 'completed' && verificationSnapshot) {
-            state.toolbar?.setStatus('verifying', 'Verifying applied changes...');
+          const verificationSnapshot = state.pendingApplyVerifications.get(
+            execState.requestId,
+          );
+          if (execState.status === "completed" && verificationSnapshot) {
+            state.toolbar?.setStatus(
+              "verifying",
+              "Verifying applied changes...",
+            );
             state.verificationEpoch += 1;
             const verificationEpoch = state.verificationEpoch;
             void runPostApplyVerification(
@@ -1250,29 +1323,32 @@ export function createWebEditor(): WebEditorApi {
           }
 
           if (
-            execState.status === 'failed' ||
-            execState.status === 'error' ||
-            execState.status === 'timeout' ||
-            execState.status === 'cancelled'
+            execState.status === "failed" ||
+            execState.status === "error" ||
+            execState.status === "timeout" ||
+            execState.status === "cancelled"
           ) {
             state.pendingApplyVerifications.delete(execState.requestId);
             state.invalidatedApplyRequests.delete(execState.requestId);
           }
 
           const statusMap: Record<string, string> = {
-            pending: 'applying',
-            starting: 'starting',
-            running: 'running',
-            locating: 'locating',
-            applying: 'applying',
-            completed: 'completed',
-            failed: 'failed',
-            error: 'failed', // Server may return 'error', treat same as 'failed'
-            timeout: 'timeout',
-            cancelled: 'cancelled',
+            pending: "applying",
+            starting: "starting",
+            running: "running",
+            locating: "locating",
+            applying: "applying",
+            completed: "completed",
+            failed: "failed",
+            error: "failed", // Server may return 'error', treat same as 'failed'
+            timeout: "timeout",
+            cancelled: "cancelled",
           };
-          type ToolbarStatusType = Parameters<NonNullable<typeof state.toolbar>['setStatus']>[0];
-          const toolbarStatus = (statusMap[execState.status] ?? 'running') as ToolbarStatusType;
+          type ToolbarStatusType = Parameters<
+            NonNullable<typeof state.toolbar>["setStatus"]
+          >[0];
+          const toolbarStatus = (statusMap[execState.status] ??
+            "running") as ToolbarStatusType;
           state.toolbar?.setStatus(toolbarStatus, execState.message);
         },
       });
@@ -1280,7 +1356,7 @@ export function createWebEditor(): WebEditorApi {
       // Initialize Toolbar UI
       state.toolbar = createToolbar({
         container: elements.uiRoot,
-        dock: 'top',
+        dock: "top",
         initialPosition: state.toolbarPosition,
         onPositionChange: (position) => {
           state.toolbarPosition = position;
@@ -1297,13 +1373,17 @@ export function createWebEditor(): WebEditorApi {
           // Full net effect check happens in applyAllTransactions() to avoid
           // performance issues during frequent merge events.
           for (const tx of undoStack) {
-            if (tx.type === 'move') {
-              return 'Apply does not support reorder operations yet';
+            if (tx.type === "move") {
+              return "Apply does not support reorder operations yet";
             }
-            if (tx.type === 'structure') {
-              return 'Apply does not support structure operations yet';
+            if (tx.type === "structure") {
+              return "Apply does not support structure operations yet";
             }
-            if (tx.type !== 'style' && tx.type !== 'text' && tx.type !== 'class') {
+            if (
+              tx.type !== "style" &&
+              tx.type !== "text" &&
+              tx.type !== "class"
+            ) {
               return `Apply does not support "${tx.type}" transactions`;
             }
           }
@@ -1326,7 +1406,7 @@ export function createWebEditor(): WebEditorApi {
           // For unwrap: select the unwrapped child
           // For duplicate: select the clone
           // For delete: deselect
-          if (data.action === 'delete') {
+          if (data.action === "delete") {
             handleDeselect();
           } else {
             // The transaction's targetLocator points to the new selection target
@@ -1356,7 +1436,7 @@ export function createWebEditor(): WebEditorApi {
       // Initialize Breadcrumbs UI (shows selected element ancestry)
       state.breadcrumbs = createBreadcrumbs({
         container: elements.uiRoot,
-        dock: 'top',
+        dock: "top",
         onSelect: (element) => {
           // When a breadcrumb is clicked, select that ancestor element
           if (element.isConnected) {
@@ -1381,7 +1461,7 @@ export function createWebEditor(): WebEditorApi {
         onPositionChange: (position) => {
           state.propertyPanelPosition = position;
         },
-        defaultTab: 'design',
+        defaultTab: "design",
         onSelectElement: (element) => {
           // When an element is selected from Components tree
           if (element.isConnected) {
@@ -1415,9 +1495,9 @@ export function createWebEditor(): WebEditorApi {
         });
       };
 
-      window.addEventListener('resize', onWindowResize, { passive: true });
+      window.addEventListener("resize", onWindowResize, { passive: true });
       state.uiResizeCleanup = () => {
-        window.removeEventListener('resize', onWindowResize);
+        window.removeEventListener("resize", onWindowResize);
         if (uiResizeRafId !== null) {
           window.cancelAnimationFrame(uiResizeRafId);
           uiResizeRafId = null;
@@ -1626,10 +1706,12 @@ export function createWebEditor(): WebEditorApi {
   function toggle(surfaceSessionId?: string): boolean {
     if (state.active) {
       stop();
-    } else if (/^[a-f0-9]{64}$/.test(surfaceSessionId ?? '')) {
+    } else if (/^[a-f0-9]{64}$/.test(surfaceSessionId ?? "")) {
       start(surfaceSessionId as string);
     } else {
-      console.warn(`${WEB_EDITOR_LOG_PREFIX} Privileged Web Editor session is required`);
+      console.warn(
+        `${WEB_EDITOR_LOG_PREFIX} Privileged Web Editor session is required`,
+      );
     }
     return state.active;
   }

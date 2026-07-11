@@ -118,7 +118,9 @@ Record each item as `PASS`, `BLOCKED`, or `N/A` with a reason. Any unchecked or
       supply executable logic.
 - [ ] If relying on the User Scripts API exception, explain that boundary
       accurately and verify that it applies only to code executed through that
-      API. The rest of the package must still comply with the remote-code rule.
+      API. Disclose both locally entered user scripts and the packaged Web
+      Editor's dedicated execution world. The rest of the package must still
+      comply with the remote-code rule.
 - [ ] Confirm the extension's remote endpoints and model-artifact behavior match
       the listing and privacy policy and remain compatible with Limited Use.
 

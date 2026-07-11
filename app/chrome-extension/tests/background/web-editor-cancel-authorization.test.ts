@@ -12,6 +12,7 @@ const nativeHostMocks = vi.hoisted(() => ({
 }));
 const authorizationMocks = vi.hoisted(() => ({
   consumePrivilegedUiAuthorization: vi.fn(),
+  validatePrivilegedUiSurfaceSession: vi.fn(async () => true),
 }));
 const sidepanelMocks = vi.hoisted(() => ({
   openAgentSetupSidepanel: vi.fn(),
@@ -77,11 +78,11 @@ describe("Web Editor execution cancellation authorization", () => {
     (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockResolvedValue({
       "agent-selected-session-id": "session-1",
     });
-    vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation(
-      (listener) => {
-        if (!requestListener) requestListener = listener as RequestListener;
-      },
-    );
+    vi.mocked(
+      chrome.runtime.onUserScriptMessage.addListener,
+    ).mockImplementation((listener) => {
+      if (!requestListener) requestListener = listener as RequestListener;
+    });
 
     const { initWebEditorListeners } =
       await import("@/entrypoints/background/web-editor");
@@ -96,6 +97,7 @@ describe("Web Editor execution cancellation authorization", () => {
       requestListener!(
         {
           type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY,
+          surfaceSessionId: "aa".repeat(32),
           authorizationToken: "apply-token",
           payload: {
             pageUrl: "https://example.com/editor",
@@ -134,6 +136,7 @@ describe("Web Editor execution cancellation authorization", () => {
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_STATUS_QUERY,
+        surfaceSessionId: "aa".repeat(32),
         requestId,
         sessionId: "session-1",
       },
@@ -151,6 +154,7 @@ describe("Web Editor execution cancellation authorization", () => {
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CANCEL_EXECUTION,
+        surfaceSessionId: "aa".repeat(32),
         authorizationToken: "cancel-token",
         payload: { requestId, sessionId: "session-1" },
       },
@@ -187,6 +191,7 @@ describe("Web Editor execution cancellation authorization", () => {
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CANCEL_EXECUTION,
+        surfaceSessionId: "aa".repeat(32),
         authorizationToken: "expired-token",
         payload: { requestId, sessionId: "session-1" },
       },
@@ -204,6 +209,7 @@ describe("Web Editor execution cancellation authorization", () => {
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CANCEL_EXECUTION,
+        surfaceSessionId: "aa".repeat(32),
         authorizationToken: "cancel-token",
         payload: { requestId, sessionId: "session-1" },
       },
