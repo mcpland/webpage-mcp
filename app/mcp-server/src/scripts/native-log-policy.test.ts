@@ -163,7 +163,10 @@ describe("native host wrappers", () => {
             line.includes("echo") && line.includes("ANTHROPIC_BASE_URL"),
         );
       expect(baseUrlOutputLines).toHaveLength(1);
-      expect(baseUrlOutputLines[0]).toContain(
+      const normalizedBaseUrlOutput = baseUrlOutputLines[0]
+        .replaceAll("^(", "(")
+        .replaceAll("^)", ")");
+      expect(normalizedBaseUrlOutput).toContain(
         "ANTHROPIC_BASE_URL is set (value hidden)",
       );
       expect(baseUrlOutputLines[0]).not.toContain("${ANTHROPIC_BASE_URL}");
