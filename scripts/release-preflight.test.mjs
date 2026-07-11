@@ -1219,6 +1219,8 @@ test("release workflow verifies before either publish mutation", async () => {
   );
   for (const requiredCheck of [
     /pnpm install --frozen-lockfile/,
+    /pnpm audit --prod/,
+    /uses: EmbarkStudios\/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe/,
     /pnpm typecheck/,
     /pnpm --filter webpage-mcp-connector compile/,
     /pnpm test:release/,
@@ -1433,20 +1435,134 @@ test("release native wrapper smoke withholds child stderr on failure", async (t)
   );
 });
 
-test("CI and release use maintained Node runtimes and Node 24 actions", async () => {
+test("dependency security gates cover npm and Cargo continuously", async () => {
+  const [ciWorkflow, releaseWorkflow, securityWorkflow, dependabot] =
+    await Promise.all([
+      readFile(join(REPOSITORY_ROOT, ".github/workflows/ci.yml"), "utf8"),
+      readFile(join(REPOSITORY_ROOT, ".github/workflows/release.yml"), "utf8"),
+      readFile(
+        join(REPOSITORY_ROOT, ".github/workflows/dependency-security.yml"),
+        "utf8",
+      ),
+      readFile(join(REPOSITORY_ROOT, ".github/dependabot.yml"), "utf8"),
+    ]);
+  const cargoDenyReference =
+    "EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe";
+
+  assert.match(
+    ciWorkflow,
+    /Audit production npm dependencies\s*\n\s+if: matrix\.node-version == 24\s*\n\s+run: pnpm audit --prod/,
+    "CI must audit the production npm graph once on its maintained Node line",
+  );
+
+  const releasePlatformGate = releaseWorkflow.slice(
+    releaseWorkflow.indexOf("  release-platform-gate:"),
+    releaseWorkflow.indexOf("  build-assets:"),
+  );
+  for (const [name, source] of [
+    ["CI", ciWorkflow],
+    ["release", releasePlatformGate],
+    ["scheduled dependency security", securityWorkflow],
+  ]) {
+    assert.match(
+      source,
+      /pnpm audit --prod/,
+      `${name} must fail on production npm advisories`,
+    );
+    const actionIndex = source.indexOf(`uses: ${cargoDenyReference}`);
+    assert.ok(
+      actionIndex >= 0,
+      `${name} must run the reviewed cargo-deny action`,
+    );
+    const stepStart = source.lastIndexOf("      - name:", actionIndex);
+    const nextStep = source.indexOf("\n      - name:", actionIndex);
+    const actionStep = source.slice(
+      stepStart,
+      nextStep >= 0 ? nextStep : source.length,
+    );
+    assert.match(actionStep, /rust-version: ["']1\.94\.0["']/);
+    assert.match(actionStep, /manifest-path: packages\/wasm-simd\/Cargo\.toml/);
+    assert.match(actionStep, /arguments: ["']--all-features --locked["']/);
+    assert.match(actionStep, /command: ["']check advisories["']/);
+  }
+
+  assert.match(
+    releasePlatformGate,
+    /Audit production npm dependencies once on Linux\s*\n\s+if: matrix\.enforce_coverage\s*\n\s+run: pnpm audit --prod/,
+    "the release npm advisory gate must run once on Linux",
+  );
+  assert.match(
+    releasePlatformGate,
+    /Audit Rust dependencies once on Linux\s*\n\s+if: matrix\.enforce_coverage\s*\n\s+uses: EmbarkStudios\/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe/,
+    "the Docker-based release Rust advisory gate must run only on Linux",
+  );
+
+  assert.match(
+    securityWorkflow,
+    /on:\s*\n\s+schedule:\s*\n\s+- cron: ["']17 4 \* \* \*["']\s*\n\s+workflow_dispatch:/,
+    "dependency security must run daily and support manual dispatch",
+  );
+  assert.match(
+    securityWorkflow,
+    /permissions:\s*\n\s+contents: read/,
+    "the advisory workflow must be read-only",
+  );
+  assert.doesNotMatch(
+    securityWorkflow,
+    /pnpm install/,
+    "the advisory-only workflow must not execute dependency lifecycle code",
+  );
+
+  const securityGates = [
+    ciWorkflow,
+    releasePlatformGate,
+    securityWorkflow,
+  ].join("\n");
+  assert.doesNotMatch(
+    securityGates,
+    /continue-on-error|ignore-registry-errors/,
+    "dependency advisory gates must fail closed",
+  );
+
+  for (const [ecosystem, directory] of [
+    ["github-actions", "/"],
+    ["npm", "/"],
+    ["cargo", "/packages/wasm-simd"],
+  ]) {
+    const escapedDirectory = directory.replaceAll("/", "\\/");
+    const entryPattern = new RegExp(
+      `package-ecosystem: ${ecosystem}\\r?\\n` +
+        `\\s+directory: ["']${escapedDirectory}["']\\r?\\n` +
+        `\\s+schedule:\\r?\\n\\s+interval: weekly\\r?\\n` +
+        `\\s+open-pull-requests-limit: 5`,
+      "g",
+    );
+    assert.equal(
+      Array.from(dependabot.matchAll(entryPattern)).length,
+      1,
+      `Dependabot must cover ${ecosystem} at ${directory} exactly once`,
+    );
+  }
+});
+
+test("CI workflows use maintained runtimes and reviewed actions", async () => {
   const workflowPaths = [
     join(REPOSITORY_ROOT, ".github/workflows/ci.yml"),
     join(REPOSITORY_ROOT, ".github/workflows/release.yml"),
+    join(REPOSITORY_ROOT, ".github/workflows/dependency-security.yml"),
   ];
   const workflows = await Promise.all(
     workflowPaths.map((workflowPath) => readFile(workflowPath, "utf8")),
+  );
+  const rootPackage = JSON.parse(
+    await readFile(join(REPOSITORY_ROOT, "package.json"), "utf8"),
   );
   const combined = workflows.join("\n");
 
   assert.doesNotMatch(
     combined,
     /node-version:\s*["']?20(?:["']?|\s|$)/,
-    "EOL Node.js 20 must not be used by CI or release jobs",
+    "EOL Node.js 20 must not be used by CI jobs",
   );
   assert.match(
     workflows[0],
@@ -1454,22 +1570,68 @@ test("CI and release use maintained Node runtimes and Node 24 actions", async ()
     "CI must verify both supported LTS release lines",
   );
 
-  const node24ActionCommits = new Set([
+  const reviewedActionCommits = new Set([
     "df4cb1c069e1874edd31b4311f1884172cec0e10", // actions/checkout v6.0.3
     "48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e", // actions/setup-node v6.4.0
     "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", // actions/upload-artifact v7.0.1
     "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", // actions/download-artifact v8.0.1
     "fc06bc1257f339d1d5d8b3a19a8cae5388b55320", // pnpm/action-setup v5.0.0
     "718ea10b132b3b2eba29c1007bb80653f286566b", // softprops/action-gh-release v3.0.1
+    "bb137d7af7e4fb67e5f82a49c4fce4fad40782fe", // EmbarkStudios/cargo-deny-action v2.0.20
   ]);
   const actionReferences = Array.from(
-    combined.matchAll(/^\s*uses:\s*([^\s#]+)@([a-f0-9]{40})/gm),
+    combined.matchAll(/^\s*uses:\s*([^\s#]+)/gm),
+    (match) => match[1],
   );
   assert.ok(actionReferences.length > 0, "workflows must use remote actions");
-  for (const [, action, commit] of actionReferences) {
+  for (const reference of actionReferences) {
+    assert.match(
+      reference,
+      /^[^@]+@[a-f0-9]{40}$/,
+      `remote action must be pinned to a full commit SHA: ${reference}`,
+    );
+    const separator = reference.lastIndexOf("@");
+    const action = reference.slice(0, separator);
+    const commit = reference.slice(separator + 1);
     assert.ok(
-      node24ActionCommits.has(commit),
-      `${action} must be pinned to the reviewed Node 24 action release`,
+      reviewedActionCommits.has(commit),
+      `${action} must be pinned to a reviewed action release`,
     );
   }
+
+  const pnpmSetupReferences = Array.from(
+    combined.matchAll(
+      /uses: pnpm\/action-setup@[a-f0-9]{40}[\s\S]{0,180}?version:\s*([^\s]+)/g,
+    ),
+    (match) => match[1],
+  );
+  const pnpmSetupCount = Array.from(
+    combined.matchAll(/^\s*uses: pnpm\/action-setup@/gm),
+  ).length;
+  assert.ok(pnpmSetupCount > 0, "workflows must pin pnpm");
+  assert.equal(
+    pnpmSetupReferences.length,
+    pnpmSetupCount,
+    "every pnpm setup step must declare a reviewed version",
+  );
+  const reviewedPackageManager =
+    "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e";
+  assert.equal(
+    rootPackage.packageManager,
+    reviewedPackageManager,
+    "the repository must pin the reviewed pnpm tarball for Corepack",
+  );
+  const packageManagerMatch =
+    /^pnpm@(\d+\.\d+\.\d+)\+sha512\.([a-f0-9]{128})$/.exec(
+      rootPackage.packageManager,
+    );
+  assert.ok(
+    packageManagerMatch,
+    "the repository pnpm contract must include a full SHA-512 integrity digest",
+  );
+  const repositoryPnpmVersion = packageManagerMatch[1];
+  assert.ok(
+    pnpmSetupReferences.every((version) => version === repositoryPnpmVersion),
+    `workflow pnpm versions must match packageManager ${repositoryPnpmVersion}: ${pnpmSetupReferences.join(", ")}`,
+  );
 });

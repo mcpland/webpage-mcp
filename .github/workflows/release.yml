@@ -113,7 +113,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
         with:
-          version: 10.33.0
+          version: 10.34.5
           run_install: false
 
       - name: Setup Node.js
@@ -124,6 +124,19 @@ jobs:
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Audit production npm dependencies once on Linux
+        if: matrix.enforce_coverage
+        run: pnpm audit --prod
+
+      - name: Audit Rust dependencies once on Linux
+        if: matrix.enforce_coverage
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
+        with:
+          rust-version: "1.94.0"
+          manifest-path: packages/wasm-simd/Cargo.toml
+          arguments: "--all-features --locked"
+          command: "check advisories"
 
       - name: Lint once on Linux
         if: matrix.enforce_coverage
@@ -192,7 +205,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
         with:
-          version: 10.33.0
+          version: 10.34.5
           run_install: false
 
       - name: Setup Node.js

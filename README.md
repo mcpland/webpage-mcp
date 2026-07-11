@@ -199,8 +199,12 @@ We aim to keep nearby versions compatible. If you run into connection, protocol,
 git clone https://github.com/mcpland/webpage-mcp.git
 cd webpage-mcp
 
-# Install dependencies
-pnpm install
+# Activate and install the exact pnpm release pinned by package.json
+corepack enable
+corepack install
+
+# Install the committed dependency graph
+pnpm install --frozen-lockfile
 
 # Build all packages
 pnpm build
@@ -377,9 +381,15 @@ Important:
 
 ### Quick Start
 
+The root `packageManager` contract pins both pnpm 10.34.5 and its registry
+SHA-512 digest. Use Corepack so local installs honor the same reviewed package
+manager bytes as CI.
+
 ```bash
-# Install dependencies
-pnpm install
+# Activate the repository-pinned pnpm and install dependencies
+corepack enable
+corepack install
+pnpm install --frozen-lockfile
 
 # Start all packages in dev mode (shared builds first, then parallel)
 pnpm dev
@@ -540,7 +550,21 @@ live store listing.
 **`ci.yml`**
 
 - Trigger: pushes and pull requests on `main`/`develop`
-- Runs: install, lint, typecheck (mcp/shared + extension), tests, build
+- Runs: frozen install, production npm and Rust advisory gates, lint,
+  typecheck (mcp/shared + extension), tests, build
+
+**`dependency-security.yml`**
+
+- Trigger: daily at 04:17 UTC and manual dispatch
+- Audits the committed production pnpm and Cargo lockfile graphs without
+  installing dependencies or executing dependency lifecycle scripts
+- Uses the same fail-closed npm and Rust advisory checks as CI and release, so
+  newly disclosed advisories are detected even when source code is unchanged
+
+Dependabot checks GitHub Actions, the root pnpm workspace, and the Rust/WASM
+crate weekly. Live advisory databases can make an unchanged commit fail a
+subsequent CI or release run; resolve or explicitly review the advisory rather
+than weakening the gate.
 
 **`release.yml`**
 
@@ -550,8 +574,8 @@ live store listing.
   commit SHA and requires Linux, Windows, and macOS gates on that exact commit.
   Every gate performs a frozen workspace install, typechecks, tests, builds,
   and exchanges a native-message ping/pong through the built platform wrapper.
-  Production coverage is collected only by the Linux gate rather than repeated
-  on all three operating systems.
+  Production npm and Rust advisory checks and coverage are collected only by
+  the Linux gate rather than repeated on all three operating systems.
 - Unified releases accept stable `x.y.z` versions only. Prerelease (`-rc.1`, `-beta.1`) and build-metadata (`+build.1`) versions are rejected before any artifact or publish step because Chrome's update version is numeric and must stay aligned with the npm package version.
 - Builds release assets:
   - Chrome extension zip (`app/chrome-extension/.output/webpage-mcp-connector-<version>-chrome-extension.zip`)
@@ -585,6 +609,9 @@ live store listing.
 - Safe session defaults and explicit dangerous-mode confirmation: `app/mcp-server/src/agent/session-security.test.ts` via `pnpm --filter webpage-mcp test`.
 - Localized extension strings: `pnpm --filter webpage-mcp-connector i18n:check`.
 - Stable-only unified release, artifact, version-setting, and standalone npm channel rules: `pnpm test:release`.
+- Production npm advisories: `pnpm audit --prod`. The scheduled Rust advisory
+  check runs cargo-deny against `packages/wasm-simd/Cargo.lock` with all
+  features and locked resolution.
 
 Human review is still required for the unresolved documentation owner (`NEEDS_OWNER`) and for installed-browser bootstrap behavior on each supported operating system.
 
