@@ -61,7 +61,41 @@ describe('performance trace tools', () => {
         filename: '/Users/alice/Downloads/perf-secret.json',
       },
     ]);
-    mocks.runtimeSendMessage.mockResolvedValue(undefined);
+    const nativeListeners = new Set<(message: any) => void>();
+    mocks.runtimeOnMessageAddListener.mockImplementation((listener) => {
+      nativeListeners.add(listener);
+    });
+    mocks.runtimeOnMessageRemoveListener.mockImplementation((listener) => {
+      nativeListeners.delete(listener);
+    });
+    mocks.runtimeSendMessage.mockImplementation(async (message) => {
+      const requestId = message?.message?.requestId;
+      const action = message?.message?.payload?.action;
+      if (action === 'prepareFile') {
+        nativeListeners.forEach((listener) =>
+          listener({
+            type: 'file_operation_response',
+            responseToRequestId: requestId,
+            payload: {
+              success: true,
+              filePath: `/private/native/${requestId}.json`,
+            },
+          }),
+        );
+      } else if (action === 'analyzeTrace' || action === 'cleanupFile') {
+        nativeListeners.forEach((listener) =>
+          listener({
+            type: 'file_operation_response',
+            responseToRequestId: requestId,
+            payload:
+              action === 'cleanupFile'
+                ? { success: true }
+                : { success: false, error: 'analysis unavailable in default mock' },
+          }),
+        );
+      }
+      return { success: true };
+    });
     mocks.alarmsCreate.mockResolvedValue(undefined);
     mocks.alarmsClear.mockResolvedValue(true);
 
@@ -248,6 +282,29 @@ describe('performance trace tools', () => {
     expect('fullPath' in payload.saved).toBe(false);
   });
 
+  it('falls back immediately when native forwarding rejects the analysis copy', async () => {
+    const { performanceStartTraceTool, performanceStopTraceTool, performanceAnalyzeInsightTool } =
+      await loadPerformanceTools();
+    mocks.runtimeSendMessage.mockResolvedValue({
+      success: false,
+      error: 'Native host not connected',
+    });
+
+    await performanceStartTraceTool.execute({});
+    const stopPromise = performanceStopTraceTool.execute({ saveToDownloads: true });
+    const traceListener = mocks.debuggerOnEventAddListener.mock.calls[0]?.[0];
+    traceListener?.({ tabId: 7 }, 'Tracing.tracingComplete', {});
+
+    const stop = await stopPromise;
+    const analyze = await performanceAnalyzeInsightTool.execute({ tabId: 7 });
+
+    expect(stop.isError).toBe(false);
+    expect(String((analyze.content[0] as { text?: string })?.text || '')).toContain(
+      'Lightweight analysis',
+    );
+    expect(mocks.runtimeOnMessageRemoveListener).toHaveBeenCalledTimes(1);
+  });
+
   it('redacts saved trace paths in analyze responses while keeping native analysis enabled', async () => {
     const { performanceStartTraceTool, performanceStopTraceTool, performanceAnalyzeInsightTool } =
       await loadPerformanceTools();
@@ -270,7 +327,17 @@ describe('performance trace tools', () => {
     mocks.runtimeSendMessage.mockImplementation(async (message) => {
       const requestId = message?.message?.requestId;
       const action = message?.message?.payload?.action;
-      if (action === 'analyzeTrace') {
+      if (action === 'prepareFile') {
+        const listener = listeners.at(-1);
+        listener?.({
+          type: 'file_operation_response',
+          responseToRequestId: requestId,
+          payload: {
+            success: true,
+            filePath: '/private/native/performance-analysis.json',
+          },
+        });
+      } else if (action === 'analyzeTrace') {
         const listener = listeners.at(-1);
         listener?.({
           type: 'file_operation_response',
@@ -289,7 +356,7 @@ describe('performance trace tools', () => {
           payload: { success: true },
         });
       }
-      return undefined;
+      return { success: true };
     });
 
     await performanceStartTraceTool.execute({});
@@ -309,6 +376,33 @@ describe('performance trace tools', () => {
     });
     expect('fullPath' in payload.saved).toBe(false);
     expect(payload.summary).toEqual({ insightName: 'test-summary' });
+    const nativePayloads = mocks.runtimeSendMessage.mock.calls.map(
+      ([message]) => message?.message?.payload,
+    );
+    expect(nativePayloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'prepareFile',
+          fileName: expect.stringMatching(/^performance_trace_analysis_.*\.json$/),
+        }),
+        {
+          action: 'analyzeTrace',
+          traceFilePath: '/private/native/performance-analysis.json',
+          insightName: undefined,
+        },
+        {
+          action: 'cleanupFile',
+          filePath: '/private/native/performance-analysis.json',
+        },
+      ]),
+    );
+    expect(
+      nativePayloads.some(
+        (nativePayload) =>
+          nativePayload?.action === 'analyzeTrace' &&
+          nativePayload.traceFilePath === '/Users/alice/Downloads/perf-secret.json',
+      ),
+    ).toBe(false);
   });
 
   it('enforces the hard duration limit even when auto-stop is disabled', async () => {

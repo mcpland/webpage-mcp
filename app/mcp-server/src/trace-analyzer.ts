@@ -12,7 +12,7 @@ import { AgentFocus } from 'chrome-devtools-frontend/front_end/models/ai_assista
 export const MAX_TRACE_FILE_BYTES = 256 * 1024 * 1024;
 
 export async function readTraceJsonFile(
-  filePath: string,
+  filePathOrDescriptor: string | number,
   maximumBytes = MAX_TRACE_FILE_BYTES,
 ): Promise<any> {
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes <= 0) {
@@ -21,7 +21,11 @@ export async function readTraceJsonFile(
 
   const chunks: Buffer[] = [];
   let totalBytes = 0;
-  for await (const chunk of fs.createReadStream(filePath)) {
+  const stream =
+    typeof filePathOrDescriptor === 'number'
+      ? fs.createReadStream('', { fd: filePathOrDescriptor, autoClose: false })
+      : fs.createReadStream(filePathOrDescriptor);
+  for await (const chunk of stream) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     totalBytes += buffer.length;
     if (totalBytes > maximumBytes) {
@@ -29,7 +33,13 @@ export async function readTraceJsonFile(
     }
     chunks.push(buffer);
   }
-  return JSON.parse(Buffer.concat(chunks, totalBytes).toString('utf8'));
+  try {
+    return JSON.parse(Buffer.concat(chunks, totalBytes).toString('utf8'));
+  } catch {
+    // Recent Node.js versions include nearby source text in JSON.parse errors.
+    // Keep trace contents out of native messaging error responses.
+    throw new Error('Trace file contains invalid JSON');
+  }
 }
 
 export async function parseTrace(json: any): Promise<{
@@ -71,13 +81,13 @@ export function getInsightText(parsedTrace: any, insights: any, insightName: str
 }
 
 export async function analyzeTraceFile(
-  filePath: string,
+  filePathOrDescriptor: string | number,
   insightName?: string,
 ): Promise<{
   summary: string;
   insight?: string;
 }> {
-  const json = await readTraceJsonFile(filePath);
+  const json = await readTraceJsonFile(filePathOrDescriptor);
   const { parsedTrace, insights } = await parseTrace(json);
   const summary = getTraceSummary(parsedTrace);
   if (insightName) {

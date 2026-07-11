@@ -13,6 +13,8 @@ export const TEMP_UPLOAD_MAX_FILENAME_BYTES = 255;
 export const FILE_OPERATION_ACTION_MAX_BYTES = 64;
 export const FILE_OPERATION_PATH_MAX_BYTES = 4096;
 export const TRACE_INSIGHT_NAME_MAX_BYTES = 256;
+export const DEFAULT_TEMP_ARTIFACT_TTL_MS = 20 * 60 * 1000;
+export const MAX_TEMP_ARTIFACT_TTL_MS = 60 * 60 * 1000;
 const DATA_URL_PREFIX_ALLOWANCE = 4096;
 
 export interface FileHandlerLimits {
@@ -20,6 +22,7 @@ export interface FileHandlerLimits {
   maxFiles?: number;
   maxTotalBytes?: number;
   maxBase64ReadFileBytes?: number;
+  artifactTtlMs?: number;
 }
 
 interface ResolvedFileHandlerLimits {
@@ -27,6 +30,19 @@ interface ResolvedFileHandlerLimits {
   maxFiles: number;
   maxTotalBytes: number;
   maxBase64ReadFileBytes: number;
+  artifactTtlMs: number;
+}
+
+interface TempArtifactIdentity {
+  dev: bigint;
+  ino: bigint;
+  birthtimeNs: bigint;
+}
+
+interface TempArtifact {
+  identity: TempArtifactIdentity;
+  size: number;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 function resolvePositiveSafeInteger(
@@ -41,6 +57,18 @@ function resolvePositiveSafeInteger(
   return resolved;
 }
 
+function resolveArtifactTtl(value: number | undefined): number {
+  const resolved = resolvePositiveSafeInteger(
+    value,
+    DEFAULT_TEMP_ARTIFACT_TTL_MS,
+    'artifactTtlMs',
+  );
+  if (resolved > MAX_TEMP_ARTIFACT_TTL_MS) {
+    throw new RangeError(`artifactTtlMs must not exceed ${MAX_TEMP_ARTIFACT_TTL_MS}`);
+  }
+  return resolved;
+}
+
 /**
  * File handler for managing file uploads through the native messaging host
  */
@@ -49,6 +77,7 @@ export class FileHandler {
   private readonly limits: ResolvedFileHandlerLimits;
   private tempFileCount = 0;
   private tempFileBytes = 0;
+  private readonly tempArtifacts = new Map<string, TempArtifact>();
   private disposed = false;
   private readonly exitHandler = (): void => this.dispose();
 
@@ -74,6 +103,7 @@ export class FileHandler {
         DEFAULT_TEMP_BASE64_READ_MAX_FILE_BYTES,
         'maxBase64ReadFileBytes',
       ),
+      artifactTtlMs: resolveArtifactTtl(limits.artifactTtlMs),
     };
     // A per-process unpredictable directory prevents pre-planted symlinks and
     // cross-instance file access through a shared /tmp path.
@@ -92,9 +122,13 @@ export class FileHandler {
     if (this.disposed) return;
     this.disposed = true;
     process.removeListener('exit', this.exitHandler);
+    for (const artifact of this.tempArtifacts.values()) {
+      if (artifact.timer) clearTimeout(artifact.timer);
+    }
     fs.rmSync(this.tempDir, { recursive: true, force: true });
     this.tempFileCount = 0;
     this.tempFileBytes = 0;
+    this.tempArtifacts.clear();
   }
 
   /**
@@ -160,13 +194,17 @@ export class FileHandler {
           if (!targetPath) {
             return { success: false, error: 'traceFilePath is required' };
           }
+          let traceFd: number | undefined;
           try {
+            traceFd = this.openAnalyzableTrace(targetPath);
             // With tsconfig moduleResolution=NodeNext, relative ESM imports need explicit .js extension
             const { analyzeTraceFile } = await import('./trace-analyzer.js');
-            const res = await analyzeTraceFile(targetPath, insightName);
+            const res = await analyzeTraceFile(traceFd, insightName);
             return { success: true, ...res };
           } catch (e: any) {
             return { success: false, error: e?.message || String(e) };
+          } finally {
+            if (traceFd !== undefined) fs.closeSync(traceFd);
           }
         }
 
@@ -219,10 +257,45 @@ export class FileHandler {
       const finalFileName = this.normalizeTempFileName(fileName) || this.generateFileName();
       const filePath = this.resolveTempFilePath(finalFileName);
 
-      // Save to file
-      fs.writeFileSync(filePath, buffer, { flag: 'wx', mode: 0o600 });
+      const fileDescriptor = fs.openSync(
+        filePath,
+        fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+        0o600,
+      );
+      let stats: fs.BigIntStats;
+      let completed = false;
+      try {
+        fs.writeFileSync(fileDescriptor, buffer);
+        stats = fs.fstatSync(fileDescriptor, { bigint: true });
+        completed = true;
+      } finally {
+        try {
+          fs.closeSync(fileDescriptor);
+        } finally {
+          if (!completed) {
+            try {
+              fs.unlinkSync(filePath);
+            } catch {
+              // Best-effort rollback for a failed create.
+            }
+          }
+        }
+      }
+
       this.tempFileCount += 1;
       this.tempFileBytes += buffer.length;
+      const artifact: TempArtifact = {
+        identity: this.identityFromStats(stats),
+        size: buffer.length,
+      };
+      this.tempArtifacts.set(filePath, artifact);
+      artifact.timer = setTimeout(
+        () => this.expireArtifact(filePath, artifact),
+        this.limits.artifactTtlMs,
+      );
+      if (typeof artifact.timer === 'object' && 'unref' in artifact.timer) {
+        artifact.timer.unref();
+      }
 
       return {
         success: true,
@@ -284,18 +357,36 @@ export class FileHandler {
         };
       }
 
-      if (fs.existsSync(resolvedPath)) {
-        const safePath = this.resolveSafeExistingTempFile(resolvedPath);
-        const size = fs.statSync(safePath).size;
-        fs.unlinkSync(safePath);
-        this.tempFileCount = Math.max(0, this.tempFileCount - 1);
-        this.tempFileBytes = Math.max(0, this.tempFileBytes - size);
+      const artifact = this.tempArtifacts.get(resolvedPath);
+      if (!artifact) {
+        if (fs.existsSync(resolvedPath)) {
+          return {
+            success: false,
+            error: 'Can only cleanup files created by this handler',
+          };
+        }
+        return {
+          success: true,
+          message: 'File cleaned up successfully',
+        };
       }
 
-      return {
-        success: true,
-        message: 'File cleaned up successfully',
-      };
+      try {
+        if (fs.existsSync(resolvedPath)) {
+          const stats = fs.lstatSync(resolvedPath, { bigint: true });
+          if (!stats.isFile() || !this.identitiesMatch(artifact.identity, stats)) {
+            throw new Error('Refusing to cleanup a replaced temporary artifact');
+          }
+          fs.unlinkSync(resolvedPath);
+        }
+        return {
+          success: true,
+          message: 'File cleaned up successfully',
+        };
+      } finally {
+        // Missing and replaced paths must not retain authorization or quota.
+        this.forgetArtifact(resolvedPath, artifact);
+      }
     } catch (error) {
       return {
         success: false,
@@ -389,6 +480,82 @@ export class FileHandler {
     return realFilePath;
   }
 
+  private openAnalyzableTrace(filePath: string): number {
+    const resolvedPath = this.resolveExistingTempFilePath(filePath);
+    if (!resolvedPath) {
+      throw new Error('Can only analyze trace files in the private temp directory');
+    }
+    const lstat = fs.lstatSync(resolvedPath);
+    if (lstat.isSymbolicLink()) {
+      throw new Error('Symbolic links are not allowed in the temp directory');
+    }
+    if (!lstat.isFile()) {
+      throw new Error(`Path is not a file: ${resolvedPath}`);
+    }
+
+    const artifact = this.tempArtifacts.get(resolvedPath);
+    if (!artifact) {
+      throw new Error('Can only analyze trace files created by this handler');
+    }
+
+    const noFollow =
+      typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+    const fileDescriptor = fs.openSync(resolvedPath, fs.constants.O_RDONLY | noFollow);
+    try {
+      const stats = fs.fstatSync(fileDescriptor, { bigint: true });
+      if (!stats.isFile()) {
+        throw new Error('Trace artifact is not a regular file');
+      }
+      if (!this.identitiesMatch(artifact.identity, stats)) {
+        throw new Error('Trace artifact identity changed after creation');
+      }
+      return fileDescriptor;
+    } catch (error) {
+      fs.closeSync(fileDescriptor);
+      throw error;
+    }
+  }
+
+  private identityFromStats(stats: fs.BigIntStats): TempArtifactIdentity {
+    return {
+      dev: stats.dev,
+      ino: stats.ino,
+      birthtimeNs: stats.birthtimeNs,
+    };
+  }
+
+  private identitiesMatch(identity: TempArtifactIdentity, stats: fs.BigIntStats): boolean {
+    return (
+      identity.dev === stats.dev &&
+      identity.ino === stats.ino &&
+      identity.birthtimeNs === stats.birthtimeNs
+    );
+  }
+
+  private forgetArtifact(filePath: string, artifact: TempArtifact): void {
+    if (this.tempArtifacts.get(filePath) !== artifact) return;
+    this.tempArtifacts.delete(filePath);
+    if (artifact.timer) clearTimeout(artifact.timer);
+    this.tempFileCount = Math.max(0, this.tempFileCount - 1);
+    this.tempFileBytes = Math.max(0, this.tempFileBytes - artifact.size);
+  }
+
+  private expireArtifact(filePath: string, artifact: TempArtifact): void {
+    if (this.tempArtifacts.get(filePath) !== artifact) return;
+    try {
+      if (fs.existsSync(filePath)) {
+        const stats = fs.lstatSync(filePath, { bigint: true });
+        if (stats.isFile() && this.identitiesMatch(artifact.identity, stats)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to expire temporary artifact:', error);
+    } finally {
+      this.forgetArtifact(filePath, artifact);
+    }
+  }
+
   /**
    * Clean up old temporary files (older than 1 hour)
    */
@@ -397,16 +564,16 @@ export class FileHandler {
       const now = Date.now();
       const oneHour = 60 * 60 * 1000;
 
-      const files = fs.readdirSync(this.tempDir);
-      for (const file of files) {
-        const filePath = path.join(this.tempDir, file);
-        const stats = fs.lstatSync(filePath);
-        if (!stats.isSymbolicLink() && stats.isFile() && now - stats.mtimeMs > oneHour) {
-          fs.unlinkSync(filePath);
-          this.tempFileCount = Math.max(0, this.tempFileCount - 1);
-          this.tempFileBytes = Math.max(0, this.tempFileBytes - stats.size);
+      for (const [filePath, artifact] of this.tempArtifacts) {
+        let shouldExpire = !fs.existsSync(filePath);
+        if (!shouldExpire) {
+          const stats = fs.lstatSync(filePath);
+          shouldExpire = stats.isFile() && now - stats.mtimeMs > oneHour;
+        }
+        if (shouldExpire) {
+          this.expireArtifact(filePath, artifact);
           // Use stderr to avoid polluting stdout (Native Messaging protocol)
-          console.error(`Cleaned up old temp file: ${file}`);
+          console.error(`Cleaned up old temp file: ${path.basename(filePath)}`);
         }
       }
     } catch (error) {

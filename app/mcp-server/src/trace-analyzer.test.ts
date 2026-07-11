@@ -66,4 +66,33 @@ describe('trace analyzer resource isolation', () => {
 
     await expect(readTraceJsonFile(filePath, 8)).rejects.toThrow('exceeds the 8 byte limit');
   });
+
+  it('reads from a caller-owned descriptor without reopening or closing it', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'webpage-mcp-trace-fd-'));
+    temporaryDirectories.push(directory);
+    const filePath = path.join(directory, 'trace.json');
+    await fs.writeFile(filePath, '{"traceEvents":[]}');
+    const handle = await fs.open(filePath, 'r');
+
+    try {
+      await expect(readTraceJsonFile(handle.fd)).resolves.toEqual({ traceEvents: [] });
+      await expect(handle.stat()).resolves.toMatchObject({ size: 18 });
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('does not include invalid trace contents in JSON parse errors', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'webpage-mcp-trace-json-'));
+    temporaryDirectories.push(directory);
+    const filePath = path.join(directory, 'trace.json');
+    const sensitiveContent = 'do-not-return-this-trace-content';
+    await fs.writeFile(filePath, `{"traceEvents":[]} ${sensitiveContent}`);
+
+    const error = await readTraceJsonFile(filePath).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Trace file contains invalid JSON');
+    expect((error as Error).message).not.toContain(sensitiveContent);
+  });
 });

@@ -126,6 +126,8 @@ interface LastTraceResult {
   expiresAt: number;
   tabUrl: string;
   saved?: SavedTraceArtifact;
+  /** Native-host private copy used for one-shot deep analysis. */
+  analysisFilePath?: string;
   metrics?: Record<string, number>;
   truncated: boolean;
   truncationReason?: TraceTruncationReason;
@@ -330,9 +332,17 @@ async function saveTraceToNativeTemp(
     const requestId = `trace-temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const timeoutMs = 30000;
     const resp = await new Promise<any>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let settled = false;
+      const finish = (result: { ok: true; value: any } | { ok: false; error: unknown }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         chrome.runtime.onMessage.removeListener(listener);
-        reject(new Error('Native temp save timed out'));
+        if (result.ok) resolve(result.value);
+        else reject(result.error);
+      };
+      const timer = setTimeout(() => {
+        finish({ ok: false, error: new Error('Native temp save timed out') });
       }, timeoutMs);
       const listener = (message: any) => {
         if (
@@ -340,14 +350,13 @@ async function saveTraceToNativeTemp(
           message.type === 'file_operation_response' &&
           message.responseToRequestId === requestId
         ) {
-          clearTimeout(timer);
-          chrome.runtime.onMessage.removeListener(listener);
-          resolve(message.payload);
+          finish({ ok: true, value: message.payload });
         }
       };
       chrome.runtime.onMessage.addListener(listener);
-      chrome.runtime
-        .sendMessage({
+      let acknowledgement: Promise<any>;
+      try {
+        acknowledgement = chrome.runtime.sendMessage({
           type: 'forward_to_native',
           message: {
             type: 'file_operation',
@@ -358,11 +367,22 @@ async function saveTraceToNativeTemp(
               fileName: filename,
             },
           },
+        });
+      } catch (error) {
+        finish({ ok: false, error });
+        return;
+      }
+      acknowledgement
+        .then((ack) => {
+          if (!ack || ack.success !== true) {
+            finish({
+              ok: false,
+              error: new Error(ack?.error || 'Native host did not accept trace preparation'),
+            });
+          }
         })
-        .catch((err) => {
-          clearTimeout(timer);
-          chrome.runtime.onMessage.removeListener(listener);
-          reject(err);
+        .catch((error) => {
+          finish({ ok: false, error });
         });
     });
 
@@ -493,8 +513,10 @@ function resultAlarmName(tabId: number): string {
 
 function disposeLastResult(tabId: number, result: LastTraceResult): void {
   void chrome.alarms.clear(resultAlarmName(tabId));
-  if (result.saved?.temporary && result.saved.fullPath) {
-    void cleanupNativeTempFile(result.saved.fullPath);
+  if (result.analysisFilePath) {
+    const analysisFilePath = result.analysisFilePath;
+    result.analysisFilePath = undefined;
+    void cleanupNativeTempFile(analysisFilePath);
   }
 }
 
@@ -523,8 +545,10 @@ function storeLastResult(tabId: number, result: LastTraceResult): void {
   const previous = LAST_RESULTS.get(tabId);
   if (previous) {
     LAST_RESULTS.delete(tabId);
-    if (previous.saved?.temporary && previous.saved.fullPath) {
-      void cleanupNativeTempFile(previous.saved.fullPath);
+    if (previous.analysisFilePath) {
+      const analysisFilePath = previous.analysisFilePath;
+      previous.analysisFilePath = undefined;
+      void cleanupNativeTempFile(analysisFilePath);
     }
   }
   LAST_RESULTS.set(tabId, result);
@@ -812,13 +836,20 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
       session.serializedBytes = actualSerializedBytes;
 
       let saved: SavedTraceArtifact | undefined;
+      let analysisFilePath: string | undefined;
       if (saveToDownloads) {
         saved = await saveTraceToDownloads(json, filenamePrefix || 'performance_trace');
+        // Downloads paths are outside the native host's private directory. Preserve deep
+        // analysis by creating a bounded private copy while the trace JSON is still in memory.
+        analysisFilePath = (
+          await saveTraceToNativeTemp(json, `${filenamePrefix || 'performance_trace'}_analysis`)
+        )?.fullPath;
       } else {
         // Persist to native temp directory so that analysis can run without Downloads permission
         const tempSaved = await saveTraceToNativeTemp(json, filenamePrefix || 'performance_trace');
         if (tempSaved) {
           saved = tempSaved;
+          analysisFilePath = tempSaved.fullPath;
         }
       }
       json = '';
@@ -835,6 +866,7 @@ class PerformanceStopTraceTool extends BaseBrowserToolExecutor {
         expiresAt: endedAt + LAST_RESULTS_TTL_MS,
         tabUrl: session.pageUrl || '',
         saved,
+        analysisFilePath,
         metrics,
         truncated: session.truncated,
         truncationReason: session.truncationReason,
@@ -914,8 +946,10 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
       }
 
       // Prefer native-side deep analysis when we have a saved file path
-      const fullPath = (result.saved && (result.saved as any).fullPath) || undefined;
+      const fullPath = result.analysisFilePath;
       if (fullPath) {
+        const temporarySavedArtifact =
+          result.saved?.temporary === true && result.saved.fullPath === fullPath;
         try {
           const requestId = `trace-analyze-${Date.now()}-${Math.random().toString(36).slice(2)}`;
           const timeoutMs = Math.max(10000, Math.min((args as any)?.timeoutMs ?? 60000, 300000));
@@ -952,10 +986,8 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
               });
           });
           if (resp && resp.success) {
-            // Best-effort cleanup for temp files (Downloads paths are ignored by native cleaner)
-            await cleanupNativeTempFile(fullPath);
             const publicSaved = toPublicSavedTraceArtifact(result.saved);
-            if (result.saved?.temporary) {
+            if (temporarySavedArtifact) {
               result.saved = publicSaved
                 ? { filename: publicSaved.filename, temporary: false }
                 : undefined;
@@ -985,6 +1017,18 @@ class PerformanceAnalyzeInsightTool extends BaseBrowserToolExecutor {
           // If native returned error, fall through to lightweight analysis
         } catch (e) {
           // Fallback to lightweight analysis below
+        } finally {
+          // Deep analysis is one-shot. Always release the private native artifact, including
+          // parser failures and messaging timeouts; download artifacts remain untouched.
+          if (result.analysisFilePath === fullPath) {
+            result.analysisFilePath = undefined;
+          }
+          await cleanupNativeTempFile(fullPath);
+          if (temporarySavedArtifact && result.saved?.temporary) {
+            result.saved = result.saved.filename
+              ? { filename: result.saved.filename, temporary: false }
+              : undefined;
+          }
         }
       }
 
