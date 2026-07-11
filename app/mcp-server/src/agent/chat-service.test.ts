@@ -566,6 +566,114 @@ describe('AgentChatService', () => {
     });
   });
 
+  it('keeps delimiter-like session and request identities isolated during cancellation', async () => {
+    const engineExecutions: Array<{
+      sessionId: string;
+      requestId: string;
+      signal: AbortSignal;
+      finish: () => void;
+    }> = [];
+    const claudeEngine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options) {
+        if (!options.signal) {
+          throw new Error('Expected execution abort signal');
+        }
+        const completion = deferred<void>();
+        engineExecutions.push({
+          sessionId: options.sessionId,
+          requestId: options.requestId,
+          signal: options.signal,
+          finish: () => completion.resolve(),
+        });
+        await completion.promise;
+      },
+    };
+    const service = new AgentChatService({
+      engines: [claudeEngine],
+      streamManager: new AgentStreamManager(),
+    });
+
+    await service.handleAct('a::b', {
+      instruction: 'Run tuple one',
+      projectId: 'project-1',
+      requestId: 'c',
+    });
+    await service.handleAct('a', {
+      instruction: 'Run tuple two',
+      projectId: 'project-1',
+      requestId: 'b::c',
+    });
+    await service.handleAct('a', {
+      instruction: 'Run sibling',
+      projectId: 'project-1',
+      requestId: 'sibling',
+    });
+
+    await vi.waitFor(() => {
+      expect(engineExecutions).toHaveLength(3);
+      expect(service.getRunningExecutions()).toHaveLength(3);
+    });
+
+    const firstExecution = engineExecutions.find(
+      (execution) => execution.sessionId === 'a::b' && execution.requestId === 'c',
+    );
+    const secondExecution = engineExecutions.find(
+      (execution) => execution.sessionId === 'a' && execution.requestId === 'b::c',
+    );
+    const siblingExecution = engineExecutions.find(
+      (execution) => execution.sessionId === 'a' && execution.requestId === 'sibling',
+    );
+    expect(firstExecution).toBeDefined();
+    expect(secondExecution).toBeDefined();
+    expect(siblingExecution).toBeDefined();
+
+    expect(service.cancelExecution('a', 'b::c')).toBe(true);
+    expect(secondExecution?.signal.aborted).toBe(true);
+    expect(firstExecution?.signal.aborted).toBe(false);
+    expect(siblingExecution?.signal.aborted).toBe(false);
+
+    await expect(
+      service.handleAct('a', {
+        instruction: 'Do not reuse the tombstone',
+        projectId: 'project-1',
+        requestId: 'b::c',
+      }),
+    ).rejects.toThrow('requestId is already active for this session');
+
+    secondExecution?.finish();
+    await vi.waitFor(async () => {
+      await expect(
+        service.handleAct('a', {
+          instruction: 'Reuse after settle',
+          projectId: 'project-1',
+          requestId: 'b::c',
+        }),
+      ).resolves.toEqual({ requestId: 'b::c' });
+    });
+
+    await vi.waitFor(() => {
+      expect(engineExecutions).toHaveLength(4);
+    });
+    const restartedExecution = engineExecutions.at(-1);
+    expect(restartedExecution).toMatchObject({
+      sessionId: 'a',
+      requestId: 'b::c',
+    });
+
+    expect(service.cancelExecution('a::b', 'c')).toBe(true);
+    expect(firstExecution?.signal.aborted).toBe(true);
+    expect(service.cancelExecution('a', 'sibling')).toBe(true);
+    expect(siblingExecution?.signal.aborted).toBe(true);
+    expect(service.cancelExecution('a', 'b::c')).toBe(true);
+    expect(restartedExecution?.signal.aborted).toBe(true);
+
+    firstExecution?.finish();
+    siblingExecution?.finish();
+    restartedExecution?.finish();
+  });
+
   it('does not persist late assistant messages after the session execution is cancelled', async () => {
     legacySession.engineName = 'claude';
     legacySession.engineSessionId = undefined;

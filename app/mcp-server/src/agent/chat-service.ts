@@ -95,10 +95,6 @@ interface ExecutionRecord extends RunningExecution {
   settling?: Promise<void>;
 }
 
-function executionKey(sessionId: string, requestId: string): string {
-  return `${sessionId}::${requestId}`;
-}
-
 function normalizeContextString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -190,10 +186,8 @@ export class AgentChatService {
   private readonly streamManager: AgentStreamManager;
   private readonly defaultEngineName: EngineName;
 
-  /**
-   * Registry of all executions, including preparation, keyed by sessionId + requestId.
-   */
-  private readonly runningExecutions = new Map<string, ExecutionRecord>();
+  /** Registry of all executions, including preparation, keyed without tuple serialization. */
+  private readonly runningExecutionsBySession = new Map<string, Map<string, ExecutionRecord>>();
   /** Lifecycle tombstones reject new work until the destructive mutation completes. */
   private readonly mutatingProjects = new Set<string>();
   private readonly mutatingSessions = new Set<string>();
@@ -219,6 +213,39 @@ export class AgentChatService {
 
   private hasRegisteredEngine(name: unknown): name is EngineName {
     return typeof name === 'string' && this.engines.has(name as EngineName);
+  }
+
+  private getRunningExecution(sessionId: string, requestId: string): ExecutionRecord | undefined {
+    return this.runningExecutionsBySession.get(sessionId)?.get(requestId);
+  }
+
+  private registerRunningExecution(execution: ExecutionRecord): void {
+    let sessionExecutions = this.runningExecutionsBySession.get(execution.sessionId);
+    if (!sessionExecutions) {
+      sessionExecutions = new Map<string, ExecutionRecord>();
+      this.runningExecutionsBySession.set(execution.sessionId, sessionExecutions);
+    }
+    if (sessionExecutions.has(execution.requestId)) {
+      throw new Error('requestId is already active for this session');
+    }
+    sessionExecutions.set(execution.requestId, execution);
+  }
+
+  private releaseRunningExecution(execution: ExecutionRecord): void {
+    const sessionExecutions = this.runningExecutionsBySession.get(execution.sessionId);
+    if (sessionExecutions?.get(execution.requestId) !== execution) {
+      return;
+    }
+    sessionExecutions.delete(execution.requestId);
+    if (sessionExecutions.size === 0) {
+      this.runningExecutionsBySession.delete(execution.sessionId);
+    }
+  }
+
+  private *runningExecutionValues(): IterableIterator<ExecutionRecord> {
+    for (const sessionExecutions of this.runningExecutionsBySession.values()) {
+      yield* sessionExecutions.values();
+    }
   }
 
   async handleAct(sessionId: string, payload: AgentActRequest): Promise<{ requestId: string }> {
@@ -644,8 +671,7 @@ export class AgentChatService {
    * Returns true if the execution was found and cancelled, false otherwise.
    */
   cancelExecution(sessionId: string, requestId: string): boolean {
-    const key = executionKey(sessionId, requestId);
-    const execution = this.runningExecutions.get(key);
+    const execution = this.getRunningExecution(sessionId, requestId);
     if (
       !execution ||
       execution.cancelled ||
@@ -672,7 +698,7 @@ export class AgentChatService {
    */
   cancelSessionExecutions(sessionId: string): number {
     let cancelled = 0;
-    for (const execution of this.runningExecutions.values()) {
+    for (const execution of this.runningExecutionValues()) {
       if (
         this.executionMatchesSession(execution, sessionId) &&
         !execution.cancelled &&
@@ -697,7 +723,7 @@ export class AgentChatService {
    */
   cancelAllExecutions(): number {
     const sessionIds = new Set<string>();
-    for (const execution of this.runningExecutions.values()) {
+    for (const execution of this.runningExecutionValues()) {
       if (!execution.cancelled && !execution.limitTerminal && !execution.terminalPublished) {
         sessionIds.add(execution.sessionId);
       }
@@ -747,7 +773,7 @@ export class AgentChatService {
     }
 
     this.mutatingProjects.add(projectId);
-    const unresolvedScopes = Array.from(this.runningExecutions.values())
+    const unresolvedScopes = Array.from(this.runningExecutionValues())
       .filter((execution) => !execution.scopeResolved)
       .map((execution) => execution.scopeReady);
     const protectedSessionIds: string[] = [];
@@ -786,7 +812,7 @@ export class AgentChatService {
    * Get list of running executions for diagnostics.
    */
   getRunningExecutions(): RunningExecution[] {
-    return Array.from(this.runningExecutions.values()).filter(
+    return Array.from(this.runningExecutionValues()).filter(
       (execution) =>
         !execution.cancelled && !execution.limitTerminal && execution.phase !== 'settled',
     );
@@ -809,8 +835,7 @@ export class AgentChatService {
       !execution.terminalPublished &&
       execution.phase !== 'settled' &&
       !this.isExecutionScopeMutating(execution) &&
-      this.runningExecutions.get(executionKey(execution.sessionId, execution.requestId)) ===
-        execution
+      this.getRunningExecution(execution.sessionId, execution.requestId) === execution
     );
   }
 
@@ -835,8 +860,7 @@ export class AgentChatService {
     requestId: string,
     payload: AgentActRequest,
   ): ExecutionRecord {
-    const key = executionKey(sessionId, requestId);
-    if (this.runningExecutions.has(key)) {
+    if (this.getRunningExecution(sessionId, requestId)) {
       throw new Error('requestId is already active for this session');
     }
 
@@ -886,7 +910,7 @@ export class AgentChatService {
       terminalPublished: false,
     };
 
-    this.runningExecutions.set(key, execution);
+    this.registerRunningExecution(execution);
     if (execution.scopeResolved) {
       execution.resolveScopeReady();
     }
@@ -922,7 +946,7 @@ export class AgentChatService {
     let globalCount = 0;
     let sessionCount = 0;
     let projectCount = 0;
-    for (const execution of this.runningExecutions.values()) {
+    for (const execution of this.runningExecutionValues()) {
       if (execution === excluded || execution.phase === 'settled') continue;
       globalCount += 1;
       if (
@@ -1009,7 +1033,7 @@ export class AgentChatService {
   private async cancelAndAwaitExecutions(
     predicate: (execution: ExecutionRecord) => boolean,
   ): Promise<number> {
-    const executions = Array.from(this.runningExecutions.values()).filter(predicate);
+    const executions = Array.from(this.runningExecutionValues()).filter(predicate);
     let cancelled = 0;
     for (const execution of executions) {
       if (!execution.cancelled && !execution.limitTerminal && !execution.terminalPublished) {
@@ -1319,10 +1343,7 @@ export class AgentChatService {
         await Promise.all(Array.from(execution.pendingPersistence));
       }
       execution.phase = 'settled';
-      const key = executionKey(execution.sessionId, execution.requestId);
-      if (this.runningExecutions.get(key) === execution) {
-        this.runningExecutions.delete(key);
-      }
+      this.releaseRunningExecution(execution);
       execution.resolveSettled();
     })();
 
