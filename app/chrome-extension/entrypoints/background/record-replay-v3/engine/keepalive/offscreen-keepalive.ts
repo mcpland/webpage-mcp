@@ -102,6 +102,7 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
   private totalRefs = 0;
 
   private offscreenPort: chrome.runtime.Port | null = null;
+  private releaseOffscreenDocument: (() => Promise<void>) | null = null;
   private connectionListenerRegistered = false;
 
   // Used to serialize async operations to avoid races.
@@ -208,8 +209,21 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
       // Ensure listener exists before Offscreen connects (race prevention).
       this.ensureConnectionListener();
 
-      // Ensure the Offscreen document exists.
-      await offscreenManager.ensureOffscreenDocument();
+      // Hold one shared document reference for the entire non-zero interval.
+      // Individual keepalive tags remain tracked by this controller, while the
+      // manager protects other explicit offscreen users from a premature close.
+      if (!this.releaseOffscreenDocument) {
+        const release =
+          await offscreenManager.acquireOffscreenDocument("rr-v3-keepalive");
+        this.releaseOffscreenDocument = release;
+        if (this.totalRefs === 0) {
+          this.sendStopCommand();
+          await this.sendRuntimeControl("stop");
+          if (this.totalRefs > 0) return;
+          await this.teardown();
+          return;
+        }
+      }
 
       // Re-check after await: state may have changed while we were creating the document.
       if (this.totalRefs === 0) {
@@ -219,6 +233,13 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
 
       // Send start command via runtime message (works even if Port is not connected).
       await this.sendRuntimeControl("start");
+      if (this.totalRefs === 0) {
+        this.sendStopCommand();
+        await this.sendRuntimeControl("stop");
+        if (this.totalRefs > 0) return;
+        await this.teardown();
+        return;
+      }
       // Also send via Port if connected.
       this.sendStartCommand();
     } else {
@@ -226,6 +247,7 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
       this.sendStopCommand();
       // Then send via runtime message to ensure Offscreen stops.
       await this.sendRuntimeControl("stop");
+      if (this.totalRefs > 0) return;
       await this.teardown();
     }
   }
@@ -235,8 +257,11 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
    */
   private async teardown(): Promise<void> {
     this.disconnectPort();
-    // Note: We do not close the Offscreen Document here because it may be used by other modules.
-    // If Offscreen Document lifecycle needs ref-counting, it should be implemented in OffscreenManager.
+    const release = this.releaseOffscreenDocument;
+    this.releaseOffscreenDocument = null;
+    if (release) {
+      await release();
+    }
   }
 
   /**
@@ -290,6 +315,13 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
     // If active, send the start command.
     if (this.totalRefs > 0) {
       this.sendStartCommand();
+    } else {
+      // A keepalive-enabled offscreen document can outlive an MV3 worker
+      // restart. The new worker owns no references, so fail closed: stop the
+      // orphan heartbeat and close the unreferenced document.
+      this.sendStopCommand();
+      this.disconnectPort();
+      void offscreenManager.closeOffscreenDocument();
     }
   };
 
@@ -402,9 +434,11 @@ class OffscreenKeepaliveControllerImpl implements KeepaliveController {
     // Retry with delays for start command (Offscreen document may not be ready yet).
     const delaysMs = command === "start" ? [0, 50, 200] : [0];
     for (const delayMs of delaysMs) {
+      if (command === "start" && this.totalRefs === 0) return;
       if (delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
+      if (command === "start" && this.totalRefs === 0) return;
       try {
         await chrome.runtime.sendMessage(msg);
         this.logger.debug(

@@ -8,31 +8,31 @@
  * - Concurrent claim behavior
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   DEFAULT_QUEUE_CONFIG,
   RUN_QUEUE_BACKPRESSURE_CODE,
   RunQueueBackpressureError,
   type RunQueueItem,
-} from '@/entrypoints/background/record-replay-v3/engine/queue/queue';
+} from "@/entrypoints/background/record-replay-v3/engine/queue/queue";
 
 import {
   QUEUE_RESOURCE_LIMITS,
   closeRrV3Db,
   deleteRrV3Db,
-} from '@/entrypoints/background/record-replay-v3';
-import { createQueueStore } from '@/entrypoints/background/record-replay-v3/storage/queue';
+} from "@/entrypoints/background/record-replay-v3";
+import { createQueueStore } from "@/entrypoints/background/record-replay-v3/storage/queue";
 import {
   RR_V3_STORES,
   withTransaction,
-} from '@/entrypoints/background/record-replay-v3/storage/db';
+} from "@/entrypoints/background/record-replay-v3/storage/db";
 
 function createStoredQueueItem(index: number): RunQueueItem {
   return {
     id: `stored-${index}` as never,
     flowId: `flow-${index}` as never,
-    status: 'running',
+    status: "running",
     createdAt: index,
     updatedAt: index,
     priority: 0,
@@ -41,8 +41,11 @@ function createStoredQueueItem(index: number): RunQueueItem {
   };
 }
 
-async function putStoredQueueItems(count: number, status: RunQueueItem['status']): Promise<void> {
-  await withTransaction(RR_V3_STORES.QUEUE, 'readwrite', async (stores) => {
+async function putStoredQueueItems(
+  count: number,
+  status: RunQueueItem["status"],
+): Promise<void> {
+  await withTransaction(RR_V3_STORES.QUEUE, "readwrite", async (stores) => {
     const store = stores[RR_V3_STORES.QUEUE];
     await Promise.all(
       Array.from({ length: count }, (_, index) => {
@@ -57,101 +60,104 @@ async function putStoredQueueItems(count: number, status: RunQueueItem['status']
   });
 }
 
-describe('V3 Queue contracts', () => {
+describe("V3 Queue contracts", () => {
   beforeEach(async () => {
     await deleteRrV3Db();
     closeRrV3Db();
   });
 
-  describe('Basic CRUD', () => {
-    it('enqueue creates a queued item with correct defaults', async () => {
+  describe("Basic CRUD", () => {
+    it("enqueue creates a queued item with correct defaults", async () => {
       const queue = createQueueStore();
 
       const item = await queue.enqueue({
-        id: 'run-1',
-        flowId: 'flow-1',
+        id: "run-1",
+        flowId: "flow-1",
         priority: 5,
       });
 
       expect(item).toMatchObject({
-        id: 'run-1',
-        flowId: 'flow-1',
+        id: "run-1",
+        flowId: "flow-1",
         priority: 5,
-        status: 'queued',
+        status: "queued",
         attempt: 0,
       });
       expect(item.createdAt).toBeGreaterThan(0);
       expect(item.updatedAt).toBeGreaterThan(0);
     });
 
-    it('get retrieves an enqueued item', async () => {
+    it("get retrieves an enqueued item", async () => {
       const queue = createQueueStore();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
 
-      const retrieved = await queue.get('run-1');
+      const retrieved = await queue.get("run-1");
       expect(retrieved).not.toBeNull();
-      expect(retrieved!.id).toBe('run-1');
+      expect(retrieved!.id).toBe("run-1");
     });
 
-    it('get returns null for non-existent item', async () => {
+    it("get returns null for non-existent item", async () => {
       const queue = createQueueStore();
 
-      const retrieved = await queue.get('non-existent');
+      const retrieved = await queue.get("non-existent");
       expect(retrieved).toBeNull();
     });
 
-    it('list returns all items when no filter', async () => {
+    it("list returns all items when no filter", async () => {
       const queue = createQueueStore();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-2', flowId: 'flow-1', priority: 2 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-2", flowId: "flow-1", priority: 2 });
 
       const items = await queue.list();
       expect(items).toHaveLength(2);
     });
 
-    it('list filters by status', async () => {
+    it("list filters by status", async () => {
       const queue = createQueueStore();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-2', flowId: 'flow-1', priority: 2 });
-      await queue.markRunning('run-1', 'owner-1', Date.now());
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-2", flowId: "flow-1", priority: 2 });
+      await queue.markRunning("run-1", "owner-1", Date.now());
 
-      const queued = await queue.list('queued');
-      const running = await queue.list('running');
+      const queued = await queue.list("queued");
+      const running = await queue.list("running");
 
       expect(queued).toHaveLength(1);
-      expect(queued[0].id).toBe('run-2');
+      expect(queued[0].id).toBe("run-2");
       expect(running).toHaveLength(1);
-      expect(running[0].id).toBe('run-1');
+      expect(running[0].id).toBe("run-1");
     });
 
-    it('rejects enqueue when global queued backpressure limit is reached', async () => {
+    it("rejects enqueue when global queued backpressure limit is reached", async () => {
       const queue = createQueueStore({ maxQueuedRuns: 1 });
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
       await expect(
-        queue.enqueue({ id: 'run-2', flowId: 'flow-2', priority: 1 }),
+        queue.enqueue({ id: "run-2", flowId: "flow-2", priority: 1 }),
       ).rejects.toMatchObject({
-        name: 'RunQueueBackpressureError',
+        name: "RunQueueBackpressureError",
         code: RUN_QUEUE_BACKPRESSURE_CODE,
         retryable: true,
-        scope: 'global',
+        scope: "global",
         limit: 1,
         queuedCount: 1,
       });
     });
 
-    it('rejects enqueue when per-flow queued backpressure limit is reached', async () => {
-      const queue = createQueueStore({ maxQueuedRuns: 5, maxQueuedRunsPerFlow: 1 });
+    it("rejects enqueue when per-flow queued backpressure limit is reached", async () => {
+      const queue = createQueueStore({
+        maxQueuedRuns: 5,
+        maxQueuedRunsPerFlow: 1,
+      });
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-2', flowId: 'flow-2', priority: 1 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-2", flowId: "flow-2", priority: 1 });
 
       let error: unknown;
       try {
-        await queue.enqueue({ id: 'run-3', flowId: 'flow-1', priority: 1 });
+        await queue.enqueue({ id: "run-3", flowId: "flow-1", priority: 1 });
       } catch (caught) {
         error = caught;
       }
@@ -160,290 +166,367 @@ describe('V3 Queue contracts', () => {
       expect(error).toMatchObject({
         code: RUN_QUEUE_BACKPRESSURE_CODE,
         retryable: true,
-        scope: 'flow',
+        scope: "flow",
         limit: 1,
         queuedCount: 1,
-        flowId: 'flow-1',
+        flowId: "flow-1",
       });
     });
 
-    it('does not count running items against queued backpressure limits', async () => {
-      const queue = createQueueStore({ maxQueuedRuns: 1, maxQueuedRunsPerFlow: 1 });
+    it("does not count running items against queued backpressure limits", async () => {
+      const queue = createQueueStore({
+        maxQueuedRuns: 1,
+        maxQueuedRunsPerFlow: 1,
+      });
       const now = Date.now();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.markRunning('run-1', 'owner-1', now);
-      const next = await queue.enqueue({ id: 'run-2', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.markRunning("run-1", "owner-1", now);
+      const next = await queue.enqueue({
+        id: "run-2",
+        flowId: "flow-1",
+        priority: 1,
+      });
 
       expect(next).toMatchObject({
-        id: 'run-2',
-        flowId: 'flow-1',
-        status: 'queued',
+        id: "run-2",
+        flowId: "flow-1",
+        status: "queued",
       });
-      const queued = await queue.list('queued');
+      const queued = await queue.list("queued");
       expect(queued).toHaveLength(1);
     });
 
-    it('keeps flow and global backpressure scopes independent', async () => {
-      const queue = createQueueStore({ maxQueuedRuns: 3, maxQueuedRunsPerFlow: 1 });
+    it("keeps flow and global backpressure scopes independent", async () => {
+      const queue = createQueueStore({
+        maxQueuedRuns: 3,
+        maxQueuedRunsPerFlow: 1,
+      });
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-2', flowId: 'flow-2', priority: 1 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-2", flowId: "flow-2", priority: 1 });
       await expect(
-        queue.enqueue({ id: 'run-3', flowId: 'flow-1', priority: 1 }),
+        queue.enqueue({ id: "run-3", flowId: "flow-1", priority: 1 }),
       ).rejects.toMatchObject({
         code: RUN_QUEUE_BACKPRESSURE_CODE,
         retryable: true,
-        scope: 'flow',
+        scope: "flow",
         limit: 1,
         queuedCount: 1,
-        flowId: 'flow-1',
+        flowId: "flow-1",
       });
     });
 
-    it('rejects oversized queue items before persistence', async () => {
+    it("rejects oversized queue items before persistence", async () => {
       const queue = createQueueStore();
-      const payload = 'x'.repeat(QUEUE_RESOURCE_LIMITS.maxStringUtf8Bytes + 1);
+      const payload = "x".repeat(QUEUE_RESOURCE_LIMITS.maxStringUtf8Bytes + 1);
 
       await expect(
         queue.enqueue({
-          id: 'oversized' as never,
-          flowId: 'flow-1' as never,
+          id: "oversized" as never,
+          flowId: "flow-1" as never,
           args: { payload },
         }),
       ).rejects.toThrow(
         `${QUEUE_RESOURCE_LIMITS.maxStringUtf8Bytes}-byte string limit`,
       );
-      await expect(queue.get('oversized')).resolves.toBeNull();
+      await expect(queue.get("oversized")).resolves.toBeNull();
     });
 
-    it('hard-caps admission overrides at the persisted queue limit', async () => {
-      await putStoredQueueItems(QUEUE_RESOURCE_LIMITS.maxQueuedItems, 'queued');
+    it("hard-caps admission overrides at the persisted queue limit", async () => {
+      await putStoredQueueItems(QUEUE_RESOURCE_LIMITS.maxQueuedItems, "queued");
       const queue = createQueueStore({
         maxQueuedRuns: Number.MAX_SAFE_INTEGER,
         maxQueuedRunsPerFlow: Number.MAX_SAFE_INTEGER,
       });
 
       await expect(
-        queue.enqueue({ id: 'overflow' as never, flowId: 'new-flow' as never }),
+        queue.enqueue({ id: "overflow" as never, flowId: "new-flow" as never }),
       ).rejects.toMatchObject({
-        scope: 'global',
+        scope: "global",
         limit: QUEUE_RESOURCE_LIMITS.maxQueuedItems,
         queuedCount: QUEUE_RESOURCE_LIMITS.maxQueuedItems,
       });
     });
 
-    it('bounds legacy queue listings and total stored records', async () => {
+    it("bounds legacy queue listings and total stored records", async () => {
       const legacyCount = QUEUE_RESOURCE_LIMITS.maxStoredItems + 5;
-      await putStoredQueueItems(legacyCount, 'running');
+      await putStoredQueueItems(legacyCount, "running");
       const queue = createQueueStore();
 
       await expect(queue.list()).resolves.toHaveLength(
         QUEUE_RESOURCE_LIMITS.maxStoredItems,
       );
       await expect(
-        queue.enqueue({ id: 'overflow' as never, flowId: 'flow-new' as never }),
+        queue.enqueue({ id: "overflow" as never, flowId: "flow-new" as never }),
       ).rejects.toMatchObject({
-        scope: 'global',
+        scope: "global",
         limit: QUEUE_RESOURCE_LIMITS.maxStoredItems,
         queuedCount: legacyCount,
       });
     });
   });
 
-  describe('Atomic claimNext', () => {
-    it('returns null when queue is empty', async () => {
+  describe("Atomic claimNext", () => {
+    it("returns null when queue is empty", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      const claimed = await queue.claimNext('owner-1', now);
+      const claimed = await queue.claimNext("owner-1", now);
       expect(claimed).toBeNull();
     });
 
-    it('claims the highest priority item first', async () => {
+    it("claims the highest priority item first", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
       // Enqueue with different priorities (lower number = lower priority)
-      await queue.enqueue({ id: 'low', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'high', flowId: 'flow-1', priority: 10 });
-      await queue.enqueue({ id: 'medium', flowId: 'flow-1', priority: 5 });
+      await queue.enqueue({ id: "low", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "high", flowId: "flow-1", priority: 10 });
+      await queue.enqueue({ id: "medium", flowId: "flow-1", priority: 5 });
 
-      const claimed = await queue.claimNext('owner-1', now);
+      const claimed = await queue.claimNext("owner-1", now);
       expect(claimed).not.toBeNull();
-      expect(claimed!.id).toBe('high');
-      expect(claimed!.status).toBe('running');
+      expect(claimed!.id).toBe("high");
+      expect(claimed!.status).toBe("running");
       expect(claimed!.priority).toBe(10);
     });
 
-    it('skips active-limited flows while preserving priority among eligible items', async () => {
-      const queue = createQueueStore();
-      const now = Date.now();
-
-      await queue.enqueue({ id: 'blocked-high', flowId: 'flow-1', priority: 10 });
-      await queue.enqueue({ id: 'eligible-low', flowId: 'flow-2', priority: 1 });
-
-      const claimed = await queue.claimNext('owner-1', now, {
-        blockedFlowIds: ['flow-1'],
-      });
-
-      expect(claimed).toMatchObject({
-        id: 'eligible-low',
-        flowId: 'flow-2',
-        status: 'running',
-      });
-      expect(await queue.get('blocked-high')).toMatchObject({
-        id: 'blocked-high',
-        status: 'queued',
-      });
-    });
-
-    it('skips active-limited profiles while preserving priority among eligible items', async () => {
+    it("skips active-limited flows while preserving priority among eligible items", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
       await queue.enqueue({
-        id: 'dangerous-high',
-        flowId: 'flow-1',
-        profile: 'dangerous',
+        id: "blocked-high",
+        flowId: "flow-1",
         priority: 10,
       });
       await queue.enqueue({
-        id: 'safe-low',
-        flowId: 'flow-2',
-        profile: 'safe',
+        id: "eligible-low",
+        flowId: "flow-2",
         priority: 1,
       });
 
-      const claimed = await queue.claimNext('owner-1', now, {
-        blockedProfiles: ['dangerous'],
+      const claimed = await queue.claimNext("owner-1", now, {
+        blockedFlowIds: ["flow-1"],
       });
 
       expect(claimed).toMatchObject({
-        id: 'safe-low',
-        profile: 'safe',
-        status: 'running',
+        id: "eligible-low",
+        flowId: "flow-2",
+        status: "running",
       });
-      expect(await queue.get('dangerous-high')).toMatchObject({
-        id: 'dangerous-high',
-        status: 'queued',
+      expect(await queue.get("blocked-high")).toMatchObject({
+        id: "blocked-high",
+        status: "queued",
       });
     });
 
-    it('claims FIFO within same priority (earlier createdAt first)', async () => {
+    it("skips active-limited profiles while preserving priority among eligible items", async () => {
+      const queue = createQueueStore();
+      const now = Date.now();
+
+      await queue.enqueue({
+        id: "dangerous-high",
+        flowId: "flow-1",
+        profile: "dangerous",
+        priority: 10,
+      });
+      await queue.enqueue({
+        id: "safe-low",
+        flowId: "flow-2",
+        profile: "safe",
+        priority: 1,
+      });
+
+      const claimed = await queue.claimNext("owner-1", now, {
+        blockedProfiles: ["dangerous"],
+      });
+
+      expect(claimed).toMatchObject({
+        id: "safe-low",
+        profile: "safe",
+        status: "running",
+      });
+      expect(await queue.get("dangerous-high")).toMatchObject({
+        id: "dangerous-high",
+        status: "queued",
+      });
+    });
+
+    it("claims FIFO within same priority (earlier createdAt first)", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
       // Enqueue items with same priority
       // Small delays ensure different createdAt timestamps
-      await queue.enqueue({ id: 'first', flowId: 'flow-1', priority: 5 });
+      await queue.enqueue({ id: "first", flowId: "flow-1", priority: 5 });
       await new Promise((r) => setTimeout(r, 5));
-      await queue.enqueue({ id: 'second', flowId: 'flow-1', priority: 5 });
+      await queue.enqueue({ id: "second", flowId: "flow-1", priority: 5 });
       await new Promise((r) => setTimeout(r, 5));
-      await queue.enqueue({ id: 'third', flowId: 'flow-1', priority: 5 });
+      await queue.enqueue({ id: "third", flowId: "flow-1", priority: 5 });
 
       // First claim should get 'first'
-      const claim1 = await queue.claimNext('owner-1', now);
-      expect(claim1!.id).toBe('first');
+      const claim1 = await queue.claimNext("owner-1", now);
+      expect(claim1!.id).toBe("first");
 
       // Second claim should get 'second'
-      const claim2 = await queue.claimNext('owner-1', now);
-      expect(claim2!.id).toBe('second');
+      const claim2 = await queue.claimNext("owner-1", now);
+      expect(claim2!.id).toBe("second");
 
       // Third claim should get 'third'
-      const claim3 = await queue.claimNext('owner-1', now);
-      expect(claim3!.id).toBe('third');
+      const claim3 = await queue.claimNext("owner-1", now);
+      expect(claim3!.id).toBe("third");
 
       // Fourth claim should return null
-      const claim4 = await queue.claimNext('owner-1', now);
+      const claim4 = await queue.claimNext("owner-1", now);
       expect(claim4).toBeNull();
     });
 
-    it('atomically updates item to running with lease', async () => {
+    it("atomically updates item to running with lease", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
 
-      const claimed = await queue.claimNext('owner-1', now);
+      const claimed = await queue.claimNext("owner-1", now);
 
       expect(claimed).toMatchObject({
-        id: 'run-1',
-        status: 'running',
+        id: "run-1",
+        status: "running",
         attempt: 1,
         lease: {
-          ownerId: 'owner-1',
+          ownerId: "owner-1",
         },
       });
       expect(claimed!.lease!.expiresAt).toBeGreaterThan(now);
       expect(claimed!.updatedAt).toBeGreaterThanOrEqual(now);
     });
 
-    it('persists the claimed item as running in the store', async () => {
+    it("persists the claimed item as running in the store", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      const claimed = await queue.claimNext('owner-1', now);
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      const claimed = await queue.claimNext("owner-1", now);
       expect(claimed).not.toBeNull();
 
       // Verify persistence via get()
-      const stored = await queue.get('run-1');
+      const stored = await queue.get("run-1");
       expect(stored).toMatchObject({
-        id: 'run-1',
-        status: 'running',
+        id: "run-1",
+        status: "running",
         attempt: 1,
-        lease: { ownerId: 'owner-1' },
+        lease: { ownerId: "owner-1" },
       });
     });
 
-    it('increments attempt on each claim', async () => {
+    it("releases a stale claim after the same owner heartbeat renews its lease", async () => {
+      const queue = createQueueStore();
+      const now = Date.now();
+      await queue.enqueue({
+        id: "run-release",
+        flowId: "flow-1",
+        priority: 1,
+        maxAttempts: 1,
+      });
+
+      const firstClaim = await queue.claimNext("owner-1", now);
+      expect(firstClaim?.lease).toBeDefined();
+      const originalLeaseExpiresAt = firstClaim!.lease!.expiresAt;
+
+      await expect(
+        queue.releaseClaim(
+          "run-release",
+          "different-owner",
+          firstClaim!.attempt,
+          now + 1,
+        ),
+      ).resolves.toBe(false);
+
+      // A restarted scheduler starts the same owner's heartbeat before the
+      // old claim promise settles. Releasing must not depend on the mutable
+      // expiresAt value or the item would remain running forever.
+      await queue.heartbeat("owner-1", now + 2);
+      const renewed = await queue.get("run-release");
+      expect(renewed?.lease?.expiresAt).not.toBe(originalLeaseExpiresAt);
+      await expect(
+        queue.releaseClaim(
+          "run-release",
+          "owner-1",
+          firstClaim!.attempt,
+          now + 3,
+        ),
+      ).resolves.toBe(true);
+
+      expect(await queue.get("run-release")).toMatchObject({
+        status: "queued",
+        attempt: 0,
+      });
+      expect((await queue.get("run-release"))?.lease).toBeUndefined();
+
+      const replacementClaim = await queue.claimNext("owner-1", now + 4);
+      expect(replacementClaim).toMatchObject({ status: "running", attempt: 1 });
+      expect(await queue.get("run-release")).toMatchObject({
+        status: "running",
+        attempt: 1,
+        lease: { expiresAt: replacementClaim!.lease!.expiresAt },
+      });
+    });
+
+    it("increments attempt on each claim", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
 
       // First claim
-      let claimed = await queue.claimNext('owner-1', now);
+      let claimed = await queue.claimNext("owner-1", now);
       expect(claimed!.attempt).toBe(1);
 
       // Re-queue by marking as queued (simulating retry)
-      await queue.markDone('run-1', now);
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
+      await queue.markDone("run-1", now);
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
 
       // Second claim
-      claimed = await queue.claimNext('owner-2', now);
+      claimed = await queue.claimNext("owner-2", now);
       expect(claimed!.attempt).toBe(1); // New enqueue resets attempt
     });
 
-    it('throws on invalid ownerId', async () => {
+    it("throws on invalid ownerId", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await expect(queue.claimNext('', now)).rejects.toThrow('ownerId is required');
+      await expect(queue.claimNext("", now)).rejects.toThrow(
+        "ownerId is required",
+      );
     });
 
-    it('throws on invalid now timestamp', async () => {
+    it("throws on invalid now timestamp", async () => {
       const queue = createQueueStore();
 
-      await expect(queue.claimNext('owner-1', NaN)).rejects.toThrow('Invalid now');
-      await expect(queue.claimNext('owner-1', Infinity)).rejects.toThrow('Invalid now');
+      await expect(queue.claimNext("owner-1", NaN)).rejects.toThrow(
+        "Invalid now",
+      );
+      await expect(queue.claimNext("owner-1", Infinity)).rejects.toThrow(
+        "Invalid now",
+      );
     });
 
-    it('concurrent claims do not return the same item', async () => {
+    it("concurrent claims do not return the same item", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
       // Enqueue multiple items
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-2', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-3', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-2", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-3", flowId: "flow-1", priority: 1 });
 
       // Claim concurrently
       const claims = await Promise.all([
-        queue.claimNext('owner-1', now),
-        queue.claimNext('owner-2', now),
-        queue.claimNext('owner-3', now),
+        queue.claimNext("owner-1", now),
+        queue.claimNext("owner-2", now),
+        queue.claimNext("owner-3", now),
       ]);
 
       // Filter out nulls
@@ -455,184 +538,194 @@ describe('V3 Queue contracts', () => {
       expect(new Set(ids).size).toBe(3);
 
       // All should be running
-      expect(claimed.every((c) => c.status === 'running')).toBe(true);
+      expect(claimed.every((c) => c.status === "running")).toBe(true);
     });
 
-    it('skips non-queued items', async () => {
+    it("skips non-queued items", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 10 });
-      await queue.enqueue({ id: 'run-2', flowId: 'flow-1', priority: 5 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 10 });
+      await queue.enqueue({ id: "run-2", flowId: "flow-1", priority: 5 });
 
       // Mark the higher priority one as running
-      await queue.markRunning('run-1', 'owner-1', now);
+      await queue.markRunning("run-1", "owner-1", now);
 
       // claimNext should skip run-1 and return run-2
-      const claimed = await queue.claimNext('owner-2', now);
-      expect(claimed!.id).toBe('run-2');
+      const claimed = await queue.claimNext("owner-2", now);
+      expect(claimed!.id).toBe("run-2");
     });
   });
 
-  describe('Status transitions', () => {
-    it('markRunning updates status and creates lease', async () => {
+  describe("Status transitions", () => {
+    it("markRunning updates status and creates lease", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.markRunning('run-1', 'owner-1', now);
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.markRunning("run-1", "owner-1", now);
 
-      const item = await queue.get('run-1');
-      expect(item!.status).toBe('running');
+      const item = await queue.get("run-1");
+      expect(item!.status).toBe("running");
       expect(item!.lease).toMatchObject({
-        ownerId: 'owner-1',
+        ownerId: "owner-1",
       });
       expect(item!.attempt).toBe(1);
     });
 
-    it('markPaused updates status while keeping lease', async () => {
+    it("markPaused updates status while keeping lease", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.markRunning('run-1', 'owner-1', now);
-      await queue.markPaused('run-1', 'owner-1', now + 1000);
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.markRunning("run-1", "owner-1", now);
+      await queue.markPaused("run-1", "owner-1", now + 1000);
 
-      const item = await queue.get('run-1');
-      expect(item!.status).toBe('paused');
-      expect(item!.lease!.ownerId).toBe('owner-1');
+      const item = await queue.get("run-1");
+      expect(item!.status).toBe("paused");
+      expect(item!.lease!.ownerId).toBe("owner-1");
     });
 
-    it('markDone removes item from queue', async () => {
+    it("markDone removes item from queue", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.markDone('run-1', now);
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.markDone("run-1", now);
 
-      const item = await queue.get('run-1');
+      const item = await queue.get("run-1");
       expect(item).toBeNull();
     });
 
-    it('cancel removes item from queue', async () => {
+    it("cancel removes item from queue", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.cancel('run-1', now, 'User cancelled');
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.cancel("run-1", now, "User cancelled");
 
-      const item = await queue.get('run-1');
+      const item = await queue.get("run-1");
       expect(item).toBeNull();
     });
 
-    it('markRunning throws for non-existent item', async () => {
+    it("markRunning throws for non-existent item", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await expect(queue.markRunning('non-existent', 'owner-1', now)).rejects.toThrow(
-        'Queue item "non-existent" not found',
-      );
+      await expect(
+        queue.markRunning("non-existent", "owner-1", now),
+      ).rejects.toThrow('Queue item "non-existent" not found');
     });
 
-    it('markPaused throws for non-existent item', async () => {
+    it("markPaused throws for non-existent item", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await expect(queue.markPaused('non-existent', 'owner-1', now)).rejects.toThrow(
-        'Queue item "non-existent" not found',
-      );
+      await expect(
+        queue.markPaused("non-existent", "owner-1", now),
+      ).rejects.toThrow('Queue item "non-existent" not found');
     });
   });
 
-  describe('Lease heartbeat', () => {
-    it('renews leases for running and paused items owned by ownerId', async () => {
+  describe("Lease heartbeat", () => {
+    it("renews leases for running and paused items owned by ownerId", async () => {
       const queue = createQueueStore();
       const t0 = 1_700_000_000_000;
       const t1 = t0 + 1_234;
 
-      await queue.enqueue({ id: 'run-running', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-paused', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-other', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-running", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-paused", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-other", flowId: "flow-1", priority: 1 });
 
-      await queue.markRunning('run-running', 'owner-1', t0);
-      await queue.markPaused('run-paused', 'owner-1', t0);
-      await queue.markRunning('run-other', 'owner-2', t0);
+      await queue.markRunning("run-running", "owner-1", t0);
+      await queue.markPaused("run-paused", "owner-1", t0);
+      await queue.markRunning("run-other", "owner-2", t0);
 
-      const otherBefore = await queue.get('run-other');
+      const otherBefore = await queue.get("run-other");
       const otherExpiresAtBefore = otherBefore!.lease!.expiresAt;
 
-      await queue.heartbeat('owner-1', t1);
+      await queue.heartbeat("owner-1", t1);
 
-      const running = await queue.get('run-running');
-      const paused = await queue.get('run-paused');
-      const otherAfter = await queue.get('run-other');
+      const running = await queue.get("run-running");
+      const paused = await queue.get("run-paused");
+      const otherAfter = await queue.get("run-other");
 
       // Owner-1's items should have renewed leases
-      expect(running!.lease!.expiresAt).toBe(t1 + DEFAULT_QUEUE_CONFIG.leaseTtlMs);
-      expect(paused!.lease!.expiresAt).toBe(t1 + DEFAULT_QUEUE_CONFIG.leaseTtlMs);
+      expect(running!.lease!.expiresAt).toBe(
+        t1 + DEFAULT_QUEUE_CONFIG.leaseTtlMs,
+      );
+      expect(paused!.lease!.expiresAt).toBe(
+        t1 + DEFAULT_QUEUE_CONFIG.leaseTtlMs,
+      );
       // Owner-2's item should be unchanged
       expect(otherAfter!.lease!.expiresAt).toBe(otherExpiresAtBefore);
     });
 
-    it('uses configured lease TTL for claims, pauses, and heartbeats', async () => {
+    it("uses configured lease TTL for claims, pauses, and heartbeats", async () => {
       const leaseTtlMs = 2_500;
       const queue = createQueueStore({ leaseTtlMs });
       const t0 = 1_700_000_000_000;
       const t1 = t0 + 1_000;
 
-      await queue.enqueue({ id: 'run-claim', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-paused', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-claim", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-paused", flowId: "flow-1", priority: 1 });
 
-      const claimed = await queue.claimNext('owner-1', t0);
+      const claimed = await queue.claimNext("owner-1", t0);
       expect(claimed!.lease!.expiresAt).toBe(t0 + leaseTtlMs);
 
-      await queue.markPaused('run-paused', 'owner-1', t0);
-      const paused = await queue.get('run-paused');
+      await queue.markPaused("run-paused", "owner-1", t0);
+      const paused = await queue.get("run-paused");
       expect(paused!.lease!.expiresAt).toBe(t0 + leaseTtlMs);
 
-      await queue.heartbeat('owner-1', t1);
-      const renewedClaim = await queue.get('run-claim');
-      const renewedPaused = await queue.get('run-paused');
+      await queue.heartbeat("owner-1", t1);
+      const renewedClaim = await queue.get("run-claim");
+      const renewedPaused = await queue.get("run-paused");
       expect(renewedClaim!.lease!.expiresAt).toBe(t1 + leaseTtlMs);
       expect(renewedPaused!.lease!.expiresAt).toBe(t1 + leaseTtlMs);
     });
 
-    it('hard-caps oversized lease TTL overrides', async () => {
+    it("hard-caps oversized lease TTL overrides", async () => {
       const queue = createQueueStore({
         leaseTtlMs: QUEUE_RESOURCE_LIMITS.maxLeaseTtlMs + 1,
       });
       const now = 1_700_000_000_000;
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1' });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1" });
 
-      const claimed = await queue.claimNext('owner-1', now);
+      const claimed = await queue.claimNext("owner-1", now);
       expect(claimed?.lease?.expiresAt).toBe(
         now + QUEUE_RESOURCE_LIMITS.maxLeaseTtlMs,
       );
     });
 
-    it('is a no-op when the owner has no leased items', async () => {
+    it("is a no-op when the owner has no leased items", async () => {
       const queue = createQueueStore();
-      await expect(queue.heartbeat('owner-1', 1_700_000_000_000)).resolves.toBeUndefined();
+      await expect(
+        queue.heartbeat("owner-1", 1_700_000_000_000),
+      ).resolves.toBeUndefined();
     });
 
-    it('throws on invalid ownerId', async () => {
+    it("throws on invalid ownerId", async () => {
       const queue = createQueueStore();
-      await expect(queue.heartbeat('', Date.now())).rejects.toThrow('ownerId is required');
+      await expect(queue.heartbeat("", Date.now())).rejects.toThrow(
+        "ownerId is required",
+      );
     });
 
-    it('throws on invalid now timestamp', async () => {
+    it("throws on invalid now timestamp", async () => {
       const queue = createQueueStore();
-      await expect(queue.heartbeat('owner-1', NaN)).rejects.toThrow('Invalid now');
+      await expect(queue.heartbeat("owner-1", NaN)).rejects.toThrow(
+        "Invalid now",
+      );
     });
   });
 
-  describe('Lease reclamation', () => {
-    it('requeues an expired running item and clears the lease', async () => {
+  describe("Lease reclamation", () => {
+    it("requeues an expired running item and clears the lease", async () => {
       const queue = createQueueStore();
       const t0 = 1_700_000_000_000;
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.markRunning('run-1', 'owner-1', t0);
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.markRunning("run-1", "owner-1", t0);
 
       const expiresAt = t0 + DEFAULT_QUEUE_CONFIG.leaseTtlMs;
 
@@ -640,82 +733,88 @@ describe('V3 Queue contracts', () => {
       expect(await queue.reclaimExpiredLeases(expiresAt)).toEqual([]);
 
       // Expired when expiresAt < now
-      expect(await queue.reclaimExpiredLeases(expiresAt + 1)).toEqual(['run-1']);
+      expect(await queue.reclaimExpiredLeases(expiresAt + 1)).toEqual([
+        "run-1",
+      ]);
 
-      const item = await queue.get('run-1');
-      expect(item).toMatchObject({ id: 'run-1', status: 'queued', attempt: 1 });
+      const item = await queue.get("run-1");
+      expect(item).toMatchObject({ id: "run-1", status: "queued", attempt: 1 });
       expect(item!.lease).toBeUndefined();
     });
 
-    it('requeues an expired paused item and keeps attempt count', async () => {
+    it("requeues an expired paused item and keeps attempt count", async () => {
       const queue = createQueueStore();
       const t0 = 1_700_000_000_000;
 
-      await queue.enqueue({ id: 'run-2', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-2", flowId: "flow-1", priority: 1 });
       // markPaused doesn't increment attempt (only markRunning/claimNext does)
-      await queue.markPaused('run-2', 'owner-1', t0);
+      await queue.markPaused("run-2", "owner-1", t0);
 
       const expiresAt = t0 + DEFAULT_QUEUE_CONFIG.leaseTtlMs;
 
-      expect(await queue.reclaimExpiredLeases(expiresAt + 1)).toEqual(['run-2']);
+      expect(await queue.reclaimExpiredLeases(expiresAt + 1)).toEqual([
+        "run-2",
+      ]);
 
-      const item = await queue.get('run-2');
-      expect(item).toMatchObject({ id: 'run-2', status: 'queued', attempt: 0 });
+      const item = await queue.get("run-2");
+      expect(item).toMatchObject({ id: "run-2", status: "queued", attempt: 0 });
       expect(item!.lease).toBeUndefined();
     });
 
-    it('reclaims multiple expired items in one call', async () => {
+    it("reclaims multiple expired items in one call", async () => {
       const queue = createQueueStore();
       const t0 = 1_700_000_000_000;
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-2', flowId: 'flow-1', priority: 1 });
-      await queue.enqueue({ id: 'run-3', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-2", flowId: "flow-1", priority: 1 });
+      await queue.enqueue({ id: "run-3", flowId: "flow-1", priority: 1 });
 
-      await queue.markRunning('run-1', 'owner-1', t0);
-      await queue.markPaused('run-2', 'owner-1', t0);
+      await queue.markRunning("run-1", "owner-1", t0);
+      await queue.markPaused("run-2", "owner-1", t0);
       // run-3 stays queued (no lease)
 
       const expiresAt = t0 + DEFAULT_QUEUE_CONFIG.leaseTtlMs;
       const reclaimed = await queue.reclaimExpiredLeases(expiresAt + 1);
 
-      expect(reclaimed.sort()).toEqual(['run-1', 'run-2']);
+      expect(reclaimed.sort()).toEqual(["run-1", "run-2"]);
 
       // All should be back to queued
-      const run1 = await queue.get('run-1');
-      const run2 = await queue.get('run-2');
-      const run3 = await queue.get('run-3');
+      const run1 = await queue.get("run-1");
+      const run2 = await queue.get("run-2");
+      const run3 = await queue.get("run-3");
 
-      expect(run1!.status).toBe('queued');
-      expect(run2!.status).toBe('queued');
-      expect(run3!.status).toBe('queued');
+      expect(run1!.status).toBe("queued");
+      expect(run2!.status).toBe("queued");
+      expect(run3!.status).toBe("queued");
     });
 
-    it('returns empty array when no items are expired', async () => {
+    it("returns empty array when no items are expired", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
-      await queue.markRunning('run-1', 'owner-1', now);
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
+      await queue.markRunning("run-1", "owner-1", now);
 
       // Check before expiration
       const reclaimed = await queue.reclaimExpiredLeases(now);
       expect(reclaimed).toEqual([]);
     });
 
-    it('throws on invalid now timestamp', async () => {
+    it("throws on invalid now timestamp", async () => {
       const queue = createQueueStore();
-      await expect(queue.reclaimExpiredLeases(NaN)).rejects.toThrow('Invalid now');
+      await expect(queue.reclaimExpiredLeases(NaN)).rejects.toThrow(
+        "Invalid now",
+      );
     });
 
-    it('reclaimed item can be claimed again with incremented attempt', async () => {
+    it("reclaimed item can be claimed again with incremented attempt", async () => {
       const queue = createQueueStore();
       const t0 = 1_700_000_000_000;
 
-      await queue.enqueue({ id: 'run-1', flowId: 'flow-1', priority: 1 });
+      await queue.enqueue({ id: "run-1", flowId: "flow-1", priority: 1 });
 
       // First claim: attempt becomes 1
-      const claim1 = await queue.claimNext('owner-1', t0);
+      const claim1 = await queue.claimNext("owner-1", t0);
       expect(claim1!.attempt).toBe(1);
 
       // Simulate lease expiration and reclaim
@@ -723,52 +822,60 @@ describe('V3 Queue contracts', () => {
       await queue.reclaimExpiredLeases(expiresAt + 1);
 
       // Verify item is back to queued with attempt preserved
-      const afterReclaim = await queue.get('run-1');
-      expect(afterReclaim!.status).toBe('queued');
+      const afterReclaim = await queue.get("run-1");
+      expect(afterReclaim!.status).toBe("queued");
       expect(afterReclaim!.attempt).toBe(1);
 
       // Second claim: attempt becomes 2
-      const claim2 = await queue.claimNext('owner-2', expiresAt + 100);
-      expect(claim2!.id).toBe('run-1');
+      const claim2 = await queue.claimNext("owner-2", expiresAt + 100);
+      expect(claim2!.id).toBe("run-1");
       expect(claim2!.attempt).toBe(2);
     });
   });
 
-  describe('Priority ordering edge cases', () => {
-    it('handles negative priorities', async () => {
+  describe("Priority ordering edge cases", () => {
+    it("handles negative priorities", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'neg', flowId: 'flow-1', priority: -5 });
-      await queue.enqueue({ id: 'zero', flowId: 'flow-1', priority: 0 });
-      await queue.enqueue({ id: 'pos', flowId: 'flow-1', priority: 5 });
+      await queue.enqueue({ id: "neg", flowId: "flow-1", priority: -5 });
+      await queue.enqueue({ id: "zero", flowId: "flow-1", priority: 0 });
+      await queue.enqueue({ id: "pos", flowId: "flow-1", priority: 5 });
 
-      const claim1 = await queue.claimNext('owner-1', now);
-      expect(claim1!.id).toBe('pos'); // Highest priority first
+      const claim1 = await queue.claimNext("owner-1", now);
+      expect(claim1!.id).toBe("pos"); // Highest priority first
 
-      const claim2 = await queue.claimNext('owner-1', now);
-      expect(claim2!.id).toBe('zero');
+      const claim2 = await queue.claimNext("owner-1", now);
+      expect(claim2!.id).toBe("zero");
 
-      const claim3 = await queue.claimNext('owner-1', now);
-      expect(claim3!.id).toBe('neg');
+      const claim3 = await queue.claimNext("owner-1", now);
+      expect(claim3!.id).toBe("neg");
     });
 
-    it('handles large priority values', async () => {
+    it("handles large priority values", async () => {
       const queue = createQueueStore();
       const now = Date.now();
 
-      await queue.enqueue({ id: 'max', flowId: 'flow-1', priority: Number.MAX_SAFE_INTEGER });
-      await queue.enqueue({ id: 'min', flowId: 'flow-1', priority: Number.MIN_SAFE_INTEGER });
-      await queue.enqueue({ id: 'mid', flowId: 'flow-1', priority: 0 });
+      await queue.enqueue({
+        id: "max",
+        flowId: "flow-1",
+        priority: Number.MAX_SAFE_INTEGER,
+      });
+      await queue.enqueue({
+        id: "min",
+        flowId: "flow-1",
+        priority: Number.MIN_SAFE_INTEGER,
+      });
+      await queue.enqueue({ id: "mid", flowId: "flow-1", priority: 0 });
 
-      const claim1 = await queue.claimNext('owner-1', now);
-      expect(claim1!.id).toBe('max');
+      const claim1 = await queue.claimNext("owner-1", now);
+      expect(claim1!.id).toBe("max");
 
-      const claim2 = await queue.claimNext('owner-1', now);
-      expect(claim2!.id).toBe('mid');
+      const claim2 = await queue.claimNext("owner-1", now);
+      expect(claim2!.id).toBe("mid");
 
-      const claim3 = await queue.claimNext('owner-1', now);
-      expect(claim3!.id).toBe('min');
+      const claim3 = await queue.claimNext("owner-1", now);
+      expect(claim3!.id).toBe("min");
     });
   });
 });

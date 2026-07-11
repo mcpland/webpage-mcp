@@ -7,19 +7,19 @@
  * - Reclaim interval is respected
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   RunQueueClaimConstraints,
   RunQueueConfig,
   RunQueueItem,
   RunQueueProfile,
-} from '@/entrypoints/background/record-replay-v3/engine/queue/queue';
-import type { LeaseManager } from '@/entrypoints/background/record-replay-v3/engine/queue/leasing';
+} from "@/entrypoints/background/record-replay-v3/engine/queue/queue";
+import type { LeaseManager } from "@/entrypoints/background/record-replay-v3/engine/queue/leasing";
 import {
   createRunScheduler,
   type RunExecutor,
-} from '@/entrypoints/background/record-replay-v3/engine/queue/scheduler';
+} from "@/entrypoints/background/record-replay-v3/engine/queue/scheduler";
 
 // ==================== Test Utilities ====================
 
@@ -45,9 +45,9 @@ function makeClaimedItem(
 ): RunQueueItem {
   return {
     id,
-    flowId: options.flowId ?? 'flow-1',
+    flowId: options.flowId ?? "flow-1",
     ...(options.profile ? { profile: options.profile } : {}),
-    status: 'running',
+    status: "running",
     createdAt: 1,
     updatedAt: 1,
     priority: 0,
@@ -56,7 +56,10 @@ function makeClaimedItem(
   };
 }
 
-function createSilentLogger(): Pick<Console, 'debug' | 'info' | 'warn' | 'error'> {
+function createSilentLogger(): Pick<
+  Console,
+  "debug" | "info" | "warn" | "error"
+> {
   return {
     debug: () => {},
     info: () => {},
@@ -97,22 +100,22 @@ function createKeepaliveProbe(): {
 
 // ==================== Tests ====================
 
-describe('V3 RunScheduler', () => {
-  describe('maxParallelRuns enforcement', () => {
-    it('enforces maxParallelRuns and backfills when a run finishes', async () => {
+describe("V3 RunScheduler", () => {
+  describe("maxParallelRuns enforcement", () => {
+    it("enforces maxParallelRuns and backfills when a run finishes", async () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 2,
         leaseTtlMs: 15_000,
         heartbeatIntervalMs: 5_000,
       };
 
-      const ownerId = 'owner-1';
+      const ownerId = "owner-1";
       const fixedNow = 1_700_000_000_000;
 
       const items: RunQueueItem[] = [
-        makeClaimedItem('run-1'),
-        makeClaimedItem('run-2'),
-        makeClaimedItem('run-3'),
+        makeClaimedItem("run-1"),
+        makeClaimedItem("run-2"),
+        makeClaimedItem("run-3"),
       ];
 
       let claimCalls = 0;
@@ -138,7 +141,7 @@ describe('V3 RunScheduler', () => {
         started.push(item.id);
         const d = createDeferred<void>();
         runDeferreds.set(item.id, d);
-        if (item.id === 'run-3') run3Started.resolve(undefined);
+        if (item.id === "run-3") run3Started.resolve(undefined);
         return d.promise;
       };
 
@@ -146,7 +149,7 @@ describe('V3 RunScheduler', () => {
       let heartbeatStopped = 0;
       const leaseManager: Pick<
         LeaseManager,
-        'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'
+        "startHeartbeat" | "stopHeartbeat" | "reclaimExpiredLeases"
       > = {
         startHeartbeat: () => {
           heartbeatStarted += 1;
@@ -173,40 +176,178 @@ describe('V3 RunScheduler', () => {
 
       scheduler.start();
 
-      // Verify keepalive was acquired on start
-      expect(keepaliveProbe.acquiredTags).toEqual(['scheduler']);
+      // A speculative startup scan does not create a keepalive document.
+      expect(keepaliveProbe.acquiredTags).toEqual([]);
 
       await scheduler.kick();
+      expect(keepaliveProbe.acquiredTags).toEqual(["scheduler"]);
 
       expect(heartbeatStarted).toBe(1);
-      expect(started).toEqual(['run-1', 'run-2']);
+      expect(started).toEqual(["run-1", "run-2"]);
       expect(claimCalls).toBe(2);
-      expect(scheduler.getState().activeRunIds.sort()).toEqual(['run-1', 'run-2']);
+      expect(scheduler.getState().activeRunIds.sort()).toEqual([
+        "run-1",
+        "run-2",
+      ]);
 
       // Complete one run and expect an automatic backfill (run-3)
-      runDeferreds.get('run-1')!.resolve(undefined);
+      runDeferreds.get("run-1")!.resolve(undefined);
 
       await thirdClaimHappened.promise;
       await run3Started.promise;
 
       expect(claimCalls).toBe(3);
-      expect(started).toEqual(['run-1', 'run-2', 'run-3']);
-      expect(doneIds).toContain('run-1');
-      expect(scheduler.getState().activeRunIds.sort()).toEqual(['run-2', 'run-3']);
+      expect(started).toEqual(["run-1", "run-2", "run-3"]);
+      expect(doneIds).toContain("run-1");
+      expect(scheduler.getState().activeRunIds.sort()).toEqual([
+        "run-2",
+        "run-3",
+      ]);
 
       // Drain remaining runs for a clean shutdown
-      runDeferreds.get('run-2')!.resolve(undefined);
-      runDeferreds.get('run-3')!.resolve(undefined);
-      await scheduler.kick();
+      runDeferreds.get("run-2")!.resolve(undefined);
+      runDeferreds.get("run-3")!.resolve(undefined);
+      await vi.waitFor(() => {
+        expect(scheduler.getState().activeRunIds).toEqual([]);
+        expect(keepaliveProbe.releasedCount()).toBe(1);
+      });
 
       scheduler.stop();
       expect(heartbeatStopped).toBe(1);
 
-      // Verify keepalive was released on stop
+      // The claim is released as soon as the queue becomes idle, even though
+      // the scheduler remains started.
       expect(keepaliveProbe.releasedCount()).toBe(1);
     });
 
-    it('does not claim when maxParallelRuns is 0', async () => {
+    it("does not retain a keepalive claim between idle polling passes", async () => {
+      vi.useFakeTimers();
+      try {
+        const keepaliveProbe = createKeepaliveProbe();
+        const claimNext = vi.fn(async () => null);
+        const scheduler = createRunScheduler({
+          queue: { claimNext, markDone: async () => {} },
+          leaseManager: {
+            startHeartbeat: () => {},
+            stopHeartbeat: () => {},
+            reclaimExpiredLeases: async () => [],
+          },
+          keepalive: keepaliveProbe.keepalive,
+          config: {
+            maxParallelRuns: 1,
+            leaseTtlMs: 15_000,
+            heartbeatIntervalMs: 5_000,
+          },
+          ownerId: "owner-idle",
+          execute: async () => {},
+          tuning: { pollIntervalMs: 100, reclaimIntervalMs: 0 },
+          logger: createSilentLogger(),
+        });
+
+        scheduler.start();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(keepaliveProbe.acquiredTags).toEqual([]);
+
+        await vi.advanceTimersByTimeAsync(500);
+        expect(keepaliveProbe.acquiredTags).toEqual([]);
+
+        await scheduler.kick();
+
+        expect(claimNext).toHaveBeenCalled();
+        expect(keepaliveProbe.acquiredTags).toEqual(["scheduler"]);
+        expect(keepaliveProbe.releasedCount()).toBe(
+          keepaliveProbe.acquiredTags.length,
+        );
+        scheduler.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("releases a stale claim across stop/start before the same owner heartbeat can strand it", async () => {
+      const claimResult = createDeferred<RunQueueItem | null>();
+      const keepaliveProbe = createKeepaliveProbe();
+      const markDone = vi.fn(async () => {});
+      const execute = vi.fn(async () => {});
+      const ownerId = "owner-stop-race";
+      const firstClaim: RunQueueItem = {
+        ...makeClaimedItem("stale-claim"),
+        lease: { ownerId, expiresAt: 16_000 },
+      };
+      const replacementClaim: RunQueueItem = {
+        ...makeClaimedItem("stale-claim"),
+        lease: { ownerId, expiresAt: 31_000 },
+      };
+      let queued = false;
+      let replacementReturned = false;
+      let claimCalls = 0;
+      let heartbeatRunning = false;
+      const releaseClaim = vi.fn(async () => {
+        queued = true;
+        return true;
+      });
+      const scheduler = createRunScheduler({
+        queue: {
+          claimNext: () => {
+            claimCalls += 1;
+            if (claimCalls === 1) return claimResult.promise;
+            if (queued && !replacementReturned) {
+              replacementReturned = true;
+              queued = false;
+              return Promise.resolve(replacementClaim);
+            }
+            return Promise.resolve(null);
+          },
+          releaseClaim,
+          markDone,
+        },
+        leaseManager: {
+          startHeartbeat: () => {
+            heartbeatRunning = true;
+          },
+          stopHeartbeat: () => {
+            heartbeatRunning = false;
+          },
+          reclaimExpiredLeases: async () => [],
+        },
+        keepalive: keepaliveProbe.keepalive,
+        config: {
+          maxParallelRuns: 1,
+          leaseTtlMs: 15_000,
+          heartbeatIntervalMs: 5_000,
+        },
+        ownerId,
+        execute,
+        tuning: { pollIntervalMs: 0, reclaimIntervalMs: 0 },
+        logger: createSilentLogger(),
+      });
+
+      scheduler.start();
+      void scheduler.kick();
+      expect(keepaliveProbe.acquiredTags).toEqual(["scheduler"]);
+      scheduler.stop();
+      expect(keepaliveProbe.releasedCount()).toBe(0);
+      scheduler.start();
+      expect(heartbeatRunning).toBe(true);
+
+      claimResult.resolve(firstClaim);
+      await vi.waitFor(() => {
+        expect(releaseClaim).toHaveBeenCalledWith(
+          "stale-claim",
+          ownerId,
+          1,
+          expect.any(Number),
+        );
+        expect(execute).toHaveBeenCalledOnce();
+        expect(markDone).toHaveBeenCalledOnce();
+      });
+      expect(execute).toHaveBeenCalledWith(replacementClaim);
+      expect(keepaliveProbe.acquiredTags).toEqual(["scheduler"]);
+      expect(keepaliveProbe.releasedCount()).toBe(1);
+      scheduler.stop();
+    });
+
+    it("does not claim when maxParallelRuns is 0", async () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 0,
         leaseTtlMs: 15_000,
@@ -224,7 +365,7 @@ describe('V3 RunScheduler', () => {
 
       const leaseManager: Pick<
         LeaseManager,
-        'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'
+        "startHeartbeat" | "stopHeartbeat" | "reclaimExpiredLeases"
       > = {
         startHeartbeat: () => {},
         stopHeartbeat: () => {},
@@ -236,7 +377,7 @@ describe('V3 RunScheduler', () => {
         leaseManager,
         keepalive: noopKeepalive,
         config,
-        ownerId: 'owner-1',
+        ownerId: "owner-1",
         execute: async () => {},
         tuning: { pollIntervalMs: 0, reclaimIntervalMs: 0 },
         logger: createSilentLogger(),
@@ -249,14 +390,17 @@ describe('V3 RunScheduler', () => {
       scheduler.stop();
     });
 
-    it('stops claiming when queue is empty', async () => {
+    it("stops claiming when queue is empty", async () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 5,
         leaseTtlMs: 15_000,
         heartbeatIntervalMs: 5_000,
       };
 
-      const items: RunQueueItem[] = [makeClaimedItem('run-1'), makeClaimedItem('run-2')];
+      const items: RunQueueItem[] = [
+        makeClaimedItem("run-1"),
+        makeClaimedItem("run-2"),
+      ];
 
       let claimCalls = 0;
       const queue = {
@@ -269,7 +413,7 @@ describe('V3 RunScheduler', () => {
 
       const leaseManager: Pick<
         LeaseManager,
-        'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'
+        "startHeartbeat" | "stopHeartbeat" | "reclaimExpiredLeases"
       > = {
         startHeartbeat: () => {},
         stopHeartbeat: () => {},
@@ -288,7 +432,7 @@ describe('V3 RunScheduler', () => {
         leaseManager,
         keepalive: noopKeepalive,
         config,
-        ownerId: 'owner-1',
+        ownerId: "owner-1",
         execute,
         tuning: { pollIntervalMs: 0, reclaimIntervalMs: 0 },
         logger: createSilentLogger(),
@@ -300,14 +444,17 @@ describe('V3 RunScheduler', () => {
       // Should have claimed all available items (2) then stopped when queue returned null
       // Note: claimNext is called until it returns null to fill all slots up to maxParallelRuns
       expect(claimCalls).toBeGreaterThanOrEqual(3); // At least: 2 successful + 1 null
-      expect(scheduler.getState().activeRunIds.sort()).toEqual(['run-1', 'run-2']);
+      expect(scheduler.getState().activeRunIds.sort()).toEqual([
+        "run-1",
+        "run-2",
+      ]);
 
-      runDeferreds.get('run-1')!.resolve(undefined);
-      runDeferreds.get('run-2')!.resolve(undefined);
+      runDeferreds.get("run-1")!.resolve(undefined);
+      runDeferreds.get("run-2")!.resolve(undefined);
       scheduler.stop();
     });
 
-    it('respects maxParallelRunsPerFlow by claiming another eligible flow', async () => {
+    it("respects maxParallelRunsPerFlow by claiming another eligible flow", async () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 3,
         maxParallelRunsPerFlow: 1,
@@ -316,9 +463,9 @@ describe('V3 RunScheduler', () => {
       };
 
       const items: RunQueueItem[] = [
-        makeClaimedItem('flow-a-1', { flowId: 'flow-a' }),
-        makeClaimedItem('flow-a-2', { flowId: 'flow-a' }),
-        makeClaimedItem('flow-b-1', { flowId: 'flow-b' }),
+        makeClaimedItem("flow-a-1", { flowId: "flow-a" }),
+        makeClaimedItem("flow-a-2", { flowId: "flow-a" }),
+        makeClaimedItem("flow-b-1", { flowId: "flow-b" }),
       ];
 
       const queue = {
@@ -337,7 +484,7 @@ describe('V3 RunScheduler', () => {
 
       const leaseManager: Pick<
         LeaseManager,
-        'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'
+        "startHeartbeat" | "stopHeartbeat" | "reclaimExpiredLeases"
       > = {
         startHeartbeat: () => {},
         stopHeartbeat: () => {},
@@ -358,7 +505,7 @@ describe('V3 RunScheduler', () => {
         leaseManager,
         keepalive: noopKeepalive,
         config,
-        ownerId: 'owner-1',
+        ownerId: "owner-1",
         execute,
         tuning: { pollIntervalMs: 0, reclaimIntervalMs: 0 },
         logger: createSilentLogger(),
@@ -367,15 +514,18 @@ describe('V3 RunScheduler', () => {
       scheduler.start();
       await scheduler.kick();
 
-      expect(started).toEqual(['flow-a-1', 'flow-b-1']);
-      expect(scheduler.getState().activeRunIds.sort()).toEqual(['flow-a-1', 'flow-b-1']);
+      expect(started).toEqual(["flow-a-1", "flow-b-1"]);
+      expect(scheduler.getState().activeRunIds.sort()).toEqual([
+        "flow-a-1",
+        "flow-b-1",
+      ]);
 
-      runDeferreds.get('flow-a-1')!.resolve(undefined);
-      runDeferreds.get('flow-b-1')!.resolve(undefined);
+      runDeferreds.get("flow-a-1")!.resolve(undefined);
+      runDeferreds.get("flow-b-1")!.resolve(undefined);
       scheduler.stop();
     });
 
-    it('respects maxParallelRunsPerProfile by claiming another eligible profile', async () => {
+    it("respects maxParallelRunsPerProfile by claiming another eligible profile", async () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 3,
         maxParallelRunsPerProfile: { dangerous: 1 },
@@ -384,9 +534,15 @@ describe('V3 RunScheduler', () => {
       };
 
       const items: RunQueueItem[] = [
-        makeClaimedItem('dangerous-1', { flowId: 'flow-a', profile: 'dangerous' }),
-        makeClaimedItem('dangerous-2', { flowId: 'flow-b', profile: 'dangerous' }),
-        makeClaimedItem('safe-1', { flowId: 'flow-c', profile: 'safe' }),
+        makeClaimedItem("dangerous-1", {
+          flowId: "flow-a",
+          profile: "dangerous",
+        }),
+        makeClaimedItem("dangerous-2", {
+          flowId: "flow-b",
+          profile: "dangerous",
+        }),
+        makeClaimedItem("safe-1", { flowId: "flow-c", profile: "safe" }),
       ];
 
       const queue = {
@@ -396,7 +552,10 @@ describe('V3 RunScheduler', () => {
           constraints?: RunQueueClaimConstraints,
         ) => {
           const index = items.findIndex(
-            (item) => !constraints?.blockedProfiles?.includes(item.profile ?? 'unknown'),
+            (item) =>
+              !constraints?.blockedProfiles?.includes(
+                item.profile ?? "unknown",
+              ),
           );
           return index === -1 ? null : items.splice(index, 1)[0];
         },
@@ -405,7 +564,7 @@ describe('V3 RunScheduler', () => {
 
       const leaseManager: Pick<
         LeaseManager,
-        'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'
+        "startHeartbeat" | "stopHeartbeat" | "reclaimExpiredLeases"
       > = {
         startHeartbeat: () => {},
         stopHeartbeat: () => {},
@@ -426,7 +585,7 @@ describe('V3 RunScheduler', () => {
         leaseManager,
         keepalive: noopKeepalive,
         config,
-        ownerId: 'owner-1',
+        ownerId: "owner-1",
         execute,
         tuning: { pollIntervalMs: 0, reclaimIntervalMs: 0 },
         logger: createSilentLogger(),
@@ -435,17 +594,20 @@ describe('V3 RunScheduler', () => {
       scheduler.start();
       await scheduler.kick();
 
-      expect(started).toEqual(['dangerous-1', 'safe-1']);
-      expect(scheduler.getState().activeRunIds.sort()).toEqual(['dangerous-1', 'safe-1']);
+      expect(started).toEqual(["dangerous-1", "safe-1"]);
+      expect(scheduler.getState().activeRunIds.sort()).toEqual([
+        "dangerous-1",
+        "safe-1",
+      ]);
 
-      runDeferreds.get('dangerous-1')!.resolve(undefined);
-      runDeferreds.get('safe-1')!.resolve(undefined);
+      runDeferreds.get("dangerous-1")!.resolve(undefined);
+      runDeferreds.get("safe-1")!.resolve(undefined);
       scheduler.stop();
     });
   });
 
-  describe('lease reclamation', () => {
-    it('reclaims expired leases at the configured interval', async () => {
+  describe("lease reclamation", () => {
+    it("reclaims expired leases at the configured interval", async () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 0,
         leaseTtlMs: 15_000,
@@ -457,7 +619,7 @@ describe('V3 RunScheduler', () => {
       const reclaimCalls: number[] = [];
       const leaseManager: Pick<
         LeaseManager,
-        'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'
+        "startHeartbeat" | "stopHeartbeat" | "reclaimExpiredLeases"
       > = {
         startHeartbeat: () => {},
         stopHeartbeat: () => {},
@@ -477,7 +639,7 @@ describe('V3 RunScheduler', () => {
         leaseManager,
         keepalive: noopKeepalive,
         config,
-        ownerId: 'owner-1',
+        ownerId: "owner-1",
         execute: async () => {},
         now: () => t,
         tuning: { pollIntervalMs: 0, reclaimIntervalMs: 100 },
@@ -501,7 +663,7 @@ describe('V3 RunScheduler', () => {
       scheduler.stop();
     });
 
-    it('does not reclaim when reclaimIntervalMs is 0', async () => {
+    it("does not reclaim when reclaimIntervalMs is 0", async () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 0,
         leaseTtlMs: 15_000,
@@ -511,7 +673,7 @@ describe('V3 RunScheduler', () => {
       const reclaimCalls: number[] = [];
       const leaseManager: Pick<
         LeaseManager,
-        'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'
+        "startHeartbeat" | "stopHeartbeat" | "reclaimExpiredLeases"
       > = {
         startHeartbeat: () => {},
         stopHeartbeat: () => {},
@@ -531,7 +693,7 @@ describe('V3 RunScheduler', () => {
         leaseManager,
         keepalive: noopKeepalive,
         config,
-        ownerId: 'owner-1',
+        ownerId: "owner-1",
         execute: async () => {},
         tuning: { pollIntervalMs: 0, reclaimIntervalMs: 0 },
         logger: createSilentLogger(),
@@ -547,8 +709,8 @@ describe('V3 RunScheduler', () => {
     });
   });
 
-  describe('error handling', () => {
-    it('throws if ownerId is empty', () => {
+  describe("error handling", () => {
+    it("throws if ownerId is empty", () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 1,
         leaseTtlMs: 15_000,
@@ -565,20 +727,23 @@ describe('V3 RunScheduler', () => {
           },
           keepalive: noopKeepalive,
           config,
-          ownerId: '',
+          ownerId: "",
           execute: async () => {},
         }),
-      ).toThrow('ownerId is required');
+      ).toThrow("ownerId is required");
     });
 
-    it('continues scheduling when executor throws', async () => {
+    it("continues scheduling when executor throws", async () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 1,
         leaseTtlMs: 15_000,
         heartbeatIntervalMs: 5_000,
       };
 
-      const items: RunQueueItem[] = [makeClaimedItem('run-1'), makeClaimedItem('run-2')];
+      const items: RunQueueItem[] = [
+        makeClaimedItem("run-1"),
+        makeClaimedItem("run-2"),
+      ];
 
       let claimCalls = 0;
       const doneIds: string[] = [];
@@ -594,7 +759,7 @@ describe('V3 RunScheduler', () => {
 
       const leaseManager: Pick<
         LeaseManager,
-        'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'
+        "startHeartbeat" | "stopHeartbeat" | "reclaimExpiredLeases"
       > = {
         startHeartbeat: () => {},
         stopHeartbeat: () => {},
@@ -605,8 +770,8 @@ describe('V3 RunScheduler', () => {
       const run2Started = createDeferred<void>();
       const execute: RunExecutor = async (item) => {
         executeCount += 1;
-        if (item.id === 'run-1') {
-          throw new Error('Simulated failure');
+        if (item.id === "run-1") {
+          throw new Error("Simulated failure");
         }
         run2Started.resolve(undefined);
       };
@@ -616,7 +781,7 @@ describe('V3 RunScheduler', () => {
         leaseManager,
         keepalive: noopKeepalive,
         config,
-        ownerId: 'owner-1',
+        ownerId: "owner-1",
         execute,
         tuning: { pollIntervalMs: 0, reclaimIntervalMs: 0 },
         logger: createSilentLogger(),
@@ -629,14 +794,14 @@ describe('V3 RunScheduler', () => {
       await run2Started.promise;
 
       expect(executeCount).toBe(2);
-      expect(doneIds).toContain('run-1');
+      expect(doneIds).toContain("run-1");
 
       scheduler.stop();
     });
   });
 
-  describe('state inspection', () => {
-    it('getState returns correct information', () => {
+  describe("state inspection", () => {
+    it("getState returns correct information", () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 3,
         leaseTtlMs: 15_000,
@@ -652,14 +817,14 @@ describe('V3 RunScheduler', () => {
         },
         keepalive: noopKeepalive,
         config,
-        ownerId: 'test-owner',
+        ownerId: "test-owner",
         execute: async () => {},
         logger: createSilentLogger(),
       });
 
       const state = scheduler.getState();
       expect(state.started).toBe(false);
-      expect(state.ownerId).toBe('test-owner');
+      expect(state.ownerId).toBe("test-owner");
       expect(state.maxParallelRuns).toBe(3);
       expect(state.activeRunIds).toEqual([]);
 
@@ -670,7 +835,7 @@ describe('V3 RunScheduler', () => {
       expect(scheduler.getState().started).toBe(false);
     });
 
-    it('dispose stops the scheduler and clears state', () => {
+    it("dispose stops the scheduler and releases an in-flight pump claim", async () => {
       const config: RunQueueConfig = {
         maxParallelRuns: 1,
         leaseTtlMs: 15_000,
@@ -690,17 +855,20 @@ describe('V3 RunScheduler', () => {
         },
         keepalive: keepaliveProbe.keepalive,
         config,
-        ownerId: 'test-owner',
+        ownerId: "test-owner",
         execute: async () => {},
         logger: createSilentLogger(),
       });
 
       scheduler.start();
+      void scheduler.kick();
       scheduler.dispose();
 
       expect(scheduler.getState().started).toBe(false);
       expect(heartbeatStopped).toBe(1);
-      expect(keepaliveProbe.releasedCount()).toBe(1);
+      await vi.waitFor(() => {
+        expect(keepaliveProbe.releasedCount()).toBe(1);
+      });
     });
   });
 });

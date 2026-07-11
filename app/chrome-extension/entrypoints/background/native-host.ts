@@ -24,7 +24,6 @@ import {
 } from "@/common/constants";
 import { handleCallTool } from "./tools";
 import { createStoragePort } from "./record-replay-v3";
-import { acquireKeepalive } from "./keepalive-manager";
 import { updateConnectionBadge } from "./action-badge";
 import { maybeShowFirstConnectNotification } from "./first-connect-notification";
 import {
@@ -66,17 +65,30 @@ const RECONNECT_BASE_DELAY_MS = 500;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 const RECONNECT_MAX_FAST_ATTEMPTS = 8;
 const RECONNECT_COOLDOWN_DELAY_MS = 5 * 60_000;
+export const NATIVE_RECONNECT_ALARM_NAME = "webpage-mcp.native-host.reconnect";
+export const NATIVE_RECONNECT_STATE_STORAGE_KEY =
+  "webpage-mcp.native-host.reconnect-state.v1";
+const RECONNECT_STATE_MAX_FUTURE_MS = RECONNECT_COOLDOWN_DELAY_MS * 2;
+
+interface PersistedNativeReconnectState {
+  version: 1;
+  attempts: number;
+  deadlineMs: number;
+}
 
 // ==================== Auto-connect State ====================
 
-let keepaliveRelease: (() => void) | null = null;
 let autoConnectEnabled = true;
 let autoConnectLoaded = false;
 let ensurePromise: Promise<boolean> | null = null;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAlarmSync: Promise<void> = Promise.resolve();
+let reconnectStartupRestore: Promise<void> = Promise.resolve();
+let reconnectScheduleGeneration = 0;
 let reconnectAttempts = 0;
+let reconnectDeadlineMs = 0;
 let manualDisconnect = false;
 let lastNativeDisconnectError: string | null = null;
+let nativeHostListenerInitialized = false;
 
 function getNativeConnectionErrorMessage(): string {
   if (lastNativeDisconnectError && lastNativeDisconnectError.trim()) {
@@ -85,7 +97,9 @@ function getNativeConnectionErrorMessage(): string {
   return "Native host not connected";
 }
 
-function isTrustedNativeControlSender(sender: chrome.runtime.MessageSender): boolean {
+function isTrustedNativeControlSender(
+  sender: chrome.runtime.MessageSender,
+): boolean {
   // Native controls are only used by extension pages and the background
   // worker. Content scripts have a sender.tab and must not be able to invoke
   // arbitrary tools, fetch auth material, or forward native payloads.
@@ -129,7 +143,9 @@ function normalizeCapabilityHandshakeRequest(
   }
   const payload = value as Record<string, unknown>;
   const rawHandshake =
-    payload.handshake && typeof payload.handshake === "object" && !Array.isArray(payload.handshake)
+    payload.handshake &&
+    typeof payload.handshake === "object" &&
+    !Array.isArray(payload.handshake)
       ? (payload.handshake as Record<string, unknown>)
       : payload;
   return {
@@ -167,7 +183,9 @@ function buildExtensionCapabilities(
     protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
     capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
     extensionVersion: getExtensionVersion(),
-    ...(request.mcpServerVersion ? { mcpServerVersion: request.mcpServerVersion } : {}),
+    ...(request.mcpServerVersion
+      ? { mcpServerVersion: request.mcpServerVersion }
+      : {}),
     supportedTools: TOOL_SCHEMAS.map((tool) => tool.name),
     supportedRunOptions: [...WEBPAGE_MCP_SUPPORTED_WORKFLOW_RUN_OPTIONS],
     featureFlags: [...WORKFLOW_RUNTIME_FEATURE_FLAGS],
@@ -308,8 +326,7 @@ function normalizeInstanceConfig(raw: unknown): McpServerInstanceConfig | null {
   const enabled = typeof record.enabled === "boolean" ? record.enabled : true;
   const autoStart =
     typeof record.autoStart === "boolean" ? record.autoStart : true;
-  const rawLabel =
-    typeof record.label === "string" ? record.label : undefined;
+  const rawLabel = typeof record.label === "string" ? record.label : undefined;
   if (rawLabel && !isUtf8LengthAtMost(rawLabel, MAX_INSTANCE_LABEL_BYTES)) {
     return null;
   }
@@ -682,7 +699,7 @@ export async function requestAgentRpcFetch(
 
   const connected = nativePort
     ? true
-    : await ensureNativeConnected("agent_rpc_fetch");
+    : await ensureNativeConnectedAfterDeadline("agent_rpc_fetch");
   if (!connected) {
     throw new Error("Native host not connected");
   }
@@ -913,46 +930,120 @@ function getReconnectDelayMs(attempt: number): number {
   return withJitter(delay);
 }
 
-/**
- * Clear the reconnect timer if active.
- */
-function clearReconnectTimer(): void {
-  if (!reconnectTimer) return;
-  clearTimeout(reconnectTimer);
-  reconnectTimer = null;
+function boundReconnectAttempts(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) return 0;
+  return Math.min(RECONNECT_MAX_FAST_ATTEMPTS, Math.max(0, value));
+}
+
+function boundReconnectDeadline(value: unknown, now = Date.now()): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    return 0;
+  }
+  return Math.min(value, now + RECONNECT_STATE_MAX_FUTURE_MS);
+}
+
+function normalizePersistedReconnectState(
+  value: unknown,
+): PersistedNativeReconnectState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) return null;
+  return {
+    version: 1,
+    attempts: boundReconnectAttempts(record.attempts),
+    deadlineMs: boundReconnectDeadline(record.deadlineMs),
+  };
+}
+
+async function loadPersistedReconnectState(): Promise<PersistedNativeReconnectState | null> {
+  try {
+    const result = await chrome.storage.local.get([
+      NATIVE_RECONNECT_STATE_STORAGE_KEY,
+    ]);
+    return normalizePersistedReconnectState(
+      result[NATIVE_RECONNECT_STATE_STORAGE_KEY],
+    );
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Failed to load reconnect state`, error);
+    return null;
+  }
+}
+
+async function persistReconnectState(
+  attempts: number,
+  deadlineMs: number,
+): Promise<void> {
+  const state: PersistedNativeReconnectState = {
+    version: 1,
+    attempts: boundReconnectAttempts(attempts),
+    deadlineMs: boundReconnectDeadline(deadlineMs),
+  };
+  try {
+    await chrome.storage.local.set({
+      [NATIVE_RECONNECT_STATE_STORAGE_KEY]: state,
+    });
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Failed to persist reconnect state`, error);
+  }
+}
+
+async function removePersistedReconnectState(): Promise<void> {
+  try {
+    await chrome.storage.local.remove(NATIVE_RECONNECT_STATE_STORAGE_KEY);
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Failed to clear reconnect state`, error);
+  }
 }
 
 /**
- * Reset reconnect state after successful connection.
+ * Cancel the durable reconnect wake-up. The generation guard prevents a
+ * previously queued alarms.get/create sequence from recreating it afterward.
  */
-function resetReconnectState(): void {
+function clearReconnectAlarm(): void {
+  reconnectScheduleGeneration += 1;
+  if (!chrome.alarms?.clear) return;
+
+  // Serialize the clear behind any in-flight get/create sequence. Otherwise a
+  // successful connection can clear first and a slower create() can recreate
+  // the stale alarm afterward.
+  reconnectAlarmSync = reconnectAlarmSync
+    .catch(() => {
+      // A previous alarm API failure must not prevent cancellation.
+    })
+    .then(async () => {
+      await Promise.resolve(chrome.alarms.clear(NATIVE_RECONNECT_ALARM_NAME));
+    })
+    .catch((error) => {
+      console.warn(`${LOG_PREFIX} Failed to clear reconnect alarm`, error);
+    });
+}
+
+/**
+ * Mark a newly opened native port as an in-flight attempt. The alarm is no
+ * longer needed, but the attempt count must survive until the handshake proves
+ * the connection is usable.
+ */
+function markReconnectAttemptInFlight(): void {
+  reconnectDeadlineMs = 0;
+  clearReconnectAlarm();
+  reconnectAlarmSync = reconnectAlarmSync
+    .catch(() => {
+      // Preserve future state writes after a failed alarm API call.
+    })
+    .then(() => persistReconnectState(reconnectAttempts, 0));
+}
+
+/** Reset reconnect state only after a successful handshake or explicit disable. */
+function resetReconnectState(): Promise<void> {
   reconnectAttempts = 0;
-  clearReconnectTimer();
-}
-
-// ==================== Keepalive Management ====================
-
-/**
- * Sync keepalive hold based on autoConnectEnabled state.
- * When auto-connect is enabled, we hold a keepalive reference to keep SW alive.
- */
-function syncKeepaliveHold(): void {
-  if (autoConnectEnabled) {
-    if (!keepaliveRelease) {
-      keepaliveRelease = acquireKeepalive("native-host");
-      console.debug(`${LOG_PREFIX} Acquired keepalive`);
-    }
-    return;
-  }
-  if (keepaliveRelease) {
-    try {
-      keepaliveRelease();
-      console.debug(`${LOG_PREFIX} Released keepalive`);
-    } catch {
-      // Ignore
-    }
-    keepaliveRelease = null;
-  }
+  reconnectDeadlineMs = 0;
+  clearReconnectAlarm();
+  reconnectAlarmSync = reconnectAlarmSync
+    .catch(() => {
+      // Preserve state cleanup after a failed alarm API call.
+    })
+    .then(removePersistedReconnectState);
+  return reconnectAlarmSync;
 }
 
 // ==================== Auto-connect Settings ====================
@@ -993,7 +1084,9 @@ async function setNativeAutoConnectEnabled(enabled: boolean): Promise<void> {
       error,
     );
   }
-  syncKeepaliveHold();
+  if (!enabled) {
+    await resetReconnectState();
+  }
 }
 
 // ==================== Reconnect Scheduling ====================
@@ -1005,21 +1098,176 @@ function scheduleReconnect(reason: string): void {
   if (nativePort) return;
   if (manualDisconnect) return;
   if (!autoConnectEnabled) return;
-  if (reconnectTimer) return;
 
   const delay = getReconnectDelayMs(reconnectAttempts);
+  const attempts = boundReconnectAttempts(reconnectAttempts);
+  const deadlineMs = Date.now() + delay;
+  reconnectDeadlineMs = deadlineMs;
+  const generation = reconnectScheduleGeneration;
   console.debug(
     `${LOG_PREFIX} Reconnect scheduled in ${delay}ms (attempt=${reconnectAttempts}, reason=${reason})`,
   );
 
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    if (nativePort) return;
-    if (manualDisconnect || !autoConnectEnabled) return;
+  reconnectAlarmSync = reconnectAlarmSync
+    .catch(() => {
+      // A failed alarm API call must not poison future reconnect scheduling.
+    })
+    .then(async () => {
+      if (generation !== reconnectScheduleGeneration) return;
+      if (nativePort || manualDisconnect || !autoConnectEnabled) return;
+      if (!chrome.alarms?.get || !chrome.alarms?.create) {
+        console.warn(
+          `${LOG_PREFIX} chrome.alarms is unavailable; reconnect was not scheduled`,
+        );
+        return;
+      }
 
-    reconnectAttempts += 1;
-    void ensureNativeConnected(`reconnect:${reason}`).catch(() => {});
-  }, delay);
+      const existing = await Promise.resolve(
+        chrome.alarms.get(NATIVE_RECONNECT_ALARM_NAME),
+      );
+      if (generation !== reconnectScheduleGeneration) return;
+      if (nativePort || manualDisconnect || !autoConnectEnabled) return;
+      if (existing) {
+        reconnectDeadlineMs = boundReconnectDeadline(existing.scheduledTime);
+        await persistReconnectState(attempts, reconnectDeadlineMs);
+        return;
+      }
+
+      await persistReconnectState(attempts, deadlineMs);
+      if (generation !== reconnectScheduleGeneration) return;
+      if (nativePort || manualDisconnect || !autoConnectEnabled) return;
+
+      await Promise.resolve(
+        chrome.alarms.create(NATIVE_RECONNECT_ALARM_NAME, {
+          when: deadlineMs,
+        }),
+      );
+    })
+    .catch((error) => {
+      console.warn(`${LOG_PREFIX} Failed to schedule reconnect alarm`, error);
+    });
+}
+
+/**
+ * Restore the durable reconnect deadline before the automatic startup probe.
+ * Returns true when startup should wait for an existing/recreated alarm.
+ */
+async function restoreReconnectStateOnStartup(): Promise<boolean> {
+  if (!autoConnectLoaded) {
+    autoConnectEnabled = await loadNativeAutoConnectEnabled();
+    autoConnectLoaded = true;
+  }
+  if (!autoConnectEnabled) {
+    await resetReconnectState();
+    return true;
+  }
+
+  const persisted = await loadPersistedReconnectState();
+  reconnectAttempts = persisted?.attempts ?? 0;
+  reconnectDeadlineMs = persisted?.deadlineMs ?? 0;
+
+  if (!chrome.alarms?.get || !chrome.alarms?.create) {
+    reconnectDeadlineMs = 0;
+    return false;
+  }
+
+  const generation = reconnectScheduleGeneration;
+  let shouldWait = false;
+  reconnectAlarmSync = reconnectAlarmSync
+    .catch(() => {
+      // A previous alarm API failure must not poison startup restoration.
+    })
+    .then(async () => {
+      if (generation !== reconnectScheduleGeneration) {
+        shouldWait = true;
+        return;
+      }
+
+      const existing = await Promise.resolve(
+        chrome.alarms.get(NATIVE_RECONNECT_ALARM_NAME),
+      );
+      if (generation !== reconnectScheduleGeneration) {
+        shouldWait = true;
+        return;
+      }
+      if (existing) {
+        const now = Date.now();
+        const boundedDeadline = boundReconnectDeadline(
+          existing.scheduledTime,
+          now,
+        );
+        if (boundedDeadline <= now) {
+          reconnectDeadlineMs = 0;
+          await Promise.resolve(
+            chrome.alarms.clear(NATIVE_RECONNECT_ALARM_NAME),
+          );
+          await persistReconnectState(reconnectAttempts, 0);
+          return;
+        }
+
+        reconnectDeadlineMs = boundedDeadline;
+        if (boundedDeadline !== existing.scheduledTime) {
+          await Promise.resolve(
+            chrome.alarms.create(NATIVE_RECONNECT_ALARM_NAME, {
+              when: boundedDeadline,
+            }),
+          );
+        }
+        await persistReconnectState(reconnectAttempts, reconnectDeadlineMs);
+        shouldWait = true;
+        return;
+      }
+
+      if (reconnectDeadlineMs > Date.now()) {
+        await Promise.resolve(
+          chrome.alarms.create(NATIVE_RECONNECT_ALARM_NAME, {
+            when: reconnectDeadlineMs,
+          }),
+        );
+        shouldWait = true;
+      } else {
+        reconnectDeadlineMs = 0;
+      }
+    })
+    .catch((error) => {
+      reconnectDeadlineMs = 0;
+      shouldWait = false;
+      console.warn(`${LOG_PREFIX} Failed to restore reconnect alarm`, error);
+    });
+  await reconnectAlarmSync;
+  return shouldWait;
+}
+
+async function ensureNativeConnectedAfterDeadline(
+  trigger: string,
+): Promise<boolean> {
+  await reconnectStartupRestore;
+  if (reconnectDeadlineMs > Date.now()) return false;
+  return ensureNativeConnected(trigger);
+}
+
+function handleNativeReconnectAlarm(alarm: chrome.alarms.Alarm): void {
+  if (alarm.name !== NATIVE_RECONNECT_ALARM_NAME) return;
+
+  void reconnectStartupRestore.then(() => {
+    handleNativeReconnectAlarmAfterRestore();
+  });
+}
+
+function handleNativeReconnectAlarmAfterRestore(): void {
+  // One-shot alarms are removed by Chrome when they fire. Advancing the
+  // generation also invalidates any stale create sequence in this worker.
+  reconnectScheduleGeneration += 1;
+  if (nativePort || manualDisconnect || !autoConnectEnabled) return;
+
+  reconnectDeadlineMs = 0;
+  reconnectAttempts = boundReconnectAttempts(reconnectAttempts + 1);
+  reconnectAlarmSync = reconnectAlarmSync
+    .catch(() => {
+      // Preserve the fired-attempt checkpoint after an alarm API failure.
+    })
+    .then(() => persistReconnectState(reconnectAttempts, 0));
+  void ensureNativeConnected("reconnect_alarm").catch(() => {});
 }
 
 // ==================== Core Ensure Function ====================
@@ -1040,19 +1288,16 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
     if (!autoConnectLoaded) {
       autoConnectEnabled = await loadNativeAutoConnectEnabled();
       autoConnectLoaded = true;
-      syncKeepaliveHold();
     }
 
     // If auto-connect is disabled, do nothing
     if (!autoConnectEnabled) {
+      await resetReconnectState();
       console.debug(
         `${LOG_PREFIX} Auto-connect disabled, skipping ensure (trigger=${trigger})`,
       );
       return false;
     }
-
-    // Sync keepalive hold
-    syncKeepaliveHold();
 
     await ensureManagedInstancesLoaded();
 
@@ -1086,6 +1331,7 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
       }
 
       console.debug(`${LOG_PREFIX} Already connected (trigger=${trigger})`);
+      await resetReconnectState();
       await ensureManagedInstancesRunning();
       await maybeShowFirstConnectNotification();
       return true;
@@ -1131,6 +1377,7 @@ async function ensureNativeConnected(trigger: string): Promise<boolean> {
       `${LOG_PREFIX} Connection initiated successfully (trigger=${trigger})`,
     );
     lastNativeDisconnectError = null;
+    await resetReconnectState();
     await ensureManagedInstancesRunning();
     await maybeShowFirstConnectNotification();
     return true;
@@ -1154,6 +1401,9 @@ export function connectNativeHost(): boolean {
     lastNativeDisconnectError = null;
     const connectedPort = chrome.runtime.connectNative(HOST_NAME);
     nativePort = connectedPort;
+    // The native messaging Port itself keeps the worker alive. No additional
+    // offscreen keepalive is needed while this connection exists.
+    markReconnectAttemptInFlight();
     syncConnectionBadge();
 
     const postOnConnectedPort = (response: unknown): boolean => {
@@ -1319,7 +1569,7 @@ export function connectNativeHost(): boolean {
         broadcastServerStatusChange(status.instanceId);
         broadcastServerInstancesChanged();
         // Server is confirmed running - now we can reset reconnect state
-        resetReconnectState();
+        await resetReconnectState();
         console.log(
           `${SUCCESS_MESSAGES.SERVER_STARTED} [${status.instanceId}]`,
         );
@@ -1396,21 +1646,33 @@ export function connectNativeHost(): boolean {
  * Initialize native host listeners and load initial state
  */
 export const initNativeHostListener = () => {
+  if (nativeHostListenerInitialized) return;
+  nativeHostListenerInitialized = true;
+
   // Initialize server status from storage
   void loadServerStatuses();
   void ensureManagedInstancesLoaded();
 
-  // Auto-connect on SW activation (covers SW restart after idle termination)
-  void ensureNativeConnected("sw_startup").catch(() => {});
+  const startupRestore = restoreReconnectStateOnStartup();
+  reconnectStartupRestore = startupRestore.then(() => undefined);
+  chrome.alarms?.onAlarm?.addListener(handleNativeReconnectAlarm);
+
+  // Auto-connect on SW activation unless a durable reconnect deadline already
+  // owns the next attempt for this worker generation.
+  void startupRestore
+    .then((shouldWait) =>
+      shouldWait ? false : ensureNativeConnected("sw_startup"),
+    )
+    .catch(() => {});
 
   // Auto-connect on Chrome browser startup
   chrome.runtime.onStartup.addListener(() => {
-    void ensureNativeConnected("onStartup").catch(() => {});
+    void ensureNativeConnectedAfterDeadline("onStartup").catch(() => {});
   });
 
   // Auto-connect on extension install/update
   chrome.runtime.onInstalled.addListener(() => {
-    void ensureNativeConnected("onInstalled").catch(() => {});
+    void ensureNativeConnectedAfterDeadline("onInstalled").catch(() => {});
   });
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -1497,9 +1759,6 @@ export const initNativeHostListener = () => {
       (async () => {
         // Explicit user disconnect: disable auto-connect and stop reconnect loop
         await setNativeAutoConnectEnabled(false);
-        clearReconnectTimer();
-        reconnectAttempts = 0;
-        syncKeepaliveHold();
 
         if (nativePort) {
           // Only set manualDisconnect if we have an active native connection to close.

@@ -121,7 +121,9 @@ function connectToBackground(): chrome.runtime.Port | null {
 
     port.onDisconnect.addListener(() => {
       console.log("[rr-keepalive] Port disconnected");
-      keepalivePort = null;
+      if (keepalivePort === port) {
+        keepalivePort = null;
+      }
       // Only reconnect if keepalive is still desired.
       scheduleReconnect(1000);
     });
@@ -253,9 +255,6 @@ export function initKeepalive(): void {
       // Ignore
     }
   });
-
-  // Also establish initial Port connection for backwards compatibility.
-  keepalivePort = connectToBackground();
 
   console.log("[rr-keepalive] Keepalive initialized");
 }

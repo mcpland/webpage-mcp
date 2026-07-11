@@ -3,10 +3,10 @@
  * @description Define the management interface of the Run queue
  */
 
-import type { JsonObject, UnixMillis } from '../../domain/json';
-import type { FlowId, NodeId, RunId } from '../../domain/ids';
-import type { TriggerFireContext } from '../../domain/triggers';
-import type { ExecutionFlags } from '@/entrypoints/background/replay-actions';
+import type { JsonObject, UnixMillis } from "../../domain/json";
+import type { FlowId, NodeId, RunId } from "../../domain/ids";
+import type { TriggerFireContext } from "../../domain/triggers";
+import type { ExecutionFlags } from "@/entrypoints/background/replay-actions";
 
 /**
  * RunQueue Configuration
@@ -44,28 +44,30 @@ export const DEFAULT_QUEUE_CONFIG: RunQueueConfig = {
   heartbeatIntervalMs: 5_000,
 };
 
-export const RUN_QUEUE_BACKPRESSURE_CODE = 'RUN_QUEUE_BACKPRESSURE' as const;
+export const RUN_QUEUE_BACKPRESSURE_CODE = "RUN_QUEUE_BACKPRESSURE" as const;
 
 export class RunQueueBackpressureError extends Error {
   readonly code = RUN_QUEUE_BACKPRESSURE_CODE;
   readonly retryable = true;
-  readonly scope: 'global' | 'flow';
+  readonly scope: "global" | "flow";
   readonly limit: number;
   readonly queuedCount: number;
   readonly flowId?: FlowId;
 
   constructor(input: {
-    scope: 'global' | 'flow';
+    scope: "global" | "flow";
     limit: number;
     queuedCount: number;
     flowId?: FlowId;
   }) {
     const target =
-      input.scope === 'flow' && input.flowId ? `flow "${input.flowId}"` : 'run queue';
+      input.scope === "flow" && input.flowId
+        ? `flow "${input.flowId}"`
+        : "run queue";
     super(
       `${target} is at queued backpressure limit ${input.limit}; retry after queued runs drain`,
     );
-    this.name = 'RunQueueBackpressureError';
+    this.name = "RunQueueBackpressureError";
     this.scope = input.scope;
     this.limit = input.limit;
     this.queuedCount = input.queuedCount;
@@ -76,9 +78,9 @@ export class RunQueueBackpressureError extends Error {
 /**
  * Queue item status
  */
-export type QueueItemStatus = 'queued' | 'running' | 'paused';
+export type QueueItemStatus = "queued" | "running" | "paused";
 
-export type RunQueueProfile = 'safe' | 'idempotent' | 'dangerous' | 'unknown';
+export type RunQueueProfile = "safe" | "idempotent" | "dangerous" | "unknown";
 
 export interface RunQueueClaimConstraints {
   blockedFlowIds?: readonly FlowId[];
@@ -140,7 +142,13 @@ export interface RunQueueItem {
  */
 export type EnqueueInput = Omit<
   RunQueueItem,
-  'status' | 'createdAt' | 'updatedAt' | 'attempt' | 'lease' | 'priority' | 'maxAttempts'
+  | "status"
+  | "createdAt"
+  | "updatedAt"
+  | "attempt"
+  | "lease"
+  | "priority"
+  | "maxAttempts"
 > & {
   id: RunId;
   /** Priority (the larger the number, the higher the priority, default 0) */
@@ -173,6 +181,20 @@ export interface RunQueue {
     now: UnixMillis,
     constraints?: RunQueueClaimConstraints,
   ): Promise<RunQueueItem | null>;
+
+  /**
+   * Atomically roll back one claim that has not started execution.
+   * This is a single-shot operation: the owner and expected attempt identify
+   * the currently held claim without depending on the heartbeat-mutated lease
+   * deadline. A later claim cannot exist until this transaction requeues the
+   * item, and every later claim increments the attempt again.
+   */
+  releaseClaim(
+    runId: RunId,
+    ownerId: string,
+    expectedAttempt: number,
+    now: UnixMillis,
+  ): Promise<boolean>;
 
   /**
    * contract renewal heartbeat
@@ -243,12 +265,13 @@ export interface RunQueue {
  */
 export function createNotImplementedQueue(): RunQueue {
   const notImplemented = () => {
-    throw new Error('RunQueue not implemented');
+    throw new Error("RunQueue not implemented");
   };
 
   return {
     enqueue: async () => notImplemented(),
     claimNext: async () => notImplemented(),
+    releaseClaim: async () => notImplemented(),
     heartbeat: async () => notImplemented(),
     reclaimExpiredLeases: async () => notImplemented(),
     recoverOrphanLeases: async () => notImplemented(),

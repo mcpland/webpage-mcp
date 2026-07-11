@@ -22,7 +22,7 @@ describe("RR-V3 keepalive sender authorization", () => {
     vi.useRealTimers();
   });
 
-  it("rejects a content-script keepalive port and accepts only offscreen.html", () => {
+  it("rejects a content-script port and closes an unreferenced offscreen reconnect", () => {
     chrome.runtime.getURL = vi.fn(
       (path = "") =>
         `chrome-extension://${chrome.runtime.id}/${path.replace(/^\//, "")}`,
@@ -51,7 +51,7 @@ describe("RR-V3 keepalive sender authorization", () => {
       origin: `chrome-extension://${chrome.runtime.id}`,
     });
     handleConnect(offscreenPort);
-    expect(offscreenPort.disconnect).not.toHaveBeenCalled();
+    expect(offscreenPort.disconnect).toHaveBeenCalledOnce();
     expect(offscreenPort.onMessage.addListener).toHaveBeenCalledOnce();
   });
 
@@ -80,6 +80,7 @@ describe("RR-V3 keepalive sender authorization", () => {
       const keepalive = await import("@/entrypoints/offscreen/rr-keepalive");
       keepalive.initKeepalive();
       const respond = vi.fn();
+      expect(chrome.runtime.connect).not.toHaveBeenCalled();
 
       listener?.(
         { type: "rr_v3_keepalive.control", command: "start" },
@@ -96,6 +97,10 @@ describe("RR-V3 keepalive sender authorization", () => {
       );
       expect(keepalive.isKeepaliveActive()).toBe(true);
       expect(respond).toHaveBeenCalledWith({ ok: true });
+      expect(chrome.runtime.connect).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(runtimePort.postMessage).toHaveBeenCalledTimes(3);
 
       listener?.(
         { type: "rr_v3_keepalive.control", command: "stop" },
@@ -103,6 +108,12 @@ describe("RR-V3 keepalive sender authorization", () => {
         respond,
       );
       expect(keepalive.isKeepaliveActive()).toBe(false);
+      expect(runtimePort.disconnect).toHaveBeenCalledOnce();
+
+      const messagesAfterStop = vi.mocked(runtimePort.postMessage).mock.calls
+        .length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(runtimePort.postMessage).toHaveBeenCalledTimes(messagesAfterStop);
     } finally {
       chrome.runtime.onMessage.addListener = originalAddListener;
       chrome.runtime.connect = originalConnect;

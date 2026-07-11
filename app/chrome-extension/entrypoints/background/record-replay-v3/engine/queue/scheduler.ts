@@ -8,23 +8,23 @@
  * - Backfill available slots when runs complete
  * - Periodically reclaim expired leases (best-effort)
  * - Start/stop lease heartbeats via LeaseManager
- * - Acquire/release keepalive to prevent MV3 SW termination (P3-05)
+ * - Acquire/release keepalive only while scheduler work is in flight (P3-05)
  *
  * Non-responsibilities:
  * - Run execution details (Flow loading, tab allocation, etc.) are injected via RunExecutor
  */
 
-import type { UnixMillis } from '../../domain/json';
-import type { RunId } from '../../domain/ids';
-import type { LeaseManager } from './leasing';
+import type { UnixMillis } from "../../domain/json";
+import type { RunId } from "../../domain/ids";
+import type { LeaseManager } from "./leasing";
 import type {
   RunQueue,
   RunQueueClaimConstraints,
   RunQueueConfig,
   RunQueueItem,
   RunQueueProfile,
-} from './queue';
-import type { KeepaliveController } from '../keepalive/offscreen-keepalive';
+} from "./queue";
+import type { KeepaliveController } from "../keepalive/offscreen-keepalive";
 
 // ==================== Types ====================
 
@@ -56,15 +56,19 @@ export interface RunSchedulerTuning {
  * Scheduler dependencies (dependency injection)
  */
 export interface RunSchedulerDeps {
-  queue: Pick<RunQueue, 'claimNext' | 'markDone'>;
-  leaseManager: Pick<LeaseManager, 'startHeartbeat' | 'stopHeartbeat' | 'reclaimExpiredLeases'>;
-  keepalive: Pick<KeepaliveController, 'acquire'>;
+  queue: Pick<RunQueue, "claimNext" | "markDone"> &
+    Partial<Pick<RunQueue, "releaseClaim">>;
+  leaseManager: Pick<
+    LeaseManager,
+    "startHeartbeat" | "stopHeartbeat" | "reclaimExpiredLeases"
+  >;
+  keepalive: Pick<KeepaliveController, "acquire">;
   config: RunQueueConfig;
   ownerId: string;
   execute: RunExecutor;
   now?: () => UnixMillis;
   tuning?: RunSchedulerTuning;
-  logger?: Pick<Console, 'debug' | 'info' | 'warn' | 'error'>;
+  logger?: Pick<Console, "debug" | "info" | "warn" | "error">;
 }
 
 /**
@@ -102,28 +106,31 @@ export interface RunScheduler {
 
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const RUN_QUEUE_PROFILES: readonly RunQueueProfile[] = [
-  'safe',
-  'idempotent',
-  'dangerous',
-  'unknown',
+  "safe",
+  "idempotent",
+  "dangerous",
+  "unknown",
 ];
 
 // ==================== Helpers ====================
 
 function clampNonNegativeInt(value: unknown, fallback: number): number {
-  const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
+  const n =
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.floor(value)
+      : fallback;
   return Math.max(0, n);
 }
 
 function normalizeOptionalPositiveInt(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     return undefined;
   }
   return Math.max(1, Math.floor(value));
 }
 
 function normalizeProfileLimits(
-  value: RunQueueConfig['maxParallelRunsPerProfile'],
+  value: RunQueueConfig["maxParallelRunsPerProfile"],
 ): Partial<Record<RunQueueProfile, number>> | undefined {
   if (!value) {
     return undefined;
@@ -142,19 +149,21 @@ function normalizeProfileLimits(
 function getQueueProfile(item: RunQueueItem): RunQueueProfile {
   return RUN_QUEUE_PROFILES.includes(item.profile as RunQueueProfile)
     ? (item.profile as RunQueueProfile)
-    : 'unknown';
+    : "unknown";
 }
 
 function buildClaimConstraints(
   activeRunItems: Map<RunId, RunQueueItem>,
   maxParallelRunsPerFlow: number | undefined,
-  maxParallelRunsPerProfile: Partial<Record<RunQueueProfile, number>> | undefined,
+  maxParallelRunsPerProfile:
+    | Partial<Record<RunQueueProfile, number>>
+    | undefined,
 ): RunQueueClaimConstraints | undefined {
-  const blockedFlowIds = new Set<RunQueueItem['flowId']>();
+  const blockedFlowIds = new Set<RunQueueItem["flowId"]>();
   const blockedProfiles = new Set<RunQueueProfile>();
 
   if (maxParallelRunsPerFlow !== undefined) {
-    const flowCounts = new Map<RunQueueItem['flowId'], number>();
+    const flowCounts = new Map<RunQueueItem["flowId"], number>();
     for (const item of activeRunItems.values()) {
       const count = (flowCounts.get(item.flowId) ?? 0) + 1;
       flowCounts.set(item.flowId, count);
@@ -185,8 +194,12 @@ function buildClaimConstraints(
   }
 
   return {
-    ...(blockedFlowIds.size ? { blockedFlowIds: Array.from(blockedFlowIds) } : {}),
-    ...(blockedProfiles.size ? { blockedProfiles: Array.from(blockedProfiles) } : {}),
+    ...(blockedFlowIds.size
+      ? { blockedFlowIds: Array.from(blockedFlowIds) }
+      : {}),
+    ...(blockedProfiles.size
+      ? { blockedProfiles: Array.from(blockedProfiles) }
+      : {}),
   };
 }
 
@@ -213,7 +226,7 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
   const logger = deps.logger ?? console;
 
   if (!deps.ownerId) {
-    throw new Error('ownerId is required');
+    throw new Error("ownerId is required");
   }
 
   const now = deps.now ?? (() => Date.now());
@@ -221,17 +234,21 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
   const maxParallelRunsPerFlow = normalizeOptionalPositiveInt(
     deps.config.maxParallelRunsPerFlow,
   );
-  const maxParallelRunsPerProfile = normalizeProfileLimits(deps.config.maxParallelRunsPerProfile);
+  const maxParallelRunsPerProfile = normalizeProfileLimits(
+    deps.config.maxParallelRunsPerProfile,
+  );
   const pollIntervalMs = clampNonNegativeInt(
     deps.tuning?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     DEFAULT_POLL_INTERVAL_MS,
   );
   const reclaimIntervalMs = clampNonNegativeInt(
-    deps.tuning?.reclaimIntervalMs ?? defaultReclaimIntervalMs(deps.config.leaseTtlMs),
+    deps.tuning?.reclaimIntervalMs ??
+      defaultReclaimIntervalMs(deps.config.leaseTtlMs),
     defaultReclaimIntervalMs(deps.config.leaseTtlMs),
   );
 
   let started = false;
+  let lifecycleGeneration = 0;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let releaseKeepalive: (() => void) | null = null;
 
@@ -243,23 +260,51 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
 
   let lastReclaimAt: UnixMillis | null = null;
 
+  function acquireKeepaliveForWork(): void {
+    if (releaseKeepalive) return;
+
+    try {
+      releaseKeepalive = deps.keepalive.acquire("scheduler");
+    } catch (e) {
+      logger.warn("[RunScheduler] keepalive.acquire failed:", e);
+      releaseKeepalive = null;
+    }
+  }
+
+  function hasKeepaliveWork(): boolean {
+    return pendingKick || pumpPromise !== null || activeRunItems.size > 0;
+  }
+
+  function releaseKeepaliveIfIdle(): void {
+    if (!releaseKeepalive || hasKeepaliveWork()) return;
+
+    const release = releaseKeepalive;
+    releaseKeepalive = null;
+    try {
+      release();
+    } catch (e) {
+      logger.warn("[RunScheduler] keepalive release failed:", e);
+    }
+  }
+
   /**
    * Single scheduling tick:
    * 1. Reclaim expired leases (if interval elapsed)
    * 2. Fill available slots up to maxParallelRuns
    */
-  async function tick(): Promise<void> {
+  async function tick(generation: number): Promise<void> {
     const t = now();
 
     // Best-effort lease reclaim (disabled when reclaimIntervalMs === 0)
     if (reclaimIntervalMs > 0) {
-      const shouldReclaim = lastReclaimAt === null || t - lastReclaimAt >= reclaimIntervalMs;
+      const shouldReclaim =
+        lastReclaimAt === null || t - lastReclaimAt >= reclaimIntervalMs;
       if (shouldReclaim) {
         lastReclaimAt = t;
         try {
           await deps.leaseManager.reclaimExpiredLeases(t);
         } catch (e) {
-          logger.warn('[RunScheduler] reclaimExpiredLeases failed:', e);
+          logger.warn("[RunScheduler] reclaimExpiredLeases failed:", e);
         }
       }
     }
@@ -268,7 +313,11 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
     //
     // Note: `stop()` can be called while an async claim is in-flight. Guard the loop
     // with `started` to prevent claiming additional items after stop is requested.
-    while (started && activeRunItems.size < maxParallelRuns) {
+    while (
+      started &&
+      generation === lifecycleGeneration &&
+      activeRunItems.size < maxParallelRuns
+    ) {
       let claimed: RunQueueItem | null = null;
       try {
         claimed = await deps.queue.claimNext(
@@ -281,11 +330,51 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
           ),
         );
       } catch (e) {
-        logger.error('[RunScheduler] claimNext failed:', e);
+        logger.error("[RunScheduler] claimNext failed:", e);
         return;
       }
 
       if (!claimed) return;
+
+      // stop()/restart may have happened while claimNext() was awaiting storage.
+      // Do not launch work under a stale scheduler lifecycle. Leave the
+      // durable running lease intact so normal lease recovery can requeue it;
+      // markDone() here would incorrectly discard an unexecuted run.
+      if (!started || generation !== lifecycleGeneration) {
+        logger.debug(
+          `[RunScheduler] Releasing stale claim "${claimed.id}" after lifecycle change`,
+        );
+        if (deps.queue.releaseClaim && claimed.lease) {
+          try {
+            const released = await deps.queue.releaseClaim(
+              claimed.id,
+              deps.ownerId,
+              claimed.attempt,
+              now(),
+            );
+            if (!released) {
+              logger.warn(
+                `[RunScheduler] Stale claim "${claimed.id}" no longer matched its original lease`,
+              );
+            }
+          } catch (e) {
+            logger.error(
+              `[RunScheduler] Failed to release stale claim "${claimed.id}":`,
+              e,
+            );
+          }
+        } else {
+          logger.error(
+            `[RunScheduler] Cannot release stale claim "${claimed.id}" because its lease release API is unavailable`,
+          );
+        }
+        return;
+      }
+
+      // Speculative polling does not need to wake/create an offscreen
+      // keepalive. Once a durable queued item is actually claimed, retain the
+      // worker through execution and queue finalization.
+      acquireKeepaliveForWork();
 
       // Guard against double-launch within the same scheduler instance
       if (activeRunItems.has(claimed.id)) {
@@ -296,7 +385,10 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
         void deps.queue
           .markDone(claimed.id, now())
           .catch((err) =>
-            logger.warn('[RunScheduler] markDone after duplicate claim failed:', err),
+            logger.warn(
+              "[RunScheduler] markDone after duplicate claim failed:",
+              err,
+            ),
           );
         continue;
       }
@@ -310,19 +402,27 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
         .then(() => deps.execute(claimedItem))
         .catch((e) => {
           // If execution failed unexpectedly, log but still cleanup
-          logger.error(`[RunScheduler] execute failed for run "${claimedItem.id}":`, e);
+          logger.error(
+            `[RunScheduler] execute failed for run "${claimedItem.id}":`,
+            e,
+          );
         })
         .finally(async () => {
-          activeRunItems.delete(claimedItem.id);
           try {
             await deps.queue.markDone(claimedItem.id, now());
           } catch (e) {
-            logger.warn(`[RunScheduler] markDone failed for run "${claimedItem.id}":`, e);
+            logger.warn(
+              `[RunScheduler] markDone failed for run "${claimedItem.id}":`,
+              e,
+            );
           }
+          activeRunItems.delete(claimedItem.id);
 
           // Backfill immediately when a slot frees up
           if (started) {
             void kick();
+          } else {
+            releaseKeepaliveIfIdle();
           }
         });
 
@@ -334,46 +434,49 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
   /**
    * Pump loop: keeps running while pendingKick is set
    */
-  async function pump(): Promise<void> {
+  async function pump(generation: number): Promise<void> {
     try {
-      while (started && pendingKick) {
+      while (started && generation === lifecycleGeneration && pendingKick) {
         pendingKick = false;
         try {
-          await tick();
+          await tick(generation);
         } catch (e) {
-          logger.error('[RunScheduler] tick failed:', e);
+          logger.error("[RunScheduler] tick failed:", e);
         }
       }
     } finally {
       pumpPromise = null;
+      releaseKeepaliveIfIdle();
+
+      // A stop/start transition can supersede an awaiting pump. Preserve a
+      // kick queued for the new lifecycle instead of letting the stale pump
+      // consume it.
+      if (started && pendingKick) {
+        void requestPump(false);
+      }
     }
   }
 
   function start(): void {
     if (started) return;
     started = true;
-
-    // Acquire keepalive to prevent MV3 SW termination
-    try {
-      releaseKeepalive = deps.keepalive.acquire('scheduler');
-    } catch (e) {
-      logger.warn('[RunScheduler] keepalive.acquire failed:', e);
-      releaseKeepalive = null;
-    }
+    lifecycleGeneration += 1;
 
     try {
       deps.leaseManager.startHeartbeat(deps.ownerId);
     } catch (e) {
-      logger.warn('[RunScheduler] startHeartbeat failed:', e);
+      logger.warn("[RunScheduler] startHeartbeat failed:", e);
     }
 
     if (pollIntervalMs > 0) {
       pollTimer = setInterval(() => {
-        void kick();
+        void requestPump(false);
       }, pollIntervalMs);
     }
 
-    void kick();
+    // Startup is a speculative recovery scan. It acquires a claim only if an
+    // item is found; explicit enqueue kicks retain the pump immediately.
+    void requestPump(false);
   }
 
   function stop(): void {
@@ -386,6 +489,8 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
     }
 
     started = false;
+    lifecycleGeneration += 1;
+    pendingKick = false;
 
     if (pollTimer) {
       clearInterval(pollTimer);
@@ -395,28 +500,27 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
     try {
       deps.leaseManager.stopHeartbeat(deps.ownerId);
     } catch (e) {
-      logger.warn('[RunScheduler] stopHeartbeat failed:', e);
+      logger.warn("[RunScheduler] stopHeartbeat failed:", e);
     }
 
-    // Release keepalive
-    if (releaseKeepalive) {
-      try {
-        releaseKeepalive();
-      } catch (e) {
-        logger.warn('[RunScheduler] keepalive release failed:', e);
-      }
-      releaseKeepalive = null;
-    }
+    releaseKeepaliveIfIdle();
   }
 
-  function kick(): Promise<void> {
+  function requestPump(holdKeepalive: boolean): Promise<void> {
     if (!started) return Promise.resolve();
 
     pendingKick = true;
+    if (holdKeepalive) {
+      acquireKeepaliveForWork();
+    }
     if (!pumpPromise) {
-      pumpPromise = pump();
+      pumpPromise = pump(lifecycleGeneration);
     }
     return pumpPromise;
+  }
+
+  function kick(): Promise<void> {
+    return requestPump(true);
   }
 
   function getState(): RunSchedulerState {
@@ -424,7 +528,9 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
       started,
       ownerId: deps.ownerId,
       maxParallelRuns,
-      ...(maxParallelRunsPerFlow !== undefined ? { maxParallelRunsPerFlow } : {}),
+      ...(maxParallelRunsPerFlow !== undefined
+        ? { maxParallelRunsPerFlow }
+        : {}),
       ...(maxParallelRunsPerProfile ? { maxParallelRunsPerProfile } : {}),
       activeRunIds: Array.from(activeRunItems.keys()),
     };
@@ -432,7 +538,6 @@ export function createRunScheduler(deps: RunSchedulerDeps): RunScheduler {
 
   function dispose(): void {
     stop();
-    activeRunItems.clear();
   }
 
   return { start, stop, kick, getState, dispose };
