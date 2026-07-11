@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
-import { AGENT_STREAM_LIMITS } from '@/common/agent-stream-boundaries';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import { AGENT_STREAM_LIMITS } from "@/common/agent-stream-boundaries";
 
 const nativeHostMocks = vi.hoisted(() => ({
   requestAgentRpcFetch: vi.fn(),
@@ -8,65 +8,79 @@ const nativeHostMocks = vi.hoisted(() => ({
   unsubscribeAgentStream: vi.fn(),
 }));
 const sidepanelMocks = vi.hoisted(() => ({ openAgentSetupSidepanel: vi.fn() }));
-const keepaliveMocks = vi.hoisted(() => ({ acquireKeepalive: vi.fn(() => vi.fn()) }));
+const keepaliveMocks = vi.hoisted(() => ({
+  acquireKeepalive: vi.fn(() => vi.fn()),
+}));
 const authorizationMocks = vi.hoisted(() => ({
   consumePrivilegedUiAuthorization: vi.fn(() => true),
 }));
 
-vi.mock('@/entrypoints/background/native-host', () => nativeHostMocks);
-vi.mock('@/entrypoints/background/utils/sidepanel', () => sidepanelMocks);
-vi.mock('@/entrypoints/background/keepalive-manager', () => keepaliveMocks);
-vi.mock('@/entrypoints/background/privileged-ui-authorization', () => authorizationMocks);
+vi.mock("@/entrypoints/background/native-host", () => nativeHostMocks);
+vi.mock("@/entrypoints/background/utils/sidepanel", () => sidepanelMocks);
+vi.mock("@/entrypoints/background/keepalive-manager", () => keepaliveMocks);
+vi.mock(
+  "@/entrypoints/background/privileged-ui-authorization",
+  () => authorizationMocks,
+);
 
-type RequestListener = Parameters<typeof chrome.runtime.onMessage.addListener>[0];
+type RequestListener = Parameters<
+  typeof chrome.runtime.onMessage.addListener
+>[0];
 
-describe('Quick Panel Agent stream authorization', () => {
+describe("Quick Panel Agent stream authorization", () => {
   let listeners: RequestListener[];
 
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
     listeners = [];
-    vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation((listener) => {
-      listeners.push(listener);
-    });
+    vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation(
+      (listener) => {
+        listeners.push(listener);
+      },
+    );
     (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockResolvedValue({
-      'agent-selected-session-id': 'session-1',
+      "agent-selected-session-id": "session-1",
     });
-    (chrome.tabs as typeof chrome.tabs & { sendMessage: ReturnType<typeof vi.fn> }).sendMessage = vi
-      .fn()
-      .mockResolvedValue(undefined);
+    (
+      chrome.tabs as typeof chrome.tabs & {
+        sendMessage: ReturnType<typeof vi.fn>;
+      }
+    ).sendMessage = vi.fn().mockResolvedValue(undefined);
     sidepanelMocks.openAgentSetupSidepanel.mockResolvedValue(undefined);
-    nativeHostMocks.subscribeAgentStream.mockResolvedValue({ subscriptionId: 'subscription-1' });
+    nativeHostMocks.subscribeAgentStream.mockImplementation(
+      async (_sessionId: string, options: { subscriptionId: string }) => ({
+        subscriptionId: options.subscriptionId,
+      }),
+    );
     nativeHostMocks.unsubscribeAgentStream.mockResolvedValue(undefined);
     nativeHostMocks.requestAgentRpcFetch.mockResolvedValue({
       ok: true,
       statusCode: 200,
       json: {},
-      body: '',
+      body: "",
     });
 
-    const { initQuickPanelAgentHandler } = await import(
-      '@/entrypoints/background/quick-panel/agent-handler'
-    );
+    const { initQuickPanelAgentHandler } =
+      await import("@/entrypoints/background/quick-panel/agent-handler");
     initQuickPanelAgentHandler();
   });
 
-  it('rejects content-script stream forgeries and accepts the internal relay', async () => {
+  it("rejects content-script stream forgeries and accepts the internal relay", async () => {
     const sendResponse = vi.fn();
     const contentSender = {
       id: chrome.runtime.id,
       tab: { id: 7, windowId: 2 } as chrome.tabs.Tab,
       frameId: 0,
-      documentId: 'document-a',
+      documentId: "document-a",
     } as chrome.runtime.MessageSender;
 
     expect(
       listeners[0](
         {
           type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
-          authorizationToken: 'token',
-          payload: { instruction: 'Review' },
+          authorizationToken: "token",
+          payload: { instruction: "Review" },
         },
         contentSender,
         sendResponse,
@@ -75,19 +89,20 @@ describe('Quick Panel Agent stream authorization', () => {
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
     await vi.waitFor(() => expect(listeners).toHaveLength(2));
     const requestId = sendResponse.mock.calls[0]?.[0]?.requestId;
+    const subscriptionId = `quick-panel-${requestId}`;
     const eventMessage = {
       type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
       payload: {
-        subscriptionId: 'subscription-1',
+        subscriptionId,
         event: {
-          type: 'message',
+          type: "message",
           data: {
-            id: 'message-1',
-            sessionId: 'session-1',
+            id: "message-1",
+            sessionId: "session-1",
             requestId,
-            role: 'assistant',
-            content: 'done',
-            messageType: 'chat',
+            role: "assistant",
+            content: "done",
+            messageType: "chat",
             createdAt: new Date(0).toISOString(),
           },
         },
@@ -101,15 +116,18 @@ describe('Quick Panel Agent stream authorization', () => {
     expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
       7,
       expect.objectContaining({ requestId }),
-      { frameId: 0 },
+      { frameId: 0, documentId: "document-a" },
     );
 
     listeners[1](
       {
         ...eventMessage,
         payload: {
-          subscriptionId: 'subscription-1',
-          event: { type: 'status', data: { requestId, status: 'completed' } },
+          subscriptionId,
+          event: {
+            type: "status",
+            data: { sessionId: "session-1", requestId, status: "completed" },
+          },
         },
       },
       { id: chrome.runtime.id },
@@ -117,50 +135,59 @@ describe('Quick Panel Agent stream authorization', () => {
     );
   });
 
-  it('terminates a request at the cumulative stream event limit', async () => {
+  it("terminates a request at the cumulative stream event limit", async () => {
     const sendResponse = vi.fn();
     const contentSender = {
       id: chrome.runtime.id,
       tab: { id: 7, windowId: 2 } as chrome.tabs.Tab,
       frameId: 0,
-      documentId: 'document-a',
+      documentId: "document-a",
     } as chrome.runtime.MessageSender;
     listeners[0](
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
-        authorizationToken: 'token',
-        payload: { instruction: 'Review' },
+        authorizationToken: "token",
+        payload: { instruction: "Review" },
       },
       contentSender,
       sendResponse,
     );
     await vi.waitFor(() => expect(listeners).toHaveLength(2));
     const requestId = sendResponse.mock.calls[0]?.[0]?.requestId;
+    const subscriptionId = `quick-panel-${requestId}`;
     const eventMessage = {
       type: BACKGROUND_MESSAGE_TYPES.AGENT_STREAM_EVENT,
       payload: {
-        subscriptionId: 'subscription-1',
+        subscriptionId,
         event: {
-          type: 'status',
-          data: { sessionId: 'session-1', requestId, status: 'running' },
+          type: "status",
+          data: { sessionId: "session-1", requestId, status: "running" },
         },
       },
     };
 
-    for (let index = 0; index <= AGENT_STREAM_LIMITS.maxEventsPerRequest; index += 1) {
+    for (
+      let index = 0;
+      index <= AGENT_STREAM_LIMITS.maxEventsPerRequest;
+      index += 1
+    ) {
       listeners[1](eventMessage, { id: chrome.runtime.id }, vi.fn());
     }
 
-    expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith('subscription-1');
-    expect(chrome.tabs.sendMessage).toHaveBeenLastCalledWith(
-      7,
-      expect.objectContaining({
-        event: expect.objectContaining({
-          type: 'error',
-          error: 'Quick Panel stream exceeded its resource budget.',
+    await vi.waitFor(() => {
+      expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith(
+        subscriptionId,
+      );
+      expect(chrome.tabs.sendMessage).toHaveBeenLastCalledWith(
+        7,
+        expect.objectContaining({
+          event: expect.objectContaining({
+            type: "error",
+            error: "Quick Panel stream exceeded its resource budget.",
+          }),
         }),
-      }),
-      { frameId: 0 },
-    );
+        { frameId: 0, documentId: "document-a" },
+      );
+    });
   });
 });

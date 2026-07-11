@@ -3,16 +3,16 @@
  * @description Provides global configuration and polyfills for test environment
  */
 
-import { vi } from 'vitest';
+import { vi } from "vitest";
 
 // Provide IndexedDB globals (jsdom doesn't include them)
-import 'fake-indexeddb/auto';
+import "fake-indexeddb/auto";
 
 // Mock chrome API (basic placeholder)
-if (typeof globalThis.chrome === 'undefined') {
+if (typeof globalThis.chrome === "undefined") {
   (globalThis as unknown as { chrome: object }).chrome = {
     runtime: {
-      id: 'test-extension-id',
+      id: "test-extension-id",
       sendMessage: vi.fn().mockResolvedValue(undefined),
       onMessage: {
         addListener: vi.fn(),
@@ -31,6 +31,11 @@ if (typeof globalThis.chrome === 'undefined') {
         set: vi.fn().mockResolvedValue(undefined),
         remove: vi.fn().mockResolvedValue(undefined),
       },
+      session: {
+        get: vi.fn().mockResolvedValue({}),
+        set: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockResolvedValue(undefined),
+      },
     },
     tabs: {
       query: vi.fn().mockResolvedValue([]),
@@ -38,7 +43,7 @@ if (typeof globalThis.chrome === 'undefined') {
       create: vi.fn().mockResolvedValue({ id: 1 }),
       update: vi.fn().mockResolvedValue({}),
       remove: vi.fn().mockResolvedValue(undefined),
-      captureVisibleTab: vi.fn().mockResolvedValue('data:image/png;base64,'),
+      captureVisibleTab: vi.fn().mockResolvedValue("data:image/png;base64,"),
       onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
       onCreated: { addListener: vi.fn(), removeListener: vi.fn() },
       onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },

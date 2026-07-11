@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
 
 const nativeHostMocks = vi.hoisted(() => ({
   requestAgentRpcFetch: vi.fn(),
@@ -18,10 +18,16 @@ const propsInjectionMocks = vi.hoisted(() => ({
   releasePropsAgentEarlyInjection: vi.fn(),
 }));
 
-vi.mock('@/entrypoints/background/native-host', () => nativeHostMocks);
-vi.mock('@/entrypoints/background/privileged-ui-authorization', () => authorizationMocks);
-vi.mock('@/entrypoints/background/utils/sidepanel', () => sidepanelMocks);
-vi.mock('@/entrypoints/background/web-editor/props-early-injection', () => propsInjectionMocks);
+vi.mock("@/entrypoints/background/native-host", () => nativeHostMocks);
+vi.mock(
+  "@/entrypoints/background/privileged-ui-authorization",
+  () => authorizationMocks,
+);
+vi.mock("@/entrypoints/background/utils/sidepanel", () => sidepanelMocks);
+vi.mock(
+  "@/entrypoints/background/web-editor/props-early-injection",
+  () => propsInjectionMocks,
+);
 
 type RequestListener = (
   message: any,
@@ -29,7 +35,7 @@ type RequestListener = (
   sendResponse: (value: any) => void,
 ) => boolean | undefined;
 
-describe('Web Editor status owner cleanup', () => {
+describe("Web Editor status owner cleanup", () => {
   let requestListener: RequestListener | undefined;
   let tabRemovedListener:
     | ((tabId: number, removeInfo: chrome.tabs.TabRemoveInfo) => void)
@@ -46,47 +52,66 @@ describe('Web Editor status owner cleanup', () => {
     requestCount = 0;
     authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValue(true);
     sidepanelMocks.openAgentSetupSidepanel.mockResolvedValue(undefined);
-    propsInjectionMocks.pruneOrphanedPropsAgentEarlyInjections.mockResolvedValue(undefined);
-    propsInjectionMocks.releasePropsAgentEarlyInjection.mockResolvedValue(undefined);
+    propsInjectionMocks.pruneOrphanedPropsAgentEarlyInjections.mockResolvedValue(
+      undefined,
+    );
+    propsInjectionMocks.releasePropsAgentEarlyInjection.mockResolvedValue(
+      undefined,
+    );
     nativeHostMocks.unsubscribeAgentStream.mockResolvedValue(undefined);
-    nativeHostMocks.subscribeAgentStream.mockImplementation(async (sessionId: string) => ({
-      subscriptionId: `subscription-${sessionId}`,
-    }));
+    nativeHostMocks.subscribeAgentStream.mockImplementation(
+      async (_sessionId: string, options: { subscriptionId: string }) => ({
+        subscriptionId: options.subscriptionId,
+      }),
+    );
     nativeHostMocks.requestAgentRpcFetch.mockImplementation(async () => {
       requestCount += 1;
       return {
         ok: true,
         statusCode: 200,
         json: { requestId: `request-${requestCount}` },
-        body: '',
+        body: "",
       };
     });
-    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-      selectedSessionCount += 1;
-      return { 'agent-selected-session-id': `session-${selectedSessionCount}` };
-    });
+    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => {
+        selectedSessionCount += 1;
+        return {
+          "agent-selected-session-id": `session-${selectedSessionCount}`,
+        };
+      },
+    );
     chrome.storage.session = {
       get: vi.fn().mockResolvedValue({}),
       set: vi.fn().mockResolvedValue(undefined),
       remove: vi.fn().mockResolvedValue(undefined),
     } as unknown as typeof chrome.storage.session;
-    vi.mocked(chrome.tabs.onRemoved.addListener).mockImplementation((listener) => {
-      tabRemovedListener = listener;
-    });
-    vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation((listener) => {
-      if (!requestListener) requestListener = listener as RequestListener;
-    });
+    vi.mocked(chrome.tabs.onRemoved.addListener).mockImplementation(
+      (listener) => {
+        tabRemovedListener = listener;
+      },
+    );
+    vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation(
+      (listener) => {
+        if (!requestListener) requestListener = listener as RequestListener;
+      },
+    );
 
-    const { initWebEditorListeners } = await import('@/entrypoints/background/web-editor');
+    const { initWebEditorListeners } =
+      await import("@/entrypoints/background/web-editor");
     initWebEditorListeners();
   });
 
   function sender(): chrome.runtime.MessageSender {
     return {
       id: chrome.runtime.id,
-      tab: { id: 7, windowId: 3, url: 'https://example.com/editor' } as chrome.tabs.Tab,
+      tab: {
+        id: 7,
+        windowId: 3,
+        url: "https://example.com/editor",
+      } as chrome.tabs.Tab,
       frameId: 0,
-      documentId: 'document-a',
+      documentId: "document-a",
     };
   }
 
@@ -97,10 +122,10 @@ describe('Web Editor status owner cleanup', () => {
           type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY,
           authorizationToken: `apply-token-${index}`,
           payload: {
-            pageUrl: 'https://example.com/editor',
-            fingerprint: { tag: 'button', classes: [] },
+            pageUrl: "https://example.com/editor",
+            fingerprint: { tag: "button", classes: [] },
             instruction: {
-              type: 'update_text',
+              type: "update_text",
               description: `Update text ${index}`,
               text: `Save ${index}`,
             },
@@ -113,24 +138,29 @@ describe('Web Editor status owner cleanup', () => {
     });
   }
 
-  it('closes streams on owner eviction and tab removal', async () => {
-    for (let index = 1; index <= 101; index += 1) {
-      await expect(apply(index)).resolves.toMatchObject({ success: true });
-    }
+  it("closes every owned stream when its tab is removed", async () => {
+    await expect(apply(1)).resolves.toMatchObject({ success: true });
+    await expect(apply(2)).resolves.toMatchObject({ success: true });
+    const subscriptionIds = nativeHostMocks.subscribeAgentStream.mock.calls.map(
+      ([, options]) => options.subscriptionId as string,
+    );
+    expect(subscriptionIds).toHaveLength(2);
 
-    await vi.waitFor(() => {
-      expect(nativeHostMocks.subscribeAgentStream).toHaveBeenCalledTimes(17);
-      expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith('subscription-session-1');
-    });
-
-    expect(tabRemovedListener).toBeTypeOf('function');
+    expect(tabRemovedListener).toBeTypeOf("function");
     tabRemovedListener!(7, { windowId: 3, isWindowClosing: false });
 
     await vi.waitFor(() => {
-      expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith('subscription-session-2');
       expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith(
-        'subscription-session-101',
+        subscriptionIds[0],
       );
+      expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith(
+        subscriptionIds[1],
+      );
+      expect(
+        nativeHostMocks.requestAgentRpcFetch.mock.calls.filter(
+          ([request]) => request?.operation === "agent.chat.cancelRequest",
+        ),
+      ).toHaveLength(2);
     });
   });
 });

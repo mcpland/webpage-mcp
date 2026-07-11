@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
-import type { ElementChangeSummary } from '@/common/web-editor-types';
+import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import type { ElementChangeSummary } from "@/common/web-editor-types";
 import {
   normalizeApplyBatchPayload,
   normalizeApplyPayload,
-} from '@/entrypoints/background/web-editor/resource-boundaries';
+} from "@/entrypoints/background/web-editor/resource-boundaries";
 
 const nativeHostMocks = vi.hoisted(() => ({
   requestAgentRpcFetch: vi.fn(),
@@ -23,10 +23,16 @@ const propsInjectionMocks = vi.hoisted(() => ({
   releasePropsAgentEarlyInjection: vi.fn(),
 }));
 
-vi.mock('@/entrypoints/background/native-host', () => nativeHostMocks);
-vi.mock('@/entrypoints/background/privileged-ui-authorization', () => authorizationMocks);
-vi.mock('@/entrypoints/background/utils/sidepanel', () => sidepanelMocks);
-vi.mock('@/entrypoints/background/web-editor/props-early-injection', () => propsInjectionMocks);
+vi.mock("@/entrypoints/background/native-host", () => nativeHostMocks);
+vi.mock(
+  "@/entrypoints/background/privileged-ui-authorization",
+  () => authorizationMocks,
+);
+vi.mock("@/entrypoints/background/utils/sidepanel", () => sidepanelMocks);
+vi.mock(
+  "@/entrypoints/background/web-editor/props-early-injection",
+  () => propsInjectionMocks,
+);
 
 type RequestListener = (
   message: any,
@@ -45,17 +51,17 @@ function createElement(index = 0, textSize = 0): ElementChangeSummary {
     label: `button-${index}`,
     fullLabel: `body > button-${index}`,
     locator,
-    type: 'text',
+    type: "text",
     changes: {
-      text: { beforePreview: 'Before', afterPreview: 'After' },
+      text: { beforePreview: "Before", afterPreview: "After" },
     },
     transactionIds: [`tx-${index}`],
     netEffect: {
       elementKey: `button-${index}`,
       locator,
       textChange: {
-        before: textSize > 0 ? 'a'.repeat(textSize) : 'Before',
-        after: textSize > 0 ? 'b'.repeat(textSize) : 'After',
+        before: textSize > 0 ? "a".repeat(textSize) : "Before",
+        after: textSize > 0 ? "b".repeat(textSize) : "After",
       },
     },
     updatedAt: index,
@@ -64,12 +70,12 @@ function createElement(index = 0, textSize = 0): ElementChangeSummary {
 
 function createApplyPayload(): Record<string, unknown> {
   return {
-    pageUrl: 'https://example.com/editor',
-    fingerprint: { tag: 'button', classes: ['primary'] },
+    pageUrl: "https://example.com/editor",
+    fingerprint: { tag: "button", classes: ["primary"] },
     instruction: {
-      type: 'update_text',
-      description: 'Update the button label',
-      text: 'Save',
+      type: "update_text",
+      description: "Update the button label",
+      text: "Save",
     },
   };
 }
@@ -80,14 +86,14 @@ function contentSender(): chrome.runtime.MessageSender {
     tab: {
       id: 7,
       windowId: 3,
-      url: 'https://example.com/editor',
+      url: "https://example.com/editor",
     } as chrome.tabs.Tab,
     frameId: 0,
-    documentId: 'document-a',
+    documentId: "document-a",
   };
 }
 
-describe('Web Editor apply resource boundaries', () => {
+describe("Web Editor apply resource boundaries", () => {
   let requestListener: RequestListener | undefined;
 
   beforeEach(async () => {
@@ -96,31 +102,40 @@ describe('Web Editor apply resource boundaries', () => {
     requestListener = undefined;
     authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValue(true);
     sidepanelMocks.openAgentSetupSidepanel.mockResolvedValue(undefined);
-    propsInjectionMocks.pruneOrphanedPropsAgentEarlyInjections.mockResolvedValue(undefined);
-    propsInjectionMocks.releasePropsAgentEarlyInjection.mockResolvedValue(undefined);
-    nativeHostMocks.subscribeAgentStream.mockResolvedValue({
-      subscriptionId: 'subscription-1',
-    });
+    propsInjectionMocks.pruneOrphanedPropsAgentEarlyInjections.mockResolvedValue(
+      undefined,
+    );
+    propsInjectionMocks.releasePropsAgentEarlyInjection.mockResolvedValue(
+      undefined,
+    );
+    nativeHostMocks.subscribeAgentStream.mockImplementation(
+      async (_sessionId: string, options: { subscriptionId: string }) => ({
+        subscriptionId: options.subscriptionId,
+      }),
+    );
     nativeHostMocks.unsubscribeAgentStream.mockResolvedValue(undefined);
     nativeHostMocks.requestAgentRpcFetch.mockResolvedValue({
       ok: true,
       statusCode: 200,
-      json: { requestId: 'request-1' },
-      body: '',
+      json: { requestId: "request-1" },
+      body: "",
     });
     (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockResolvedValue({
-      'agent-selected-session-id': 'session-1',
+      "agent-selected-session-id": "session-1",
     });
     chrome.storage.session = {
       get: vi.fn().mockResolvedValue({}),
       set: vi.fn().mockResolvedValue(undefined),
       remove: vi.fn().mockResolvedValue(undefined),
     } as unknown as typeof chrome.storage.session;
-    vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation((listener) => {
-      if (!requestListener) requestListener = listener as RequestListener;
-    });
+    vi.mocked(chrome.runtime.onMessage.addListener).mockImplementation(
+      (listener) => {
+        if (!requestListener) requestListener = listener as RequestListener;
+      },
+    );
 
-    const { initWebEditorListeners } = await import('@/entrypoints/background/web-editor');
+    const { initWebEditorListeners } =
+      await import("@/entrypoints/background/web-editor");
     initWebEditorListeners();
   });
 
@@ -131,7 +146,7 @@ describe('Web Editor apply resource boundaries', () => {
     return sendResponse.mock.calls[0]![0] as Record<string, unknown>;
   }
 
-  it('rejects raw depth and field collections before allocating normalized copies', () => {
+  it("rejects raw depth and field collections before allocating normalized copies", () => {
     const applyPayload = createApplyPayload();
     let nested: Record<string, unknown> = {};
     applyPayload.extra = nested;
@@ -140,17 +155,22 @@ describe('Web Editor apply resource boundaries', () => {
       nested.next = next;
       nested = next;
     }
-    expect(() => normalizeApplyPayload(applyPayload)).toThrow(/JSON depth limit/);
+    expect(() => normalizeApplyPayload(applyPayload)).toThrow(
+      /JSON depth limit/,
+    );
 
     const tooManyStyles = Object.fromEntries(
-      Array.from({ length: 257 }, (_, index) => [`--property-${index}`, 'value']),
+      Array.from({ length: 257 }, (_, index) => [
+        `--property-${index}`,
+        "value",
+      ]),
     );
     expect(() =>
       normalizeApplyPayload({
         ...createApplyPayload(),
         instruction: {
-          type: 'update_style',
-          description: 'Update styles',
+          type: "update_style",
+          description: "Update styles",
           style: tooManyStyles,
         },
       }),
@@ -159,15 +179,17 @@ describe('Web Editor apply resource boundaries', () => {
     expect(() =>
       normalizeApplyPayload({
         ...createApplyPayload(),
-        fingerprint: { tag: 'button', classes: Array(129).fill('class-name') },
+        fingerprint: { tag: "button", classes: Array(129).fill("class-name") },
       }),
     ).toThrow(/fingerprint\.classes.*item limit/);
   });
 
-  it('bounds batch elements, exclusions, locators, debug source, and net effects', () => {
+  it("bounds batch elements, exclusions, locators, debug source, and net effects", () => {
     expect(() =>
       normalizeApplyBatchPayload({
-        elements: Array.from({ length: 65 }, (_, index) => createElement(index)),
+        elements: Array.from({ length: 65 }, (_, index) =>
+          createElement(index),
+        ),
         excludedKeys: [],
       }),
     ).toThrow(/payload\.elements.*item limit/);
@@ -179,7 +201,7 @@ describe('Web Editor apply resource boundaries', () => {
             ...createElement(),
             locator: {
               ...createElement().locator,
-              selectors: Array(17).fill('.selector'),
+              selectors: Array(17).fill(".selector"),
             },
           },
         ],
@@ -192,7 +214,7 @@ describe('Web Editor apply resource boundaries', () => {
         elements: [
           {
             ...createElement(),
-            debugSource: { file: 'x'.repeat(8 * 1024 + 1) },
+            debugSource: { file: "x".repeat(8 * 1024 + 1) },
           },
         ],
         excludedKeys: [],
@@ -206,7 +228,7 @@ describe('Web Editor apply resource boundaries', () => {
             ...createElement(),
             netEffect: {
               ...createElement().netEffect,
-              classChanges: { before: Array(129).fill('old'), after: [] },
+              classChanges: { before: Array(129).fill("old"), after: [] },
             },
           },
         ],
@@ -217,19 +239,21 @@ describe('Web Editor apply resource boundaries', () => {
     expect(() =>
       normalizeApplyBatchPayload({
         elements: [createElement()],
-        excludedKeys: Array(129).fill('element-key'),
+        excludedKeys: Array(129).fill("element-key"),
       }),
     ).toThrow(/excludedKeys.*item limit/);
   });
 
-  it('enforces the final prompt byte cap before calling the Agent RPC', async () => {
+  it("enforces the final prompt byte cap before calling the Agent RPC", async () => {
     const response = await send({
       type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY_BATCH,
-      authorizationToken: 'apply-token',
+      authorizationToken: "apply-token",
       payload: {
-        elements: Array.from({ length: 64 }, (_, index) => createElement(index, 2_200)),
+        elements: Array.from({ length: 64 }, (_, index) =>
+          createElement(index, 2_200),
+        ),
         excludedKeys: [],
-        pageUrl: 'https://example.com/editor',
+        pageUrl: "https://example.com/editor",
       },
     });
 
@@ -238,23 +262,24 @@ describe('Web Editor apply resource boundaries', () => {
     expect(nativeHostMocks.requestAgentRpcFetch).not.toHaveBeenCalled();
   });
 
-  it('preserves a normal apply payload and sends only the bounded prompt', async () => {
+  it("preserves a normal apply payload and sends only the bounded prompt", async () => {
     const response = await send({
       type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_APPLY,
-      authorizationToken: 'apply-token',
+      authorizationToken: "apply-token",
       payload: createApplyPayload(),
     });
 
     expect(response).toMatchObject({
       success: true,
-      requestId: 'request-1',
-      sessionId: 'session-1',
+      requestId: expect.any(String),
+      sessionId: "session-1",
     });
     const request = nativeHostMocks.requestAgentRpcFetch.mock.calls[0]![0];
-    expect(request.operation).toBe('agent.chat.act');
+    expect(request.operation).toBe("agent.chat.act");
     expect(JSON.parse(request.body)).toMatchObject({
-      dbSessionId: 'session-1',
-      instruction: expect.stringContaining('Update the button label'),
+      dbSessionId: "session-1",
+      requestId: response.requestId,
+      instruction: expect.stringContaining("Update the button label"),
     });
   });
 });

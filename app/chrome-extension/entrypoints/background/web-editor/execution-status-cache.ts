@@ -26,10 +26,10 @@ export class ExecutionStatusCache {
     this.ttlMs = options.ttlMs ?? WEB_EDITOR_STATUS_CACHE_TTL_MS;
     this.now = options.now ?? Date.now;
     if (!Number.isSafeInteger(this.maxEntries) || this.maxEntries <= 0) {
-      throw new RangeError('maxEntries must be a positive safe integer');
+      throw new RangeError("maxEntries must be a positive safe integer");
     }
     if (!Number.isFinite(this.ttlMs) || this.ttlMs <= 0) {
-      throw new RangeError('ttlMs must be positive');
+      throw new RangeError("ttlMs must be positive");
     }
   }
 
@@ -41,7 +41,7 @@ export class ExecutionStatusCache {
     requestId: string,
     status: string,
     message?: string,
-    result?: ExecutionStatusEntry['result'],
+    result?: ExecutionStatusEntry["result"],
   ): void {
     const now = this.now();
     this.pruneExpired(now);
@@ -49,7 +49,9 @@ export class ExecutionStatusCache {
     this.entries.delete(requestId);
     this.entries.set(requestId, { status, message, result, updatedAt: now });
     while (this.entries.size > this.maxEntries) {
-      const oldestRequestId = this.entries.keys().next().value as string | undefined;
+      const oldestRequestId = this.entries.keys().next().value as
+        | string
+        | undefined;
       if (!oldestRequestId) break;
       this.entries.delete(oldestRequestId);
     }
@@ -62,6 +64,10 @@ export class ExecutionStatusCache {
       return undefined;
     }
     return entry;
+  }
+
+  delete(requestId: string): boolean {
+    return this.entries.delete(requestId);
   }
 
   pruneExpired(now = this.now()): void {

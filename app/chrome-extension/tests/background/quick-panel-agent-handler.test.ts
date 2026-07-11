@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
 
 const nativeHostMocks = vi.hoisted(() => ({
   requestAgentRpcFetch: vi.fn(),
@@ -19,10 +19,13 @@ const authorizationMocks = vi.hoisted(() => ({
   consumePrivilegedUiAuthorization: vi.fn(() => true),
 }));
 
-vi.mock('@/entrypoints/background/native-host', () => nativeHostMocks);
-vi.mock('@/entrypoints/background/utils/sidepanel', () => sidepanelMocks);
-vi.mock('@/entrypoints/background/keepalive-manager', () => keepaliveMocks);
-vi.mock('@/entrypoints/background/privileged-ui-authorization', () => authorizationMocks);
+vi.mock("@/entrypoints/background/native-host", () => nativeHostMocks);
+vi.mock("@/entrypoints/background/utils/sidepanel", () => sidepanelMocks);
+vi.mock("@/entrypoints/background/keepalive-manager", () => keepaliveMocks);
+vi.mock(
+  "@/entrypoints/background/privileged-ui-authorization",
+  () => authorizationMocks,
+);
 
 type RequestListener = (
   message: unknown,
@@ -30,67 +33,92 @@ type RequestListener = (
   sendResponse: (value: unknown) => void,
 ) => boolean;
 
-describe('Quick Panel agent handler', () => {
+describe("Quick Panel agent handler", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
 
-    (globalThis.chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
-      async () => undefined,
-    );
-    (globalThis.chrome.storage.local.get as ReturnType<typeof vi.fn>).mockResolvedValue({
-      'agent-selected-session-id': 'session-123',
+    (
+      globalThis.chrome.runtime.sendMessage as ReturnType<typeof vi.fn>
+    ).mockImplementation(async () => undefined);
+    (
+      globalThis.chrome.storage.local.get as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({
+      "agent-selected-session-id": "session-123",
     });
     sidepanelMocks.openAgentSetupSidepanel.mockResolvedValue(undefined);
-    (globalThis.chrome.tabs as typeof globalThis.chrome.tabs & { sendMessage: ReturnType<typeof vi.fn> }).sendMessage =
-      vi.fn().mockResolvedValue(undefined);
+    (
+      globalThis.chrome.tabs as typeof globalThis.chrome.tabs & {
+        sendMessage: ReturnType<typeof vi.fn>;
+      }
+    ).sendMessage = vi.fn().mockResolvedValue(undefined);
 
-    nativeHostMocks.subscribeAgentStream.mockResolvedValue({ subscriptionId: 'sub-123' });
+    nativeHostMocks.subscribeAgentStream.mockImplementation(
+      async (_sessionId: string, options: { subscriptionId: string }) => ({
+        subscriptionId: options.subscriptionId,
+      }),
+    );
     nativeHostMocks.unsubscribeAgentStream.mockResolvedValue(undefined);
-    nativeHostMocks.requestAgentRpcFetch.mockImplementation(async (request: any) => {
-      if (request?.operation === 'agent.sessions.get') {
-        return { ok: true, statusCode: 200, json: { session: { id: 'session-123' } }, body: '' };
-      }
-      if (request?.operation === 'agent.chat.act') {
-        return { ok: true, statusCode: 200, json: { requestId: 'req-123' }, body: '' };
-      }
-      return { ok: true, statusCode: 200, json: {}, body: '' };
-    });
+    nativeHostMocks.requestAgentRpcFetch.mockImplementation(
+      async (request: any) => {
+        if (request?.operation === "agent.sessions.get") {
+          return {
+            ok: true,
+            statusCode: 200,
+            json: { session: { id: "session-123" } },
+            body: "",
+          };
+        }
+        if (request?.operation === "agent.chat.act") {
+          return {
+            ok: true,
+            statusCode: 200,
+            json: { requestId: "req-123" },
+            body: "",
+          };
+        }
+        return { ok: true, statusCode: 200, json: {}, body: "" };
+      },
+    );
     authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValue(true);
   });
 
-  it('forwards page context in the act payload', async () => {
+  it("forwards page context in the act payload", async () => {
     let requestListener: RequestListener | undefined;
-    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
-      (listener) => {
-        if (!requestListener) {
-          requestListener = listener as typeof requestListener;
-        }
-      },
-    );
+    (
+      globalThis.chrome.runtime.onMessage.addListener as ReturnType<
+        typeof vi.fn
+      >
+    ).mockImplementation((listener) => {
+      if (!requestListener) {
+        requestListener = listener as typeof requestListener;
+      }
+    });
 
-    const { initQuickPanelAgentHandler } = await import(
-      '@/entrypoints/background/quick-panel/agent-handler'
-    );
+    const { initQuickPanelAgentHandler } =
+      await import("@/entrypoints/background/quick-panel/agent-handler");
     initQuickPanelAgentHandler();
 
-    expect(requestListener).toBeTypeOf('function');
+    expect(requestListener).toBeTypeOf("function");
 
     const sendResponse = vi.fn();
     const handled = requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
-        authorizationToken: 'one-time-token',
+        authorizationToken: "one-time-token",
         payload: {
-          instruction: 'Review this page',
+          instruction: "Review this page",
           context: {
-            pageUrl: 'https://example.com/settings',
-            selectedText: 'Save changes',
-            elementInfo: { role: 'button', label: 'Save' },
+            pageUrl: "https://example.com/settings",
+            selectedText: "Save changes",
+            elementInfo: { role: "button", label: "Save" },
           },
         },
       },
-      { tab: { id: 7, windowId: 3 }, frameId: 0 } as chrome.runtime.MessageSender,
+      {
+        tab: { id: 7, windowId: 3 },
+        frameId: 0,
+      } as chrome.runtime.MessageSender,
       sendResponse,
     );
 
@@ -100,90 +128,101 @@ describe('Quick Panel agent handler', () => {
       expect(sendResponse).toHaveBeenCalledWith({
         success: true,
         requestId: expect.any(String),
-        sessionId: 'session-123',
+        sessionId: "session-123",
       });
     });
 
     await vi.waitFor(() => {
       expect(
         nativeHostMocks.requestAgentRpcFetch.mock.calls.some(
-          ([request]) => request?.operation === 'agent.chat.act',
+          ([request]) => request?.operation === "agent.chat.act",
         ),
       ).toBe(true);
     });
 
     const actRequest = nativeHostMocks.requestAgentRpcFetch.mock.calls.find(
-      ([request]) => request?.operation === 'agent.chat.act',
+      ([request]) => request?.operation === "agent.chat.act",
     )?.[0];
 
     expect(actRequest).toBeTruthy();
     expect(JSON.parse(actRequest.body)).toEqual({
-      instruction: 'Review this page',
-      dbSessionId: 'session-123',
+      instruction: "Review this page",
+      dbSessionId: "session-123",
       requestId: expect.any(String),
       context: {
-        pageUrl: 'https://example.com/settings',
-        selectedText: 'Save changes',
-        elementInfo: { role: 'button', label: 'Save' },
+        pageUrl: "https://example.com/settings",
+        selectedText: "Save changes",
+        elementInfo: { role: "button", label: "Save" },
       },
     });
   });
 
-  it('rejects Agent work without a valid document-bound authorization', async () => {
+  it("rejects Agent work without a valid document-bound authorization", async () => {
     let requestListener: RequestListener | undefined;
-    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
-      (listener) => {
-        requestListener = listener as RequestListener;
-      },
-    );
+    (
+      globalThis.chrome.runtime.onMessage.addListener as ReturnType<
+        typeof vi.fn
+      >
+    ).mockImplementation((listener) => {
+      requestListener = listener as RequestListener;
+    });
     authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValue(false);
 
-    const { initQuickPanelAgentHandler } = await import(
-      '@/entrypoints/background/quick-panel/agent-handler'
-    );
+    const { initQuickPanelAgentHandler } =
+      await import("@/entrypoints/background/quick-panel/agent-handler");
     initQuickPanelAgentHandler();
 
     const sendResponse = vi.fn();
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
-        payload: { instruction: 'Read local secrets' },
+        payload: { instruction: "Read local secrets" },
       },
-      { id: chrome.runtime.id, tab: { id: 7 }, frameId: 0 } as chrome.runtime.MessageSender,
+      {
+        id: chrome.runtime.id,
+        tab: { id: 7 },
+        frameId: 0,
+      } as chrome.runtime.MessageSender,
       sendResponse,
     );
 
     await vi.waitFor(() => {
       expect(sendResponse).toHaveBeenCalledWith({
         success: false,
-        error: 'Quick Panel authorization is missing or expired.',
+        error: "Quick Panel authorization is missing or expired.",
       });
     });
     expect(nativeHostMocks.requestAgentRpcFetch).not.toHaveBeenCalled();
   });
 
-  it('opens Agent Setup when no session has been selected', async () => {
+  it("opens Agent Setup when no session has been selected", async () => {
     let requestListener: RequestListener | undefined;
-    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
-      (listener) => {
-        requestListener = listener as RequestListener;
-      },
-    );
-    (globalThis.chrome.storage.local.get as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    (
+      globalThis.chrome.runtime.onMessage.addListener as ReturnType<
+        typeof vi.fn
+      >
+    ).mockImplementation((listener) => {
+      requestListener = listener as RequestListener;
+    });
+    (
+      globalThis.chrome.storage.local.get as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({});
 
-    const { initQuickPanelAgentHandler } = await import(
-      '@/entrypoints/background/quick-panel/agent-handler'
-    );
+    const { initQuickPanelAgentHandler } =
+      await import("@/entrypoints/background/quick-panel/agent-handler");
     initQuickPanelAgentHandler();
 
     const sendResponse = vi.fn();
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
-        authorizationToken: 'one-time-token',
-        payload: { instruction: 'Review this page' },
+        authorizationToken: "one-time-token",
+        payload: { instruction: "Review this page" },
       },
-      { tab: { id: 7, windowId: 3 }, frameId: 0 } as chrome.runtime.MessageSender,
+      {
+        tab: { id: 7, windowId: 3 },
+        frameId: 0,
+      } as chrome.runtime.MessageSender,
       sendResponse,
     );
 
@@ -191,30 +230,31 @@ describe('Quick Panel agent handler', () => {
       expect(sendResponse).toHaveBeenCalledWith({
         success: false,
         error:
-          'No Agent session selected. Open Agent Setup, select or create a session, then try again.',
+          "No Agent session selected. Open Agent Setup, select or create a session, then try again.",
       });
       expect(sidepanelMocks.openAgentSetupSidepanel).toHaveBeenCalledWith(7, 3);
     });
     expect(nativeHostMocks.subscribeAgentStream).not.toHaveBeenCalled();
   });
 
-  it('allows only one active request per originating document', async () => {
+  it("allows only one active request per originating document", async () => {
     let requestListener: RequestListener | undefined;
-    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
-      (listener) => {
-        if (!requestListener) requestListener = listener as RequestListener;
-      },
-    );
+    (
+      globalThis.chrome.runtime.onMessage.addListener as ReturnType<
+        typeof vi.fn
+      >
+    ).mockImplementation((listener) => {
+      if (!requestListener) requestListener = listener as RequestListener;
+    });
 
-    const { initQuickPanelAgentHandler } = await import(
-      '@/entrypoints/background/quick-panel/agent-handler'
-    );
+    const { initQuickPanelAgentHandler } =
+      await import("@/entrypoints/background/quick-panel/agent-handler");
     initQuickPanelAgentHandler();
 
     const sender = {
       tab: { id: 7, windowId: 3 },
       frameId: 0,
-      documentId: 'document-a',
+      documentId: "document-a",
     } as chrome.runtime.MessageSender;
     const firstResponse = vi.fn();
     const secondResponse = vi.fn();
@@ -222,8 +262,8 @@ describe('Quick Panel agent handler', () => {
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
-        authorizationToken: 'first-token',
-        payload: { instruction: 'First request' },
+        authorizationToken: "first-token",
+        payload: { instruction: "First request" },
       },
       sender,
       firstResponse,
@@ -232,15 +272,15 @@ describe('Quick Panel agent handler', () => {
       expect(firstResponse).toHaveBeenCalledWith({
         success: true,
         requestId: expect.any(String),
-        sessionId: 'session-123',
+        sessionId: "session-123",
       });
     });
 
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
-        authorizationToken: 'second-token',
-        payload: { instruction: 'Second request' },
+        authorizationToken: "second-token",
+        payload: { instruction: "Second request" },
       },
       sender,
       secondResponse,
@@ -249,29 +289,30 @@ describe('Quick Panel agent handler', () => {
     await vi.waitFor(() => {
       expect(secondResponse).toHaveBeenCalledWith({
         success: false,
-        error: 'Quick Panel already has an active request for this document.',
+        error: "Quick Panel already has an active request for this document.",
       });
     });
     expect(keepaliveMocks.acquireKeepalive).toHaveBeenCalledOnce();
   });
 
-  it('rejects work above the global active request budget', async () => {
+  it("rejects work above the global active request budget", async () => {
     let requestListener: RequestListener | undefined;
     let tabRemovedListener: ((tabId: number) => void) | undefined;
-    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
-      (listener) => {
-        if (!requestListener) requestListener = listener as RequestListener;
-      },
-    );
-    (globalThis.chrome.tabs.onRemoved.addListener as ReturnType<typeof vi.fn>).mockImplementation(
-      (listener) => {
-        tabRemovedListener = listener as (tabId: number) => void;
-      },
-    );
+    (
+      globalThis.chrome.runtime.onMessage.addListener as ReturnType<
+        typeof vi.fn
+      >
+    ).mockImplementation((listener) => {
+      if (!requestListener) requestListener = listener as RequestListener;
+    });
+    (
+      globalThis.chrome.tabs.onRemoved.addListener as ReturnType<typeof vi.fn>
+    ).mockImplementation((listener) => {
+      tabRemovedListener = listener as (tabId: number) => void;
+    });
 
-    const { initQuickPanelAgentHandler } = await import(
-      '@/entrypoints/background/quick-panel/agent-handler'
-    );
+    const { initQuickPanelAgentHandler } =
+      await import("@/entrypoints/background/quick-panel/agent-handler");
     initQuickPanelAgentHandler();
 
     const responses: Array<ReturnType<typeof vi.fn>> = [];
@@ -297,28 +338,38 @@ describe('Quick Panel agent handler', () => {
       expect(responses[31]).toHaveBeenCalledWith({
         success: true,
         requestId: expect.any(String),
-        sessionId: 'session-123',
+        sessionId: "session-123",
       });
       expect(responses[32]).toHaveBeenCalledWith({
         success: false,
         error:
-          'Quick Panel has reached the active request limit. Cancel a request and try again.',
+          "Quick Panel has reached the active request limit. Cancel a request and try again.",
       });
     });
     expect(keepaliveMocks.acquireKeepalive).toHaveBeenCalledTimes(32);
 
     tabRemovedListener?.(7);
+    await vi.waitFor(() => {
+      expect(
+        nativeHostMocks.requestAgentRpcFetch.mock.calls.filter(
+          ([request]) => request?.operation === "agent.chat.cancelRequest",
+        ),
+      ).toHaveLength(32);
+      expect(chrome.alarms.clear).toHaveBeenCalledTimes(32);
+    });
   });
 
-  it('unsubscribes when cancellation wins the subscription race', async () => {
+  it("unsubscribes when cancellation wins the subscription race", async () => {
     let requestListener: RequestListener | undefined;
-    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
-      (listener) => {
-        if (!requestListener) {
-          requestListener = listener as RequestListener;
-        }
-      },
-    );
+    (
+      globalThis.chrome.runtime.onMessage.addListener as ReturnType<
+        typeof vi.fn
+      >
+    ).mockImplementation((listener) => {
+      if (!requestListener) {
+        requestListener = listener as RequestListener;
+      }
+    });
 
     let resolveSubscription!: (value: { subscriptionId: string }) => void;
     nativeHostMocks.subscribeAgentStream.mockReturnValue(
@@ -327,19 +378,21 @@ describe('Quick Panel agent handler', () => {
       }),
     );
 
-    const { initQuickPanelAgentHandler } = await import(
-      '@/entrypoints/background/quick-panel/agent-handler'
-    );
+    const { initQuickPanelAgentHandler } =
+      await import("@/entrypoints/background/quick-panel/agent-handler");
     initQuickPanelAgentHandler();
 
     const sendResponse = vi.fn();
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
-        authorizationToken: 'one-time-token',
-        payload: { instruction: 'Review this page' },
+        authorizationToken: "one-time-token",
+        payload: { instruction: "Review this page" },
       },
-      { tab: { id: 7, windowId: 3 }, frameId: 0 } as chrome.runtime.MessageSender,
+      {
+        tab: { id: 7, windowId: 3 },
+        frameId: 0,
+      } as chrome.runtime.MessageSender,
       sendResponse,
     );
 
@@ -347,7 +400,7 @@ describe('Quick Panel agent handler', () => {
       expect(sendResponse).toHaveBeenCalledWith({
         success: true,
         requestId: expect.any(String),
-        sessionId: 'session-123',
+        sessionId: "session-123",
       });
       expect(nativeHostMocks.subscribeAgentStream).toHaveBeenCalledOnce();
     });
@@ -357,10 +410,13 @@ describe('Quick Panel agent handler', () => {
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_CANCEL_AI,
-        authorizationToken: 'cancel-token',
-        payload: { requestId, sessionId: 'session-123' },
+        authorizationToken: "cancel-token",
+        payload: { requestId, sessionId: "session-123" },
       },
-      { tab: { id: 7, windowId: 3 }, frameId: 0 } as chrome.runtime.MessageSender,
+      {
+        tab: { id: 7, windowId: 3 },
+        frameId: 0,
+      } as chrome.runtime.MessageSender,
       cancelResponse,
     );
 
@@ -368,40 +424,47 @@ describe('Quick Panel agent handler', () => {
       expect(cancelResponse).toHaveBeenCalledWith({ success: true });
     });
 
-    resolveSubscription({ subscriptionId: 'late-subscription' });
+    const subscriptionId = nativeHostMocks.subscribeAgentStream.mock
+      .calls[0]?.[1]?.subscriptionId as string;
+    resolveSubscription({ subscriptionId });
 
     await vi.waitFor(() => {
-      expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith('late-subscription');
+      expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith(
+        subscriptionId,
+      );
     });
-    expect(globalThis.chrome.runtime.onMessage.addListener).toHaveBeenCalledOnce();
+    expect(
+      globalThis.chrome.runtime.onMessage.addListener,
+    ).toHaveBeenCalledTimes(2);
   });
 
-  it('rejects cancellation without valid document-bound authorization', async () => {
+  it("rejects cancellation without valid document-bound authorization", async () => {
     let requestListener: RequestListener | undefined;
-    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
-      (listener) => {
-        requestListener = listener as RequestListener;
-      },
-    );
+    (
+      globalThis.chrome.runtime.onMessage.addListener as ReturnType<
+        typeof vi.fn
+      >
+    ).mockImplementation((listener) => {
+      requestListener = listener as RequestListener;
+    });
     authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValue(false);
 
-    const { initQuickPanelAgentHandler } = await import(
-      '@/entrypoints/background/quick-panel/agent-handler'
-    );
+    const { initQuickPanelAgentHandler } =
+      await import("@/entrypoints/background/quick-panel/agent-handler");
     initQuickPanelAgentHandler();
 
     const sendResponse = vi.fn();
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_CANCEL_AI,
-        authorizationToken: 'invalid-token',
-        payload: { requestId: 'req-foreign', sessionId: 'session-foreign' },
+        authorizationToken: "invalid-token",
+        payload: { requestId: "req-foreign", sessionId: "session-foreign" },
       },
       {
         id: chrome.runtime.id,
         tab: { id: 7 },
         frameId: 0,
-        documentId: 'document-a',
+        documentId: "document-a",
       } as chrome.runtime.MessageSender,
       sendResponse,
     );
@@ -409,19 +472,21 @@ describe('Quick Panel agent handler', () => {
     await vi.waitFor(() => {
       expect(sendResponse).toHaveBeenCalledWith({
         success: false,
-        error: 'Quick Panel cancellation authorization is missing or expired.',
+        error: "Quick Panel cancellation authorization is missing or expired.",
       });
     });
     expect(nativeHostMocks.requestAgentRpcFetch).not.toHaveBeenCalled();
   });
 
-  it('rejects cancellation from a different originating document', async () => {
+  it("rejects cancellation from a different originating document", async () => {
     let requestListener: RequestListener | undefined;
-    (globalThis.chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mockImplementation(
-      (listener) => {
-        if (!requestListener) requestListener = listener as RequestListener;
-      },
-    );
+    (
+      globalThis.chrome.runtime.onMessage.addListener as ReturnType<
+        typeof vi.fn
+      >
+    ).mockImplementation((listener) => {
+      if (!requestListener) requestListener = listener as RequestListener;
+    });
 
     let resolveSubscription!: (value: { subscriptionId: string }) => void;
     nativeHostMocks.subscribeAgentStream.mockReturnValue(
@@ -430,23 +495,22 @@ describe('Quick Panel agent handler', () => {
       }),
     );
 
-    const { initQuickPanelAgentHandler } = await import(
-      '@/entrypoints/background/quick-panel/agent-handler'
-    );
+    const { initQuickPanelAgentHandler } =
+      await import("@/entrypoints/background/quick-panel/agent-handler");
     initQuickPanelAgentHandler();
 
     const originalSender = {
       id: chrome.runtime.id,
       tab: { id: 7, windowId: 3 },
       frameId: 0,
-      documentId: 'document-a',
+      documentId: "document-a",
     } as chrome.runtime.MessageSender;
     const sendResponse = vi.fn();
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_SEND_TO_AI,
-        authorizationToken: 'send-token',
-        payload: { instruction: 'Review this page' },
+        authorizationToken: "send-token",
+        payload: { instruction: "Review this page" },
       },
       originalSender,
       sendResponse,
@@ -456,7 +520,7 @@ describe('Quick Panel agent handler', () => {
       expect(sendResponse).toHaveBeenCalledWith({
         success: true,
         requestId: expect.any(String),
-        sessionId: 'session-123',
+        sessionId: "session-123",
       });
     });
 
@@ -465,22 +529,22 @@ describe('Quick Panel agent handler', () => {
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_CANCEL_AI,
-        authorizationToken: 'foreign-cancel-token',
-        payload: { requestId, sessionId: 'session-123' },
+        authorizationToken: "foreign-cancel-token",
+        payload: { requestId, sessionId: "session-123" },
       },
-      { ...originalSender, documentId: 'document-b' },
+      { ...originalSender, documentId: "document-b" },
       foreignCancelResponse,
     );
 
     await vi.waitFor(() => {
       expect(foreignCancelResponse).toHaveBeenCalledWith({
         success: false,
-        error: 'Quick Panel request belongs to a different document.',
+        error: "Quick Panel request belongs to a different document.",
       });
     });
     expect(
       nativeHostMocks.requestAgentRpcFetch.mock.calls.some(
-        ([request]) => request?.operation === 'agent.chat.cancelRequest',
+        ([request]) => request?.operation === "agent.chat.cancelRequest",
       ),
     ).toBe(false);
 
@@ -488,8 +552,8 @@ describe('Quick Panel agent handler', () => {
     requestListener!(
       {
         type: BACKGROUND_MESSAGE_TYPES.QUICK_PANEL_CANCEL_AI,
-        authorizationToken: 'original-cancel-token',
-        payload: { requestId, sessionId: 'session-123' },
+        authorizationToken: "original-cancel-token",
+        payload: { requestId, sessionId: "session-123" },
       },
       originalSender,
       originalCancelResponse,
@@ -498,9 +562,11 @@ describe('Quick Panel agent handler', () => {
       expect(originalCancelResponse).toHaveBeenCalledWith({ success: true });
     });
 
-    resolveSubscription({ subscriptionId: 'late-subscription' });
+    resolveSubscription({ subscriptionId: "late-subscription" });
     await vi.waitFor(() => {
-      expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith('late-subscription');
+      expect(nativeHostMocks.unsubscribeAgentStream).toHaveBeenCalledWith(
+        "late-subscription",
+      );
     });
   });
 });
