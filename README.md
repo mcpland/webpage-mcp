@@ -544,7 +544,8 @@ live store listing.
 
 **`release.yml`**
 
-- Trigger: tag push `v*` and manual dispatch
+- Trigger: tag push `v*` and manual dispatch. A branch dispatch with
+  `publish_npm=false` remains available as a build-only release dry run.
 - Unified releases accept stable `x.y.z` versions only. Prerelease (`-rc.1`, `-beta.1`) and build-metadata (`+build.1`) versions are rejected before any artifact or publish step because Chrome's update version is numeric and must stay aligned with the npm package version.
 - Builds release assets:
   - Chrome extension zip (`app/chrome-extension/.output/webpage-mcp-connector-<version>-chrome-extension.zip`)
@@ -552,7 +553,13 @@ live store listing.
   - `SHA256SUMS.txt`
 - On tag pushes, creates a GitHub Release and uploads assets
 - On tag pushes (`v*`), publishes `webpage-mcp` to npm (requires `NPM_AUTH_TOKEN` secret)
-- Manual npm publish available via `workflow_dispatch` with `publish_npm=true`
+- Manual npm publish is available via `workflow_dispatch` with
+  `publish_npm=true` only when the selected ref is the exact matching
+  `v<package-version>` tag. A branch dispatch that requests publishing fails
+  closed.
+- The npm mutation job uses the `npm-publish` GitHub Environment so repository
+  administrators can configure required reviewers or other deployment
+  protection rules.
 - `scripts/npm-dist-tag.mjs` remains an npm-only utility; it is not used by `release.yml` and does not imply unified prerelease support.
 - Formal release builds require the Actions repository variable `CHROME_EXTENSION_PUBLIC_KEY`. It must contain the single-line base64 DER public-key body from Chrome Web Store, never a PEM or private key, and must derive the configured official extension ID. Local builds may omit it, but then unpacked builds do not use the official stable extension ID.
 

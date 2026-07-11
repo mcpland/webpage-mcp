@@ -40,6 +40,10 @@ jobs:
           RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: node scripts/release-preflight.mjs metadata --tag "$RELEASE_TAG"
 
+      - name: Verify npm publish ref
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_npm == true)
+        run: node scripts/release-preflight.mjs npm-publish --ref "$GITHUB_REF"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
         with:
@@ -163,9 +167,11 @@ jobs:
   publish-npm:
     name: Publish MCP Server to npm
     needs: build-assets
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_npm == true)
+    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_npm == true))
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment:
+      name: npm-publish
     permissions:
       contents: read
       id-token: write
@@ -179,6 +185,9 @@ jobs:
         with:
           name: release-assets-${{ github.sha }}
           path: artifacts
+
+      - name: Reverify npm publish ref
+        run: node scripts/release-preflight.mjs npm-publish --ref "$GITHUB_REF"
 
       - name: Reverify release metadata and artifacts
         env:

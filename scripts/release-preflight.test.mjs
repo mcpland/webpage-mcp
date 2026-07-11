@@ -12,6 +12,7 @@ import { deflateRawSync, gzipSync } from "node:zlib";
 import {
   verifyReleaseArtifacts,
   verifyReleaseMetadata,
+  verifyNpmPublishRef,
 } from "./release-preflight.mjs";
 import {
   EXTENSION_EXPECTED_ID_ENV,
@@ -493,6 +494,29 @@ test("release metadata accepts only stable Chrome-safe versions", async (t) => {
   await assert.rejects(
     verifyReleaseMetadata({ rootDir: stableRoot, tag: "v1.2.3+build.1" }),
     /build metadata is not supported/,
+  );
+});
+
+test("npm publish refs must exactly match the package version tag", async (t) => {
+  const rootDir = await createReleaseRoot(t);
+  const result = await verifyNpmPublishRef({
+    rootDir,
+    ref: `refs/tags/v${VERSION}`,
+  });
+  assert.equal(result.version, VERSION);
+  assert.equal(result.ref, `refs/tags/v${VERSION}`);
+
+  await assert.rejects(
+    verifyNpmPublishRef({ rootDir, ref: "refs/heads/main" }),
+    /requires an exact refs\/tags\/v<version> ref/,
+  );
+  await assert.rejects(
+    verifyNpmPublishRef({ rootDir, ref: `refs/tags/${VERSION}` }),
+    /Release tag must use the v<version> form/,
+  );
+  await assert.rejects(
+    verifyNpmPublishRef({ rootDir, ref: "refs/tags/v1.2.4" }),
+    /does not match package version/,
   );
 });
 
@@ -1073,6 +1097,18 @@ test("release workflow verifies before either publish mutation", async () => {
     githubJob,
   );
   const npmJob = workflow.indexOf("  publish-npm:");
+  const npmPublishRefPreflight = workflow.indexOf(
+    "      - name: Verify npm publish ref",
+    buildJob,
+  );
+  const npmJobHeader = workflow.slice(
+    npmJob,
+    workflow.indexOf("    steps:", npmJob),
+  );
+  const npmPublishRefReverify = workflow.indexOf(
+    "      - name: Reverify npm publish ref",
+    npmJob,
+  );
   const npmPreflight = workflow.indexOf(
     "      - name: Reverify release metadata and artifacts",
     npmJob,
@@ -1111,6 +1147,26 @@ test("release workflow verifies before either publish mutation", async () => {
   assert.ok(
     buildJob >= 0 && artifactPreflight > buildJob,
     "build job must run artifact preflight",
+  );
+  assert.match(
+    workflow,
+    /workflow_dispatch:[\s\S]*publish_npm:[\s\S]*default:\s*false/,
+    "manual release builds must default to a non-publishing dry run",
+  );
+  assert.doesNotMatch(
+    workflow.slice(buildJob, workflow.indexOf("    steps:", buildJob)),
+    /^\s+if:/m,
+    "manual dry-run builds must not skip the build job",
+  );
+  assert.ok(
+    npmPublishRefPreflight > buildJob &&
+      npmPublishRefPreflight < artifactPreflight,
+    "publish requests must validate the triggering ref in the build job",
+  );
+  assert.match(
+    buildJobBody.slice(npmPublishRefPreflight - buildJob),
+    /if: github\.event_name == 'push' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.publish_npm == true\)[\s\S]*npm-publish --ref "\$GITHUB_REF"/,
+    "tag pushes and manual publish requests must run the ref preflight",
   );
   assert.match(
     buildJobBody,
@@ -1154,6 +1210,25 @@ test("release workflow verifies before either publish mutation", async () => {
     "npm publish must follow preflight",
   );
   assert.match(
+    npmJobHeader,
+    /if: startsWith\(github\.ref, 'refs\/tags\/v'\) && \(github\.event_name == 'push' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.publish_npm == true\)\)/,
+    "npm publishing must be limited to v-prefixed tag refs",
+  );
+  assert.match(
+    npmJobHeader,
+    /environment:\s*\n\s+name: npm-publish/,
+    "npm publishing must use the protected npm-publish environment",
+  );
+  assert.ok(
+    npmPublishRefReverify > npmJob && npmPreflight > npmPublishRefReverify,
+    "the npm job must revalidate its exact publish ref before artifact verification",
+  );
+  assert.match(
+    workflow.slice(npmPublishRefReverify, npmPreflight),
+    /npm-publish --ref "\$GITHUB_REF"/,
+    "the npm job must bind publishing to the full GitHub ref",
+  );
+  assert.match(
     workflow.slice(npmJob, npmPublish + 300),
     /npm publish[\s\S]*--tag latest/,
     "the stable-only unified release must publish to latest explicitly",
@@ -1165,7 +1240,7 @@ test("release workflow verifies before either publish mutation", async () => {
   );
   assert.doesNotMatch(
     buildJobBody,
-    /action-gh-release|npm publish/,
+    /action-gh-release|^\s*npm publish(?:\s|$)/m,
     "build and verification must not mutate a release",
   );
 });

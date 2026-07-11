@@ -247,6 +247,30 @@ export async function verifyReleaseMetadata({
   };
 }
 
+export async function verifyNpmPublishRef({
+  rootDir = process.cwd(),
+  ref,
+  environment = process.env,
+} = {}) {
+  const prefix = "refs/tags/";
+  invariant(
+    typeof ref === "string" && ref.startsWith(prefix),
+    `npm publish requires an exact refs/tags/v<version> ref, received: ${String(ref)}`,
+  );
+  const tag = ref.slice(prefix.length);
+  const metadata = await verifyReleaseMetadata({
+    rootDir,
+    tag,
+    environment,
+  });
+  const expectedRef = `${prefix}v${metadata.version}`;
+  invariant(
+    ref === expectedRef,
+    `npm publish ref ${ref} does not exactly match ${expectedRef}`,
+  );
+  return { ...metadata, ref };
+}
+
 async function listFiles(rootDir, currentDir = rootDir) {
   const entries = await readdir(currentDir, { withFileTypes: true });
   const files = [];
@@ -1133,16 +1157,25 @@ export async function verifyReleaseArtifacts({
 function parseCliArguments(argv) {
   const [command, ...args] = argv;
   invariant(
-    command === "metadata" || command === "artifacts",
-    "Usage: release-preflight.mjs <metadata|artifacts> [artifacts-dir] [--tag <vX.Y.Z>]",
+    command === "metadata" ||
+      command === "artifacts" ||
+      command === "npm-publish",
+    "Usage: release-preflight.mjs <metadata|artifacts|npm-publish> [artifacts-dir] [--tag <vX.Y.Z>] [--ref <refs/tags/vX.Y.Z>]",
   );
   let artifactsDir;
   let tag;
+  let ref;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--tag") {
       invariant(index + 1 < args.length, "--tag requires a value");
       tag = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (argument === "--ref") {
+      invariant(index + 1 < args.length, "--ref requires a value");
+      ref = args[index + 1];
       index += 1;
       continue;
     }
@@ -1156,21 +1189,37 @@ function parseCliArguments(argv) {
     command !== "artifacts" || artifactsDir,
     "artifacts command requires an artifacts directory",
   );
-  return { command, artifactsDir, tag };
+  invariant(
+    command !== "npm-publish" || ref,
+    "npm-publish command requires --ref",
+  );
+  invariant(
+    command === "npm-publish" || ref === undefined,
+    "--ref is supported only by the npm-publish command",
+  );
+  invariant(
+    command !== "npm-publish" || tag === undefined,
+    "--tag is not supported by the npm-publish command; use --ref",
+  );
+  return { command, artifactsDir, tag, ref };
 }
 
 async function main() {
-  const { command, artifactsDir, tag } = parseCliArguments(
+  const { command, artifactsDir, tag, ref } = parseCliArguments(
     process.argv.slice(2),
   );
   const result =
     command === "metadata"
       ? await verifyReleaseMetadata({ tag })
-      : await verifyReleaseArtifacts({ artifactsDir, tag });
+      : command === "artifacts"
+        ? await verifyReleaseArtifacts({ artifactsDir, tag })
+        : await verifyNpmPublishRef({ ref });
   console.log(
     command === "metadata"
       ? `Release metadata verified for version ${result.version}.`
-      : `Release metadata and artifacts verified for version ${result.version}.`,
+      : command === "artifacts"
+        ? `Release metadata and artifacts verified for version ${result.version}.`
+        : `npm publish ref verified for version ${result.version}.`,
   );
 }
 
