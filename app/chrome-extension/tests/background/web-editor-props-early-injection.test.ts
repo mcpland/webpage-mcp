@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-describe('Web Editor props early injection registry', () => {
+describe("Web Editor props early injection registry", () => {
   let sessionData: Record<string, unknown>;
   let registeredScripts: Map<string, chrome.scripting.RegisteredContentScript>;
   let tabsById: Map<number, chrome.tabs.Tab>;
@@ -40,8 +40,7 @@ describe('Web Editor props early injection registry', () => {
     executeScript = vi.fn(async (options: any) => [
       {
         frameId: 0,
-        documentId:
-          options.target.documentIds?.[0] ?? 'current-top-document',
+        documentId: options.target.documentIds?.[0] ?? "current-top-document",
         result: undefined,
       },
     ]);
@@ -51,7 +50,9 @@ describe('Web Editor props early injection registry', () => {
         if (keys == null) return { ...sessionData };
         const requested = Array.isArray(keys) ? keys : [keys];
         return Object.fromEntries(
-          requested.filter((key) => key in sessionData).map((key) => [key, sessionData[key]]),
+          requested
+            .filter((key) => key in sessionData)
+            .map((key) => [key, sessionData[key]]),
         );
       }),
       set: vi.fn(async (items: Record<string, unknown>) => {
@@ -65,10 +66,14 @@ describe('Web Editor props early injection registry', () => {
     } as unknown as typeof chrome.storage.session;
 
     chrome.scripting = {
-      getRegisteredContentScripts: vi.fn(async (filter?: { ids?: string[] }) => {
-        const scripts = Array.from(registeredScripts.values());
-        return filter?.ids ? scripts.filter((script) => filter.ids?.includes(script.id)) : scripts;
-      }),
+      getRegisteredContentScripts: vi.fn(
+        async (filter?: { ids?: string[] }) => {
+          const scripts = Array.from(registeredScripts.values());
+          return filter?.ids
+            ? scripts.filter((script) => filter.ids?.includes(script.id))
+            : scripts;
+        },
+      ),
       registerContentScripts: vi.fn(
         async (scripts: chrome.scripting.RegisteredContentScript[]) => {
           for (const script of scripts) {
@@ -100,43 +105,49 @@ describe('Web Editor props early injection registry', () => {
     delete (window as any).__REACT_DEVTOOLS_GLOBAL_HOOK__;
   });
 
-  it('registers only for the current browser session and records the requesting tab', async () => {
-    const { registerPropsAgentEarlyInjection } = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+  it("registers only for the current browser session and records the requesting tab", async () => {
+    const { registerPropsAgentEarlyInjection } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
 
-    const result = await registerPropsAgentEarlyInjection(12, 'https://example.com/editor');
+    const result = await registerPropsAgentEarlyInjection(
+      12,
+      "https://example.com/editor",
+    );
 
     expect(result.id).toMatch(/^mcp_we_props_early_example_com_[a-f0-9]{24}$/);
     expect(chrome.scripting.registerContentScripts).toHaveBeenCalledWith([
       expect.objectContaining({
         id: result.id,
-        matches: ['*://example.com/*'],
-        world: 'MAIN',
-        runAt: 'document_start',
+        matches: ["*://example.com/*"],
+        world: "MAIN",
+        runAt: "document_start",
         persistAcrossSessions: false,
       }),
     ]);
     expect(storedRegistration(12)).toEqual({
       version: 1,
       registrationId: result.id,
-      host: 'example.com',
-      origin: 'https://example.com',
+      host: "example.com",
+      origin: "https://example.com",
     });
   });
 
-  it('keeps a shared host registration until the final editor tab releases it', async () => {
-    const { registerPropsAgentEarlyInjection, releasePropsAgentEarlyInjection } = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+  it("keeps a shared host registration until the final editor tab releases it", async () => {
+    const {
+      registerPropsAgentEarlyInjection,
+      releasePropsAgentEarlyInjection,
+    } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
 
-    await registerPropsAgentEarlyInjection(12, 'https://example.com/one');
-    await registerPropsAgentEarlyInjection(13, 'https://example.com/two');
+    await registerPropsAgentEarlyInjection(12, "https://example.com/one");
+    await registerPropsAgentEarlyInjection(13, "https://example.com/two");
     await releasePropsAgentEarlyInjection(12);
 
     expect(unregisterContentScripts).not.toHaveBeenCalled();
     const registrationId = storedRegistration(13).registrationId;
-    expect(registrationId).toMatch(/^mcp_we_props_early_example_com_[a-f0-9]{24}$/);
+    expect(registrationId).toMatch(
+      /^mcp_we_props_early_example_com_[a-f0-9]{24}$/,
+    );
     expect(registeredScripts.has(registrationId)).toBe(true);
 
     await releasePropsAgentEarlyInjection(13);
@@ -147,56 +158,73 @@ describe('Web Editor props early injection registry', () => {
     expect(registeredScripts.has(registrationId)).toBe(false);
   });
 
-  it('keeps distinct hosts separate when their sanitized names collide', async () => {
-    const { registerPropsAgentEarlyInjection } = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+  it("keeps distinct hosts separate when their sanitized names collide", async () => {
+    const { registerPropsAgentEarlyInjection } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
 
-    const dotted = await registerPropsAgentEarlyInjection(12, 'https://foo.bar/editor');
-    const underscored = await registerPropsAgentEarlyInjection(13, 'https://foo_bar/editor');
+    const dotted = await registerPropsAgentEarlyInjection(
+      12,
+      "https://foo.bar/editor",
+    );
+    const underscored = await registerPropsAgentEarlyInjection(
+      13,
+      "https://foo_bar/editor",
+    );
 
     expect(dotted.id).not.toBe(underscored.id);
     expect(dotted.id).toMatch(/^mcp_we_props_early_foo_bar_[a-f0-9]{24}$/);
     expect(underscored.id).toMatch(/^mcp_we_props_early_foo_bar_[a-f0-9]{24}$/);
-    expect(registeredScripts.get(dotted.id)?.matches).toEqual(['*://foo.bar/*']);
-    expect(registeredScripts.get(underscored.id)?.matches).toEqual(['*://foo_bar/*']);
+    expect(registeredScripts.get(dotted.id)?.matches).toEqual([
+      "*://foo.bar/*",
+    ]);
+    expect(registeredScripts.get(underscored.id)?.matches).toEqual([
+      "*://foo_bar/*",
+    ]);
   });
 
-  it('releases the old host after tab A crosses sites so tab B no longer receives it', async () => {
-    const { registerPropsAgentEarlyInjection, reconcilePropsAgentEarlyInjectionNavigation } =
-      await import('@/entrypoints/background/web-editor/props-early-injection');
+  it("releases the old host after tab A crosses sites so tab B no longer receives it", async () => {
+    const {
+      registerPropsAgentEarlyInjection,
+      reconcilePropsAgentEarlyInjectionNavigation,
+    } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
 
     const registration = await registerPropsAgentEarlyInjection(
       12,
-      'https://old.example/editor',
+      "https://old.example/editor",
     );
     const released = await reconcilePropsAgentEarlyInjectionNavigation(
       12,
-      'https://new.example/page',
+      "https://new.example/page",
     );
 
     expect(released).toBe(true);
-    expect(sessionData['web-editor-props-early-tab-12']).toBeUndefined();
-    expect(unregisterContentScripts).toHaveBeenCalledWith({ ids: [registration.id] });
+    expect(sessionData["web-editor-props-early-tab-12"]).toBeUndefined();
+    expect(unregisterContentScripts).toHaveBeenCalledWith({
+      ids: [registration.id],
+    });
     expect(registeredScripts.has(registration.id)).toBe(false);
     expect(
       Array.from(registeredScripts.values()).some((script) =>
-        script.matches?.includes('*://old.example/*'),
+        script.matches?.includes("*://old.example/*"),
       ),
     ).toBe(false);
   });
 
-  it('retains registration across same-host navigation and refreshes the normalized origin', async () => {
-    const { registerPropsAgentEarlyInjection, reconcilePropsAgentEarlyInjectionNavigation } =
-      await import('@/entrypoints/background/web-editor/props-early-injection');
+  it("retains registration across same-host navigation and refreshes the normalized origin", async () => {
+    const {
+      registerPropsAgentEarlyInjection,
+      reconcilePropsAgentEarlyInjectionNavigation,
+    } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
 
     const registration = await registerPropsAgentEarlyInjection(
       12,
-      'https://Example.COM/editor',
+      "https://Example.COM/editor",
     );
     const released = await reconcilePropsAgentEarlyInjectionNavigation(
       12,
-      'http://example.com:8080/next',
+      "http://example.com:8080/next",
     );
 
     expect(released).toBe(false);
@@ -205,62 +233,80 @@ describe('Web Editor props early injection registry', () => {
     expect(storedRegistration(12)).toEqual({
       version: 1,
       registrationId: registration.id,
-      host: 'example.com',
-      origin: 'http://example.com:8080',
+      host: "example.com",
+      origin: "http://example.com:8080",
     });
   });
 
-  it('migrates the legacy tab-to-registrationId schema on a same-host commit', async () => {
-    const { registerPropsAgentEarlyInjection, reconcilePropsAgentEarlyInjectionNavigation } =
-      await import('@/entrypoints/background/web-editor/props-early-injection');
+  it("migrates the legacy tab-to-registrationId schema on a same-host commit", async () => {
+    const {
+      registerPropsAgentEarlyInjection,
+      reconcilePropsAgentEarlyInjectionNavigation,
+    } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
 
-    const registration = await registerPropsAgentEarlyInjection(12, 'https://legacy.example/a');
-    sessionData['web-editor-props-early-tab-12'] = registration.id;
+    const registration = await registerPropsAgentEarlyInjection(
+      12,
+      "https://legacy.example/a",
+    );
+    sessionData["web-editor-props-early-tab-12"] = registration.id;
 
-    await reconcilePropsAgentEarlyInjectionNavigation(12, 'https://legacy.example/b');
+    await reconcilePropsAgentEarlyInjectionNavigation(
+      12,
+      "https://legacy.example/b",
+    );
 
     expect(unregisterContentScripts).not.toHaveBeenCalled();
     expect(storedRegistration(12)).toEqual({
       version: 1,
       registrationId: registration.id,
-      host: 'legacy.example',
-      origin: 'https://legacy.example',
+      host: "legacy.example",
+      origin: "https://legacy.example",
     });
   });
 
-  it('keeps a shared registration until every editor tab leaves the host', async () => {
-    const { registerPropsAgentEarlyInjection, reconcilePropsAgentEarlyInjectionNavigation } =
-      await import('@/entrypoints/background/web-editor/props-early-injection');
+  it("keeps a shared registration until every editor tab leaves the host", async () => {
+    const {
+      registerPropsAgentEarlyInjection,
+      reconcilePropsAgentEarlyInjectionNavigation,
+    } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
 
-    const registration = await registerPropsAgentEarlyInjection(12, 'https://shared.example/a');
-    await registerPropsAgentEarlyInjection(13, 'https://shared.example/b');
+    const registration = await registerPropsAgentEarlyInjection(
+      12,
+      "https://shared.example/a",
+    );
+    await registerPropsAgentEarlyInjection(13, "https://shared.example/b");
 
-    await reconcilePropsAgentEarlyInjectionNavigation(12, 'https://other.example/a');
+    await reconcilePropsAgentEarlyInjectionNavigation(
+      12,
+      "https://other.example/a",
+    );
     expect(unregisterContentScripts).not.toHaveBeenCalled();
     expect(registeredScripts.has(registration.id)).toBe(true);
 
-    await reconcilePropsAgentEarlyInjectionNavigation(13, 'chrome://settings/');
-    expect(unregisterContentScripts).toHaveBeenCalledWith({ ids: [registration.id] });
+    await reconcilePropsAgentEarlyInjectionNavigation(13, "chrome://settings/");
+    expect(unregisterContentScripts).toHaveBeenCalledWith({
+      ids: [registration.id],
+    });
     expect(registeredScripts.has(registration.id)).toBe(false);
   });
 
-  it('restores persisted ownership after a service-worker restart', async () => {
+  it("restores persisted ownership after a service-worker restart", async () => {
     tabsById.set(12, {
       id: 12,
-      url: 'https://restart.example/current',
+      url: "https://restart.example/current",
     } as chrome.tabs.Tab);
-    const firstWorker = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+    const firstWorker =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
     const registration = await firstWorker.registerPropsAgentEarlyInjection(
       12,
-      'https://restart.example/editor',
+      "https://restart.example/editor",
     );
 
     vi.resetModules();
-    const restartedWorker = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+    const restartedWorker =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
     restartedWorker.initPropsAgentEarlyInjectionNavigationLifecycle();
     await restartedWorker.pruneOrphanedPropsAgentEarlyInjections();
 
@@ -269,22 +315,23 @@ describe('Web Editor props early injection registry', () => {
     expect(storedRegistration(12)).toEqual({
       version: 1,
       registrationId: registration.id,
-      host: 'restart.example',
-      origin: 'https://restart.example',
+      host: "restart.example",
+      origin: "https://restart.example",
     });
     expect(registeredScripts.has(registration.id)).toBe(true);
 
     await restartedWorker.reconcilePropsAgentEarlyInjectionNavigation(
       12,
-      'https://after-restart.example/',
+      "https://after-restart.example/",
     );
-    expect(unregisterContentScripts).toHaveBeenCalledWith({ ids: [registration.id] });
+    expect(unregisterContentScripts).toHaveBeenCalledWith({
+      ids: [registration.id],
+    });
   });
 
-  it('registers the top-level navigation listener once per worker instance', async () => {
-    const { initPropsAgentEarlyInjectionNavigationLifecycle } = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+  it("registers the top-level navigation listener once per worker instance", async () => {
+    const { initPropsAgentEarlyInjectionNavigationLifecycle } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
 
     initPropsAgentEarlyInjectionNavigationLifecycle();
     initPropsAgentEarlyInjectionNavigationLifecycle();
@@ -295,23 +342,24 @@ describe('Web Editor props early injection registry', () => {
     expect(addTabReplacedListener).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it('ignores subframe commits and releases only on a top-frame cross-host commit', async () => {
-    const propsInjection = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+  it("ignores subframe commits and releases only on a top-frame cross-host commit", async () => {
+    const propsInjection =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
     const registration = await propsInjection.registerPropsAgentEarlyInjection(
       12,
-      'https://frames.example/editor',
+      "https://frames.example/editor",
     );
     propsInjection.initPropsAgentEarlyInjectionNavigationLifecycle();
     const listener = addNavigationListener.mock.calls[0]?.[0] as
-      | ((details: chrome.webNavigation.WebNavigationTransitionCallbackDetails) => void)
+      | ((
+          details: chrome.webNavigation.WebNavigationTransitionCallbackDetails,
+        ) => void)
       | undefined;
 
     listener?.({
       tabId: 12,
       frameId: 3,
-      url: 'https://cross-host.example/frame',
+      url: "https://cross-host.example/frame",
     } as chrome.webNavigation.WebNavigationTransitionCallbackDetails);
     expect(storedRegistration(12).registrationId).toBe(registration.id);
     expect(unregisterContentScripts).not.toHaveBeenCalled();
@@ -319,56 +367,86 @@ describe('Web Editor props early injection registry', () => {
     listener?.({
       tabId: 12,
       frameId: 0,
-      url: 'https://cross-host.example/top',
+      url: "https://cross-host.example/top",
     } as chrome.webNavigation.WebNavigationTransitionCallbackDetails);
     // Queue behind the listener's async reconciliation to await completion.
     await propsInjection.reconcilePropsAgentEarlyInjectionNavigation(
       12,
-      'https://cross-host.example/top',
+      "https://cross-host.example/top",
     );
-    expect(sessionData['web-editor-props-early-tab-12']).toBeUndefined();
-    expect(unregisterContentScripts).toHaveBeenCalledWith({ ids: [registration.id] });
+    expect(sessionData["web-editor-props-early-tab-12"]).toBeUndefined();
+    expect(unregisterContentScripts).toHaveBeenCalledWith({
+      ids: [registration.id],
+    });
   });
 
-  it('retires an untracked legacy agent on every exact top-level document commit', async () => {
-    const propsInjection = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+  it("retires an untracked legacy agent on top-level commits while migration is pending", async () => {
+    const propsInjection =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
     propsInjection.initPropsAgentEarlyInjectionNavigationLifecycle();
     const listener = addNavigationListener.mock.calls[0]?.[0] as
-      | ((details: chrome.webNavigation.WebNavigationTransitionCallbackDetails) => void)
+      | ((
+          details: chrome.webNavigation.WebNavigationTransitionCallbackDetails,
+        ) => void)
       | undefined;
 
     listener?.({
       tabId: 44,
       frameId: 0,
-      documentId: 'new-document',
-      url: 'https://untracked.example/current',
+      documentId: "new-document",
+      url: "https://untracked.example/current",
     } as chrome.webNavigation.WebNavigationTransitionCallbackDetails);
     await vi.waitFor(() => expect(executeScript).toHaveBeenCalledOnce());
 
     expect(executeScript).toHaveBeenCalledWith(
       expect.objectContaining({
-        target: { tabId: 44, documentIds: ['new-document'] },
-        world: 'MAIN',
+        target: { tabId: 44, documentIds: ["new-document"] },
+        world: "MAIN",
       }),
     );
   });
 
-  it('does not attempt MAIN retirement on an unscriptable top-level URL', async () => {
-    const propsInjection = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+  it("stops probing every navigation after the legacy retirement migration completes", async () => {
+    sessionData["web-editor-props-legacy-retirement-version"] = 2;
+    const propsInjection =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
     propsInjection.initPropsAgentEarlyInjectionNavigationLifecycle();
     const listener = addNavigationListener.mock.calls[0]?.[0] as
-      | ((details: chrome.webNavigation.WebNavigationTransitionCallbackDetails) => void)
+      | ((
+          details: chrome.webNavigation.WebNavigationTransitionCallbackDetails,
+        ) => void)
       | undefined;
 
     listener?.({
       tabId: 44,
       frameId: 0,
-      documentId: 'browser-document',
-      url: 'chrome://settings/',
+      documentId: "post-migration-document",
+      url: "https://untracked.example/current",
+    } as chrome.webNavigation.WebNavigationTransitionCallbackDetails);
+    await vi.waitFor(() =>
+      expect(chrome.storage.session.get).toHaveBeenCalled(),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executeScript).not.toHaveBeenCalled();
+  });
+
+  it("does not attempt MAIN retirement on an unscriptable top-level URL", async () => {
+    const propsInjection =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
+    propsInjection.initPropsAgentEarlyInjectionNavigationLifecycle();
+    const listener = addNavigationListener.mock.calls[0]?.[0] as
+      | ((
+          details: chrome.webNavigation.WebNavigationTransitionCallbackDetails,
+        ) => void)
+      | undefined;
+
+    listener?.({
+      tabId: 44,
+      frameId: 0,
+      documentId: "browser-document",
+      url: "chrome://settings/",
     } as chrome.webNavigation.WebNavigationTransitionCallbackDetails);
     await Promise.resolve();
     await Promise.resolve();
@@ -376,77 +454,84 @@ describe('Web Editor props early injection registry', () => {
     expect(executeScript).not.toHaveBeenCalled();
   });
 
-  it('releases ownership when Chrome replaces the tab document', async () => {
-    const propsInjection = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+  it("releases ownership when Chrome replaces the tab document", async () => {
+    const propsInjection =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
     const registration = await propsInjection.registerPropsAgentEarlyInjection(
       12,
-      'https://replace.example/editor',
+      "https://replace.example/editor",
     );
     propsInjection.initPropsAgentEarlyInjectionNavigationLifecycle();
     const listener = addTabReplacedListener.mock.calls[0]?.[0] as
-      | ((details: chrome.webNavigation.WebNavigationReplacementCallbackDetails) => void)
+      | ((
+          details: chrome.webNavigation.WebNavigationReplacementCallbackDetails,
+        ) => void)
       | undefined;
 
     listener?.({ tabId: 99, replacedTabId: 12, timeStamp: Date.now() });
     // Queue a no-op reconciliation behind the listener's release operation.
     await propsInjection.reconcilePropsAgentEarlyInjectionNavigation(
       12,
-      'https://replace.example/after',
+      "https://replace.example/after",
     );
 
-    expect(sessionData['web-editor-props-early-tab-12']).toBeUndefined();
-    expect(unregisterContentScripts).toHaveBeenCalledWith({ ids: [registration.id] });
+    expect(sessionData["web-editor-props-early-tab-12"]).toBeUndefined();
+    expect(unregisterContentScripts).toHaveBeenCalledWith({
+      ids: [registration.id],
+    });
   });
 
-  it('prunes orphaned managed registrations without touching unrelated scripts', async () => {
+  it("prunes orphaned managed registrations without touching unrelated scripts", async () => {
     tabsById.set(21, {
       id: 21,
-      url: 'https://kept.example/current',
+      url: "https://kept.example/current",
     } as chrome.tabs.Tab);
-    registeredScripts.set('mcp_we_props_early_orphan_example', {
-      id: 'mcp_we_props_early_orphan_example',
-      matches: ['*://orphan.example/*'],
-      js: ['inject-scripts/props-hook-bootstrap.js'],
+    registeredScripts.set("mcp_we_props_early_orphan_example", {
+      id: "mcp_we_props_early_orphan_example",
+      matches: ["*://orphan.example/*"],
+      js: ["inject-scripts/props-hook-bootstrap.js"],
     });
-    registeredScripts.set('unrelated-script', {
-      id: 'unrelated-script',
-      matches: ['<all_urls>'],
-      js: ['unrelated.js'],
+    registeredScripts.set("unrelated-script", {
+      id: "unrelated-script",
+      matches: ["<all_urls>"],
+      js: ["unrelated.js"],
     });
 
-    const { pruneOrphanedPropsAgentEarlyInjections, registerPropsAgentEarlyInjection } = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
+    const {
+      pruneOrphanedPropsAgentEarlyInjections,
+      registerPropsAgentEarlyInjection,
+    } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
+    const kept = await registerPropsAgentEarlyInjection(
+      21,
+      "https://kept.example/editor",
     );
-    const kept = await registerPropsAgentEarlyInjection(21, 'https://kept.example/editor');
     await pruneOrphanedPropsAgentEarlyInjections();
 
     expect(unregisterContentScripts).toHaveBeenCalledWith({
-      ids: ['mcp_we_props_early_orphan_example'],
+      ids: ["mcp_we_props_early_orphan_example"],
     });
     expect(registeredScripts.has(kept.id)).toBe(true);
-    expect(registeredScripts.has('unrelated-script')).toBe(true);
+    expect(registeredScripts.has("unrelated-script")).toBe(true);
   });
 
-  it('replaces stale legacy registration settings with the exact bootstrap config', async () => {
+  it("replaces stale legacy registration settings with the exact bootstrap config", async () => {
     tabsById.set(21, {
       id: 21,
-      url: 'https://stale.example/current',
+      url: "https://stale.example/current",
     } as chrome.tabs.Tab);
-    const propsInjection = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+    const propsInjection =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
     const registration = await propsInjection.registerPropsAgentEarlyInjection(
       21,
-      'https://stale.example/editor',
+      "https://stale.example/editor",
     );
     registeredScripts.set(registration.id, {
       id: registration.id,
-      js: ['inject-scripts/props-agent.js'],
-      matches: ['*://stale.example/*'],
-      runAt: 'document_idle',
-      world: 'ISOLATED',
+      js: ["inject-scripts/props-agent.js"],
+      matches: ["*://stale.example/*"],
+      runAt: "document_idle",
+      world: "ISOLATED",
       allFrames: true,
       matchOriginAsFallback: true,
       persistAcrossSessions: true,
@@ -462,10 +547,10 @@ describe('Web Editor props early injection registry', () => {
     expect(chrome.scripting.registerContentScripts).toHaveBeenCalledWith([
       {
         id: registration.id,
-        js: ['inject-scripts/props-hook-bootstrap.js'],
-        matches: ['*://stale.example/*'],
-        runAt: 'document_start',
-        world: 'MAIN',
+        js: ["inject-scripts/props-hook-bootstrap.js"],
+        matches: ["*://stale.example/*"],
+        runAt: "document_start",
+        world: "MAIN",
         allFrames: false,
         matchOriginAsFallback: false,
         persistAcrossSessions: false,
@@ -473,23 +558,22 @@ describe('Web Editor props early injection registry', () => {
     ]);
   });
 
-  it('retires legacy agents in open http tabs without an early-injection record', async () => {
+  it("retires legacy agents in open http tabs without an early-injection record", async () => {
     tabsById.set(31, {
       id: 31,
-      url: 'https://ordinary.example/current',
+      url: "https://ordinary.example/current",
     } as chrome.tabs.Tab);
     tabsById.set(32, {
       id: 32,
-      url: 'https://discarded.example/current',
+      url: "https://discarded.example/current",
       discarded: true,
     } as chrome.tabs.Tab);
     tabsById.set(33, {
       id: 33,
-      url: 'chrome://settings/',
+      url: "chrome://settings/",
     } as chrome.tabs.Tab);
-    const { pruneOrphanedPropsAgentEarlyInjections } = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+    const { pruneOrphanedPropsAgentEarlyInjections } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
 
     await pruneOrphanedPropsAgentEarlyInjections();
 
@@ -497,54 +581,55 @@ describe('Web Editor props early injection registry', () => {
     expect(executeScript).toHaveBeenCalledWith(
       expect.objectContaining({
         target: { tabId: 31, frameIds: [0] },
-        world: 'MAIN',
+        world: "MAIN",
         func: expect.any(Function),
       }),
     );
-    expect(sessionData['web-editor-props-legacy-retirement-version']).toBe(2);
+    expect(sessionData["web-editor-props-legacy-retirement-version"]).toBe(2);
   });
 
-  it('marks the migration only after a successful sweep and retries failures', async () => {
+  it("marks the migration only after a successful sweep and retries failures", async () => {
     tabsById.set(31, {
       id: 31,
-      url: 'https://retry.example/current',
+      url: "https://retry.example/current",
     } as chrome.tabs.Tab);
     executeScript.mockResolvedValueOnce([]);
-    const propsInjection = await import(
-      '@/entrypoints/background/web-editor/props-early-injection'
-    );
+    const propsInjection =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
 
     await expect(
       propsInjection.pruneOrphanedPropsAgentEarlyInjections(),
-    ).rejects.toThrow('must be retried');
-    expect(sessionData['web-editor-props-legacy-retirement-version']).toBeUndefined();
+    ).rejects.toThrow("must be retried");
+    expect(
+      sessionData["web-editor-props-legacy-retirement-version"],
+    ).toBeUndefined();
 
     await propsInjection.pruneOrphanedPropsAgentEarlyInjections();
     expect(executeScript).toHaveBeenCalledTimes(2);
-    expect(sessionData['web-editor-props-legacy-retirement-version']).toBe(2);
+    expect(sessionData["web-editor-props-legacy-retirement-version"]).toBe(2);
   });
 
-  it('times out a stuck sweep without blocking operational registration', async () => {
+  it("times out a stuck sweep without blocking operational registration", async () => {
     vi.useFakeTimers();
     try {
       tabsById.set(31, {
         id: 31,
-        url: 'https://stuck.example/current',
+        url: "https://stuck.example/current",
       } as chrome.tabs.Tab);
       executeScript.mockReturnValueOnce(new Promise(() => {}));
-      const propsInjection = await import(
-        '@/entrypoints/background/web-editor/props-early-injection'
-      );
+      const propsInjection =
+        await import("@/entrypoints/background/web-editor/props-early-injection");
 
       const pruning = propsInjection.pruneOrphanedPropsAgentEarlyInjections();
-      const pruningRejection = expect(pruning).rejects.toThrow('must be retried');
+      const pruningRejection =
+        expect(pruning).rejects.toThrow("must be retried");
       await vi.waitFor(() => expect(executeScript).toHaveBeenCalledOnce());
       await expect(
         propsInjection.registerPropsAgentEarlyInjection(
           32,
-          'https://operational.example/editor',
+          "https://operational.example/editor",
         ),
-      ).resolves.toMatchObject({ host: 'operational.example' });
+      ).resolves.toMatchObject({ host: "operational.example" });
 
       await vi.advanceTimersByTimeAsync(1_500);
       await pruningRejection;
@@ -552,24 +637,26 @@ describe('Web Editor props early injection registry', () => {
         propsInjection.releasePropsAgentEarlyInjection(32),
       ).resolves.toBeUndefined();
       expect(
-        sessionData['web-editor-props-legacy-retirement-version'],
+        sessionData["web-editor-props-legacy-retirement-version"],
       ).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('makes the actual bootstrap safe in both legacy/new injection orders', () => {
+  it("makes the actual bootstrap safe in both legacy/new injection orders", () => {
     const bootstrap = readFileSync(
-      join(process.cwd(), 'inject-scripts', 'props-hook-bootstrap.js'),
-      'utf8',
+      join(process.cwd(), "inject-scripts", "props-hook-bootstrap.js"),
+      "utf8",
     );
     const runBootstrap = () => Function(bootstrap)();
     const dispose = vi.fn(() => {
-      throw new Error('legacy dispose failure');
+      throw new Error("legacy dispose failure");
     });
     const cleanup = vi.fn();
-    window.addEventListener('web-editor-props:cleanup', cleanup, { once: true });
+    window.addEventListener("web-editor-props:cleanup", cleanup, {
+      once: true,
+    });
     (window as any).__MCP_WEB_EDITOR_PROPS_AGENT__ = { version: 1, dispose };
 
     runBootstrap();
@@ -577,7 +664,7 @@ describe('Web Editor props early injection registry', () => {
     expect(dispose).toHaveBeenCalledOnce();
     expect(cleanup).toHaveBeenCalledOnce();
     const sentinel = (window as any).__MCP_WEB_EDITOR_PROPS_AGENT__;
-    expect(sentinel).toEqual({ version: 2, transport: 'background-only' });
+    expect(sentinel).toEqual({ version: 2, transport: "background-only" });
     expect(Object.isFrozen(sentinel)).toBe(true);
 
     delete (window as any).__MCP_WEB_EDITOR_PROPS_AGENT__;
