@@ -144,6 +144,14 @@ Record each item as `PASS`, `BLOCKED`, or `N/A` with a reason. Any unchecked or
 - [ ] Record the exact ZIP path, byte size, and SHA-256 digest. Inspect the ZIP
       rather than a working directory and confirm it contains no secrets,
       private keys, unreviewed source maps, test fixtures, or unrelated files.
+- [ ] On real Linux, Windows, and macOS installations, load the exact packaged
+      extension, install and register the matching npm tarball, open the
+      browser, and confirm the extension connects to the registered native host
+      and completes a basic health/tool request. The release workflow exercises
+      each built `run_host.sh` or `run_host.bat` with a native ping/pong frame,
+      but it does not launch an installed browser or validate the browser
+      profile, extension origin, and registered-manifest handshake. Record this
+      manual evidence; a green platform matrix does not close that blind spot.
 - [ ] Upload only that recorded ZIP. After upload, confirm the dashboard Package
       tab reports the expected version and permissions before submitting it for
       review.

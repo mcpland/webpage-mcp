@@ -2,9 +2,17 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import process from "node:process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync, gzipSync } from "node:zlib";
@@ -1085,7 +1093,14 @@ test("release workflow verifies before either publish mutation", async () => {
     join(REPOSITORY_ROOT, ".github/workflows/release.yml"),
     "utf8",
   );
+  const releaseIdentityJob = workflow.indexOf("  release-identity:");
+  const platformGateJob = workflow.indexOf("  release-platform-gate:");
   const buildJob = workflow.indexOf("  build-assets:");
+  const releaseIdentityBody = workflow.slice(
+    releaseIdentityJob,
+    platformGateJob,
+  );
+  const platformGateBody = workflow.slice(platformGateJob, buildJob);
   const artifactPreflight = workflow.indexOf(
     "      - name: Verify release artifacts",
     buildJob,
@@ -1097,6 +1112,8 @@ test("release workflow verifies before either publish mutation", async () => {
     githubJob,
   );
   const npmJob = workflow.indexOf("  publish-npm:");
+  const githubJobBody = workflow.slice(githubJob, npmJob);
+  const npmJobBody = workflow.slice(npmJob);
   const npmPublishRefPreflight = workflow.indexOf(
     "      - name: Verify npm publish ref",
     buildJob,
@@ -1148,6 +1165,85 @@ test("release workflow verifies before either publish mutation", async () => {
     buildJob >= 0 && artifactPreflight > buildJob,
     "build job must run artifact preflight",
   );
+  assert.ok(
+    releaseIdentityJob >= 0 &&
+      platformGateJob > releaseIdentityJob &&
+      buildJob > platformGateJob,
+    "release identity and platform gates must precede artifact construction",
+  );
+  assert.match(
+    releaseIdentityBody,
+    /outputs:\s*\n\s+release_sha:\s*\$\{\{ steps\.bind_release_sha\.outputs\.release_sha \}\}/,
+    "the release identity job must expose its immutable commit SHA",
+  );
+  assert.match(
+    releaseIdentityBody,
+    /ref:\s*\$\{\{ github\.sha \}\}[\s\S]*git rev-parse "\$\{EVENT_RELEASE_SHA\}\^\{commit\}"/,
+    "the release identity job must peel the event object to its exact commit",
+  );
+  assert.match(
+    releaseIdentityBody,
+    /Verify npm publish ref before platform gates[\s\S]*if: github\.event_name == 'push' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.publish_npm == true\)[\s\S]*npm-publish --ref "\$GITHUB_REF"/,
+    "invalid manual publish refs must fail before starting platform runners",
+  );
+  assert.match(
+    platformGateBody,
+    /needs:\s*release-identity[\s\S]*runs-on:\s*\$\{\{ matrix\.os \}\}/,
+    "every platform gate must consume the bound release identity",
+  );
+  for (const [platform, os] of [
+    ["Linux", "ubuntu-latest"],
+    ["Windows", "windows-latest"],
+    ["macOS", "macos-latest"],
+  ]) {
+    assert.match(
+      platformGateBody,
+      new RegExp(`platform: ${platform}\\r?\\n\\s+os: ${os}`),
+      `${platform} must be an explicit release platform gate`,
+    );
+  }
+  assert.equal(
+    platformGateBody.match(/enforce_coverage:\s*true/g)?.length,
+    1,
+    "release coverage must run on exactly one platform",
+  );
+  assert.equal(
+    platformGateBody.match(/enforce_coverage:\s*false/g)?.length,
+    2,
+    "the other release platforms must avoid duplicate coverage collection",
+  );
+  assert.match(
+    platformGateBody,
+    /ref:\s*\$\{\{ needs\.release-identity\.outputs\.release_sha \}\}[\s\S]*EXPECTED_RELEASE_SHA:\s*\$\{\{ needs\.release-identity\.outputs\.release_sha \}\}/,
+    "platform checkouts must bind to the identity job output",
+  );
+  for (const requiredCheck of [
+    /pnpm install --frozen-lockfile/,
+    /pnpm typecheck/,
+    /pnpm --filter webpage-mcp-connector compile/,
+    /pnpm test:release/,
+    /pnpm test:workspace/,
+    /pnpm -r --if-present test/,
+    /pnpm build/,
+    /node scripts\/verify-native-host-wrapper\.mjs/,
+  ]) {
+    assert.match(
+      platformGateBody,
+      requiredCheck,
+      `platform gate is missing ${requiredCheck}`,
+    );
+  }
+  assert.ok(
+    platformGateBody.includes(
+      "ENFORCE_COVERAGE: ${{ matrix.enforce_coverage && 'true' || 'false' }}",
+    ),
+    "coverage selection must come from the explicit platform matrix",
+  );
+  assert.match(
+    platformGateBody,
+    /real installed browser remains manual/,
+    "the process smoke must not claim to cover an installed-browser handshake",
+  );
   assert.match(
     workflow,
     /workflow_dispatch:[\s\S]*publish_npm:[\s\S]*default:\s*false/,
@@ -1169,14 +1265,29 @@ test("release workflow verifies before either publish mutation", async () => {
     "tag pushes and manual publish requests must run the ref preflight",
   );
   assert.match(
-    buildJobBody,
-    /ENFORCE_COVERAGE:\s*["']true["']/,
+    platformGateBody,
+    /ENFORCE_COVERAGE:/,
     "release tests must enforce production coverage thresholds",
   );
   assert.match(
-    buildJobBody,
+    platformGateBody,
     /pnpm test:workspace/,
     "release tests must include cross-platform workspace scripts",
+  );
+  assert.doesNotMatch(
+    buildJobBody,
+    /ENFORCE_COVERAGE|pnpm -r --if-present test/,
+    "artifact construction must consume the completed gate instead of rerunning coverage",
+  );
+  assert.match(
+    workflow.slice(buildJob, workflow.indexOf("    steps:", buildJob)),
+    /needs:\s*\n\s+- release-identity\s*\n\s+- release-platform-gate[\s\S]*outputs:\s*\n\s+release_sha:/,
+    "artifact construction must need both the identity and platform gates",
+  );
+  assert.match(
+    buildJobBody,
+    /ref:\s*\$\{\{ needs\.release-identity\.outputs\.release_sha \}\}[\s\S]*name:\s*release-assets-\$\{\{ steps\.verify_release_sha\.outputs\.release_sha \}\}/,
+    "release artifacts must stay bound to the gated checkout SHA",
   );
   assert.match(
     buildJobBody,
@@ -1204,6 +1315,23 @@ test("release workflow verifies before either publish mutation", async () => {
   assert.match(
     workflow.slice(githubJob, githubPublish),
     /needs: build-assets[\s\S]*Reverify release metadata and artifacts/,
+  );
+  for (const publishJobBody of [githubJobBody, npmJobBody]) {
+    assert.match(
+      publishJobBody,
+      /ref:\s*\$\{\{ needs\.build-assets\.outputs\.release_sha \}\}/,
+      "publish jobs must checkout the SHA propagated through needs",
+    );
+    assert.match(
+      publishJobBody,
+      /name:\s*release-assets-\$\{\{ needs\.build-assets\.outputs\.release_sha \}\}/,
+      "publish jobs must download only the gated SHA artifact",
+    );
+  }
+  assert.doesNotMatch(
+    workflow,
+    /release-assets-\$\{\{ github\.sha \}\}/,
+    "artifact identity must come through needs rather than an ambient context",
   );
   assert.ok(
     npmPreflight > npmJob && npmPublish > npmPreflight,
@@ -1242,6 +1370,66 @@ test("release workflow verifies before either publish mutation", async () => {
     buildJobBody,
     /action-gh-release|^\s*npm publish(?:\s|$)/m,
     "build and verification must not mutate a release",
+  );
+});
+
+test("release native wrapper smoke exercises the platform process boundary", async () => {
+  const source = await readFile(
+    join(REPOSITORY_ROOT, "scripts/verify-native-host-wrapper.mjs"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /process\.platform === "win32"\s*\? "run_host\.bat"\s*: "run_host\.sh"/,
+  );
+  assert.match(source, /type: "ping_from_extension"/);
+  assert.match(source, /response\.type === "pong_to_extension"/);
+  assert.match(source, /WEBPAGE_MCP_NODE_PATH: process\.execPath/);
+  assert.match(source, /WEBPAGE_MCP_NATIVE_SOCKET: socketPath\(smokeRoot\)/);
+  assert.match(source, /contents withheld/);
+  assert.doesNotMatch(source, /stderr\.(?:subarray|toString)/);
+});
+
+test("release native wrapper smoke withholds child stderr on failure", async (t) => {
+  const distDir = await mkdtemp(join(tmpdir(), "webpage-mcp-wrapper-failure-"));
+  t.after(() => rm(distDir, { recursive: true, force: true }));
+  await mkdir(join(distDir, "scripts"), { recursive: true });
+  await writeFile(join(distDir, "index.js"), "module.exports = {};\n");
+  await writeFile(
+    join(distDir, "scripts/native-log-runner.js"),
+    "module.exports = {};\n",
+  );
+
+  const secretMarker = "native-wrapper-secret-stderr-marker";
+  const wrapperName =
+    process.platform === "win32" ? "run_host.bat" : "run_host.sh";
+  const wrapperPath = join(distDir, wrapperName);
+  const wrapperSource =
+    process.platform === "win32"
+      ? `@echo off\r\necho ${secretMarker} 1>&2\r\nexit /b 7\r\n`
+      : `#!/usr/bin/env bash\nprintf '%s\\n' '${secretMarker}' >&2\nexit 7\n`;
+  await writeFile(wrapperPath, wrapperSource);
+  if (process.platform !== "win32") await chmod(wrapperPath, 0o755);
+
+  const result = spawnSync(
+    process.execPath,
+    [join(REPOSITORY_ROOT, "scripts/verify-native-host-wrapper.mjs")],
+    {
+      cwd: REPOSITORY_ROOT,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        WEBPAGE_MCP_NATIVE_WRAPPER_DIST_DIR: distDir,
+      },
+    },
+  );
+  const diagnostics = `${result.stdout}\n${result.stderr}`;
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(diagnostics, new RegExp(secretMarker));
+  assert.match(
+    diagnostics,
+    /stderr captured \d+ bytes(?:; output limit reached)?; contents withheld/,
   );
 });
 

@@ -546,6 +546,12 @@ live store listing.
 
 - Trigger: tag push `v*` and manual dispatch. A branch dispatch with
   `publish_npm=false` remains available as a build-only release dry run.
+- Before artifact construction, the workflow binds the event to one immutable
+  commit SHA and requires Linux, Windows, and macOS gates on that exact commit.
+  Every gate performs a frozen workspace install, typechecks, tests, builds,
+  and exchanges a native-message ping/pong through the built platform wrapper.
+  Production coverage is collected only by the Linux gate rather than repeated
+  on all three operating systems.
 - Unified releases accept stable `x.y.z` versions only. Prerelease (`-rc.1`, `-beta.1`) and build-metadata (`+build.1`) versions are rejected before any artifact or publish step because Chrome's update version is numeric and must stay aligned with the npm package version.
 - Builds release assets:
   - Chrome extension zip (`app/chrome-extension/.output/webpage-mcp-connector-<version>-chrome-extension.zip`)
@@ -570,6 +576,11 @@ live store listing.
 ## Verification
 
 - Native/stdio packaging and registration helpers: `pnpm --filter webpage-mcp test`; the stable runtime dependency contract is covered by `app/mcp-server/src/scripts/stable-runtime-dependencies.test.ts`. End-to-end startup bootstrap across installed browser profiles is `Verification: Missing` and remains a manual `doctor` check.
+- Release platform gates execute each built `run_host.sh` or `run_host.bat` and
+  verify a native ping/pong frame, but they do not launch an installed browser
+  profile or the packaged extension. The real browser → extension → registered
+  native-host handshake on Linux, Windows, and macOS remains a manual release
+  check.
 - Agent project/session selection and missing-selection routing: `pnpm --filter webpage-mcp-connector exec vitest run tests/utils/agent-selection.test.ts tests/background/sidepanel-utils.test.ts tests/background/quick-panel-agent-handler.test.ts`.
 - Safe session defaults and explicit dangerous-mode confirmation: `app/mcp-server/src/agent/session-security.test.ts` via `pnpm --filter webpage-mcp test`.
 - Localized extension strings: `pnpm --filter webpage-mcp-connector i18n:check`.
