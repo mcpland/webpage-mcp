@@ -305,7 +305,7 @@ export class RecordingSessionManager {
     flow: Flow,
     originTabId: number,
     documentId?: string,
-  ): Promise<void> {
+  ): Promise<string> {
     // Clear cache for fresh session
     this.nodeIndexMap.clear();
     this.nodeBytesById.clear();
@@ -360,9 +360,10 @@ export class RecordingSessionManager {
       this.assertInitialFlowWithinBudget();
       await this.persistRecoveryState();
     } catch (error) {
-      await this.stopSession();
+      await this.stopSession(expectedSessionId);
       throw error;
     }
+    return expectedSessionId;
   }
 
   /**
@@ -430,13 +431,22 @@ export class RecordingSessionManager {
   /**
    * Finalize stop and clear session state.
    */
-  async stopSession(): Promise<Flow | null> {
+  async stopSession(expectedSessionId?: string): Promise<Flow | null> {
+    if (
+      expectedSessionId !== undefined &&
+      this.state.sessionId !== expectedSessionId
+    ) {
+      return null;
+    }
     const flow = this.state.flow;
     const sessionId = this.state.sessionId;
     if (this.recoveryStore) {
-      await this.enqueuePersistence(() =>
-        this.recoveryStore!.clear(sessionId || undefined),
-      ).catch((error) => {
+      await this.enqueuePersistence(async () => {
+        if (this.state.sessionId !== sessionId) return;
+        await this.recoveryStore!.clear(
+          expectedSessionId || sessionId || undefined,
+        );
+      }).catch((error) => {
         // A saved workflow is already durable at this point. Do not keep a
         // phantom active session solely because stale recovery cleanup failed.
         console.warn(
@@ -445,6 +455,7 @@ export class RecordingSessionManager {
         );
       });
     }
+    if (this.state.sessionId !== sessionId) return null;
     this.resetSessionState();
     return flow;
   }

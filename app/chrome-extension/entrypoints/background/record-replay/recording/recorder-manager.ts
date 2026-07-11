@@ -315,6 +315,7 @@ type RecordedFlow = Flow | FlowV3;
 class RecorderManagerImpl {
   private initialized = false;
   private readyPromise: Promise<void> | null = null;
+  private startReservation: symbol | null = null;
   private stopPromise: Promise<{
     success: boolean;
     error?: string;
@@ -397,7 +398,32 @@ class RecorderManagerImpl {
     await this.readyPromise;
   }
 
-  async start(
+  start(
+    meta?: Partial<Flow>,
+    tabId?: number,
+  ): Promise<{ success: boolean; error?: string }> {
+    if (this.startReservation) {
+      return Promise.resolve({
+        success: false,
+        error: "Recording start already in progress",
+      });
+    }
+
+    const reservation = Symbol("recording-start");
+    this.startReservation = reservation;
+    const operation = this.startInternal(meta, tabId);
+    void operation.then(
+      () => {
+        if (this.startReservation === reservation) this.startReservation = null;
+      },
+      () => {
+        if (this.startReservation === reservation) this.startReservation = null;
+      },
+    );
+    return operation;
+  }
+
+  private async startInternal(
     meta?: Partial<Flow>,
     tabId?: number,
   ): Promise<{ success: boolean; error?: string }> {
@@ -456,41 +482,69 @@ class RecorderManagerImpl {
       // ignore metadata enrichment errors
     }
     const documentId = await this.getTopDocumentId(active.id);
-    await session.startSession(flow, active.id, documentId);
-    recordingNetworkTracker.beginSession();
+    const expectedSessionId = await session.startSession(
+      flow,
+      active.id,
+      documentId,
+    );
+    let networkTrackerStarted = false;
 
-    // The initial navigation is background-owned and has no content retry. Add
-    // it to the same durable session/document checkpoint before START can make
-    // the page emit its first recorder event.
-    const url = active.url;
-    if (url) {
-      addNavigationStep(flow, url);
-      await session.persistRecoveryState();
-    }
-    broadcastRecordingStateChanged();
+    try {
+      const assertExpectedSession = () => {
+        const current = session.getSession();
+        if (
+          current.sessionId !== expectedSessionId ||
+          current.status !== "recording"
+        ) {
+          throw new Error("Recording start was superseded");
+        }
+      };
 
-    // Ensure recorder available and start listening
-    await ensureRecorderInjected(active.id);
-    const started = await broadcastControlToTab(active.id, REC_CMD.START, {
-      id: flow.id,
-      name: flow.name,
-      description: flow.description,
-      sessionId: session.getSession().sessionId,
-    });
-    if (started === false) {
-      await rollbackUnconfirmedStart(
-        active.id,
-        session.getSession().sessionId,
-      ).catch(() => {});
-      await session.stopSession();
-      recordingNetworkTracker.endSession();
+      assertExpectedSession();
+      networkTrackerStarted = true;
+      recordingNetworkTracker.beginSession();
+
+      // The initial navigation is background-owned and has no content retry.
+      // Add it to the same durable session/document checkpoint before START can
+      // make the page emit its first recorder event.
+      const url = active.url;
+      if (url) {
+        addNavigationStep(flow, url);
+        await session.persistRecoveryState();
+      }
+      assertExpectedSession();
+      broadcastRecordingStateChanged();
+
+      // Ensure recorder available and start listening.
+      await ensureRecorderInjected(active.id);
+      assertExpectedSession();
+      const started = await broadcastControlToTab(active.id, REC_CMD.START, {
+        id: flow.id,
+        name: flow.name,
+        description: flow.description,
+        sessionId: expectedSessionId,
+      });
+      if (started === false) {
+        throw new Error("Top-frame recorder did not acknowledge START");
+      }
+      assertExpectedSession();
+      return { success: true };
+    } catch (error) {
+      await rollbackUnconfirmedStart(active.id, expectedSessionId).catch(
+        () => {},
+      );
+      const stoppedFlow = await session
+        .stopSession(expectedSessionId)
+        .catch(() => null);
+      if (networkTrackerStarted && stoppedFlow === flow) {
+        recordingNetworkTracker.endSession();
+      }
       broadcastRecordingStateChanged();
       return {
         success: false,
-        error: "Top-frame recorder did not acknowledge START",
+        error: error instanceof Error ? error.message : String(error),
       };
     }
-    return { success: true };
   }
 
   /**

@@ -66,6 +66,16 @@ function sender(): chrome.runtime.MessageSender {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function checkpointFixture(sessionId: string): RecordingRecoveryCheckpoint {
   const now = Date.now();
   return {
@@ -248,6 +258,91 @@ describe("recording MV3 recovery", () => {
       .mock.invocationCallOrder.at(-1);
     expect(lastLeaseWriteOrder).toBeDefined();
     expect(lastLeaseWriteOrder!).toBeLessThan(startOrder);
+  });
+
+  it("reserves START synchronously and explicitly rejects a concurrent attempt", async () => {
+    const tabLookup = deferred<chrome.tabs.Tab>();
+    vi.mocked(chrome.tabs.get).mockImplementationOnce(() => tabLookup.promise);
+    const { recordingSession } =
+      await import("@/entrypoints/background/record-replay/recording/session-manager");
+    const { RecorderManager } =
+      await import("@/entrypoints/background/record-replay/recording/recorder-manager");
+    managers.push(recordingSession);
+
+    const firstStart = RecorderManager.start({ name: "First start" }, 7);
+    const concurrentStart = await RecorderManager.start(
+      { name: "Concurrent start" },
+      7,
+    );
+
+    expect(concurrentStart).toEqual({
+      success: false,
+      error: "Recording start already in progress",
+    });
+    await vi.waitFor(() => expect(chrome.tabs.get).toHaveBeenCalledOnce());
+    tabLookup.resolve({
+      id: 7,
+      url: "https://example.test/",
+    } as chrome.tabs.Tab);
+
+    await expect(firstStart).resolves.toEqual({ success: true });
+    const startCalls = vi
+      .mocked((chrome.tabs as any).sendMessage)
+      .mock.calls.filter((call: any[]) => call[1]?.cmd === "start");
+    expect(startCalls).toHaveLength(1);
+    expect(recordingSession.getFlow()?.name).toBe("First start");
+  });
+
+  it("rolls back the captured session when the post-start checkpoint fails", async () => {
+    const checkpointWrite = deferred<void>();
+    const { browserRecordingRecoveryStore } =
+      await import("@/entrypoints/background/record-replay/recording/recording-recovery-store");
+    const originalSave = browserRecordingRecoveryStore.save.bind(
+      browserRecordingRecoveryStore,
+    );
+    const saveSpy = vi
+      .spyOn(browserRecordingRecoveryStore, "save")
+      .mockImplementationOnce(originalSave)
+      .mockImplementationOnce(() => checkpointWrite.promise);
+    const { recordingNetworkTracker } =
+      await import("@/entrypoints/background/record-replay/recording/network-tracker");
+    const endSession = vi.spyOn(recordingNetworkTracker, "endSession");
+    const { recordingSession } =
+      await import("@/entrypoints/background/record-replay/recording/session-manager");
+    const { RecorderManager } =
+      await import("@/entrypoints/background/record-replay/recording/recorder-manager");
+    managers.push(recordingSession);
+
+    const start = RecorderManager.start({ name: "Failed checkpoint" }, 7);
+
+    await vi.waitFor(() => expect(saveSpy).toHaveBeenCalledTimes(2));
+    const expectedSessionId = saveSpy.mock.calls[0]?.[0].sessionId;
+    expect(expectedSessionId).toBeTruthy();
+    expect(recordingSession.getSession()).toMatchObject({
+      sessionId: expectedSessionId,
+      status: "recording",
+    });
+    checkpointWrite.reject(new Error("checkpoint unavailable"));
+
+    const result = await start;
+    expect(result).toEqual({
+      success: false,
+      error: "checkpoint unavailable",
+    });
+    expect(recordingSession.getStatus()).toBe("idle");
+    expect(endSession).toHaveBeenCalledOnce();
+    const stopCall = vi
+      .mocked((chrome.tabs as any).sendMessage)
+      .mock.calls.find(
+        (call: any[]) =>
+          call[1]?.action === "stop" && call[1]?.requireAck === true,
+      );
+    expect(stopCall?.[1]).toMatchObject({ sessionId: expectedSessionId });
+    expect(
+      vi
+        .mocked((chrome.tabs as any).sendMessage)
+        .mock.calls.some((call: any[]) => call[1]?.cmd === "start"),
+    ).toBe(false);
   });
 
   it("stops a possibly-started page before clearing state when the START response is lost", async () => {
@@ -564,6 +659,50 @@ describe("recording MV3 recovery", () => {
     expect(await browserRecordingRecoveryStore.load()).toMatchObject({
       sessionId: "sess-new",
     });
+  });
+
+  it("does not let delayed cleanup reset a replacement session", async () => {
+    const clearStarted = deferred<void>();
+    const allowClear = deferred<void>();
+    const store: RecordingRecoveryStore = {
+      load: vi.fn(async () => null),
+      save: vi.fn(async () => {}),
+      clear: vi.fn(async () => {
+        clearStarted.resolve();
+        await allowClear.promise;
+      }),
+    };
+    const { RecordingSessionManager } =
+      await import("@/entrypoints/background/record-replay/recording/session-manager");
+    const manager = new RecordingSessionManager({}, store);
+    managers.push(manager);
+    await manager.initializeRecovery();
+    const oldSessionId = await manager.startSession(
+      { ...flow(), id: "old-flow" },
+      7,
+      "document-a",
+    );
+
+    const staleCleanup = manager.stopSession(oldSessionId);
+    await clearStarted.promise;
+    const replacementStart = manager.startSession(
+      { ...flow(), id: "replacement-flow", name: "Replacement" },
+      8,
+      "document-b",
+    );
+    const replacementSessionId = manager.getSession().sessionId;
+    expect(replacementSessionId).not.toBe(oldSessionId);
+    allowClear.resolve();
+
+    await expect(staleCleanup).resolves.toBeNull();
+    await expect(replacementStart).resolves.toBe(replacementSessionId);
+    expect(manager.getSession()).toMatchObject({
+      sessionId: replacementSessionId,
+      status: "recording",
+      originTabId: 8,
+    });
+    expect(manager.getFlow()?.id).toBe("replacement-flow");
+    expect(store.clear).toHaveBeenCalledWith(oldSessionId);
   });
 
   it("fails events closed while recovery storage is unavailable instead of replying ignored", async () => {
