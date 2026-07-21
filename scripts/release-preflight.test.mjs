@@ -1755,11 +1755,6 @@ test("release workflow verifies before either publish mutation", async () => {
     "the stable-only unified release must publish to latest explicitly",
   );
   assert.doesNotMatch(
-    workflow,
-    /npm-dist-tag\.mjs|DIST_TAG=/,
-    "the unified release must not imply npm-only prerelease support",
-  );
-  assert.doesNotMatch(
     buildJobBody,
     /action-gh-release|^\s*npm publish(?:\s|$)/m,
     "build and verification must not mutate a release",

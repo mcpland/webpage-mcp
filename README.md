@@ -624,7 +624,6 @@ than weakening the gate.
 - The npm mutation job uses the `npm-publish` GitHub Environment so repository
   administrators can configure required reviewers or other deployment
   protection rules.
-- `scripts/npm-dist-tag.mjs` remains an npm-only utility; it is not used by `release.yml` and does not imply unified prerelease support.
 - Formal release builds require the Actions repository variable `CHROME_EXTENSION_PUBLIC_KEY`. It must contain the single-line base64 DER public-key body from Chrome Web Store, never a PEM or private key, and must derive the configured official extension ID. Local builds may omit it, but then unpacked builds do not use the official stable extension ID.
 
 </details>
