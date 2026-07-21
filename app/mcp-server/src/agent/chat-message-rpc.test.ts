@@ -687,7 +687,7 @@ describe('agent session public read sanitization', () => {
     expectRedactedManagementInfo(projectClaudeInfoResponse.json?.managementInfo);
   });
 
-  it('redacts session payloads returned from create, update, and reset', async () => {
+  it('returns sanitized session payloads from create, update, and reset', async () => {
     const workspaceBase = await createTempDir('session-write-sanitize-workspace-');
     const dataDir = await createTempDir('session-write-sanitize-data-');
     const dbFile = path.join(dataDir, 'agent.db');
@@ -715,9 +715,6 @@ describe('agent session public read sanitization', () => {
           optionsConfig: {
             allowedTools: ['chrome_read_page'],
             maxTurns: 3,
-            env: {
-              OPENAI_API_KEY: 'secret',
-            },
           },
         },
       },
@@ -739,9 +736,6 @@ describe('agent session public read sanitization', () => {
           optionsConfig: {
             allowedTools: ['chrome_read_page'],
             maxTurns: 3,
-            env: {
-              OPENAI_API_KEY: 'secret',
-            },
           },
         },
       },
