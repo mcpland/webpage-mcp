@@ -235,7 +235,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
     chrome.tabs.sendMessage = vi.fn().mockResolvedValue({
       success: true,
       textContent: "page content",
-      title: "Extracted title",
+      article: { title: "Extracted title" },
     });
     chrome.scripting = {
       ...chrome.scripting,
@@ -969,7 +969,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
     vi.mocked(chrome.tabs.sendMessage).mockResolvedValueOnce({
       success: true,
       textContent: "😀".repeat(25_601),
-      title: "Extracted title",
+      article: { title: "Extracted title" },
     });
     const error = vi
       .spyOn(console, "error")
@@ -983,6 +983,26 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(mocks.addDocument).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(
       "ContentIndexer: Failed to extract bounded content from tab 32",
+    );
+  });
+
+  it("passes the nested Readability article title to the chunker", async () => {
+    pagesByTab.set(33, {
+      url: "https://example.test/readability-title",
+      title: "Browser tab title",
+    });
+    vi.mocked(chrome.tabs.sendMessage).mockResolvedValueOnce({
+      success: true,
+      textContent: "Readable article body",
+      article: { title: "Readability article title" },
+    });
+    const indexer = await createIndexer();
+
+    await indexer.indexTabContent(33);
+
+    expect(mocks.chunkText).toHaveBeenCalledWith(
+      "Readable article body",
+      "Readability article title",
     );
   });
 

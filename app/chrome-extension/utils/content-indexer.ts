@@ -1830,7 +1830,7 @@ export class ContentIndexer {
         action: TOOL_MESSAGE_TYPES.WEB_FETCHER_GET_TEXT_CONTENT,
       });
 
-      const title = response?.title ?? "";
+      const title = response?.article?.title ?? "";
       if (
         response?.success === true &&
         isBoundedUtf8String(response.textContent, MAX_EXTRACTED_TEXT_BYTES) &&
