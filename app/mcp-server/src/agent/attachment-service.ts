@@ -10,6 +10,7 @@
  *   ~/.webpage-mcp-agent/attachments/{projectId}/{messageId}-{index}-{uuid}.{ext}
  */
 import fs from 'node:fs/promises';
+import { constants as fsConstants, type BigIntStats } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -187,6 +188,14 @@ function saturatingAdd(current: number, addition: number): number {
     : current + addition;
 }
 
+function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.birthtimeNs === right.birthtimeNs
+  );
+}
+
 // ============================================================
 // AttachmentService Class
 // ============================================================
@@ -275,10 +284,11 @@ export class AttachmentService {
     const projectDir = this.getProjectAttachmentsDir(projectId);
     const filePath = path.join(projectDir, filename);
 
-    // Double-check resolved path is within project directory (defense in depth)
+    // Double-check resolved path is a direct descendant (defense in depth).
     const resolved = path.resolve(filePath);
     const resolvedProjectDir = path.resolve(projectDir);
-    if (!resolved.startsWith(resolvedProjectDir + path.sep)) {
+    const relative = path.relative(resolvedProjectDir, resolved);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
       throw new Error('Path traversal attempt detected');
     }
 
@@ -319,6 +329,7 @@ export class AttachmentService {
     await this.withProjectWriteLock(projectId, async () => {
       // Create directory and enforce the persistent per-project quota atomically.
       await fs.mkdir(projectDir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+      await this.assertSafeProjectDirectory(projectDir);
       if (process.platform !== 'win32') {
         await Promise.all([
           fs.chmod(this.getAttachmentsRootDir(), PRIVATE_DIRECTORY_MODE),
@@ -699,9 +710,11 @@ export class AttachmentService {
    */
   async attachmentExists(projectId: string, filename: string): Promise<boolean> {
     try {
+      const projectDir = this.getProjectAttachmentsDir(projectId);
+      await this.assertSafeProjectDirectory(projectDir);
       const filePath = this.getAttachmentPath(projectId, filename);
-      await fs.access(filePath);
-      return true;
+      const stats = await fs.lstat(filePath);
+      return stats.isFile() && !stats.isSymbolicLink();
     } catch {
       return false;
     }
@@ -728,24 +741,44 @@ export class AttachmentService {
     }
 
     const filePath = this.getAttachmentPath(projectId, filename);
-    const handle = await fs.open(filePath, 'r');
+    const projectDir = this.getProjectAttachmentsDir(projectId);
+    const projectStats = await this.assertSafeProjectDirectory(projectDir);
+    const pathStats = await fs.lstat(filePath, { bigint: true });
+    if (pathStats.isSymbolicLink()) {
+      throw new Error('Attachment symbolic links are not allowed');
+    }
+    if (!pathStats.isFile()) {
+      throw new Error('Attachment is not a regular file');
+    }
+
+    const noFollow =
+      typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0;
+    const handle = await fs.open(filePath, fsConstants.O_RDONLY | noFollow);
     try {
-      const stats = await handle.stat();
+      const stats = await handle.stat({ bigint: true });
       if (!stats.isFile()) {
         throw new Error('Attachment is not a regular file');
       }
-      if (!Number.isSafeInteger(stats.size) || stats.size < 0) {
+      if (!sameFileIdentity(pathStats, stats)) {
+        throw new Error('Attachment identity changed while opening');
+      }
+      const currentProjectStats = await this.assertSafeProjectDirectory(projectDir);
+      if (!sameFileIdentity(projectStats, currentProjectStats)) {
+        throw new Error('Attachment project directory identity changed while opening');
+      }
+      const size = Number(stats.size);
+      if (!Number.isSafeInteger(size) || size < 0) {
         throw new Error('Attachment size is invalid');
       }
-      if (stats.size > maxTotalBytes) {
+      if (size > maxTotalBytes) {
         return {
           buffer: Buffer.alloc(0),
           offset,
-          totalBytes: stats.size,
+          totalBytes: size,
         };
       }
 
-      const bytesToRead = Math.min(maxBytes, Math.max(0, stats.size - offset));
+      const bytesToRead = Math.min(maxBytes, Math.max(0, size - offset));
       const buffer = Buffer.allocUnsafe(bytesToRead);
       let bytesRead = 0;
       while (bytesRead < bytesToRead) {
@@ -764,11 +797,22 @@ export class AttachmentService {
       return {
         buffer: bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead),
         offset,
-        totalBytes: stats.size,
+        totalBytes: size,
       };
     } finally {
       await handle.close();
     }
+  }
+
+  private async assertSafeProjectDirectory(projectDir: string): Promise<BigIntStats> {
+    const stats = await fs.lstat(projectDir, { bigint: true });
+    if (stats.isSymbolicLink()) {
+      throw new Error('Attachment project directory symbolic links are not allowed');
+    }
+    if (!stats.isDirectory()) {
+      throw new Error('Attachment project path is not a directory');
+    }
+    return stats;
   }
 }
 

@@ -113,6 +113,104 @@ afterEach(async () => {
 });
 
 describe('bounded attachment inventory service', () => {
+  it('reads regular attachment ranges from the opened file descriptor', async () => {
+    const { rootDir, service } = await createService('attachment-secure-read-');
+    const projectDir = path.join(rootDir, 'project-1');
+    const filePath = path.join(projectDir, 'message-0-image.png');
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.writeFile(filePath, '0123456789');
+
+    const chunk = await service.readAttachmentChunk(
+      'project-1',
+      'message-0-image.png',
+      3,
+      4,
+      100,
+    );
+
+    expect(chunk.buffer.toString()).toBe('3456');
+    expect(chunk).toMatchObject({ offset: 3, totalBytes: 10 });
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects attachment file and project directory symlinks',
+    async () => {
+      const { rootDir, service } = await createService('attachment-symlink-read-');
+      const outsideDir = await createTempDir('attachment-symlink-target-');
+      const outsideFile = path.join(outsideDir, 'secret.png');
+      await fs.writeFile(outsideFile, 'outside secret');
+
+      const regularProjectDir = path.join(rootDir, 'regular-project');
+      await fs.mkdir(regularProjectDir, { recursive: true });
+      await fs.symlink(outsideFile, path.join(regularProjectDir, 'linked.png'));
+      await expect(
+        service.readAttachmentChunk('regular-project', 'linked.png', 0, 100, 100),
+      ).rejects.toThrow('symbolic links are not allowed');
+      await expect(service.attachmentExists('regular-project', 'linked.png')).resolves.toBe(
+        false,
+      );
+
+      await fs.mkdir(rootDir, { recursive: true });
+      await fs.symlink(outsideDir, path.join(rootDir, 'linked-project'), 'dir');
+      await expect(
+        service.readAttachmentChunk('linked-project', 'secret.png', 0, 100, 100),
+      ).rejects.toThrow('project directory symbolic links are not allowed');
+      await expect(service.attachmentExists('linked-project', 'secret.png')).resolves.toBe(
+        false,
+      );
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects a regular file replaced between path inspection and open',
+    async () => {
+      const { rootDir, service } = await createService('attachment-identity-read-');
+      const projectDir = path.join(rootDir, 'project-1');
+      const filePath = path.join(projectDir, 'message-0-image.png');
+      const replacementPath = path.join(projectDir, 'replacement.png');
+      await fs.mkdir(projectDir, { recursive: true });
+      await fs.writeFile(filePath, 'trusted attachment');
+      await fs.writeFile(replacementPath, 'replacement attachment');
+
+      const open = fs.open.bind(fs);
+      vi.spyOn(fs, 'open').mockImplementationOnce(async (target, flags, mode) => {
+        const targetPath = target.toString();
+        await fs.rename(targetPath, `${targetPath}.original`);
+        await fs.rename(replacementPath, targetPath);
+        return open(target, flags, mode);
+      });
+
+      await expect(
+        service.readAttachmentChunk('project-1', 'message-0-image.png', 0, 100, 100),
+      ).rejects.toThrow('identity changed while opening');
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'does not save through a pre-planted project directory symlink',
+    async () => {
+      const { rootDir, service } = await createService('attachment-symlink-save-');
+      const outsideDir = await createTempDir('attachment-symlink-save-target-');
+      await fs.mkdir(rootDir, { recursive: true });
+      await fs.symlink(outsideDir, path.join(rootDir, 'linked-project'), 'dir');
+
+      await expect(
+        service.saveAttachment({
+          projectId: 'linked-project',
+          messageId: 'message',
+          index: 0,
+          attachment: {
+            type: 'image',
+            name: 'image.png',
+            mimeType: 'image/png',
+            dataBase64: Buffer.from('image').toString('base64'),
+          },
+        }),
+      ).rejects.toThrow('project directory symbolic links are not allowed');
+      await expect(fs.readdir(outsideDir)).resolves.toEqual([]);
+    },
+  );
+
   it('paginates root entries and bounds every per-project file scan', async () => {
     const { rootDir, service } = await createService('attachment-stats-bounds-', {
       maxProjectBytes: 1024,
