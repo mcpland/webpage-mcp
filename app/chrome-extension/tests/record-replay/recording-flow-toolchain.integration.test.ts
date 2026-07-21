@@ -3248,6 +3248,50 @@ describe("recording/editing/flow toolchain integration", () => {
     expect(updated?.meta?.quality).toBeUndefined();
   });
 
+  it("workflowStabilizeTool treats path prefixes as complete path segments", async () => {
+    const flowId = `workflow-stabilize-path-boundary-${Date.now()}`;
+    await createStoragePort().flows.save(
+      createFlow(flowId, [
+        {
+          id: "wait-1" as any,
+          kind: "wait",
+          config: { condition: { kind: "selector", selector: "#ready" } },
+        },
+      ]),
+    );
+
+    const result = await workflowStabilizeTool.execute({
+      flowId,
+      iterations: 1,
+      startUrl: "https://staging.example.com/application",
+      safety: {
+        executionMode: "sandboxReplay",
+        allowedHosts: ["staging.example.com"],
+        testEnvironment: {
+          name: "staging",
+          origins: ["https://staging.example.com"],
+          pathPrefixes: ["/app"],
+        },
+      },
+    });
+    const payload = parseToolPayload(result);
+
+    expect(mocks.enqueueRunAndWait).not.toHaveBeenCalled();
+    expect(payload.safety).toMatchObject({
+      executionMode: "analyzeOnly",
+      blocked: true,
+      blockedReason: expect.stringContaining("outside the declared safety boundary"),
+    });
+    expect(payload.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "STABILIZE_TEST_ENVIRONMENT_BLOCKED",
+          path: "/startUrl",
+        }),
+      ]),
+    );
+  });
+
   it("workflowStabilizeTool validates current tab URL for sandboxReplay without startUrl", async () => {
     const flowId = `workflow-stabilize-current-tab-boundary-${Date.now()}`;
     await createStoragePort().flows.save(

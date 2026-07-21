@@ -1095,6 +1095,16 @@ function hostMatchesBoundary(host: string, allowedHost: string): boolean {
   return normalizedHost === normalizedAllowed || normalizedHost.endsWith(`.${normalizedAllowed}`);
 }
 
+function pathMatchesBoundary(pathname: string, prefix: string): boolean {
+  if (!prefix.startsWith('/')) return false;
+  const normalizedPrefix = prefix.replace(/\/+$/, '') || '/';
+  return (
+    normalizedPrefix === '/' ||
+    pathname === normalizedPrefix ||
+    pathname.startsWith(`${normalizedPrefix}/`)
+  );
+}
+
 function isAllowedPublicStartUrl(url: string): boolean {
   let parsed: URL;
   try {
@@ -1162,7 +1172,7 @@ function validateUrlAgainstStabilizeBoundary(
     boundary.allowedHosts.some((host) => hostMatchesBoundary(parsed.hostname, host));
   const pathAllowed =
     boundary.pathPrefixes.length === 0 ||
-    boundary.pathPrefixes.some((prefix) => parsed.pathname.startsWith(prefix));
+    boundary.pathPrefixes.some((prefix) => pathMatchesBoundary(parsed.pathname, prefix));
   if (!originAllowed || !hostAllowed || !pathAllowed) {
     return {
       code:
