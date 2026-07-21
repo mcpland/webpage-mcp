@@ -19,6 +19,7 @@ import { deflateRawSync, gzipSync } from "node:zlib";
 import { parseDocument } from "yaml";
 
 import {
+  findExternalBundledDependency,
   verifyReleaseArtifacts,
   verifyReleaseMetadata,
   verifyNpmPublishRef,
@@ -35,6 +36,42 @@ import {
 import { loadReviewedLegalFiles } from "./legal-notices.mjs";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+test("bundled dependency scanning distinguishes executable imports from codegen strings", () => {
+  const reviewed = new Set(["ajv", "fast-uri"]);
+  assert.equal(
+    findExternalBundledDependency(
+      [
+        "const code = 'require(\"ajv/dist/runtime/uri\").default';",
+        'const template = `import("fast-uri")`;',
+      ].join("\n"),
+      reviewed,
+    ),
+    undefined,
+  );
+  assert.equal(
+    findExternalBundledDependency(
+      'const uri = require("ajv/dist/runtime/uri");',
+      reviewed,
+    ),
+    "ajv",
+  );
+  assert.equal(
+    findExternalBundledDependency('import("fast-uri/lib/utils")', reviewed),
+    "fast-uri",
+  );
+  assert.equal(
+    findExternalBundledDependency(
+      'export { default } from "fast-uri";',
+      reviewed,
+    ),
+    "fast-uri",
+  );
+  assert.throws(
+    () => findExternalBundledDependency("function {", reviewed),
+    /cannot be parsed safely/,
+  );
+});
 
 function parseYaml(source, label) {
   const document = parseDocument(source, {
