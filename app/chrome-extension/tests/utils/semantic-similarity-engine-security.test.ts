@@ -230,6 +230,42 @@ describe('SemanticSimilarityEngine security boundaries', () => {
     }
   });
 
+  it('reserves a released worker slot before waking the queued task', async () => {
+    const engine = new SemanticSimilarityEngine({
+      modelPreset: 'multilingual-e5-small',
+      modelVersion: 'quantized',
+      dimension: 384,
+    });
+    const internal = engine as unknown as {
+      config: { concurrentLimit: number };
+      runningWorkerTasks: number;
+      workerTaskQueue: unknown[];
+      acquireWorkerSlot: () => Promise<void>;
+      releaseWorkerSlot: () => void;
+    };
+    internal.config.concurrentLimit = 1;
+
+    await internal.acquireWorkerSlot();
+    const second = internal.acquireWorkerSlot();
+    expect(internal.runningWorkerTasks).toBe(1);
+    expect(internal.workerTaskQueue).toHaveLength(1);
+
+    internal.releaseWorkerSlot();
+    expect(internal.runningWorkerTasks).toBe(1);
+    const third = internal.acquireWorkerSlot();
+    expect(internal.runningWorkerTasks).toBe(1);
+    expect(internal.workerTaskQueue).toHaveLength(1);
+
+    await second;
+    internal.releaseWorkerSlot();
+    await third;
+    expect(internal.runningWorkerTasks).toBe(1);
+    internal.releaseWorkerSlot();
+    expect(internal.runningWorkerTasks).toBe(0);
+
+    await engine.dispose();
+  });
+
   it('requires an exact Content-Length before allocating a pinned response', async () => {
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({

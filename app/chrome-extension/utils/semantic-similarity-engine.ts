@@ -2095,10 +2095,7 @@ export class SemanticSimilarityEngine {
       return embedding;
     }
 
-    if (this.runningWorkerTasks >= this.config.concurrentLimit) {
-      await this.waitForWorkerSlot();
-    }
-    this.runningWorkerTasks++;
+    await this.acquireWorkerSlot();
 
     const startTime = performance.now();
     try {
@@ -2133,8 +2130,7 @@ export class SemanticSimilarityEngine {
         this.performanceStats.totalEmbeddingTime / this.performanceStats.totalEmbeddingComputations;
       return embedding;
     } finally {
-      this.runningWorkerTasks--;
-      this.processWorkerQueue();
+      this.releaseWorkerSlot();
     }
   }
 
@@ -2236,10 +2232,7 @@ export class SemanticSimilarityEngine {
 
     if (textsToTokenize.length === 0) return results as Float32Array[];
 
-    if (this.runningWorkerTasks >= this.config.concurrentLimit) {
-      await this.waitForWorkerSlot();
-    }
-    this.runningWorkerTasks++;
+    await this.acquireWorkerSlot();
 
     const startTime = performance.now();
     try {
@@ -2292,8 +2285,7 @@ export class SemanticSimilarityEngine {
         this.performanceStats.totalEmbeddingTime / this.performanceStats.totalEmbeddingComputations;
       return results as Float32Array[];
     } finally {
-      this.runningWorkerTasks--;
-      this.processWorkerQueue();
+      this.releaseWorkerSlot();
     }
   }
 
@@ -2570,9 +2562,25 @@ export class SemanticSimilarityEngine {
     });
   }
 
+  private async acquireWorkerSlot(): Promise<void> {
+    if (this.runningWorkerTasks < this.config.concurrentLimit) {
+      this.runningWorkerTasks++;
+      return;
+    }
+    await this.waitForWorkerSlot();
+  }
+
+  private releaseWorkerSlot(): void {
+    if (this.runningWorkerTasks > 0) this.runningWorkerTasks--;
+    this.processWorkerQueue();
+  }
+
   private processWorkerQueue(): void {
     if (this.workerTaskQueue.length > 0 && this.runningWorkerTasks < this.config.concurrentLimit) {
       const waiter = this.workerTaskQueue.shift();
+      // Reserve the released slot before waking the waiter. Its continuation
+      // runs in a later microtask, so deferring this increment can oversubscribe.
+      this.runningWorkerTasks++;
       waiter?.resolve();
     }
   }
