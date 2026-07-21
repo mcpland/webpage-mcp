@@ -143,6 +143,10 @@ jobs:
           npm audit --omit=dev --package-lock-only --prefix app/mcp-server --audit-level=low
           pnpm audit:mcp-bundle
 
+      - name: Verify reviewed legal notices once on Linux
+        if: matrix.enforce_coverage
+        run: pnpm legal:check
+
       - name: Install pinned Rust for advisory scan once on Linux
         if: matrix.enforce_coverage
         run: |

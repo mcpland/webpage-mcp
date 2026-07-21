@@ -58,6 +58,10 @@ jobs:
           npm audit --omit=dev --package-lock-only --prefix app/mcp-server --audit-level=low
           pnpm audit:mcp-bundle
 
+      - name: Verify reviewed legal notices
+        if: matrix.node-version == 24
+        run: pnpm legal:check
+
       - name: Lint
         run: pnpm lint
 

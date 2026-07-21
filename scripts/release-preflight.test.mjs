@@ -1547,6 +1547,7 @@ test("release workflow verifies before either publish mutation", async () => {
   for (const requiredCheck of [
     /pnpm install --frozen-lockfile/,
     /pnpm audit --prod/,
+    /pnpm legal:check/,
     /node scripts\/install-cargo-deny\.mjs --install-dir "\$RUNNER_TEMP\/webpage-mcp-cargo-deny"/,
     /"\$RUNNER_TEMP\/webpage-mcp-cargo-deny\/cargo-deny" --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories/,
     /pnpm typecheck/,
@@ -1851,6 +1852,11 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
     ciWorkflow,
     /Audit production npm dependencies\s*\n\s+if: matrix\.node-version == 24\s*\n\s+run: pnpm audit --prod/,
     "CI must audit the production npm graph once on its maintained Node line",
+  );
+  assert.match(
+    ciWorkflow,
+    /Verify reviewed legal notices\s*\n\s+if: matrix\.node-version == 24\s*\n\s+run: pnpm legal:check/,
+    "CI must expose legal inventory verification as an explicit maintained-line gate",
   );
 
   const releasePlatformGate = releaseWorkflow.slice(
