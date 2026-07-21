@@ -77,6 +77,20 @@ describe('NativeDirectiveQueue', () => {
     await vi.waitFor(() => expect(queue.pendingBytes).toBe(0));
   });
 
+  it('accepts an explicit retained byte length without serializing the item again', async () => {
+    const gate = deferred();
+    const queue = new NativeDirectiveQueue<unknown>(4, () => gate.promise, vi.fn(), 8);
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+
+    queue.enqueue(circular, 7);
+
+    expect(queue.pendingBytes).toBe(7);
+    expect(() => queue.enqueue({}, 0)).toThrowError(RangeError);
+    gate.resolve();
+    await vi.waitFor(() => expect(queue.pendingBytes).toBe(0));
+  });
+
   it('rejects multiple requests whose cumulative retained bytes exceed the budget', () => {
     const queue = new NativeDirectiveQueue<Buffer>(4, () => new Promise(() => {}), vi.fn(), 10);
 

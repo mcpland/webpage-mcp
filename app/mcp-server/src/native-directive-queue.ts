@@ -95,7 +95,7 @@ export class NativeDirectiveQueue<T> {
     return this.retainedBytes;
   }
 
-  public enqueue(item: T): void {
+  public enqueue(item: T, retainedByteLength?: number): void {
     if (this.closed) {
       throw new NativeDirectiveQueueClosedError();
     }
@@ -103,7 +103,10 @@ export class NativeDirectiveQueue<T> {
       throw new NativeDirectiveQueueOverflowError(this.maximumPending);
     }
 
-    const byteLength = serializedByteLength(item);
+    const byteLength = retainedByteLength ?? serializedByteLength(item);
+    if (!Number.isSafeInteger(byteLength) || byteLength <= 0) {
+      throw new RangeError('retainedByteLength must be a positive safe integer');
+    }
     if (byteLength > this.maximumQueuedBytes - this.retainedBytes) {
       throw new NativeDirectiveQueueByteOverflowError(byteLength, this.retainedBytes, this.maximumQueuedBytes);
     }

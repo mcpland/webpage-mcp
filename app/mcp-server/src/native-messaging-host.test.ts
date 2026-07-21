@@ -1,4 +1,4 @@
-import { Writable } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_MCP_INSTANCE_ID, NativeMessageType } from 'webpage-mcp-shared';
 import {
@@ -69,7 +69,114 @@ function decodeFrame(frame: Buffer): Record<string, unknown> {
   return JSON.parse(frame.subarray(4).toString()) as Record<string, unknown>;
 }
 
+function encodeFrameBody(body: Buffer): Buffer {
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(body.byteLength, 0);
+  return Buffer.concat([header, body]);
+}
+
+function encodeFrame(message: unknown): Buffer {
+  return encodeFrameBody(Buffer.from(JSON.stringify(message), 'utf8'));
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 describe('NativeMessagingHost outbound requests', () => {
+  it('rejects queue pressure without dropping later frames or shutting down', async () => {
+    const output = new CollectingWritable();
+    const input = new PassThrough();
+    const firstFrame = encodeFrame({
+      type: NativeMessageType.START,
+      requestId: 'first-directive',
+      payload: { padding: 'a'.repeat(128) },
+    });
+    const secondFrame = encodeFrame({
+      type: NativeMessageType.START,
+      requestId: 'second-directive',
+    });
+    const responseFrame = encodeFrame({
+      responseToRequestId: 'extension-request',
+      payload: { ok: true },
+    });
+    const firstBodyBytes = firstFrame.byteLength - 4;
+    const host = new NativeMessagingHost(
+      new NativeMessageWriter(output),
+      input,
+      firstBodyBytes,
+    );
+    const gate = deferred();
+    const handled: unknown[] = [];
+    const internal = host as unknown as {
+      setupMessageHandling: () => void;
+      handleMessage: (message: unknown) => Promise<void>;
+      processShutdownRequested: boolean;
+    };
+    internal.handleMessage = vi.fn(async (message: any) => {
+      handled.push(message);
+      if (message?.requestId === 'first-directive') await gate.promise;
+    });
+    internal.setupMessageHandling();
+
+    input.write(Buffer.concat([firstFrame, secondFrame, responseFrame]));
+
+    await vi.waitFor(() => expect(handled).toHaveLength(2));
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(1));
+    expect(handled).toEqual([
+      expect.objectContaining({ requestId: 'first-directive' }),
+      expect.objectContaining({ responseToRequestId: 'extension-request' }),
+    ]);
+    expect(decodeFrame(output.chunks[0])).toMatchObject({
+      responseToRequestId: 'second-directive',
+      error: expect.stringContaining('[queue_bytes_exceeded]'),
+    });
+    expect(internal.processShutdownRequested).toBe(false);
+
+    gate.resolve();
+    await host.shutdown();
+    input.destroy();
+  });
+
+  it('reports malformed JSON and continues decoding the same input chunk', async () => {
+    const output = new CollectingWritable();
+    const input = new PassThrough();
+    const host = new NativeMessagingHost(new NativeMessageWriter(output), input);
+    const handled: unknown[] = [];
+    const internal = host as unknown as {
+      setupMessageHandling: () => void;
+      handleMessage: (message: unknown) => Promise<void>;
+      processShutdownRequested: boolean;
+    };
+    internal.handleMessage = vi.fn(async (message) => {
+      handled.push(message);
+    });
+    internal.setupMessageHandling();
+
+    input.write(
+      Buffer.concat([
+        encodeFrameBody(Buffer.from('{"requestId":', 'utf8')),
+        encodeFrame({ responseToRequestId: 'still-decoded', payload: true }),
+      ]),
+    );
+
+    await vi.waitFor(() => expect(handled).toHaveLength(1));
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(1));
+    expect(handled[0]).toMatchObject({ responseToRequestId: 'still-decoded' });
+    expect(decodeFrame(output.chunks[0])).toMatchObject({
+      type: NativeMessageType.ERROR_FROM_NATIVE_HOST,
+      payload: { message: expect.stringContaining('[invalid_json]') },
+    });
+    expect(internal.processShutdownRequested).toBe(false);
+
+    await host.shutdown();
+    input.destroy();
+  });
+
   it('rejects oversized native and IPC routing fields before dispatch', async () => {
     const output = new CollectingWritable();
     const host = new NativeMessagingHost(new NativeMessageWriter(output));

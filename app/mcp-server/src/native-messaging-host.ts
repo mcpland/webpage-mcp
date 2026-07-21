@@ -1,5 +1,6 @@
 import { stdin, stdout } from 'process';
 import net from 'node:net';
+import type { Readable } from 'node:stream';
 import { Server } from './server';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -40,7 +41,14 @@ import {
   type McpClientCapabilityFallback,
 } from './mcp/register-tools';
 import { NativeMessageFrameDecoder } from './native-message-framing';
-import { NativeDirectiveQueue } from './native-directive-queue';
+import {
+  DEFAULT_NATIVE_DIRECTIVE_MAX_QUEUED_BYTES,
+  NativeDirectiveQueue,
+  NativeDirectiveQueueByteOverflowError,
+  NativeDirectiveQueueClosedError,
+  NativeDirectiveQueueEncodingError,
+  NativeDirectiveQueueOverflowError,
+} from './native-directive-queue';
 import {
   isNativeMessageEncodingError,
   NativeMessageWriter,
@@ -77,6 +85,34 @@ export const NATIVE_MESSAGE_TYPE_MAX_BYTES = 128;
 export const NATIVE_CONTROL_ERROR_MAX_BYTES = 8 * 1024;
 export const IPC_METHOD_MAX_BYTES = 128;
 export const IPC_TOOL_NAME_MAX_BYTES = 256;
+
+class NativeDirectiveJsonError extends Error {
+  public constructor() {
+    super('Native directive contains invalid JSON');
+    this.name = 'NativeDirectiveJsonError';
+  }
+}
+
+function formatNativeDirectiveAdmissionError(error: unknown): string {
+  if (error instanceof NativeDirectiveJsonError) {
+    return `Native directive rejected [invalid_json]: ${error.message}`;
+  }
+  if (error instanceof NativeDirectiveQueueOverflowError) {
+    return `Native directive rejected [queue_full]: ${error.message}`;
+  }
+  if (error instanceof NativeDirectiveQueueByteOverflowError) {
+    return `Native directive rejected [queue_bytes_exceeded]: ${error.message}`;
+  }
+  if (error instanceof NativeDirectiveQueueClosedError) {
+    return `Native directive rejected [queue_closed]: ${error.message}`;
+  }
+  if (error instanceof NativeDirectiveQueueEncodingError) {
+    return `Native directive rejected [queue_encoding_failed]: ${error.message}`;
+  }
+  return `Native directive rejected [internal_error]: ${
+    error instanceof Error ? error.message : String(error)
+  }`;
+}
 
 export function createNativeIpcListenOptions(socketPath: string): net.ListenOptions {
   return {
@@ -214,7 +250,12 @@ export class NativeMessagingHost {
   private shutdownPromise: Promise<void> | null = null;
   private static readonly AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
 
-  public constructor(private readonly messageWriter = new NativeMessageWriter(stdout)) {}
+  public constructor(
+    private readonly messageWriter = new NativeMessageWriter(stdout),
+    private readonly messageInput: Readable = stdin,
+    private readonly nativeDirectiveMaximumQueuedBytes =
+      DEFAULT_NATIVE_DIRECTIVE_MAX_QUEUED_BYTES,
+  ) {}
 
   public setServer(serverInstance: Server): void {
     const instanceId = resolveInstanceId(serverInstance.instanceId);
@@ -701,35 +742,55 @@ export class NativeMessagingHost {
 
   private setupMessageHandling(): void {
     const decoder = new NativeMessageFrameDecoder();
-    const directiveQueue = new NativeDirectiveQueue<Buffer>(
+    const directiveQueue = new NativeDirectiveQueue<unknown>(
       NATIVE_MAX_PENDING_DIRECTIVES,
-      (messageBuffer) => this.handleMessage(JSON.parse(messageBuffer.toString('utf8'))),
+      (message) => this.handleMessage(message),
       (error) => {
-        this.sendError(
-          `Failed to handle directive message: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        this.rejectNativeDirective(undefined, error);
       },
+      this.nativeDirectiveMaximumQueuedBytes,
     );
     let framingFailed = false;
 
+    const onFrame = (messageBuffer: Buffer): void => {
+      let message: unknown;
+      try {
+        message = JSON.parse(messageBuffer.toString('utf8'));
+      } catch {
+        this.rejectNativeDirective(undefined, new NativeDirectiveJsonError());
+        return;
+      }
+
+      const responseToRequestId =
+        message && typeof message === 'object'
+          ? (message as Record<string, unknown>).responseToRequestId
+          : undefined;
+      if (responseToRequestId !== undefined) {
+        // Extension responses unblock active directives and must never wait
+        // behind them. Keep failures local to this complete frame.
+        void this.handleMessage(message).catch((error) => {
+          this.rejectNativeDirective(message, error);
+        });
+        return;
+      }
+
+      try {
+        // The parsed object is retained, but account it by its exact wire size
+        // without serializing a potentially multi-megabyte directive twice.
+        directiveQueue.enqueue(message, messageBuffer.byteLength);
+      } catch (error) {
+        this.rejectNativeDirective(message, error);
+      }
+    };
+
     const onReadable = () => {
       let chunk;
-      while ((chunk = stdin.read()) !== null) {
+      while ((chunk = this.messageInput.read()) !== null) {
         try {
-          decoder.write(chunk, (messageBuffer) => {
-            const message = JSON.parse(messageBuffer.toString());
-            if (message?.responseToRequestId) {
-              // Extension responses unblock active directives and must never wait behind them.
-              void this.handleMessage(message);
-            } else {
-              // Retain the original frame rather than a parsed object so the
-              // queue's byte budget exactly matches the memory it owns.
-              directiveQueue.enqueue(messageBuffer);
-            }
-          });
+          decoder.write(chunk, onFrame);
         } catch (error) {
           framingFailed = true;
-          stdin.removeListener('readable', onReadable);
+          this.messageInput.removeListener('readable', onReadable);
           this.sendError(error instanceof Error ? error.message : String(error));
           this.requestProcessShutdown(1);
           break;
@@ -749,16 +810,29 @@ export class NativeMessagingHost {
       }
     };
 
-    stdin.on('readable', onReadable);
-    stdin.on('end', onEnd);
-    stdin.on('error', onError);
+    this.messageInput.on('readable', onReadable);
+    this.messageInput.on('end', onEnd);
+    this.messageInput.on('error', onError);
     this.messageHandlingCleanup = () => {
       directiveQueue.close();
-      stdin.removeListener('readable', onReadable);
-      stdin.removeListener('end', onEnd);
-      stdin.removeListener('error', onError);
+      this.messageInput.removeListener('readable', onReadable);
+      this.messageInput.removeListener('end', onEnd);
+      this.messageInput.removeListener('error', onError);
       this.messageHandlingCleanup = null;
     };
+  }
+
+  private rejectNativeDirective(message: unknown, error: unknown): void {
+    const errorMessage = formatNativeDirectiveAdmissionError(error);
+    const requestId =
+      message && typeof message === 'object'
+        ? (message as Record<string, unknown>).requestId
+        : undefined;
+    if (isBoundedNonEmptyString(requestId, NATIVE_CONTROL_IDENTIFIER_MAX_BYTES)) {
+      this.sendRequestResponse(requestId, undefined, errorMessage);
+    } else {
+      this.sendError(errorMessage);
+    }
   }
 
   private getOrCreateServer(instanceId: string): Server {
