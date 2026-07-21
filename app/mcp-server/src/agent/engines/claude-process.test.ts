@@ -9,6 +9,7 @@ import {
   resolveClaudeEngineTimeoutMs,
   spawnSupervisedClaudeCodeProcess,
 } from './claude-process';
+import { BoundedDiagnosticBuffer } from './diagnostic-redaction';
 
 class FakeClaudeChildProcess extends EventEmitter {
   public readonly stdin = new PassThrough();
@@ -289,6 +290,33 @@ describe('Claude process supervision', () => {
     await supervised.completion;
     child.stderr.emit('data', Buffer.from('after close'));
     expect(onStderr).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves stderr line endings across process chunks', async () => {
+    vi.useFakeTimers();
+    const child = new FakeClaudeChildProcess();
+    const diagnostics = new BoundedDiagnosticBuffer();
+    const forwarded: string[] = [];
+    const emitted: string[] = [];
+    const supervised = spawnSupervisedClaudeCodeProcess(createSpawnOptions(), {
+      timeoutMs: 1_000,
+      platform: 'linux',
+      onStderr(data) {
+        forwarded.push(data);
+        emitted.push(...diagnostics.push(data));
+      },
+      spawnProcess: () => child as unknown as ChildProcess,
+    });
+
+    child.emit('spawn');
+    child.stderr.emit('data', Buffer.from('resume failed\n'));
+    child.stderr.emit('data', Buffer.from('connection reset by peer\n'));
+
+    expect(forwarded).toEqual(['resume failed\n', 'connection reset by peer\n']);
+    expect(emitted).toEqual(['resume failed', 'connection reset by peer']);
+
+    child.emit('close', 0, null);
+    await supervised.completion;
   });
 
   it('redacts child stderr before forwarding it to the SDK callback', async () => {

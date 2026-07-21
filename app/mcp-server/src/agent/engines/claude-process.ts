@@ -171,7 +171,7 @@ export function spawnSupervisedClaudeCodeProcess(
   };
   const handleStderr = (data: Buffer | string): void => {
     if (!supervisorOptions.onStderr) return;
-    const redacted = redactDiagnosticText(data, CLAUDE_STDERR_CHUNK_MAX_BYTES).trimEnd();
+    const redacted = redactDiagnosticText(data, CLAUDE_STDERR_CHUNK_MAX_BYTES);
     if (redacted) supervisorOptions.onStderr(redacted);
   };
   const handleClose = (code: number | null, signal: NodeJS.Signals | null): void => {
