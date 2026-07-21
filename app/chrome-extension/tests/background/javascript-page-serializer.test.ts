@@ -286,6 +286,28 @@ describe("bounded JavaScript page serializer", () => {
     expect(result.truncated).toBe(false);
   });
 
+  it("preserves bounded hints for built-in objects with no enumerable fields", () => {
+    const result = serialize({
+      date: new Date("2026-07-22T01:02:03.000Z"),
+      regexp: /hello\s+world/giu,
+      map: new Map([
+        ["first", 1],
+        ["second", 2],
+      ]),
+      set: new Set([1, 2, 3]),
+    });
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(JSON.parse(result.text)).toEqual({
+      date: "[Date: 2026-07-22T01:02:03.000Z]",
+      regexp: "[RegExp: /hello\\s+world/giu]",
+      map: "[Map(2)]",
+      set: "[Set(3)]",
+    });
+    expect(result.truncated).toBe(false);
+  });
+
   it("bounds and sanitizes huge thrown values", () => {
     const error = new Error("Bearer super-secret-token");
     error.stack = `Error: Bearer super-secret-token\n${"x".repeat(2_000_000)}`;

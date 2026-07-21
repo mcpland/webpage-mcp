@@ -662,6 +662,93 @@ export function serializeJavaScriptEvaluation(
       return false;
     };
 
+    const readObjectTag = (value: object): string => {
+      try {
+        const tag = Object.prototype.toString.call(value);
+        return typeof tag === "string" && tag.length <= 64 ? tag : "";
+      } catch {
+        return "";
+      }
+    };
+
+    const writeSpecialObject = (
+      value: Record<string, unknown>,
+      tag: string,
+      root: boolean,
+    ): boolean => {
+      if (tag === "[object Date]") {
+        let iso = "";
+        try {
+          const toISOString = value.toISOString;
+          const candidate =
+            typeof toISOString === "function"
+              ? toISOString.call(value)
+              : undefined;
+          if (typeof candidate === "string") iso = candidate;
+        } catch {
+          // Preserve the type hint without trusting a page-provided method.
+        }
+        const sanitized = sanitizeBoundedText(iso, 128);
+        redacted = redacted || sanitized.redacted;
+        if (sanitized.truncated) markTruncated();
+        writeFixedString(
+          sanitized.text ? `[Date: ${sanitized.text}]` : "[Date]",
+          root,
+        );
+        return true;
+      }
+
+      if (tag === "[object RegExp]") {
+        let source = "";
+        let flags = "";
+        try {
+          if (typeof value.source === "string") source = value.source;
+          if (typeof value.flags === "string") flags = value.flags;
+        } catch {
+          // Preserve the type hint without trusting page-provided accessors.
+        }
+        const sanitizedSource = sanitizeBoundedText(source, 256);
+        const sanitizedFlags = sanitizeBoundedText(flags, 32);
+        redacted =
+          redacted || sanitizedSource.redacted || sanitizedFlags.redacted;
+        if (sanitizedSource.truncated || sanitizedFlags.truncated) {
+          markTruncated();
+        }
+        writeFixedString(
+          sanitizedSource.text
+            ? `[RegExp: /${sanitizedSource.text}/${sanitizedFlags.text}]`
+            : "[RegExp]",
+          root,
+        );
+        return true;
+      }
+
+      if (tag === "[object Map]" || tag === "[object Set]") {
+        const type = tag === "[object Map]" ? "Map" : "Set";
+        let size: number | null = null;
+        try {
+          const candidate = value.size;
+          if (
+            typeof candidate === "number" &&
+            candidate >= 0 &&
+            candidate <= 9_007_199_254_740_991 &&
+            candidate % 1 === 0
+          ) {
+            size = candidate;
+          }
+        } catch {
+          // Preserve the type hint without trusting page-provided accessors.
+        }
+        writeFixedString(
+          size === null ? `[${type}]` : `[${type}(${size})]`,
+          root,
+        );
+        return true;
+      }
+
+      return false;
+    };
+
     const writeValue = (
       value: unknown,
       depth: number,
@@ -762,6 +849,9 @@ export function serializeJavaScriptEvaluation(
         writeFixedString("[Circular]", root);
         return;
       }
+
+      const objectTag = readObjectTag(objectValue);
+      if (writeSpecialObject(objectValue, objectTag, root)) return;
 
       let arrayValue = false;
       try {
