@@ -961,6 +961,31 @@ describe("ContentIndexer tab/page lifecycle", () => {
     expect(mocks.addDocument).not.toHaveBeenCalled();
   });
 
+  it("rejects oversized extracted text before handing it to the chunker", async () => {
+    pagesByTab.set(32, {
+      url: "https://example.test/oversized-content",
+      title: "Oversized content",
+    });
+    vi.mocked(chrome.tabs.sendMessage).mockResolvedValueOnce({
+      success: true,
+      textContent: "😀".repeat(25_601),
+      title: "Extracted title",
+    });
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const indexer = await createIndexer();
+
+    await indexer.indexTabContent(32);
+
+    expect(mocks.chunkText).not.toHaveBeenCalled();
+    expect(mocks.getEmbedding).not.toHaveBeenCalled();
+    expect(mocks.addDocument).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      "ContentIndexer: Failed to extract bounded content from tab 32",
+    );
+  });
+
   it("indexes identical URL/title pages independently in different tabs", async () => {
     pagesByTab.set(1, { url: "https://example.test/page", title: "Same page" });
     pagesByTab.set(2, { url: "https://example.test/page", title: "Same page" });

@@ -37,6 +37,18 @@ import { TOOL_MESSAGE_TYPES } from "@/common/message-types";
 
 const TAB_INVALIDATION_SCHEMA_VERSION = 1;
 const MAX_PENDING_TAB_INVALIDATIONS = 100_000;
+// Must not exceed the bounds enforced by web-fetcher-helper.js before the
+// extension message crosses into the background service worker.
+const MAX_EXTRACTED_TEXT_BYTES = 100 * 1024;
+const MAX_EXTRACTED_TITLE_BYTES = 8 * 1024;
+
+function isBoundedUtf8String(
+  value: unknown,
+  maximumBytes: number,
+): value is string {
+  if (typeof value !== "string" || value.length > maximumBytes) return false;
+  return new TextEncoder().encode(value).byteLength <= maximumBytes;
+}
 
 interface TabInvalidationJournal {
   schemaVersion: typeof TAB_INVALIDATION_SCHEMA_VERSION;
@@ -1818,15 +1830,20 @@ export class ContentIndexer {
         action: TOOL_MESSAGE_TYPES.WEB_FETCHER_GET_TEXT_CONTENT,
       });
 
-      if (response.success && response.textContent) {
+      const title = response?.title ?? "";
+      if (
+        response?.success === true &&
+        isBoundedUtf8String(response.textContent, MAX_EXTRACTED_TEXT_BYTES) &&
+        response.textContent.length > 0 &&
+        isBoundedUtf8String(title, MAX_EXTRACTED_TITLE_BYTES)
+      ) {
         return {
           textContent: response.textContent,
-          title: response.title || "",
+          title,
         };
       } else {
         console.error(
-          `ContentIndexer: Failed to extract content from tab ${tabId}:`,
-          response.error,
+          `ContentIndexer: Failed to extract bounded content from tab ${tabId}`,
         );
         return null;
       }
