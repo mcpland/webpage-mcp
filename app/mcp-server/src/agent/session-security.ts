@@ -23,6 +23,7 @@ const BOOLEAN_CODEX_CONFIG_FIELDS = [
 ] as const;
 
 const POSITIVE_INTEGER_CODEX_CONFIG_FIELDS = ['maxTurns', 'maxThinkingTokens'] as const;
+const UNSUPPORTED_CLAUDE_PROCESS_OPTIONS = ['mcpServers', 'env'] as const;
 
 interface SessionSecurityInput {
   permissionMode?: unknown;
@@ -265,6 +266,14 @@ export function validateSessionSecurityConfig({
 
   if (engineName !== 'claude') {
     return undefined;
+  }
+
+  if (isRecord(input.optionsConfig)) {
+    for (const field of UNSUPPORTED_CLAUDE_PROCESS_OPTIONS) {
+      if (hasOwn(input.optionsConfig, field)) {
+        return `optionsConfig.${field} is not supported for persisted Claude sessions`;
+      }
+    }
   }
 
   const rawMode = hasPermissionMode

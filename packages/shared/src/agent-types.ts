@@ -222,11 +222,9 @@ export interface AgentSessionOptionsConfig {
   maxThinkingTokens?: number;
   maxTurns?: number;
   maxBudgetUsd?: number;
-  mcpServers?: Record<string, unknown>;
   outputFormat?: Record<string, unknown>;
   enableFileCheckpointing?: boolean;
   sandbox?: Record<string, unknown>;
-  env?: Record<string, string>;
   /**
    * Optional Codex-specific configuration overrides.
    * Only applicable when using CodexEngine.

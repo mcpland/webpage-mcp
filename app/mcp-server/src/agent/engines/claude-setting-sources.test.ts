@@ -29,6 +29,28 @@ describe('Claude setting source isolation', () => {
 });
 
 describe('Claude persisted work-limit validation', () => {
+  it.each(['mcpServers', 'env'] as const)(
+    'rejects legacy process-capable %s before loading the SDK',
+    async (field) => {
+      const optionsConfig = { [field]: {} };
+      expect(() => validateClaudeExecutionOptionsConfig(optionsConfig)).toThrow(
+        `optionsConfig.${field} is not supported`,
+      );
+      await expect(
+        new ClaudeEngine('runtime-process-option-test').initializeAndRun(
+          {
+            sessionId: 'legacy-session',
+            instruction: 'must fail before SDK loading',
+            requestId: 'legacy-request',
+            projectRoot: process.cwd(),
+            optionsConfig,
+          },
+          { emit: () => {} },
+        ),
+      ).rejects.toThrow(`optionsConfig.${field} is not supported`);
+    },
+  );
+
   it.each([
     ['maxTurns', AGENT_SESSION_MAX_TURNS],
     ['maxThinkingTokens', AGENT_SESSION_MAX_THINKING_TOKENS],

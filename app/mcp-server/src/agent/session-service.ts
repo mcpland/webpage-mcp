@@ -50,10 +50,12 @@ export interface SessionOptionsConfig {
   maxThinkingTokens?: number;
   maxTurns?: number;
   maxBudgetUsd?: number;
+  /** Legacy persisted shape; public validation rejects process-spawning MCP configuration. */
   mcpServers?: Record<string, unknown>;
   outputFormat?: Record<string, unknown>;
   enableFileCheckpointing?: boolean;
   sandbox?: Record<string, unknown>;
+  /** Legacy persisted shape; public validation rejects child-process environment overrides. */
   env?: Record<string, string>;
   /**
    * Optional Codex-specific configuration overrides.

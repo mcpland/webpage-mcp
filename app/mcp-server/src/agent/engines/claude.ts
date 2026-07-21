@@ -76,6 +76,13 @@ export function validateClaudeExecutionOptionsConfig(optionsConfig: unknown): vo
     throw new Error('ClaudeEngine: optionsConfig must be an object');
   }
   const record = optionsConfig as Record<string, unknown>;
+  for (const field of ['mcpServers', 'env'] as const) {
+    if (Object.prototype.hasOwnProperty.call(record, field)) {
+      throw new Error(
+        `ClaudeEngine: optionsConfig.${field} is not supported for persisted sessions`,
+      );
+    }
+  }
   for (const [field, maximum] of [
     ['maxTurns', AGENT_SESSION_MAX_TURNS],
     ['maxThinkingTokens', AGENT_SESSION_MAX_THINKING_TOKENS],
@@ -721,13 +728,6 @@ export class ClaudeEngine implements AgentEngine {
         }
 
         if (
-          optionsRecord.mcpServers &&
-          typeof optionsRecord.mcpServers === 'object' &&
-          !Array.isArray(optionsRecord.mcpServers)
-        ) {
-          queryOptions.mcpServers = optionsRecord.mcpServers;
-        }
-        if (
           optionsRecord.outputFormat &&
           typeof optionsRecord.outputFormat === 'object' &&
           !Array.isArray(optionsRecord.outputFormat)
@@ -744,46 +744,15 @@ export class ClaudeEngine implements AgentEngine {
         ) {
           queryOptions.sandbox = optionsRecord.sandbox;
         }
-
-        // Merge session-level env overrides with base claudeEnv
-        // Session env takes precedence over process env (useful for per-session API keys, etc.)
-        if (
-          optionsRecord.env &&
-          typeof optionsRecord.env === 'object' &&
-          !Array.isArray(optionsRecord.env)
-        ) {
-          const sessionEnv = optionsRecord.env as Record<string, unknown>;
-          const mergedEnv = { ...claudeEnv };
-          for (const [key, value] of Object.entries(sessionEnv)) {
-            if (typeof value === 'string') {
-              mergedEnv[key] = value;
-            }
-          }
-          // Ensure Node.js bin directory is still in PATH after merge
-          // Session may have overwritten PATH, which would break child processes
-          const nodeBinDir = path.dirname(process.execPath);
-          const mergedPath = mergedEnv.PATH || mergedEnv.Path || '';
-          if (!mergedPath.includes(nodeBinDir)) {
-            mergedEnv.PATH = [nodeBinDir, mergedPath].filter(Boolean).join(path.delimiter);
-          }
-          queryOptions.env = mergedEnv;
-        }
       }
 
       // Inject the local Webpage MCP server based on project preference.
-      // This only controls the built-in "webpage-mcp" entry; user-configured MCP servers remain untouched.
+      // Persisted sessions cannot add process-spawning MCP entries. Only the
+      // product-owned stdio bridge is admitted here.
       const WEBPAGE_MCP_SERVER_NAME = 'webpage-mcp';
       if (enableWebpageMcp) {
         const stdioConfig = resolveWebpageMcpStdioConfig(this.instanceId);
-        const existingMcpServers =
-          queryOptions.mcpServers &&
-          typeof queryOptions.mcpServers === 'object' &&
-          !Array.isArray(queryOptions.mcpServers)
-            ? (queryOptions.mcpServers as Record<string, unknown>)
-            : {};
-
         queryOptions.mcpServers = {
-          ...existingMcpServers,
           [WEBPAGE_MCP_SERVER_NAME]: {
             type: 'stdio',
             command: stdioConfig.command,
@@ -797,21 +766,7 @@ export class ClaudeEngine implements AgentEngine {
             DIAGNOSTIC_ERROR_MAX_BYTES,
           ),
         );
-      } else if (
-        queryOptions.mcpServers &&
-        typeof queryOptions.mcpServers === 'object' &&
-        !Array.isArray(queryOptions.mcpServers)
-      ) {
-        // If Webpage MCP is disabled, remove it from existing mcpServers if present
-        const existing = queryOptions.mcpServers as Record<string, unknown>;
-        if (WEBPAGE_MCP_SERVER_NAME in existing) {
-          const { [WEBPAGE_MCP_SERVER_NAME]: _removed, ...rest } = existing;
-          if (Object.keys(rest).length > 0) {
-            queryOptions.mcpServers = rest;
-          } else {
-            delete (queryOptions as Record<string, unknown>).mcpServers;
-          }
-        }
+      } else {
         console.error('[ClaudeEngine] Webpage MCP server disabled');
       }
 

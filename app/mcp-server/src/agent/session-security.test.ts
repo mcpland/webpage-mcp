@@ -109,6 +109,18 @@ describe('safe agent permission defaults', () => {
 });
 
 describe('session security validation', () => {
+  it.each(['mcpServers', 'env'] as const)(
+    'rejects persisted Claude %s process configuration',
+    (field) => {
+      expect(
+        validateSessionSecurityConfig({
+          engineName: 'claude',
+          input: { optionsConfig: { [field]: {} } },
+        }),
+      ).toBe(`optionsConfig.${field} is not supported for persisted Claude sessions`);
+    },
+  );
+
   it.each([
     ['maxTurns', AGENT_SESSION_MAX_TURNS],
     ['maxThinkingTokens', AGENT_SESSION_MAX_THINKING_TOKENS],
