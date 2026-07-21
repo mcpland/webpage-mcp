@@ -361,13 +361,16 @@ function boundedStringArray(
   path: string,
   maxItems: number,
   maxItemBytes: number,
+  options: { requireNonEmptyItems?: boolean } = {},
 ): string[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new Error(`${path} must be an array`);
   if (value.length > maxItems) throw new Error(`${path} exceeds the Web Editor item limit`);
   const output: string[] = [];
   for (let index = 0; index < value.length; index += 1) {
-    const item = boundedString(value[index], `${path}[${index}]`, maxItemBytes);
+    const item = boundedString(value[index], `${path}[${index}]`, maxItemBytes, {
+      required: options.requireNonEmptyItems,
+    });
     if (item) output.push(item);
   }
   return output;
@@ -483,12 +486,14 @@ export function normalizeElementLocator(value: unknown, path: string): ElementLo
     `${path}.frameChain`,
     WEB_EDITOR_RESOURCE_LIMITS.locatorChains,
     WEB_EDITOR_RESOURCE_LIMITS.selectorBytes,
+    { requireNonEmptyItems: true },
   );
   const shadowHostChain = boundedStringArray(
     record.shadowHostChain,
     `${path}.shadowHostChain`,
     WEB_EDITOR_RESOURCE_LIMITS.locatorChains,
     WEB_EDITOR_RESOURCE_LIMITS.selectorBytes,
+    { requireNonEmptyItems: true },
   );
   const debugSource = normalizeDebugSource(record.debugSource, `${path}.debugSource`);
   return {

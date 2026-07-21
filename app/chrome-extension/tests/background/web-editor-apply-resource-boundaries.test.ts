@@ -5,6 +5,7 @@ import type { ElementChangeSummary } from "@/common/web-editor-types";
 import {
   normalizeApplyBatchPayload,
   normalizeApplyPayload,
+  normalizeElementLocator,
 } from "@/entrypoints/background/web-editor/resource-boundaries";
 
 const nativeHostMocks = vi.hoisted(() => ({
@@ -156,6 +157,43 @@ describe("Web Editor apply resource boundaries", () => {
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
     return sendResponse.mock.calls[0]![0] as Record<string, unknown>;
   }
+
+  it("rejects empty entries instead of shifting ordered locator chains", () => {
+    expect(() =>
+      normalizeElementLocator(
+        {
+          selectors: ["button"],
+          frameChain: ["iframe#outer", "   ", "iframe#inner"],
+        },
+        "payload.locator",
+      ),
+    ).toThrow(/frameChain\[1\] is required/);
+
+    expect(() =>
+      normalizeElementLocator(
+        {
+          selectors: ["button"],
+          shadowHostChain: ["app-shell", null, "inner-shell"],
+        },
+        "payload.locator",
+      ),
+    ).toThrow(/shadowHostChain\[1\] is required/);
+
+    expect(
+      normalizeElementLocator(
+        {
+          selectors: ["", " button.primary "],
+          frameChain: [" iframe#outer ", "iframe#inner"],
+          shadowHostChain: [" app-shell "],
+        },
+        "payload.locator",
+      ),
+    ).toMatchObject({
+      selectors: ["button.primary"],
+      frameChain: ["iframe#outer", "iframe#inner"],
+      shadowHostChain: ["app-shell"],
+    });
+  });
 
   it("rejects raw depth and field collections before allocating normalized copies", () => {
     const applyPayload = createApplyPayload();
