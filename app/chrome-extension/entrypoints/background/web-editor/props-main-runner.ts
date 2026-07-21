@@ -40,6 +40,22 @@ export function executePropsOperationInMain(request: unknown): unknown {
   });
   const SUPPORTED_OPERATIONS = new Set(['probe', 'read', 'write', 'reset']);
   const NATIVE_ELEMENT_MATCHES = Element.prototype.matches;
+  const NATIVE_ARRAY_IS_ARRAY = Array.isArray;
+  const NATIVE_GET_OWN_PROPERTY_DESCRIPTOR =
+    Object.getOwnPropertyDescriptor;
+  const NATIVE_DEFINE_PROPERTY = Object.defineProperty;
+  const NATIVE_REFLECT_OWN_KEYS = Reflect.ownKeys;
+  const NATIVE_STRING_CHAR_CODE_AT = String.prototype.charCodeAt;
+  const NATIVE_MAP_ENTRIES = Map.prototype.entries;
+  const NATIVE_SET_VALUES = Set.prototype.values;
+  const NATIVE_MAP_SIZE_GETTER = NATIVE_GET_OWN_PROPERTY_DESCRIPTOR(
+    Map.prototype,
+    'size',
+  )?.get;
+  const NATIVE_SET_SIZE_GETTER = NATIVE_GET_OWN_PROPERTY_DESCRIPTOR(
+    Set.prototype,
+    'size',
+  )?.get;
 
   /** @type {'READY' | 'HOOK_PRESENT_NO_RENDERERS' | 'RENDERERS_NO_EDITING' | 'HOOK_MISSING'} */
   const HOOK_STATUS = Object.freeze({
@@ -114,6 +130,185 @@ export function executePropsOperationInMain(request: unknown): unknown {
       codeUnits += character.length;
     }
     return output;
+  }
+
+  function jsonStringByteLength(value, stopAfter) {
+    let bytes = 2;
+    for (let index = 0; index < value.length; index++) {
+      const codeUnit = NATIVE_STRING_CHAR_CODE_AT.call(value, index);
+      if (codeUnit === 0x22 || codeUnit === 0x5c) {
+        bytes += 2;
+      } else if (codeUnit <= 0x1f) {
+        bytes +=
+          codeUnit === 0x08 ||
+          codeUnit === 0x09 ||
+          codeUnit === 0x0a ||
+          codeUnit === 0x0c ||
+          codeUnit === 0x0d
+            ? 2
+            : 6;
+      } else if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+        const next =
+          index + 1 < value.length
+            ? NATIVE_STRING_CHAR_CODE_AT.call(value, index + 1)
+            : -1;
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          bytes += 4;
+          index += 1;
+        } else {
+          bytes += 6;
+        }
+      } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+        bytes += 6;
+      } else if (codeUnit <= 0x7f) {
+        bytes += 1;
+      } else if (codeUnit <= 0x7ff) {
+        bytes += 2;
+      } else {
+        bytes += 3;
+      }
+      if (bytes > stopAfter) return bytes;
+    }
+    return bytes;
+  }
+
+  /**
+   * Copy a JSON-shaped value while measuring it without invoking page-owned
+   * getters or toJSON methods. Returning the copy also prevents an unchecked
+   * page object from reaching Chrome's structured-clone boundary.
+   */
+  function cloneBoundedJson(value, maxBytes) {
+    const active = typeof WeakSet === 'function' ? new WeakSet() : null;
+    let bytes = 0;
+    let nodes = 0;
+
+    function consume(amount) {
+      bytes += amount;
+      return bytes <= maxBytes;
+    }
+
+    function visit(current, depth) {
+      nodes += 1;
+      if (nodes > 32768 || depth > 64) return null;
+
+      if (current === null) {
+        return consume(4) ? { value: null } : null;
+      }
+
+      const type = typeof current;
+      if (type === 'string') {
+        const stringBytes = jsonStringByteLength(
+          current,
+          Math.max(0, maxBytes - bytes),
+        );
+        return consume(stringBytes) ? { value: current } : null;
+      }
+      if (type === 'boolean') {
+        return consume(current ? 4 : 5) ? { value: current } : null;
+      }
+      if (type === 'number') {
+        return Number.isFinite(current) && consume(32)
+          ? { value: current }
+          : null;
+      }
+      if (type === 'undefined') {
+        return consume(4) ? { value: undefined } : null;
+      }
+      if (type !== 'object') return null;
+      if (active?.has(current)) return null;
+      active?.add(current);
+
+      try {
+        if (NATIVE_ARRAY_IS_ARRAY(current)) {
+          const lengthDescriptor = NATIVE_GET_OWN_PROPERTY_DESCRIPTOR(
+            current,
+            'length',
+          );
+          const length = lengthDescriptor?.value;
+          if (
+            !Number.isSafeInteger(length) ||
+            length < 0 ||
+            length > 8192 ||
+            !consume(2 + Math.max(0, length - 1))
+          ) {
+            return null;
+          }
+
+          const keys = NATIVE_REFLECT_OWN_KEYS(current);
+          for (const key of keys) {
+            if (key === 'length') continue;
+            if (typeof key !== 'string') return null;
+            const numericIndex = +key;
+            if (
+              !Number.isSafeInteger(numericIndex) ||
+              numericIndex < 0 ||
+              numericIndex >= length ||
+              `${numericIndex}` !== key
+            ) {
+              return null;
+            }
+          }
+
+          const copy = [];
+          copy.length = length;
+          for (let index = 0; index < length; index++) {
+            const descriptor = NATIVE_GET_OWN_PROPERTY_DESCRIPTOR(
+              current,
+              `${index}`,
+            );
+            if (!descriptor) {
+              if (!consume(4)) return null;
+              continue;
+            }
+            if (!('value' in descriptor)) return null;
+            const child = visit(descriptor.value, depth + 1);
+            if (!child) return null;
+            NATIVE_DEFINE_PROPERTY(copy, `${index}`, {
+              configurable: true,
+              enumerable: true,
+              writable: true,
+              value: child.value,
+            });
+          }
+          return { value: copy };
+        }
+
+        if (!consume(2)) return null;
+        const copy = {};
+        let entries = 0;
+        for (const key of NATIVE_REFLECT_OWN_KEYS(current)) {
+          if (typeof key !== 'string') return null;
+          const descriptor = NATIVE_GET_OWN_PROPERTY_DESCRIPTOR(current, key);
+          if (!descriptor || !descriptor.enumerable) continue;
+          if (!('value' in descriptor)) return null;
+          if (entries > 0 && !consume(1)) return null;
+          if (
+            !consume(
+              jsonStringByteLength(key, Math.max(0, maxBytes - bytes)) + 1,
+            )
+          ) {
+            return null;
+          }
+          const child = visit(descriptor.value, depth + 1);
+          if (!child) return null;
+          NATIVE_DEFINE_PROPERTY(copy, key, {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: child.value,
+          });
+          entries += 1;
+        }
+        return { value: copy };
+      } catch {
+        return null;
+      } finally {
+        active?.delete(current);
+      }
+    }
+
+    const result = visit(value, 0);
+    return result ? { value: result.value, bytes } : null;
   }
 
   // =============================================================================
@@ -261,19 +456,7 @@ export function executePropsOperationInMain(request: unknown): unknown {
         locator,
         payload,
       };
-      try {
-        const encoded = JSON.stringify(request);
-        if (
-          typeof encoded !== 'string' ||
-          utf8ByteLength(encoded, TRANSPORT_LIMITS.maxRequestBytes) >
-            TRANSPORT_LIMITS.maxRequestBytes
-        ) {
-          return null;
-        }
-      } catch {
-        return null;
-      }
-      return request;
+      return cloneBoundedJson(request, TRANSPORT_LIMITS.maxRequestBytes)?.value ?? null;
     },
   };
 
@@ -1424,24 +1607,44 @@ export function executePropsOperationInMain(request: unknown): unknown {
 
         // Array
         if (Array.isArray(value)) {
-          const max = Math.min(value.length, SERIALIZE_LIMITS.maxArrayLength);
+          const length = NATIVE_GET_OWN_PROPERTY_DESCRIPTOR(
+            value,
+            'length',
+          )?.value;
+          if (!Number.isSafeInteger(length) || length < 0) {
+            return {
+              kind: 'unknown',
+              type: 'array',
+              preview: '[Invalid array metadata]',
+            };
+          }
+          const max = Math.min(length, SERIALIZE_LIMITS.maxArrayLength);
           const items = [];
           for (let i = 0; i < max && !ctx.exhausted; i++) {
             items.push(this.serializeValue(value[i], ctx, depth + 1));
           }
           return {
             kind: 'array',
-            length: value.length,
-            truncated: value.length > items.length,
+            length,
+            truncated: length > items.length,
             items,
           };
         }
 
         // Map
-        if (value instanceof Map) {
+        let mapSize = null;
+        try {
+          const candidate = NATIVE_MAP_SIZE_GETTER?.call(value);
+          if (Number.isSafeInteger(candidate) && candidate >= 0) {
+            mapSize = candidate;
+          }
+        } catch {
+          // Not a genuine Map.
+        }
+        if (mapSize !== null) {
           const entries = [];
           let count = 0;
-          for (const [k, v] of value.entries()) {
+          for (const [k, v] of NATIVE_MAP_ENTRIES.call(value)) {
             if (count >= SERIALIZE_LIMITS.maxEntries || ctx.exhausted) break;
             entries.push({
               key: this.serializeValue(k, ctx, depth + 1),
@@ -1451,25 +1654,34 @@ export function executePropsOperationInMain(request: unknown): unknown {
           }
           return {
             kind: 'map',
-            size: value.size,
-            truncated: value.size > count,
+            size: mapSize,
+            truncated: mapSize > count,
             entries,
           };
         }
 
         // Set
-        if (value instanceof Set) {
+        let setSize = null;
+        try {
+          const candidate = NATIVE_SET_SIZE_GETTER?.call(value);
+          if (Number.isSafeInteger(candidate) && candidate >= 0) {
+            setSize = candidate;
+          }
+        } catch {
+          // Not a genuine Set.
+        }
+        if (setSize !== null) {
           const items = [];
           let count = 0;
-          for (const v of value.values()) {
+          for (const v of NATIVE_SET_VALUES.call(value)) {
             if (count >= SERIALIZE_LIMITS.maxEntries || ctx.exhausted) break;
             items.push(this.serializeValue(v, ctx, depth + 1));
             count++;
           }
           return {
             kind: 'set',
-            size: value.size,
-            truncated: value.size > count,
+            size: setSize,
+            truncated: setSize > count,
             items,
           };
         }
@@ -2222,19 +2434,11 @@ export function executePropsOperationInMain(request: unknown): unknown {
               read.value === undefined ? { $we: 'undefined' } : read.value,
             componentGuard,
           };
-          let stateDeltaBytes = Number.POSITIVE_INFINITY;
-          try {
-            const encodedStateDelta = JSON.stringify(writeStateDelta);
-            if (typeof encodedStateDelta === 'string') {
-              stateDeltaBytes = utf8ByteLength(
-                encodedStateDelta,
-                req.payload.stateBudgetBytes,
-              );
-            }
-          } catch {
-            // Reject below.
-          }
-          if (stateDeltaBytes > req.payload.stateBudgetBytes) {
+          const boundedStateDelta = cloneBoundedJson(
+            writeStateDelta,
+            req.payload.stateBudgetBytes,
+          );
+          if (!boundedStateDelta) {
             return Transport.createResponse(
               req.requestId,
               false,
@@ -2242,8 +2446,9 @@ export function executePropsOperationInMain(request: unknown): unknown {
               'Original prop exceeds the reset storage budget',
             );
           }
-          try {
-            const resetWire = JSON.stringify({
+          writeStateDelta = boundedStateDelta.value;
+          const boundedResetRequest = cloneBoundedJson(
+            {
               v: PROTOCOL_VERSION,
               requestId: req.requestId,
               op: 'reset',
@@ -2259,20 +2464,10 @@ export function executePropsOperationInMain(request: unknown): unknown {
                   },
                 ],
               },
-            });
-            if (
-              typeof resetWire !== 'string' ||
-              utf8ByteLength(resetWire, TRANSPORT_LIMITS.maxRequestBytes) >
-                TRANSPORT_LIMITS.maxRequestBytes
-            ) {
-              return Transport.createResponse(
-                req.requestId,
-                false,
-                base,
-                'Original prop cannot fit a reset request',
-              );
-            }
-          } catch {
+            },
+            TRANSPORT_LIMITS.maxRequestBytes,
+          );
+          if (!boundedResetRequest) {
             return Transport.createResponse(
               req.requestId,
               false,
@@ -2571,18 +2766,11 @@ export function executePropsOperationInMain(request: unknown): unknown {
     const execution = { response };
     if (operationTargetGuard) execution.targetGuard = operationTargetGuard;
     if (operationStateDelta) execution.stateDelta = operationStateDelta;
-    try {
-      const encoded = JSON.stringify(execution);
-      if (
-        typeof encoded === 'string' &&
-        utf8ByteLength(encoded, TRANSPORT_LIMITS.maxResponseBytes) <=
-          TRANSPORT_LIMITS.maxResponseBytes
-      ) {
-        return execution;
-      }
-    } catch {
-      // Return the bounded fallback below.
-    }
+    const boundedExecution = cloneBoundedJson(
+      execution,
+      TRANSPORT_LIMITS.maxResponseBytes,
+    );
+    if (boundedExecution) return boundedExecution.value;
 
     const fallbackResponse = Transport.createResponse(
       typeof response?.requestId === 'string' ? response.requestId : '',
@@ -2595,7 +2783,12 @@ export function executePropsOperationInMain(request: unknown): unknown {
     const fallbackExecution = { response: fallbackResponse };
     if (operationTargetGuard) fallbackExecution.targetGuard = operationTargetGuard;
     if (operationStateDelta) fallbackExecution.stateDelta = operationStateDelta;
-    return fallbackExecution;
+    return (
+      cloneBoundedJson(
+        fallbackExecution,
+        TRANSPORT_LIMITS.maxResponseBytes,
+      )?.value ?? { response: fallbackResponse }
+    );
   }
 
   const normalized = Transport.normalizeRequest(request);

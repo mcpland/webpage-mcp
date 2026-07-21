@@ -108,6 +108,7 @@ describe('per-operation MAIN-world props runner', () => {
   it('is closure-free and contains no page-visible command transport', () => {
     const source = executePropsOperationInMain.toString();
     expect(source).not.toContain('web-editor-props:');
+    expect(source).not.toContain('JSON.stringify');
     expect(source).not.toMatch(
       /(?:addEventListener|CustomEvent|crypto\.subtle)/,
     );
@@ -150,6 +151,66 @@ describe('per-operation MAIN-world props runner', () => {
       },
     });
     expect(listenerSpy).not.toHaveBeenCalled();
+  });
+
+  it('never exposes page-owned array or collection metadata', () => {
+    const toJSON = vi.fn(() => 1);
+    const oversizedMetadata = {
+      toJSON,
+      pad: 'A'.repeat(2_000_000),
+    };
+    const arrayLengthRead = vi.fn(() => oversizedMetadata);
+    const hostileArray = new Proxy([], {
+      get(target, key, receiver) {
+        if (key === 'length') return arrayLengthRead();
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const hostileMap = new Map([['answer', 42]]);
+    const hostileSet = new Set(['value']);
+    const mapSizeRead = vi.fn(() => oversizedMetadata);
+    const setSizeRead = vi.fn(() => oversizedMetadata);
+    Object.defineProperty(hostileMap, 'size', {
+      configurable: true,
+      enumerable: true,
+      get: mapSizeRead,
+    });
+    Object.defineProperty(hostileSet, 'size', {
+      configurable: true,
+      enumerable: true,
+      get: setSizeRead,
+    });
+    attachReactProps({ hostileArray, hostileMap, hostileSet });
+
+    const execution = executePropsOperationInMain(request('read')) as any;
+
+    expect(execution.response.success).toBe(true);
+    expect(execution.response.data.props.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'hostileArray',
+          value: {
+            kind: 'array',
+            length: 0,
+            truncated: false,
+            items: [],
+          },
+        }),
+        expect.objectContaining({
+          key: 'hostileMap',
+          value: expect.objectContaining({ kind: 'map', size: 1 }),
+        }),
+        expect.objectContaining({
+          key: 'hostileSet',
+          value: expect.objectContaining({ kind: 'set', size: 1 }),
+        }),
+      ]),
+    );
+    expect(arrayLengthRead).not.toHaveBeenCalled();
+    expect(mapSizeRead).not.toHaveBeenCalled();
+    expect(setSizeRead).not.toHaveBeenCalled();
+    expect(toJSON).not.toHaveBeenCalled();
+    expect(JSON.stringify(execution).length).toBeLessThan(256 * 1024);
   });
 
   it('keeps multi-byte strings within the bridge UTF-8 boundary', () => {
@@ -695,14 +756,12 @@ describe('per-operation MAIN-world props runner', () => {
     expect(result.response.data.meta.write).not.toHaveProperty('original');
   });
 
-  it('preserves mutation recovery state when the public envelope exceeds its cap', () => {
+  it('finalizes mutation recovery state without page JSON serialization hooks', () => {
     const { renderer } = attachReactProps({ count: 1 });
     const originalStringify = JSON.stringify;
+    const hostileStringify = vi.fn(() => 'x');
     renderer.overrideProps.mockImplementation(() => {
-      JSON.stringify = vi
-        .fn()
-        .mockImplementationOnce(() => 'x'.repeat(256 * 1024 + 1))
-        .mockImplementation(originalStringify) as typeof JSON.stringify;
+      JSON.stringify = hostileStringify as typeof JSON.stringify;
     });
 
     try {
@@ -717,8 +776,8 @@ describe('per-operation MAIN-world props runner', () => {
 
       expect(result).toMatchObject({
         response: {
-          success: false,
-          error: 'Props response exceeded the resource limit',
+          success: true,
+          data: { meta: { write: { method: 'overrideProps' } } },
         },
         stateDelta: {
           kind: 'write_original',
@@ -726,6 +785,7 @@ describe('per-operation MAIN-world props runner', () => {
           encodedValue: 1,
         },
       });
+      expect(hostileStringify).not.toHaveBeenCalled();
     } finally {
       JSON.stringify = originalStringify;
     }
