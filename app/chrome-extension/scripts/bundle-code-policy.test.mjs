@@ -36,8 +36,19 @@ test("accepts a local, static Manifest V3 bundle", async (t) => {
 
 for (const [name, source, expected] of [
   ["direct eval", "eval('x')", /direct eval/],
+  ["indirect eval", "(0, eval)('x')", /direct eval/],
   ["Function constructor", "new Function('x')", /Function constructor/],
   ["bare Function constructor", "Function('x')", /Function constructor/],
+  [
+    "aliased Function constructor",
+    "const F = Function; F('x')",
+    /Function constructor/,
+  ],
+  [
+    "computed global Function constructor",
+    "globalThis['Fun' + 'ction']('x')",
+    /Function constructor/,
+  ],
   [
     "AsyncFunction constructor",
     "new AsyncFunction('x')",
@@ -61,6 +72,23 @@ for (const [name, source, expected] of [
     await assert.rejects(verifyBundleCodePolicy({ bundleDir }), expected);
   });
 }
+
+test("allows non-executing Function identity and property names", async (t) => {
+  const bundleDir = fixture(
+    "const isFunction = value instanceof Function; registry.Function;",
+  );
+  t.after(() => fs.rmSync(bundleDir, { recursive: true, force: true }));
+  await assert.doesNotReject(verifyBundleCodePolicy({ bundleDir }));
+});
+
+test("rejects unparseable executable JavaScript", async (t) => {
+  const bundleDir = fixture("const broken = ;");
+  t.after(() => fs.rmSync(bundleDir, { recursive: true, force: true }));
+  await assert.rejects(
+    verifyBundleCodePolicy({ bundleDir }),
+    /cannot be parsed/,
+  );
+});
 
 test("rejects JSEP artifacts", async (t) => {
   const bundleDir = fixture();

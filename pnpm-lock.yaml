@@ -157,6 +157,9 @@ importers:
       '@wxt-dev/module-react':
         specifier: ^1.0.2
         version: 1.2.2(vite@7.3.6(@types/node@22.19.11)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.8.3))(wxt@0.20.27(@types/node@22.19.11)(eslint@9.39.4(jiti@2.7.0))(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.2)(yaml@2.8.3))
+      acorn:
+        specifier: 8.16.0
+        version: 8.16.0
       dotenv:
         specifier: ^16.5.0
         version: 16.6.1
