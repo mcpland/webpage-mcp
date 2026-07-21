@@ -741,7 +741,12 @@ export class NativeMessagingHost {
   }
 
   private setupMessageHandling(): void {
-    const decoder = new NativeMessageFrameDecoder();
+    // A frame accepted by the decoder must be admissible as one retained
+    // directive. Sharing the byte budget prevents a 32-64 MiB gap where the
+    // host would allocate and parse input that the queue can never retain.
+    const decoder = new NativeMessageFrameDecoder(
+      this.nativeDirectiveMaximumQueuedBytes,
+    );
     const directiveQueue = new NativeDirectiveQueue<unknown>(
       NATIVE_MAX_PENDING_DIRECTIVES,
       (message) => this.handleMessage(message),

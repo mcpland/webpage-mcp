@@ -88,6 +88,36 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe('NativeMessagingHost outbound requests', () => {
+  it('uses the retained-directive budget as the inbound frame limit', async () => {
+    const output = new CollectingWritable();
+    const input = new PassThrough();
+    const host = new NativeMessagingHost(
+      new NativeMessageWriter(output),
+      input,
+      8,
+    );
+    const internal = host as unknown as {
+      setupMessageHandling: () => void;
+      requestProcessShutdown: (exitCode: number) => void;
+    };
+    internal.requestProcessShutdown = vi.fn();
+    internal.setupMessageHandling();
+
+    const oversizedHeader = Buffer.alloc(4);
+    oversizedHeader.writeUInt32LE(9, 0);
+    input.write(oversizedHeader);
+
+    await vi.waitFor(() => expect(output.chunks).toHaveLength(1));
+    expect(decodeFrame(output.chunks[0])).toMatchObject({
+      type: NativeMessageType.ERROR_FROM_NATIVE_HOST,
+      payload: { message: expect.stringContaining('maximum 8') },
+    });
+    expect(internal.requestProcessShutdown).toHaveBeenCalledWith(1);
+
+    await host.shutdown();
+    input.destroy();
+  });
+
   it('rejects queue pressure without dropping later frames or shutting down', async () => {
     const output = new CollectingWritable();
     const input = new PassThrough();
