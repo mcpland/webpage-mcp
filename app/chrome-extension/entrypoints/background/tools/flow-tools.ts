@@ -62,6 +62,14 @@ import {
   type SelectorStability,
   type SelectorType,
 } from '@/shared/selector';
+import {
+  getStabilizeSafetyBoundary,
+  hasStabilizeUrlBoundary,
+  isAllowedPublicStartUrl,
+  normalizeBoundaryStrings,
+  validateUrlAgainstStabilizeBoundary,
+  type WorkflowStabilizeValidationError,
+} from './flow-safety-boundary';
 
 type FlowHintLevel = 'info' | 'warning';
 
@@ -382,12 +390,6 @@ interface WorkflowStabilizeScore {
 }
 
 type WorkflowRiskProfile = 'safe' | 'idempotent' | 'dangerous' | 'unknown';
-
-interface WorkflowStabilizeValidationError {
-  code: string;
-  path: string;
-  message: string;
-}
 
 interface WorkflowStabilizeWarning {
   code: string;
@@ -1078,112 +1080,6 @@ async function resolveTrustedWorkflowApproval(options: {
     return { accepted: false, reason: 'approval testEnvironment scope does not match request' };
   }
   return { accepted: true, approval };
-}
-
-function normalizeBoundaryStrings(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((item) => (typeof item === 'string' ? item.trim() : ''))
-    .filter((item): item is string => item.length > 0);
-}
-
-function hostMatchesBoundary(host: string, allowedHost: string): boolean {
-  const normalizedHost = host.toLowerCase();
-  const normalizedAllowed = allowedHost.toLowerCase();
-  return normalizedHost === normalizedAllowed || normalizedHost.endsWith(`.${normalizedAllowed}`);
-}
-
-function pathMatchesBoundary(pathname: string, prefix: string): boolean {
-  if (!prefix.startsWith('/')) return false;
-  const normalizedPrefix = prefix.replace(/\/+$/, '') || '/';
-  return (
-    normalizedPrefix === '/' ||
-    pathname === normalizedPrefix ||
-    pathname.startsWith(`${normalizedPrefix}/`)
-  );
-}
-
-function isAllowedPublicStartUrl(url: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url.trim());
-  } catch {
-    return false;
-  }
-
-  return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-}
-
-interface StabilizeSafetyBoundary {
-  allowedHosts: string[];
-  origins: string[];
-  pathPrefixes: string[];
-}
-
-function getStabilizeSafetyBoundary(args: any): StabilizeSafetyBoundary {
-  const allowedHosts = normalizeBoundaryStrings(args?.safety?.allowedHosts);
-  const testEnvironment =
-    args?.safety?.testEnvironment &&
-    typeof args.safety.testEnvironment === 'object' &&
-    !Array.isArray(args.safety.testEnvironment)
-      ? args.safety.testEnvironment
-      : undefined;
-  const origins = normalizeBoundaryStrings(testEnvironment?.origins);
-  const pathPrefixes = normalizeBoundaryStrings(testEnvironment?.pathPrefixes);
-  return { allowedHosts, origins, pathPrefixes };
-}
-
-function hasStabilizeUrlBoundary(boundary: StabilizeSafetyBoundary): boolean {
-  return (
-    boundary.allowedHosts.length > 0 ||
-    boundary.origins.length > 0 ||
-    boundary.pathPrefixes.length > 0
-  );
-}
-
-function validateUrlAgainstStabilizeBoundary(
-  url: string,
-  boundary: StabilizeSafetyBoundary,
-  path: string,
-  label: string,
-): WorkflowStabilizeValidationError | undefined {
-  if (!hasStabilizeUrlBoundary(boundary)) {
-    return undefined;
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return {
-      code: path === '/startUrl' ? 'INVALID_START_URL' : 'INVALID_REPLAY_URL',
-      path,
-      message: `${label} must be an absolute URL`,
-    };
-  }
-
-  const originAllowed =
-    boundary.origins.length === 0 ||
-    boundary.origins.some((origin) => origin.replace(/\/+$/, '') === parsed.origin);
-  const hostAllowed =
-    boundary.allowedHosts.length === 0 ||
-    boundary.allowedHosts.some((host) => hostMatchesBoundary(parsed.hostname, host));
-  const pathAllowed =
-    boundary.pathPrefixes.length === 0 ||
-    boundary.pathPrefixes.some((prefix) => pathMatchesBoundary(parsed.pathname, prefix));
-  if (!originAllowed || !hostAllowed || !pathAllowed) {
-    return {
-      code:
-        path === '/startUrl'
-          ? 'START_URL_OUTSIDE_TEST_ENVIRONMENT'
-          : 'REPLAY_URL_OUTSIDE_TEST_ENVIRONMENT',
-      path,
-      message: `${label} is outside the declared safety boundary: ${parsed.origin}${parsed.pathname}`,
-    };
-  }
-  return undefined;
 }
 
 async function resolveStabilizeTargetTabUrl(args: any): Promise<{ url?: string; path: string; label: string }> {
