@@ -157,6 +157,46 @@ export function findUniqueElement(
   }
 }
 
+/**
+ * Resolve a child-index path without walking unrelated descendant subtrees.
+ * Every inspected child still consumes the caller's shared traversal budget.
+ */
+export function findElementByPath(
+  root: ParentNode,
+  path: readonly number[],
+  budget: DomTraversalBudget = createDomTraversalBudget(),
+): Element | null {
+  if (
+    !Array.isArray(path) ||
+    path.length === 0 ||
+    path.length > WEB_EDITOR_DOM_LIMITS.maxDepth
+  ) {
+    return null;
+  }
+
+  let parent: ParentNode = root;
+  for (const index of path) {
+    if (
+      !Number.isSafeInteger(index) ||
+      index < 0 ||
+      index >= WEB_EDITOR_DOM_LIMITS.maxDirectChildren
+    ) {
+      return null;
+    }
+
+    let child = parent.firstElementChild;
+    for (let position = 0; position <= index; position += 1) {
+      if (!child || !consumeElement(budget)) return null;
+      if (position === index) break;
+      child = child.nextElementSibling;
+    }
+    if (!child) return null;
+    parent = child;
+  }
+
+  return parent instanceof Element ? parent : null;
+}
+
 /** Read a bounded class list without first copying the whole DOMTokenList. */
 export function readBoundedClassNames(
   element: Element,

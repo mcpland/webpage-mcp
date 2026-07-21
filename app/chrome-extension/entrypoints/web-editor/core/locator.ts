@@ -14,6 +14,7 @@ import type { ElementLocator } from '@/common/web-editor-types';
 import { findDebugSource } from './debug-source';
 import {
   createDomTraversalBudget,
+  findElementByPath,
   findElementIndex,
   findUniqueElement,
   readBoundedClassNames,
@@ -760,6 +761,27 @@ export function locateElement(
   if (!Array.isArray(locator.selectors) || locator.selectors.length > MAX_SELECTOR_CANDIDATES) {
     return null;
   }
+
+  const pathElement = findElementByPath(queryRoot, locator.path, budget);
+  if (pathElement) {
+    let matchesLocator = false;
+    for (const selector of locator.selectors) {
+      try {
+        if (!pathElement.matches(selector)) continue;
+        matchesLocator = true;
+        break;
+      } catch {
+        // A malformed candidate must not suppress later valid fallbacks.
+      }
+    }
+    if (
+      matchesLocator &&
+      (!locator.fingerprint || verifyFingerprint(pathElement, locator.fingerprint))
+    ) {
+      return pathElement;
+    }
+  }
+
   for (const selector of locator.selectors) {
     const element = findUniqueElement(queryRoot, selector, budget);
     if (!element) continue;

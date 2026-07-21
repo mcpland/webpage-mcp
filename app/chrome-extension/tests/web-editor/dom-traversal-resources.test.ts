@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   createDomTraversalBudget,
+  findElementByPath,
   findElementInsertionReference,
   findUniqueElement,
 } from '@/entrypoints/web-editor/core/dom-traversal';
@@ -52,6 +53,43 @@ describe('web editor DOM traversal resource limits', () => {
     parent.className = 'deep-target';
 
     expect(findUniqueElement(root, '.deep-target')).toBeNull();
+  });
+
+  it('resolves a bounded path without scanning unrelated descendants', () => {
+    const root = document.createElement('div');
+    const branch = document.createElement('section');
+    const target = document.createElement('button');
+    branch.append(target);
+    root.append(branch);
+    for (let index = 0; index < 100; index += 1) {
+      const unrelated = document.createElement('article');
+      unrelated.append(document.createElement('span'));
+      root.append(unrelated);
+    }
+    const budget = createDomTraversalBudget({
+      maxElements: 2,
+      maxTraversalMs: 1_000,
+    });
+
+    expect(findElementByPath(root, [0, 0], budget)).toBe(target);
+    expect(budget.remainingElements).toBe(0);
+  });
+
+  it('fails closed when a path index exceeds its traversal budget', () => {
+    const root = document.createElement('div');
+    root.append(
+      document.createElement('span'),
+      document.createElement('span'),
+      document.createElement('span'),
+    );
+
+    expect(
+      findElementByPath(
+        root,
+        [2],
+        createDomTraversalBudget({ maxElements: 2, maxTraversalMs: 1_000 }),
+      ),
+    ).toBeNull();
   });
 
   it('reports an incomplete insertion lookup instead of snapshotting excess children', () => {

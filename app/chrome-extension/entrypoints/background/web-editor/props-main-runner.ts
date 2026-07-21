@@ -546,6 +546,61 @@ export function executePropsOperationInMain(request: unknown): unknown {
       }
     },
 
+    findByPath(root, path, budget) {
+      if (
+        !root ||
+        !NATIVE_ARRAY_IS_ARRAY(path) ||
+        path.length === 0 ||
+        path.length > LOCATOR_LIMITS.maxDepth ||
+        !budget
+      ) {
+        return null;
+      }
+
+      try {
+        let parent = root;
+        for (const index of path) {
+          if (
+            !Number.isSafeInteger(index) ||
+            index < 0 ||
+            index > 1000000
+          ) {
+            return null;
+          }
+
+          let child = parent.firstElementChild;
+          for (let position = 0; position <= index; position += 1) {
+            if (
+              !child ||
+              budget.visited >= LOCATOR_LIMITS.maxVisitedElements ||
+              Date.now() > budget.deadline
+            ) {
+              return null;
+            }
+            budget.visited += 1;
+            if (position === index) break;
+            child = child.nextElementSibling;
+          }
+          if (!child) return null;
+          parent = child;
+        }
+        return parent instanceof Element ? parent : null;
+      } catch {
+        return null;
+      }
+    },
+
+    matchesAnySelector(element, selectors) {
+      for (const selector of selectors) {
+        try {
+          if (NATIVE_ELEMENT_MATCHES.call(element, selector)) return true;
+        } catch {
+          // A malformed candidate must not suppress later valid fallbacks.
+        }
+      }
+      return false;
+    },
+
     computeFingerprint(element) {
       try {
         const parts = [];
@@ -700,6 +755,23 @@ export function executePropsOperationInMain(request: unknown): unknown {
           LOCATOR_LIMITS.maxSelectors,
         );
         if (!selectors) return null;
+        const pathElement = this.findByPath(
+          queryRoot,
+          normalizedLocator.path,
+          budget,
+        );
+        if (
+          pathElement &&
+          this.matchesAnySelector(pathElement, selectors) &&
+          (!normalizedLocator.fingerprint ||
+            this.verifyFingerprint(
+              pathElement,
+              normalizedLocator.fingerprint,
+            ))
+        ) {
+          return pathElement;
+        }
+
         for (const selector of selectors) {
           const element = this.findUnique(queryRoot, selector, budget);
           if (!element) continue;

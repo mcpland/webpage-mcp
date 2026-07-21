@@ -383,24 +383,45 @@ describe('per-operation MAIN-world props runner', () => {
     });
   });
 
-  it('shares a 12,000-element budget across selector candidates', () => {
+  it('uses the locator path before scanning a DOM larger than the selector budget', () => {
+    const target = document.createElement('button');
+    target.id = 'large-target';
+    document.body.append(target);
+    attachReactProps({ label: 'Found' }, target);
     const fragment = document.createDocumentFragment();
     for (let index = 0; index < 12_100; index += 1) {
       fragment.append(document.createElement('div'));
     }
-    const target = document.createElement('button');
-    target.id = 'late-target';
-    fragment.append(target);
     document.body.append(fragment);
     const matches = vi.spyOn(Element.prototype, 'matches');
 
-    const response = readProps({ selectors: ['#late-target', 'button'] });
+    const response = readProps({
+      selectors: ['[', '#large-target'],
+      fingerprint: 'button|id=large-target',
+      path: [0, 1, 0],
+    });
 
     expect(response).toMatchObject({
-      success: false,
-      error: 'Target element not found',
+      success: true,
+      data: { props: { entries: [expect.objectContaining({ key: 'label' })] } },
     });
-    expect(matches.mock.calls.length).toBeLessThanOrEqual(12_000);
+    expect(matches).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to bounded selector traversal when a locator path is stale', () => {
+    const stalePathTarget = document.createElement('aside');
+    const target = document.createElement('button');
+    target.id = 'moved-target';
+    document.body.append(stalePathTarget, target);
+    attachReactProps({ label: 'Found' }, target);
+
+    expect(
+      readProps({
+        selectors: ['#moved-target'],
+        fingerprint: 'button|id=moved-target',
+        path: [0, 1, 0],
+      }),
+    ).toMatchObject({ success: true });
   });
 
   it('rejects oversized and structurally expensive selectors before traversal', () => {

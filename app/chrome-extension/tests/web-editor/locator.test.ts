@@ -332,6 +332,24 @@ describe('locator: locateElement', () => {
     expect(locateElement(locator, document)).toBe(el);
   });
 
+  it('uses the DOM path before scanning a document larger than the selector budget', () => {
+    const target = document.createElement('button');
+    target.id = 'large-target';
+    document.body.append(target);
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < 20_100; index += 1) {
+      fragment.append(document.createElement('div'));
+    }
+    document.body.append(fragment);
+    const locator: ElementLocator = {
+      selectors: ['[', '#large-target'],
+      fingerprint: computeFingerprint(target),
+      path: computeDomPath(target),
+    };
+
+    expect(locateElement(locator, document)).toBe(target);
+  });
+
   it('returns null when selector is not unique', () => {
     const a = document.createElement('div');
     a.className = 'x';
