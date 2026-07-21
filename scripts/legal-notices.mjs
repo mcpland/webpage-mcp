@@ -48,7 +48,7 @@ export const LEGAL_ARTIFACTS = Object.freeze({
     inventorySource: NPM_INVENTORY_ARTIFACTS.extension.inventorySource,
     archiveInventory: NPM_INVENTORY_ARTIFACTS.extension.archiveInventory,
     inventorySha256:
-      "01e4006f4c7a1f8adc75ef9732fbf417a0feaef8f4d46c1bf2a68099bd61d86c",
+      "66a6a2bab4184c7db3ad3c5d7179f5a0fdebc8b8c33635ae95c2610b311d74e8",
     requiredMarkers: Object.freeze([
       "THIRD_PARTY_COMPONENTS.json",
       "@xenova/transformers",

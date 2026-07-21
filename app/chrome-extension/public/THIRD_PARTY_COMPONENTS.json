@@ -99,12 +99,12 @@
     },
     {
       "name": "@hono/node-server",
-      "version": "2.0.5",
-      "resolved": "https://registry.npmjs.org/@hono/node-server/-/node-server-2.0.5.tgz",
-      "integrity": "sha512-yQFvDmyDo3y6rEOJZDUYPJ49DIKTPpIk4kGvm40xx4Ejne0Pu9a1+exxPN+C1UppWK/WGZX9F++/Xs231tE86g==",
+      "version": "2.0.10",
+      "resolved": "https://registry.npmjs.org/@hono/node-server/-/node-server-2.0.10.tgz",
+      "integrity": "sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "23ae8c88ab9da545b74544410f500317bf9730b328d3dee406ba9a5a0e99fa68",
+      "packageJsonSha256": "c864dc402e9c5fffd9656afb37bb0dc244bdc0d0a019c6a885772e08035d3b92",
       "licenseEvidence": [
         {
           "path": "LICENSE",

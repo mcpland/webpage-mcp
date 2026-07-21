@@ -4,7 +4,7 @@ packages:
 
 overrides:
   '@babel/core': 7.29.6
-  '@hono/node-server': 2.0.5
+  '@hono/node-server': 2.0.10
   '@protobufjs/utf8': 1.1.1
   'minimatch@<4': 3.1.4
   'minimatch@>=10 <11': 10.2.3
