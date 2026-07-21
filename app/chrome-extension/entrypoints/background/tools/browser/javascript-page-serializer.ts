@@ -31,7 +31,8 @@ export function serializeJavaScriptEvaluation(
   try {
     // These literals deliberately duplicate the public hard ceiling. The
     // remote function cannot close over imported extension constants.
-    const MIN_OUTPUT_BYTES = 1;
+    // Must match the public minimum and fit the longest truncation suffix.
+    const MIN_OUTPUT_BYTES = 64;
     const MAX_OUTPUT_BYTES = 1024 * 1024;
     const MAX_DEPTH = 6;
     const MAX_ARRAY_LENGTH = 200;

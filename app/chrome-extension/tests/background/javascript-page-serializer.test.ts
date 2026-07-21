@@ -102,6 +102,16 @@ describe("bounded JavaScript page serializer", () => {
     expect(result.truncated).toBe(true);
   });
 
+  it("always reserves enough output budget for a visible truncation marker", () => {
+    const result = serialize("*".repeat(5_000), 1);
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(utf8Bytes(result.text)).toBeLessThanOrEqual(64);
+    expect(result.text).toContain("[truncated to 64 bytes]");
+    expect(result.truncated).toBe(true);
+  });
+
   it("enforces depth limits without recursively walking a malicious deep graph", () => {
     const root: Record<string, unknown> = {};
     let cursor = root;

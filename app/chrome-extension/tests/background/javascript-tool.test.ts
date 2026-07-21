@@ -115,6 +115,13 @@ describe("javascriptTool", () => {
         maxOutputBytes: JAVASCRIPT_TOOL_LIMITS.MAX_OUTPUT_BYTES + 1,
       },
     ],
+    [
+      "maxOutputBytes",
+      {
+        code: "return 1;",
+        maxOutputBytes: JAVASCRIPT_TOOL_LIMITS.MIN_OUTPUT_BYTES - 1,
+      },
+    ],
   ])(
     "rejects an out-of-range %s before resolving a tab",
     async (_name, args) => {

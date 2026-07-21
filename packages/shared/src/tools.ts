@@ -91,7 +91,8 @@ export const JAVASCRIPT_TOOL_LIMITS = Object.freeze({
   MAX_TIMEOUT_MS: 60_000,
   MAX_CODE_BYTES: 256 * 1024,
   DEFAULT_MAX_OUTPUT_BYTES: 50 * 1024,
-  MIN_OUTPUT_BYTES: 1,
+  // Leave enough room for an explicit truncation marker in every response.
+  MIN_OUTPUT_BYTES: 64,
   MAX_OUTPUT_BYTES: 1024 * 1024,
 });
 
