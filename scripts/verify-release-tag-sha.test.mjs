@@ -151,6 +151,36 @@ test("peels an annotated remote tag to its commit", async (t) => {
   await assertVerificationStateUnchanged(repository);
 });
 
+test("accepts an older release commit that remains in remote main", async (t) => {
+  const { repository, firstCommit } = await createRepository(t);
+  pushLightweightTag(repository, firstCommit);
+  await createSecondCommit(repository);
+  runGit(repository, ["push", "origin", "HEAD:refs/heads/main"]);
+
+  await verifyReleaseTagSha({
+    cwd: repository,
+    tag: RELEASE_TAG,
+    expectedSha: firstCommit,
+  });
+  await assertVerificationStateUnchanged(repository);
+});
+
+test("rejects a reviewed tag commit that was never merged into remote main", async (t) => {
+  const { repository } = await createRepository(t);
+  const unmergedCommit = await createSecondCommit(repository);
+  pushLightweightTag(repository, unmergedCommit);
+
+  const message = await rejectionMessage(() =>
+    verifyReleaseTagSha({
+      cwd: repository,
+      tag: RELEASE_TAG,
+      expectedSha: unmergedCommit,
+    }),
+  );
+  assert.match(message, /not contained in the remote main branch/);
+  await assertVerificationStateUnchanged(repository);
+});
+
 test("rejects a remotely moved tag even when the stale local tag still matches", async (t) => {
   const { repository, firstCommit } = await createRepository(t);
   pushLightweightTag(repository, firstCommit);
@@ -355,7 +385,7 @@ if (phase === "prepared" && rejectsCleanup) {
   const remainingRefs = temporaryVerificationRefs(repository)
     .split(/\r?\n/)
     .filter(Boolean);
-  assert.equal(remainingRefs.length, 1);
+  assert.equal(remainingRefs.length, 2);
   await rm(hookPath, { force: true });
   for (const ref of remainingRefs) {
     runGit(repository, ["update-ref", "-d", ref]);
@@ -429,8 +459,9 @@ test("implementation uses an isolated bounded fetch and fail-closed cleanup", as
   const source = await readFile(SCRIPT_PATH, "utf8");
   assert.match(
     source,
-    /"fetch",\s*"--no-tags",\s*"--force",\s*"--no-write-fetch-head",\s*"origin",\s*`\$\{sourceRef\}:\$\{temporaryRef\}`/,
+    /"fetch",\s*"--no-tags",\s*"--force",\s*"--no-write-fetch-head",\s*"origin",\s*`\$\{sourceRef\}:\$\{temporaryTagRef\}`,\s*`\$\{RELEASE_BRANCH_REF\}:\$\{temporaryBranchRef\}`/,
   );
+  assert.match(source, /"merge-base",\s*"--is-ancestor"/);
   assert.match(source, /GIT_TERMINAL_PROMPT: "0"/);
   assert.match(source, /LC_ALL: "C"/);
   assert.match(source, /maxBuffer: MAX_GIT_OUTPUT_BYTES/);

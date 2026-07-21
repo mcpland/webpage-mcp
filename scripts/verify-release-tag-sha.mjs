@@ -12,6 +12,7 @@ import { validateUnifiedReleaseVersion } from "./unified-release-version.mjs";
 
 const EXPECTED_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const RELEASE_TAG_PATTERN = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
+const RELEASE_BRANCH_REF = "refs/heads/main";
 const TEMP_REF_PREFIX = "refs/webpage-mcp/release-verification";
 const MAX_TEMP_REF_ATTEMPTS = 8;
 const MAX_GIT_OUTPUT_BYTES = 64 * 1024;
@@ -188,7 +189,8 @@ async function verifyReleaseTagShaInternal({
   const validatedTag = validateReleaseTag(tag);
   const validatedExpectedSha = validateExpectedSha(expectedSha);
   const sourceRef = `refs/tags/${validatedTag}`;
-  const temporaryRef = await allocateTemporaryRef({ cwd, environment });
+  const temporaryTagRef = await allocateTemporaryRef({ cwd, environment });
+  const temporaryBranchRef = await allocateTemporaryRef({ cwd, environment });
   let verificationError;
 
   try {
@@ -202,7 +204,8 @@ async function verifyReleaseTagShaInternal({
         "--force",
         "--no-write-fetch-head",
         "origin",
-        `${sourceRef}:${temporaryRef}`,
+        `${sourceRef}:${temporaryTagRef}`,
+        `${RELEASE_BRANCH_REF}:${temporaryBranchRef}`,
       ],
     });
     const peeled = await runGit({
@@ -213,7 +216,7 @@ async function verifyReleaseTagShaInternal({
         "rev-parse",
         "--verify",
         "--end-of-options",
-        `${temporaryRef}^{commit}`,
+        `${temporaryTagRef}^{commit}`,
       ],
     });
     const actualSha = parsePeeledCommit(peeled.stdout);
@@ -224,6 +227,17 @@ async function verifyReleaseTagShaInternal({
       ),
       "Remote release tag does not point at the expected gated commit.",
     );
+    const ancestry = await runGit({
+      cwd,
+      environment,
+      stage: "Release commit ancestry check",
+      args: ["merge-base", "--is-ancestor", actualSha, temporaryBranchRef],
+      allowedExitCodes: [0, 1],
+    });
+    invariant(
+      ancestry.exitCode === 0,
+      "Release commit is not contained in the remote main branch.",
+    );
   } catch (error) {
     verificationError = asPublicError(
       error,
@@ -232,13 +246,15 @@ async function verifyReleaseTagShaInternal({
   }
 
   let cleanupError;
-  try {
-    await removeTemporaryRef({ cwd, environment, temporaryRef });
-  } catch (error) {
-    cleanupError = asPublicError(
-      error,
-      "Temporary release ref cleanup failed unexpectedly; contents withheld.",
-    );
+  for (const temporaryRef of [temporaryTagRef, temporaryBranchRef]) {
+    try {
+      await removeTemporaryRef({ cwd, environment, temporaryRef });
+    } catch (error) {
+      cleanupError ??= asPublicError(
+        error,
+        "Temporary release ref cleanup failed unexpectedly; contents withheld.",
+      );
+    }
   }
 
   if (cleanupError) {

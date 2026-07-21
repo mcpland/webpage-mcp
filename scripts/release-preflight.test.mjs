@@ -1500,8 +1500,13 @@ test("release workflow verifies before either publish mutation", async () => {
   );
   assert.match(
     releaseIdentityBody,
-    /ref:\s*\$\{\{ github\.sha \}\}[\s\S]*git rev-parse "\$\{EVENT_RELEASE_SHA\}\^\{commit\}"/,
+    /ref:\s*\$\{\{ github\.sha \}\}\s*\n\s+fetch-depth:\s*0[\s\S]*git rev-parse "\$\{EVENT_RELEASE_SHA\}\^\{commit\}"/,
     "the release identity job must peel the event object to its exact commit",
+  );
+  assert.match(
+    releaseIdentityBody,
+    /Verify release commit ancestry before platform gates\s*\n\s+if: startsWith\(github\.ref, 'refs\/tags\/v'\)[\s\S]*EXPECTED_RELEASE_SHA: \$\{\{ steps\.bind_release_sha\.outputs\.release_sha \}\}[\s\S]*verify-release-tag-sha\.mjs --tag "\$GITHUB_REF_NAME" --expected-sha "\$EXPECTED_RELEASE_SHA"/,
+    "tag releases must prove remote main ancestry before starting platform runners",
   );
   assert.match(
     releaseIdentityBody,
@@ -1681,7 +1686,7 @@ test("release workflow verifies before either publish mutation", async () => {
   for (const publishJobBody of [githubJobBody, npmJobBody]) {
     assert.match(
       publishJobBody,
-      /ref:\s*\$\{\{ needs\.build-assets\.outputs\.release_sha \}\}/,
+      /ref:\s*\$\{\{ needs\.build-assets\.outputs\.release_sha \}\}\s*\n\s+fetch-depth:\s*0/,
       "publish jobs must checkout the SHA propagated through needs",
     );
     assert.match(
