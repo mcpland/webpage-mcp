@@ -59,6 +59,17 @@ interface AuthorizationIssueResult {
   documentBound: boolean;
 }
 
+export interface PrivilegedUiSurfaceDeactivation {
+  surface: PrivilegedUiSurface;
+  surfaceSessionId: string;
+  tabId: number;
+  reason: "replaced" | "stopped" | "closed" | "navigation" | "tab_removed";
+}
+
+type SurfaceDeactivationListener = (
+  event: PrivilegedUiSurfaceDeactivation,
+) => void | Promise<void>;
+
 function activeSurfaceKey(surface: PrivilegedUiSurface, tabId: number): string {
   return `${surface}:${tabId}`;
 }
@@ -179,9 +190,14 @@ export class PrivilegedUiAuthorizationStore {
     return true;
   }
 
-  deactivateTab(tabId: number): void {
-    for (const surface of VALID_SURFACES)
+  deactivateTab(tabId: number): boolean {
+    let deactivated = false;
+    for (const surface of VALID_SURFACES) {
+      if (!this.activeSurfaces.has(activeSurfaceKey(surface, tabId))) continue;
       this.deactivateSurface(surface, tabId);
+      deactivated = true;
+    }
+    return deactivated;
   }
 
   exportActiveSurfaceSessions(): ActiveSurfaceSession[] {
@@ -395,9 +411,60 @@ export class PrivilegedUiAuthorizationStore {
 }
 
 const authorizationStore = new PrivilegedUiAuthorizationStore();
+const surfaceDeactivationListeners = new Set<SurfaceDeactivationListener>();
 let initialized = false;
 let activeSurfacesHydrated = false;
 let surfaceOperationQueue: Promise<void> = Promise.resolve();
+
+export function addPrivilegedUiSurfaceDeactivationListener(
+  listener: SurfaceDeactivationListener,
+): () => void {
+  surfaceDeactivationListeners.add(listener);
+  return () => surfaceDeactivationListeners.delete(listener);
+}
+
+async function notifyDeactivatedSurfaces(
+  previous: ActiveSurfaceSession[],
+  reason: PrivilegedUiSurfaceDeactivation["reason"],
+): Promise<void> {
+  if (surfaceDeactivationListeners.size === 0 || previous.length === 0) return;
+  const active = new Map(
+    authorizationStore
+      .exportActiveSurfaceSessions()
+      .map((session) => [
+        activeSurfaceKey(session.surface, session.tabId),
+        session,
+      ]),
+  );
+  const deactivated = previous.filter((session) => {
+    const current = active.get(
+      activeSurfaceKey(session.surface, session.tabId),
+    );
+    return current?.surfaceSessionId !== session.surfaceSessionId;
+  });
+  if (deactivated.length === 0) return;
+
+  const listeners = Array.from(surfaceDeactivationListeners);
+  const results = await Promise.allSettled(
+    deactivated.flatMap((session) =>
+      listeners.map((listener) =>
+        Promise.resolve().then(() =>
+          listener({
+            surface: session.surface,
+            surfaceSessionId: session.surfaceSessionId,
+            tabId: session.tabId,
+            reason,
+          }),
+        ),
+      ),
+    ),
+  );
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.warn("Privileged UI surface cleanup failed", result.reason);
+    }
+  }
+}
 
 async function hydrateActiveSurfaces(): Promise<void> {
   if (activeSurfacesHydrated) return;
@@ -443,6 +510,7 @@ export async function startPrivilegedUiSurfaceSession(
     }
     try {
       await persistActiveSurfaces();
+      await notifyDeactivatedSurfaces(previous, "replaced");
       return surfaceSessionId;
     } catch (error) {
       authorizationStore.restoreActiveSurfaceSessions(previous);
@@ -466,6 +534,7 @@ export async function stopPrivilegedUiSurfaceSession(
     if (!deactivated) return false;
     try {
       await persistActiveSurfaces();
+      await notifyDeactivatedSurfaces(previous, "stopped");
       return true;
     } catch (error) {
       authorizationStore.restoreActiveSurfaceSessions(previous);
@@ -554,6 +623,7 @@ export function initPrivilegedUiAuthorization(): void {
         if (!success) return false;
         try {
           await persistActiveSurfaces();
+          await notifyDeactivatedSurfaces(previous, "closed");
           return true;
         } catch (error) {
           authorizationStore.restoreActiveSurfaceSessions(previous);
@@ -613,9 +683,25 @@ export function initPrivilegedUiAuthorization(): void {
   chrome.tabs.onRemoved.addListener((tabId) => {
     void runSurfaceOperation(async () => {
       const previous = authorizationStore.exportActiveSurfaceSessions();
-      authorizationStore.deactivateTab(tabId);
+      if (!authorizationStore.deactivateTab(tabId)) return;
       try {
         await persistActiveSurfaces();
+        await notifyDeactivatedSurfaces(previous, "tab_removed");
+      } catch (error) {
+        authorizationStore.restoreActiveSurfaceSessions(previous);
+        throw error;
+      }
+    }).catch(() => {});
+  });
+
+  chrome.webNavigation.onCommitted.addListener((details) => {
+    if (details.frameId !== 0) return;
+    void runSurfaceOperation(async () => {
+      const previous = authorizationStore.exportActiveSurfaceSessions();
+      if (!authorizationStore.deactivateTab(details.tabId)) return;
+      try {
+        await persistActiveSurfaces();
+        await notifyDeactivatedSurfaces(previous, "navigation");
       } catch (error) {
         authorizationStore.restoreActiveSurfaceSessions(previous);
         throw error;

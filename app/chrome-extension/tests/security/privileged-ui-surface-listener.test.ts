@@ -27,6 +27,9 @@ describe("privileged UI surface listener", () => {
   let contentListener: RuntimeListener;
   let userScriptListener: RuntimeListener;
   let tabRemovedListener: (tabId: number) => void;
+  let navigationListener: (
+    details: chrome.webNavigation.WebNavigationTransitionCallbackDetails,
+  ) => void;
   let sessionData: Record<string, unknown>;
 
   beforeEach(() => {
@@ -54,6 +57,11 @@ describe("privileged UI surface listener", () => {
     vi.mocked(chrome.tabs.onRemoved.addListener).mockImplementation(
       (candidate) => {
         tabRemovedListener = candidate as (tabId: number) => void;
+      },
+    );
+    vi.mocked(chrome.webNavigation.onCommitted.addListener).mockImplementation(
+      (candidate) => {
+        navigationListener = candidate;
       },
     );
     captureNextWorkerListeners();
@@ -281,6 +289,101 @@ describe("privileged UI surface listener", () => {
         sender(),
       ),
     ).resolves.toBe(true);
+  });
+
+  it("notifies owners for every surface deactivation path", async () => {
+    const worker = await loadWorker();
+    const cleanup = vi.fn(async () => undefined);
+    worker.addPrivilegedUiSurfaceDeactivationListener(cleanup);
+    const firstSessionId = await worker.startPrivilegedUiSurfaceSession(
+      PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      17,
+    );
+    const secondSessionId = await worker.startPrivilegedUiSurfaceSession(
+      PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      17,
+    );
+
+    expect(cleanup).toHaveBeenNthCalledWith(1, {
+      surface: PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      surfaceSessionId: firstSessionId,
+      tabId: 17,
+      reason: "replaced",
+    });
+    expect(await sendRuntime(closeMessage(secondSessionId))).toEqual({
+      success: true,
+    });
+    expect(cleanup).toHaveBeenNthCalledWith(2, {
+      surface: PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      surfaceSessionId: secondSessionId,
+      tabId: 17,
+      reason: "closed",
+    });
+
+    const stoppedSessionId = await worker.startPrivilegedUiSurfaceSession(
+      PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      17,
+    );
+    await expect(
+      worker.stopPrivilegedUiSurfaceSession(
+        PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+        17,
+        stoppedSessionId,
+      ),
+    ).resolves.toBe(true);
+    expect(cleanup).toHaveBeenNthCalledWith(3, {
+      surface: PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      surfaceSessionId: stoppedSessionId,
+      tabId: 17,
+      reason: "stopped",
+    });
+
+    const navigatedSessionId = await worker.startPrivilegedUiSurfaceSession(
+      PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      17,
+    );
+    navigationListener({
+      tabId: 17,
+      frameId: 0,
+      frameType: "outermost_frame",
+      documentId: "document-b",
+      documentLifecycle: "active",
+      parentDocumentId: undefined,
+      processId: 1,
+      timeStamp: Date.now(),
+      transitionQualifiers: [],
+      transitionType: "link",
+      url: "https://example.com/next",
+    });
+    await vi.waitFor(() =>
+      expect(cleanup).toHaveBeenNthCalledWith(4, {
+        surface: PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+        surfaceSessionId: navigatedSessionId,
+        tabId: 17,
+        reason: "navigation",
+      }),
+    );
+    await expect(
+      worker.validatePrivilegedUiSurfaceSession(
+        PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+        navigatedSessionId,
+        sender("document-b"),
+      ),
+    ).resolves.toBe(false);
+
+    const removedSessionId = await worker.startPrivilegedUiSurfaceSession(
+      PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      17,
+    );
+    tabRemovedListener(17);
+    await vi.waitFor(() =>
+      expect(cleanup).toHaveBeenNthCalledWith(5, {
+        surface: PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+        surfaceSessionId: removedSessionId,
+        tabId: 17,
+        reason: "tab_removed",
+      }),
+    );
   });
 
   it("rolls back activation, first binding, and stop when persistence fails", async () => {

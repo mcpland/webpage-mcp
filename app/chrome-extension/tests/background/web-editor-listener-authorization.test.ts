@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import {
+  BACKGROUND_MESSAGE_TYPES,
+  PRIVILEGED_UI_SURFACES,
+} from "@/common/message-types";
 
 const nativeHostMocks = vi.hoisted(() => ({
   requestAgentRpcFetch: vi.fn(),
@@ -7,6 +10,7 @@ const nativeHostMocks = vi.hoisted(() => ({
   unsubscribeAgentStream: vi.fn(),
 }));
 const authorizationMocks = vi.hoisted(() => ({
+  addPrivilegedUiSurfaceDeactivationListener: vi.fn(),
   consumePrivilegedUiAuthorization: vi.fn(),
   validatePrivilegedUiSurfaceSession: vi.fn(),
   startPrivilegedUiSurfaceSession: vi.fn(),
@@ -50,10 +54,21 @@ describe("Web Editor listener role authorization", () => {
   let requestListener: RequestListener;
   let userScriptListener: RequestListener;
   let commandListener: (command: string) => Promise<void>;
+  let surfaceDeactivationListener: (event: {
+    surface: string;
+    surfaceSessionId: string;
+    tabId: number;
+  }) => Promise<void> | void;
 
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    authorizationMocks.addPrivilegedUiSurfaceDeactivationListener.mockImplementation(
+      (listener) => {
+        surfaceDeactivationListener = listener;
+        return vi.fn();
+      },
+    );
     authorizationMocks.validatePrivilegedUiSurfaceSession.mockResolvedValue(
       true,
     );
@@ -183,6 +198,18 @@ describe("Web Editor listener role authorization", () => {
     );
   });
 
+  it("releases early injection when its Web Editor surface is deactivated", async () => {
+    await surfaceDeactivationListener({
+      surface: PRIVILEGED_UI_SURFACES.WEB_EDITOR,
+      surfaceSessionId: "a".repeat(64),
+      tabId: 7,
+    });
+
+    expect(
+      propsInjectionMocks.releasePropsAgentEarlyInjection,
+    ).toHaveBeenCalledWith(7, "a".repeat(64));
+  });
+
   it.each([
     BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_TOGGLE,
     BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_CLEAR_SELECTION,
@@ -305,7 +332,7 @@ describe("Web Editor listener role authorization", () => {
     await vi.waitFor(() =>
       expect(
         propsInjectionMocks.registerPropsAgentEarlyInjection,
-      ).toHaveBeenCalledWith(7, "https://example.com/"),
+      ).toHaveBeenCalledWith(7, "https://example.com/", "a".repeat(64)),
     );
   });
 

@@ -21,6 +21,7 @@ import {
   unsubscribeAgentStream,
 } from "../native-host";
 import {
+  addPrivilegedUiSurfaceDeactivationListener,
   consumePrivilegedUiAuthorization,
   startPrivilegedUiSurfaceSession,
   stopPrivilegedUiSurfaceSession,
@@ -1374,7 +1375,6 @@ async function toggleEditorInTabUnlocked(
           tabId,
         );
       }
-      await releasePropsAgentEarlyInjection(tabId);
       return { active: false };
     }
 
@@ -1461,6 +1461,14 @@ async function getActiveTabId(): Promise<number | null> {
 export function initWebEditorListeners(): void {
   if (initialized) return;
   initialized = true;
+
+  addPrivilegedUiSurfaceDeactivationListener((event) => {
+    if (event.surface !== PRIVILEGED_UI_SURFACES.WEB_EDITOR) return;
+    return releasePropsAgentEarlyInjection(
+      event.tabId,
+      event.surfaceSessionId,
+    ).then(() => undefined);
+  });
 
   // MV3 lifecycle events can be dispatched immediately after worker startup;
   // register this listener synchronously before starting async reconciliation.
@@ -1606,10 +1614,12 @@ export function initWebEditorListeners(): void {
           const senderTab = (_sender as chrome.runtime.MessageSender)?.tab;
           const senderTabId = senderTab?.id;
           const senderTabUrl = senderTab?.url;
+          const surfaceSessionId = readWebEditorSurfaceSessionId(message);
 
           if (
             typeof senderTabId !== "number" ||
-            typeof senderTabUrl !== "string"
+            typeof senderTabUrl !== "string" ||
+            !surfaceSessionId
           ) {
             return sendResponse({
               success: false,
@@ -1621,6 +1631,7 @@ export function initWebEditorListeners(): void {
             const result = await registerPropsAgentEarlyInjection(
               senderTabId,
               senderTabUrl,
+              surfaceSessionId,
             );
 
             // Respond first, then reload (to avoid message port closing during navigation)

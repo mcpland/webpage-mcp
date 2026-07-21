@@ -11,6 +11,7 @@ const nativeHostMocks = vi.hoisted(() => ({
   unsubscribeAgentStream: vi.fn(),
 }));
 const authorizationMocks = vi.hoisted(() => ({
+  addPrivilegedUiSurfaceDeactivationListener: vi.fn(() => vi.fn()),
   consumePrivilegedUiAuthorization: vi.fn(),
   validatePrivilegedUiSurfaceSession: vi.fn(async () => true),
 }));

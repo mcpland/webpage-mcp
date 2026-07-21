@@ -1,7 +1,8 @@
 const PROPS_AGENT_SCRIPT_PATH = "inject-scripts/props-hook-bootstrap.js";
 const REGISTRATION_ID_PREFIX = "mcp_we_props_early";
 const TAB_REGISTRATION_STORAGE_PREFIX = "web-editor-props-early-tab-";
-const TAB_REGISTRATION_STORAGE_VERSION = 1;
+const TAB_REGISTRATION_STORAGE_VERSION = 2;
+const SURFACE_SESSION_PATTERN = /^[a-f0-9]{64}$/;
 const LEGACY_RETIREMENT_MIGRATION_STORAGE_KEY =
   "web-editor-props-legacy-retirement-version";
 const LEGACY_RETIREMENT_MIGRATION_VERSION = 2;
@@ -20,6 +21,7 @@ interface StoredTabRegistration {
   registrationId: string;
   host: string;
   origin: string;
+  surfaceSessionId: string;
 }
 
 export interface EarlyInjectionResult {
@@ -285,7 +287,9 @@ function readStoredRegistration(value: unknown): StoredTabRegistration | null {
     !candidate.host ||
     candidate.host.length > 255 ||
     typeof candidate.origin !== "string" ||
-    candidate.origin.length > 2_048
+    candidate.origin.length > 2_048 ||
+    typeof candidate.surfaceSessionId !== "string" ||
+    !SURFACE_SESSION_PATTERN.test(candidate.surfaceSessionId)
   ) {
     return null;
   }
@@ -373,12 +377,14 @@ function tryBuildEarlyInjectionLocation(
 function toStoredRegistration(
   registrationId: string,
   location: Pick<EarlyInjectionLocation, "host" | "origin">,
+  surfaceSessionId: string,
 ): StoredTabRegistration {
   return {
     version: TAB_REGISTRATION_STORAGE_VERSION,
     registrationId,
     host: location.host,
     origin: location.origin,
+    surfaceSessionId,
   };
 }
 
@@ -469,8 +475,12 @@ async function releaseStoredTabRegistration(
 export function registerPropsAgentEarlyInjection(
   tabId: number,
   tabUrl: string,
+  surfaceSessionId: string,
 ): Promise<EarlyInjectionResult> {
   return serializeRegistryOperation(async () => {
+    if (!SURFACE_SESSION_PATTERN.test(surfaceSessionId)) {
+      throw new Error("A valid Web Editor surface session is required");
+    }
     const { host, origin, matches } = buildEarlyInjectionLocation(tabUrl);
     const id = await buildRegistrationId(host);
     const storageKey = registrationStorageKey(tabId);
@@ -499,7 +509,11 @@ export function registerPropsAgentEarlyInjection(
 
     try {
       await chrome.storage.session.set({
-        [storageKey]: toStoredRegistration(id, { host, origin }),
+        [storageKey]: toStoredRegistration(
+          id,
+          { host, origin },
+          surfaceSessionId,
+        ),
       });
     } catch (error) {
       if (!alreadyRegistered) {
@@ -519,13 +533,26 @@ export function registerPropsAgentEarlyInjection(
 }
 
 /** Release a tab's registration and remove the script when no other tab uses it. */
-export function releasePropsAgentEarlyInjection(tabId: number): Promise<void> {
+export function releasePropsAgentEarlyInjection(
+  tabId: number,
+  expectedSurfaceSessionId?: string,
+): Promise<boolean> {
   return serializeRegistryOperation(async () => {
     const storageKey = registrationStorageKey(tabId);
     const stored = await chrome.storage.session.get(storageKey);
-    const id = readStoredRegistrationId(stored[storageKey]);
+    const record = readStoredRegistration(stored[storageKey]);
+    if (
+      expectedSurfaceSessionId !== undefined &&
+      (!SURFACE_SESSION_PATTERN.test(expectedSurfaceSessionId) ||
+        record?.surfaceSessionId !== expectedSurfaceSessionId)
+    ) {
+      return false;
+    }
+    const id =
+      record?.registrationId ?? readStoredRegistrationId(stored[storageKey]);
 
     await releaseStoredTabRegistration(storageKey, id);
+    return true;
   });
 }
 
@@ -548,23 +575,26 @@ export function reconcilePropsAgentEarlyInjectionNavigation(
 
     const registrationId = readStoredRegistrationId(rawRegistration);
     const currentLocation = tryBuildEarlyInjectionLocation(tabUrl);
-    if (registrationId && currentLocation) {
+    const storedRecord = readStoredRegistration(rawRegistration);
+    if (registrationId && currentLocation && storedRecord) {
       const expectedId = await buildRegistrationId(currentLocation.host);
-      const storedRecord = readStoredRegistration(rawRegistration);
       const sameHost =
         registrationId === expectedId &&
-        (!storedRecord || storedRecord.host === currentLocation.host);
+        storedRecord.host === currentLocation.host;
 
       if (sameHost) {
-        // Migrate the legacy string schema and keep the last committed origin
-        // current without widening the host-scoped registration.
+        // Keep the last committed origin current without widening the
+        // host-scoped registration.
         if (
-          !storedRecord ||
           storedRecord.origin !== currentLocation.origin ||
           storedRecord.host !== currentLocation.host
         ) {
           await chrome.storage.session.set({
-            [storageKey]: toStoredRegistration(registrationId, currentLocation),
+            [storageKey]: toStoredRegistration(
+              registrationId,
+              currentLocation,
+              storedRecord.surfaceSessionId,
+            ),
           });
         }
         return false;
@@ -633,12 +663,14 @@ export async function pruneOrphanedPropsAgentEarlyInjections(): Promise<void> {
     const storageRemovals: string[] = [];
 
     // Reconcile persisted tab ownership with the browser's current top-level
-    // URL. This also migrates the legacy tab -> registrationId string schema.
+    // URL. Unowned records from older schemas are retired instead of being
+    // silently attached to a future surface session.
     for (const [key, value] of Object.entries(initialStored)) {
       if (!key.startsWith(TAB_REGISTRATION_STORAGE_PREFIX)) continue;
       const tabId = parseRegistrationStorageTabId(key);
       const registrationId = readStoredRegistrationId(value);
-      if (tabId === null || !registrationId) {
+      const storedRecord = readStoredRegistration(value);
+      if (tabId === null || !registrationId || !storedRecord) {
         storageRemovals.push(key);
         continue;
       }
@@ -652,18 +684,20 @@ export async function pruneOrphanedPropsAgentEarlyInjections(): Promise<void> {
       await retireLegacyPropsAgentInTab(tabId);
 
       const expectedId = await buildRegistrationId(currentLocation.host);
-      const storedRecord = readStoredRegistration(value);
       if (
         registrationId !== expectedId ||
-        (storedRecord !== null && storedRecord.host !== currentLocation.host)
+        storedRecord.host !== currentLocation.host
       ) {
         storageRemovals.push(key);
         continue;
       }
 
-      const nextRecord = toStoredRegistration(registrationId, currentLocation);
+      const nextRecord = toStoredRegistration(
+        registrationId,
+        currentLocation,
+        storedRecord.surfaceSessionId,
+      );
       if (
-        !storedRecord ||
         storedRecord.origin !== nextRecord.origin ||
         storedRecord.host !== nextRecord.host
       ) {

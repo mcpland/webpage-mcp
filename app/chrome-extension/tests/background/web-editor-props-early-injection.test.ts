@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const SURFACE_SESSION_ID = "a".repeat(64);
+
 describe("Web Editor props early injection registry", () => {
   let sessionData: Record<string, unknown>;
   let registeredScripts: Map<string, chrome.scripting.RegisteredContentScript>;
@@ -16,12 +18,14 @@ describe("Web Editor props early injection registry", () => {
     registrationId: string;
     host: string;
     origin: string;
+    surfaceSessionId: string;
   } {
     return sessionData[`web-editor-props-early-tab-${tabId}`] as {
       version: number;
       registrationId: string;
       host: string;
       origin: string;
+      surfaceSessionId: string;
     };
   }
 
@@ -112,6 +116,7 @@ describe("Web Editor props early injection registry", () => {
     const result = await registerPropsAgentEarlyInjection(
       12,
       "https://example.com/editor",
+      SURFACE_SESSION_ID,
     );
 
     expect(result.id).toMatch(/^mcp_we_props_early_example_com_[a-f0-9]{24}$/);
@@ -125,10 +130,11 @@ describe("Web Editor props early injection registry", () => {
       }),
     ]);
     expect(storedRegistration(12)).toEqual({
-      version: 1,
+      version: 2,
       registrationId: result.id,
       host: "example.com",
       origin: "https://example.com",
+      surfaceSessionId: SURFACE_SESSION_ID,
     });
   });
 
@@ -139,8 +145,16 @@ describe("Web Editor props early injection registry", () => {
     } =
       await import("@/entrypoints/background/web-editor/props-early-injection");
 
-    await registerPropsAgentEarlyInjection(12, "https://example.com/one");
-    await registerPropsAgentEarlyInjection(13, "https://example.com/two");
+    await registerPropsAgentEarlyInjection(
+      12,
+      "https://example.com/one",
+      SURFACE_SESSION_ID,
+    );
+    await registerPropsAgentEarlyInjection(
+      13,
+      "https://example.com/two",
+      SURFACE_SESSION_ID,
+    );
     await releasePropsAgentEarlyInjection(12);
 
     expect(unregisterContentScripts).not.toHaveBeenCalled();
@@ -158,6 +172,34 @@ describe("Web Editor props early injection registry", () => {
     expect(registeredScripts.has(registrationId)).toBe(false);
   });
 
+  it("releases only for the surface session that owns the tab registration", async () => {
+    const {
+      registerPropsAgentEarlyInjection,
+      releasePropsAgentEarlyInjection,
+    } =
+      await import("@/entrypoints/background/web-editor/props-early-injection");
+    const otherSurfaceSessionId = "b".repeat(64);
+    const registration = await registerPropsAgentEarlyInjection(
+      12,
+      "https://owned.example/editor",
+      SURFACE_SESSION_ID,
+    );
+
+    await expect(
+      releasePropsAgentEarlyInjection(12, otherSurfaceSessionId),
+    ).resolves.toBe(false);
+    expect(storedRegistration(12).surfaceSessionId).toBe(SURFACE_SESSION_ID);
+    expect(unregisterContentScripts).not.toHaveBeenCalled();
+
+    await expect(
+      releasePropsAgentEarlyInjection(12, SURFACE_SESSION_ID),
+    ).resolves.toBe(true);
+    expect(sessionData["web-editor-props-early-tab-12"]).toBeUndefined();
+    expect(unregisterContentScripts).toHaveBeenCalledWith({
+      ids: [registration.id],
+    });
+  });
+
   it("keeps distinct hosts separate when their sanitized names collide", async () => {
     const { registerPropsAgentEarlyInjection } =
       await import("@/entrypoints/background/web-editor/props-early-injection");
@@ -165,10 +207,12 @@ describe("Web Editor props early injection registry", () => {
     const dotted = await registerPropsAgentEarlyInjection(
       12,
       "https://foo.bar/editor",
+      SURFACE_SESSION_ID,
     );
     const underscored = await registerPropsAgentEarlyInjection(
       13,
       "https://foo_bar/editor",
+      SURFACE_SESSION_ID,
     );
 
     expect(dotted.id).not.toBe(underscored.id);
@@ -192,6 +236,7 @@ describe("Web Editor props early injection registry", () => {
     const registration = await registerPropsAgentEarlyInjection(
       12,
       "https://old.example/editor",
+      SURFACE_SESSION_ID,
     );
     const released = await reconcilePropsAgentEarlyInjectionNavigation(
       12,
@@ -221,6 +266,7 @@ describe("Web Editor props early injection registry", () => {
     const registration = await registerPropsAgentEarlyInjection(
       12,
       "https://Example.COM/editor",
+      SURFACE_SESSION_ID,
     );
     const released = await reconcilePropsAgentEarlyInjectionNavigation(
       12,
@@ -231,14 +277,15 @@ describe("Web Editor props early injection registry", () => {
     expect(unregisterContentScripts).not.toHaveBeenCalled();
     expect(registeredScripts.has(registration.id)).toBe(true);
     expect(storedRegistration(12)).toEqual({
-      version: 1,
+      version: 2,
       registrationId: registration.id,
       host: "example.com",
       origin: "http://example.com:8080",
+      surfaceSessionId: SURFACE_SESSION_ID,
     });
   });
 
-  it("migrates the legacy tab-to-registrationId schema on a same-host commit", async () => {
+  it("retires an unowned legacy registration on a same-host commit", async () => {
     const {
       registerPropsAgentEarlyInjection,
       reconcilePropsAgentEarlyInjectionNavigation,
@@ -248,6 +295,7 @@ describe("Web Editor props early injection registry", () => {
     const registration = await registerPropsAgentEarlyInjection(
       12,
       "https://legacy.example/a",
+      SURFACE_SESSION_ID,
     );
     sessionData["web-editor-props-early-tab-12"] = registration.id;
 
@@ -256,12 +304,9 @@ describe("Web Editor props early injection registry", () => {
       "https://legacy.example/b",
     );
 
-    expect(unregisterContentScripts).not.toHaveBeenCalled();
-    expect(storedRegistration(12)).toEqual({
-      version: 1,
-      registrationId: registration.id,
-      host: "legacy.example",
-      origin: "https://legacy.example",
+    expect(sessionData["web-editor-props-early-tab-12"]).toBeUndefined();
+    expect(unregisterContentScripts).toHaveBeenCalledWith({
+      ids: [registration.id],
     });
   });
 
@@ -275,8 +320,13 @@ describe("Web Editor props early injection registry", () => {
     const registration = await registerPropsAgentEarlyInjection(
       12,
       "https://shared.example/a",
+      SURFACE_SESSION_ID,
     );
-    await registerPropsAgentEarlyInjection(13, "https://shared.example/b");
+    await registerPropsAgentEarlyInjection(
+      13,
+      "https://shared.example/b",
+      SURFACE_SESSION_ID,
+    );
 
     await reconcilePropsAgentEarlyInjectionNavigation(
       12,
@@ -302,6 +352,7 @@ describe("Web Editor props early injection registry", () => {
     const registration = await firstWorker.registerPropsAgentEarlyInjection(
       12,
       "https://restart.example/editor",
+      SURFACE_SESSION_ID,
     );
 
     vi.resetModules();
@@ -313,10 +364,11 @@ describe("Web Editor props early injection registry", () => {
     expect(addNavigationListener).toHaveBeenCalledOnce();
     expect(unregisterContentScripts).not.toHaveBeenCalled();
     expect(storedRegistration(12)).toEqual({
-      version: 1,
+      version: 2,
       registrationId: registration.id,
       host: "restart.example",
       origin: "https://restart.example",
+      surfaceSessionId: SURFACE_SESSION_ID,
     });
     expect(registeredScripts.has(registration.id)).toBe(true);
 
@@ -348,6 +400,7 @@ describe("Web Editor props early injection registry", () => {
     const registration = await propsInjection.registerPropsAgentEarlyInjection(
       12,
       "https://frames.example/editor",
+      SURFACE_SESSION_ID,
     );
     propsInjection.initPropsAgentEarlyInjectionNavigationLifecycle();
     const listener = addNavigationListener.mock.calls[0]?.[0] as
@@ -460,6 +513,7 @@ describe("Web Editor props early injection registry", () => {
     const registration = await propsInjection.registerPropsAgentEarlyInjection(
       12,
       "https://replace.example/editor",
+      SURFACE_SESSION_ID,
     );
     propsInjection.initPropsAgentEarlyInjectionNavigationLifecycle();
     const listener = addTabReplacedListener.mock.calls[0]?.[0] as
@@ -505,6 +559,7 @@ describe("Web Editor props early injection registry", () => {
     const kept = await registerPropsAgentEarlyInjection(
       21,
       "https://kept.example/editor",
+      SURFACE_SESSION_ID,
     );
     await pruneOrphanedPropsAgentEarlyInjections();
 
@@ -525,6 +580,7 @@ describe("Web Editor props early injection registry", () => {
     const registration = await propsInjection.registerPropsAgentEarlyInjection(
       21,
       "https://stale.example/editor",
+      SURFACE_SESSION_ID,
     );
     registeredScripts.set(registration.id, {
       id: registration.id,
@@ -628,6 +684,7 @@ describe("Web Editor props early injection registry", () => {
         propsInjection.registerPropsAgentEarlyInjection(
           32,
           "https://operational.example/editor",
+          SURFACE_SESSION_ID,
         ),
       ).resolves.toMatchObject({ host: "operational.example" });
 
@@ -635,7 +692,7 @@ describe("Web Editor props early injection registry", () => {
       await pruningRejection;
       await expect(
         propsInjection.releasePropsAgentEarlyInjection(32),
-      ).resolves.toBeUndefined();
+      ).resolves.toBe(true);
       expect(
         sessionData["web-editor-props-legacy-retirement-version"],
       ).toBeUndefined();
