@@ -9,7 +9,10 @@ import { PerformanceTraceFormatter } from 'chrome-devtools-frontend/front_end/mo
 import { PerformanceInsightFormatter } from 'chrome-devtools-frontend/front_end/models/ai_assistance/data_formatters/PerformanceInsightFormatter.js';
 import { AgentFocus } from 'chrome-devtools-frontend/front_end/models/ai_assistance/performance/AIContext.js';
 
-export const MAX_TRACE_FILE_BYTES = 256 * 1024 * 1024;
+// Trace parsing simultaneously retains the input bytes, decoded text, parsed
+// objects, and DevTools' derived model. Match the production per-upload cap
+// instead of the aggregate temporary-storage budget.
+export const MAX_TRACE_FILE_BYTES = 16 * 1024 * 1024;
 
 export async function readTraceJsonFile(
   filePathOrDescriptor: string | number,

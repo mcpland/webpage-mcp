@@ -24,7 +24,8 @@ vi.mock(
   () => ({ AgentFocus: { fromParsedTrace: vi.fn() } }),
 );
 
-import { parseTrace, readTraceJsonFile } from './trace-analyzer';
+import { DEFAULT_TEMP_UPLOAD_MAX_FILE_BYTES } from './file-handler';
+import { MAX_TRACE_FILE_BYTES, parseTrace, readTraceJsonFile } from './trace-analyzer';
 
 const temporaryDirectories: string[] = [];
 
@@ -38,6 +39,10 @@ afterEach(async () => {
 });
 
 describe('trace analyzer resource isolation', () => {
+  it('keeps the in-memory parser bound at the production upload limit', () => {
+    expect(MAX_TRACE_FILE_BYTES).toBe(DEFAULT_TEMP_UPLOAD_MAX_FILE_BYTES);
+  });
+
   it('uses an independent trace processor for every concurrent parse', async () => {
     let instance = 0;
     engineMocks.createWithAllHandlers.mockImplementation(() => {
