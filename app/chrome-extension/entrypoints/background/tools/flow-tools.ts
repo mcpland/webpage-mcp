@@ -3,12 +3,8 @@ import {
   TOOL_NAMES,
   WEBPAGE_MCP_CAPABILITY_VERSION,
   WEBPAGE_MCP_PROTOCOL_VERSION,
-  createEmptyWorkflowSideEffectSummary,
-  isKnownWorkflowSideEffectKind,
-  normalizeWorkflowNodeSideEffectProfile,
   workflowSideEffectAllowsRetry,
   type WorkflowSideEffectProfile,
-  type WorkflowSideEffectSummary,
 } from 'webpage-mcp-shared';
 import {
   FLOW_DSL_VERSION,
@@ -78,6 +74,25 @@ import {
   getMigrationRollbackSnapshot,
   workflowRuntimeRequiresMigration,
 } from './flow-runtime-migration';
+import { redactWorkflowUrl as redactUrl } from './flow-redaction';
+import {
+  buildWorkflowSegmentPlan,
+  classifyWorkflowRisk,
+  collectRuntimeSideEffectEvidence,
+  getDisabledWorkflowNodeIds,
+  getNodeSideEffectProfile,
+  getNodeWorkflowRisk,
+  getPublicNodeExecutionMetadata,
+  hasSegmentBoundary,
+  isBoundaryStoppedStatus,
+  maxWorkflowRisk,
+  mergeWorkflowSideEffectSummaries,
+  riskRank,
+  summarizeWorkflowSideEffects,
+  type RuntimeSideEffectEvidence,
+  type WorkflowRiskProfile,
+  type WorkflowSegmentPlan,
+} from './flow-risk-analysis';
 
 type FlowHintLevel = 'info' | 'warning';
 
@@ -352,20 +367,6 @@ interface WorkflowResetValidation {
   errors: WorkflowStabilizeValidationError[];
 }
 
-type WorkflowSegmentBoundarySource = 'static' | 'runtime' | 'override';
-
-interface WorkflowSegmentPlan {
-  mode: 'none' | 'explicit' | 'stopBeforeDangerous';
-  stopBeforeNodeId?: string;
-  endNodeId?: string;
-  autoBoundary?: boolean;
-  boundaryNodeId?: string;
-  boundaryKind?: string;
-  boundaryRisk?: WorkflowRiskProfile;
-  boundarySource?: WorkflowSegmentBoundarySource;
-  ambiguousBoundaryNodeIds?: string[];
-}
-
 interface TrustedWorkflowApproval {
   approvalId: string;
   approvedBy: 'user' | 'ui' | 'policy';
@@ -396,8 +397,6 @@ interface WorkflowStabilizeScore {
   failedRuns: number;
   iterations: number;
 }
-
-type WorkflowRiskProfile = 'safe' | 'idempotent' | 'dangerous' | 'unknown';
 
 interface WorkflowStabilizeWarning {
   code: string;
@@ -540,364 +539,6 @@ function buildWorkflowCapabilityMatrix(
     captcha: 'unknown',
     unsupportedReasons,
   };
-}
-
-function getNodeSideEffectProfile(node: FlowV3['nodes'][number]): WorkflowSideEffectProfile {
-  return normalizeWorkflowNodeSideEffectProfile(node.kind, node.config, node.sideEffect);
-}
-
-function getDisabledWorkflowNodeIds(flow: FlowV3): Set<string> {
-  return new Set(
-    (Array.isArray(flow.nodes) ? flow.nodes : [])
-      .filter((node) => node.disabled === true)
-      .map((node) => String(node.id)),
-  );
-}
-
-function getPublicNodeExecutionMetadata(
-  node: FlowV3['nodes'][number],
-): Pick<PublicAnalyzedNode, 'executable' | 'sideEffect'> {
-  if (node.kind === 'trigger' || node.disabled === true) {
-    return { executable: false };
-  }
-  return {
-    sideEffect: getNodeSideEffectProfile(node),
-  };
-}
-
-function sideEffectSummaryKeyForRisk(risk: WorkflowRiskProfile): keyof WorkflowSideEffectSummary {
-  return risk === 'unknown' ? 'unknown' : risk;
-}
-
-function summarizeWorkflowSideEffects(
-  flow: FlowV3,
-  nodeRiskOverrides: ReadonlyMap<string, WorkflowRiskProfile> = new Map(),
-): WorkflowSideEffectSummary {
-  const summary = createEmptyWorkflowSideEffectSummary();
-  for (const node of Array.isArray(flow.nodes) ? flow.nodes : []) {
-    if (node.disabled === true) {
-      continue;
-    }
-    const override = nodeRiskOverrides.get(String(node.id));
-    if (override) {
-      summary[sideEffectSummaryKeyForRisk(override)] += 1;
-    } else {
-      const profile = getNodeSideEffectProfile(node);
-      summary[profile.category] += 1;
-    }
-    if (!override && !isKnownWorkflowSideEffectKind(node.kind)) {
-      summary.unknown += 1;
-    }
-  }
-  return summary;
-}
-
-function classifyWorkflowRisk(summary: WorkflowSideEffectSummary): WorkflowRiskProfile {
-  if ((summary.dangerous ?? 0) > 0) return 'dangerous';
-  if ((summary.unknown ?? 0) > 0) return 'unknown';
-  if ((summary.idempotent ?? 0) > 0) return 'idempotent';
-  return 'safe';
-}
-
-interface RuntimeSideEffectObservation {
-  runId: string;
-  eventType: string;
-  category: 'dangerous' | 'unknown';
-  reason: string;
-  nodeId?: string;
-  method?: string;
-  resourceType?: string;
-  url?: string;
-  beforeUrl?: string;
-  afterUrl?: string;
-}
-
-interface RuntimeSideEffectEvidence {
-  risk: WorkflowRiskProfile;
-  summary: WorkflowSideEffectSummary;
-  observations: RuntimeSideEffectObservation[];
-}
-
-const HTTP_METHODS_WITHOUT_REQUEST_BODY_SIDE_EFFECTS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
-
-function maxWorkflowRisk(left: WorkflowRiskProfile, right: WorkflowRiskProfile): WorkflowRiskProfile {
-  return riskRank(left) >= riskRank(right) ? left : right;
-}
-
-function mergeWorkflowSideEffectSummaries(
-  base: WorkflowSideEffectSummary,
-  observed: WorkflowSideEffectSummary,
-): WorkflowSideEffectSummary {
-  return {
-    safe: base.safe + observed.safe,
-    idempotent: base.idempotent + observed.idempotent,
-    dangerous: base.dangerous + observed.dangerous,
-    unknown: base.unknown + observed.unknown,
-  };
-}
-
-function addRuntimeSideEffectObservation(
-  evidence: RuntimeSideEffectEvidence,
-  observation: RuntimeSideEffectObservation,
-): void {
-  evidence.observations.push(observation);
-  evidence.summary[observation.category] += 1;
-  evidence.risk = maxWorkflowRisk(evidence.risk, observation.category);
-}
-
-function normalizedHttpMethod(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toUpperCase() : '';
-}
-
-function collectRuntimeSideEffectEvidence(
-  runs: WorkflowDebugRun[],
-  options: { disabledNodeIds?: ReadonlySet<string> } = {},
-): RuntimeSideEffectEvidence {
-  const evidence: RuntimeSideEffectEvidence = {
-    risk: 'safe',
-    summary: createEmptyWorkflowSideEffectSummary(),
-    observations: [],
-  };
-
-  for (const run of runs) {
-    for (const event of run.events) {
-      const nodeId = typeof event.nodeId === 'string' && event.nodeId.trim() ? event.nodeId.trim() : undefined;
-      if (nodeId && options.disabledNodeIds?.has(nodeId)) {
-        continue;
-      }
-      if (event.type === 'network.observed') {
-        const method = normalizedHttpMethod(event.method);
-        const resourceType = typeof event.resourceType === 'string' ? event.resourceType : undefined;
-        const url = typeof event.url === 'string' ? event.url : undefined;
-        if (method && !HTTP_METHODS_WITHOUT_REQUEST_BODY_SIDE_EFFECTS.has(method)) {
-          addRuntimeSideEffectObservation(evidence, {
-            runId: run.id,
-            eventType: 'network.observed',
-            category: 'dangerous',
-            reason: `Observed mutating network request method ${method}`,
-            ...(nodeId ? { nodeId } : {}),
-            method,
-            ...(resourceType ? { resourceType } : {}),
-            ...(url ? { url: redactUrl(url) } : {}),
-          });
-          continue;
-        }
-        if (resourceType === 'websocket' || resourceType === 'eventsource') {
-          addRuntimeSideEffectObservation(evidence, {
-            runId: run.id,
-            eventType: 'network.observed',
-            category: 'unknown',
-            reason: `Observed long-lived ${resourceType} network activity`,
-            ...(nodeId ? { nodeId } : {}),
-            ...(method ? { method } : {}),
-            resourceType,
-            ...(url ? { url: redactUrl(url) } : {}),
-          });
-        }
-        continue;
-      }
-
-      if (event.type === 'navigation.observed' && event.status === 'completed') {
-        const beforeUrl = typeof event.beforeUrl === 'string' ? event.beforeUrl : '';
-        const afterUrl = typeof event.afterUrl === 'string' ? event.afterUrl : '';
-        if (!beforeUrl || !afterUrl || beforeUrl === afterUrl) {
-          continue;
-        }
-        try {
-          const before = new URL(beforeUrl);
-          const after = new URL(afterUrl);
-          if (before.origin !== after.origin) {
-            addRuntimeSideEffectObservation(evidence, {
-              runId: run.id,
-              eventType: 'navigation.observed',
-              category: 'unknown',
-              reason: 'Observed cross-origin navigation during workflow replay',
-              ...(nodeId ? { nodeId } : {}),
-              beforeUrl: redactUrl(beforeUrl),
-              afterUrl: redactUrl(afterUrl),
-            });
-          }
-        } catch {
-          addRuntimeSideEffectObservation(evidence, {
-            runId: run.id,
-            eventType: 'navigation.observed',
-            category: 'unknown',
-            reason: 'Observed navigation with unparseable URL evidence',
-            ...(nodeId ? { nodeId } : {}),
-            beforeUrl: redactUrl(beforeUrl),
-            afterUrl: redactUrl(afterUrl),
-          });
-        }
-      }
-    }
-  }
-
-  return {
-    ...evidence,
-    observations: evidence.observations.slice(0, 20),
-  };
-}
-
-function riskRank(risk: WorkflowRiskProfile): number {
-  switch (risk) {
-    case 'safe':
-      return 0;
-    case 'idempotent':
-      return 1;
-    case 'dangerous':
-      return 2;
-    case 'unknown':
-      return 3;
-  }
-}
-
-function getNodeWorkflowRisk(node: FlowV3['nodes'][number]): WorkflowRiskProfile {
-  if (!isKnownWorkflowSideEffectKind(node.kind)) {
-    return 'unknown';
-  }
-  const profile = getNodeSideEffectProfile(node);
-  return profile.category;
-}
-
-function buildRuntimeNodeRiskMap(evidence: RuntimeSideEffectEvidence): Map<string, WorkflowRiskProfile> {
-  const risks = new Map<string, WorkflowRiskProfile>();
-  for (const observation of evidence.observations) {
-    if (!observation.nodeId) {
-      continue;
-    }
-    const previous = risks.get(observation.nodeId) ?? 'safe';
-    risks.set(observation.nodeId, maxWorkflowRisk(previous, observation.category));
-  }
-  return risks;
-}
-
-function getSegmentBoundaryRisk(
-  node: FlowV3['nodes'][number],
-  runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
-  nodeRiskOverrides: ReadonlyMap<string, WorkflowRiskProfile>,
-): { risk: WorkflowRiskProfile; source: WorkflowSegmentBoundarySource } {
-  const overrideRisk = nodeRiskOverrides.get(String(node.id));
-  const staticRisk = overrideRisk ?? getNodeWorkflowRisk(node);
-  const staticSource: WorkflowSegmentBoundarySource = overrideRisk ? 'override' : 'static';
-  const runtimeRisk = runtimeNodeRisks.get(String(node.id));
-  if (runtimeRisk && riskRank(runtimeRisk) > riskRank(staticRisk)) {
-    return { risk: runtimeRisk, source: 'runtime' };
-  }
-  return { risk: staticRisk, source: staticSource };
-}
-
-function isRiskBoundary(
-  node: FlowV3['nodes'][number],
-  runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
-  nodeRiskOverrides: ReadonlyMap<string, WorkflowRiskProfile>,
-): boolean {
-  const { risk } = getSegmentBoundaryRisk(node, runtimeNodeRisks, nodeRiskOverrides);
-  return risk === 'dangerous' || risk === 'unknown';
-}
-
-function findNodeByPublicId(flow: FlowV3, nodeId: string): FlowV3['nodes'][number] | undefined {
-  return (Array.isArray(flow.nodes) ? flow.nodes : []).find((node) => String(node.id) === nodeId);
-}
-
-function findUniqueFirstRiskBoundary(
-  flow: FlowV3,
-  runtimeNodeRisks: Map<string, WorkflowRiskProfile>,
-  nodeRiskOverrides: ReadonlyMap<string, WorkflowRiskProfile>,
-): { node?: FlowV3['nodes'][number]; ambiguousNodeIds?: string[] } {
-  const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
-  const nodeById = new Map(nodes.map((node) => [String(node.id), node]));
-  const queue: string[] = [String(flow.entryNodeId)];
-  const visited = new Set<string>();
-  const boundaryNodeIds = new Set<string>();
-
-  while (queue.length > 0) {
-    const nodeId = queue.shift();
-    if (!nodeId || visited.has(nodeId)) {
-      continue;
-    }
-    visited.add(nodeId);
-    const node = nodeById.get(nodeId);
-    if (!node) {
-      continue;
-    }
-    if (node.disabled !== true && isRiskBoundary(node, runtimeNodeRisks, nodeRiskOverrides)) {
-      boundaryNodeIds.add(nodeId);
-      continue;
-    }
-    for (const edge of Array.isArray(flow.edges) ? flow.edges : []) {
-      if (String(edge.from) === nodeId && !visited.has(String(edge.to))) {
-        queue.push(String(edge.to));
-      }
-    }
-  }
-
-  if (boundaryNodeIds.size === 1) {
-    const [nodeId] = boundaryNodeIds;
-    return { node: nodeById.get(nodeId) };
-  }
-  if (boundaryNodeIds.size > 1) {
-    return { ambiguousNodeIds: Array.from(boundaryNodeIds).sort() };
-  }
-  return {};
-}
-
-function buildWorkflowSegmentPlan(
-  flow: FlowV3,
-  args: any,
-  runtimeEvidence: RuntimeSideEffectEvidence,
-  nodeRiskOverrides: ReadonlyMap<string, WorkflowRiskProfile> = new Map(),
-): WorkflowSegmentPlan {
-  const segments = isRecord(args?.safety?.segments) ? args.safety.segments : {};
-  if (segments.mode === 'explicit') {
-    const stopBeforeNodeId =
-      typeof segments.stopBeforeNodeId === 'string' && segments.stopBeforeNodeId.trim()
-        ? segments.stopBeforeNodeId.trim()
-        : undefined;
-    const endNodeId =
-      typeof segments.endNodeId === 'string' && segments.endNodeId.trim()
-        ? segments.endNodeId.trim()
-        : undefined;
-    return {
-      mode: 'explicit',
-      ...(stopBeforeNodeId ? { stopBeforeNodeId } : {}),
-      ...(endNodeId ? { endNodeId } : {}),
-    };
-  }
-
-  if (segments.mode !== 'stopBeforeDangerous') {
-    return { mode: 'none' };
-  }
-
-  const runtimeNodeRisks = buildRuntimeNodeRiskMap(runtimeEvidence);
-  const boundaryResult = findUniqueFirstRiskBoundary(flow, runtimeNodeRisks, nodeRiskOverrides);
-  const boundaryNode = boundaryResult.node;
-  if (!boundaryNode) {
-    return {
-      mode: 'stopBeforeDangerous',
-      ...(boundaryResult.ambiguousNodeIds
-        ? { ambiguousBoundaryNodeIds: boundaryResult.ambiguousNodeIds }
-        : {}),
-    };
-  }
-
-  const boundary = getSegmentBoundaryRisk(boundaryNode, runtimeNodeRisks, nodeRiskOverrides);
-  return {
-    mode: 'stopBeforeDangerous',
-    stopBeforeNodeId: String(boundaryNode.id),
-    autoBoundary: true,
-    boundaryNodeId: String(boundaryNode.id),
-    boundaryKind: boundaryNode.kind,
-    boundaryRisk: boundary.risk,
-    boundarySource: boundary.source,
-  };
-}
-
-function hasSegmentBoundary(plan: WorkflowSegmentPlan): boolean {
-  return Boolean(plan.stopBeforeNodeId || plan.endNodeId);
-}
-
-function isBoundaryStoppedStatus(status: string): boolean {
-  return status === 'stopped' || status === 'stopped_at_boundary';
 }
 
 function normalizeExecutionMode(value: unknown): 'auto' | 'analyzeOnly' | 'sandboxReplay' | 'userApprovedReplay' {
@@ -1743,14 +1384,6 @@ function isVariableReference(value: string): string | null {
 function isSensitiveKey(key: string): boolean {
   const normalized = key.trim().toLowerCase();
   return SENSITIVE_DEBUG_CONFIG_KEYS.has(normalized) || isSensitiveKeyName(normalized);
-}
-
-function redactUrl(value: string): string {
-  const credentialRedacted = value.replace(/^(https?:\/\/)([^/?#@]+)@/i, `$1${REDACTED}@`);
-  return credentialRedacted.replace(
-    /([?&][^=&]*(?:authorization|auth|bearer|cookie|key|password|secret|session|token)[^=&]*=)[^&#]*/gi,
-    `$1${REDACTED}`,
-  );
 }
 
 function sanitizeDebugValue(
