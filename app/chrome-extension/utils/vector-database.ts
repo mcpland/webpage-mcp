@@ -23,6 +23,11 @@ export interface SearchResult {
   distance: number;
 }
 
+export interface VectorPageDocumentInput {
+  chunk: TextChunk;
+  embedding: Float32Array;
+}
+
 export interface VectorDatabaseConfig {
   dimension: number;
   maxElements: number;
@@ -1620,12 +1625,150 @@ export class VectorDatabase {
     );
   }
 
+  /**
+   * Add and publish one complete page with a single index/mapping commit.
+   * Caller-owned chunks and embeddings are snapshotted before initialization
+   * or mutation-queue waits.
+   */
+  public async addTabPage(
+    tabId: number,
+    url: string,
+    title: string,
+    inputs: readonly VectorPageDocumentInput[],
+  ): Promise<number[]> {
+    const snapshots = Array.from(inputs, ({ chunk, embedding }) => ({
+      chunk: { ...chunk },
+      embedding: new Float32Array(embedding),
+    }));
+    if (!this.isInitialized) await this.initialize();
+    return this.enqueueMutation(() =>
+      this.addTabPageInternal(tabId, url, title, snapshots),
+    );
+  }
+
+  private async addTabPageInternal(
+    tabId: number,
+    url: string,
+    title: string,
+    inputs: readonly VectorPageDocumentInput[],
+  ): Promise<number[]> {
+    this.assertSafeMutationState();
+    if (
+      !isNonNegativeSafeInteger(tabId) ||
+      typeof url !== "string" ||
+      typeof title !== "string" ||
+      inputs.length === 0 ||
+      inputs.length > this.config.maxElements
+    ) {
+      throw new Error("A non-empty, valid vector page is required");
+    }
+    if (this.tabDocuments.has(tabId) || this.completedTabPages.has(tabId)) {
+      throw new Error(
+        `Cannot batch-add vector page for non-empty tab ${tabId}`,
+      );
+    }
+
+    for (const { chunk, embedding } of inputs) {
+      if (
+        typeof chunk.text !== "string" ||
+        typeof chunk.source !== "string" ||
+        !isNonNegativeSafeInteger(chunk.index) ||
+        !isNonNegativeSafeInteger(chunk.wordCount) ||
+        embedding.length !== this.config.dimension
+      ) {
+        throw new Error("Vector page contains invalid document data");
+      }
+      for (const value of embedding) {
+        if (!Number.isFinite(value)) {
+          throw new Error("Vector page contains an invalid embedding");
+        }
+      }
+    }
+
+    const physicalCount = this.inspectHnswActiveLabels().usedLabels.size;
+    if (physicalCount + inputs.length > this.config.maxElements) {
+      throw new VectorCompactionRequiredError(
+        physicalCount,
+        this.config.maxElements,
+      );
+    }
+
+    const labels: number[] = [];
+    try {
+      for (const { chunk, embedding } of inputs) {
+        labels.push(
+          await this.addDocumentInternal(tabId, url, title, chunk, embedding, {
+            capacityPreflighted: true,
+            persistChanges: false,
+            verifyInvariant: false,
+          }),
+        );
+      }
+
+      const invariantFailure = this.activeLabelInvariantFailure(
+        this.documents.keys(),
+        this.nextLabel,
+      );
+      if (invariantFailure) {
+        const invariantError = new Error(
+          `Vector page add violated the active-label invariant: ${invariantFailure}`,
+        );
+        await this.replaceUnsafePersistedIndexWithEmpty(invariantError.message);
+        throw invariantError;
+      }
+
+      const completion: PersistedTabPageCompletion = {
+        pageKey: `${url}\u0000${title}`,
+        url,
+        title,
+        labels: [...labels],
+        expectedCount: labels.length,
+      };
+      const candidateCompletions = new Map(this.completedTabPages);
+      candidateCompletions.set(tabId, completion);
+
+      await this.saveIndex();
+      const revision = await this.saveDocumentMappings(candidateCompletions);
+      await this.verifyTabPageCompletionInPersistedMappings(
+        tabId,
+        completion,
+        revision,
+      );
+      this.completedTabPages.set(tabId, completion);
+      return [...labels];
+    } catch (error) {
+      this.completedTabPages.delete(tabId);
+      if (error instanceof HnswIndexPersistenceUncertainError) {
+        const failure = cleanupError(
+          "persist batched vector page index with unknown outcome",
+          error,
+        );
+        this.unsafeMutationState = failure;
+        this.unsafeIndexPersistenceOutcome = true;
+        throw failure;
+      }
+      if (this.unsafeMutationState || this.unsafeIndexPersistenceOutcome) {
+        throw error;
+      }
+      const ownedLabels = labels.filter((label) => this.documents.has(label));
+      if (ownedLabels.length > 0) {
+        await this.rollbackAddedDocuments(ownedLabels, tabId, error);
+      }
+      throw error;
+    }
+  }
+
   private async addDocumentInternal(
     tabId: number,
     url: string,
     title: string,
     chunk: TextChunk,
     embedding: Float32Array,
+    options: {
+      capacityPreflighted?: boolean;
+      persistChanges?: boolean;
+      verifyInvariant?: boolean;
+    } = {},
   ): Promise<number> {
     this.assertSafeMutationState();
     const documentId = this.generateDocumentId(tabId, chunk.index);
@@ -1665,12 +1808,14 @@ export class VectorDatabase {
       // HNSW capacity is physical: tombstoned labels still occupy slots until
       // a durable rebuild. Refuse the mutation before reserving a label,
       // crossing addPoint, or writing either persistence backend.
-      const physicalCount = this.inspectHnswActiveLabels().usedLabels.size;
-      if (physicalCount + 1 > this.config.maxElements) {
-        throw new VectorCompactionRequiredError(
-          physicalCount,
-          this.config.maxElements,
-        );
+      if (!options.capacityPreflighted) {
+        const physicalCount = this.inspectHnswActiveLabels().usedLabels.size;
+        if (physicalCount + 1 > this.config.maxElements) {
+          throw new VectorCompactionRequiredError(
+            physicalCount,
+            this.config.maxElements,
+          );
+        }
       }
 
       const cleanEmbedding = new Float32Array(embedding);
@@ -1754,14 +1899,18 @@ export class VectorDatabase {
       // the exact final label set.
       this.completedTabPages.delete(tabId);
 
-      // Save index and mappings
-      await this.saveIndex();
-      await this.saveDocumentMappings();
+      if (options.persistChanges !== false) {
+        await this.saveIndex();
+        await this.saveDocumentMappings();
+      }
 
-      const invariantFailure = this.activeLabelInvariantFailure(
-        this.documents.keys(),
-        this.nextLabel,
-      );
+      const invariantFailure =
+        options.verifyInvariant === false
+          ? null
+          : this.activeLabelInvariantFailure(
+              this.documents.keys(),
+              this.nextLabel,
+            );
       if (invariantFailure) {
         // Recovery now owns the whole derived index. Do not run the ordinary
         // single-label rollback against the replacement index in the catch
@@ -1981,6 +2130,77 @@ export class VectorDatabase {
             resetError,
           ],
           `Vector add for label ${label} failed and its unsafe rollback state could not be reset`,
+        );
+        this.unsafeMutationState = failure;
+        throw failure;
+      }
+    }
+  }
+
+  private async rollbackAddedDocuments(
+    labels: readonly number[],
+    tabId: number,
+    originalError: unknown,
+  ): Promise<void> {
+    const rollbackFailures: Error[] = [];
+    for (const label of [...labels].reverse()) {
+      if (!this.documents.has(label)) continue;
+      this.removeLabelFromMappings(label, tabId);
+      try {
+        this.index.markDelete(label);
+      } catch (error) {
+        rollbackFailures.push(
+          cleanupError(`mark batched vector ${label} deleted`, error),
+        );
+      }
+    }
+
+    try {
+      await this.saveIndex();
+    } catch (error) {
+      if (error instanceof HnswIndexPersistenceUncertainError) {
+        this.unsafeIndexPersistenceOutcome = true;
+      }
+      rollbackFailures.push(
+        cleanupError("persist rolled-back vector page index", error),
+      );
+    }
+    try {
+      await this.saveDocumentMappings();
+    } catch (error) {
+      rollbackFailures.push(
+        cleanupError("persist rolled-back vector page mappings", error),
+      );
+    }
+
+    if (rollbackFailures.length > 0) {
+      const failure = new AggregateError(
+        [
+          cleanupError("original vector page add failure", originalError),
+          ...rollbackFailures,
+        ],
+        `Vector page for tab ${tabId} failed and rollback did not complete`,
+      );
+      this.unsafeMutationState = failure;
+      throw failure;
+    }
+
+    const invariantFailure = this.activeLabelInvariantFailure(
+      this.documents.keys(),
+      this.nextLabel,
+    );
+    if (invariantFailure) {
+      try {
+        await this.replaceUnsafePersistedIndexWithEmpty(
+          `vector page rollback left an unsafe active-label state: ${invariantFailure}`,
+        );
+      } catch (resetError) {
+        const failure = new AggregateError(
+          [
+            cleanupError("original vector page add failure", originalError),
+            resetError,
+          ],
+          `Vector page for tab ${tabId} failed and its unsafe rollback state could not be reset`,
         );
         this.unsafeMutationState = failure;
         throw failure;

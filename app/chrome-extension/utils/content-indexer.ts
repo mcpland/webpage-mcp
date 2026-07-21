@@ -9,8 +9,9 @@ import {
   VectorCompactionRequiredError,
   getGlobalVectorDatabase,
   resetGlobalVectorDatabase,
-  type VectorCompactionResult,
   type SearchResult,
+  type VectorCompactionResult,
+  type VectorPageDocumentInput,
 } from "./vector-database";
 import {
   SemanticSimilarityEngine,
@@ -1398,26 +1399,24 @@ export class ContentIndexer {
         }
 
         try {
+          const pageDocuments: VectorPageDocumentInput[] = [];
           for (const chunk of chunksToIndex) {
             const embedding = await this.semanticEngine.getEmbedding(
               chunk.text,
             );
-            const label = await this.vectorDatabase.addDocument(
-              tabId,
-              tab.url!,
-              tab.title || "",
-              chunk,
-              embedding,
-            );
-            console.log(
-              `ContentIndexer: Indexed chunk ${chunk.index} with label ${label}`,
-            );
+            pageDocuments.push({ chunk, embedding });
           }
-          await this.vectorDatabase.commitTabPage(
+          const labels = await this.vectorDatabase.addTabPage(
             tabId,
             tab.url!,
             tab.title || "",
+            pageDocuments,
           );
+          for (let index = 0; index < labels.length; index += 1) {
+            console.log(
+              `ContentIndexer: Indexed chunk ${chunksToIndex[index]?.index} with label ${labels[index]}`,
+            );
+          }
         } catch (error) {
           this.indexedPageByTab.delete(tabId);
           this.tabsRequiringDurableRemoval.add(tabId);

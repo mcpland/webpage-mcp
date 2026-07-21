@@ -617,7 +617,130 @@ async function addCompletedVectorPage(
   await database.commitTabPage(tabId, url, title);
 }
 
+function vectorPageInputs(count: number) {
+  return Array.from({ length: count }, (_entry, index) => ({
+    chunk: {
+      text: `chunk ${index}`,
+      source: "content",
+      index,
+      wordCount: 2,
+    },
+    embedding: new Float32Array([1, index, 1]),
+  }));
+}
+
 describe("vector database cleanup", () => {
+  it("persists a complete multi-chunk page with one index and mapping commit", async () => {
+    const indexFileName = `batched-page-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    const writesBefore = hnswMocks.writeCalls.length;
+
+    await expect(
+      database.addTabPage(
+        7,
+        "https://example.test/batched",
+        "Batched",
+        vectorPageInputs(3),
+      ),
+    ).resolves.toEqual([0, 1, 2]);
+
+    expect(hnswMocks.writeCalls).toHaveLength(writesBefore + 1);
+    expect(hnswMocks.addPointCalls.map(({ label }) => label)).toEqual([
+      0, 1, 2,
+    ]);
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      revision: 1,
+      documents: [
+        [0, expect.any(Object)],
+        [1, expect.any(Object)],
+        [2, expect.any(Object)],
+      ],
+      tabDocuments: [[7, [0, 1, 2]]],
+      completedTabPages: [
+        [
+          7,
+          {
+            pageKey: "https://example.test/batched\u0000Batched",
+            labels: [0, 1, 2],
+            expectedCount: 3,
+          },
+        ],
+      ],
+      nextLabel: 3,
+    });
+    await expect(database.inspectTabPageCompletion(7)).resolves.toMatchObject({
+      state: "complete",
+      page: { expectedCount: 3 },
+    });
+  });
+
+  it("rolls back every batched label when the page mapping commit fails", async () => {
+    const indexFileName = `batched-page-rollback-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({ dimension: 3, indexFileName });
+    await database.initialize();
+    const transactionSpy = await abortNextVectorMappingWrite();
+    const statefulSet = chrome.storage.local.set;
+    let rejectFallbackOnce = true;
+    chrome.storage.local.set = vi.fn(async (values) => {
+      if (rejectFallbackOnce) {
+        rejectFallbackOnce = false;
+        throw new Error("batched mapping fallback failed");
+      }
+      await statefulSet(values);
+    }) as typeof chrome.storage.local.set;
+
+    try {
+      await expect(
+        database.addTabPage(
+          7,
+          "https://example.test/rollback",
+          "Rollback",
+          vectorPageInputs(2),
+        ),
+      ).rejects.toThrow("Failed to save vector mappings");
+    } finally {
+      transactionSpy.mockRestore();
+    }
+
+    expect(hnswMocks.writeCalls).toHaveLength(2);
+    expect(hnswMocks.deletedLabels).toEqual([1, 0]);
+    await expect(getVectorMappingRecord(indexFileName)).resolves.toMatchObject({
+      revision: 2,
+      documents: [],
+      tabDocuments: [],
+      completedTabPages: [],
+      nextLabel: 2,
+    });
+    await expect(database.inspectTabPageCompletion(7)).resolves.toEqual({
+      state: "absent",
+    });
+  });
+
+  it("rejects a page larger than the configured index before mutation", async () => {
+    const indexFileName = `batched-page-capacity-${crypto.randomUUID()}.dat`;
+    useStatefulChromeStorage();
+    const database = new VectorDatabase({
+      dimension: 3,
+      indexFileName,
+      maxElements: 1,
+    });
+    await database.initialize();
+
+    await expect(
+      database.addTabPage(
+        7,
+        "https://example.test/capacity",
+        "Capacity",
+        vectorPageInputs(2),
+      ),
+    ).rejects.toThrow("A non-empty, valid vector page is required");
+    expect(hnswMocks.addPointCalls).toHaveLength(0);
+    expect(hnswMocks.writeCalls).toHaveLength(0);
+  });
+
   it.each([1, 2, 3, 4])(
     "compacts maxElements=%i to deterministic headroom before retrying an add",
     async (maxElements) => {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   addDocument: vi.fn(),
+  addTabPage: vi.fn(),
   chunkText: vi.fn(),
   clearAllVectorData: vi.fn(),
   clearVectorDatabase: vi.fn(),
@@ -134,6 +135,7 @@ describe("ContentIndexer tab/page lifecycle", () => {
   const pagesByTab = new Map<number, TestPage>();
   const vectorDatabase = {
     addDocument: mocks.addDocument,
+    addTabPage: mocks.addTabPage,
     clear: mocks.clearVectorDatabase,
     compactForPendingAdd: mocks.compactVectorIndex,
     commitTabPage: mocks.commitTabPage,
@@ -158,6 +160,23 @@ describe("ContentIndexer tab/page lifecycle", () => {
     mocks.engineConfigs.length = 0;
 
     mocks.addDocument.mockResolvedValue(1);
+    mocks.addTabPage.mockImplementation(
+      async (
+        tabId: number,
+        url: string,
+        title: string,
+        inputs: Array<{ chunk: unknown; embedding: Float32Array }>,
+      ) => {
+        const labels: number[] = [];
+        for (const { chunk, embedding } of inputs) {
+          labels.push(
+            await mocks.addDocument(tabId, url, title, chunk, embedding),
+          );
+        }
+        await mocks.commitTabPage(tabId, url, title);
+        return labels;
+      },
+    );
     mocks.chunkText.mockReturnValue([
       { text: "page content", source: "content", index: 0, wordCount: 2 },
     ]);
@@ -990,6 +1009,22 @@ describe("ContentIndexer tab/page lifecycle", () => {
 
     await expect(indexer.indexTabContent(4)).resolves.toBeUndefined();
     expect(mocks.addDocument).toHaveBeenCalledTimes(2);
+    expect(mocks.addTabPage).toHaveBeenCalledOnce();
+    expect(mocks.addTabPage).toHaveBeenCalledWith(
+      4,
+      "https://example.test/embedding-retry",
+      "Embedding retry",
+      [
+        expect.objectContaining({
+          chunk: expect.objectContaining({ index: 0 }),
+          embedding: expect.any(Float32Array),
+        }),
+        expect.objectContaining({
+          chunk: expect.objectContaining({ index: 1 }),
+          embedding: expect.any(Float32Array),
+        }),
+      ],
+    );
     expect(indexer.getStats().indexedPages).toBe(1);
   });
 
