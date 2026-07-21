@@ -41,6 +41,7 @@ export function serializeJavaScriptEvaluation(
     const MAX_KEY_LENGTH = 512;
     const MAX_VISITED_VALUES = 4096;
     const MAX_CHUNK_CHARS = 4096;
+    const MAX_ENUMERATION_DURATION_MS = 100;
     const MAX_SERIALIZABLE_BIGINT = 10n ** 4096n;
 
     const requestedInteger =
@@ -549,6 +550,29 @@ export function serializeJavaScriptEvaluation(
     let truncated = false;
     let byteTruncated = false;
     let stopped = false;
+    let enumerationDeadline = 0;
+    try {
+      const startedAt = Date.now();
+      if (typeof startedAt === "number" && startedAt === startedAt) {
+        enumerationDeadline = startedAt + MAX_ENUMERATION_DURATION_MS;
+      }
+    } catch {
+      // The count ceilings remain authoritative if the page poisons Date.now.
+    }
+
+    const enumerationDeadlineExceeded = (): boolean => {
+      if (enumerationDeadline === 0) return false;
+      try {
+        const current = Date.now();
+        return (
+          typeof current !== "number" ||
+          current !== current ||
+          current > enumerationDeadline
+        );
+      } catch {
+        return true;
+      }
+    };
 
     const pushChunk = (value: string): void => {
       if (!value) return;
@@ -912,6 +936,13 @@ export function serializeJavaScriptEvaluation(
       try {
         for (const rawKey in objectValue) {
           if (nodeLimitReached) break;
+          if (inspected >= MAX_OBJECT_KEYS || enumerationDeadlineExceeded()) {
+            hasMoreKeys = true;
+            break;
+          }
+          // Inherited enumerable keys still consume traversal work even though
+          // only own properties are emitted.
+          inspected += 1;
           let isOwn = false;
           try {
             isOwn =
@@ -922,11 +953,6 @@ export function serializeJavaScriptEvaluation(
             break;
           }
           if (!isOwn) continue;
-          if (inspected >= MAX_OBJECT_KEYS) {
-            hasMoreKeys = true;
-            break;
-          }
-          inspected += 1;
 
           const longKey = rawKey.length > MAX_KEY_LENGTH;
           const sensitiveKey = longKey || isSensitiveKey(rawKey);

@@ -172,6 +172,35 @@ describe("bounded JavaScript page serializer", () => {
     expect(result.truncated).toBe(true);
   });
 
+  it("charges inherited enumerable keys to the object traversal budget", () => {
+    const prototype: Record<string, unknown> = {};
+    for (let index = 0; index < 1_000; index += 1) {
+      prototype[`inherited${index}`] = index;
+    }
+    const result = serialize(Object.create(prototype), 100_000);
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(JSON.parse(result.text)).toEqual({ __truncated__: true });
+    expect(result.truncated).toBe(true);
+  });
+
+  it("stops object enumeration when its wall-clock budget expires", () => {
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValueOnce(1_000).mockReturnValue(1_101);
+    let result: ReturnType<typeof serialize>;
+    try {
+      result = serialize({ value: 1 }, 100_000);
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(JSON.parse(result.text)).toEqual({ __truncated__: true });
+    expect(result.truncated).toBe(true);
+  });
+
   it("enforces a global visited-value budget across a broad nested graph", () => {
     const value = Array.from({ length: 100 }, () =>
       Array.from({ length: 100 }, () => 0),
