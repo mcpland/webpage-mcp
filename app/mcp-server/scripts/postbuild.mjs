@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { verifyMcpBundleMetafile } from '../../../scripts/mcp-bundle-components.mjs';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -34,6 +36,13 @@ function chmodIfExists(filePath, mode) {
 if (!fs.existsSync(distDir)) {
   throw new Error(`dist directory not found: ${distDir}`);
 }
+
+const bundleMetafile = path.join(distDir, 'metafile-cjs.json');
+const bundleVerification = verifyMcpBundleMetafile({
+  projectRoot,
+  metafilePath: bundleMetafile,
+});
+fs.rmSync(bundleMetafile);
 
 fs.mkdirSync(path.join(distDir, 'logs'), { recursive: true });
 
@@ -75,4 +84,6 @@ chmodIfExists(path.join(distDir, 'run_host.sh'), 0o755);
 
 fs.writeFileSync(path.join(distDir, 'node_path.txt'), process.execPath, 'utf8');
 
-console.log('Postbuild completed');
+console.log(
+  `Postbuild completed; verified ${bundleVerification.components.size} bundled dependency components`,
+);

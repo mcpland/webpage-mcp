@@ -31,5 +31,9 @@ describe('build pipeline', () => {
 
     expect((transpileBuild as { clean?: boolean }).clean).toBe(true);
     expect((bundleBuild as { clean?: boolean }).clean).toBe(false);
+    expect((bundleBuild as { metafile?: boolean }).metafile).toBe(true);
+    expect((bundleBuild as { noExternal?: string[] }).noExternal).toContain(
+      '@modelcontextprotocol/sdk',
+    );
   });
 });

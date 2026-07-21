@@ -33,10 +33,17 @@ jobs:
         with:
           node-version: 24
 
-      # Both scanners read committed lockfiles. Avoid installing or executing
-      # dependency lifecycle code in this advisory-only workflow.
+      # Resolve metadata without installing or executing dependency lifecycle
+      # code, then scan both committed dependency closures.
       - name: Audit production npm dependencies
         run: pnpm audit --prod
+
+      - name: Audit published MCP dependency closure
+        run: |
+          pnpm shrinkwrap:mcp:check
+          pnpm shrinkwrap:mcp:check-current
+          npm audit --omit=dev --package-lock-only --prefix app/mcp-server --audit-level=low
+          pnpm audit:mcp-bundle
 
       - name: Install pinned Rust toolchain
         run: |

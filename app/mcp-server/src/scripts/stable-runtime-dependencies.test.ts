@@ -189,9 +189,17 @@ describe("stable runtime dependencies", () => {
           ".": "./index.cjs",
           "./sqlite-core": "./sqlite-core.cjs",
         },
+        dependencies: {
+          "runtime-hoisted": "1.0.0",
+          "runtime-leaf": "2.0.0",
+        },
       },
       {
-        "index.cjs": "module.exports = {};\n",
+        "index.cjs": [
+          'exports.hoisted = require("runtime-hoisted");',
+          'exports.leaf = require("runtime-leaf");',
+          "",
+        ].join("\n"),
         "sqlite-core.cjs": "module.exports = {};\n",
       },
     );
@@ -217,18 +225,15 @@ describe("stable runtime dependencies", () => {
     );
     await writeFixturePackage(
       sourceNodeModulesDir,
-      "@modelcontextprotocol/sdk",
-      {
-        exports: { "./server/index.js": "./server/index.js" },
-        dependencies: { "runtime-leaf": "1.0.0" },
-      },
-      { "server/index.js": 'module.exports = require("runtime-leaf");\n' },
+      "runtime-hoisted",
+      {},
+      { "index.js": 'module.exports = "hoisted";\n' },
     );
     await writeFixturePackage(
       sourceNodeModulesDir,
       "runtime-leaf",
-      {},
-      { "index.js": 'module.exports = "hoisted";\n' },
+      { version: "2.0.0" },
+      { "index.js": 'module.exports = "drizzle";\n' },
     );
 
     const concurrentInstalls = await Promise.all([
@@ -252,9 +257,13 @@ describe("stable runtime dependencies", () => {
       leaf: string;
     };
     expect(BetterSqlite3.leaf).toBe("nested");
-    expect(runtimeRequire("@modelcontextprotocol/sdk/server/index.js")).toBe(
-      "hoisted",
-    );
+    const Drizzle = runtimeRequire("drizzle-orm") as {
+      hoisted: string;
+      leaf: string;
+    };
+    expect(Drizzle.hoisted).toBe("hoisted");
+    expect(Drizzle.leaf).toBe("drizzle");
+    expect(runtimeRequire("runtime-hoisted")).toBe("hoisted");
     for (const moduleId of RUNTIME_REQUIRED_MODULE_IDS) {
       expect(
         isPathInside(

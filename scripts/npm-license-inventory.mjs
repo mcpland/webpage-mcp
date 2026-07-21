@@ -10,6 +10,12 @@ import { clearTimeout, setTimeout } from "node:timers";
 import { URL } from "node:url";
 import { gunzipSync } from "node:zlib";
 
+import {
+  MCP_NPM_SHRINKWRAP_SCOPE,
+  verifyMcpNpmShrinkwrap,
+} from "./mcp-npm-shrinkwrap.mjs";
+import { loadMcpBundleComponents } from "./mcp-bundle-components.mjs";
+
 export const NPM_INVENTORY_ARTIFACTS = Object.freeze({
   mcp: Object.freeze({
     rootPackage: "webpage-mcp",
@@ -27,6 +33,10 @@ export const NPM_INVENTORY_ARTIFACTS = Object.freeze({
 
 export const INVENTORY_SCHEMA_VERSION = 1;
 export const INVENTORY_SCOPE = "pnpm-production-closure";
+
+function inventoryScopeForArtifact(artifactName) {
+  return artifactName === "mcp" ? MCP_NPM_SHRINKWRAP_SCOPE : INVENTORY_SCOPE;
+}
 
 const FIRST_PARTY_WORKSPACE_PACKAGES = new Set(["webpage-mcp-shared"]);
 const MAX_LOCKFILE_BYTES = 8 * 1024 * 1024;
@@ -473,7 +483,11 @@ export function formatPnpmListFailure(rootPackage, error, stderr) {
   return `[npm-license-inventory] pnpm list failed for ${rootPackage} (code=${code}, signal=${signal}, stderrBytes=${Buffer.byteLength(typeof stderr === "string" ? stderr : "")}; contents withheld)`;
 }
 
-async function executePnpmList(rootDir, rootPackage) {
+async function executePnpmList(
+  rootDir,
+  rootPackage,
+  { production = true } = {},
+) {
   const npmExecPath = process.env.npm_execpath;
   const command = npmExecPath ? process.execPath : "pnpm";
   const args = [
@@ -481,7 +495,7 @@ async function executePnpmList(rootDir, rootPackage) {
     "--filter",
     rootPackage,
     "list",
-    "--prod",
+    ...(production ? ["--prod"] : []),
     "--json",
     "--depth",
     "Infinity",
@@ -508,6 +522,98 @@ async function executePnpmList(rootDir, rootPackage) {
       },
     );
   });
+}
+
+function parseSelectedListComponents(source, artifactName, expected) {
+  if (
+    typeof source !== "string" ||
+    Buffer.byteLength(source) > MAX_LIST_OUTPUT_BYTES
+  ) {
+    fail(`${artifactName} complete pnpm list output exceeds its byte limit`);
+  }
+  let roots;
+  try {
+    roots = JSON.parse(source);
+  } catch {
+    fail(`${artifactName} complete pnpm list output is invalid JSON`);
+  }
+  const artifact = NPM_INVENTORY_ARTIFACTS[artifactName];
+  if (
+    !Array.isArray(roots) ||
+    roots.length !== 1 ||
+    !isRecord(roots[0]) ||
+    roots[0].name !== artifact.rootPackage
+  ) {
+    fail(`${artifactName} complete pnpm list has an invalid root`);
+  }
+  const components = new Map();
+  const stack = [];
+  const enqueue = (node) => {
+    for (const field of [
+      "dependencies",
+      "optionalDependencies",
+      "devDependencies",
+    ]) {
+      if (node[field] === undefined) continue;
+      if (!isRecord(node[field])) {
+        fail(`${artifactName} complete pnpm list ${field} must be an object`);
+      }
+      for (const entry of Object.entries(node[field])) stack.push(entry);
+    }
+  };
+  enqueue(roots[0]);
+  let visited = 0;
+  while (stack.length > 0) {
+    const [name, dependency] = stack.pop();
+    visited += 1;
+    if (visited > MAX_GRAPH_NODES || !isRecord(dependency)) {
+      fail(`${artifactName} complete pnpm list exceeds its graph budget`);
+    }
+    const version = dependency.version;
+    if (expected.get(name) === version) {
+      const resolved = assertShortString(
+        dependency.resolved,
+        `${artifactName} bundled ${name}@${version} resolved URL`,
+        4096,
+      );
+      validateRegistryUrl(
+        resolved,
+        name,
+        version,
+        `${artifactName} bundled ${name}@${version} resolved URL`,
+      );
+      const key = componentKey(name, version);
+      const existing = components.get(key);
+      const packagePath =
+        typeof dependency.path === "string" && dependency.path.length <= 8192
+          ? dependency.path
+          : undefined;
+      if (existing && existing.resolved !== resolved) {
+        fail(`${artifactName} bundled ${key} has conflicting archives`);
+      }
+      if (existing && packagePath) existing.paths.add(packagePath);
+      else if (!existing) {
+        components.set(key, {
+          name,
+          version,
+          resolved,
+          paths: new Set(packagePath ? [packagePath] : []),
+        });
+      }
+    }
+    enqueue(dependency);
+  }
+  const missing = [...expected].filter(
+    ([name, version]) => !components.has(componentKey(name, version)),
+  );
+  if (missing.length > 0) {
+    fail(
+      `${artifactName} bundled component install drifted: ${missing
+        .map(([name, version]) => componentKey(name, version))
+        .join(", ")}`,
+    );
+  }
+  return components;
 }
 
 function parseListOutput(source, artifactName) {
@@ -635,6 +741,36 @@ export async function collectProductionClosure({
 } = {}) {
   const artifact = NPM_INVENTORY_ARTIFACTS[artifactName];
   if (!artifact) fail(`unknown artifact: ${String(artifactName)}`);
+  if (artifactName === "mcp" && listOutput === undefined) {
+    const [closure, productionList, completeList] = await Promise.all([
+      verifyMcpNpmShrinkwrap({ rootDir }),
+      executePnpmList(rootDir, artifact.rootPackage),
+      executePnpmList(rootDir, artifact.rootPackage, { production: false }),
+    ]);
+    const installed = parseListOutput(productionList, artifactName);
+    for (const [key, component] of closure.components) {
+      const installedComponent = installed.components.get(key);
+      if (!installedComponent) continue;
+      for (const path of installedComponent.paths) component.paths.add(path);
+    }
+    const bundled = parseSelectedListComponents(
+      completeList,
+      artifactName,
+      loadMcpBundleComponents(rootDir),
+    );
+    for (const [key, component] of bundled) {
+      const existing = closure.components.get(key);
+      if (existing) {
+        if (existing.resolved !== component.resolved) {
+          fail(`${artifactName} ${key} differs between runtime and bundle`);
+        }
+        for (const path of component.paths) existing.paths.add(path);
+      } else {
+        closure.components.set(key, component);
+      }
+    }
+    return closure;
+  }
   const source =
     listOutput ?? (await executePnpmList(rootDir, artifact.rootPackage));
   return parseListOutput(source, artifactName);
@@ -1345,7 +1481,7 @@ function validateInventoryShape(raw, artifactName) {
   if (
     raw.artifact !== artifactName ||
     raw.importer !== artifact.importer ||
-    raw.scope !== INVENTORY_SCOPE
+    raw.scope !== inventoryScopeForArtifact(artifactName)
   ) {
     fail(`${artifactName} inventory identity or scope is incorrect`);
   }
@@ -1636,16 +1772,21 @@ export async function verifyReviewedInventory({
     artifactName,
     listOutput,
   });
-  const lockSource =
-    lockfileSource ??
-    (
-      await readBoundedFile(
-        resolve(rootDir, "pnpm-lock.yaml"),
-        MAX_LOCKFILE_BYTES,
-        "pnpm lockfile",
+  const needsPnpmIntegrities = [...closure.components.values()].some(
+    (component) => component.integrity === undefined,
+  );
+  const integrities = needsPnpmIntegrities
+    ? parsePnpmLockIntegrities(
+        lockfileSource ??
+          (
+            await readBoundedFile(
+              resolve(rootDir, "pnpm-lock.yaml"),
+              MAX_LOCKFILE_BYTES,
+              "pnpm lockfile",
+            )
+          ).toString("utf8"),
       )
-    ).toString("utf8");
-  const integrities = parsePnpmLockIntegrities(lockSource);
+    : new Map();
 
   const expectedKeys = new Set(closure.components.keys());
   const reviewedKeys = new Set(inventory.components.keys());
@@ -1673,10 +1814,10 @@ export async function verifyReviewedInventory({
   let locallyUnavailable = 0;
   for (const [key, graphComponent] of closure.components) {
     const reviewed = inventory.components.get(key);
-    const lockedIntegrity = integrities.get(key);
+    const lockedIntegrity = graphComponent.integrity ?? integrities.get(key);
     if (!lockedIntegrity || reviewed.integrity !== lockedIntegrity) {
       fail(
-        `${artifactName} ${key} registry integrity does not match pnpm-lock.yaml`,
+        `${artifactName} ${key} registry integrity does not match its production lockfile`,
       );
     }
     if (reviewed.resolved !== graphComponent.resolved) {
@@ -1733,16 +1874,21 @@ export async function buildReviewedInventory({
     artifactName,
     listOutput,
   });
-  const lockSource =
-    lockfileSource ??
-    (
-      await readBoundedFile(
-        resolve(rootDir, "pnpm-lock.yaml"),
-        MAX_LOCKFILE_BYTES,
-        "pnpm lockfile",
+  const needsPnpmIntegrities = [...closure.components.values()].some(
+    (component) => component.integrity === undefined,
+  );
+  const integrities = needsPnpmIntegrities
+    ? parsePnpmLockIntegrities(
+        lockfileSource ??
+          (
+            await readBoundedFile(
+              resolve(rootDir, "pnpm-lock.yaml"),
+              MAX_LOCKFILE_BYTES,
+              "pnpm lockfile",
+            )
+          ).toString("utf8"),
       )
-    ).toString("utf8");
-  const integrities = parsePnpmLockIntegrities(lockSource);
+    : new Map();
   const graphComponents = [...closure.components.values()].sort((left, right) =>
     compareText(
       componentKey(left.name, left.version),
@@ -1760,7 +1906,7 @@ export async function buildReviewedInventory({
       if (index >= graphComponents.length) return;
       const graphComponent = graphComponents[index];
       const key = componentKey(graphComponent.name, graphComponent.version);
-      const integrity = integrities.get(key);
+      const integrity = graphComponent.integrity ?? integrities.get(key);
       if (!integrity) {
         failure = new Error(
           `[npm-license-inventory] ${artifactName} ${key} has no locked registry integrity`,
@@ -1798,7 +1944,7 @@ export async function buildReviewedInventory({
     schemaVersion: INVENTORY_SCHEMA_VERSION,
     artifact: artifactName,
     importer: artifact.importer,
-    scope: INVENTORY_SCOPE,
+    scope: inventoryScopeForArtifact(artifactName),
     firstPartyWorkspacePackages: [...closure.firstPartyWorkspacePackages].sort(
       compareText,
     ),

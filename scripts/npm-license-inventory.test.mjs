@@ -133,7 +133,7 @@ function inventoryBytes(component = inventoryComponent()) {
         schemaVersion: 1,
         artifact: "mcp",
         importer: "app/mcp-server",
-        scope: "pnpm-production-closure",
+        scope: "npm-runtime-and-bundled-closure",
         firstPartyWorkspacePackages: [],
         components: [component],
       },

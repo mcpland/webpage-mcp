@@ -8,7 +8,6 @@ export const RUNTIME_REQUIRED_MODULE_IDS = [
   "drizzle-orm",
   "drizzle-orm/sqlite-core",
   "better-sqlite3",
-  "@modelcontextprotocol/sdk/server/index.js",
 ] as const;
 
 const DEPENDENCY_LAYOUT_VERSION = 1;

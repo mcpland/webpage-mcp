@@ -78,9 +78,10 @@ export const bundleConfig = {
   bundle: true,
   splitting: false,
   sourcemap: true,
+  metafile: true,
   clean: false,
   dts: false,
-  noExternal: ['webpage-mcp-shared'],
+  noExternal: ['webpage-mcp-shared', '@modelcontextprotocol/sdk'],
   alias: {
     'webpage-mcp-shared': path.resolve(__dirname, '../../packages/shared/src/index.ts'),
   },

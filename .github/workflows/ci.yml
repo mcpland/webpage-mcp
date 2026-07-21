@@ -50,6 +50,14 @@ jobs:
         if: matrix.node-version == 24
         run: pnpm audit --prod
 
+      - name: Audit published MCP dependency closure
+        if: matrix.node-version == 24
+        run: |
+          pnpm shrinkwrap:mcp:check
+          pnpm shrinkwrap:mcp:check-current
+          npm audit --omit=dev --package-lock-only --prefix app/mcp-server --audit-level=low
+          pnpm audit:mcp-bundle
+
       - name: Lint
         run: pnpm lint
 
@@ -138,6 +146,11 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/webpage-mcp-pack"
           pnpm --dir app/mcp-server pack --pack-destination "$RUNNER_TEMP/webpage-mcp-pack"
+
+      - name: Verify fresh npm consumer dependency graph
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./app/mcp-server/package.json').version")"
+          node scripts/verify-packed-mcp-consumer.mjs "$RUNNER_TEMP/webpage-mcp-pack/webpage-mcp-${PACKAGE_VERSION}.tgz"
 
       # This exercises package installation, native manifest registration, and
       # doctor validation. A real Chrome extension/native handshake remains a

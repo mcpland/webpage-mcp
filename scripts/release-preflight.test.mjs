@@ -70,6 +70,7 @@ const MCP_PACKAGE_TEMPLATE = {
   files: [
     "dist",
     "LICENSE",
+    "npm-shrinkwrap.json",
     "THIRD_PARTY_NOTICES.md",
     "THIRD_PARTY_COMPONENTS.json",
     "!dist/node_path.txt",
@@ -83,9 +84,42 @@ const MCP_PACKAGE_TEMPLATE = {
     directory: "app/mcp-server",
   },
   preferGlobal: true,
-  dependencies: { chalk: "^5.4.1" },
+  dependencies: { chalk: "5.4.1" },
+  overrides: { chalk: "5.4.1" },
   scripts: { postinstall: "node dist/scripts/postinstall.js" },
 };
+
+function createMcpShrinkwrap(pkg) {
+  return Buffer.from(
+    `${JSON.stringify(
+      {
+        name: pkg.name,
+        version: pkg.version,
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: pkg.name,
+            version: pkg.version,
+            license: pkg.license,
+            hasInstallScript: true,
+            engines: pkg.engines,
+            dependencies: pkg.dependencies,
+          },
+          "node_modules/chalk": {
+            version: "5.4.1",
+            resolved: "https://registry.npmjs.org/chalk/-/chalk-5.4.1.tgz",
+            integrity: `sha512-${Buffer.alloc(64, 5).toString("base64")}`,
+            license: "MIT",
+            engines: { node: "^12.17.0 || ^14.13 || >=16.0.0" },
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
 const EXTENSION_PERMISSIONS = [
   "nativeMessaging",
   "tabs",
@@ -141,10 +175,15 @@ async function createReleaseRoot(t, versions = {}) {
     join(tmpdir(), "webpage-mcp-release-preflight-"),
   );
   t.after(() => rm(rootDir, { recursive: true, force: true }));
-  await writeJson(join(rootDir, "app/mcp-server/package.json"), {
+  const mcpPackage = {
     ...MCP_PACKAGE_TEMPLATE,
     version: versions.mcp ?? VERSION,
-  });
+  };
+  await writeJson(join(rootDir, "app/mcp-server/package.json"), mcpPackage);
+  await writeFile(
+    join(rootDir, "app/mcp-server/npm-shrinkwrap.json"),
+    createMcpShrinkwrap(mcpPackage),
+  );
   await writeJson(join(rootDir, "app/chrome-extension/package.json"), {
     name: "webpage-mcp-connector",
     version: versions.extension ?? VERSION,
@@ -158,6 +197,7 @@ async function createReleaseRoot(t, versions = {}) {
     "app/chrome-extension/public/THIRD_PARTY_NOTICES.md",
     "app/chrome-extension/public/THIRD_PARTY_LICENSES.txt",
     "app/chrome-extension/public/THIRD_PARTY_COMPONENTS.json",
+    "scripts/mcp-bundle-components.json",
   ]) {
     const targetPath = join(rootDir, relativePath);
     await mkdir(dirname(targetPath), { recursive: true });
@@ -349,8 +389,19 @@ async function createArtifacts(rootDir, overrides = {}) {
     loadReviewedLegalFiles({ rootDir, artifactName: "mcp" }),
     loadReviewedLegalFiles({ rootDir, artifactName: "extension" }),
   ]);
+  const mcpShrinkwrap = await readFile(
+    join(rootDir, "app/mcp-server/npm-shrinkwrap.json"),
+  );
   const mcpEntries = [
     ["package/package.json", `${JSON.stringify(packedPackage, null, 2)}\n`],
+    ...(!overrides.omitMcpShrinkwrap
+      ? [
+          [
+            "package/npm-shrinkwrap.json",
+            overrides.mcpShrinkwrap ?? mcpShrinkwrap,
+          ],
+        ]
+      : []),
     ...(!overrides.omitMcpLicense
       ? [[mcpLegal.archiveLicense, overrides.mcpLicense ?? mcpLegal.license]]
       : []),
@@ -1049,6 +1100,35 @@ test("release artifact verification fails closed", async (t) => {
 });
 
 test("release artifacts must contain runnable npm and extension payloads", async (t) => {
+  await t.test(
+    "when the published dependency closure is absent or drifts",
+    async (t) => {
+      const missingRoot = await createReleaseRoot(t);
+      const missingArtifacts = await createArtifacts(missingRoot, {
+        omitMcpShrinkwrap: true,
+      });
+      await assert.rejects(
+        verifyReleaseArtifacts({
+          rootDir: missingRoot,
+          artifactsDir: missingArtifacts.artifactsDir,
+        }),
+        /Missing package\/npm-shrinkwrap\.json in npm tarball/,
+      );
+
+      const driftRoot = await createReleaseRoot(t);
+      const driftArtifacts = await createArtifacts(driftRoot, {
+        mcpShrinkwrap: "{}\n",
+      });
+      await assert.rejects(
+        verifyReleaseArtifacts({
+          rootDir: driftRoot,
+          artifactsDir: driftArtifacts.artifactsDir,
+        }),
+        /npm-shrinkwrap\.json does not match the reviewed repository source/,
+      );
+    },
+  );
+
   await t.test("when npm package metadata omits bin", async (t) => {
     const rootDir = await createReleaseRoot(t);
     const { artifactsDir } = await createArtifacts(rootDir, {
@@ -1550,6 +1630,17 @@ test("release workflow verifies before either publish mutation", async () => {
     "WASM verification must finish before release artifacts are packed",
   );
   assert.ok(
+    buildJobBody.indexOf("Pack MCP npm package") <
+      buildJobBody.indexOf("Verify fresh npm consumer dependency graph") &&
+      buildJobBody.indexOf("Verify fresh npm consumer dependency graph") <
+        buildJobBody.indexOf("Verify release artifacts"),
+    "the exact MCP tarball must pass a fresh npm install and audit before artifact approval",
+  );
+  assert.match(
+    buildJobBody,
+    /node scripts\/verify-packed-mcp-consumer\.mjs "artifacts\/mcp\/webpage-mcp-\$\{PACKAGE_VERSION\}\.tgz"/,
+  );
+  assert.ok(
     githubJob > artifactPreflight,
     "GitHub release job must follow artifact preflight",
   );
@@ -1770,6 +1861,11 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
       source,
       /pnpm audit --prod/,
       `${name} must fail on production npm advisories`,
+    );
+    assert.match(
+      source,
+      /pnpm shrinkwrap:mcp:check\s*\n\s+pnpm shrinkwrap:mcp:check-current\s*\n\s+npm audit --omit=dev --package-lock-only --prefix app\/mcp-server --audit-level=low\s*\n\s+pnpm audit:mcp-bundle/,
+      `${name} must validate and audit the published MCP dependency closure`,
     );
     assert.doesNotMatch(
       source,

@@ -129,6 +129,14 @@ jobs:
         if: matrix.enforce_coverage
         run: pnpm audit --prod
 
+      - name: Audit published MCP dependency closure once on Linux
+        if: matrix.enforce_coverage
+        run: |
+          pnpm shrinkwrap:mcp:check
+          pnpm shrinkwrap:mcp:check-current
+          npm audit --omit=dev --package-lock-only --prefix app/mcp-server --audit-level=low
+          pnpm audit:mcp-bundle
+
       - name: Install pinned Rust for advisory scan once on Linux
         if: matrix.enforce_coverage
         run: |
@@ -250,6 +258,11 @@ jobs:
         run: |
           mkdir -p artifacts/mcp
           pnpm --dir app/mcp-server pack --pack-destination ../../artifacts/mcp
+
+      - name: Verify fresh npm consumer dependency graph
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./app/mcp-server/package.json').version")"
+          node scripts/verify-packed-mcp-consumer.mjs "artifacts/mcp/webpage-mcp-${PACKAGE_VERSION}.tgz"
 
       - name: Collect extension artifacts
         run: |

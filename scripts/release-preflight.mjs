@@ -14,6 +14,12 @@ import {
 } from "./extension-public-key.mjs";
 import { loadReviewedLegalFiles } from "./legal-notices.mjs";
 import { validateUnifiedReleaseVersion } from "./unified-release-version.mjs";
+import {
+  MCP_NPM_SHRINKWRAP_PATH,
+  parseMcpNpmShrinkwrap,
+  verifyMcpNpmShrinkwrap,
+} from "./mcp-npm-shrinkwrap.mjs";
+import { loadMcpBundleComponents } from "./mcp-bundle-components.mjs";
 
 const RELEASE_PACKAGES = [
   {
@@ -38,6 +44,7 @@ const MCP_PACKAGE_CONTRACT = {
   files: [
     "dist",
     "LICENSE",
+    "npm-shrinkwrap.json",
     "THIRD_PARTY_NOTICES.md",
     "THIRD_PARTY_COMPONENTS.json",
     "!dist/node_path.txt",
@@ -63,6 +70,7 @@ const MCP_PACKED_FIELDS = [
   "repository",
   "preferGlobal",
   "dependencies",
+  "overrides",
 ];
 const MCP_RUNTIME_ENTRYPOINTS = [
   "package/dist/native-messaging-host.js",
@@ -137,6 +145,15 @@ function verifyMcpSourcePackageContract(pkg, description) {
     isRecord(pkg.dependencies) && Object.keys(pkg.dependencies).length > 0,
     `${description} must declare runtime dependencies`,
   );
+  for (const [name, version] of Object.entries(pkg.dependencies)) {
+    invariant(
+      typeof version === "string" &&
+        /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/.test(
+          version,
+        ),
+      `${description} runtime dependency ${name} must use an exact version`,
+    );
+  }
 }
 
 function normalizeArchivePath(
@@ -227,6 +244,12 @@ export async function verifyReleaseMetadata({
     );
     if (releasePackage.name === "webpage-mcp") {
       verifyMcpSourcePackageContract(pkg, releasePackage.path);
+      for (const name of loadMcpBundleComponents(rootDir).keys()) {
+        invariant(
+          pkg.dependencies[name] === undefined,
+          `${releasePackage.path} bundled dependency ${name} must not be reinstalled by npm`,
+        );
+      }
     }
     const version = validateUnifiedReleaseVersion(
       pkg.version,
@@ -242,6 +265,7 @@ export async function verifyReleaseMetadata({
       `Release package versions must match: ${packages[0].path}=${expectedVersion}, ${pkg.path}=${pkg.version}`,
     );
   }
+  await verifyMcpNpmShrinkwrap({ rootDir });
   if (tagVersion !== undefined) {
     invariant(
       tagVersion === expectedVersion,
@@ -730,7 +754,13 @@ function verifyStaticLocalCommonJsDependencies(entries, entryPath) {
   }
 }
 
-function verifyPackedMcpPackage({ packedPackage, sourcePackage, tarEntries }) {
+function verifyPackedMcpPackage({
+  packedPackage,
+  sourcePackage,
+  sourceShrinkwrap,
+  bundleComponents,
+  tarEntries,
+}) {
   invariant(
     isRecord(packedPackage),
     "npm tarball package/package.json must contain an object",
@@ -750,6 +780,40 @@ function verifyPackedMcpPackage({ packedPackage, sourcePackage, tarEntries }) {
       typeof value === "string" && !value.startsWith("workspace:"),
       `npm runtime dependency ${name} must be publishable and may not use workspace:`,
     );
+  }
+  const packedShrinkwrap = readTarEntry(
+    tarEntries,
+    "package/npm-shrinkwrap.json",
+    "npm tarball npm-shrinkwrap.json",
+  );
+  invariant(
+    packedShrinkwrap.equals(sourceShrinkwrap),
+    "npm tarball npm-shrinkwrap.json does not match the reviewed repository source",
+  );
+  parseMcpNpmShrinkwrap(packedShrinkwrap, { sourcePackage: packedPackage });
+  for (const name of bundleComponents.keys()) {
+    invariant(
+      packedPackage.dependencies[name] === undefined,
+      `npm tarball bundled dependency ${name} must not be an external runtime dependency`,
+    );
+  }
+  const escapedBundleNames = [...bundleComponents.keys()].map((name) =>
+    name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  );
+  const externalBundlePattern = new RegExp(
+    `(?:require|import)\\(\\s*["'](?:${escapedBundleNames.join("|")})(?:/[^"']*)?["']\\s*\\)`,
+  );
+  for (const entry of tarEntries.values()) {
+    if (
+      !entry.isDirectory &&
+      entry.name.startsWith("package/dist/") &&
+      entry.name.endsWith(".js")
+    ) {
+      invariant(
+        !externalBundlePattern.test(entry.bytes.toString("utf8")),
+        `${entry.name} leaves a reviewed bundled dependency external`,
+      );
+    }
   }
   for (const entry of tarEntries.values()) {
     invariant(
@@ -1122,13 +1186,18 @@ export async function verifyReleaseArtifacts({
     packedPackageVersion === metadata.version,
     `npm tarball version ${packedPackageVersion} does not match release version ${metadata.version}`,
   );
-  const sourcePackage = await readJson(
-    resolve(rootDir, "app/mcp-server/package.json"),
-    "app/mcp-server/package.json",
-  );
+  const [sourcePackage, sourceShrinkwrap] = await Promise.all([
+    readJson(
+      resolve(rootDir, "app/mcp-server/package.json"),
+      "app/mcp-server/package.json",
+    ),
+    readFile(resolve(rootDir, MCP_NPM_SHRINKWRAP_PATH)),
+  ]);
   verifyPackedMcpPackage({
     packedPackage,
     sourcePackage,
+    sourceShrinkwrap,
+    bundleComponents: loadMcpBundleComponents(rootDir),
     tarEntries,
   });
 

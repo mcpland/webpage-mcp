@@ -65,7 +65,7 @@ test("reviewed legal notices match package metadata and vendored boundaries", as
   const summaries = await verifyRepositoryLegalNotices({
     rootDir: REPOSITORY_ROOT,
   });
-  assert.equal(summaries.mcp.componentCount, 176);
+  assert.equal(summaries.mcp.componentCount, 98);
   assert.equal(summaries.extension.componentCount, 202);
   for (const summary of Object.values(summaries)) {
     assert.equal(

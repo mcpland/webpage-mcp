@@ -2,3 +2,6 @@
 # scripts/npm-license-inventory.mjs and scripts/legal-notices.mjs.
 app/mcp-server/THIRD_PARTY_COMPONENTS.json
 app/chrome-extension/public/THIRD_PARTY_COMPONENTS.json
+
+# npm emits canonical lockfile JSON; release checks compare those exact bytes.
+app/mcp-server/npm-shrinkwrap.json
