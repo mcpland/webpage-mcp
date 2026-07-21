@@ -1413,6 +1413,10 @@ test("release workflow verifies before either publish mutation", async () => {
   );
   const npmJob = workflow.indexOf("  publish-npm:");
   const githubJobBody = workflow.slice(githubJob, npmJob);
+  const githubJobHeader = workflow.slice(
+    githubJob,
+    workflow.indexOf("    steps:", githubJob),
+  );
   const npmJobBody = workflow.slice(npmJob);
   const npmPublishRefPreflight = workflow.indexOf(
     "      - name: Verify npm publish ref",
@@ -1649,6 +1653,11 @@ test("release workflow verifies before either publish mutation", async () => {
   assert.ok(
     githubJob > artifactPreflight,
     "GitHub release job must follow artifact preflight",
+  );
+  assert.match(
+    githubJobHeader,
+    /environment:\s*\n\s+name: github-release/,
+    "GitHub asset publishing must use the protected github-release environment",
   );
   assert.ok(
     githubPublish > githubJob,

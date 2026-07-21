@@ -314,6 +314,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment:
+      name: github-release
     permissions:
       contents: write
 
