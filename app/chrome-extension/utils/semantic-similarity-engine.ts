@@ -624,6 +624,29 @@ interface PendingMessage {
   resolve: (value: WorkerResponsePayload | PromiseLike<WorkerResponsePayload>) => void;
   reject: (reason?: any) => void;
   type: string;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
+interface WorkerTaskWaiter {
+  resolve: () => void;
+  reject: (reason?: unknown) => void;
+}
+
+const SEMANTIC_WORKER_DEFAULT_TIMEOUT_MS = 60_000;
+const SEMANTIC_WORKER_INFERENCE_TIMEOUT_MS = 120_000;
+const SEMANTIC_WORKER_INITIALIZATION_TIMEOUT_MS = 5 * 60_000;
+const SEMANTIC_WORKER_CONTROL_TIMEOUT_MS = 10_000;
+const SEMANTIC_WORKER_DISPOSE_CLEAR_TIMEOUT_MS = 2_000;
+
+function semanticWorkerTimeoutMs(type: string): number {
+  if (type === 'init') return SEMANTIC_WORKER_INITIALIZATION_TIMEOUT_MS;
+  if (type === 'infer' || type === 'batchInfer') {
+    return SEMANTIC_WORKER_INFERENCE_TIMEOUT_MS;
+  }
+  if (type === 'getStats' || type === 'clearBuffers') {
+    return SEMANTIC_WORKER_CONTROL_TIMEOUT_MS;
+  }
+  return SEMANTIC_WORKER_DEFAULT_TIMEOUT_MS;
 }
 
 interface TokenizedOutput {
@@ -993,6 +1016,8 @@ export class SemanticSimilarityEngine {
   private initPromise: Promise<void> | null = null;
   private nextTokenId = 0;
   private pendingMessages = new Map<number, PendingMessage>();
+  private isDisposing = false;
+  private disposePromise: Promise<void> | null = null;
   private useOffscreen = false; // Whether to use offscreen mode
 
   public readonly config: Required<ModelConfig>;
@@ -1024,7 +1049,7 @@ export class SemanticSimilarityEngine {
   };
 
   private runningWorkerTasks = 0;
-  private workerTaskQueue: (() => void)[] = [];
+  private workerTaskQueue: WorkerTaskWaiter[] = [];
 
   /**
    * Detect if current runtime environment supports Worker
@@ -1189,14 +1214,59 @@ export class SemanticSimilarityEngine {
     return resolvePinnedModelArtifact(this.config.modelIdentifier, this.config.onnxModelFile);
   }
 
+  private takePendingWorkerMessage(id: number): PendingMessage | undefined {
+    const pending = this.pendingMessages.get(id);
+    if (!pending) return undefined;
+    this.pendingMessages.delete(id);
+    clearTimeout(pending.timeoutId);
+    return pending;
+  }
+
+  private rejectPendingWorkerMessages(error: Error): void {
+    const pending = Array.from(this.pendingMessages.values());
+    this.pendingMessages.clear();
+    for (const callbacks of pending) {
+      clearTimeout(callbacks.timeoutId);
+      callbacks.reject(error);
+    }
+  }
+
+  private rejectWorkerTaskWaiters(error: Error): void {
+    const waiters = this.workerTaskQueue.splice(0);
+    for (const waiter of waiters) waiter.reject(error);
+  }
+
+  private terminateWorker(error: Error): void {
+    const worker = this.worker;
+    this.worker = null;
+    if (worker) {
+      worker.onmessage = null;
+      worker.onerror = null;
+      worker.terminate();
+    }
+    this.rejectPendingWorkerMessages(error);
+    this.rejectWorkerTaskWaiters(error);
+  }
+
   private _sendMessageToWorker(
     type: string,
     payload?: WorkerMessagePayload,
     transferList?: Transferable[],
+    timeoutMs = semanticWorkerTimeoutMs(type),
+    allowDuringDispose = false,
   ): Promise<WorkerResponsePayload> {
     return new Promise((resolve, reject) => {
-      if (!this.worker) {
+      if (this.isDisposing && !allowDuringDispose) {
+        reject(new Error('Semantic worker is being disposed.'));
+        return;
+      }
+      const worker = this.worker;
+      if (!worker) {
         reject(new Error('Worker is not initialized.'));
+        return;
+      }
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+        reject(new Error('Semantic worker timeout must be a positive safe integer.'));
         return;
       }
       if (this.pendingMessages.size >= SEMANTIC_RESOURCE_LIMITS.maxConcurrentRequests + 2) {
@@ -1204,13 +1274,27 @@ export class SemanticSimilarityEngine {
         return;
       }
       const id = this.nextTokenId++;
-      this.pendingMessages.set(id, { resolve, reject, type });
+      const timeoutId = setTimeout(() => {
+        const pending = this.takePendingWorkerMessage(id);
+        if (!pending) return;
+        const error = new Error(
+          `Semantic worker task ${type} timed out after ${timeoutMs}ms`,
+        );
+        error.name = 'SemanticWorkerTimeoutError';
+        pending.reject(error);
+      }, timeoutMs);
+      this.pendingMessages.set(id, { resolve, reject, type, timeoutId });
 
-      // Use transferable objects if provided for zero-copy transfer
-      if (transferList && transferList.length > 0) {
-        this.worker.postMessage({ id, type, payload }, transferList);
-      } else {
-        this.worker.postMessage({ id, type, payload });
+      try {
+        // Use transferable objects if provided for zero-copy transfer
+        if (transferList && transferList.length > 0) {
+          worker.postMessage({ id, type, payload }, transferList);
+        } else {
+          worker.postMessage({ id, type, payload });
+        }
+      } catch (error) {
+        const pending = this.takePendingWorkerMessage(id);
+        pending?.reject(error);
       }
     });
   }
@@ -1242,10 +1326,8 @@ export class SemanticSimilarityEngine {
       }>,
     ) => {
       const { id, status, payload, stats } = event.data;
-      const promiseCallbacks = this.pendingMessages.get(id);
+      const promiseCallbacks = this.takePendingWorkerMessage(id);
       if (!promiseCallbacks) return;
-
-      this.pendingMessages.delete(id);
 
       // Update Worker statistics
       if (stats) {
@@ -1289,10 +1371,9 @@ export class SemanticSimilarityEngine {
         });
       }
       console.error('==========================================================');
-      this.pendingMessages.forEach((callbacks) => {
-        callbacks.reject(new Error(`Worker terminated or unhandled error: ${error.message}`));
-      });
-      this.pendingMessages.clear();
+      this.terminateWorker(
+        new Error(`Worker terminated or unhandled error: ${error.message}`),
+      );
       this.isInitialized = false;
       this.isInitializing = false;
     };
@@ -1404,8 +1485,7 @@ export class SemanticSimilarityEngine {
       console.error('SemanticSimilarityEngine: Initialization failed.', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       reportProgress('error', 0, `Initialization failed: ${errorMessage}`);
-      if (this.worker) this.worker.terminate();
-      this.worker = null;
+      this.terminateWorker(new Error(`Semantic worker initialization failed: ${errorMessage}`));
       this.isInitialized = false;
       this.isInitializing = false;
       this.initPromise = null;
@@ -1590,14 +1670,13 @@ export class SemanticSimilarityEngine {
       );
     } catch (error) {
       console.error('SemanticSimilarityEngine: Initialization failed.', error);
-      if (this.worker) this.worker.terminate();
-      this.worker = null;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.terminateWorker(new Error(`Semantic worker initialization failed: ${errorMessage}`));
       this.isInitialized = false;
       this.isInitializing = false;
       this.initPromise = null;
 
       // Create a more detailed error object
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const enhancedError = new Error(errorMessage);
       enhancedError.name = 'ModelInitializationError';
       throw enhancedError;
@@ -2486,15 +2565,15 @@ export class SemanticSimilarityEngine {
     if (this.workerTaskQueue.length >= SEMANTIC_RESOURCE_LIMITS.maxWorkerQueue) {
       throw new Error('Semantic worker queue is full');
     }
-    return new Promise((resolve) => {
-      this.workerTaskQueue.push(resolve);
+    return new Promise((resolve, reject) => {
+      this.workerTaskQueue.push({ resolve, reject });
     });
   }
 
   private processWorkerQueue(): void {
     if (this.workerTaskQueue.length > 0 && this.runningWorkerTasks < this.config.concurrentLimit) {
-      const resolve = this.workerTaskQueue.shift();
-      if (resolve) resolve();
+      const waiter = this.workerTaskQueue.shift();
+      waiter?.resolve();
     }
   }
 
@@ -2513,10 +2592,23 @@ export class SemanticSimilarityEngine {
 
   // New: Clean up Worker buffer
   public async clearWorkerBuffers(): Promise<void> {
+    await this.clearWorkerBuffersWithin(SEMANTIC_WORKER_CONTROL_TIMEOUT_MS, false);
+  }
+
+  private async clearWorkerBuffersWithin(
+    timeoutMs: number,
+    allowDuringDispose: boolean,
+  ): Promise<void> {
     if (!this.worker || !this.isInitialized) return;
 
     try {
-      await this._sendMessageToWorker('clearBuffers');
+      await this._sendMessageToWorker(
+        'clearBuffers',
+        undefined,
+        undefined,
+        timeoutMs,
+        allowDuringDispose,
+      );
       console.log('SemanticSimilarityEngine: Worker buffers cleared.');
     } catch (error) {
       console.warn('Failed to clear worker buffers:', error);
@@ -2550,16 +2642,29 @@ export class SemanticSimilarityEngine {
     };
   }
 
-  public async dispose(): Promise<void> {
+  public dispose(): Promise<void> {
+    if (this.disposePromise) return this.disposePromise;
+    this.isDisposing = true;
+    this.disposePromise = this.performDispose().finally(() => {
+      this.isDisposing = false;
+      this.disposePromise = null;
+    });
+    return this.disposePromise;
+  }
+
+  private async performDispose(): Promise<void> {
     console.log('SemanticSimilarityEngine: Disposing...');
 
-    // Clean up worker buffer
-    await this.clearWorkerBuffers();
+    const disposalError = new Error('Semantic worker was disposed.');
+    this.rejectPendingWorkerMessages(disposalError);
+    this.rejectWorkerTaskWaiters(disposalError);
 
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-    }
+    // Best-effort only: a wedged worker must not block model replacement.
+    await this.clearWorkerBuffersWithin(
+      SEMANTIC_WORKER_DISPOSE_CLEAR_TIMEOUT_MS,
+      true,
+    );
+    this.terminateWorker(disposalError);
 
     // Clean SIMD engine
     if (this.simdMath) {
@@ -2571,8 +2676,6 @@ export class SemanticSimilarityEngine {
     this.embeddingCache.clear();
     this.tokenizationCache.clear();
     this.memoryPool.clear();
-    this.pendingMessages.clear();
-    this.workerTaskQueue = [];
     this.isInitialized = false;
     this.isInitializing = false;
     this.initPromise = null;

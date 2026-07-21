@@ -1,10 +1,29 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   SemanticSimilarityEngine,
   SemanticSimilarityEngineProxy,
   readPinnedModelResponse,
 } from '@/utils/semantic-similarity-engine';
 import { SEMANTIC_RESOURCE_LIMITS } from '@/utils/semantic-similarity-boundaries';
+
+function fakeWorker(): Worker & {
+  postMessage: ReturnType<typeof vi.fn>;
+  terminate: ReturnType<typeof vi.fn>;
+} {
+  return {
+    onmessage: null,
+    onmessageerror: null,
+    onerror: null,
+    postMessage: vi.fn(),
+    terminate: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  } as unknown as Worker & {
+    postMessage: ReturnType<typeof vi.fn>;
+    terminate: ReturnType<typeof vi.fn>;
+  };
+}
 
 describe('SemanticSimilarityEngine security boundaries', () => {
   it('constructs catalog-backed 384/768 configs and rejects tunable resource injection', () => {
@@ -74,6 +93,141 @@ describe('SemanticSimilarityEngine security boundaries', () => {
         Array.from({ length: SEMANTIC_RESOURCE_LIMITS.maxBatchTexts + 1 }, () => 'valid'),
       ),
     ).rejects.toThrow(/batch item limit/i);
+  });
+
+  it('times out worker messages and removes their pending callbacks', async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = new SemanticSimilarityEngine({
+        modelPreset: 'multilingual-e5-small',
+        modelVersion: 'quantized',
+        dimension: 384,
+      });
+      const worker = fakeWorker();
+      const internal = engine as unknown as {
+        worker: Worker | null;
+        pendingMessages: Map<number, unknown>;
+        _sendMessageToWorker: (
+          type: string,
+          payload?: unknown,
+          transferList?: Transferable[],
+          timeoutMs?: number,
+        ) => Promise<unknown>;
+      };
+      internal.worker = worker;
+
+      const request = internal._sendMessageToWorker(
+        'getStats',
+        undefined,
+        undefined,
+        25,
+      );
+      const outcome = request.then(
+        (value) => ({ status: 'resolved' as const, value }),
+        (error) => ({ status: 'rejected' as const, error }),
+      );
+
+      expect(internal.pendingMessages.size).toBe(1);
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(outcome).resolves.toMatchObject({
+        status: 'rejected',
+        error: {
+          name: 'SemanticWorkerTimeoutError',
+          message: expect.stringContaining('getStats'),
+        },
+      });
+      expect(internal.pendingMessages.size).toBe(0);
+      expect(worker.postMessage).toHaveBeenCalledOnce();
+
+      worker.postMessage.mockImplementationOnce(() => {
+        throw new Error('structured clone failed');
+      });
+      await expect(
+        internal._sendMessageToWorker('infer', undefined, undefined, 25),
+      ).rejects.toThrow('structured clone failed');
+      expect(internal.pendingMessages.size).toBe(0);
+
+      await engine.dispose();
+      expect(worker.terminate).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settles worker requests and queued slot waiters during bounded disposal', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const engine = new SemanticSimilarityEngine({
+        modelPreset: 'multilingual-e5-small',
+        modelVersion: 'quantized',
+        dimension: 384,
+      });
+      const worker = fakeWorker();
+      const internal = engine as unknown as {
+        worker: Worker | null;
+        isInitialized: boolean;
+        pendingMessages: Map<number, unknown>;
+        workerTaskQueue: unknown[];
+        _sendMessageToWorker: (
+          type: string,
+          payload?: unknown,
+          transferList?: Transferable[],
+          timeoutMs?: number,
+        ) => Promise<unknown>;
+        waitForWorkerSlot: () => Promise<void>;
+      };
+      internal.worker = worker;
+      internal.isInitialized = true;
+
+      const request = internal._sendMessageToWorker(
+        'infer',
+        undefined,
+        undefined,
+        60_000,
+      );
+      const slot = internal.waitForWorkerSlot();
+      const requestOutcome = request.then(
+        () => ({ status: 'resolved' as const }),
+        (error) => ({ status: 'rejected' as const, error }),
+      );
+      const slotOutcome = slot.then(
+        () => ({ status: 'resolved' as const }),
+        (error) => ({ status: 'rejected' as const, error }),
+      );
+      const disposal = engine.dispose();
+
+      await expect(requestOutcome).resolves.toMatchObject({
+        status: 'rejected',
+        error: { message: expect.stringMatching(/disposed/i) },
+      });
+      await expect(slotOutcome).resolves.toMatchObject({
+        status: 'rejected',
+        error: { message: expect.stringMatching(/disposed/i) },
+      });
+      expect(worker.terminate).not.toHaveBeenCalled();
+      expect(worker.postMessage).toHaveBeenLastCalledWith({
+        id: 1,
+        type: 'clearBuffers',
+        payload: undefined,
+      });
+
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(worker.terminate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await disposal;
+
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(internal.pendingMessages.size).toBe(0);
+      expect(internal.workerTaskQueue).toHaveLength(0);
+      expect(warn).toHaveBeenCalledWith(
+        'Failed to clear worker buffers:',
+        expect.objectContaining({ name: 'SemanticWorkerTimeoutError' }),
+      );
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('requires an exact Content-Length before allocating a pinned response', async () => {
