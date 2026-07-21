@@ -16,6 +16,7 @@ import process from "node:process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync, gzipSync } from "node:zlib";
+import { parseDocument } from "yaml";
 
 import {
   verifyReleaseArtifacts,
@@ -34,6 +35,87 @@ import {
 import { loadReviewedLegalFiles } from "./legal-notices.mjs";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+function parseYaml(source, label) {
+  const document = parseDocument(source, {
+    prettyErrors: true,
+    strict: true,
+    uniqueKeys: true,
+  });
+  assert.equal(
+    document.errors.length,
+    0,
+    `${label} must be valid YAML: ${document.errors.map((error) => error.message).join("; ")}`,
+  );
+  const value = document.toJS({ maxAliasCount: 0 });
+  assert.ok(value && typeof value === "object" && !Array.isArray(value));
+  return value;
+}
+
+async function readYaml(relativePath) {
+  const source = await readFile(join(REPOSITORY_ROOT, relativePath), "utf8");
+  return parseYaml(source, relativePath);
+}
+
+function workflowJob(workflow, jobId) {
+  const job = workflow.jobs?.[jobId];
+  assert.ok(job && typeof job === "object", `workflow job ${jobId} must exist`);
+  return job;
+}
+
+function workflowSteps(job) {
+  assert.ok(Array.isArray(job.steps), "workflow job must define steps");
+  return job.steps;
+}
+
+function namedStep(job, name) {
+  const matches = workflowSteps(job).filter((step) => step.name === name);
+  assert.equal(
+    matches.length,
+    1,
+    `workflow step ${name} must exist exactly once`,
+  );
+  return matches[0];
+}
+
+function assertStepOrder(job, names) {
+  const actual = workflowSteps(job).map((step) => step.name);
+  let previous = -1;
+  let previousName = "job start";
+  for (const name of names) {
+    const index = actual.indexOf(name);
+    assert.ok(
+      index > previous,
+      `workflow step ${name} must follow ${previousName}`,
+    );
+    previous = index;
+    previousName = name;
+  }
+}
+
+function joinedRunScripts(job) {
+  return workflowSteps(job)
+    .map((step) => (typeof step.run === "string" ? step.run : ""))
+    .join("\n");
+}
+
+function allWorkflowSteps(workflow) {
+  return Object.values(workflow.jobs ?? {}).flatMap((job) =>
+    workflowSteps(job),
+  );
+}
+
+function joinedWorkflowRunScripts(workflow) {
+  return Object.values(workflow.jobs ?? {})
+    .map((job) => joinedRunScripts(job))
+    .join("\n");
+}
+
+function actionReferences(workflow) {
+  return allWorkflowSteps(workflow)
+    .map((step) => step.uses)
+    .filter((reference) => typeof reference === "string");
+}
 const VERSION = "1.2.3";
 const { publicKey: testPublicKey, privateKey: testPrivateKey } =
   generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -1380,402 +1462,326 @@ test("release archive inventories reject traversal, links, and duplicates", asyn
   }
 });
 
-test("release workflow verifies before either publish mutation", async () => {
-  const workflow = await readFile(
-    join(REPOSITORY_ROOT, ".github/workflows/release.yml"),
-    "utf8",
-  );
-  const releaseIdentityJob = workflow.indexOf("  release-identity:");
-  const platformGateJob = workflow.indexOf("  release-platform-gate:");
-  const buildJob = workflow.indexOf("  build-assets:");
-  const releaseIdentityBody = workflow.slice(
-    releaseIdentityJob,
-    platformGateJob,
-  );
-  const platformGateBody = workflow.slice(platformGateJob, buildJob);
-  const artifactPreflight = workflow.indexOf(
-    "      - name: Verify release artifacts",
-    buildJob,
-  );
-  const githubJob = workflow.indexOf("  publish-github-release:");
-  const buildJobBody = workflow.slice(buildJob, githubJob);
-  const githubPublish = workflow.indexOf(
-    "uses: softprops/action-gh-release@",
-    githubJob,
-  );
-  const githubTagShaReverify = workflow.indexOf(
-    "      - name: Reverify release tag commit",
-    githubJob,
-  );
-  const githubPublishStep = workflow.indexOf(
-    "      - name: Publish GitHub Release",
-    githubJob,
-  );
-  const npmJob = workflow.indexOf("  publish-npm:");
-  const githubJobBody = workflow.slice(githubJob, npmJob);
-  const githubJobHeader = workflow.slice(
-    githubJob,
-    workflow.indexOf("    steps:", githubJob),
-  );
-  const npmJobBody = workflow.slice(npmJob);
-  const npmPublishRefPreflight = workflow.indexOf(
-    "      - name: Verify npm publish ref",
-    buildJob,
-  );
-  const npmJobHeader = workflow.slice(
-    npmJob,
-    workflow.indexOf("    steps:", npmJob),
-  );
-  const npmPublishRefReverify = workflow.indexOf(
-    "      - name: Reverify npm publish ref",
-    npmJob,
-  );
-  const npmPreflight = workflow.indexOf(
-    "      - name: Reverify release metadata and artifacts",
-    npmJob,
-  );
-  const npmTagShaReverify = workflow.indexOf(
-    "      - name: Reverify release tag commit",
-    npmJob,
-  );
-  const npmPublishStep = workflow.indexOf(
-    "      - name: Publish package",
-    npmJob,
-  );
-  const npmPublish = workflow.indexOf('          npm publish "', npmJob);
+test("release workflow enforces structural publish contracts", async () => {
+  const workflow = await readYaml(".github/workflows/release.yml");
+  assert.deepEqual(Object.keys(workflow.jobs), [
+    "release-identity",
+    "release-platform-gate",
+    "build-assets",
+    "publish-github-release",
+    "publish-npm",
+  ]);
+  assert.deepEqual(workflow.on.push.tags, ["v*"]);
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.publish_npm, {
+    description: "Publish webpage-mcp to npm",
+    required: false,
+    default: false,
+    type: "boolean",
+  });
+  assert.deepEqual(workflow.env, {
+    CHROME_EXTENSION_PUBLIC_KEY: "${{ vars.CHROME_EXTENSION_PUBLIC_KEY }}",
+    CHROME_EXTENSION_EXPECTED_ID: "iehgbogeakiedihodennfcnigojnncag",
+    WEBPAGE_MCP_REQUIRE_EXTENSION_PUBLIC_KEY: "true",
+  });
 
-  assert.match(
-    workflow,
-    /CHROME_EXTENSION_PUBLIC_KEY:\s*\$\{\{\s*vars\.CHROME_EXTENSION_PUBLIC_KEY\s*\}\}/,
-    "formal releases must source the public key from a repository variable",
+  const identity = workflowJob(workflow, "release-identity");
+  const platformGate = workflowJob(workflow, "release-platform-gate");
+  const build = workflowJob(workflow, "build-assets");
+  const githubPublish = workflowJob(workflow, "publish-github-release");
+  const npmPublish = workflowJob(workflow, "publish-npm");
+
+  assert.deepEqual(identity.outputs, {
+    release_sha: "${{ steps.bind_release_sha.outputs.release_sha }}",
+  });
+  const identityCheckout = namedStep(identity, "Checkout event object");
+  assert.deepEqual(identityCheckout.with, {
+    ref: "${{ github.sha }}",
+    "fetch-depth": 0,
+  });
+  const bindIdentity = namedStep(identity, "Bind exact release commit");
+  assert.equal(bindIdentity.id, "bind_release_sha");
+  assert.equal(bindIdentity.env.EVENT_RELEASE_SHA, "${{ github.sha }}");
+  assert.ok(
+    bindIdentity.run.includes('git rev-parse "${EVENT_RELEASE_SHA}^{commit}"'),
   );
-  assert.match(
-    workflow,
-    /WEBPAGE_MCP_REQUIRE_EXTENSION_PUBLIC_KEY:\s*["']true["']/,
-    "formal releases must fail closed when the public key is unavailable",
-  );
-  assert.match(
-    workflow,
-    /CHROME_EXTENSION_EXPECTED_ID:\s*iehgbogeakiedihodennfcnigojnncag/,
-    "formal releases must bind the public key to the official extension ID",
+  assert.ok(
+    bindIdentity.run.includes(
+      'echo "release_sha=$ACTUAL_RELEASE_SHA" >> "$GITHUB_OUTPUT"',
+    ),
   );
 
-  const remoteActionRefs = Array.from(
-    workflow.matchAll(/^\s*uses:\s*([^\s#]+)/gm),
-    (match) => match[1],
-  ).filter((reference) => !reference.startsWith("./"));
-  assert.ok(remoteActionRefs.length > 0, "workflow must use remote actions");
-  for (const reference of remoteActionRefs) {
-    assert.match(
-      reference,
-      /^[^@]+@[a-f0-9]{40}$/,
-      `remote action must be pinned to a full commit SHA: ${reference}`,
+  const metadataBeforeGates = namedStep(
+    identity,
+    "Verify release metadata before platform gates",
+  );
+  assert.equal(
+    metadataBeforeGates.run,
+    'node scripts/release-preflight.mjs metadata --tag "$RELEASE_TAG"',
+  );
+  const ancestryBeforeGates = namedStep(
+    identity,
+    "Verify release commit ancestry before platform gates",
+  );
+  assert.equal(ancestryBeforeGates.if, "startsWith(github.ref, 'refs/tags/v')");
+  assert.equal(
+    ancestryBeforeGates.env.EXPECTED_RELEASE_SHA,
+    "${{ steps.bind_release_sha.outputs.release_sha }}",
+  );
+  assert.equal(
+    ancestryBeforeGates.run,
+    'node scripts/verify-release-tag-sha.mjs --tag "$GITHUB_REF_NAME" --expected-sha "$EXPECTED_RELEASE_SHA"',
+  );
+  const publishRefBeforeGates = namedStep(
+    identity,
+    "Verify npm publish ref before platform gates",
+  );
+  assert.equal(
+    publishRefBeforeGates.if,
+    "github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_npm == true)",
+  );
+  assert.equal(
+    publishRefBeforeGates.run,
+    'node scripts/release-preflight.mjs npm-publish --ref "$GITHUB_REF"',
+  );
+
+  assert.equal(platformGate.needs, "release-identity");
+  assert.equal(platformGate["runs-on"], "${{ matrix.os }}");
+  assert.deepEqual(platformGate.strategy.matrix.include, [
+    { platform: "Linux", os: "ubuntu-latest", enforce_coverage: true },
+    { platform: "Windows", os: "windows-latest", enforce_coverage: false },
+    { platform: "macOS", os: "macos-latest", enforce_coverage: false },
+  ]);
+  const platformCheckout = namedStep(
+    platformGate,
+    "Checkout exact release commit",
+  );
+  assert.equal(
+    platformCheckout.with.ref,
+    "${{ needs.release-identity.outputs.release_sha }}",
+  );
+  const exactPlatformCheckout = namedStep(
+    platformGate,
+    "Verify exact release checkout",
+  );
+  assert.equal(
+    exactPlatformCheckout.env.EXPECTED_RELEASE_SHA,
+    "${{ needs.release-identity.outputs.release_sha }}",
+  );
+  const platformScripts = joinedRunScripts(platformGate);
+  for (const command of [
+    "pnpm install --frozen-lockfile",
+    "pnpm audit --prod",
+    "pnpm legal:check",
+    'node scripts/install-cargo-deny.mjs --install-dir "$RUNNER_TEMP/webpage-mcp-cargo-deny"',
+    '"$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --config deny.toml',
+    "pnpm typecheck",
+    "pnpm --filter webpage-mcp-connector compile",
+    "pnpm test:release",
+    "pnpm test:workspace",
+    "pnpm -r --if-present test",
+    "pnpm build",
+    "node scripts/verify-native-host-wrapper.mjs",
+  ]) {
+    assert.ok(
+      platformScripts.includes(command),
+      "platform gate is missing " + command,
+    );
+  }
+  for (const name of [
+    "Audit production npm dependencies once on Linux",
+    "Audit published MCP dependency closure once on Linux",
+    "Verify reviewed legal notices once on Linux",
+    "Install pinned Rust for advisory scan once on Linux",
+    "Install verified cargo-deny once on Linux",
+    "Audit Rust dependencies once on Linux",
+    "Lint once on Linux",
+  ]) {
+    assert.equal(namedStep(platformGate, name).if, "matrix.enforce_coverage");
+  }
+  assert.equal(
+    namedStep(platformGate, "Test workspace").env.ENFORCE_COVERAGE,
+    "${{ matrix.enforce_coverage && 'true' || 'false' }}",
+  );
+
+  assert.deepEqual(build.needs, ["release-identity", "release-platform-gate"]);
+  assert.equal(build.if, undefined);
+  assert.deepEqual(build.outputs, {
+    release_sha: "${{ steps.verify_release_sha.outputs.release_sha }}",
+  });
+  assert.equal(
+    namedStep(build, "Checkout exact gated commit").with.ref,
+    "${{ needs.release-identity.outputs.release_sha }}",
+  );
+  assertStepOrder(build, [
+    "Verify npm publish ref",
+    "Install verified wasm-pack",
+    "Verify reproducible WASM runtime",
+    "Pack MCP npm package",
+    "Verify fresh npm consumer dependency graph",
+    "Verify release artifacts against extension build",
+    "Upload release artifacts",
+  ]);
+  const buildPublishRef = namedStep(build, "Verify npm publish ref");
+  assert.equal(
+    buildPublishRef.if,
+    "github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_npm == true)",
+  );
+  assert.equal(
+    buildPublishRef.run,
+    'node scripts/release-preflight.mjs npm-publish --ref "$GITHUB_REF"',
+  );
+  assert.equal(
+    namedStep(build, "Install verified wasm-pack").run,
+    'node scripts/install-wasm-pack.mjs --install-dir "$RUNNER_TEMP/webpage-mcp-wasm-pack"',
+  );
+  const wasmVerification = namedStep(build, "Verify reproducible WASM runtime");
+  assert.equal(
+    wasmVerification.env.WASM_PACK_BINARY,
+    "${{ runner.temp }}/webpage-mcp-wasm-pack/wasm-pack",
+  );
+  assert.ok(wasmVerification.run.includes("cargo test --manifest-path"));
+  assert.ok(wasmVerification.run.includes("pnpm verify:wasm"));
+  assert.ok(!joinedRunScripts(build).includes("pnpm -r --if-present test"));
+  assert.ok(!joinedRunScripts(build).includes("cargo install wasm-pack"));
+  assert.deepEqual(namedStep(build, "Upload release artifacts").with, {
+    name: "release-assets-${{ steps.verify_release_sha.outputs.release_sha }}",
+    path: "artifacts/",
+    "if-no-files-found": "error",
+    "retention-days": 30,
+  });
+
+  const artifactVerificationRuns = [
+    namedStep(build, "Verify release artifacts against extension build").run,
+    namedStep(
+      githubPublish,
+      "Reverify release metadata and artifacts (archive-only; no build directory)",
+    ).run,
+    namedStep(
+      npmPublish,
+      "Reverify release metadata and artifacts (archive-only; no build directory)",
+    ).run,
+  ];
+  assert.deepEqual(artifactVerificationRuns, [
+    'node scripts/release-preflight.mjs artifacts artifacts --require-build-match --tag "$RELEASE_TAG"',
+    'node scripts/release-preflight.mjs artifacts artifacts --archive-only --tag "$GITHUB_REF_NAME"',
+    'node scripts/release-preflight.mjs artifacts artifacts --archive-only --tag "$RELEASE_TAG"',
+  ]);
+
+  for (const publishJob of [githubPublish, npmPublish]) {
+    assert.equal(publishJob.needs, "build-assets");
+    assert.deepEqual(
+      namedStep(publishJob, "Checkout exact gated commit").with,
+      {
+        ref: "${{ needs.build-assets.outputs.release_sha }}",
+        "fetch-depth": 0,
+      },
+    );
+    assert.deepEqual(
+      namedStep(publishJob, "Download verified release artifacts").with,
+      {
+        name: "release-assets-${{ needs.build-assets.outputs.release_sha }}",
+        path: "artifacts",
+      },
     );
   }
 
-  assert.ok(
-    buildJob >= 0 && artifactPreflight > buildJob,
-    "build job must run artifact preflight",
+  assert.equal(githubPublish.if, "startsWith(github.ref, 'refs/tags/v')");
+  assert.deepEqual(githubPublish.environment, { name: "github-release" });
+  assert.deepEqual(githubPublish.permissions, { contents: "write" });
+  assertStepOrder(githubPublish, [
+    "Setup Node.js for publish verification",
+    "Reverify release metadata and artifacts (archive-only; no build directory)",
+    "Reverify release tag commit",
+    "Publish GitHub Release",
+  ]);
+  const githubSteps = workflowSteps(githubPublish);
+  const githubTagCheckIndex = githubSteps.findIndex(
+    (step) => step.name === "Reverify release tag commit",
   );
-  assert.deepEqual(
-    Array.from(
-      workflow.matchAll(
-        /^\s+run: node scripts\/release-preflight\.mjs artifacts artifacts (.+)$/gm,
-      ),
-      (match) => match[1],
-    ),
-    [
-      '--require-build-match --tag "$RELEASE_TAG"',
-      '--archive-only --tag "$GITHUB_REF_NAME"',
-      '--archive-only --tag "$RELEASE_TAG"',
+  assert.equal(
+    githubSteps[githubTagCheckIndex + 1].name,
+    "Publish GitHub Release",
+  );
+  const githubTagCheck = namedStep(
+    githubPublish,
+    "Reverify release tag commit",
+  );
+  assert.equal(
+    githubTagCheck.env.EXPECTED_RELEASE_SHA,
+    "${{ needs.build-assets.outputs.release_sha }}",
+  );
+  assert.equal(
+    githubTagCheck.run,
+    'node scripts/verify-release-tag-sha.mjs --tag "$GITHUB_REF_NAME" --expected-sha "$EXPECTED_RELEASE_SHA"',
+  );
+  const githubMutation = namedStep(githubPublish, "Publish GitHub Release");
+  assert.match(
+    githubMutation.uses,
+    /^softprops\/action-gh-release@[a-f0-9]{40}$/,
+  );
+  assert.equal(githubMutation.with.tag_name, "${{ github.ref_name }}");
+  assert.equal(
+    githubMutation.with.target_commitish,
+    "${{ needs.build-assets.outputs.release_sha }}",
+  );
+  assert.equal(
+    namedStep(githubPublish, "Setup Node.js for publish verification").with[
+      "node-version"
     ],
-    "the build job must require ZIP-to-build matching while clean publish checkouts explicitly verify archives only",
+    24,
   );
-  assert.ok(
-    releaseIdentityJob >= 0 &&
-      platformGateJob > releaseIdentityJob &&
-      buildJob > platformGateJob,
-    "release identity and platform gates must precede artifact construction",
-  );
-  assert.match(
-    releaseIdentityBody,
-    /outputs:\s*\n\s+release_sha:\s*\$\{\{ steps\.bind_release_sha\.outputs\.release_sha \}\}/,
-    "the release identity job must expose its immutable commit SHA",
-  );
-  assert.match(
-    releaseIdentityBody,
-    /ref:\s*\$\{\{ github\.sha \}\}\s*\n\s+fetch-depth:\s*0[\s\S]*git rev-parse "\$\{EVENT_RELEASE_SHA\}\^\{commit\}"/,
-    "the release identity job must peel the event object to its exact commit",
-  );
-  assert.match(
-    releaseIdentityBody,
-    /Verify release commit ancestry before platform gates\s*\n\s+if: startsWith\(github\.ref, 'refs\/tags\/v'\)[\s\S]*EXPECTED_RELEASE_SHA: \$\{\{ steps\.bind_release_sha\.outputs\.release_sha \}\}[\s\S]*verify-release-tag-sha\.mjs --tag "\$GITHUB_REF_NAME" --expected-sha "\$EXPECTED_RELEASE_SHA"/,
-    "tag releases must prove remote main ancestry before starting platform runners",
-  );
-  assert.match(
-    releaseIdentityBody,
-    /Verify npm publish ref before platform gates[\s\S]*if: github\.event_name == 'push' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.publish_npm == true\)[\s\S]*npm-publish --ref "\$GITHUB_REF"/,
-    "invalid manual publish refs must fail before starting platform runners",
-  );
-  assert.match(
-    platformGateBody,
-    /needs:\s*release-identity[\s\S]*runs-on:\s*\$\{\{ matrix\.os \}\}/,
-    "every platform gate must consume the bound release identity",
-  );
-  for (const [platform, os] of [
-    ["Linux", "ubuntu-latest"],
-    ["Windows", "windows-latest"],
-    ["macOS", "macos-latest"],
-  ]) {
-    assert.match(
-      platformGateBody,
-      new RegExp(`platform: ${platform}\\r?\\n\\s+os: ${os}`),
-      `${platform} must be an explicit release platform gate`,
-    );
-  }
-  assert.equal(
-    platformGateBody.match(/enforce_coverage:\s*true/g)?.length,
-    1,
-    "release coverage must run on exactly one platform",
-  );
-  assert.equal(
-    platformGateBody.match(/enforce_coverage:\s*false/g)?.length,
-    2,
-    "the other release platforms must avoid duplicate coverage collection",
-  );
-  assert.match(
-    platformGateBody,
-    /ref:\s*\$\{\{ needs\.release-identity\.outputs\.release_sha \}\}[\s\S]*EXPECTED_RELEASE_SHA:\s*\$\{\{ needs\.release-identity\.outputs\.release_sha \}\}/,
-    "platform checkouts must bind to the identity job output",
-  );
-  for (const requiredCheck of [
-    /pnpm install --frozen-lockfile/,
-    /pnpm audit --prod/,
-    /pnpm legal:check/,
-    /node scripts\/install-cargo-deny\.mjs --install-dir "\$RUNNER_TEMP\/webpage-mcp-cargo-deny"/,
-    /"\$RUNNER_TEMP\/webpage-mcp-cargo-deny\/cargo-deny" --config deny\.toml --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories/,
-    /pnpm typecheck/,
-    /pnpm --filter webpage-mcp-connector compile/,
-    /pnpm test:release/,
-    /pnpm test:workspace/,
-    /pnpm -r --if-present test/,
-    /pnpm build/,
-    /node scripts\/verify-native-host-wrapper\.mjs/,
-  ]) {
-    assert.match(
-      platformGateBody,
-      requiredCheck,
-      `platform gate is missing ${requiredCheck}`,
-    );
-  }
-  assert.ok(
-    platformGateBody.includes(
-      "ENFORCE_COVERAGE: ${{ matrix.enforce_coverage && 'true' || 'false' }}",
-    ),
-    "coverage selection must come from the explicit platform matrix",
-  );
-  assert.match(
-    platformGateBody,
-    /real installed browser remains manual/,
-    "the process smoke must not claim to cover an installed-browser handshake",
-  );
-  assert.match(
-    workflow,
-    /workflow_dispatch:[\s\S]*publish_npm:[\s\S]*default:\s*false/,
-    "manual release builds must default to a non-publishing dry run",
-  );
-  assert.doesNotMatch(
-    workflow.slice(buildJob, workflow.indexOf("    steps:", buildJob)),
-    /^\s+if:/m,
-    "manual dry-run builds must not skip the build job",
-  );
-  assert.ok(
-    npmPublishRefPreflight > buildJob &&
-      npmPublishRefPreflight < artifactPreflight,
-    "publish requests must validate the triggering ref in the build job",
-  );
-  assert.match(
-    buildJobBody.slice(npmPublishRefPreflight - buildJob),
-    /if: github\.event_name == 'push' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.publish_npm == true\)[\s\S]*npm-publish --ref "\$GITHUB_REF"/,
-    "tag pushes and manual publish requests must run the ref preflight",
-  );
-  assert.match(
-    platformGateBody,
-    /ENFORCE_COVERAGE:/,
-    "release tests must enforce production coverage thresholds",
-  );
-  assert.match(
-    platformGateBody,
-    /pnpm test:workspace/,
-    "release tests must include cross-platform workspace scripts",
-  );
-  assert.doesNotMatch(
-    buildJobBody,
-    /ENFORCE_COVERAGE|pnpm -r --if-present test/,
-    "artifact construction must consume the completed gate instead of rerunning coverage",
-  );
-  assert.match(
-    workflow.slice(buildJob, workflow.indexOf("    steps:", buildJob)),
-    /needs:\s*\n\s+- release-identity\s*\n\s+- release-platform-gate[\s\S]*outputs:\s*\n\s+release_sha:/,
-    "artifact construction must need both the identity and platform gates",
-  );
-  assert.match(
-    buildJobBody,
-    /ref:\s*\$\{\{ needs\.release-identity\.outputs\.release_sha \}\}[\s\S]*name:\s*release-assets-\$\{\{ steps\.verify_release_sha\.outputs\.release_sha \}\}/,
-    "release artifacts must stay bound to the gated checkout SHA",
-  );
-  assert.match(
-    buildJobBody,
-    /cargo test --manifest-path packages\/wasm-simd\/Cargo\.toml --locked/,
-    "release verification must run locked Rust tests",
-  );
-  assert.match(
-    buildJobBody,
-    /pnpm verify:wasm/,
-    "release verification must rebuild and compare committed WASM artifacts",
-  );
-  assert.match(
-    buildJobBody,
-    /node scripts\/install-wasm-pack\.mjs --install-dir "\$RUNNER_TEMP\/webpage-mcp-wasm-pack"/,
-    "release artifact construction must install the byte-pinned wasm-pack binary",
-  );
-  assert.match(
-    buildJobBody,
-    /WASM_PACK_BINARY: \$\{\{ runner\.temp \}\}\/webpage-mcp-wasm-pack\/wasm-pack/,
-    "release artifact construction must invoke the verified wasm-pack by absolute path",
-  );
-  assert.doesNotMatch(
-    buildJobBody,
-    /cargo install wasm-pack/,
-    "release artifact construction must not compile an unverified generator",
-  );
-  assert.ok(
-    buildJobBody.indexOf("pnpm verify:wasm") <
-      buildJobBody.indexOf("Pack MCP npm package"),
-    "WASM verification must finish before release artifacts are packed",
-  );
-  assert.ok(
-    buildJobBody.indexOf("Pack MCP npm package") <
-      buildJobBody.indexOf("Verify fresh npm consumer dependency graph") &&
-      buildJobBody.indexOf("Verify fresh npm consumer dependency graph") <
-        buildJobBody.indexOf("Verify release artifacts"),
-    "the exact MCP tarball must pass a fresh npm install and audit before artifact approval",
-  );
-  assert.match(
-    buildJobBody,
-    /node scripts\/verify-packed-mcp-consumer\.mjs "artifacts\/mcp\/webpage-mcp-\$\{PACKAGE_VERSION\}\.tgz"/,
-  );
-  assert.ok(
-    githubJob > artifactPreflight,
-    "GitHub release job must follow artifact preflight",
-  );
-  assert.match(
-    githubJobHeader,
-    /environment:\s*\n\s+name: github-release/,
-    "GitHub asset publishing must use the protected github-release environment",
-  );
-  assert.ok(
-    githubPublish > githubJob,
-    "GitHub release mutation must stay in the gated job",
-  );
-  assert.match(
-    workflow.slice(githubJob, githubPublish),
-    /needs: build-assets[\s\S]*Reverify release metadata and artifacts/,
-  );
-  assert.ok(
-    githubTagShaReverify > githubJob &&
-      githubPublishStep > githubTagShaReverify &&
-      githubPublish > githubPublishStep,
-    "GitHub release publishing must re-fetch and bind the remote tag immediately before mutation",
-  );
-  assert.equal(
-    githubJobBody.match(/- name: Reverify release tag commit/g)?.length,
-    1,
-    "the GitHub publish job must perform exactly one final remote tag check",
-  );
-  assert.match(
-    githubJobBody,
-    /- name: Reverify release tag commit\s*\n\s+env:\s*\n\s+EXPECTED_RELEASE_SHA: \$\{\{ needs\.build-assets\.outputs\.release_sha \}\}\s*\n\s+run: node scripts\/verify-release-tag-sha\.mjs --tag "\$GITHUB_REF_NAME" --expected-sha "\$EXPECTED_RELEASE_SHA"\s*\n\s*\n\s+- name: Publish GitHub Release\s*\n\s+uses: softprops\/action-gh-release@/,
-    "the GitHub tag check must be the step immediately before the release mutation",
-  );
-  assert.match(
-    githubJobBody,
-    /uses: softprops\/action-gh-release@[a-f0-9]{40}[\s\S]*?with:\s*\n\s+tag_name: \$\{\{ github\.ref_name \}\}\s*\n\s+target_commitish: \$\{\{ needs\.build-assets\.outputs\.release_sha \}\}/,
-    "the GitHub release action must explicitly bind both its tag and gated target commit",
-  );
-  assert.match(
-    githubJobBody,
-    /Setup Node\.js for publish verification[\s\S]*uses: actions\/setup-node@[a-f0-9]{40}[\s\S]*node-version: 24[\s\S]*Reverify release metadata and artifacts/,
-    "the GitHub publish job must pin Node 24 before its final JavaScript verification",
-  );
-  for (const publishJobBody of [githubJobBody, npmJobBody]) {
-    assert.match(
-      publishJobBody,
-      /ref:\s*\$\{\{ needs\.build-assets\.outputs\.release_sha \}\}\s*\n\s+fetch-depth:\s*0/,
-      "publish jobs must checkout the SHA propagated through needs",
-    );
-    assert.match(
-      publishJobBody,
-      /name:\s*release-assets-\$\{\{ needs\.build-assets\.outputs\.release_sha \}\}/,
-      "publish jobs must download only the gated SHA artifact",
-    );
-  }
-  assert.doesNotMatch(
-    workflow,
-    /release-assets-\$\{\{ github\.sha \}\}/,
-    "artifact identity must come through needs rather than an ambient context",
-  );
-  assert.ok(
-    npmPreflight > npmJob && npmPublish > npmPreflight,
-    "npm publish must follow preflight",
-  );
-  assert.ok(
-    npmTagShaReverify > npmPreflight &&
-      npmPublishStep > npmTagShaReverify &&
-      npmPublish > npmPublishStep,
-    "npm publishing must re-fetch and bind the remote tag immediately before mutation",
-  );
-  assert.equal(
-    npmJobBody.match(/- name: Reverify release tag commit/g)?.length,
-    1,
-    "the npm publish job must perform exactly one final remote tag check",
-  );
-  assert.match(
-    npmJobBody,
-    /- name: Reverify release tag commit\s*\n\s+env:\s*\n\s+EXPECTED_RELEASE_SHA: \$\{\{ needs\.build-assets\.outputs\.release_sha \}\}\s*\n\s+run: node scripts\/verify-release-tag-sha\.mjs --tag "\$GITHUB_REF_NAME" --expected-sha "\$EXPECTED_RELEASE_SHA"\s*\n\s*\n\s+- name: Publish package\s*\n\s+run:/,
-    "the npm tag check must be the step immediately before npm publish",
-  );
-  assert.match(
-    npmJobHeader,
-    /if: startsWith\(github\.ref, 'refs\/tags\/v'\) && \(github\.event_name == 'push' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.publish_npm == true\)\)/,
-    "npm publishing must be limited to v-prefixed tag refs",
-  );
-  assert.match(
-    npmJobHeader,
-    /environment:\s*\n\s+name: npm-publish/,
-    "npm publishing must use the protected npm-publish environment",
-  );
-  assert.ok(
-    npmPublishRefReverify > npmJob && npmPreflight > npmPublishRefReverify,
-    "the npm job must revalidate its exact publish ref before artifact verification",
-  );
-  assert.match(
-    workflow.slice(npmPublishRefReverify, npmPreflight),
-    /npm-publish --ref "\$GITHUB_REF"/,
-    "the npm job must bind publishing to the full GitHub ref",
-  );
-  assert.match(
-    workflow.slice(npmJob, npmPublish + 300),
-    /npm publish[\s\S]*--tag latest/,
-    "the stable-only unified release must publish to latest explicitly",
-  );
-  assert.doesNotMatch(
-    buildJobBody,
-    /action-gh-release|^\s*npm publish(?:\s|$)/m,
-    "build and verification must not mutate a release",
-  );
-});
 
+  assert.equal(
+    npmPublish.if,
+    "startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_npm == true))",
+  );
+  assert.deepEqual(npmPublish.environment, { name: "npm-publish" });
+  assert.deepEqual(npmPublish.permissions, {
+    contents: "read",
+    "id-token": "write",
+  });
+  assertStepOrder(npmPublish, [
+    "Reverify npm publish ref",
+    "Reverify release metadata and artifacts (archive-only; no build directory)",
+    "Setup Node.js for npm publish",
+    "Ensure NPM token is configured",
+    "Reverify release tag commit",
+    "Publish package",
+  ]);
+  const npmSteps = workflowSteps(npmPublish);
+  const npmTagCheckIndex = npmSteps.findIndex(
+    (step) => step.name === "Reverify release tag commit",
+  );
+  assert.equal(npmSteps[npmTagCheckIndex + 1].name, "Publish package");
+  assert.equal(
+    namedStep(npmPublish, "Reverify npm publish ref").run,
+    'node scripts/release-preflight.mjs npm-publish --ref "$GITHUB_REF"',
+  );
+  const npmTagCheck = namedStep(npmPublish, "Reverify release tag commit");
+  assert.equal(
+    npmTagCheck.env.EXPECTED_RELEASE_SHA,
+    "${{ needs.build-assets.outputs.release_sha }}",
+  );
+  assert.equal(
+    npmTagCheck.run,
+    'node scripts/verify-release-tag-sha.mjs --tag "$GITHUB_REF_NAME" --expected-sha "$EXPECTED_RELEASE_SHA"',
+  );
+  const npmMutation = namedStep(npmPublish, "Publish package");
+  assert.ok(
+    npmMutation.run.includes("--provenance --access public --tag latest"),
+  );
+  assert.equal(
+    npmMutation.env.NODE_AUTH_TOKEN,
+    "${{ secrets.NPM_AUTH_TOKEN }}",
+  );
+
+  assert.ok(
+    !actionReferences({ jobs: { build } }).some((reference) =>
+      reference.startsWith("softprops/action-gh-release@"),
+    ),
+  );
+  assert.ok(!joinedRunScripts(build).includes("npm publish"));
+});
 test("release native wrapper smoke exercises the platform process boundary", async () => {
   const source = await readFile(
     join(REPOSITORY_ROOT, "scripts/verify-native-host-wrapper.mjs"),
@@ -1836,247 +1842,252 @@ test("release native wrapper smoke withholds child stderr on failure", async (t)
   );
 });
 
-test("dependency security gates cover npm and Cargo continuously", async () => {
+test("dependency security gates encode reviewed commands structurally", async () => {
   const [
-    ciWorkflow,
-    releaseWorkflow,
-    securityWorkflow,
+    ci,
+    release,
+    security,
     dependabot,
     cargoDenyTool,
     wasmPackTool,
     cargoDenyPolicy,
   ] = await Promise.all([
-    readFile(join(REPOSITORY_ROOT, ".github/workflows/ci.yml"), "utf8"),
-    readFile(join(REPOSITORY_ROOT, ".github/workflows/release.yml"), "utf8"),
-    readFile(
-      join(REPOSITORY_ROOT, ".github/workflows/dependency-security.yml"),
-      "utf8",
-    ),
-    readFile(join(REPOSITORY_ROOT, ".github/dependabot.yml"), "utf8"),
+    readYaml(".github/workflows/ci.yml"),
+    readYaml(".github/workflows/release.yml"),
+    readYaml(".github/workflows/dependency-security.yml"),
+    readYaml(".github/dependabot.yml"),
     readFile(join(REPOSITORY_ROOT, "scripts/cargo-deny-tool.json"), "utf8"),
     readFile(join(REPOSITORY_ROOT, "scripts/wasm-pack-tool.json"), "utf8"),
     readFile(join(REPOSITORY_ROOT, "deny.toml"), "utf8"),
   ]);
+
   const cargoDeny = JSON.parse(cargoDenyTool);
   const wasmPack = JSON.parse(wasmPackTool);
-  assert.equal(cargoDeny.version, "0.19.8");
-  assert.equal(cargoDeny.rustToolchain, "1.94.0");
-  assert.equal(cargoDeny.archive.size, 4_983_961);
-  assert.equal(
-    cargoDeny.archive.sha256,
-    "70e769ae3872e34d45132b17040859175e11401dc12dddb0303e0b8c7d088f3f",
+  assert.deepEqual(
+    {
+      version: cargoDeny.version,
+      rustToolchain: cargoDeny.rustToolchain,
+      archiveSize: cargoDeny.archive.size,
+      archiveSha256: cargoDeny.archive.sha256,
+      binarySize: cargoDeny.binary.size,
+      binarySha256: cargoDeny.binary.sha256,
+    },
+    {
+      version: "0.19.8",
+      rustToolchain: "1.94.0",
+      archiveSize: 4_983_961,
+      archiveSha256:
+        "70e769ae3872e34d45132b17040859175e11401dc12dddb0303e0b8c7d088f3f",
+      binarySize: 8_951_120,
+      binarySha256:
+        "f84bbd8f18ca59d531b848bad2f39237b17b5980d7f9cdd373d81f6689eb685f",
+    },
   );
-  assert.equal(cargoDeny.binary.size, 8_951_120);
-  assert.equal(
-    cargoDeny.binary.sha256,
-    "f84bbd8f18ca59d531b848bad2f39237b17b5980d7f9cdd373d81f6689eb685f",
-  );
-  assert.equal(wasmPack.version, "0.15.0");
-  assert.equal(
-    wasmPack.archive.sha256,
-    "c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a",
-  );
-  assert.equal(
-    wasmPack.binary.sha256,
-    "c6c3d54702f4bae4a1d51e37e19c2c61b130865dc3fabc745eebe8194b87b253",
+  assert.deepEqual(
+    {
+      version: wasmPack.version,
+      archiveSha256: wasmPack.archive.sha256,
+      binarySha256: wasmPack.binary.sha256,
+    },
+    {
+      version: "0.15.0",
+      archiveSha256:
+        "c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a",
+      binarySha256:
+        "c6c3d54702f4bae4a1d51e37e19c2c61b130865dc3fabc745eebe8194b87b253",
+    },
   );
   assert.equal(
     cargoDenyPolicy,
     '[advisories]\nyanked = "deny"\nunmaintained = "all"\nunsound = "all"\nunused-ignored-advisory = "deny"\nignore = []\n',
-    "cargo-deny must fail closed on every advisory class without exceptions",
   );
 
-  assert.match(
-    ciWorkflow,
-    /Audit production npm dependencies\s*\n\s+if: matrix\.node-version == 24\s*\n\s+run: pnpm audit --prod/,
-    "CI must audit the production npm graph once on its maintained Node line",
-  );
-  assert.match(
-    ciWorkflow,
-    /Verify reviewed legal notices\s*\n\s+if: matrix\.node-version == 24\s*\n\s+run: pnpm legal:check/,
-    "CI must expose legal inventory verification as an explicit maintained-line gate",
-  );
-  for (const [name, source] of [
-    ["CI WASM rebuild", ciWorkflow],
-    ["release artifact build", releaseWorkflow],
-  ]) {
-    assert.match(
-      source,
-      /node scripts\/install-wasm-pack\.mjs --install-dir "\$RUNNER_TEMP\/webpage-mcp-wasm-pack"/,
-      `${name} must install the byte-pinned wasm-pack binary`,
-    );
-    assert.match(
-      source,
-      /WASM_PACK_BINARY: \$\{\{ runner\.temp \}\}\/webpage-mcp-wasm-pack\/wasm-pack/,
-      `${name} must pass the verified wasm-pack absolute path to the artifact builder`,
-    );
-    assert.doesNotMatch(
-      source,
-      /cargo install wasm-pack/,
-      `${name} must not compile wasm-pack from an independently resolved tool graph`,
-    );
-  }
-
-  const releasePlatformGate = releaseWorkflow.slice(
-    releaseWorkflow.indexOf("  release-platform-gate:"),
-    releaseWorkflow.indexOf("  build-assets:"),
-  );
-  for (const [name, source] of [
-    ["CI", ciWorkflow],
-    ["release", releasePlatformGate],
-    ["scheduled dependency security", securityWorkflow],
-  ]) {
-    assert.match(
-      source,
-      /pnpm audit --prod/,
-      `${name} must fail on production npm advisories`,
-    );
-    assert.match(
-      source,
-      /pnpm shrinkwrap:mcp:check\s*\n\s+pnpm shrinkwrap:mcp:check-current\s*\n\s+npm audit --omit=dev --package-lock-only --prefix app\/mcp-server --audit-level=low\s*\n\s+pnpm audit:mcp-bundle/,
-      `${name} must validate and audit the published MCP dependency closure`,
-    );
-    assert.doesNotMatch(
-      source,
-      /EmbarkStudios\/cargo-deny-action/,
-      `${name} must not delegate binary acquisition to a mutable action implementation`,
-    );
-    assert.match(
-      source,
-      /rustup toolchain install 1\.94\.0 --profile minimal/,
-      `${name} must install the pinned Rust toolchain`,
-    );
-    assert.match(
-      source,
-      /rustup default 1\.94\.0/,
-      `${name} must select the pinned Rust toolchain`,
-    );
-    assert.match(
-      source,
-      /node scripts\/install-cargo-deny\.mjs --install-dir "\$RUNNER_TEMP\/webpage-mcp-cargo-deny"/,
-      `${name} must install the byte-pinned cargo-deny binary`,
-    );
-    assert.match(
-      source,
-      /cargo metadata --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features --locked --format-version 1 > \/dev\/null/,
-      `${name} must validate the committed Cargo graph`,
-    );
-    const auditCommand = source
-      .split(/\r?\n/)
-      .find((line) =>
-        line.includes(
-          '"$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --config deny.toml --manifest-path',
-        ),
-      );
-    assert.ok(
-      auditCommand,
-      `${name} must execute cargo-deny through its absolute verified path`,
-    );
-    assert.match(
-      auditCommand,
-      /--config deny\.toml --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories$/,
-      `${name} must scan the complete production Rust graph`,
-    );
-    assert.doesNotMatch(
-      auditCommand,
-      /--locked|--offline|--frozen|--disable-fetch/,
-      `${name} must leave live advisory-database refresh enabled`,
-    );
-    assert.match(
-      source,
-      /git diff --exit-code -- packages\/wasm-simd\/Cargo\.lock/,
-      `${name} must fail if scanning changes the committed lockfile`,
-    );
-    assert.match(
-      source,
-      /cargo metadata --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features --locked --format-version 1 > \/dev\/null\s*\n\s+"\$RUNNER_TEMP\/webpage-mcp-cargo-deny\/cargo-deny" --config deny\.toml --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories\s*\n\s+git diff --exit-code -- packages\/wasm-simd\/Cargo\.lock/,
-      `${name} must keep locked-graph validation, live advisory refresh, and mutation detection adjacent`,
-    );
-  }
-
-  assert.match(
-    releasePlatformGate,
-    /Audit production npm dependencies once on Linux\s*\n\s+if: matrix\.enforce_coverage\s*\n\s+run: pnpm audit --prod/,
-    "the release npm advisory gate must run once on Linux",
-  );
-  assert.match(
-    releasePlatformGate,
-    /Install verified cargo-deny once on Linux\s*\n\s+if: matrix\.enforce_coverage\s*\n\s+run: node scripts\/install-cargo-deny\.mjs[^\n]*\s*\n[\s\S]*?Audit Rust dependencies once on Linux\s*\n\s+if: matrix\.enforce_coverage\s*\n\s+run:/,
-    "the verified release Rust advisory gate must run only on Linux",
-  );
-
-  assert.match(
-    securityWorkflow,
-    /on:\s*\n\s+schedule:\s*\n\s+- cron: ["']17 4 \* \* \*["']\s*\n\s+workflow_dispatch:/,
-    "dependency security must run daily and support manual dispatch",
-  );
-  assert.match(
-    securityWorkflow,
-    /permissions:\s*\n\s+contents: read/,
-    "the advisory workflow must be read-only",
-  );
-  assert.doesNotMatch(
-    securityWorkflow,
-    /pnpm install/,
-    "the advisory-only workflow must not execute dependency lifecycle code",
-  );
-
-  const securityGates = [
-    ciWorkflow,
-    releasePlatformGate,
-    securityWorkflow,
-  ].join("\n");
-  assert.doesNotMatch(
-    securityGates,
-    /continue-on-error|ignore-registry-errors|\|\|\s*true/,
-    "dependency advisory gates must fail closed",
-  );
-
-  for (const [ecosystem, directory] of [
-    ["github-actions", "/"],
-    ["npm", "/"],
-    ["cargo", "/packages/wasm-simd"],
-  ]) {
-    const escapedDirectory = directory.replaceAll("/", "\\/");
-    const entryPattern = new RegExp(
-      `package-ecosystem: ${ecosystem}\\r?\\n` +
-        `\\s+directory: ["']${escapedDirectory}["']\\r?\\n` +
-        `\\s+schedule:\\r?\\n\\s+interval: weekly\\r?\\n` +
-        `\\s+open-pull-requests-limit: 5`,
-      "g",
-    );
-    assert.equal(
-      Array.from(dependabot.matchAll(entryPattern)).length,
-      1,
-      `Dependabot must cover ${ecosystem} at ${directory} exactly once`,
-    );
-  }
-});
-
-test("CI workflows use maintained runtimes and reviewed actions", async () => {
-  const workflowPaths = [
-    join(REPOSITORY_ROOT, ".github/workflows/ci.yml"),
-    join(REPOSITORY_ROOT, ".github/workflows/release.yml"),
-    join(REPOSITORY_ROOT, ".github/workflows/dependency-security.yml"),
+  const publishedClosureCommands = [
+    "pnpm shrinkwrap:mcp:check",
+    "pnpm shrinkwrap:mcp:check-current",
+    "npm audit --omit=dev --package-lock-only --prefix app/mcp-server --audit-level=low",
+    "pnpm audit:mcp-bundle",
   ];
-  const workflows = await Promise.all(
-    workflowPaths.map((workflowPath) => readFile(workflowPath, "utf8")),
+  const rustAuditCommands = [
+    "cargo metadata --manifest-path packages/wasm-simd/Cargo.toml --all-features --locked --format-version 1 > /dev/null",
+    '"$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --config deny.toml --manifest-path packages/wasm-simd/Cargo.toml --all-features check advisories',
+    "git diff --exit-code -- packages/wasm-simd/Cargo.lock",
+  ];
+  const gates = [
+    {
+      name: "CI",
+      workflow: ci,
+      npmJob: "verify",
+      npmAudit: "Audit production npm dependencies",
+      closureAudit: "Audit published MCP dependency closure",
+      rustJob: "wasm-artifacts",
+      rustInstall: "Install pinned Rust toolchain",
+      denyInstall: "Install verified cargo-deny",
+      rustAudit: "Audit Rust dependencies",
+    },
+    {
+      name: "release",
+      workflow: release,
+      npmJob: "release-platform-gate",
+      npmAudit: "Audit production npm dependencies once on Linux",
+      closureAudit: "Audit published MCP dependency closure once on Linux",
+      rustJob: "release-platform-gate",
+      rustInstall: "Install pinned Rust for advisory scan once on Linux",
+      denyInstall: "Install verified cargo-deny once on Linux",
+      rustAudit: "Audit Rust dependencies once on Linux",
+    },
+    {
+      name: "scheduled dependency security",
+      workflow: security,
+      npmJob: "audit",
+      npmAudit: "Audit production npm dependencies",
+      closureAudit: "Audit published MCP dependency closure",
+      rustJob: "audit",
+      rustInstall: "Install pinned Rust toolchain",
+      denyInstall: "Install verified cargo-deny",
+      rustAudit: "Audit Rust dependencies",
+    },
+  ];
+
+  for (const gate of gates) {
+    const npmJob = workflowJob(gate.workflow, gate.npmJob);
+    const rustJob = workflowJob(gate.workflow, gate.rustJob);
+    assert.equal(namedStep(npmJob, gate.npmAudit).run, "pnpm audit --prod");
+    assert.deepEqual(
+      namedStep(npmJob, gate.closureAudit).run.trim().split("\n"),
+      publishedClosureCommands,
+    );
+    const rustInstall = namedStep(rustJob, gate.rustInstall).run;
+    assert.ok(
+      rustInstall.includes("rustup toolchain install 1.94.0 --profile minimal"),
+    );
+    assert.ok(rustInstall.includes("rustup default 1.94.0"));
+    assert.equal(
+      namedStep(rustJob, gate.denyInstall).run,
+      'node scripts/install-cargo-deny.mjs --install-dir "$RUNNER_TEMP/webpage-mcp-cargo-deny"',
+    );
+    const rustAudit = namedStep(rustJob, gate.rustAudit).run.trim().split("\n");
+    assert.deepEqual(rustAudit, rustAuditCommands);
+    assert.ok(
+      !rustAudit[1].includes("--locked") &&
+        !rustAudit[1].includes("--offline") &&
+        !rustAudit[1].includes("--frozen") &&
+        !rustAudit[1].includes("--disable-fetch"),
+      gate.name + " must keep the live advisory refresh enabled",
+    );
+    assert.ok(
+      !actionReferences(gate.workflow).some((reference) =>
+        reference.startsWith("EmbarkStudios/cargo-deny-action@"),
+      ),
+    );
+    for (const guardedJob of new Set([npmJob, rustJob])) {
+      for (const step of workflowSteps(guardedJob)) {
+        assert.notEqual(step["continue-on-error"], true);
+        if (typeof step.run === "string") {
+          assert.ok(!step.run.includes("ignore-registry-errors"));
+          assert.ok(!step.run.includes("|| true"));
+        }
+      }
+    }
+  }
+
+  const ciVerify = workflowJob(ci, "verify");
+  assert.equal(
+    namedStep(ciVerify, "Audit production npm dependencies").if,
+    "matrix.node-version == 24",
   );
+  assert.equal(
+    namedStep(ciVerify, "Verify reviewed legal notices").if,
+    "matrix.node-version == 24",
+  );
+  const releaseGate = workflowJob(release, "release-platform-gate");
+  for (const name of [
+    "Audit production npm dependencies once on Linux",
+    "Install verified cargo-deny once on Linux",
+    "Audit Rust dependencies once on Linux",
+  ]) {
+    assert.equal(namedStep(releaseGate, name).if, "matrix.enforce_coverage");
+  }
+
+  for (const [name, job] of [
+    ["CI WASM rebuild", workflowJob(ci, "wasm-artifacts")],
+    ["release artifact build", workflowJob(release, "build-assets")],
+  ]) {
+    assert.equal(
+      namedStep(job, "Install verified wasm-pack").run,
+      'node scripts/install-wasm-pack.mjs --install-dir "$RUNNER_TEMP/webpage-mcp-wasm-pack"',
+      name,
+    );
+    const verificationName =
+      name === "CI WASM rebuild"
+        ? "Verify generated runtime artifacts"
+        : "Verify reproducible WASM runtime";
+    assert.equal(
+      namedStep(job, verificationName).env.WASM_PACK_BINARY,
+      "${{ runner.temp }}/webpage-mcp-wasm-pack/wasm-pack",
+    );
+    assert.ok(!joinedRunScripts(job).includes("cargo install wasm-pack"));
+  }
+
+  assert.deepEqual(security.on, {
+    schedule: [{ cron: "17 4 * * *" }],
+    workflow_dispatch: null,
+  });
+  assert.deepEqual(security.permissions, { contents: "read" });
+  assert.ok(!joinedWorkflowRunScripts(security).includes("pnpm install"));
+
+  assert.deepEqual(dependabot, {
+    version: 2,
+    updates: [
+      {
+        "package-ecosystem": "github-actions",
+        directory: "/",
+        schedule: { interval: "weekly" },
+        "open-pull-requests-limit": 5,
+      },
+      {
+        "package-ecosystem": "npm",
+        directory: "/",
+        schedule: { interval: "weekly" },
+        "open-pull-requests-limit": 5,
+      },
+      {
+        "package-ecosystem": "cargo",
+        directory: "/packages/wasm-simd",
+        schedule: { interval: "weekly" },
+        "open-pull-requests-limit": 5,
+      },
+    ],
+  });
+});
+test("CI workflows use maintained runtimes and reviewed actions", async () => {
+  const [ci, release, security] = await Promise.all([
+    readYaml(".github/workflows/ci.yml"),
+    readYaml(".github/workflows/release.yml"),
+    readYaml(".github/workflows/dependency-security.yml"),
+  ]);
+  const workflows = [ci, release, security];
   const rootPackage = JSON.parse(
     await readFile(join(REPOSITORY_ROOT, "package.json"), "utf8"),
   );
-  const combined = workflows.join("\n");
 
-  assert.doesNotMatch(
-    combined,
-    /node-version:\s*["']?20(?:["']?|\s|$)/,
-    "EOL Node.js 20 must not be used by CI jobs",
+  assert.deepEqual(
+    workflowJob(ci, "verify").strategy.matrix["node-version"],
+    [22, 24],
   );
-  assert.match(
-    workflows[0],
-    /node-version:\s*\[22, 24\]/,
-    "CI must verify both supported LTS release lines",
+  const setupNodeSteps = workflows.flatMap((workflow) =>
+    allWorkflowSteps(workflow).filter((step) =>
+      String(step.uses ?? "").startsWith("actions/setup-node@"),
+    ),
   );
+  assert.ok(setupNodeSteps.length > 0);
+  for (const step of setupNodeSteps) {
+    const version = step.with?.["node-version"];
+    assert.ok(
+      version === 24 || version === "${{ matrix.node-version }}",
+      "setup-node must use Node 24 or the reviewed CI matrix",
+    );
+  }
 
   const reviewedActionCommits = new Set([
     "df4cb1c069e1874edd31b4311f1884172cec0e10", // actions/checkout v6.0.3
@@ -2086,59 +2097,46 @@ test("CI workflows use maintained runtimes and reviewed actions", async () => {
     "fc06bc1257f339d1d5d8b3a19a8cae5388b55320", // pnpm/action-setup v5.0.0
     "718ea10b132b3b2eba29c1007bb80653f286566b", // softprops/action-gh-release v3.0.1
   ]);
-  const actionReferences = Array.from(
-    combined.matchAll(/^\s*uses:\s*([^\s#]+)/gm),
-    (match) => match[1],
-  );
-  assert.ok(actionReferences.length > 0, "workflows must use remote actions");
-  for (const reference of actionReferences) {
-    assert.match(
-      reference,
-      /^[^@]+@[a-f0-9]{40}$/,
-      `remote action must be pinned to a full commit SHA: ${reference}`,
-    );
+  const references = workflows
+    .flatMap((workflow) => actionReferences(workflow))
+    .filter((reference) => !reference.startsWith("./"));
+  assert.ok(references.length > 0, "workflows must use remote actions");
+  for (const reference of references) {
     const separator = reference.lastIndexOf("@");
+    assert.ok(separator > 0, "remote action must include a commit reference");
     const action = reference.slice(0, separator);
     const commit = reference.slice(separator + 1);
+    assert.match(
+      commit,
+      /^[a-f0-9]{40}$/,
+      action + " must pin a full commit SHA",
+    );
     assert.ok(
       reviewedActionCommits.has(commit),
-      `${action} must be pinned to a reviewed action release`,
+      action + " must be pinned to a reviewed action release",
     );
   }
 
-  const pnpmSetupReferences = Array.from(
-    combined.matchAll(
-      /uses: pnpm\/action-setup@[a-f0-9]{40}[\s\S]{0,180}?version:\s*([^\s]+)/g,
-    ),
-    (match) => match[1],
-  );
-  const pnpmSetupCount = Array.from(
-    combined.matchAll(/^\s*uses: pnpm\/action-setup@/gm),
-  ).length;
-  assert.ok(pnpmSetupCount > 0, "workflows must pin pnpm");
-  assert.equal(
-    pnpmSetupReferences.length,
-    pnpmSetupCount,
-    "every pnpm setup step must declare a reviewed version",
-  );
   const reviewedPackageManager =
     "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e";
-  assert.equal(
-    rootPackage.packageManager,
-    reviewedPackageManager,
-    "the repository must pin the reviewed pnpm tarball for Corepack",
-  );
+  assert.equal(rootPackage.packageManager, reviewedPackageManager);
   const packageManagerMatch =
     /^pnpm@(\d+\.\d+\.\d+)\+sha512\.([a-f0-9]{128})$/.exec(
       rootPackage.packageManager,
     );
-  assert.ok(
-    packageManagerMatch,
-    "the repository pnpm contract must include a full SHA-512 integrity digest",
-  );
+  assert.ok(packageManagerMatch);
   const repositoryPnpmVersion = packageManagerMatch[1];
-  assert.ok(
-    pnpmSetupReferences.every((version) => version === repositoryPnpmVersion),
-    `workflow pnpm versions must match packageManager ${repositoryPnpmVersion}: ${pnpmSetupReferences.join(", ")}`,
+  const pnpmSetupSteps = workflows.flatMap((workflow) =>
+    allWorkflowSteps(workflow).filter((step) =>
+      String(step.uses ?? "").startsWith("pnpm/action-setup@"),
+    ),
   );
+  assert.ok(pnpmSetupSteps.length > 0, "workflows must pin pnpm");
+  for (const step of pnpmSetupSteps) {
+    assert.equal(
+      String(step.with?.version),
+      repositoryPnpmVersion,
+      "every pnpm setup must match the packageManager version",
+    );
+  }
 });
