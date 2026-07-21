@@ -1573,7 +1573,7 @@ test("release workflow enforces structural publish contracts", async () => {
     "pnpm audit --prod",
     "pnpm legal:check",
     'node scripts/install-cargo-deny.mjs --install-dir "$RUNNER_TEMP/webpage-mcp-cargo-deny"',
-    '"$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --config deny.toml',
+    '"$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --manifest-path packages/wasm-simd/Cargo.toml --all-features check --config deny.toml advisories',
     "pnpm typecheck",
     "pnpm --filter webpage-mcp-connector compile",
     "pnpm test:release",
@@ -1910,7 +1910,7 @@ test("dependency security gates encode reviewed commands structurally", async ()
   ];
   const rustAuditCommands = [
     "cargo metadata --manifest-path packages/wasm-simd/Cargo.toml --all-features --locked --format-version 1 > /dev/null",
-    '"$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --config deny.toml --manifest-path packages/wasm-simd/Cargo.toml --all-features check advisories',
+    '"$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --manifest-path packages/wasm-simd/Cargo.toml --all-features check --config deny.toml advisories',
     "git diff --exit-code -- packages/wasm-simd/Cargo.lock",
   ];
   const gates = [
