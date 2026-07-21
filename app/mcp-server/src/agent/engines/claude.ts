@@ -661,7 +661,6 @@ export class ClaudeEngine implements AgentEngine {
         abortController: internalAbortController,
         // Pass merged env through to Claude SDK.
         env: claudeEnv,
-        stderr: recordStderr,
         spawnClaudeCodeProcess: (
           spawnOptions: Parameters<typeof spawnSupervisedClaudeCodeProcess>[0],
         ) => {
