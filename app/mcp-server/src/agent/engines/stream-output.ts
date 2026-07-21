@@ -135,6 +135,17 @@ export class BoundedTextAccumulator {
     return retainedBytes > 0 || retainedBytes < incomingBytes;
   }
 
+  public markTruncated(additionalObservedBytes = 0): void {
+    if (!Number.isSafeInteger(additionalObservedBytes) || additionalObservedBytes < 0) {
+      throw new RangeError('additionalObservedBytes must be a non-negative safe integer');
+    }
+    if (!Number.isSafeInteger(this.totalBytes + additionalObservedBytes)) {
+      throw new RangeError('observed byte count exceeds the safe integer range');
+    }
+    this.totalBytes += additionalObservedBytes;
+    this.didTruncate = true;
+  }
+
   public replace(value: string): void {
     this.clear();
     this.append(value);

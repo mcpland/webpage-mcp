@@ -244,6 +244,20 @@ describe('stream output bounds', () => {
     expect(snapshot.originalBytes).toBeGreaterThan(STREAM_PENDING_TOOL_INPUT_MAX_BYTES);
   });
 
+  it('records upstream truncation without appending sentinel payload bytes', () => {
+    const input = new BoundedTextAccumulator(128);
+    input.append('{"value":"partial"}');
+    input.markTruncated(7);
+
+    const snapshot = input.snapshot();
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.originalBytes).toBe(
+      Buffer.byteLength('{"value":"partial"}', 'utf8') + 7,
+    );
+    expect(snapshot.text).toContain('[truncated]');
+    expect(snapshot.text).not.toContain('....');
+  });
+
   it('bounds adversarial content and metadata by actual JSON bytes', () => {
     const circular: Record<string, unknown> = {
       command: '\u0000'.repeat(200_000),

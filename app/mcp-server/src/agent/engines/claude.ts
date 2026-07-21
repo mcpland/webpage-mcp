@@ -972,9 +972,9 @@ export class ClaudeEngine implements AgentEngine {
                   const accumulator = pendingToolInputs.get(blockIndex)!.inputJson;
                   accumulator.append(boundedPartial.text);
                   if (boundedPartial.truncated) {
-                    // Force the accumulator's own truncation flag so the JSON
-                    // is never parsed and the emitted metadata reports it.
-                    accumulator.append('....');
+                    accumulator.markTruncated(
+                      boundedPartial.observedBytes - boundedPartial.retainedBytes,
+                    );
                   }
                 }
                 break;
