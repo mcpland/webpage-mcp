@@ -15,6 +15,10 @@ import {
   type NativeInstanceListPayload,
 } from "webpage-mcp-shared";
 import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import {
+  isExtensionBackgroundSender,
+  isExtensionPageSender,
+} from "@/common/runtime-sender-auth";
 import { sanitizeAgentStreamRelayPayload } from "@/common/agent-stream-boundaries";
 import {
   NATIVE_HOST,
@@ -102,10 +106,10 @@ function getNativeConnectionErrorMessage(): string {
 function isTrustedNativeControlSender(
   sender: chrome.runtime.MessageSender,
 ): boolean {
-  // Native controls are only used by extension pages and the background
-  // worker. Content scripts have a sender.tab and must not be able to invoke
-  // arbitrary tools, fetch auth material, or forward native payloads.
-  return sender.id === chrome.runtime.id && sender.tab === undefined;
+  // Native controls are only used by extension-owned documents and the
+  // background worker. Extension documents opened in a tab legitimately carry
+  // sender.tab, so distinguish them by their extension origin instead.
+  return isExtensionBackgroundSender(sender) || isExtensionPageSender(sender);
 }
 
 interface PendingNativeRequest {

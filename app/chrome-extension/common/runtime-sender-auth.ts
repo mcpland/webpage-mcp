@@ -18,14 +18,17 @@ function senderHasExtensionOrigin(
   return sender.origin === expected.origin || typeof sender.url === "string";
 }
 
-/** Privileged extension pages only; content scripts always carry sender.tab. */
+/**
+ * A document owned by this extension, whether hosted in a tab, popup, side
+ * panel, or offscreen document. A tab is not a content-script discriminator:
+ * extension pages opened with chrome.tabs.create() carry sender.tab too.
+ */
 export function isExtensionPageSender(
   sender: chrome.runtime.MessageSender | undefined,
 ): boolean {
   return Boolean(
     sender &&
     sender.id === chrome.runtime.id &&
-    sender.tab === undefined &&
     senderHasExtensionOrigin(sender),
   );
 }
@@ -59,7 +62,14 @@ export function isExtensionBackgroundSender(
 export function isOffscreenDocumentSender(
   sender: chrome.runtime.MessageSender | undefined,
 ): boolean {
-  if (!isExtensionPageSender(sender) || !sender?.url) return false;
+  if (
+    !sender ||
+    sender.tab !== undefined ||
+    !isExtensionPageSender(sender) ||
+    !sender.url
+  ) {
+    return false;
+  }
   const actual = sender.url.split(/[?#]/, 1)[0];
   return actual === chrome.runtime.getURL("offscreen.html");
 }

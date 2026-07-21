@@ -1,4 +1,5 @@
 import { BACKGROUND_MESSAGE_TYPES } from "@/common/message-types";
+import { isExtensionPageSender } from "@/common/runtime-sender-auth";
 import type { FlowId } from "../record-replay-v3/domain/ids";
 import type { FlowToolMetadata, FlowV3 } from "../record-replay-v3/domain/flow";
 import type { JsonObject } from "../record-replay-v3/domain/json";
@@ -55,12 +56,6 @@ const RECORD_REPLAY_REQUEST_TYPES = new Set<string>([
   BACKGROUND_MESSAGE_TYPES.RR_SCHEDULE_FLOW,
   BACKGROUND_MESSAGE_TYPES.RR_UNSCHEDULE_FLOW,
 ]);
-
-export function isRecordReplayExtensionPageSender(
-  sender: chrome.runtime.MessageSender,
-): boolean {
-  return sender.id === chrome.runtime.id && sender.tab === undefined;
-}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -173,7 +168,7 @@ export function initRecordReplayListeners(): void {
           controlAuthorization.authorizeStop(message, sender, recordingSession);
         if (
           !authorizedOverlayStop &&
-          !isRecordReplayExtensionPageSender(sender)
+          !isExtensionPageSender(sender)
         ) {
           sendResponse({
             success: false,

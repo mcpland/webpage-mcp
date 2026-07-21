@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 
@@ -60,19 +60,35 @@ function contentSender(
 }
 
 function extensionPageSender(): chrome.runtime.MessageSender {
-  return { id: chrome.runtime.id };
+  return {
+    id: chrome.runtime.id,
+    tab: { id: 9 } as chrome.tabs.Tab,
+    frameId: 0,
+    documentId: 'builder-document',
+    url: `chrome-extension://${chrome.runtime.id}/builder.html`,
+    origin: `chrome-extension://${chrome.runtime.id}`,
+  };
 }
 
 describe('record/replay listener authorization', () => {
   let listener: RuntimeListener;
+  const originalGetUrl = chrome.runtime.getURL;
 
   beforeAll(async () => {
+    chrome.runtime.getURL = vi.fn(
+      (path = '') => `chrome-extension://${chrome.runtime.id}/${path.replace(/^\//, '')}`,
+    );
     vi.mocked(chrome.runtime.onMessage.addListener).mockClear();
     const { initRecordReplayListeners } = await import('@/entrypoints/background/record-replay');
     initRecordReplayListeners();
     const registered = vi.mocked(chrome.runtime.onMessage.addListener).mock.calls.at(-1)?.[0];
     if (!registered) throw new Error('record/replay listener was not registered');
     listener = registered;
+  });
+
+  afterAll(() => {
+    if (originalGetUrl) chrome.runtime.getURL = originalGetUrl;
+    else delete (chrome.runtime as { getURL?: unknown }).getURL;
   });
 
   beforeEach(() => {

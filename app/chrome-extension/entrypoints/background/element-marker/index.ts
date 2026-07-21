@@ -1,4 +1,5 @@
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
+import { isExtensionPageSender } from '@/common/runtime-sender-auth';
 import type {
   UpsertMarkerRequest,
   ElementMarker,
@@ -33,14 +34,6 @@ interface MarkerSession extends MarkerDocumentTarget {
 // document-scoped capability for the in-page overlay instead of trusting the
 // tab that happens to be active when the message reaches the service worker.
 const markerSessions = new Map<number, MarkerSession>();
-
-function isExtensionPageSender(sender: chrome.runtime.MessageSender): boolean {
-  if (sender.tab || sender.id !== chrome.runtime.id) return false;
-
-  const extensionRoot = chrome.runtime.getURL('');
-  const extensionOrigin = new URL(extensionRoot).origin;
-  return sender.origin === extensionOrigin || sender.url?.startsWith(extensionRoot) === true;
-}
 
 async function getTopDocumentTarget(tabId: number): Promise<MarkerDocumentTarget> {
   const frames = await chrome.webNavigation.getAllFrames({ tabId });
@@ -79,15 +72,18 @@ async function authorizeValidationTarget(
   request: MarkerValidationRequest,
   sender: chrome.runtime.MessageSender,
 ): Promise<MarkerDocumentTarget> {
+  if (isExtensionPageSender(sender)) {
+    if (typeof request.tabId !== 'number') {
+      throw new Error('marker validation requires an explicit target tab');
+    }
+    return getTopDocumentTarget(request.tabId);
+  }
+
   if (sender.tab) {
     return authorizeMarkerSessionSender(request.markerSessionId, sender);
   }
 
-  if (!isExtensionPageSender(sender) || typeof request.tabId !== 'number') {
-    throw new Error('marker validation requires an explicit target tab');
-  }
-
-  return getTopDocumentTarget(request.tabId);
+  throw new Error('marker validation requires an explicit target tab');
 }
 
 async function authorizeMarkerSessionSender(

@@ -21,7 +21,7 @@ describe("runtime sender authorization", () => {
     chrome.runtime.getURL = originalGetUrl;
   });
 
-  it("accepts extension pages but rejects content scripts and foreign origins", () => {
+  it("accepts extension documents in tabs but rejects content scripts and foreign origins", () => {
     const page: chrome.runtime.MessageSender = {
       id: chrome.runtime.id,
       url: `chrome-extension://${chrome.runtime.id}/sidepanel.html`,
@@ -30,9 +30,14 @@ describe("runtime sender authorization", () => {
     expect(isExtensionPageSender(page)).toBe(true);
     expect(
       isExtensionPageSender({ ...page, tab: { id: 1 } as chrome.tabs.Tab }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
-      isExtensionPageSender({ ...page, url: "https://example.com/page" }),
+      isExtensionPageSender({
+        ...page,
+        tab: { id: 1 } as chrome.tabs.Tab,
+        url: "https://example.com/page",
+        origin: "https://example.com",
+      }),
     ).toBe(false);
     expect(isExtensionPageSender({ ...page, id: "other-extension" })).toBe(
       false,
@@ -46,6 +51,12 @@ describe("runtime sender authorization", () => {
       origin: `chrome-extension://${chrome.runtime.id}`,
     };
     expect(isOffscreenDocumentSender(sender)).toBe(true);
+    expect(
+      isOffscreenDocumentSender({
+        ...sender,
+        tab: { id: 1 } as chrome.tabs.Tab,
+      }),
+    ).toBe(false);
     expect(
       isOffscreenDocumentSender({
         ...sender,

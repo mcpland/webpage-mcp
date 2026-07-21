@@ -106,6 +106,10 @@ describe("native host port lifecycle", () => {
       runtime: {
         id: "test-extension-id",
         lastError: null,
+        getURL: vi.fn(
+          (path = "") =>
+            `chrome-extension://test-extension-id/${path.replace(/^\//, "")}`,
+        ),
         connectNative: vi.fn(() => ports.shift()),
         getManifest: vi.fn(() => ({ version: "0.9.0" })),
         sendMessage: vi.fn().mockResolvedValue(undefined),
@@ -151,12 +155,37 @@ describe("native host port lifecycle", () => {
         {
           id: "test-extension-id",
           tab: { id: 7 },
+          url: "https://example.com/",
+          origin: "https://example.com",
         } as chrome.runtime.MessageSender,
         untrustedResponse,
       ),
     ).toBe(false);
     expect(dependencyMocks.handleCallTool).not.toHaveBeenCalled();
     expect(untrustedResponse).not.toHaveBeenCalled();
+
+    dependencyMocks.handleCallTool.mockResolvedValueOnce({ ok: true });
+    const trustedTabResponse = vi.fn();
+    expect(
+      runtimeMessageListener!(
+        { type: "call_tool", name: "chrome_read_page", args: {} },
+        {
+          id: "test-extension-id",
+          tab: { id: 8 },
+          frameId: 0,
+          documentId: "options-document",
+          url: "chrome-extension://test-extension-id/options.html",
+          origin: "chrome-extension://test-extension-id",
+        } as chrome.runtime.MessageSender,
+        trustedTabResponse,
+      ),
+    ).toBe(true);
+    await vi.waitFor(() =>
+      expect(trustedTabResponse).toHaveBeenCalledWith({
+        success: true,
+        result: { ok: true },
+      }),
+    );
 
     const disconnectResponse = vi.fn();
     runtimeMessageListener!(

@@ -155,6 +155,9 @@ describe('Element Marker target authorization', () => {
   function extensionSender(): chrome.runtime.MessageSender {
     return {
       id: 'test-extension-id',
+      tab: { id: 9 } as chrome.tabs.Tab,
+      frameId: 0,
+      documentId: 'extension-document',
       url: 'chrome-extension://test-extension-id/popup.html',
       origin: 'chrome-extension://test-extension-id',
     };

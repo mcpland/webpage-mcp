@@ -136,6 +136,9 @@ describe("RpcServer", () => {
 
       const pageSender: chrome.runtime.MessageSender = {
         id: chrome.runtime.id,
+        tab: { id: 2 } as chrome.tabs.Tab,
+        frameId: 0,
+        documentId: "builder-document",
         url: `chrome-extension://${chrome.runtime.id}/sidepanel.html`,
         origin: `chrome-extension://${chrome.runtime.id}`,
       };

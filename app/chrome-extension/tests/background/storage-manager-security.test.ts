@@ -126,7 +126,10 @@ describe("storage manager authorization", () => {
   function extensionSender(): chrome.runtime.MessageSender {
     return {
       id: "test-extension-id",
-      url: "chrome-extension://test-extension-id/popup.html",
+      tab: { id: 7 } as chrome.tabs.Tab,
+      frameId: 0,
+      documentId: "options-document",
+      url: "chrome-extension://test-extension-id/options.html",
       origin: "chrome-extension://test-extension-id",
     };
   }
