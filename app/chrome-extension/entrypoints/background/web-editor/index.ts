@@ -1611,6 +1611,20 @@ export function initWebEditorListeners(): void {
         BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION
       ) {
         (async () => {
+          if (
+            !consumePrivilegedUiAuthorization(
+              message?.authorizationToken,
+              PRIVILEGED_UI_ACTIONS.WEB_EDITOR_REGISTER_PROPS_INJECTION,
+              _sender as chrome.runtime.MessageSender,
+            )
+          ) {
+            return sendResponse({
+              success: false,
+              error:
+                "Props early injection authorization is missing or expired.",
+            });
+          }
+
           const senderTab = (_sender as chrome.runtime.MessageSender)?.tab;
           const senderTabId = senderTab?.id;
           const senderTabUrl = senderTab?.url;

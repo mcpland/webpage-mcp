@@ -935,8 +935,11 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
    * Register early injection and reload the page.
    * This allows capturing React DevTools hook before React initializes.
    */
-  async function registerEarlyInjectionAndReload(): Promise<void> {
+  async function registerEarlyInjectionAndReload(
+    activationEvent: Event,
+  ): Promise<void> {
     if (disposer.isDisposed) return;
+    if (!isTrustedPrivilegedUiEvent(activationEvent)) return;
 
     // Verify chrome runtime is available
     if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
@@ -957,8 +960,12 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
     if (!confirmed) return;
 
     try {
+      const authorizationToken = await authorizePrivilegedUiAction(
+        PRIVILEGED_UI_ACTIONS.WEB_EDITOR_REGISTER_PROPS_INJECTION,
+      );
       const resp = await sendWebEditorRuntimeMessage<any>({
         type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION,
+        authorizationToken,
       });
 
       if (!resp?.success) {
@@ -1033,7 +1040,7 @@ export function createPropsPanel(options: PropsPanelOptions): PropsPanel {
       hookStatus === "HOOK_PRESENT_NO_RENDERERS";
 
     if (lastData?.needsRefresh && canBenefitFromEarlyInjection) {
-      void registerEarlyInjectionAndReload();
+      void registerEarlyInjectionAndReload(e);
       return;
     }
 

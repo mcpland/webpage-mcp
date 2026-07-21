@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BACKGROUND_MESSAGE_TYPES,
+  PRIVILEGED_UI_ACTIONS,
   PRIVILEGED_UI_SURFACES,
 } from "@/common/message-types";
 
@@ -76,6 +77,7 @@ describe("Web Editor listener role authorization", () => {
       "a".repeat(64),
     );
     authorizationMocks.stopPrivilegedUiSurfaceSession.mockResolvedValue(true);
+    authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValue(true);
     propsInjectionMocks.pruneOrphanedPropsAgentEarlyInjections.mockResolvedValue(
       undefined,
     );
@@ -324,6 +326,7 @@ describe("Web Editor listener role authorization", () => {
         {
           type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION,
           surfaceSessionId: "a".repeat(64),
+          authorizationToken: "registration-token",
         },
         contentSender(),
         sendResponse,
@@ -334,6 +337,41 @@ describe("Web Editor listener role authorization", () => {
         propsInjectionMocks.registerPropsAgentEarlyInjection,
       ).toHaveBeenCalledWith(7, "https://example.com/", "a".repeat(64)),
     );
+    expect(
+      authorizationMocks.consumePrivilegedUiAuthorization,
+    ).toHaveBeenCalledWith(
+      "registration-token",
+      PRIVILEGED_UI_ACTIONS.WEB_EDITOR_REGISTER_PROPS_INJECTION,
+      contentSender(),
+    );
+    await vi.waitFor(() => expect(chrome.tabs.reload).toHaveBeenCalledWith(7));
+  });
+
+  it("rejects early injection without a one-time authorization", async () => {
+    authorizationMocks.consumePrivilegedUiAuthorization.mockReturnValue(false);
+    const sendResponse = vi.fn();
+
+    expect(
+      userScriptListener(
+        {
+          type: BACKGROUND_MESSAGE_TYPES.WEB_EDITOR_PROPS_REGISTER_EARLY_INJECTION,
+          surfaceSessionId: "a".repeat(64),
+        },
+        contentSender(),
+        sendResponse,
+      ),
+    ).toBe(true);
+
+    await vi.waitFor(() =>
+      expect(sendResponse).toHaveBeenCalledWith({
+        success: false,
+        error: "Props early injection authorization is missing or expired.",
+      }),
+    );
+    expect(
+      propsInjectionMocks.registerPropsAgentEarlyInjection,
+    ).not.toHaveBeenCalled();
+    expect(chrome.tabs.reload).not.toHaveBeenCalled();
   });
 
   it("routes an authenticated props operation only to the sender document", async () => {
