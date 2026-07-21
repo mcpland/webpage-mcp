@@ -1553,7 +1553,7 @@ test("release workflow verifies before either publish mutation", async () => {
     /pnpm audit --prod/,
     /pnpm legal:check/,
     /node scripts\/install-cargo-deny\.mjs --install-dir "\$RUNNER_TEMP\/webpage-mcp-cargo-deny"/,
-    /"\$RUNNER_TEMP\/webpage-mcp-cargo-deny\/cargo-deny" --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories/,
+    /"\$RUNNER_TEMP\/webpage-mcp-cargo-deny\/cargo-deny" --config deny\.toml --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories/,
     /pnpm typecheck/,
     /pnpm --filter webpage-mcp-connector compile/,
     /pnpm test:release/,
@@ -1833,6 +1833,7 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
     securityWorkflow,
     dependabot,
     cargoDenyTool,
+    cargoDenyPolicy,
   ] = await Promise.all([
     readFile(join(REPOSITORY_ROOT, ".github/workflows/ci.yml"), "utf8"),
     readFile(join(REPOSITORY_ROOT, ".github/workflows/release.yml"), "utf8"),
@@ -1842,6 +1843,7 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
     ),
     readFile(join(REPOSITORY_ROOT, ".github/dependabot.yml"), "utf8"),
     readFile(join(REPOSITORY_ROOT, "scripts/cargo-deny-tool.json"), "utf8"),
+    readFile(join(REPOSITORY_ROOT, "deny.toml"), "utf8"),
   ]);
   const cargoDeny = JSON.parse(cargoDenyTool);
   assert.equal(cargoDeny.version, "0.19.8");
@@ -1855,6 +1857,11 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
   assert.equal(
     cargoDeny.binary.sha256,
     "f84bbd8f18ca59d531b848bad2f39237b17b5980d7f9cdd373d81f6689eb685f",
+  );
+  assert.equal(
+    cargoDenyPolicy,
+    '[advisories]\nyanked = "deny"\nunmaintained = "all"\nunsound = "all"\nunused-ignored-advisory = "deny"\nignore = []\n',
+    "cargo-deny must fail closed on every advisory class without exceptions",
   );
 
   assert.match(
@@ -1916,7 +1923,7 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
       .split(/\r?\n/)
       .find((line) =>
         line.includes(
-          '"$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --manifest-path',
+          '"$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --config deny.toml --manifest-path',
         ),
       );
     assert.ok(
@@ -1925,7 +1932,7 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
     );
     assert.match(
       auditCommand,
-      /--manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories$/,
+      /--config deny\.toml --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories$/,
       `${name} must scan the complete production Rust graph`,
     );
     assert.doesNotMatch(
@@ -1940,7 +1947,7 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
     );
     assert.match(
       source,
-      /cargo metadata --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features --locked --format-version 1 > \/dev\/null\s*\n\s+"\$RUNNER_TEMP\/webpage-mcp-cargo-deny\/cargo-deny" --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories\s*\n\s+git diff --exit-code -- packages\/wasm-simd\/Cargo\.lock/,
+      /cargo metadata --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features --locked --format-version 1 > \/dev\/null\s*\n\s+"\$RUNNER_TEMP\/webpage-mcp-cargo-deny\/cargo-deny" --config deny\.toml --manifest-path packages\/wasm-simd\/Cargo\.toml --all-features check advisories\s*\n\s+git diff --exit-code -- packages\/wasm-simd\/Cargo\.lock/,
       `${name} must keep locked-graph validation, live advisory refresh, and mutation detection adjacent`,
     );
   }

@@ -164,7 +164,7 @@ jobs:
         if: matrix.enforce_coverage
         run: |
           cargo metadata --manifest-path packages/wasm-simd/Cargo.toml --all-features --locked --format-version 1 > /dev/null
-          "$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --manifest-path packages/wasm-simd/Cargo.toml --all-features check advisories
+          "$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --config deny.toml --manifest-path packages/wasm-simd/Cargo.toml --all-features check advisories
           git diff --exit-code -- packages/wasm-simd/Cargo.lock
 
       - name: Lint once on Linux

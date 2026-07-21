@@ -233,7 +233,7 @@ jobs:
       - name: Audit Rust dependencies
         run: |
           cargo metadata --manifest-path packages/wasm-simd/Cargo.toml --all-features --locked --format-version 1 > /dev/null
-          "$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --manifest-path packages/wasm-simd/Cargo.toml --all-features check advisories
+          "$RUNNER_TEMP/webpage-mcp-cargo-deny/cargo-deny" --config deny.toml --manifest-path packages/wasm-simd/Cargo.toml --all-features check advisories
           git diff --exit-code -- packages/wasm-simd/Cargo.lock
 
       - name: Install pinned wasm-pack
