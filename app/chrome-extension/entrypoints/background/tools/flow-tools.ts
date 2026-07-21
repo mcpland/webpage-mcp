@@ -3,7 +3,6 @@ import {
   TOOL_NAMES,
   WEBPAGE_MCP_CAPABILITY_VERSION,
   WEBPAGE_MCP_PROTOCOL_VERSION,
-  workflowSideEffectAllowsRetry,
   type WorkflowSideEffectProfile,
 } from 'webpage-mcp-shared';
 import {
@@ -49,7 +48,6 @@ import {
 } from '../record-replay-v3/flows/sensitive';
 import { findEntryNodeId } from '../record-replay-v3/storage/import/flow-convert';
 import { applyFlowParameterSuggestions } from './flow-parameterization';
-import type { NodePolicy, RetryPolicy } from '../record-replay-v3/domain/policy';
 import {
   compareSelectorCandidates,
   computeSelectorStability,
@@ -99,6 +97,12 @@ import {
   type WorkflowSegmentPlan,
 } from './flow-risk-analysis';
 import { WorkflowReleaseReadinessTool } from './flow-release-readiness';
+import {
+  applyDefaultStabilityPolicy,
+  flowDefaultRetryTouchesSideEffects,
+  isRetryableStabilityErrorCode,
+  safeRetryNodesMissingPolicy,
+} from './flow-retry-policy';
 
 type FlowHintLevel = 'info' | 'warning';
 
@@ -452,23 +456,7 @@ const SENSITIVE_DEBUG_CONFIG_KEYS = new Set([
   'requestbody',
 ]);
 const SCRIPT_CONFIG_KEYS = new Set(['code', 'script', 'jsScript']);
-const RETRYABLE_STABILITY_ERROR_CODES = [
-  RR_ERROR_CODES.TARGET_NOT_FOUND,
-  RR_ERROR_CODES.ELEMENT_NOT_VISIBLE,
-  RR_ERROR_CODES.TIMEOUT,
-  RR_ERROR_CODES.NAVIGATION_FAILED,
-] as const;
-
 type FlowVariable = NonNullable<FlowV3['variables']>[number];
-
-const DEFAULT_SAFE_RETRY_POLICY: RetryPolicy = {
-  retries: 1,
-  intervalMs: 500,
-  backoff: 'linear',
-  maxIntervalMs: 2_000,
-  jitter: 'full',
-  retryOn: RETRYABLE_STABILITY_ERROR_CODES,
-};
 let fallbackQualityHmacSalt: string | undefined;
 
 function flowDisablesFailureScreenshots(flow: FlowV3): boolean {
@@ -805,35 +793,6 @@ async function persistScheduledRevalidationCatchUp(flow: FlowV3): Promise<FlowV3
     }
     return latest;
   });
-}
-
-function isSafeForFlowDefaultRetry(node: FlowV3['nodes'][number]): boolean {
-  return workflowSideEffectAllowsRetry(getNodeSideEffectProfile(node), 'flowDefault');
-}
-
-function sideEffectRetryEligibleNodes(flow: FlowV3): FlowV3['nodes'] {
-  return (Array.isArray(flow.nodes) ? flow.nodes : []).filter(isSafeForFlowDefaultRetry);
-}
-
-function isRetryableStabilityErrorCode(code: string): boolean {
-  return (RETRYABLE_STABILITY_ERROR_CODES as readonly string[]).includes(code);
-}
-
-function policyHasRetryDirective(policy: NodePolicy | undefined): boolean {
-  return Boolean(policy?.retry || policy?.onError?.kind === 'retry');
-}
-
-function getRetryTemplateFromPolicy(policy: NodePolicy | undefined): RetryPolicy {
-  if (policy?.retry) {
-    return { ...policy.retry };
-  }
-  if (policy?.onError?.kind === 'retry') {
-    return {
-      ...DEFAULT_SAFE_RETRY_POLICY,
-      ...policy.onError.override,
-    };
-  }
-  return { ...DEFAULT_SAFE_RETRY_POLICY };
 }
 
 function getVariableName(variable: FlowVariable | null | undefined): string | undefined {
@@ -2928,17 +2887,6 @@ function buildWaitDiagnosticRecommendations(
   }));
 }
 
-function safeRetryNodesMissingPolicy(flow: FlowV3): FlowV3['nodes'] {
-  return sideEffectRetryEligibleNodes(flow).filter(
-    (node) => !policyHasRetryDirective(node.policy),
-  );
-}
-
-function flowDefaultRetryTouchesSideEffects(flow: FlowV3): boolean {
-  if (!policyHasRetryDirective(flow.policy?.defaultNodePolicy)) return false;
-  return (Array.isArray(flow.nodes) ? flow.nodes : []).some((node) => !isSafeForFlowDefaultRetry(node));
-}
-
 function buildRepairRecommendations(
   flow: FlowV3,
   hints: FlowHint[],
@@ -3045,69 +2993,6 @@ function buildRepairRecommendations(
     ...buildRuntimeFailureRecommendations(runs),
     ...buildWaitDiagnosticRecommendations(runs),
   ];
-}
-
-function applyDefaultStabilityPolicy(flow: FlowV3): WorkflowRepairChange[] {
-  const changes: WorkflowRepairChange[] = [];
-  const policy = flow.policy ?? {};
-  const defaultNodePolicy = policy.defaultNodePolicy ?? {};
-  const nextDefaultNodePolicy = { ...defaultNodePolicy };
-  const retryTemplate = getRetryTemplateFromPolicy(nextDefaultNodePolicy);
-
-  if (!nextDefaultNodePolicy.timeout) {
-    nextDefaultNodePolicy.timeout = { ms: 15_000, scope: 'attempt' };
-    changes.push({
-      code: 'default_timeout_added',
-      message: 'Added default node attempt timeout of 15000ms.',
-    });
-  }
-
-  if (policyHasRetryDirective(nextDefaultNodePolicy)) {
-    delete nextDefaultNodePolicy.retry;
-    if (nextDefaultNodePolicy.onError?.kind === 'retry') {
-      delete nextDefaultNodePolicy.onError;
-    }
-    changes.push({
-      code: 'global_retry_scoped_to_safe_nodes',
-      message:
-        'Removed flow-level default retry so side-effecting nodes are not retried automatically.',
-    });
-  }
-
-  const safeNodesMissingRetry = safeRetryNodesMissingPolicy(flow);
-  for (const node of safeNodesMissingRetry) {
-    node.policy = {
-      ...(node.policy ?? {}),
-      retry: { ...retryTemplate },
-    };
-  }
-  if (safeNodesMissingRetry.length > 0) {
-    changes.push({
-      code: 'default_retry_added',
-      message: `Added one retry to ${safeNodesMissingRetry.length} safe query/read node(s).`,
-    });
-  }
-
-  const artifacts = nextDefaultNodePolicy.artifacts ?? {};
-  if (artifacts.screenshot !== 'onFailure' && artifacts.screenshot !== 'always') {
-    nextDefaultNodePolicy.artifacts = {
-      ...artifacts,
-      screenshot: 'onFailure',
-    };
-    changes.push({
-      code: 'failure_screenshot_added',
-      message: 'Enabled screenshot capture on node failure.',
-    });
-  }
-
-  if (changes.length > 0) {
-    flow.policy = {
-      ...policy,
-      defaultNodePolicy: nextDefaultNodePolicy,
-    };
-  }
-
-  return changes;
 }
 
 function getIncomingEdges(flow: FlowV3, nodeId: string): FlowV3['edges'] {
