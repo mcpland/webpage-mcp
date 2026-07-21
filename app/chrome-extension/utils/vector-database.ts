@@ -35,11 +35,6 @@ import {
   waitForGlobalHnswFileSystemIdle,
 } from "./vector-storage";
 
-export {
-  clearIndexedDatabaseStore,
-  deleteIndexedDatabase,
-} from "./vector-storage";
-
 export interface VectorDocument {
   id: string;
   tabId: number;

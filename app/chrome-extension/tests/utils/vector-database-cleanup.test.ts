@@ -393,11 +393,13 @@ import {
   VectorDatabase,
   VectorCompactionRequiredError,
   clearAllVectorData,
-  clearIndexedDatabaseStore,
-  deleteIndexedDatabase,
   getGlobalVectorDatabase,
   resetGlobalVectorDatabase,
 } from "@/utils/vector-database";
+import {
+  clearIndexedDatabaseStore,
+  deleteIndexedDatabase,
+} from "@/utils/vector-storage";
 
 type MutableDeleteRequest = {
   error?: DOMException | null;
