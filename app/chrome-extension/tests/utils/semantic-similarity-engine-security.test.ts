@@ -266,6 +266,31 @@ describe('SemanticSimilarityEngine security boundaries', () => {
     await engine.dispose();
   });
 
+  it('allocates cache-owned embeddings without exposing a recycling API', async () => {
+    const engine = new SemanticSimilarityEngine({
+      modelPreset: 'multilingual-e5-small',
+      modelVersion: 'quantized',
+      dimension: 384,
+    });
+    const internal = engine as unknown as {
+      embeddingAllocator: {
+        allocate: (size: number) => Float32Array;
+        releaseEmbedding?: unknown;
+      };
+    };
+
+    const first = internal.embeddingAllocator.allocate(384);
+    first[0] = 42;
+    const second = internal.embeddingAllocator.allocate(384);
+
+    expect(second).not.toBe(first);
+    expect(second[0]).toBe(0);
+    expect(first[0]).toBe(42);
+    expect(internal.embeddingAllocator.releaseEmbedding).toBeUndefined();
+
+    await engine.dispose();
+  });
+
   it('requires an exact Content-Length before allocating a pinned response', async () => {
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({

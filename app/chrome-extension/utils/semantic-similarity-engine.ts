@@ -571,13 +571,12 @@ interface WorkerStats {
   batchSize?: number;
 }
 
-// Memory pool manager
-class EmbeddingMemoryPool {
-  private pools: Map<number, Float32Array[]> = new Map();
-  private maxPoolSize: number = 10;
-  private stats = { allocated: 0, reused: 0, released: 0 };
+// Embeddings escape into the LRU cache by reference. Each allocation therefore
+// has exclusive ownership and must never be returned to a reusable pool.
+class EmbeddingAllocator {
+  private allocated = 0;
 
-  getEmbedding(size: number): Float32Array {
+  allocate(size: number): Float32Array {
     if (
       !Number.isInteger(size) ||
       size <= 0 ||
@@ -585,38 +584,17 @@ class EmbeddingMemoryPool {
     ) {
       throw new Error('Invalid embedding allocation size');
     }
-    const pool = this.pools.get(size);
-    if (pool && pool.length > 0) {
-      this.stats.reused++;
-      return pool.pop()!;
-    }
-
-    this.stats.allocated++;
+    this.allocated++;
     return new Float32Array(size);
   }
 
-  releaseEmbedding(embedding: Float32Array): void {
-    const size = embedding.length;
-    if (!this.pools.has(size)) {
-      this.pools.set(size, []);
-    }
-
-    const pool = this.pools.get(size)!;
-    if (pool.length < this.maxPoolSize) {
-      // Clear array for reuse
-      embedding.fill(0);
-      pool.push(embedding);
-      this.stats.released++;
-    }
-  }
-
   getStats() {
-    return { ...this.stats };
+    // Keep the existing diagnostic shape while making non-reuse explicit.
+    return { allocated: this.allocated, reused: 0, released: 0 };
   }
 
-  clear(): void {
-    this.pools.clear();
-    this.stats = { allocated: 0, reused: 0, released: 0 };
+  resetStats(): void {
+    this.allocated = 0;
   }
 }
 
@@ -1025,8 +1003,8 @@ export class SemanticSimilarityEngine {
   private embeddingCache: LRUCache<string, Float32Array>;
   // Added: tokenization cache
   private tokenizationCache: LRUCache<string, TokenizedOutput>;
-  // Added: memory pool manager
-  private memoryPool: EmbeddingMemoryPool;
+  // Cache-owned embedding allocator
+  private embeddingAllocator: EmbeddingAllocator;
   // Added: SIMD math engine
   private simdMath: SIMDMathEngine | null = null;
   private useSIMD = false;
@@ -1206,7 +1184,7 @@ export class SemanticSimilarityEngine {
     this.tokenizationCache = new LRUCache<string, TokenizedOutput>(
       Math.min(this.config.cacheSize, 200),
     );
-    this.memoryPool = new EmbeddingMemoryPool();
+    this.embeddingAllocator = new EmbeddingAllocator();
     this.simdMath = new SIMDMathEngine();
   }
 
@@ -1960,8 +1938,8 @@ export class SemanticSimilarityEngine {
         ? workerOutput.data
         : new Float32Array(workerOutput.data);
 
-    // Use memory pool to get embedding array
-    const embedding = this.memoryPool.getEmbedding(hiddenSize);
+    // Allocate an embedding that the cache may retain by reference.
+    const embedding = this.embeddingAllocator.allocate(hiddenSize);
     let validTokens = 0;
 
     for (let i = 0; i < seqLength; i++) {
@@ -2025,8 +2003,8 @@ export class SemanticSimilarityEngine {
     const embeddings: Float32Array[] = [];
 
     for (let b = 0; b < batchSize; b++) {
-      // Use memory pool to get embedding array
-      const embedding = this.memoryPool.getEmbedding(hiddenSize);
+      // Allocate an embedding that the cache may retain by reference.
+      const embedding = this.embeddingAllocator.allocate(hiddenSize);
       let validTokens = 0;
       const currentAttentionMask = attentionMasksBatch[b];
       for (let i = 0; i < seqLength; i++) {
@@ -2543,7 +2521,7 @@ export class SemanticSimilarityEngine {
               : 0,
         },
       },
-      memoryPool: this.memoryPool.getStats(),
+      memoryPool: this.embeddingAllocator.getStats(),
       memoryUsage: this.getMemoryUsage(),
       isInitialized: this.isInitialized,
       isInitializing: this.isInitializing,
@@ -2683,7 +2661,7 @@ export class SemanticSimilarityEngine {
     this.tokenizer = null;
     this.embeddingCache.clear();
     this.tokenizationCache.clear();
-    this.memoryPool.clear();
+    this.embeddingAllocator.resetStats();
     this.isInitialized = false;
     this.isInitializing = false;
     this.initPromise = null;
