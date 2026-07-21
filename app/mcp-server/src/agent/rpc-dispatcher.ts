@@ -424,7 +424,7 @@ export async function dispatchAgentRpc(
         const payload = createBoundedCollectionPage({
           items: projects.map(sanitizeProjectForPublicRead),
           totalCount,
-          limit: safeLimit,
+          limit: fetchLimit,
           offset: safeOffset,
           buildPayload: (pageProjects, pagination) => ({
             projects: pageProjects,
@@ -534,7 +534,7 @@ export async function dispatchAgentRpc(
         const payload = createBoundedCollectionPage({
           items: sessions.map(sanitizeSessionForPublicRead),
           totalCount,
-          limit: safeLimit,
+          limit: fetchLimit,
           offset: safeOffset,
           buildPayload: (pageSessions, pagination) => ({
             sessions: pageSessions,
@@ -566,7 +566,7 @@ export async function dispatchAgentRpc(
         const payload = createBoundedCollectionPage({
           items: sessions.map(sanitizeSessionForPublicRead),
           totalCount,
-          limit: safeLimit,
+          limit: fetchLimit,
           offset: safeOffset,
           buildPayload: (pageSessions, pagination) => ({
             sessions: pageSessions,
@@ -720,7 +720,7 @@ export async function dispatchAgentRpc(
         const payload = createBoundedCollectionPage({
           items: messages,
           totalCount,
-          limit: safeLimit,
+          limit: fetchLimit,
           offset: safeOffset,
           buildPayload: (pageMessages, pagination) => ({
             success: true,
@@ -932,7 +932,7 @@ export async function dispatchAgentRpc(
         const payload = createBoundedCollectionPage({
           items: messages,
           totalCount,
-          limit: safeLimit,
+          limit: fetchLimit,
           offset: safeOffset,
           buildPayload: (pageMessages, pagination) => ({
             success: true,

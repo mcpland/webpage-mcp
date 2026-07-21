@@ -192,7 +192,7 @@ describe('Agent RPC response encoding', () => {
           };
         };
         const pageMessages = payload[options.collection] ?? [];
-        expect(payload.pagination.limit).toBe(500);
+        expect(payload.pagination.limit).toBe(rpcDispatcher.AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT);
         expect(payload.pagination.count).toBe(pageMessages.length);
         expect(pageMessages.length).toBeLessThanOrEqual(
           rpcDispatcher.AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT,

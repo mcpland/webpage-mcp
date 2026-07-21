@@ -156,7 +156,7 @@ describe('Agent RPC project and session collection pagination', () => {
     expect(defaultPage.json).toMatchObject({
       totalCount: 500,
       pagination: {
-        limit: 50,
+        limit: rpcDispatcher.AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT,
         offset: 0,
         count: rpcDispatcher.AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT,
         hasMore: true,
@@ -201,7 +201,7 @@ describe('Agent RPC project and session collection pagination', () => {
         };
         const pageItems = payload[options.collection] ?? [];
         expect(payload.totalCount).toBe(500);
-        expect(payload.pagination.limit).toBe(500);
+        expect(payload.pagination.limit).toBe(rpcDispatcher.AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT);
         expect(payload.pagination.count).toBe(pageItems.length);
         expect(pageItems.length).toBeLessThanOrEqual(
           rpcDispatcher.AGENT_RPC_COLLECTION_PAGE_FETCH_LIMIT,

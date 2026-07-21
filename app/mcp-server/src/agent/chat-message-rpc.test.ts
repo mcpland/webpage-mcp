@@ -398,7 +398,7 @@ describe('agent.sessions.history', () => {
     expect(response.json?.messages).toHaveLength(1);
     expect(response.json?.messages?.[0]?.content).toBe('expected session history message');
     expect(response.json?.totalCount).toBe(1);
-    expect(response.json?.pagination).toMatchObject({ limit: 100, offset: 0, hasMore: false });
+    expect(response.json?.pagination).toMatchObject({ limit: 16, offset: 0, hasMore: false });
 
     const cappedResponse = await dispatchAgentRpc(
       {
@@ -409,7 +409,7 @@ describe('agent.sessions.history', () => {
       createRpcDeps(),
     );
     expect(cappedResponse.statusCode).toBe(200);
-    expect(cappedResponse.json?.pagination?.limit).toBe(500);
+    expect(cappedResponse.json?.pagination?.limit).toBe(16);
   });
 });
 
@@ -973,7 +973,7 @@ describe('project-scoped chat message RPCs', () => {
       createRpcDeps(),
     );
     expect(cappedResponse.statusCode).toBe(200);
-    expect(cappedResponse.json?.pagination?.limit).toBe(500);
+    expect(cappedResponse.json?.pagination?.limit).toBe(16);
   });
 });
 
