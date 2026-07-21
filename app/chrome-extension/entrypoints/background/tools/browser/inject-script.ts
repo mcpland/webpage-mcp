@@ -3,6 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { ExecutionWorld } from '@/common/constants';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { annotateMainWorldResponse } from './userscript-response-provenance';
 
 interface InjectScriptParam {
   url?: string;
@@ -160,7 +161,7 @@ class SendCommandToInjectScriptTool extends BaseBrowserToolExecutor {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(result),
+            text: JSON.stringify(annotateMainWorldResponse(result)),
           },
         ],
         isError: false,

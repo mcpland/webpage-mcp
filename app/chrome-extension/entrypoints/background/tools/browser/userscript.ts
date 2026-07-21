@@ -4,6 +4,10 @@ import { TOOL_NAMES } from 'webpage-mcp-shared';
 import { ExecutionWorld, STORAGE_KEYS } from '@/common/constants';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
+  MAIN_WORLD_RESPONSE_PROVENANCE,
+  USER_SCRIPT_RESPONSE_PROVENANCE,
+} from './userscript-response-provenance';
+import {
   USER_SCRIPT_EXECUTION_LIMITS,
   executeUserScript,
   listRegisteredUserScripts,
@@ -1091,7 +1095,11 @@ class UserscriptTool extends BaseBrowserToolExecutor {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ ok: true, result: results[0].result }),
+              text: JSON.stringify({
+                ok: true,
+                result: results[0].result,
+                responseProvenance: USER_SCRIPT_RESPONSE_PROVENANCE,
+              }),
             },
           ],
           isError: false,
@@ -1113,7 +1121,16 @@ class UserscriptTool extends BaseBrowserToolExecutor {
         { frameId: 0 },
       );
       return {
-        content: [{ type: 'text', text: JSON.stringify({ ok: true, result }) }],
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              ok: true,
+              result,
+              responseProvenance: MAIN_WORLD_RESPONSE_PROVENANCE,
+            }),
+          },
+        ],
         isError: false,
       };
     } catch (e) {

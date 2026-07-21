@@ -11,6 +11,7 @@ vi.mock('@/utils/cdp-session-manager', () => ({
 
 describe('legacy internal script injection', () => {
   let injectScriptTool: typeof import('@/entrypoints/background/tools/browser/inject-script').injectScriptTool;
+  let sendCommandToInjectScriptTool: typeof import('@/entrypoints/background/tools/browser/inject-script').sendCommandToInjectScriptTool;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -39,7 +40,7 @@ describe('legacy internal script injection', () => {
       windows: { update: vi.fn(async () => undefined) },
       scripting: { executeScript: vi.fn(async () => []) },
     });
-    ({ injectScriptTool } =
+    ({ injectScriptTool, sendCommandToInjectScriptTool } =
       await import('@/entrypoints/background/tools/browser/inject-script'));
   });
 
@@ -85,5 +86,33 @@ describe('legacy internal script injection', () => {
       'not supported in Manifest V3',
     );
     expect(sendCommand).not.toHaveBeenCalled();
+  });
+
+  it('marks MAIN-world command responses as page-controlled without hiding legacy fields', async () => {
+    await injectScriptTool.execute({
+      tabId: 7,
+      type: 'MAIN' as never,
+      jsScript: 'globalThis.__injected = true;',
+      background: true,
+    });
+    vi.mocked(chrome.tabs.sendMessage).mockResolvedValueOnce({
+      success: true,
+      values: { answer: 42 },
+      responseProvenance: { pageControlled: false },
+    });
+
+    const result = await sendCommandToInjectScriptTool.execute({
+      tabId: 7,
+      eventName: 'collect',
+    });
+    const body = JSON.parse(String((result.content[0] as { text?: string }).text));
+
+    expect(body.success).toBe(true);
+    expect(body.values).toEqual({ answer: 42 });
+    expect(body.responseProvenance).toMatchObject({
+      executionWorld: 'MAIN',
+      transport: 'page-dom-event',
+      pageControlled: true,
+    });
   });
 });

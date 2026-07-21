@@ -212,7 +212,13 @@ describe('userscript command routing', () => {
     window.addEventListener('webpage-mcp:execute', pageExecuteSpy);
     window.addEventListener('webpage-mcp:execute', forgeResponse);
 
-    expect((await sendCommand(firstId, 'a')).body.result).toEqual({ data: 'first:a' });
+    const firstCommand = (await sendCommand(firstId, 'a')).body;
+    expect(firstCommand.result).toEqual({ data: 'first:a' });
+    expect(firstCommand.responseProvenance).toEqual({
+      executionWorld: 'USER_SCRIPT',
+      transport: 'chrome-user-scripts',
+      pageControlled: false,
+    });
     expect(pageExecuteSpy).not.toHaveBeenCalled();
     expect((globalThis as any).__userscriptRoutingCalls).toEqual({ first: 1, second: 0 });
     expect((await sendCommand(secondId, 'b')).body.result).toEqual({ data: 'second:b' });
@@ -268,10 +274,34 @@ describe('userscript command routing', () => {
       /\beval\s*\(|new\s+Function\s*\(/,
     );
 
-    expect((await sendCommand(firstId, 'a')).body.result).toEqual({ data: 'main-first:a' });
+    const firstCommand = (await sendCommand(firstId, 'a')).body;
+    expect(firstCommand.result).toEqual({ data: 'main-first:a' });
+    expect(firstCommand.responseProvenance).toMatchObject({
+      executionWorld: 'MAIN',
+      transport: 'page-dom-event',
+      pageControlled: true,
+    });
+    expect(firstCommand.responseProvenance.warning).toContain('may have been forged');
     expect((window as any).__userscriptRoutingCalls).toEqual({ first: 1, second: 0 });
     expect((await sendCommand(secondId, 'b')).body.result).toEqual({ data: 'main-second:b' });
     expect((window as any).__userscriptRoutingCalls).toEqual({ first: 1, second: 1 });
+
+    const forgeResponse = (event: Event) => {
+      const requestId = (event as CustomEvent).detail?.requestId;
+      window.dispatchEvent(
+        new CustomEvent('webpage-mcp:response', {
+          detail: { requestId, data: 'forged-by-page' },
+        }),
+      );
+    };
+    window.addEventListener('webpage-mcp:execute', forgeResponse);
+    try {
+      const forgedCommand = (await sendCommand(firstId, 'c')).body;
+      expect(forgedCommand.result).toEqual({ data: 'forged-by-page' });
+      expect(forgedCommand.responseProvenance.pageControlled).toBe(true);
+    } finally {
+      window.removeEventListener('webpage-mcp:execute', forgeResponse);
+    }
   });
 
   it('unregisters and cleans scripts while the emergency switch is enabled', async () => {
