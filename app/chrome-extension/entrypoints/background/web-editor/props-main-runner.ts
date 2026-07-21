@@ -1410,7 +1410,7 @@ export function executePropsOperationInMain(request: unknown): unknown {
      */
     createContext() {
       return {
-        seen: typeof WeakMap === 'function' ? new WeakMap() : null,
+        seen: [],
         nextId: 1,
         nodes: 0,
         bytes: 0,
@@ -1672,9 +1672,19 @@ export function executePropsOperationInMain(request: unknown): unknown {
 
         // Circular reference detection
         if (ctx?.seen) {
-          const existingId = ctx.seen.get(value);
-          if (existingId) return { kind: 'circular', refId: existingId };
-          ctx.seen.set(value, ctx.nextId++);
+          for (
+            let index = 0;
+            index < depth && index < ctx.seen.length;
+            index++
+          ) {
+            const active = ctx.seen[index];
+            if (active.value === value) {
+              return { kind: 'circular', refId: active.id };
+            }
+          }
+          // Retain ancestors only; completed sibling branches are not cycles.
+          ctx.seen.length = depth;
+          ctx.seen[depth] = { value, id: ctx.nextId++ };
         }
 
         // Array

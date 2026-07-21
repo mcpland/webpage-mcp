@@ -153,6 +153,29 @@ describe('per-operation MAIN-world props runner', () => {
     expect(listenerSpy).not.toHaveBeenCalled();
   });
 
+  it('distinguishes shared props values from active circular references', () => {
+    const shared = { value: 1 };
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    attachReactProps({ first: shared, second: shared, circular });
+
+    const result = executePropsOperationInMain(request('read')) as any;
+    const entries = result.response.data.props.entries;
+    const first = entries.find((entry: any) => entry.key === 'first').value;
+    const second = entries.find((entry: any) => entry.key === 'second').value;
+    const cycle = entries.find((entry: any) => entry.key === 'circular').value;
+
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({
+      kind: 'object',
+      entries: [{ key: 'value', value: { kind: 'number', value: 1 } }],
+    });
+    expect(cycle).toMatchObject({
+      kind: 'object',
+      entries: [{ key: 'self', value: { kind: 'circular' } }],
+    });
+  });
+
   it('never exposes page-owned array or collection metadata', () => {
     const toJSON = vi.fn(() => 1);
     const oversizedMetadata = {

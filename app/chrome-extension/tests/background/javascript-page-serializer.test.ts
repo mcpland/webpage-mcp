@@ -272,6 +272,20 @@ describe("bounded JavaScript page serializer", () => {
     });
   });
 
+  it("serializes shared references independently without reporting a cycle", () => {
+    const shared = { nested: { value: 1 } };
+    const result = serialize({ first: shared, second: shared });
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(JSON.parse(result.text)).toEqual({
+      first: { nested: { value: 1 } },
+      second: { nested: { value: 1 } },
+    });
+    expect(result.text).not.toContain("[Circular]");
+    expect(result.truncated).toBe(false);
+  });
+
   it("bounds and sanitizes huge thrown values", () => {
     const error = new Error("Bearer super-secret-token");
     error.stack = `Error: Bearer super-secret-token\n${"x".repeat(2_000_000)}`;

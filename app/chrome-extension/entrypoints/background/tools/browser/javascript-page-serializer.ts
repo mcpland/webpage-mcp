@@ -647,11 +647,18 @@ export function serializeJavaScriptEvaluation(
       else writeJsonString(value);
     };
 
-    const wasSeen = (value: object): boolean => {
-      for (let index = 0; index < seen.length; index += 1) {
+    const wasSeen = (value: object, depth: number): boolean => {
+      const activeDepth = MAX_DEPTH - depth;
+      for (
+        let index = 0;
+        index < activeDepth && index < seen.length;
+        index += 1
+      ) {
         if (seen[index] === value) return true;
       }
-      seen[seen.length] = value;
+      // Slots at this depth or below belong to a completed sibling branch.
+      seen.length = activeDepth;
+      seen[activeDepth] = value;
       return false;
     };
 
@@ -751,7 +758,7 @@ export function serializeJavaScriptEvaluation(
       }
 
       const objectValue = value as Record<string, unknown>;
-      if (wasSeen(objectValue)) {
+      if (wasSeen(objectValue, depth)) {
         writeFixedString("[Circular]", root);
         return;
       }
