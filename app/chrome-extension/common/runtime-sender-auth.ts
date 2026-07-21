@@ -18,6 +18,12 @@ function senderHasExtensionOrigin(
   return sender.origin === expected.origin || typeof sender.url === "string";
 }
 
+export type ExtensionTopFrameSender = chrome.runtime.MessageSender & {
+  id: string;
+  tab: chrome.tabs.Tab & { id: number };
+  frameId: 0;
+};
+
 /**
  * A document owned by this extension, whether hosted in a tab, popup, side
  * panel, or offscreen document. A tab is not a content-script discriminator:
@@ -55,6 +61,27 @@ export function isExtensionBackgroundSender(
     sender.origin === undefined &&
     sender.documentId === undefined &&
     sender.documentLifecycle === undefined,
+  );
+}
+
+/**
+ * A same-extension sender injected into the top frame of a real tab.
+ *
+ * This deliberately does not inspect sender.url/origin: for content scripts
+ * and user scripts those fields identify the host page, not the extension.
+ * Callers remain responsible for document/session capabilities specific to
+ * their surface.
+ */
+export function isExtensionTopFrameSender(
+  sender: chrome.runtime.MessageSender | undefined,
+): sender is ExtensionTopFrameSender {
+  const tabId = sender?.tab?.id;
+  return Boolean(
+    sender &&
+    sender.id === chrome.runtime.id &&
+    Number.isSafeInteger(tabId) &&
+    (tabId as number) >= 0 &&
+    sender.frameId === 0,
   );
 }
 

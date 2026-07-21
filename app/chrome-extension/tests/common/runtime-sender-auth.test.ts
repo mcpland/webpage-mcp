@@ -4,6 +4,7 @@ import {
   isExtensionBackgroundSender,
   isExtensionPageSender,
   isExtensionRuntimeSender,
+  isExtensionTopFrameSender,
   isOffscreenDocumentSender,
 } from "@/common/runtime-sender-auth";
 
@@ -91,5 +92,29 @@ describe("runtime sender authorization", () => {
       }),
     ).toBe(false);
     expect(isExtensionBackgroundSender({ id: "other-extension" })).toBe(false);
+  });
+
+  it("accepts only same-extension senders in a real tab's top frame", () => {
+    const sender: chrome.runtime.MessageSender = {
+      id: chrome.runtime.id,
+      tab: { id: 7 } as chrome.tabs.Tab,
+      frameId: 0,
+      url: "https://example.com/page",
+      origin: "https://example.com",
+    };
+    expect(isExtensionTopFrameSender(sender)).toBe(true);
+    expect(
+      isExtensionTopFrameSender({ ...sender, id: "other-extension" }),
+    ).toBe(false);
+    expect(isExtensionTopFrameSender({ ...sender, tab: undefined })).toBe(
+      false,
+    );
+    expect(isExtensionTopFrameSender({ ...sender, frameId: 1 })).toBe(false);
+    expect(
+      isExtensionTopFrameSender({
+        ...sender,
+        tab: { id: Number.NaN } as chrome.tabs.Tab,
+      }),
+    ).toBe(false);
   });
 });

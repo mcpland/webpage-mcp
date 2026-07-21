@@ -1,3 +1,4 @@
+import { isExtensionTopFrameSender } from '@/common/runtime-sender-auth';
 import type { RecordingStatus } from './session-manager';
 
 export const RECORDER_CONTROL_REGISTER_ACTION = 'rr_register_recorder_control';
@@ -28,21 +29,16 @@ interface RecorderControlMessage {
 }
 
 function getSenderScope(sender: chrome.runtime.MessageSender): SenderScope | null {
-  const tabId = sender.tab?.id;
-  const frameId = sender.frameId;
   const documentId = typeof sender.documentId === 'string' ? sender.documentId : '';
 
   if (
-    sender.id !== chrome.runtime.id ||
-    !Number.isInteger(tabId) ||
-    (tabId as number) < 0 ||
-    frameId !== 0 ||
+    !isExtensionTopFrameSender(sender) ||
     documentId.length > MAX_DOCUMENT_ID_LENGTH
   ) {
     return null;
   }
 
-  return { tabId: tabId as number, frameId, documentId };
+  return { tabId: sender.tab.id, frameId: 0, documentId };
 }
 
 function parseCapability(message: RecorderControlMessage): string | null {

@@ -2,6 +2,7 @@ import {
   BACKGROUND_MESSAGE_TYPES,
   PRIVILEGED_UI_SURFACES,
 } from "@/common/message-types";
+import { isExtensionTopFrameSender } from "@/common/runtime-sender-auth";
 import { validatePrivilegedUiSurfaceSession } from "../privileged-ui-authorization";
 import { executePropsOperationInMain } from "./props-main-runner";
 
@@ -834,13 +835,9 @@ function normalizeSender(sender: chrome.runtime.MessageSender): {
   tabId: number;
   documentId: string;
 } | null {
-  const tabId = sender.tab?.id;
   const documentId = sender.documentId;
   if (
-    sender.id !== chrome.runtime.id ||
-    !Number.isSafeInteger(tabId) ||
-    (tabId as number) < 0 ||
-    sender.frameId !== 0 ||
+    !isExtensionTopFrameSender(sender) ||
     !isBoundedString(
       documentId,
       WEB_EDITOR_PROPS_RPC_LIMITS.maxDocumentIdBytes,
@@ -851,7 +848,7 @@ function normalizeSender(sender: chrome.runtime.MessageSender): {
   ) {
     return null;
   }
-  return { tabId: tabId as number, documentId };
+  return { tabId: sender.tab.id, documentId };
 }
 
 function acquireQuota(key: string): boolean {

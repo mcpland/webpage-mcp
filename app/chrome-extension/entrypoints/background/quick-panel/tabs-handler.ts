@@ -19,6 +19,7 @@ import {
   type QuickPanelTabsQueryMessage,
   type QuickPanelTabsQueryResponse,
 } from '@/common/message-types';
+import { isExtensionTopFrameSender } from '@/common/runtime-sender-auth';
 
 // ============================================================
 // Constants
@@ -46,7 +47,7 @@ function isValidWindowId(value: unknown): value is number {
 }
 
 function isTrustedQuickPanelSender(sender: chrome.runtime.MessageSender): boolean {
-  return sender.id === chrome.runtime.id && isValidTabId(sender.tab?.id) && sender.frameId === 0;
+  return isExtensionTopFrameSender(sender) && isValidTabId(sender.tab.id);
 }
 
 function normalizeBoolean(value: unknown): boolean {

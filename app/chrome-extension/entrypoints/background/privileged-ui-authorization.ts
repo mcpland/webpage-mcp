@@ -9,6 +9,7 @@ import {
   type PrivilegedUiSurface,
   type PrivilegedUiSurfaceCloseMessage,
 } from "@/common/message-types";
+import { isExtensionTopFrameSender } from "@/common/runtime-sender-auth";
 
 const AUTHORIZATION_TTL_MS = 30_000;
 const MAX_PENDING_AUTHORIZATIONS = 256;
@@ -81,21 +82,12 @@ function isSurfaceSessionId(value: unknown): value is string {
 function getSenderScope(
   sender: chrome.runtime.MessageSender,
 ): SenderScope | null {
-  const extensionId = typeof sender.id === "string" ? sender.id : "";
-  const expectedExtensionId = chrome.runtime.id;
-  const tabId = sender.tab?.id;
-  const frameId = sender.frameId;
   const documentId =
     typeof sender.documentId === "string" ? sender.documentId : "";
 
   // Privileged in-page UI is only injected by this extension into the top frame.
   if (
-    !extensionId ||
-    extensionId !== expectedExtensionId ||
-    typeof tabId !== "number" ||
-    !Number.isInteger(tabId) ||
-    tabId < 0 ||
-    frameId !== 0 ||
+    !isExtensionTopFrameSender(sender) ||
     !documentId ||
     documentId.length > 512
   ) {
@@ -103,9 +95,9 @@ function getSenderScope(
   }
 
   return {
-    extensionId,
-    tabId,
-    frameId,
+    extensionId: sender.id,
+    tabId: sender.tab.id,
+    frameId: 0,
     documentId,
   };
 }

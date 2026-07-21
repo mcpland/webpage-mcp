@@ -4,8 +4,10 @@ import {
   PRIVILEGED_UI_SURFACES,
 } from "@/common/message-types";
 import {
+  isExtensionBackgroundSender,
   isExtensionPageSender,
   isExtensionRuntimeSender,
+  isExtensionTopFrameSender,
 } from "@/common/runtime-sender-auth";
 import { sanitizeAgentStreamRelayPayload } from "@/common/agent-stream-boundaries";
 import {
@@ -118,11 +120,7 @@ const webEditorToggleQueues = new Map<number, Promise<void>>();
 function isWebEditorUserScriptSender(
   sender: chrome.runtime.MessageSender,
 ): boolean {
-  return (
-    sender.id === chrome.runtime.id &&
-    typeof sender.tab?.id === "number" &&
-    sender.frameId === 0
-  );
+  return isExtensionTopFrameSender(sender);
 }
 
 function readWebEditorSurfaceSessionId(message: unknown): string | null {
@@ -138,12 +136,7 @@ function readWebEditorSurfaceSessionId(message: unknown): string | null {
 function isBackgroundRebroadcast(
   sender: chrome.runtime.MessageSender,
 ): boolean {
-  return (
-    sender.id === chrome.runtime.id &&
-    sender.tab === undefined &&
-    sender.url === undefined &&
-    sender.origin === undefined
-  );
+  return isExtensionBackgroundSender(sender);
 }
 
 /** Storage key prefix for TX change session data (per-tab isolation) */
@@ -193,16 +186,11 @@ async function ensureWebEditorRecoveryReady(): Promise<void> {
 function getExecutionSenderScope(
   sender: chrome.runtime.MessageSender,
 ): Pick<ExecutionOwner, "tabId" | "frameId" | "documentId"> | null {
-  const tabId = sender.tab?.id;
-  if (
-    sender.id !== chrome.runtime.id ||
-    typeof tabId !== "number" ||
-    sender.frameId !== 0
-  ) {
+  if (!isExtensionTopFrameSender(sender)) {
     return null;
   }
   return {
-    tabId,
+    tabId: sender.tab.id,
     frameId: 0,
     documentId: typeof sender.documentId === "string" ? sender.documentId : "",
   };
