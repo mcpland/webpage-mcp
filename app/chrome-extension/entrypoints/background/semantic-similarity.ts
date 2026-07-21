@@ -9,10 +9,7 @@ import {
   OFFSCREEN_MESSAGE_TYPES,
 } from "@/common/message-types";
 import { STORAGE_KEYS, ERROR_MESSAGES } from "@/common/constants";
-import {
-  isExtensionPageSender,
-  isOffscreenDocumentSender,
-} from "@/common/runtime-sender-auth";
+import { isOffscreenDocumentSender } from "@/common/runtime-sender-auth";
 import {
   getStoredSemanticModelSelection,
   normalizeSemanticModelState,
@@ -648,19 +645,9 @@ function analyzeErrorType(
 export const initSemanticSimilarityListener = () => {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const messageType = message?.type;
-    const isSemanticControl =
-      messageType === BACKGROUND_MESSAGE_TYPES.SWITCH_SEMANTIC_MODEL ||
-      messageType === BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS ||
-      messageType === BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS ||
-      messageType === BACKGROUND_MESSAGE_TYPES.INITIALIZE_SEMANTIC_ENGINE;
+    if (messageType !== BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS) return;
 
-    if (!isSemanticControl) return;
-
-    const isAuthorized =
-      messageType === BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS
-        ? isOffscreenDocumentSender(sender)
-        : isExtensionPageSender(sender) && !isOffscreenDocumentSender(sender);
-    if (!isAuthorized) {
+    if (!isOffscreenDocumentSender(sender)) {
       sendResponse({
         success: false,
         error: "Unauthorized semantic engine control request",
@@ -668,57 +655,16 @@ export const initSemanticSimilarityListener = () => {
       return false;
     }
 
-    if (messageType === BACKGROUND_MESSAGE_TYPES.SWITCH_SEMANTIC_MODEL) {
-      handleModelSwitch(
-        message.modelPreset,
-        message.modelVersion,
-        message.modelDimension,
-        message.previousDimension,
+    handleUpdateModelStatus(message.attemptId, message.modelState)
+      .then((result: { success: boolean; error?: string }) =>
+        sendResponse(result),
       )
-        .then((result: { success: boolean; error?: string }) =>
-          sendResponse(result),
-        )
-        .catch((error: unknown) =>
-          sendResponse({
-            success: false,
-            error: safeSemanticErrorMessage(error),
-          }),
-        );
-      return true;
-    } else if (messageType === BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS) {
-      handleGetModelStatus()
-        .then((result: { success: boolean; status?: any; error?: string }) =>
-          sendResponse(result),
-        )
-        .catch((error: unknown) =>
-          sendResponse({
-            success: false,
-            error: safeSemanticErrorMessage(error),
-          }),
-        );
-      return true;
-    } else if (messageType === BACKGROUND_MESSAGE_TYPES.UPDATE_MODEL_STATUS) {
-      handleUpdateModelStatus(message.attemptId, message.modelState)
-        .then((result: { success: boolean; error?: string }) =>
-          sendResponse(result),
-        )
-        .catch((error: unknown) =>
-          sendResponse({
-            success: false,
-            error: safeSemanticErrorMessage(error),
-          }),
-        );
-      return true;
-    } else {
-      initializeDefaultSemanticEngine()
-        .then(() => sendResponse({ success: true }))
-        .catch((error: unknown) =>
-          sendResponse({
-            success: false,
-            error: safeSemanticErrorMessage(error),
-          }),
-        );
-      return true;
-    }
+      .catch((error: unknown) =>
+        sendResponse({
+          success: false,
+          error: safeSemanticErrorMessage(error),
+        }),
+      );
+    return true;
   });
 };

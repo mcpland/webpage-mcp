@@ -17,8 +17,6 @@ export enum MessageTarget {
 
 // Background script message types
 export const BACKGROUND_MESSAGE_TYPES = {
-  SWITCH_SEMANTIC_MODEL: "switch_semantic_model",
-  GET_MODEL_STATUS: "get_model_status",
   UPDATE_MODEL_STATUS: "update_model_status",
   GET_STORAGE_STATS: "get_storage_stats",
   CLEAR_ALL_DATA: "clear_all_data",
@@ -32,7 +30,6 @@ export const BACKGROUND_MESSAGE_TYPES = {
   GET_NATIVE_AUTH_TOKEN: "get_native_auth_token",
   SERVER_STATUS_CHANGED: "server_status_changed",
   SERVER_INSTANCES_CHANGED: "server_instances_changed",
-  INITIALIZE_SEMANTIC_ENGINE: "initialize_semantic_engine",
   // Record & Replay background control and queries
   RR_START_RECORDING: "rr_start_recording",
   RR_STOP_RECORDING: "rr_stop_recording",

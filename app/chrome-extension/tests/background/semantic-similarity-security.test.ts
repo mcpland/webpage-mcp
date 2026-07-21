@@ -142,6 +142,12 @@ describe("semantic engine control authorization", () => {
     });
   }
 
+  async function getModelStatus() {
+    const { handleGetModelStatus } =
+      await import("@/entrypoints/background/semantic-similarity");
+    return handleGetModelStatus();
+  }
+
   function extensionSender(): chrome.runtime.MessageSender {
     return {
       id: "test-extension-id",
@@ -181,26 +187,8 @@ describe("semantic engine control authorization", () => {
     });
   }
 
-  it.each([
-    BACKGROUND_MESSAGE_TYPES.SWITCH_SEMANTIC_MODEL,
-    BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS,
-    BACKGROUND_MESSAGE_TYPES.INITIALIZE_SEMANTIC_ENGINE,
-  ])("rejects content-script control request %s", async (type) => {
-    await expect(dispatch({ type }, contentSender())).resolves.toEqual({
-      success: false,
-      error: "Unauthorized semantic engine control request",
-    });
-    expect(storageGet).not.toHaveBeenCalled();
-    expect(storageSet).not.toHaveBeenCalled();
-  });
-
-  it("allows extension pages to query model status", async () => {
-    await expect(
-      dispatch(
-        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
-        extensionSender(),
-      ),
-    ).resolves.toMatchObject({
+  it("reports model status through the internal service", async () => {
+    await expect(getModelStatus()).resolves.toMatchObject({
       success: true,
       status: { initializationStatus: "ready", downloadProgress: 100 },
     });
@@ -238,12 +226,7 @@ describe("semantic engine control authorization", () => {
         runtimeSendMessage.mockResolvedValueOnce(response);
       }
 
-      await expect(
-        dispatch(
-          { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
-          extensionSender(),
-        ),
-      ).resolves.toMatchObject({
+      await expect(getModelStatus()).resolves.toMatchObject({
         success: true,
         status: {
           initializationStatus: "error",
@@ -258,12 +241,7 @@ describe("semantic engine control authorization", () => {
     persistedStorage.selectedModel = "attacker/model";
     persistedStorage.selectedVersion = "latest";
 
-    await expect(
-      dispatch(
-        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
-        extensionSender(),
-      ),
-    ).resolves.toMatchObject({
+    await expect(getModelStatus()).resolves.toMatchObject({
       success: true,
       status: { initializationStatus: "error" },
     });
@@ -290,12 +268,7 @@ describe("semantic engine control authorization", () => {
       };
     });
 
-    await expect(
-      dispatch(
-        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
-        extensionSender(),
-      ),
-    ).resolves.toMatchObject({
+    await expect(getModelStatus()).resolves.toMatchObject({
       success: true,
       status: { initializationStatus: "error" },
     });
@@ -310,12 +283,7 @@ describe("semantic engine control authorization", () => {
       startedAt: 1,
     };
 
-    await expect(
-      dispatch(
-        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
-        extensionSender(),
-      ),
-    ).resolves.toMatchObject({
+    await expect(getModelStatus()).resolves.toMatchObject({
       success: true,
       status: {
         initializationStatus: "error",
@@ -376,12 +344,7 @@ describe("semantic engine control authorization", () => {
       status: "downloading",
       downloadProgress: 42,
     });
-    await expect(
-      dispatch(
-        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
-        extensionSender(),
-      ),
-    ).resolves.toMatchObject({
+    await expect(getModelStatus()).resolves.toMatchObject({
       success: true,
       status: {
         initializationStatus: "downloading",
@@ -427,16 +390,6 @@ describe("semantic engine control authorization", () => {
       success: false,
       error: expect.stringMatching(/no longer active/i),
     });
-  });
-
-  it("does not let the offscreen document invoke UI controls", async () => {
-    await expect(
-      dispatch(
-        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
-        offscreenSender(),
-      ),
-    ).resolves.toMatchObject({ success: false });
-    expect(storageGet).not.toHaveBeenCalled();
   });
 
   it("ignores unrelated and malformed messages", async () => {
@@ -626,20 +579,16 @@ describe("semantic engine control authorization", () => {
     expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(2);
   });
 
-  it("reports a rejected default offscreen initialization through the endpoint", async () => {
+  it("reports a rejected default offscreen initialization", async () => {
     runtimeSendMessage.mockRejectedValueOnce(
       new Error("default offscreen failed"),
     );
+    const { initializeDefaultSemanticEngine } =
+      await import("@/entrypoints/background/semantic-similarity");
 
-    await expect(
-      dispatch(
-        { type: BACKGROUND_MESSAGE_TYPES.INITIALIZE_SEMANTIC_ENGINE },
-        extensionSender(),
-      ),
-    ).resolves.toMatchObject({
-      success: false,
-      error: expect.stringMatching(/default offscreen failed/i),
-    });
+    await expect(initializeDefaultSemanticEngine()).rejects.toThrow(
+      /default offscreen failed/i,
+    );
     expect(storageSet).toHaveBeenLastCalledWith({
       modelState: expect.objectContaining({ status: "error" }),
     });
@@ -650,30 +599,18 @@ describe("semantic engine control authorization", () => {
     indexerMocks.initialize.mockRejectedValueOnce(
       new Error("default indexer failed"),
     );
+    const { handleModelSwitch, initializeDefaultSemanticEngine } =
+      await import("@/entrypoints/background/semantic-similarity");
 
-    await expect(
-      dispatch(
-        { type: BACKGROUND_MESSAGE_TYPES.INITIALIZE_SEMANTIC_ENGINE },
-        extensionSender(),
-      ),
-    ).resolves.toMatchObject({
-      success: false,
-      error: expect.stringMatching(/default indexer failed/i),
-    });
+    await expect(initializeDefaultSemanticEngine()).rejects.toThrow(
+      /default indexer failed/i,
+    );
     expect(storageSet).toHaveBeenLastCalledWith({
       modelState: expect.objectContaining({ status: "error" }),
     });
 
     await expect(
-      dispatch(
-        {
-          type: BACKGROUND_MESSAGE_TYPES.SWITCH_SEMANTIC_MODEL,
-          modelPreset: "multilingual-e5-small",
-          modelVersion: "quantized",
-          modelDimension: 384,
-        },
-        extensionSender(),
-      ),
+      handleModelSwitch("multilingual-e5-small", "quantized", 384),
     ).resolves.toEqual({ success: true });
     expect(runtimeSendMessage).toHaveBeenCalledTimes(2);
     expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(1);
@@ -684,30 +621,18 @@ describe("semantic engine control authorization", () => {
       (value) => value.modelState?.status === "ready",
       new Error("default ready persistence failed"),
     );
-    await expect(
-      dispatch(
-        { type: BACKGROUND_MESSAGE_TYPES.INITIALIZE_SEMANTIC_ENGINE },
-        extensionSender(),
-      ),
-    ).resolves.toMatchObject({
-      success: false,
-      error: expect.stringMatching(/default ready persistence failed/i),
-    });
+    const { handleModelSwitch, initializeDefaultSemanticEngine } =
+      await import("@/entrypoints/background/semantic-similarity");
+    await expect(initializeDefaultSemanticEngine()).rejects.toThrow(
+      /default ready persistence failed/i,
+    );
     expect(storageSet).toHaveBeenLastCalledWith({
       modelState: expect.objectContaining({ status: "error" }),
     });
     expect(indexerMocks.initialize).toHaveBeenCalledTimes(1);
 
     await expect(
-      dispatch(
-        {
-          type: BACKGROUND_MESSAGE_TYPES.SWITCH_SEMANTIC_MODEL,
-          modelPreset: "multilingual-e5-small",
-          modelVersion: "quantized",
-          modelDimension: 384,
-        },
-        extensionSender(),
-      ),
+      handleModelSwitch("multilingual-e5-small", "quantized", 384),
     ).resolves.toEqual({ success: true });
     expect(runtimeSendMessage).toHaveBeenCalledTimes(2);
     expect(indexerMocks.reinitialize).toHaveBeenCalledTimes(1);
@@ -1103,12 +1028,7 @@ describe("semantic engine control authorization", () => {
       },
     });
 
-    await expect(
-      dispatch(
-        { type: BACKGROUND_MESSAGE_TYPES.GET_MODEL_STATUS },
-        extensionSender(),
-      ),
-    ).resolves.toEqual({
+    await expect(getModelStatus()).resolves.toEqual({
       success: true,
       status: expect.objectContaining({
         initializationStatus: "idle",
