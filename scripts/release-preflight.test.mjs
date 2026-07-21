@@ -1634,6 +1634,21 @@ test("release workflow verifies before either publish mutation", async () => {
     /pnpm verify:wasm/,
     "release verification must rebuild and compare committed WASM artifacts",
   );
+  assert.match(
+    buildJobBody,
+    /node scripts\/install-wasm-pack\.mjs --install-dir "\$RUNNER_TEMP\/webpage-mcp-wasm-pack"/,
+    "release artifact construction must install the byte-pinned wasm-pack binary",
+  );
+  assert.match(
+    buildJobBody,
+    /WASM_PACK_BINARY: \$\{\{ runner\.temp \}\}\/webpage-mcp-wasm-pack\/wasm-pack/,
+    "release artifact construction must invoke the verified wasm-pack by absolute path",
+  );
+  assert.doesNotMatch(
+    buildJobBody,
+    /cargo install wasm-pack/,
+    "release artifact construction must not compile an unverified generator",
+  );
   assert.ok(
     buildJobBody.indexOf("pnpm verify:wasm") <
       buildJobBody.indexOf("Pack MCP npm package"),
@@ -1828,6 +1843,7 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
     securityWorkflow,
     dependabot,
     cargoDenyTool,
+    wasmPackTool,
     cargoDenyPolicy,
   ] = await Promise.all([
     readFile(join(REPOSITORY_ROOT, ".github/workflows/ci.yml"), "utf8"),
@@ -1838,9 +1854,11 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
     ),
     readFile(join(REPOSITORY_ROOT, ".github/dependabot.yml"), "utf8"),
     readFile(join(REPOSITORY_ROOT, "scripts/cargo-deny-tool.json"), "utf8"),
+    readFile(join(REPOSITORY_ROOT, "scripts/wasm-pack-tool.json"), "utf8"),
     readFile(join(REPOSITORY_ROOT, "deny.toml"), "utf8"),
   ]);
   const cargoDeny = JSON.parse(cargoDenyTool);
+  const wasmPack = JSON.parse(wasmPackTool);
   assert.equal(cargoDeny.version, "0.19.8");
   assert.equal(cargoDeny.rustToolchain, "1.94.0");
   assert.equal(cargoDeny.archive.size, 4_983_961);
@@ -1852,6 +1870,15 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
   assert.equal(
     cargoDeny.binary.sha256,
     "f84bbd8f18ca59d531b848bad2f39237b17b5980d7f9cdd373d81f6689eb685f",
+  );
+  assert.equal(wasmPack.version, "0.15.0");
+  assert.equal(
+    wasmPack.archive.sha256,
+    "c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a",
+  );
+  assert.equal(
+    wasmPack.binary.sha256,
+    "c6c3d54702f4bae4a1d51e37e19c2c61b130865dc3fabc745eebe8194b87b253",
   );
   assert.equal(
     cargoDenyPolicy,
@@ -1869,6 +1896,26 @@ test("dependency security gates cover npm and Cargo continuously", async () => {
     /Verify reviewed legal notices\s*\n\s+if: matrix\.node-version == 24\s*\n\s+run: pnpm legal:check/,
     "CI must expose legal inventory verification as an explicit maintained-line gate",
   );
+  for (const [name, source] of [
+    ["CI WASM rebuild", ciWorkflow],
+    ["release artifact build", releaseWorkflow],
+  ]) {
+    assert.match(
+      source,
+      /node scripts\/install-wasm-pack\.mjs --install-dir "\$RUNNER_TEMP\/webpage-mcp-wasm-pack"/,
+      `${name} must install the byte-pinned wasm-pack binary`,
+    );
+    assert.match(
+      source,
+      /WASM_PACK_BINARY: \$\{\{ runner\.temp \}\}\/webpage-mcp-wasm-pack\/wasm-pack/,
+      `${name} must pass the verified wasm-pack absolute path to the artifact builder`,
+    );
+    assert.doesNotMatch(
+      source,
+      /cargo install wasm-pack/,
+      `${name} must not compile wasm-pack from an independently resolved tool graph`,
+    );
+  }
 
   const releasePlatformGate = releaseWorkflow.slice(
     releaseWorkflow.indexOf("  release-platform-gate:"),

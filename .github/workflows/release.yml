@@ -243,17 +243,20 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Install pinned Rust and WASM toolchain
+      - name: Install pinned Rust toolchain
         run: |
           rustup toolchain install 1.94.0 --profile minimal --target wasm32-unknown-unknown
-          cargo install wasm-pack --version '=0.15.0' --locked
           rustc --version
-          wasm-pack --version
+
+      - name: Install verified wasm-pack
+        run: node scripts/install-wasm-pack.mjs --install-dir "$RUNNER_TEMP/webpage-mcp-wasm-pack"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Verify reproducible WASM runtime
+        env:
+          WASM_PACK_BINARY: ${{ runner.temp }}/webpage-mcp-wasm-pack/wasm-pack
         run: |
           cargo test --manifest-path packages/wasm-simd/Cargo.toml --locked
           pnpm verify:wasm

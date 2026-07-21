@@ -9,7 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -23,6 +23,22 @@ const artifactNames = ["simd_math.js", "simd_math_bg.wasm"];
 function fail(message) {
   throw new Error(`[wasm-simd] ${message}`);
 }
+
+function resolveWasmPackBinary() {
+  const configured = process.env.WASM_PACK_BINARY;
+  if (configured === undefined) return "wasm-pack";
+  if (
+    configured.length === 0 ||
+    !isAbsolute(configured) ||
+    Buffer.byteLength(configured, "utf8") > 4095 ||
+    /[\u0000-\u001f\u007f]/.test(configured)
+  ) {
+    fail("WASM_PACK_BINARY must be a bounded absolute path without controls");
+  }
+  return configured;
+}
+
+const wasmPackBinary = resolveWasmPackBinary();
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -74,7 +90,7 @@ async function assertToolchain(manifest) {
     );
   }
 
-  const wasmPackVersion = run("wasm-pack", ["--version"], { capture: true });
+  const wasmPackVersion = run(wasmPackBinary, ["--version"], { capture: true });
   if (wasmPackVersion !== `wasm-pack ${manifest.toolchain.wasmPack}`) {
     fail(
       `wasm-pack ${manifest.toolchain.wasmPack} is required; found ${wasmPackVersion}`,
@@ -155,7 +171,7 @@ async function build(outDir) {
   const { env, forbiddenPaths } = await deterministicBuildEnvironment();
   await rm(outDir, { force: true, recursive: true });
   run(
-    "wasm-pack",
+    wasmPackBinary,
     [
       "build",
       "--target",

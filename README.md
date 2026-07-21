@@ -592,6 +592,11 @@ then runs `cargo-deny` without its `--locked`/`--offline` flags so the RustSec
 database is refreshed on every gate; download, refresh, and scan failures remain
 fatal.
 
+WASM rebuild gates apply the same byte-verification pipeline to the official
+Linux x64 musl `wasm-pack` release described by `scripts/wasm-pack-tool.json`.
+Both its archive and extracted executable are size- and SHA-256-pinned, and the
+artifact builder invokes that verified executable by absolute path.
+
 Dependabot checks GitHub Actions, the root pnpm workspace, and the Rust/WASM
 crate weekly. Live advisory databases can make an unchanged commit fail a
 subsequent CI or release run; resolve or explicitly review the advisory rather
@@ -641,8 +646,8 @@ than weakening the gate.
 - Agent project/session selection and missing-selection routing: `pnpm --filter webpage-mcp-connector exec vitest run tests/utils/agent-selection.test.ts tests/background/sidepanel-utils.test.ts tests/background/quick-panel-agent-handler.test.ts`.
 - Safe session defaults and explicit dangerous-mode confirmation: `app/mcp-server/src/agent/session-security.test.ts` via `pnpm --filter webpage-mcp test`.
 - Localized extension strings: `pnpm --filter webpage-mcp-connector i18n:check`.
-- Stable-only unified release, artifact, version-setting, legal inventory,
-  verified cargo-deny installer, and standalone npm channel rules:
+- Stable-only unified release, artifact, version-setting, legal inventory, and
+  verified cargo-deny/wasm-pack installers:
   `pnpm test:release` and `pnpm legal:check`.
 - Production npm advisories: `pnpm audit --prod`. The scheduled Rust advisory
   check validates `packages/wasm-simd/Cargo.lock` with Rust 1.94.0, then runs

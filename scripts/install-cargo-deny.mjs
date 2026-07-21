@@ -272,8 +272,10 @@ export async function downloadVerifiedArchive(
     fetchImpl = globalThis.fetch,
     timeoutMs = DOWNLOAD_TIMEOUT_MS,
     idleTimeoutMs = DOWNLOAD_IDLE_TIMEOUT_MS,
+    toolLabel = "cargo-deny",
   } = {},
 ) {
+  if (!/^[a-z0-9-]{1,64}$/.test(toolLabel)) fail("tool label is invalid");
   assertExactKeys(archive, ["url", "size", "sha256"], "archive specification");
   const initialUrl = validateDownloadUrl(archive.url, "archive URL");
   const expectedSize = assertPositiveInteger(archive.size, "archive size");
@@ -300,7 +302,7 @@ export async function downloadVerifiedArchive(
         headers: Object.freeze({
           Accept: "application/octet-stream",
           "Accept-Encoding": "identity",
-          "User-Agent": "webpage-mcp-cargo-deny-installer/1",
+          "User-Agent": `webpage-mcp-${toolLabel}-installer/1`,
         }),
         redirect: "manual",
         signal: controller.signal,
@@ -308,10 +310,10 @@ export async function downloadVerifiedArchive(
       if (response.status >= 300 && response.status < 400) {
         await response.body?.cancel().catch(() => {});
         if (redirectCount === MAX_REDIRECTS) {
-          fail("cargo-deny download exceeded the redirect limit");
+          fail(`${toolLabel} download exceeded the redirect limit`);
         }
         const location = response.headers.get("location");
-        if (!location) fail("cargo-deny download redirect omitted Location");
+        if (!location) fail(`${toolLabel} download redirect omitted Location`);
         const redirected = validateDownloadUrl(
           new URL(location, currentUrl).href,
           "redirect URL",
@@ -321,14 +323,14 @@ export async function downloadVerifiedArchive(
           redirected.hostname !== "release-assets.githubusercontent.com"
         ) {
           fail(
-            "cargo-deny download redirect did not target GitHub release assets",
+            `${toolLabel} download redirect did not target GitHub release assets`,
           );
         }
         if (
           currentUrl.hostname === "release-assets.githubusercontent.com" &&
           redirected.hostname !== currentUrl.hostname
         ) {
-          fail("cargo-deny release asset redirected outside its fixed host");
+          fail(`${toolLabel} release asset redirected outside its fixed host`);
         }
         currentUrl = redirected;
         continue;
@@ -339,7 +341,7 @@ export async function downloadVerifiedArchive(
     if (!response || response.status !== 200 || !response.body) {
       await response?.body?.cancel().catch(() => {});
       fail(
-        `cargo-deny download returned HTTP ${response?.status ?? "unknown"}`,
+        `${toolLabel} download returned HTTP ${response?.status ?? "unknown"}`,
       );
     }
     const contentLength = response.headers.get("content-length");
@@ -349,7 +351,7 @@ export async function downloadVerifiedArchive(
         Number(contentLength) !== expectedSize
       ) {
         await response.body.cancel().catch(() => {});
-        fail("cargo-deny archive Content-Length does not match the pin");
+        fail(`${toolLabel} archive Content-Length does not match the pin`);
       }
     }
 
@@ -371,20 +373,20 @@ export async function downloadVerifiedArchive(
         if (done) break;
         const bytes = Buffer.from(value);
         if (totalBytes + bytes.length > expectedSize) {
-          fail("cargo-deny archive exceeded its pinned size");
+          fail(`${toolLabel} archive exceeded its pinned size`);
         }
         await writeChunk(handle, bytes, totalBytes);
         digest.update(bytes);
         totalBytes += bytes.length;
       }
       if (totalBytes !== expectedSize) {
-        fail("cargo-deny archive size does not match the pin");
+        fail(`${toolLabel} archive size does not match the pin`);
       }
       if (controller.signal.aborted) {
-        fail("cargo-deny archive download exceeded its timeout");
+        fail(`${toolLabel} archive download exceeded its timeout`);
       }
       if (digest.digest("hex") !== archive.sha256) {
-        fail("cargo-deny archive SHA-256 does not match the pin");
+        fail(`${toolLabel} archive SHA-256 does not match the pin`);
       }
       await handle.sync();
     } finally {
@@ -394,7 +396,7 @@ export async function downloadVerifiedArchive(
   } catch (error) {
     await response?.body?.cancel().catch(() => {});
     if (controller.signal.aborted) {
-      fail("cargo-deny archive download timed out or exceeded its bounds");
+      fail(`${toolLabel} archive download timed out or exceeded its bounds`);
     }
     throw error;
   } finally {
@@ -423,8 +425,13 @@ export async function extractVerifiedBinary(
   archivePath,
   binary,
   destination,
-  { spawnImpl = spawn, timeoutMs = EXTRACT_TIMEOUT_MS } = {},
+  {
+    spawnImpl = spawn,
+    timeoutMs = EXTRACT_TIMEOUT_MS,
+    toolLabel = "cargo-deny",
+  } = {},
 ) {
+  if (!/^[a-z0-9-]{1,64}$/.test(toolLabel)) fail("tool label is invalid");
   assertAbsoluteSafePath(archivePath, "archive path");
   assertAbsoluteSafePath(destination, "binary destination");
   assertExactKeys(
@@ -470,7 +477,7 @@ export async function extractVerifiedBinary(
         const bytes = Buffer.from(chunk);
         if (totalBytes + bytes.length > expectedSize) {
           child.kill("SIGKILL");
-          fail("extracted cargo-deny binary exceeded its pinned size");
+          fail(`extracted ${toolLabel} binary exceeded its pinned size`);
         }
         await writeChunk(handle, bytes, totalBytes);
         digest.update(bytes);
@@ -484,18 +491,18 @@ export async function extractVerifiedBinary(
       exitPromise,
       diagnosticsPromise,
     ]);
-    if (timedOut) fail("cargo-deny extraction timed out");
+    if (timedOut) fail(`${toolLabel} extraction timed out`);
     if (streamError) throw streamError;
     if (code !== 0) {
       fail(
-        `cargo-deny extraction failed with ${signal ? `signal ${signal}` : `exit code ${code}`}; stderr captured ${diagnostics.bytes} bytes${diagnostics.truncated ? "; output limit reached" : ""}; contents withheld`,
+        `${toolLabel} extraction failed with ${signal ? `signal ${signal}` : `exit code ${code}`}; stderr captured ${diagnostics.bytes} bytes${diagnostics.truncated ? "; output limit reached" : ""}; contents withheld`,
       );
     }
     if (totalBytes !== expectedSize) {
-      fail("extracted cargo-deny binary size does not match the pin");
+      fail(`extracted ${toolLabel} binary size does not match the pin`);
     }
     if (digest.digest("hex") !== binary.sha256) {
-      fail("extracted cargo-deny binary SHA-256 does not match the pin");
+      fail(`extracted ${toolLabel} binary SHA-256 does not match the pin`);
     }
     await handle.chmod(0o755);
     await handle.sync();
@@ -523,7 +530,12 @@ async function hashOpenFile(handle) {
   return digest.digest("hex");
 }
 
-export async function verifyCachedBinary(target, binary) {
+export async function verifyCachedBinary(
+  target,
+  binary,
+  { toolLabel = "cargo-deny" } = {},
+) {
+  if (!/^[a-z0-9-]{1,64}$/.test(toolLabel)) fail("tool label is invalid");
   assertAbsoluteSafePath(target, "cached binary path");
   let metadata;
   try {
@@ -533,8 +545,8 @@ export async function verifyCachedBinary(target, binary) {
     throw error;
   }
   if (metadata.isSymbolicLink())
-    fail("cached cargo-deny must not be a symlink");
-  if (!metadata.isFile()) fail("cached cargo-deny must be a regular file");
+    fail(`cached ${toolLabel} must not be a symlink`);
+  if (!metadata.isFile()) fail(`cached ${toolLabel} must be a regular file`);
   const handle = await open(
     target,
     fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
@@ -546,7 +558,7 @@ export async function verifyCachedBinary(target, binary) {
       openedMetadata.dev !== metadata.dev ||
       openedMetadata.ino !== metadata.ino
     ) {
-      fail("cached cargo-deny changed while it was being verified");
+      fail(`cached ${toolLabel} changed while it was being verified`);
     }
     if (openedMetadata.size !== binary.size) {
       return false;
@@ -563,7 +575,7 @@ export async function verifyCachedBinary(target, binary) {
       finalMetadata.mode !== openedMetadata.mode ||
       (finalMetadata.mode & 0o7777) !== 0o755
     ) {
-      fail("cached cargo-deny changed while it was being hashed");
+      fail(`cached ${toolLabel} changed while it was being hashed`);
     }
     return digest === binary.sha256;
   } finally {
@@ -574,9 +586,14 @@ export async function verifyCachedBinary(target, binary) {
 export function probeCargoDeny(
   binaryPath,
   binary = CARGO_DENY_TOOL.binary,
-  { spawnSyncImpl = spawnSync, timeoutMs = VERSION_TIMEOUT_MS } = {},
+  {
+    spawnSyncImpl = spawnSync,
+    timeoutMs = VERSION_TIMEOUT_MS,
+    toolLabel = "cargo-deny",
+  } = {},
 ) {
-  assertAbsoluteSafePath(binaryPath, "cargo-deny probe path");
+  if (!/^[a-z0-9-]{1,64}$/.test(toolLabel)) fail("tool label is invalid");
+  assertAbsoluteSafePath(binaryPath, `${toolLabel} probe path`);
   validateTimeout(timeoutMs, VERSION_TIMEOUT_MS, "version probe timeout");
   const result = spawnSyncImpl(binaryPath, ["--version"], {
     encoding: "utf8",
@@ -595,10 +612,12 @@ export function probeCargoDeny(
   ) {
     const stderrBytes = Buffer.byteLength(result.stderr ?? "", "utf8");
     fail(
-      `cargo-deny version probe failed; stderr captured ${stderrBytes} bytes; contents withheld`,
+      `${toolLabel} version probe failed; stderr captured ${stderrBytes} bytes; contents withheld`,
     );
   }
 }
+
+export const probeVerifiedBinary = probeCargoDeny;
 
 export async function installCargoDeny(installDirectory) {
   assertSupportedPlatform();

@@ -9,7 +9,9 @@
 # and the wasm32-unknown-unknown target automatically.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install the exact generator version recorded in artifacts.json.
+# Local development may build the exact generator version from its locked
+# crate graph. CI/release use scripts/install-wasm-pack.mjs to install the
+# official Linux binary only after exact archive and executable hash checks.
 cargo install wasm-pack --version '=0.15.0' --locked
 ```
 
@@ -63,8 +65,9 @@ const wasmModule = await import(wasmUrl);
 3. Review changes to `artifacts.json`, `simd_math.js`, and `simd_math_bg.wasm`
 4. Run `pnpm verify:wasm` to rebuild in a clean temporary directory and verify hashes and exports
 
-Release builds use `Cargo.lock`, the pinned Rust and wasm-pack versions, a fixed
-source-date epoch, disabled incremental compilation, and remapped source paths.
+Release builds use `Cargo.lock`, the pinned Rust version, the byte-verified
+wasm-pack binary described by `scripts/wasm-pack-tool.json`, a fixed source-date
+epoch, disabled incremental compilation, and remapped source paths.
 This keeps user names, Cargo home paths, and worktree paths out of the committed
 WASM binary. CI performs the same clean rebuild and rejects stale artifacts or a
 public JavaScript/WebAssembly interface change.
