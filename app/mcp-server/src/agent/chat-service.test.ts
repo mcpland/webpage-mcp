@@ -566,6 +566,98 @@ describe('AgentChatService', () => {
     });
   });
 
+  it('closes execution admission during shutdown and reopens it on restart', async () => {
+    const run = vi.fn().mockResolvedValue(undefined);
+    const service = new AgentChatService({
+      engines: [{ name: 'claude', supportsMcp: true, initializeAndRun: run }],
+      streamManager: new AgentStreamManager(),
+    });
+
+    await expect(service.cancelAndAwaitAllExecutions()).resolves.toBe(0);
+    await expect(
+      service.handleAct('shutdown-session', {
+        instruction: 'must not start',
+        projectId: 'project-1',
+        requestId: 'shutdown-rejected',
+      }),
+    ).rejects.toThrow('Agent execution service is shutting down');
+    expect(projectServiceMocks.getProject).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+
+    service.resumeExecutionAdmission();
+    await expect(
+      service.handleAct('shutdown-session', {
+        instruction: 'may start after restart',
+        projectId: 'project-1',
+        requestId: 'shutdown-restarted',
+      }),
+    ).resolves.toEqual({ requestId: 'shutdown-restarted' });
+    await vi.waitFor(() => expect(service.getRunningExecutions()).toHaveLength(0));
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it('waits for admitted assistant persistence during shutdown', async () => {
+    legacySession.engineName = 'claude';
+    legacySession.engineSessionId = undefined;
+    legacySession.model = undefined;
+    const persistence = deferred<void>();
+    messageServiceMocks.createMessage.mockImplementation((input: { role?: string }) =>
+      input.role === 'user' ? Promise.resolve(undefined) : persistence.promise,
+    );
+    let engineSignal: AbortSignal | undefined;
+    const engine: AgentEngine = {
+      name: 'claude',
+      supportsMcp: true,
+      async initializeAndRun(options, ctx) {
+        engineSignal = options.signal;
+        ctx.emit({
+          type: 'message',
+          data: {
+            id: 'shutdown-final-assistant',
+            sessionId: legacySession.id,
+            role: 'assistant',
+            content: 'persist before database close',
+            messageType: 'chat',
+            cliSource: 'claude',
+            requestId: 'shutdown-persistence',
+            isStreaming: false,
+            isFinal: true,
+            createdAt: new Date(0).toISOString(),
+          },
+        });
+        await new Promise<void>((resolve) =>
+          options.signal?.addEventListener('abort', () => resolve(), {
+            once: true,
+          }),
+        );
+      },
+    };
+    const service = new AgentChatService({
+      engines: [engine],
+      streamManager: new AgentStreamManager(),
+    });
+    await service.handleAct(legacySession.id, {
+      instruction: 'run until shutdown',
+      dbSessionId: legacySession.id,
+      requestId: 'shutdown-persistence',
+    });
+    await vi.waitFor(() =>
+      expect(messageServiceMocks.createMessage).toHaveBeenCalledTimes(2),
+    );
+
+    let shutdownSettled = false;
+    const shutdown = service.cancelAndAwaitAllExecutions().then(() => {
+      shutdownSettled = true;
+    });
+    await vi.waitFor(() => expect(engineSignal?.aborted).toBe(true));
+    expect(shutdownSettled).toBe(false);
+
+    persistence.resolve();
+    await shutdown;
+    expect(shutdownSettled).toBe(true);
+    expect(service.getRunningExecutions()).toHaveLength(0);
+  });
+
   it('keeps delimiter-like session and request identities isolated during cancellation', async () => {
     const engineExecutions: Array<{
       sessionId: string;

@@ -191,6 +191,7 @@ export class AgentChatService {
   /** Lifecycle tombstones reject new work until the destructive mutation completes. */
   private readonly mutatingProjects = new Set<string>();
   private readonly mutatingSessions = new Set<string>();
+  private acceptingExecutions = true;
 
   constructor(options: AgentChatServiceOptions) {
     this.streamManager = options.streamManager;
@@ -736,6 +737,23 @@ export class AgentChatService {
     return cancelled;
   }
 
+  /** Re-open admission when an owning Server starts after a clean stop. */
+  resumeExecutionAdmission(): void {
+    this.acceptingExecutions = true;
+  }
+
+  /**
+   * Close admission, cancel every execution, and wait for engines plus all
+   * admitted persistence to settle before the owning Server closes storage.
+   */
+  async cancelAndAwaitAllExecutions(): Promise<number> {
+    this.acceptingExecutions = false;
+    return this.cancelAndAwaitExecutions(
+      () => true,
+      'Execution cancelled by server shutdown',
+    );
+  }
+
   /**
    * Hold a session tombstone while destructive session state is changed.
    * Preparation, engine execution, and spawned persistence must all settle first.
@@ -922,6 +940,9 @@ export class AgentChatService {
     dbSessionId: string | undefined,
     projectId: string | undefined,
   ): void {
+    if (!this.acceptingExecutions) {
+      throw new Error('Agent execution service is shutting down');
+    }
     if (
       this.mutatingSessions.has(sessionId) ||
       (dbSessionId !== undefined && this.mutatingSessions.has(dbSessionId))
@@ -1032,6 +1053,7 @@ export class AgentChatService {
 
   private async cancelAndAwaitExecutions(
     predicate: (execution: ExecutionRecord) => boolean,
+    terminalMessage = 'Execution cancelled by lifecycle mutation',
   ): Promise<number> {
     const executions = Array.from(this.runningExecutionValues()).filter(predicate);
     let cancelled = 0;
@@ -1040,7 +1062,7 @@ export class AgentChatService {
         this.cancelExecutionRecord(execution);
         this.publishExecutionTerminal(execution, {
           status: 'cancelled',
-          message: 'Execution cancelled by lifecycle mutation',
+          message: terminalMessage,
         });
         cancelled++;
       }

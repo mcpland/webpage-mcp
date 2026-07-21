@@ -909,7 +909,7 @@ export class NativeMessagingHost {
     const normalized = resolveInstanceId(instanceId);
     const server = this.servers.get(normalized);
 
-    if (server?.isRunning) {
+    if (server) {
       await server.stop();
     }
 

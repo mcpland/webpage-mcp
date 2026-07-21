@@ -32,6 +32,8 @@ export class Server {
   private static activeServerCount = 0;
   public isRunning = false;
   public readonly instanceId: string;
+  private countedAsActive = false;
+  private stopPromise: Promise<void> | null = null;
   private nativeHost: {
     sendRequestToExtensionAndWait: (
       messagePayload: unknown,
@@ -62,6 +64,9 @@ export class Server {
   }
 
   public async invokeAgentRpc(request: AgentRpcRequestPayload): Promise<InternalRouteResponse> {
+    if (!this.isRunning) {
+      throw new Error(ERROR_MESSAGES.SERVER_NOT_RUNNING);
+    }
     return dispatchAgentRpc(request, {
       chatService: this.agentChatService,
       requestExtension: async (payload) => {
@@ -97,6 +102,12 @@ export class Server {
       timeoutMs?: number,
     ) => Promise<unknown>;
   }): Promise<void> {
+    if (this.stopPromise) {
+      await this.stopPromise;
+    }
+    if (this.countedAsActive && !this.isRunning) {
+      await this.stop();
+    }
     if (!this.nativeHost || this.nativeHost !== nativeHost) {
       this.nativeHost = nativeHost;
     }
@@ -105,22 +116,29 @@ export class Server {
       return;
     }
 
+    this.agentChatService.resumeExecutionAdmission();
     this.isRunning = true;
+    this.countedAsActive = true;
     Server.activeServerCount += 1;
   }
 
   public async stop(): Promise<void> {
-    this.agentChatService.cancelAllExecutions();
-
-    if (!this.isRunning) {
-      return;
-    }
-
+    if (this.stopPromise) return this.stopPromise;
     this.isRunning = false;
-    Server.activeServerCount = Math.max(0, Server.activeServerCount - 1);
-    if (Server.activeServerCount === 0) {
-      closeDb();
-    }
+    const shutdown = (async () => {
+      await this.agentChatService.cancelAndAwaitAllExecutions();
+      if (!this.countedAsActive) return;
+      this.countedAsActive = false;
+      Server.activeServerCount = Math.max(0, Server.activeServerCount - 1);
+      if (Server.activeServerCount === 0) {
+        closeDb();
+      }
+    })();
+    const tracked = shutdown.finally(() => {
+      if (this.stopPromise === tracked) this.stopPromise = null;
+    });
+    this.stopPromise = tracked;
+    return tracked;
   }
 }
 

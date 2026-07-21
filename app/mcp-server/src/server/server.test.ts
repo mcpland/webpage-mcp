@@ -4,6 +4,14 @@ import { createSession, getSession } from "../agent/session-service";
 import { getDb, projects } from "../agent/db";
 import { Server } from "./index";
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("Server agent RPC runtime", () => {
   const server = new Server({ instanceId: "unit-test" });
   const projectRoot = process.cwd();
@@ -32,10 +40,13 @@ describe("Server agent RPC runtime", () => {
     const lifecycleServer = new Server({ instanceId: "lifecycle-test" });
     const chatService = (
       lifecycleServer as unknown as {
-        agentChatService: { cancelAllExecutions(): number };
+        agentChatService: { cancelAndAwaitAllExecutions(): Promise<number> };
       }
     ).agentChatService;
-    const cancelAllExecutions = vi.spyOn(chatService, "cancelAllExecutions");
+    const cancelAllExecutions = vi.spyOn(
+      chatService,
+      "cancelAndAwaitAllExecutions",
+    );
 
     await lifecycleServer.start({
       sendRequestToExtensionAndWait: async () => ({ ok: true }),
@@ -43,6 +54,49 @@ describe("Server agent RPC runtime", () => {
     await lifecycleServer.stop();
 
     expect(cancelAllExecutions).toHaveBeenCalledOnce();
+  });
+
+  test("stop waits for execution persistence and coalesces concurrent callers", async () => {
+    const lifecycleServer = new Server({ instanceId: "settling-test" });
+    const chatService = (
+      lifecycleServer as unknown as {
+        agentChatService: { cancelAndAwaitAllExecutions(): Promise<number> };
+      }
+    ).agentChatService;
+    const settlement = deferred<number>();
+    const cancelAndAwait = vi
+      .spyOn(chatService, "cancelAndAwaitAllExecutions")
+      .mockReturnValue(settlement.promise);
+    await lifecycleServer.start({
+      sendRequestToExtensionAndWait: async () => ({ ok: true }),
+    });
+
+    let stopped = false;
+    const firstStop = lifecycleServer.stop().then(() => {
+      stopped = true;
+    });
+    const secondStop = lifecycleServer.stop();
+    await Promise.resolve();
+
+    expect(lifecycleServer.isRunning).toBe(false);
+    expect(cancelAndAwait).toHaveBeenCalledOnce();
+    expect(stopped).toBe(false);
+
+    settlement.resolve(1);
+    await Promise.all([firstStop, secondStop]);
+    expect(stopped).toBe(true);
+  });
+
+  test("rejects new RPC work after shutdown begins", async () => {
+    const lifecycleServer = new Server({ instanceId: "stopped-rpc-test" });
+    await lifecycleServer.start({
+      sendRequestToExtensionAndWait: async () => ({ ok: true }),
+    });
+    await lifecycleServer.stop();
+
+    await expect(
+      lifecycleServer.invokeAgentRpc({ operation: "health.ping" }),
+    ).rejects.toThrow("Server is not actively running");
   });
 
   test("binds embedded MCP engines to the Server instance", () => {
