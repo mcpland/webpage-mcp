@@ -1,12 +1,3 @@
----
-type: repo-overview
-title: Webpage MCP
-description: Browser-native MCP server, Chrome connector, workflows, and local Agent tooling.
-owner: NEEDS_OWNER
-status: proposed
-tags: [mcp, chrome-extension, browser-automation]
----
-
 <p align="center">
   <img src="logo.png" alt="Webpage MCP" width="160" />
 </p>
@@ -632,29 +623,6 @@ than weakening the gate.
 - Formal release builds require the Actions repository variable `CHROME_EXTENSION_PUBLIC_KEY`. It must contain the single-line base64 DER public-key body from Chrome Web Store, never a PEM or private key, and must derive the configured official extension ID. Local builds may omit it, but then unpacked builds do not use the official stable extension ID.
 
 </details>
-
----
-
-## Verification
-
-- Native/stdio packaging and registration helpers: `pnpm --filter webpage-mcp test`; the stable runtime dependency contract is covered by `app/mcp-server/src/scripts/stable-runtime-dependencies.test.ts`. End-to-end startup bootstrap across installed browser profiles is `Verification: Missing` and remains a manual `doctor` check.
-- Release platform gates execute each built `run_host.sh` or `run_host.bat` and
-  verify a native ping/pong frame, but they do not launch an installed browser
-  profile or the packaged extension. The real browser → extension → registered
-  native-host handshake on Linux, Windows, and macOS remains a manual release
-  check.
-- Agent project/session selection and missing-selection routing: `pnpm --filter webpage-mcp-connector exec vitest run tests/utils/agent-selection.test.ts tests/background/sidepanel-utils.test.ts tests/background/quick-panel-agent-handler.test.ts`.
-- Safe session defaults and explicit dangerous-mode confirmation: `app/mcp-server/src/agent/session-security.test.ts` via `pnpm --filter webpage-mcp test`.
-- Localized extension strings: `pnpm --filter webpage-mcp-connector i18n:check`.
-- Stable-only unified release, artifact, version-setting, legal inventory, and
-  verified cargo-deny/wasm-pack installers:
-  `pnpm test:release` and `pnpm legal:check`.
-- Production npm advisories: `pnpm audit --prod`. The scheduled Rust advisory
-  check validates `packages/wasm-simd/Cargo.lock` with Rust 1.94.0, then runs
-  the verified cargo-deny 0.19.8 binary with all features and a freshly updated
-  advisory database.
-
-Human review is still required for the unresolved documentation owner (`NEEDS_OWNER`) and for installed-browser bootstrap behavior on each supported operating system.
 
 ---
 
