@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fmcpland%2Fwebpage-mcp.svg)](https://mcptoplist.com/server/glama%2Fmcpland%2Fwebpage-mcp)
+
 <p align="center">
   <img src="logo.png" alt="Webpage MCP" width="160" />
 </p>
