@@ -80,18 +80,34 @@ const ALLOWED_DECLARED_LICENSES = new Set([
   "ISC",
   "LGPL-3.0-or-later",
   "MIT",
+  "Unlicense",
 ]);
 
 const METADATA_ONLY_LICENSE_REVIEWS = new Map([
   ["drizzle-orm@0.45.2", "metadata-license-only"],
   ["guid-typescript@1.0.9", "canonical-isc-fallback"],
   ["markstream-react@0.0.20-beta.7", "metadata-license-only"],
+  ["standardwebhooks@1.0.0", "metadata-license-only"],
   ["stream-markdown-parser@0.0.60", "metadata-license-only"],
   ["onnxruntime-common@1.14.0", "onnx-excluded-build-input"],
   ["onnxruntime-node@1.14.0", "onnx-excluded-build-input"],
   ["onnxruntime-web@1.14.0", "onnx-excluded-build-input"],
   ["onnxruntime-common@1.22.0", "onnx-vendored-runtime"],
   ["onnxruntime-web@1.22.0", "onnx-vendored-runtime"],
+]);
+const MCP_METADATA_ONLY_LICENSE_REVIEWS = new Set([
+  "drizzle-orm@0.45.2",
+  "standardwebhooks@1.0.0",
+]);
+const ANTHROPIC_CLAUDE_SDK_PLATFORM_PACKAGES_0_3_231 = new Set([
+  "@anthropic-ai/claude-agent-sdk-darwin-arm64",
+  "@anthropic-ai/claude-agent-sdk-darwin-x64",
+  "@anthropic-ai/claude-agent-sdk-linux-arm64",
+  "@anthropic-ai/claude-agent-sdk-linux-arm64-musl",
+  "@anthropic-ai/claude-agent-sdk-linux-x64",
+  "@anthropic-ai/claude-agent-sdk-linux-x64-musl",
+  "@anthropic-ai/claude-agent-sdk-win32-arm64",
+  "@anthropic-ai/claude-agent-sdk-win32-x64",
 ]);
 
 const KNOWN_REVIEW_TAGS = new Set([
@@ -832,9 +848,12 @@ function policyForComponent({ artifactName, name, version, declaredLicense }) {
     // The declared SPDX expression is also the reviewed conclusion unless an
     // exact exception below selects a permitted alternative.
   } else if (
-    key === "@anthropic-ai/claude-agent-sdk@0.1.77" &&
     artifactName === "mcp" &&
-    declaredLicense === "SEE LICENSE IN README.md"
+    version === "0.3.231" &&
+    ((name === "@anthropic-ai/claude-agent-sdk" &&
+      declaredLicense === "SEE LICENSE IN README.md") ||
+      (ANTHROPIC_CLAUDE_SDK_PLATFORM_PACKAGES_0_3_231.has(name) &&
+        declaredLicense === "SEE LICENSE IN LICENSE.md"))
   ) {
     concludedLicense = "LicenseRef-Anthropic-Legal-Agreements";
     additionalEvidence.add("README.md");
@@ -868,7 +887,10 @@ function policyForComponent({ artifactName, name, version, declaredLicense }) {
 
   const metadataReview = METADATA_ONLY_LICENSE_REVIEWS.get(key);
   if (metadataReview) {
-    if (artifactName !== "extension" && key !== "drizzle-orm@0.45.2") {
+    if (
+      artifactName !== "extension" &&
+      !MCP_METADATA_ONLY_LICENSE_REVIEWS.has(key)
+    ) {
       fail(
         `${artifactName} cannot use the ${metadataReview} exception for ${key}`,
       );

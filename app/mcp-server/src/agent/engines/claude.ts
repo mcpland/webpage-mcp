@@ -57,6 +57,12 @@ import {
   createRedactedDiagnosticError,
   redactDiagnosticText,
 } from './diagnostic-redaction';
+import {
+  assertClaudeSafeAttachment,
+  assertClaudeSafeImagePath,
+  enforceClaudeImageReadSafety,
+  enforceClaudeToolResultImageSafety,
+} from './claude-image-safety';
 
 export function describeClaudeAuthTokenConfiguration(
   authToken: string | undefined,
@@ -542,6 +548,7 @@ export class ClaudeEngine implements AgentEngine {
             `[ClaudeEngine] Using ${resolvedImagePaths.length} pre-resolved image path(s)`,
           );
           for (let index = 0; index < resolvedImagePaths.length; index++) {
+            await assertClaudeSafeImagePath(resolvedImagePaths[index]);
             imageLines.push(`Image #${index + 1} path: ${resolvedImagePaths[index]}`);
           }
         } else {
@@ -551,6 +558,7 @@ export class ClaudeEngine implements AgentEngine {
           );
           for (let index = 0; index < imageAttachments.length; index++) {
             const attachment = imageAttachments[index];
+            assertClaudeSafeAttachment(attachment);
             const tempFilePath = await this.writeAttachmentToTemp(attachment);
             tempFiles.push(tempFilePath);
             imageLines.push(`Image #${index + 1} path: ${tempFilePath}`);
@@ -681,6 +689,20 @@ export class ClaudeEngine implements AgentEngine {
             }),
           );
           return supervisedProcess.process;
+        },
+        // Programmatic hooks cannot be supplied by persisted session options.
+        // Inspect file content before the affected embedded Sharp loaders run.
+        hooks: {
+          PreToolUse: [
+            {
+              hooks: [enforceClaudeImageReadSafety],
+            },
+          ],
+          PostToolUse: [
+            {
+              hooks: [enforceClaudeToolResultImageSafety],
+            },
+          ],
         },
       };
 

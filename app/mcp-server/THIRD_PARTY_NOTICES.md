@@ -6,8 +6,9 @@ License identifiers in this table are the upstream package declarations. `THIRD_
 
 | Ecosystem | Component                        | Version       | License                    | Distribution                             | Source                                                    |
 | --------- | -------------------------------- | ------------- | -------------------------- | ---------------------------------------- | --------------------------------------------------------- |
-| npm       | `@anthropic-ai/claude-agent-sdk` | `0.1.77`      | `SEE LICENSE IN README.md` | Runtime dependency under Anthropic terms | https://github.com/anthropics/claude-agent-sdk-typescript |
-| npm       | `@modelcontextprotocol/sdk`      | `1.29.0`      | `MIT`                      | Bundled protocol runtime                  | https://github.com/modelcontextprotocol/typescript-sdk    |
+| npm       | `@anthropic-ai/claude-agent-sdk` | `0.3.231`     | `SEE LICENSE IN README.md` | Runtime dependency under Anthropic terms | https://github.com/anthropics/claude-agent-sdk-typescript |
+| npm       | `@anthropic-ai/sdk`              | `0.116.0`     | `MIT`                      | Runtime peer dependency                  | https://github.com/anthropics/anthropic-sdk-typescript    |
+| npm       | `@modelcontextprotocol/sdk`      | `1.29.0`      | `MIT`                      | Runtime peer and bundled protocol code   | https://github.com/modelcontextprotocol/typescript-sdk    |
 | npm       | `better-sqlite3`                 | `12.11.1`     | `MIT`                      | Runtime dependency with native binary    | https://github.com/WiseLibs/better-sqlite3                |
 | npm       | `chalk`                          | `5.6.2`       | `MIT`                      | Declared runtime dependency              | https://github.com/chalk/chalk                            |
 | npm       | `chrome-devtools-frontend`       | `1.0.1587905` | `BSD-3-Clause`             | Runtime trace-analysis dependency        | https://github.com/ChromeDevTools/devtools-frontend       |
@@ -17,5 +18,6 @@ License identifiers in this table are the upstream package declarations. `THIRD_
 | npm       | `is-admin`                       | `4.0.0`       | `MIT`                      | Runtime Windows privilege helper         | https://github.com/sindresorhus/is-admin                  |
 | npm       | `pino`                           | `9.14.0`      | `MIT`                      | Declared runtime dependency              | https://github.com/pinojs/pino                            |
 | npm       | `uuid`                           | `11.1.1`      | `MIT`                      | Runtime identifier dependency            | https://github.com/uuidjs/uuid                            |
+| npm       | `zod`                            | `4.4.3`       | `MIT`                      | Runtime schema dependency                | https://github.com/colinhacks/zod                         |
 
-For `@anthropic-ai/claude-agent-sdk`, consult the exact `LICENSE.md` and README distributed with that installed package before use. No rights beyond its upstream terms are granted by this notice.
+For `@anthropic-ai/claude-agent-sdk` and its platform packages, consult the exact `LICENSE.md` and README distributed with the installed packages before use. No rights beyond their upstream terms are granted by this notice.

@@ -32,8 +32,12 @@ jobs:
         with:
           node-version: 24
 
-      # Resolve metadata without installing or executing dependency lifecycle
-      # code, then scan both committed dependency closures.
+      # The Claude platform package contains the runtime binary whose embedded
+      # components are audited below. Install it without lifecycle scripts.
+      - name: Install audited npm runtime without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Scan both committed dependency closures and the installed platform binary.
       - name: Audit production npm dependencies
         run: pnpm audit --prod
 

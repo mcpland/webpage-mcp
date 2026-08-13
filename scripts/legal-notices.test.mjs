@@ -90,7 +90,9 @@ test("reviewed legal notices match package metadata and vendored boundaries", as
     new Set(["webpage-mcp-shared"]),
   );
   assert.equal(
-    mcpInventory.components.has("@img/sharp-win32-x64@0.33.5"),
+    mcpInventory.components.has(
+      "@anthropic-ai/claude-agent-sdk-win32-x64@0.3.231",
+    ),
     true,
   );
   assert.equal(
@@ -99,7 +101,7 @@ test("reviewed legal notices match package metadata and vendored boundaries", as
   );
 
   const anthropic = mcpInventory.components.get(
-    "@anthropic-ai/claude-agent-sdk@0.1.77",
+    "@anthropic-ai/claude-agent-sdk@0.3.231",
   );
   assert.equal(anthropic.declaredLicense, "SEE LICENSE IN README.md");
   assert.equal(
@@ -110,6 +112,19 @@ test("reviewed legal notices match package metadata and vendored boundaries", as
   assert.deepEqual(
     anthropic.licenseEvidence.map(({ path }) => path),
     ["LICENSE.md", "README.md"],
+  );
+  const anthropicPlatform = mcpInventory.components.get(
+    "@anthropic-ai/claude-agent-sdk-linux-x64@0.3.231",
+  );
+  assert.equal(anthropicPlatform.declaredLicense, "SEE LICENSE IN LICENSE.md");
+  assert.deepEqual(anthropicPlatform.review, ["anthropic-non-spdx"]);
+  assert.equal(
+    mcpInventory.components.get("@anthropic-ai/sdk@0.116.0").concludedLicense,
+    "MIT",
+  );
+  assert.deepEqual(
+    mcpInventory.components.get("standardwebhooks@1.0.0").review,
+    ["metadata-license-only"],
   );
   assert.deepEqual(mcpInventory.components.get("drizzle-orm@0.45.2").review, [
     "metadata-license-only",

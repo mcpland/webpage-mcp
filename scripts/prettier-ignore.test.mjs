@@ -23,6 +23,7 @@ test("canonical generated files stay outside staged formatting", async () => {
     "pnpm-lock.yaml",
     "packages/wasm-simd/artifacts.json",
     "app/mcp-server/npm-shrinkwrap.json",
+    "scripts/claude-sdk-runtime-policy.json",
   ]) {
     assert.equal(await isIgnored(relativePath), true, relativePath);
   }

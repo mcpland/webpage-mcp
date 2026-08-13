@@ -6,6 +6,9 @@ app/chrome-extension/public/THIRD_PARTY_COMPONENTS.json
 # npm emits canonical lockfile JSON; release checks compare those exact bytes.
 app/mcp-server/npm-shrinkwrap.json
 
+# Runtime policy parsing requires JSON.stringify canonical bytes.
+scripts/claude-sdk-runtime-policy.json
+
 # pnpm and the WASM artifact generator own these canonical files. Formatting
 # them would create large diffs and invalidate the recorded artifact bytes.
 pnpm-lock.yaml

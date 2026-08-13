@@ -2134,7 +2134,13 @@ test("dependency security gates encode reviewed commands structurally", async ()
     workflow_dispatch: null,
   });
   assert.deepEqual(security.permissions, { contents: "read" });
-  assert.ok(!joinedWorkflowRunScripts(security).includes("pnpm install"));
+  assert.equal(
+    namedStep(
+      workflowJob(security, "audit"),
+      "Install audited npm runtime without lifecycle scripts",
+    ).run,
+    "pnpm install --frozen-lockfile --ignore-scripts",
+  );
 
   assert.deepEqual(dependabot, {
     version: 2,
