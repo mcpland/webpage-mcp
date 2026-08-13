@@ -5,9 +5,12 @@ import { createRequire } from "node:module";
 
 export const RUNTIME_NODE_MODULES_PATH_FILE = "node_modules_path.txt";
 export const RUNTIME_REQUIRED_MODULE_IDS = [
+  "better-sqlite3",
+  "cross-spawn",
   "drizzle-orm",
   "drizzle-orm/sqlite-core",
-  "better-sqlite3",
+  "uuid",
+  "zod/v4",
 ] as const;
 
 const DEPENDENCY_LAYOUT_VERSION = 1;

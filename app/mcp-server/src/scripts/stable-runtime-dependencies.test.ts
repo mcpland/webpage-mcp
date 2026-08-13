@@ -235,6 +235,24 @@ describe("stable runtime dependencies", () => {
       { version: "2.0.0" },
       { "index.js": 'module.exports = "drizzle";\n' },
     );
+    await writeFixturePackage(
+      sourceNodeModulesDir,
+      "cross-spawn",
+      {},
+      { "index.js": "module.exports = {};\n" },
+    );
+    await writeFixturePackage(
+      sourceNodeModulesDir,
+      "uuid",
+      {},
+      { "index.js": "module.exports = {};\n" },
+    );
+    await writeFixturePackage(
+      sourceNodeModulesDir,
+      "zod",
+      { exports: { "./v4": "./v4/index.cjs" } },
+      { "v4/index.cjs": "module.exports = {};\n" },
+    );
 
     const concurrentInstalls = await Promise.all([
       installStableRuntimeDependencies(sourceDistDir, runtimeDistDir),
