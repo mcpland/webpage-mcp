@@ -5,22 +5,90 @@ import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import console from "node:console";
 import fs from "node:fs";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { clearTimeout, setTimeout } from "node:timers";
+import { pathToFileURL } from "node:url";
 import { deriveChromeExtensionId } from "./extension-public-key.mjs";
 
 const STARTUP_TIMEOUT_MS = 45_000;
 const CDP_TIMEOUT_MS = 20_000;
 const MAX_DIAGNOSTIC_BYTES = 64 * 1024;
+const MAX_NATIVE_MANIFEST_BYTES = 64 * 1024;
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
+const NATIVE_HOST_NAME = "com.webpagemcp.nativehost";
 
 function requiredEnvironment(name) {
   const value = process.env[name];
   assert.ok(value, `${name} is required for the browser native handshake`);
   return value;
+}
+
+function assertPathInside(root, candidate, description) {
+  const relative = path.relative(root, candidate);
+  assert.ok(
+    relative.length > 0 &&
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative),
+    `${description} must stay beneath RUNNER_TEMP`,
+  );
+}
+
+export async function validateBrowserNativeUserDataDirectory({
+  runnerTemp,
+  userDataDirectory,
+  extensionId,
+}) {
+  assert.match(extensionId, EXTENSION_ID_PATTERN);
+  const [runnerRoot, userDataDir] = await Promise.all([
+    realpath(runnerTemp),
+    realpath(userDataDirectory),
+  ]);
+  assertPathInside(runnerRoot, userDataDir, "Chrome user data directory");
+
+  const userDataStats = await lstat(userDataDir);
+  assert.equal(
+    userDataStats.isDirectory() && !userDataStats.isSymbolicLink(),
+    true,
+    "Chrome user data directory must be a regular directory",
+  );
+  const manifestPath = path.join(
+    userDataDir,
+    "NativeMessagingHosts",
+    `${NATIVE_HOST_NAME}.json`,
+  );
+  const manifestStats = await lstat(manifestPath);
+  assert.equal(
+    manifestStats.isFile() && !manifestStats.isSymbolicLink(),
+    true,
+    "native messaging manifest must be a regular file",
+  );
+  assert.ok(
+    manifestStats.size > 0 && manifestStats.size <= MAX_NATIVE_MANIFEST_BYTES,
+    "native messaging manifest must stay within its byte budget",
+  );
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  assert.equal(manifest.name, NATIVE_HOST_NAME);
+  assert.ok(
+    Array.isArray(manifest.allowed_origins) &&
+      manifest.allowed_origins.includes(`chrome-extension://${extensionId}/`),
+    "native messaging manifest must allow the smoke extension",
+  );
+  assert.equal(
+    typeof manifest.path === "string" && path.isAbsolute(manifest.path),
+    true,
+    "native messaging manifest must use an absolute host path",
+  );
+  const hostStats = await lstat(manifest.path);
+  assert.equal(
+    hostStats.isFile() && !hostStats.isSymbolicLink(),
+    true,
+    "native messaging host must be a regular file",
+  );
+  fs.accessSync(manifest.path, fs.constants.X_OK);
+  return userDataDir;
 }
 
 function boundedDiagnostics(stream) {
@@ -228,13 +296,11 @@ async function main() {
     "extension manifest must request nativeMessaging",
   );
 
-  const smokeRoot = await mkdtemp(
-    path.join(
-      path.resolve(process.env.RUNNER_TEMP || tmpdir()),
-      "webpage-mcp-browser-native-",
-    ),
-  );
-  const userDataDir = path.join(smokeRoot, "chrome-profile");
+  const userDataDir = await validateBrowserNativeUserDataDirectory({
+    runnerTemp: requiredEnvironment("RUNNER_TEMP"),
+    userDataDirectory: requiredEnvironment("WEBPAGE_MCP_CHROME_USER_DATA_DIR"),
+    extensionId,
+  });
   const args = [
     "--headless=new",
     "--disable-gpu",
@@ -320,11 +386,16 @@ async function main() {
       child.kill("SIGKILL");
       await waitForExit(child, 5_000);
     }
-    await rm(smokeRoot, { recursive: true, force: true });
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+const isMain =
+  process.argv[1] !== undefined &&
+  pathToFileURL(process.argv[1]).href === import.meta.url;
+
+if (isMain) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

@@ -269,6 +269,7 @@ jobs:
           export HOME="$SMOKE_ROOT/home"
           mkdir -p "$HOME"
           test "$HOME" != "$ORIGINAL_HOME"
+          export WEBPAGE_MCP_CHROME_USER_DATA_DIR="$HOME/.config/google-chrome-for-testing"
           node app/mcp-server/dist/cli.js register \
             --browser chrome \
             --force \

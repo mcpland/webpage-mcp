@@ -67,6 +67,9 @@ describe('macOS native registration CI smoke', () => {
     expect(registrationJob).not.toContain('verify-browser-native-handshake.mjs');
     expect(browserJob).toMatch(/runs-on:\s*ubuntu-latest/);
     expect(browserJob).toContain('browser-actions/setup-chrome@');
+    expect(browserJob).toContain(
+      'export WEBPAGE_MCP_CHROME_USER_DATA_DIR="$HOME/.config/google-chrome-for-testing"',
+    );
     expect(browserJob).toContain('node scripts/verify-browser-native-handshake.mjs');
   });
 });

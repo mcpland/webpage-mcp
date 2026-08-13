@@ -2087,6 +2087,11 @@ test("dependency security gates encode reviewed commands structurally", async ()
     browserNativeHandshake,
     "Verify real Chrome Native Messaging handshake",
   ).run;
+  assert.ok(
+    browserNativeRun.includes(
+      'export WEBPAGE_MCP_CHROME_USER_DATA_DIR="$HOME/.config/google-chrome-for-testing"',
+    ),
+  );
   assert.ok(browserNativeRun.includes('--extension-id "$SMOKE_EXTENSION_ID"'));
   assert.ok(
     browserNativeRun.includes(
