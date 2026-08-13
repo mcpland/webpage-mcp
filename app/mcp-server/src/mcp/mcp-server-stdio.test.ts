@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import type net from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IPC_CANCEL_REQUEST_METHOD } from '../ipc/bridge-protocol';
-import { NativeIpcBridgeClient } from './mcp-server-stdio';
+import { NativeIpcBridgeClient } from './native-ipc-bridge-client';
 
 class FakeSocket extends EventEmitter {
   public readonly writes: string[] = [];
