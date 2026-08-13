@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -100,4 +101,18 @@ test("workspace clean scripts and CI stay cross-platform", () => {
     "node ./scripts/clean-workspace.mjs modules",
   );
   assert.match(workflow, /verify-windows:[\s\S]*?runs-on:\s*windows-latest/);
+});
+
+test("extension coverage output stays outside the worktree", () => {
+  const result = spawnSync(
+    "git",
+    [
+      "check-ignore",
+      "--no-index",
+      "--quiet",
+      "app/chrome-extension/coverage/coverage-final.json",
+    ],
+    { cwd: repositoryRoot, encoding: "utf8", shell: false },
+  );
+  assert.equal(result.status, 0, result.stderr);
 });
