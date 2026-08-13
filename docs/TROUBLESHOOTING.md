@@ -1,12 +1,13 @@
 # Webpage MCP Troubleshooting
 
-This project now uses a fully native transport stack:
+The browser side always uses the native bridge:
 
 - Chrome Extension <-> MCP Server: Chrome Native Messaging
-- MCP Client <-> MCP Server: stdio (`webpage-mcp-stdio`)
-- Internal bridge: local IPC socket/pipe
+- Local MCP Client <-> MCP Server: stdio (`webpage-mcp-stdio`) by default
+- Remote MCP Client <-> MCP Server: optional Streamable HTTP (`webpage-mcp-server`)
+- Both MCP entries <-> Native Messaging host: authenticated local IPC socket/pipe
 
-No localhost HTTP port is required.
+No HTTP port is required for the default setup. A listener exists only when `webpage-mcp-server` is explicitly started. If it is not running, the stdio/native path is unchanged.
 
 ## Quick Checks
 
@@ -90,6 +91,28 @@ export WEBPAGE_MCP_NATIVE_SOCKET="$HOME/.webpage-mcp/native-custom.sock"
 ```
 
 Use the same env for Chrome-launched native host environment and MCP client environment.
+
+## Remote Streamable HTTP Cannot Connect
+
+First verify the listener separately from Chrome/native readiness:
+
+```bash
+curl --fail http://127.0.0.1:12306/healthz
+curl --fail \
+  -H "Authorization: Bearer $WEBPAGE_MCP_REMOTE_TOKEN" \
+  http://127.0.0.1:12306/readyz
+```
+
+Use the actual HTTPS hostname when TLS or a Host allowlist is configured. Interpret the result as follows:
+
+- Connection refused: `webpage-mcp-server` is not running, the address/port is wrong, or a firewall blocks it.
+- `/healthz` is `200` but `/readyz` is `503`: the listener is alive but the Native Messaging host is not connected. Open Chrome, connect the extension, and run `doctor`.
+- `401 Unauthorized`: send `Authorization: Bearer <remote token>`. URL/query tokens and `WEBPAGE_MCP_AUTH_TOKEN` are not accepted.
+- `403 Forbidden Host`: the hostname or IP used in the client URL is missing from `--allowed-host`.
+- `403 Forbidden Origin`: the client sent an `Origin` that is missing from `--allowed-origin`. Normal server-side clients generally do not send this header.
+- TLS certificate failure: use a certificate trusted by the remote client and make sure its SAN covers the hostname in the MCP URL.
+
+The MCP URL must include `/mcp`, for example `https://mcp-host.example.internal:12306/mcp`. A non-loopback listener requires a dedicated remote token; wildcard binds require an allowed Host; plaintext also requires `--allow-insecure-http`. See [Remote MCP Access](REMOTE_MCP.md) for the complete secure setup.
 
 ## ENOENT Socket Missing
 

@@ -9,7 +9,7 @@ tags: [installation, native-messaging, troubleshooting]
 
 # Webpage MCP Installation Guide
 
-This document covers installation and Native Messaging registration. The normal MCP client entry is `webpage-mcp-stdio`; it validates the stable runtime and user-level manifests on every startup before connecting to Chrome's native bridge.
+This document covers installation and Native Messaging registration. The normal MCP client entry is `webpage-mcp-stdio`; it validates the stable runtime and user-level manifests on every startup before connecting to Chrome's native bridge. `webpage-mcp-server` is an optional Streamable HTTP gateway to the same bridge and is never started automatically.
 
 ## Installation Overview
 
@@ -17,16 +17,20 @@ Package-manager binaries come from the `bin` entries in `package.json`; the post
 
 ```
 Install or npx resolution
-├─ Package manager exposes webpage-mcp / webpage-mcp-stdio bins
+├─ Package manager exposes webpage-mcp / webpage-mcp-stdio / webpage-mcp-server bins
 ├─ postinstall
 │  ├─ Verify/fix packaged executable permissions
 │  ├─ Global, non-elevated install → attempt user-level registration
 │  └─ Local/npx install → print manual recovery guidance
-└─ webpage-mcp-stdio startup
-   ├─ Prepare a stable runtime copy and runtime dependencies
-   ├─ Validate user-level browser manifests
-   ├─ Auto-register missing or outdated user-level manifests
-   └─ Run lightweight diagnostics, then connect over stdio/local IPC
+├─ webpage-mcp-stdio startup (default)
+│  ├─ Prepare a stable runtime copy and runtime dependencies
+│  ├─ Validate user-level browser manifests
+│  ├─ Auto-register missing or outdated user-level manifests
+│  └─ Run lightweight diagnostics, then connect over stdio/local IPC
+└─ webpage-mcp-server startup (only when explicitly invoked)
+   ├─ Run the same Native Messaging bootstrap
+   ├─ Open a bounded Streamable HTTP listener
+   └─ Route authenticated remote sessions through the same local IPC bridge
 ```
 
 System-level registration is a fallback and always requires explicit `--system` plus administrator/root privileges.
@@ -59,6 +63,16 @@ Global installation is not required. Configure the MCP client to resolve the pub
 ```
 
 Starting the MCP client runs the bootstrap shown above. Chrome must be open, the connector extension must be enabled, and both processes must use the same `WEBPAGE_MCP_NATIVE_SOCKET` value when that variable is customized.
+
+### 1b. Optional remote MCP entry
+
+Only use the network listener when the MCP client cannot run on the Chrome host:
+
+```bash
+npx -y webpage-mcp@latest webpage-mcp-server
+```
+
+This default is loopback-only (`http://127.0.0.1:12306/mcp`). Non-loopback access requires a separate remote token, Host allowlist for wildcard binds, and TLS or an explicit plaintext acknowledgement. The remote entry does not replace registration or Chrome's Native Messaging process. Follow [Remote MCP Access](../../docs/REMOTE_MCP.md) before exposing it to another machine.
 
 ### 2. Optional global CLI installation
 
@@ -137,10 +151,10 @@ sudo webpage-mcp register
 
 ```
 Registration Process
-├─ Startup Bootstrap (webpage-mcp-stdio)
+├─ Startup Bootstrap (webpage-mcp-stdio or an explicitly started webpage-mcp-server)
 │  ├─ Validate stable runtime and user-level manifests
 │  ├─ Register only when a manifest is missing/outdated
-│  └─ Report doctor-lite issues to stderr without exposing an HTTP service
+│  └─ Report doctor-lite issues to stderr
 │
 ├─ User-Level Registration (webpage-mcp register)
 │  ├─ Get user-level manifest path
@@ -383,6 +397,7 @@ If the problem persists, please submit an issue to the project repository with t
 
 - Published bin and postinstall behavior: `app/mcp-server/package.json` and `app/mcp-server/src/scripts/postinstall.ts`; verify with `pnpm --filter webpage-mcp build` and package preflight in `pnpm test:release`.
 - Startup runtime/manifest bootstrap: `app/mcp-server/src/mcp/mcp-server-stdio.ts` and `app/mcp-server/src/scripts/utils.ts`; stable dependency behavior is covered by `pnpm --filter webpage-mcp exec vitest run src/scripts/stable-runtime-dependencies.test.ts`.
+- Optional remote transport: `app/mcp-server/src/mcp/mcp-server-http.ts`, `remote-server-config.ts`, and `remote-mcp-server.ts`; SDK interoperability and security boundaries are covered by `pnpm --filter webpage-mcp exec vitest run src/mcp/remote-server-config.test.ts src/mcp/remote-mcp-server.test.ts`.
 - Manifest path/contents: `pnpm --filter webpage-mcp exec vitest run src/scripts/native-manifest-file.test.ts` plus the manual `doctor` command on each target operating system.
 - CLI registration and repair commands: static command wiring in `app/mcp-server/src/cli.ts`; installed-browser end-to-end registration remains `Verification: Missing` and requires manual Chrome/Chromium checks.
 

@@ -10,14 +10,16 @@ It provides:
 
 - `webpage-mcp`: CLI for registration, diagnostics, and maintenance
 - `webpage-mcp-stdio`: MCP stdio server entry used by MCP clients
+- `webpage-mcp-server`: optional MCP Streamable HTTP server entry for remote clients
 
 This package uses:
 
-- MCP Client <-> MCP Server: `stdio`
+- Local MCP Client <-> MCP Server: `stdio` by default
+- Remote MCP Client <-> MCP Server: opt-in Streamable HTTP
 - Webpage MCP Connector (Chrome extension) <-> MCP Server: Chrome Native Messaging
-- Internal bridge: local IPC socket / pipe
+- Both MCP transports <-> Native Messaging host: authenticated local IPC socket / pipe
 
-No localhost HTTP server or port is required.
+No HTTP server or port is required for the normal stdio setup. The optional listener exists only while `webpage-mcp-server` is explicitly running; without it, the original stdio/native path is unchanged.
 
 ## Requirements
 
@@ -58,6 +60,35 @@ npx -y webpage-mcp@latest doctor --fix
 
 Recommended: copy the register command from extension popup/welcome page, because it already includes the current extension ID.
 
+## Optional Remote MCP Server
+
+Start a loopback-only Streamable HTTP endpoint with the main CLI subcommand:
+
+```bash
+npx -y webpage-mcp@latest webpage-mcp-server
+```
+
+Or invoke the standalone bin directly:
+
+```bash
+npx -y -p webpage-mcp@latest webpage-mcp-server
+```
+
+The default URL is `http://127.0.0.1:12306/mcp`. Binding to a non-loopback address requires a separate `WEBPAGE_MCP_REMOTE_TOKEN` or private `--token-file`. Wildcard binds also require at least one `--allowed-host`, and plaintext requires `--allow-insecure-http`.
+
+Example with direct TLS:
+
+```bash
+npx -y webpage-mcp@latest webpage-mcp-server \
+  --host 0.0.0.0 \
+  --allowed-host mcp-host.example.internal \
+  --token-file "$HOME/.config/webpage-mcp/remote-token" \
+  --tls-cert /path/to/fullchain.pem \
+  --tls-key /path/to/private-key.pem
+```
+
+The remote process is only a gateway to the existing authenticated local bridge. Chrome must remain open and the Connector must be connected. See [Remote MCP Access](../../docs/REMOTE_MCP.md) for secure deployment, Agent/Codex configuration, probes, all options, and troubleshooting.
+
 ## Version Compatibility
 
 The Webpage MCP Connector Chrome extension and this `webpage-mcp` npm package are built and released from the same CI pipeline, but Chrome Web Store review and rollout timing is not fixed. This means the latest npm package may be available before the matching Chrome extension version reaches users.
@@ -83,6 +114,10 @@ webpage-mcp register [--browser chrome|chromium|all] [--detect] [--system] [--ex
 webpage-mcp doctor [--fix] [--json] [--browser chrome|chromium|all]
 webpage-mcp report [--json] [--output <file>] [--copy] [--no-redact] [--include-logs none|tail|full] [--log-lines <n>] [--browser chrome|chromium|all]
 webpage-mcp fix-permissions
+webpage-mcp webpage-mcp-server [remote options]
+# aliases/standalone forms:
+webpage-mcp serve [remote options]
+webpage-mcp-server [remote options]
 ```
 
 Notes:
@@ -130,6 +165,13 @@ Use local stdio entry in MCP client config:
 }
 ```
 
+Start the local-build HTTP gateway only when testing remote transport:
+
+```bash
+node app/mcp-server/dist/mcp/mcp-server-http.js --help
+node app/mcp-server/dist/cli.js webpage-mcp-server
+```
+
 ## Environment Variables
 
 - `WEBPAGE_MCP_NATIVE_SOCKET`
@@ -146,8 +188,16 @@ Use local stdio entry in MCP client config:
   - Additional allowed Chrome extension origins (comma or whitespace separated).
 - `WEBPAGE_MCP_AUTH_TOKEN`
   - Optional token exposed to extension via `auth_get_token` (for UI display/copy and downstream use).
+- `WEBPAGE_MCP_REMOTE_HOST` / `WEBPAGE_MCP_REMOTE_PORT`
+  - Optional remote gateway listen address and port (defaults: `127.0.0.1:12306`).
+- `WEBPAGE_MCP_REMOTE_TOKEN` / `WEBPAGE_MCP_REMOTE_TOKEN_FILE`
+  - Dedicated remote Bearer credential; a private token file takes precedence.
+- `WEBPAGE_MCP_REMOTE_ALLOWED_HOSTS` / `WEBPAGE_MCP_REMOTE_ALLOWED_ORIGINS`
+  - Comma/whitespace-separated HTTP Host and exact browser Origin allowlists.
+- `WEBPAGE_MCP_REMOTE_TLS_CERT` / `WEBPAGE_MCP_REMOTE_TLS_KEY`
+  - Optional direct-listener PEM certificate and private key.
 
-## Optional Auth Token
+## Extension UI Token vs. Remote Authentication
 
 Set an auth token if you want the extension to read it from the native host:
 
@@ -159,6 +209,7 @@ Current behavior:
 
 - Token is returned by native host `auth_get_token`.
 - Token is not currently enforced as an auth check for MCP tool calls.
+- It is intentionally not accepted as the remote HTTP credential. Use the separate `WEBPAGE_MCP_REMOTE_TOKEN` or `--token-file` for remote access.
 
 ## Troubleshooting
 
@@ -180,7 +231,10 @@ npx -y webpage-mcp@latest doctor --fix
 
 5. Fully restart Chrome and retry.
 
+For HTTP `401`, `403`, TLS, firewall, or `/readyz` failures, use the remote-specific checks in [Remote MCP Access](../../docs/REMOTE_MCP.md) and [Troubleshooting](../../docs/TROUBLESHOOTING.md).
+
 ## Related Docs
 
 - Root project guide: [../../README.md](../../README.md)
+- Remote MCP access: [../../docs/REMOTE_MCP.md](../../docs/REMOTE_MCP.md)
 - Troubleshooting: [../../docs/TROUBLESHOOTING.md](../../docs/TROUBLESHOOTING.md)

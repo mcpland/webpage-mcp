@@ -25,17 +25,24 @@
 ## How It Works
 
 ```
-┌──────────┐     MCP stdio    ┌───────────────┐
-│ AI Client├─────────────────►│   MCP Server  │
-└──────────┘                  └───────┬───────┘
-       Native Messaging stdin/stdout  │
-                                      │
-┌─────────────┐  Chrome APIs ┌────────▼───────┐
-│ Your Webpage│◄─────────────┤  MCP Connector │
-└─────────────┘   DevTools   └────────────────┘
+┌──────────────┐  MCP stdio (default)  ┌────────────────────┐
+│ Local Client ├───────────────────────►│ webpage-mcp-stdio  │──┐
+└──────────────┘                        └────────────────────┘  │
+                                                                ├─ authenticated local IPC
+┌──────────────┐  Streamable HTTP       ┌────────────────────┐  │
+│ Remote Client├────── (opt-in) ───────►│ webpage-mcp-server │──┘
+└──────────────┘                        └────────────────────┘
+                                                     │
+                                           Chrome Native Messaging
+                                                     │
+┌─────────────┐       Chrome APIs          ┌──────────▼───────┐
+│ Your Webpage│◄───────────────────────────┤  MCP Connector   │
+└─────────────┘        DevTools            └──────────────────┘
 ```
 
-The **Webpage MCP Connector** (Chrome extension) exposes real browser capabilities as MCP tools. The **MCP Server** bridges AI clients and the connector using Chrome [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging). MCP clients connect over stdio only (no localhost HTTP transport).
+The **Webpage MCP Connector** (Chrome extension) exposes real browser capabilities as MCP tools. The **MCP Server** bridges AI clients and the connector using Chrome [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging). Local clients use stdio by default. An optional Streamable HTTP gateway can expose the same host to an explicitly authorized remote MCP client; it is never started automatically.
+
+When the HTTP gateway is not running, the original stdio → authenticated local IPC → Native Messaging path is unchanged and no TCP port is opened. See [Remote MCP Access](docs/REMOTE_MCP.md) for the opt-in network setup and security boundaries.
 
 Webpage MCP is best understood as a browser-native workflow layer for Chrome, not just a page-control bridge. Recent Chrome releases have made [Chrome DevTools MCP capable of connecting to active browser sessions](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session), which makes protocol-level control of existing tabs much easier. Webpage MCP complements that model by focusing on what DevTools MCP does not try to be: Chrome extension APIs, saved workflows, in-browser operator UI, semantic cross-tab memory, and page-to-code editing flows.
 
@@ -44,11 +51,11 @@ Webpage MCP is best understood as a browser-native workflow layer for Chrome, no
 [Read the full Webpage MCP Privacy Policy](PRIVACY.md) before connecting an MCP
 client, enabling Agent features, or using the extension on sensitive pages.
 
-Webpage MCP has no hosted Webpage MCP relay: the extension-to-native-host bridge and MCP transport stay on the local machine. That local transport boundary does **not** mean all data processed through the product always stays local. Browser content can leave the machine when a connected AI client, a configured Agent engine, a browser/network tool, or the semantic-model downloader contacts an external service.
+Webpage MCP has no hosted Webpage MCP relay. The extension-to-native-host bridge and authenticated internal IPC stay on the local machine, and the default stdio MCP transport is local. If you explicitly start the remote Streamable HTTP gateway, browser tool requests and results also cross the network path between that host and each authorized remote MCP client. That transport boundary does **not** mean all data processed through the product always stays local. Browser content can leave the machine when a remote MCP client, a connected local AI client, a configured Agent engine, a browser/network tool, or the semantic-model downloader contacts an external service.
 
 | Surface                                                 | Data that may be processed                                                                                                   | Destination and trigger                                                                                                                                                                                                                                                |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MCP browser tools                                       | Page text, accessibility data, screenshots, console/network data, history, bookmarks, files, and tool results                | Sent over the local bridge to the connected MCP client when a tool is invoked. The client may then send that data to its configured model provider under that provider's retention and privacy terms.                                                                  |
+| MCP browser tools                                       | Page text, accessibility data, screenshots, console/network data, history, bookmarks, files, and tool results                | Sent over the default local stdio bridge, or over the operator-enabled remote gateway, to the connected MCP client when a tool is invoked. The client may then send that data to its configured model provider under that provider's retention and privacy terms.      |
 | Quick Panel and Web Editor Agent                        | The instruction plus relevant page URL, selected text, element metadata, screenshots/attachments, or structured edit context | Passed through the native host to the user-selected Claude or Codex engine when the user starts an Agent action. Those engines may call Anthropic, OpenAI, or a configured compatible endpoint; their own authentication, network, and retention policies apply.       |
 | Semantic search                                         | Indexed tab text and generated embeddings                                                                                    | Inference and the vector index run locally. On first use, pinned model artifacts are downloaded from Hugging Face and cached after size and SHA-256 verification; tab content is not uploaded to Hugging Face for embedding inference.                                 |
 | Navigation, requests, workflows, uploads, and downloads | URLs, request bodies, files, cookies available to the browser context, and workflow inputs                                   | Sent to the requested website or endpoint when the corresponding tool/workflow runs. These operations can have real external side effects.                                                                                                                             |
@@ -69,8 +76,8 @@ The extension requests broad capabilities including `<all_urls>`, `history`, `bo
 | ----------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | :grinning:              | **Chatbot/Model Agnostic**    | Let any LLM, chatbot client, or agent automate your browser                                                                              |
 | :star:                  | **Use Your Original Browser** | Seamlessly integrate with your existing browser environment (configs, login states, etc.)                                                |
-| :computer:              | **Local Bridge and Storage**  | Native/stdio transport and product-owned state stay local; configured AI providers and explicit network tools remain external data flows |
-| :electric_plug:         | **Native Stdio Transport**    | Native Messaging + stdio only (no localhost HTTP port)                                                                                   |
+| :computer:              | **Local Bridge and Storage**  | Native Messaging, internal IPC, and product-owned state stay local; configured clients/providers and network tools remain external flows |
+| :electric_plug:         | **Local + Remote Transports** | Local MCP stdio by default; optional authenticated Streamable HTTP gateway for explicitly configured remote agents                       |
 | :racing_car:            | **Cross-Tab**                 | Cross-tab context support                                                                                                                |
 | :control_knobs:         | **Workflow Runtime**          | Record, publish, trigger, and replay flows; expose saved browser workflows as MCP tools                                                  |
 | :speech_balloon:        | **In-Browser Agent UX**       | Built-in sidepanel, Quick Panel, element picker, and workflow views keep the agent inside Chrome                                         |
@@ -261,6 +268,29 @@ Use stdio transport via `npx`:
 }
 ```
 
+This remains the recommended local configuration and does not open a network port.
+
+### Optional Remote Streamable HTTP
+
+On the computer running Chrome and the Connector, start the opt-in gateway:
+
+```bash
+npx -y webpage-mcp@latest webpage-mcp-server
+```
+
+The default endpoint is loopback-only at `http://127.0.0.1:12306/mcp`. A non-loopback listener requires a dedicated bearer token and, for wildcard addresses, an explicit Host allowlist. It also requires TLS unless plaintext use is acknowledged explicitly. For example, on a trusted private network behind TLS:
+
+```bash
+npx -y webpage-mcp@latest webpage-mcp-server \
+  --host 0.0.0.0 \
+  --allowed-host mcp-host.example.internal \
+  --token-file "$HOME/.config/webpage-mcp/remote-token" \
+  --tls-cert /path/to/fullchain.pem \
+  --tls-key /path/to/private-key.pem
+```
+
+Configure the remote agent with `https://mcp-host.example.internal:12306/mcp` and an `Authorization: Bearer ...` header. Do not put the token in the URL. Read [Remote MCP Access](docs/REMOTE_MCP.md) before binding outside loopback; it covers token generation, Codex configuration, TLS/reverse-proxy choices, health probes, Host/Origin checks, and troubleshooting.
+
 ### Claude Desktop Configuration
 
 Add to your Claude Desktop MCP config (`claude_desktop_config.json`) — use the same `npx` stdio config above.
@@ -285,7 +315,16 @@ You can also add it with Codex CLI:
 codex mcp add webpage-mcp -- npx -y -p webpage-mcp@latest webpage-mcp-stdio
 ```
 
-After adding the server, restart Codex if needed and use `/mcp` in the Codex TUI to confirm `webpage-mcp` is enabled.
+For an already-running remote gateway, Codex's Streamable HTTP form is:
+
+```toml
+[mcp_servers."webpage-mcp-remote"]
+url = "https://mcp-host.example.internal:12306/mcp"
+bearer_token_env_var = "WEBPAGE_MCP_REMOTE_TOKEN"
+tool_timeout_sec = 120
+```
+
+Set `WEBPAGE_MCP_REMOTE_TOKEN` in the environment of the computer running Codex. After adding the server, restart Codex if needed and use `/mcp` in the Codex TUI to confirm `webpage-mcp` is enabled. See the [official Codex MCP documentation](https://developers.openai.com/codex/mcp) for current client-side options.
 
 ### Local Absolute Path (Dev)
 
@@ -318,8 +357,9 @@ Important:
 
 ### Notes
 
-- The current architecture is fully native/stdio and does not expose localhost MCP/agent HTTP endpoints.
-- Multiple instances are identified by `instanceId`; data transport is native/stdio only.
+- Native Messaging and the authenticated local IPC bridge remain required for both MCP transports.
+- `webpage-mcp-stdio` is the default local transport. `webpage-mcp-server` opens the optional HTTP listener only when you run it explicitly.
+- Multiple Connector instances are identified by `instanceId`; both gateways route through the same native host.
 - For `npx` usage, keep `-p webpage-mcp@latest` in args so `webpage-mcp-stdio` resolves as the executed bin.
 
 ---
@@ -450,12 +490,14 @@ attributions.
 
 ## CLI Reference
 
-| Command           | Description                                     |
-| ----------------- | ----------------------------------------------- |
-| `register`        | Register the Native Messaging host manifest     |
-| `fix-permissions` | Fix execution permissions for native host files |
-| `doctor`          | Diagnose installation and environment issues    |
-| `report`          | Export a diagnostic report for troubleshooting  |
+| Command                         | Description                                                   |
+| ------------------------------- | ------------------------------------------------------------- |
+| `register`                      | Register the Native Messaging host manifest                   |
+| `fix-permissions`               | Fix execution permissions for native host files               |
+| `doctor`                        | Diagnose installation and environment issues                  |
+| `report`                        | Export a diagnostic report for troubleshooting                |
+| `webpage-mcp-server` subcommand | Start the optional Streamable HTTP gateway (`serve` is alias) |
+| standalone `webpage-mcp-server` | Start the same gateway through the package's dedicated bin    |
 
 ### Register Options
 
@@ -494,7 +536,7 @@ The extension popup and welcome page can generate this command automatically usi
 | Extension framework | [WXT](https://wxt.dev/) (Vite-based)       |
 | Extension UI        | React 18 + TailwindCSS v4                  |
 | Flow builder        | @xyflow/react (ReactFlow)                  |
-| MCP server          | Node.js Native Messaging + local IPC       |
+| MCP server          | Node.js stdio/Streamable HTTP + local IPC  |
 | MCP SDK             | @modelcontextprotocol/sdk                  |
 | Agent SDK           | @anthropic-ai/claude-agent-sdk             |
 | Database            | SQLite (better-sqlite3 + drizzle-orm)      |
@@ -524,7 +566,8 @@ The extension popup and welcome page can generate this command automatically usi
 
 1. Ensure Chrome is open and the extension is enabled
 2. Ensure native host is connected (`npx -y webpage-mcp@latest doctor`)
-3. Use npx stdio config in your MCP client (`command: "npx"`, `args: ["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"]`)
+3. For local clients, use npx stdio config (`command: "npx"`, `args: ["-y", "-p", "webpage-mcp@latest", "webpage-mcp-stdio"]`)
+4. For remote clients, verify authenticated `/readyz`, the `/mcp` suffix, Host allowlist, TLS trust, firewall, and bearer header; see [Remote MCP Access](docs/REMOTE_MCP.md)
 
 </details>
 

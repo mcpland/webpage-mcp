@@ -48,7 +48,8 @@ fs.mkdirSync(path.join(distDir, 'logs'), { recursive: true });
 
 const readmeContent = `# ${packageJson.name}
 
-This program is the Native Messaging host for Chrome extension.
+This package contains the Native Messaging host, the default MCP stdio bridge,
+and an optional Streamable HTTP gateway for remote MCP clients.
 
 ## Installation Instructions
 
@@ -70,7 +71,20 @@ This program is the Native Messaging host for Chrome extension.
 
 ## Usage
 
-This application is automatically started by the Chrome extension and does not need to be run manually.
+Chrome automatically starts the registered Native Messaging host. Local MCP
+clients should normally run \`webpage-mcp-stdio\`; this does not open a TCP port.
+
+To opt into a loopback-only Streamable HTTP endpoint at
+\`http://127.0.0.1:12306/mcp\`, run:
+
+\`\`\`
+npx -y ${packageJson.name}@latest webpage-mcp-server
+\`\`\`
+
+Remote network binds require a dedicated bearer token and additional Host/TLS
+configuration. Read the package's main README and docs/REMOTE_MCP.md before
+exposing the gateway outside loopback. The gateway still depends on the Chrome
+extension's Native Messaging host and authenticated local IPC bridge.
 `;
 
 fs.writeFileSync(path.join(distDir, 'README.md'), readmeContent, 'utf8');
