@@ -2162,7 +2162,6 @@ test("CI workflows use maintained runtimes and reviewed actions", async () => {
       rootPackage.packageManager,
     );
   assert.ok(packageManagerMatch);
-  const repositoryPnpmVersion = packageManagerMatch[1];
   const pnpmSetupSteps = workflows.flatMap((workflow) =>
     allWorkflowSteps(workflow).filter((step) =>
       String(step.uses ?? "").startsWith("pnpm/action-setup@"),
@@ -2170,10 +2169,9 @@ test("CI workflows use maintained runtimes and reviewed actions", async () => {
   );
   assert.ok(pnpmSetupSteps.length > 0, "workflows must pin pnpm");
   for (const step of pnpmSetupSteps) {
-    assert.equal(
-      String(step.with?.version),
-      repositoryPnpmVersion,
-      "every pnpm setup must match the packageManager version",
+    assert.ok(
+      !("version" in (step.with ?? {})),
+      "pnpm setup must use packageManager as its only version source",
     );
   }
 });
