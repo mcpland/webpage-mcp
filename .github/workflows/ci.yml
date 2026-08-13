@@ -152,6 +152,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build shared package
+        run: pnpm build:shared
+
       - name: Pack MCP npm package
         run: |
           mkdir -p "$RUNNER_TEMP/webpage-mcp-pack"
@@ -248,7 +251,27 @@ jobs:
       - name: Test Rust implementation
         run: cargo test --manifest-path packages/wasm-simd/Cargo.toml --locked
 
-      - name: Verify generated runtime artifacts
+      - name: Rebuild generated runtime artifacts
+        id: rebuild-wasm
         env:
           WASM_PACK_BINARY: ${{ runner.temp }}/webpage-mcp-wasm-pack/wasm-pack
-        run: node packages/wasm-simd/scripts/wasm-artifacts.mjs verify
+        run: node packages/wasm-simd/scripts/wasm-artifacts.mjs sync
+
+      - name: Verify generated runtime artifacts
+        id: verify-wasm
+        run: |
+          git diff --exit-code -- packages/wasm-simd/artifacts.json \
+            app/chrome-extension/workers/simd_math.js \
+            app/chrome-extension/workers/simd_math_bg.wasm
+
+      - name: Upload rebuilt runtime artifact evidence
+        if: ${{ always() && steps.rebuild-wasm.outcome == 'success' && steps.verify-wasm.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rebuilt-wasm-runtime-${{ github.sha }}
+          path: |
+            packages/wasm-simd/artifacts.json
+            app/chrome-extension/workers/simd_math.js
+            app/chrome-extension/workers/simd_math_bg.wasm
+          if-no-files-found: error
+          retention-days: 1

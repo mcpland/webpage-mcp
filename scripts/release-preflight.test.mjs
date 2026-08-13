@@ -2046,6 +2046,20 @@ test("dependency security gates encode reviewed commands structurally", async ()
     assert.equal(namedStep(releaseGate, name).if, "matrix.enforce_coverage");
   }
 
+  const macosNativeRegistration = workflowJob(
+    ci,
+    "verify-macos-native-registration",
+  );
+  assertStepOrder(macosNativeRegistration, [
+    "Install dependencies",
+    "Build shared package",
+    "Pack MCP npm package",
+  ]);
+  assert.equal(
+    namedStep(macosNativeRegistration, "Build shared package").run,
+    "pnpm build:shared",
+  );
+
   for (const [name, job] of [
     ["CI WASM rebuild", workflowJob(ci, "wasm-artifacts")],
     ["release artifact build", workflowJob(release, "build-assets")],
@@ -2055,16 +2069,31 @@ test("dependency security gates encode reviewed commands structurally", async ()
       'node scripts/install-wasm-pack.mjs --install-dir "$RUNNER_TEMP/webpage-mcp-wasm-pack"',
       name,
     );
-    const verificationName =
+    const wasmBuildName =
       name === "CI WASM rebuild"
-        ? "Verify generated runtime artifacts"
+        ? "Rebuild generated runtime artifacts"
         : "Verify reproducible WASM runtime";
     assert.equal(
-      namedStep(job, verificationName).env.WASM_PACK_BINARY,
+      namedStep(job, wasmBuildName).env.WASM_PACK_BINARY,
       "${{ runner.temp }}/webpage-mcp-wasm-pack/wasm-pack",
     );
     assert.ok(!joinedRunScripts(job).includes("cargo install wasm-pack"));
   }
+
+  const ciWasm = workflowJob(ci, "wasm-artifacts");
+  assert.equal(
+    namedStep(ciWasm, "Verify generated runtime artifacts").run,
+    "git diff --exit-code -- packages/wasm-simd/artifacts.json \\\n  app/chrome-extension/workers/simd_math.js \\\n  app/chrome-extension/workers/simd_math_bg.wasm\n",
+  );
+  const wasmEvidence = namedStep(
+    ciWasm,
+    "Upload rebuilt runtime artifact evidence",
+  );
+  assert.equal(
+    wasmEvidence.if,
+    "${{ always() && steps.rebuild-wasm.outcome == 'success' && steps.verify-wasm.outcome == 'failure' }}",
+  );
+  assert.equal(wasmEvidence.with["if-no-files-found"], "error");
 
   assert.deepEqual(security.on, {
     schedule: [{ cron: "17 4 * * *" }],
