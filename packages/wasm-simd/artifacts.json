@@ -7,10 +7,15 @@
   },
   "artifacts": {
     "simd_math.js": "cc1a9aa14db7776b156bce49c5eef1d6c9ae05d67cb64615f42eb1cd15bb97eb",
-    "simd_math_bg.wasm": "00d71cb6fc7a735447d100c2cf8de6abedf4f914c2405fca6c66d1e6ba2b96c7"
+    "simd_math_bg.wasm": "bc6811acdd7e2e95344a099e849ed8ad9c8d3ef278baa1c99da3497c3e162c3e"
   },
   "interface": {
-    "moduleExports": ["SIMDMath", "default", "init", "initSync"],
+    "moduleExports": [
+      "SIMDMath",
+      "default",
+      "init",
+      "initSync"
+    ],
     "simdMathMethods": [
       "__destroy_into_raw",
       "batch_similarity",
