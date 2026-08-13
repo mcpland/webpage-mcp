@@ -276,6 +276,24 @@
       "review": []
     },
     {
+      "name": "@hono/node-server",
+      "version": "2.0.10",
+      "resolved": "https://registry.npmjs.org/@hono/node-server/-/node-server-2.0.10.tgz",
+      "integrity": "sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "c864dc402e9c5fffd9656afb37bb0dc244bdc0d0a019c6a885772e08035d3b92",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733"
+        }
+      ],
+      "sourceUrl": "https://github.com/honojs/node-server",
+      "patch": null,
+      "review": []
+    },
+    {
       "name": "@modelcontextprotocol/sdk",
       "version": "1.29.0",
       "resolved": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.29.0.tgz",
@@ -1441,6 +1459,24 @@
         }
       ],
       "sourceUrl": "https://github.com/inspect-js/hasOwn",
+      "patch": null,
+      "review": []
+    },
+    {
+      "name": "hono",
+      "version": "4.12.34",
+      "resolved": "https://registry.npmjs.org/hono/-/hono-4.12.34.tgz",
+      "integrity": "sha512-GqXJqY/xJkJmuloTrnV1ZEXG3fqte+VjkUqoRNZXcrUidiUOP4fMSIHHY4tsqZBK++kVyWmt/AAfSUuy57/eSA==",
+      "declaredLicense": "MIT",
+      "concludedLicense": "MIT",
+      "packageJsonSha256": "83da95303f0d0e1df8b146d3d12df282e7ba0b28204a83501e8b29ba1bebd131",
+      "licenseEvidence": [
+        {
+          "path": "LICENSE",
+          "sha256": "a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115"
+        }
+      ],
+      "sourceUrl": "https://github.com/honojs/hono",
       "patch": null,
       "review": []
     },

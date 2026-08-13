@@ -26,6 +26,7 @@ export interface McpBridgeSessionOptions {
   sessionId?: string;
   serverName: string;
   logLabel: string;
+  onToolListChanged?: (sourceSessionId: string) => Promise<void>;
 }
 
 export interface McpBridgeSession {
@@ -107,7 +108,11 @@ export function createMcpBridgeSession(options: McpBridgeSessionOptions): McpBri
       }
       if (shouldNotifyWorkflowToolListChanged(request.params.name, args, response.result)) {
         try {
-          await server.sendToolListChanged();
+          if (options.onToolListChanged) {
+            await options.onToolListChanged(sessionId);
+          } else {
+            await server.sendToolListChanged();
+          }
         } catch (notificationError) {
           console.warn(
             `[${options.logLabel}] Failed to send tools/list_changed notification:`,
@@ -139,7 +144,9 @@ export function createMcpBridgeSession(options: McpBridgeSessionOptions): McpBri
     close(): Promise<void> {
       if (!closePromise) {
         clearDynamicFlowCacheForSession(sessionId);
-        closePromise = server.close();
+        // Assign before invoking Server.close so a synchronous transport
+        // onclose callback cannot recursively start a second close.
+        closePromise = Promise.resolve().then(() => server.close());
       }
       return closePromise;
     },

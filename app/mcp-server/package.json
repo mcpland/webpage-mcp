@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "bin": {
     "webpage-mcp": "./dist/cli.js",
+    "webpage-mcp-server": "./dist/mcp/mcp-server-http.js",
     "webpage-mcp-stdio": "./dist/mcp/mcp-server-stdio.js"
   },
   "scripts": {

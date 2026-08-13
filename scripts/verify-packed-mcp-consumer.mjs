@@ -30,6 +30,16 @@ function runNpm(args, cwd) {
   });
 }
 
+function runNode(args, cwd) {
+  return execFileSync(process.execPath, args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+    timeout: 30_000,
+    windowsHide: true,
+  });
+}
+
 async function main() {
   const packageArgument = process.argv[2];
   if (!packageArgument || process.argv.length !== 3) {
@@ -113,8 +123,28 @@ async function main() {
     await rename(installedMcpSdk, hiddenMcpSdk);
     try {
       runtimeRequire("./dist/mcp/register-tools.js");
+      runtimeRequire("./dist/mcp/mcp-server-http.js");
     } finally {
       await rename(hiddenMcpSdk, installedMcpSdk);
+    }
+
+    const subcommandHelp = runNode(
+      [
+        join(installedRoot, "dist/cli.js"),
+        "webpage-mcp-server",
+        "--help",
+      ],
+      installRoot,
+    );
+    const standaloneHelp = runNode(
+      [join(installedRoot, "dist/mcp/mcp-server-http.js"), "--help"],
+      installRoot,
+    );
+    if (
+      !subcommandHelp.includes("Streamable HTTP") ||
+      !standaloneHelp.includes("Streamable HTTP")
+    ) {
+      throw new Error("installed remote MCP server commands failed their help smoke test");
     }
 
     runNpm(["audit", "--omit=dev", "--audit-level=low"], installRoot);

@@ -35,5 +35,8 @@ describe('build pipeline', () => {
     expect((bundleBuild as { noExternal?: string[] }).noExternal).toContain(
       '@modelcontextprotocol/sdk',
     );
+    expect((bundleBuild as { entry?: Record<string, string> }).entry).toHaveProperty(
+      'mcp/mcp-server-http',
+    );
   });
 });

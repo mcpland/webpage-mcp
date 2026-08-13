@@ -916,6 +916,7 @@ interface ManifestValidationResult {
 export interface StdioBootstrapOptions extends RegistrationLogOptions {
   targetBrowsers?: BrowserType[];
   forceRegister?: boolean;
+  logLabel?: string;
 }
 
 export interface StdioBootstrapResult {
@@ -1097,7 +1098,7 @@ function runDoctorLiteChecks(
   return issues;
 }
 
-export async function autoBootstrapNativeMessagingForStdio(
+export async function autoBootstrapNativeMessaging(
   options?: StdioBootstrapOptions,
 ): Promise<StdioBootstrapResult> {
   const logger = createRegistrationLogger({
@@ -1105,6 +1106,7 @@ export async function autoBootstrapNativeMessagingForStdio(
     silent: options?.silent,
   });
   const browsers = resolveBrowsersForRegistration(options?.targetBrowsers);
+  const logLabel = options?.logLabel?.trim() || "webpage-mcp";
   const runtime = await ensureStableRuntimeHostFiles({
     output: options?.output,
     silent: true,
@@ -1126,7 +1128,7 @@ export async function autoBootstrapNativeMessagingForStdio(
   if (options?.forceRegister || !manifestResult.allValid) {
     registrationAttempted = true;
     logger.warn(
-      "[webpage-mcp-stdio] Native Messaging manifest missing or outdated; attempting automatic user-level registration.",
+      `[${logLabel}] Native Messaging manifest missing or outdated; attempting automatic user-level registration.`,
     );
     registrationSucceeded = await tryRegisterUserLevelHost(browsers, {
       output: "stderr",
@@ -1142,7 +1144,7 @@ export async function autoBootstrapNativeMessagingForStdio(
   );
   if (doctorLiteIssues.length > 0) {
     logger.warn(
-      `[webpage-mcp-stdio] doctor-lite detected issues: ${doctorLiteIssues.join(" | ")}`,
+      `[${logLabel}] doctor-lite detected issues: ${doctorLiteIssues.join(" | ")}`,
     );
   }
 
@@ -1155,6 +1157,15 @@ export async function autoBootstrapNativeMessagingForStdio(
     manifestValid: manifestResult.allValid,
     doctorLiteIssues,
   };
+}
+
+export function autoBootstrapNativeMessagingForStdio(
+  options?: StdioBootstrapOptions,
+): Promise<StdioBootstrapResult> {
+  return autoBootstrapNativeMessaging({
+    ...options,
+    logLabel: options?.logLabel || "webpage-mcp-stdio",
+  });
 }
 
 // Import the is-admin package (only used on Windows platform)

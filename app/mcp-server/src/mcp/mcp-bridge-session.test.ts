@@ -37,13 +37,17 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function connect(bridge: FakeBridge): Promise<{ client: Client; session: McpBridgeSession }> {
+async function connect(
+  bridge: FakeBridge,
+  onToolListChanged?: (sourceSessionId: string) => Promise<void>,
+): Promise<{ client: Client; session: McpBridgeSession }> {
   const session = createMcpBridgeSession({
     bridgeClient: bridge,
     sessionId: 'test-session',
     instanceId: 'remote-one',
     serverName: 'TestWebpageMcpServer',
     logLabel: 'test-webpage-mcp',
+    onToolListChanged,
   });
   const client = new Client(
     { name: 'test-client', version: '1.0.0' },
@@ -108,5 +112,19 @@ describe('MCP bridge session', () => {
 
     expect(response.tools.length).toBeGreaterThan(0);
     expect(response.tools.some((tool) => tool.name === 'chrome_read_page')).toBe(true);
+  });
+
+  it('delegates successful workflow tool-list changes to a shared broadcaster', async () => {
+    const bridge = new FakeBridge();
+    const onToolListChanged = vi.fn(async () => undefined);
+    const { client } = await connect(bridge, onToolListChanged);
+
+    await client.callTool({
+      name: 'workflow_publish',
+      arguments: { workflowId: 'flow-1' },
+    });
+
+    expect(onToolListChanged).toHaveBeenCalledOnce();
+    expect(onToolListChanged).toHaveBeenCalledWith('test-session');
   });
 });

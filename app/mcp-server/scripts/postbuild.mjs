@@ -80,6 +80,7 @@ copyIfExists(path.join(sourceScriptsDir, 'run_host.bat'), path.join(distDir, 'ru
 
 chmodIfExists(path.join(distDir, 'index.js'), 0o755);
 chmodIfExists(path.join(distDir, 'cli.js'), 0o755);
+chmodIfExists(path.join(distDir, 'mcp', 'mcp-server-http.js'), 0o755);
 chmodIfExists(path.join(distDir, 'run_host.sh'), 0o755);
 
 fs.writeFileSync(path.join(distDir, 'node_path.txt'), process.execPath, 'utf8');

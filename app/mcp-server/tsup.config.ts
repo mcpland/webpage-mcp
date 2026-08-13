@@ -67,6 +67,7 @@ export const bundleConfig = {
     'agent/rpc-dispatcher': path.join(SRC_DIR, 'agent/rpc-dispatcher.ts'),
     'agent/types': path.join(SRC_DIR, 'agent/types.ts'),
     'mcp/mcp-server-stdio': path.join(SRC_DIR, 'mcp/mcp-server-stdio.ts'),
+    'mcp/mcp-server-http': path.join(SRC_DIR, 'mcp/mcp-server-http.ts'),
     'mcp/register-tools': path.join(SRC_DIR, 'mcp/register-tools.ts'),
     'native-messaging-host': path.join(SRC_DIR, 'native-messaging-host.ts'),
     'server/index': path.join(SRC_DIR, 'server/index.ts'),

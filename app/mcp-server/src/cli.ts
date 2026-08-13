@@ -10,6 +10,10 @@ import {
 import { BrowserType, parseBrowserType, detectInstalledBrowsers } from './scripts/browser-config';
 import { runDoctor } from './scripts/doctor';
 import { DEFAULT_INCLUDE_LOGS_MODE, runReport } from './scripts/report';
+import {
+  configureRemoteMcpServerCommand,
+  type RemoteMcpServerCliOptions,
+} from './mcp/remote-server-config';
 
 program
   .version(require('../package.json').version)
@@ -195,6 +199,21 @@ program
       process.exit(1);
     }
   });
+
+const remoteServerCommand = configureRemoteMcpServerCommand(
+  program.command('webpage-mcp-server').alias('serve'),
+);
+remoteServerCommand.action(async (options: RemoteMcpServerCliOptions) => {
+  try {
+    const { runRemoteMcpServerCommand } = await import('./mcp/mcp-server-http.js');
+    await runRemoteMcpServerCommand(options);
+  } catch (error) {
+    console.error(
+      `[webpage-mcp-server] Fatal error: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+  }
+});
 
 program.parse(process.argv);
 

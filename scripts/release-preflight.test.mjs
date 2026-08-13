@@ -184,6 +184,7 @@ const MCP_PACKAGE_TEMPLATE = {
   main: "dist/index.js",
   bin: {
     "webpage-mcp": "./dist/cli.js",
+    "webpage-mcp-server": "./dist/mcp/mcp-server-http.js",
     "webpage-mcp-stdio": "./dist/mcp/mcp-server-stdio.js",
   },
   files: [
@@ -546,6 +547,13 @@ async function createArtifacts(rootDir, overrides = {}) {
             {
               contents: "#!/usr/bin/env node\nconsole.log('cli');\n",
               mode: overrides.mcpCliMode ?? 0o755,
+            },
+          ],
+          [
+            "package/dist/mcp/mcp-server-http.js",
+            {
+              contents: "#!/usr/bin/env node\nconsole.log('http');\n",
+              mode: overrides.mcpHttpMode ?? 0o755,
             },
           ],
           [
