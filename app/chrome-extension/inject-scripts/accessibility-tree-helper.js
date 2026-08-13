@@ -1048,12 +1048,12 @@
     }
     if (state.stop) return;
     // Traverse light DOM children
-    if (/** @type {HTMLElement} */ (el).children && domDepth < MAX_DOM_DEPTH) {
-      const children = /** @type {HTMLElement} */ (el).children;
-      for (let i = 0; i < children.length; i++) {
-        if (state.stop) break;
+    if (domDepth < MAX_DOM_DEPTH) {
+      let child = /** @type {HTMLElement} */ (el).firstElementChild;
+      while (child && !state.stop) {
+        const next = child.nextElementSibling;
         traverse(
-          children[i],
+          child,
           include ? depth + 1 : depth,
           domDepth + 1,
           cfg,
@@ -1061,17 +1061,18 @@
           refMap,
           state,
         );
+        child = next;
       }
     }
     // Traverse shadow DOM roots within the same access budgets.
     try {
       const anyEl = /** @type {any} */ (el);
       if (anyEl && anyEl.shadowRoot && domDepth < MAX_DOM_DEPTH) {
-        const srChildren = anyEl.shadowRoot.children || [];
-        for (let i = 0; i < srChildren.length; i++) {
-          if (state.stop) break;
+        let child = anyEl.shadowRoot.firstElementChild;
+        while (child && !state.stop) {
+          const next = child.nextElementSibling;
           traverse(
-            srChildren[i],
+            child,
             include ? depth + 1 : depth,
             domDepth + 1,
             cfg,
@@ -1079,6 +1080,7 @@
             refMap,
             state,
           );
+          child = next;
         }
       }
     } catch (_) {
