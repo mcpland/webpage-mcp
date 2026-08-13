@@ -143,8 +143,8 @@ importers:
         version: 3.25.76
     devDependencies:
       '@iconify-json/lucide':
-        specifier: ^1.1.0
-        version: 1.2.93
+        specifier: ^1.2.123
+        version: 1.2.123
       '@tailwindcss/vite':
         specifier: ^4.0.0
         version: 4.3.2(vite@7.3.6(@types/node@22.19.11)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.8.3))
@@ -816,8 +816,8 @@ packages:
     resolution: {integrity: sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ==}
     engines: {node: '>=18.18'}
 
-  '@iconify-json/lucide@1.2.93':
-    resolution: {integrity: sha512-xMbNHP3uS0c/jkgmj6k/9DcuqW7Ey88R0bM2hV5rOJ8wDARql6kM0UC/WCHOyfjh+7OIJnRuDqUvvStx2NHbNw==}
+  '@iconify-json/lucide@1.2.123':
+    resolution: {integrity: sha512-0CozmpKXEOEEhltrfT2zt+/t1hez67Y+hM2VJWoIcBKdBrb83VYuKf+b5A0QU9HfQm+RNn2GjFWlTOwi+Ss6IA==}
 
   '@iconify/types@2.0.0':
     resolution: {integrity: sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg==}
@@ -5504,7 +5504,7 @@ snapshots:
 
   '@humanwhocodes/retry@0.4.3': {}
 
-  '@iconify-json/lucide@1.2.93':
+  '@iconify-json/lucide@1.2.123':
     dependencies:
       '@iconify/types': 2.0.0
 
