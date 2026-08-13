@@ -1964,12 +1964,12 @@
     },
     {
       "name": "fast-uri",
-      "version": "3.1.4",
-      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.4.tgz",
-      "integrity": "sha512-8JnbkQ4juDyvYs4mgFGQqg4yCYtFDtUtmp2QIQq11ZZe5CFQ5wcqm1rqDgAh/QdMySuBnPzMUiJUNZG5N/AiQw==",
+      "version": "3.1.5",
+      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.5.tgz",
+      "integrity": "sha512-gHwA1O9LDIcKunMKhObS/HimwtehO1nPUECKAu5TpKgaO19fcWEl4bliWe1jWxVFvIXztJjjQ4L8XQ1EU9f7Jw==",
       "declaredLicense": "BSD-3-Clause",
       "concludedLicense": "BSD-3-Clause",
-      "packageJsonSha256": "a9fff7e32f1e48fd1f9eee683ff19ab75ac068f6cb62c2261a40d7b5bccbf86a",
+      "packageJsonSha256": "3b01e17f5de289a0905ad894187235c8a8bb284a1fd285b40227b1d862f86b4d",
       "licenseEvidence": [
         {
           "path": "LICENSE",
@@ -2251,12 +2251,12 @@
     },
     {
       "name": "hono",
-      "version": "4.12.27",
-      "resolved": "https://registry.npmjs.org/hono/-/hono-4.12.27.tgz",
-      "integrity": "sha512-1yrb/+w6HWQJrUCLkJ2IF5jNIPvvFkblV5RNOYl6bV+OA6p9GLcMpHFFGTosSvHvcAUibuUukRqhlYI4z32C7Q==",
+      "version": "4.12.34",
+      "resolved": "https://registry.npmjs.org/hono/-/hono-4.12.34.tgz",
+      "integrity": "sha512-GqXJqY/xJkJmuloTrnV1ZEXG3fqte+VjkUqoRNZXcrUidiUOP4fMSIHHY4tsqZBK++kVyWmt/AAfSUuy57/eSA==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "0190ed73085e7509f652e5877691ea52063628ad633add49e7ffef4a375389cd",
+      "packageJsonSha256": "83da95303f0d0e1df8b146d3d12df282e7ba0b28204a83501e8b29ba1bebd131",
       "licenseEvidence": [
         {
           "path": "LICENSE",
@@ -2323,12 +2323,12 @@
     },
     {
       "name": "ip-address",
-      "version": "10.1.1",
-      "resolved": "https://registry.npmjs.org/ip-address/-/ip-address-10.1.1.tgz",
-      "integrity": "sha512-1FMu8/N15Ck1BL551Jf42NYIoin2unWjLQ2Fze/DXryJRl5twqtwNHlO39qERGbIOcKYWHdgRryhOC+NG4eaLw==",
+      "version": "10.3.1",
+      "resolved": "https://registry.npmjs.org/ip-address/-/ip-address-10.3.1.tgz",
+      "integrity": "sha512-1e9d3kb97NHJTIJDZW9rKqW2h6+dFa50Dy0fpPSMQp2ADje5gvKsXmdiK6dwY5t76TaTt5+P5N1Y/LoToIxP6g==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "c4adfd033f010ba9d49b57c5003b992d1a7e4cda62c66ad2d7ac175444e84f74",
+      "packageJsonSha256": "4a0a3acff34188079b379a63f5752659c83185004febca496c388d1d5ca2ed7c",
       "licenseEvidence": [
         {
           "path": "LICENSE",

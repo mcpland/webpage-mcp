@@ -784,12 +784,12 @@
     },
     {
       "name": "fast-uri",
-      "version": "3.1.4",
-      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.4.tgz",
-      "integrity": "sha512-8JnbkQ4juDyvYs4mgFGQqg4yCYtFDtUtmp2QIQq11ZZe5CFQ5wcqm1rqDgAh/QdMySuBnPzMUiJUNZG5N/AiQw==",
+      "version": "3.1.5",
+      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.5.tgz",
+      "integrity": "sha512-gHwA1O9LDIcKunMKhObS/HimwtehO1nPUECKAu5TpKgaO19fcWEl4bliWe1jWxVFvIXztJjjQ4L8XQ1EU9f7Jw==",
       "declaredLicense": "BSD-3-Clause",
       "concludedLicense": "BSD-3-Clause",
-      "packageJsonSha256": "a9fff7e32f1e48fd1f9eee683ff19ab75ac068f6cb62c2261a40d7b5bccbf86a",
+      "packageJsonSha256": "3b01e17f5de289a0905ad894187235c8a8bb284a1fd285b40227b1d862f86b4d",
       "licenseEvidence": [
         {
           "path": "LICENSE",
@@ -1306,16 +1306,16 @@
     },
     {
       "name": "process-warning",
-      "version": "5.0.0",
-      "resolved": "https://registry.npmjs.org/process-warning/-/process-warning-5.0.0.tgz",
-      "integrity": "sha512-a39t9ApHNx2L4+HBnQKqxxHNs1r7KF+Intd8Q/g1bUh6q0WIp9voPXJ/x0j+ZL45KF1pJd9+q2jLIRMfvEshkA==",
+      "version": "5.1.0",
+      "resolved": "https://registry.npmjs.org/process-warning/-/process-warning-5.1.0.tgz",
+      "integrity": "sha512-jQSaVHsPgtyw60e1rQ/A+/ArPEj/S8pS/vFnyGa/gYFXrKk/6RuDkoqVDQ5NI5MmS01698ltlAk0NoDBNLujRw==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "f14f7a85d62d314b0fac4c483fb1d272360e6b00debe52112acd119621c864b6",
+      "packageJsonSha256": "e728ec4dc6a636f83354688d96721845327263b0729381630ef1796964834391",
       "licenseEvidence": [
         {
           "path": "LICENSE",
-          "sha256": "d9726abc9eff9496f3ecb5302e70756f310db24a01c7ddd20f541143bf5576ad"
+          "sha256": "8d3c1dd501e056405ab56f4ad87b987070d55d1fe814616584ec2360045f9017"
         }
       ],
       "sourceUrl": "https://github.com/fastify/process-warning",
