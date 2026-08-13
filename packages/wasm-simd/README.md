@@ -14,13 +14,14 @@ From the repository root:
 
 ```bash
 pnpm --filter @webpage-mcp/wasm-simd test
-pnpm verify:wasm
+pnpm verify:wasm:runtime
 ```
 
 The Rust tests cover SIMD-lane tails, mismatched and zero-length inputs, and
-batch/matrix result ordering. `pnpm verify:wasm` performs a clean deterministic
-rebuild, checks the generated JavaScript and WebAssembly export surfaces and
-hashes, and executes cosine and batch smoke checks against the generated module.
+batch/matrix result ordering. `pnpm verify:wasm:runtime` checks the committed
+JavaScript and WebAssembly export surfaces and hashes, and executes cosine and
+batch smoke checks against the generated module on any supported development
+platform.
 
 These checks establish numerical behavior and artifact reproducibility. This
 repository does not currently include a reproducible performance benchmark, so
@@ -53,6 +54,7 @@ From repository root:
 ```bash
 pnpm build:wasm
 pnpm verify:wasm
+pnpm verify:wasm:runtime
 ```
 
 Inside this package:
@@ -63,9 +65,13 @@ pnpm build:dev
 ```
 
 The release toolchain and generated artifact hashes/exports are recorded in
-`rust-toolchain.toml`, `Cargo.lock`, and `artifacts.json`. `pnpm build:wasm`
-performs a deterministic release build and synchronizes the extension workers;
-`pnpm verify:wasm` independently rebuilds and rejects any source/artifact drift.
+`rust-toolchain.toml`, `Cargo.lock`, and `artifacts.json`. Canonical release
+bytes are generated and reproducibility-checked only on Linux x64, the platform
+recorded in `artifacts.json` and used by CI/release. On that platform,
+`pnpm build:wasm` synchronizes the extension workers and `pnpm verify:wasm`
+independently rebuilds and rejects source/artifact drift. On other platforms,
+use `pnpm build:dev` for local experiments and `pnpm verify:wasm:runtime` to
+verify the committed portable runtime without claiming byte reproducibility.
 
 ## Browser Support
 

@@ -402,7 +402,8 @@ pnpm dev:shared           # Watch mode
 pnpm build:shared         # Production build
 
 # WASM SIMD (requires Rust toolchain)
-pnpm build:wasm           # Build and copy to extension
+pnpm build:wasm           # Linux x64: build canonical release bytes
+pnpm verify:wasm:runtime  # Any platform: verify committed runtime
 ```
 
 ### Testing
@@ -586,7 +587,10 @@ fatal.
 WASM rebuild gates apply the same byte-verification pipeline to the official
 Linux x64 musl `wasm-pack` release described by `scripts/wasm-pack-tool.json`.
 Both its archive and extracted executable are size- and SHA-256-pinned, and the
-artifact builder invokes that verified executable by absolute path.
+artifact builder invokes that verified executable by absolute path. Exact WASM
+byte reproducibility is a Linux x64 contract enforced by `artifacts.json`;
+other hosts can verify the committed portable runtime with
+`pnpm verify:wasm:runtime`.
 
 Dependabot checks GitHub Actions, the root pnpm workspace, and the Rust/WASM
 crate weekly. Live advisory databases can make an unchanged commit fail a

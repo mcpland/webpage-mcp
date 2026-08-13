@@ -1,9 +1,13 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "toolchain": {
     "rust": "1.94.0",
     "wasmPack": "0.15.0",
     "wasmBindgen": "0.2.126"
+  },
+  "buildPlatform": {
+    "os": "linux",
+    "arch": "x64"
   },
   "artifacts": {
     "simd_math.js": "cc1a9aa14db7776b156bce49c5eef1d6c9ae05d67cb64615f42eb1cd15bb97eb",

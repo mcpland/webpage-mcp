@@ -11,6 +11,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertCanonicalWasmBuildPlatform } from "./wasm-build-platform.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const crateDir = resolve(scriptDir, "..");
@@ -76,7 +77,7 @@ function assertEqualList(label, actual, expected) {
 
 async function loadManifest() {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  if (manifest.schemaVersion !== 1) {
+  if (manifest.schemaVersion !== 2) {
     fail(`unsupported artifact manifest schema: ${manifest.schemaVersion}`);
   }
   return manifest;
@@ -313,21 +314,34 @@ async function verify(manifest) {
           `${artifactName} is stale (manifest ${expectedHash}, rebuilt ${rebuiltHash}); run pnpm build:wasm`,
         );
       }
-
-      const tracked = await readFile(join(extensionWorkerDir, artifactName));
-      const trackedHash = sha256(tracked);
-      if (trackedHash !== expectedHash) {
-        fail(
-          `tracked ${artifactName} does not match artifacts.json (expected ${expectedHash}, found ${trackedHash})`,
-        );
-      }
     }
+
+    await verifyRuntime(manifest, false);
 
     console.log(
       "[wasm-simd] source rebuild, runtime behavior, hashes, and public interface verified",
     );
   } finally {
     await rm(temporaryOutput, { force: true, recursive: true });
+  }
+}
+
+async function verifyRuntime(manifest, report = true) {
+  const tracked = await inspectArtifacts(extensionWorkerDir, []);
+  assertInterface(tracked.interface, manifest.interface);
+  for (const artifactName of artifactNames) {
+    const expectedHash = manifest.artifacts[artifactName];
+    const trackedHash = tracked.hashes[artifactName];
+    if (trackedHash !== expectedHash) {
+      fail(
+        `tracked ${artifactName} does not match artifacts.json (expected ${expectedHash}, found ${trackedHash})`,
+      );
+    }
+  }
+  if (report) {
+    console.log(
+      "[wasm-simd] committed runtime behavior, hashes, and public interface verified",
+    );
   }
 }
 
@@ -350,6 +364,7 @@ const command = process.argv[2];
 const manifest = await loadManifest();
 
 if (command === "sync" || command === "verify") {
+  assertCanonicalWasmBuildPlatform(manifest);
   await assertToolchain(manifest);
 }
 
@@ -359,6 +374,8 @@ if (command === "sync") {
   await verify(manifest);
 } else if (command === "copy") {
   await copy(manifest);
+} else if (command === "verify-runtime") {
+  await verifyRuntime(manifest);
 } else {
-  fail("usage: wasm-artifacts.mjs <sync|verify|copy>");
+  fail("usage: wasm-artifacts.mjs <sync|verify|verify-runtime|copy>");
 }

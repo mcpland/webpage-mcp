@@ -14,7 +14,8 @@
     "clean": "rimraf pkg/",
     "copy:artifacts": "node ./scripts/wasm-artifacts.mjs copy",
     "test": "cargo test --locked",
-    "verify:artifacts": "node ./scripts/wasm-artifacts.mjs verify"
+    "verify:artifacts": "node ./scripts/wasm-artifacts.mjs verify",
+    "verify:runtime": "node ./scripts/wasm-artifacts.mjs verify-runtime"
   },
   "keywords": [
     "wasm",
