@@ -2054,10 +2054,44 @@ test("dependency security gates encode reviewed commands structurally", async ()
     "Install dependencies",
     "Build shared package",
     "Pack MCP npm package",
+    "Install, register, and diagnose native host in isolation",
   ]);
   assert.equal(
     namedStep(macosNativeRegistration, "Build shared package").run,
     "pnpm build:shared",
+  );
+
+  const browserNativeHandshake = workflowJob(
+    ci,
+    "verify-browser-native-handshake",
+  );
+  const setupChromeForTesting = namedStep(
+    browserNativeHandshake,
+    "Setup Chrome for Testing",
+  );
+  assert.equal(
+    setupChromeForTesting.uses,
+    "browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd",
+  );
+  assert.deepEqual(setupChromeForTesting.with, {
+    "chrome-version": "stable",
+    "install-dependencies": true,
+  });
+  const browserNativeBuild = namedStep(
+    browserNativeHandshake,
+    "Build native host and keyed extension",
+  ).run;
+  assert.ok(browserNativeBuild.includes("pnpm build:mcp"));
+  assert.ok(browserNativeBuild.includes("pnpm build:extension"));
+  const browserNativeRun = namedStep(
+    browserNativeHandshake,
+    "Verify real Chrome Native Messaging handshake",
+  ).run;
+  assert.ok(browserNativeRun.includes('--extension-id "$SMOKE_EXTENSION_ID"'));
+  assert.ok(
+    browserNativeRun.includes(
+      "node scripts/verify-browser-native-handshake.mjs",
+    ),
   );
 
   for (const [name, job] of [
@@ -2161,6 +2195,7 @@ test("CI workflows use maintained runtimes and reviewed actions", async () => {
     "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", // actions/upload-artifact v7.0.1
     "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", // actions/download-artifact v8.0.1
     "fc06bc1257f339d1d5d8b3a19a8cae5388b55320", // pnpm/action-setup v5.0.0
+    "2e1d749697dd1612b833dba4a722266286fbefcd", // browser-actions/setup-chrome v2.1.2
     "718ea10b132b3b2eba29c1007bb80653f286566b", // softprops/action-gh-release v3.0.1
   ]);
   const references = workflows

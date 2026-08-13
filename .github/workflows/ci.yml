@@ -132,7 +132,7 @@ jobs:
   verify-macos-native-registration:
     name: macOS Native Registration Smoke (Node 24)
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -165,9 +165,6 @@ jobs:
           PACKAGE_VERSION="$(node -p "require('./app/mcp-server/package.json').version")"
           node scripts/verify-packed-mcp-consumer.mjs "$RUNNER_TEMP/webpage-mcp-pack/webpage-mcp-${PACKAGE_VERSION}.tgz"
 
-      # This exercises package installation, native manifest registration, and
-      # doctor validation. A real Chrome extension/native handshake remains a
-      # separate manual release check.
       - name: Install, register, and diagnose native host in isolation
         shell: bash
         run: |
@@ -212,6 +209,71 @@ jobs:
 
           export SMOKE_ROOT ORIGINAL_HOME DOCTOR_REPORT
           node scripts/verify-macos-native-registration-smoke.mjs
+
+  verify-browser-native-handshake:
+    name: Chrome Extension and Native Host Handshake (Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # Branded Chrome removed --load-extension in milestone 137. Chrome for
+      # Testing intentionally retains it for extension automation.
+      - name: Setup Chrome for Testing
+        id: chrome-for-testing
+        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
+        with:
+          chrome-version: stable
+          install-dependencies: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build native host and keyed extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          SMOKE_IDENTITY="$(node scripts/browser-native-smoke-identity.mjs)"
+          CHROME_EXTENSION_PUBLIC_KEY="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.encodedPublicKey)' "$SMOKE_IDENTITY")"
+          SMOKE_EXTENSION_ID="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.extensionId)' "$SMOKE_IDENTITY")"
+          echo "SMOKE_EXTENSION_ID=$SMOKE_EXTENSION_ID" >> "$GITHUB_ENV"
+          export CHROME_EXTENSION_PUBLIC_KEY
+          pnpm build:shared
+          pnpm build:mcp
+          pnpm build:extension
+
+      - name: Verify real Chrome Native Messaging handshake
+        shell: bash
+        env:
+          WEBPAGE_MCP_CHROME_BINARY: ${{ steps.chrome-for-testing.outputs.chrome-path }}
+          WEBPAGE_MCP_EXTENSION_DIR: ${{ github.workspace }}/app/chrome-extension/.output/chrome-mv3
+          WEBPAGE_MCP_EXPECTED_EXTENSION_ID: ${{ env.SMOKE_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+          ORIGINAL_HOME="$HOME"
+          SMOKE_ROOT="$(mktemp -d "$RUNNER_TEMP/webpage-mcp-browser-native.XXXXXX")"
+          trap 'rm -rf "$SMOKE_ROOT"' EXIT
+          export HOME="$SMOKE_ROOT/home"
+          mkdir -p "$HOME"
+          test "$HOME" != "$ORIGINAL_HOME"
+          node app/mcp-server/dist/cli.js register \
+            --browser chrome \
+            --force \
+            --extension-id "$SMOKE_EXTENSION_ID"
+          node scripts/verify-browser-native-handshake.mjs
 
   wasm-artifacts:
     name: Rebuild and verify WASM artifacts

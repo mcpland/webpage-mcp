@@ -2,15 +2,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-function readMacosNativeRegistrationJob(): string {
+function readCiJob(jobName: string): string {
   const workflowPath = path.resolve(__dirname, '../../../../.github/workflows/ci.yml');
   const workflow = fs.readFileSync(workflowPath, 'utf8');
-  const jobStart = workflow.indexOf('  verify-macos-native-registration:');
+  const jobStart = workflow.indexOf(`  ${jobName}:`);
   expect(jobStart).toBeGreaterThanOrEqual(0);
   const nextJob = workflow.slice(jobStart + 2).search(/^ {2}[a-z0-9_-]+:\s*$/m);
   return nextJob < 0
     ? workflow.slice(jobStart)
     : workflow.slice(jobStart, jobStart + 2 + nextJob);
+}
+
+function readMacosNativeRegistrationJob(): string {
+  return readCiJob('verify-macos-native-registration');
 }
 
 function readMacosNativeRegistrationVerifier(): string {
@@ -56,8 +60,13 @@ describe('macOS native registration CI smoke', () => {
     expect(verifier).toContain('dangerousOriginalConfigRoot');
   });
 
-  it('labels browser handshake validation as a remaining manual check', () => {
-    const job = readMacosNativeRegistrationJob();
-    expect(job).toMatch(/real Chrome extension\/native handshake remains a[\s\S]*manual release check/);
+  it('keeps the real browser handshake in a dedicated Linux job', () => {
+    const registrationJob = readMacosNativeRegistrationJob();
+    const browserJob = readCiJob('verify-browser-native-handshake');
+
+    expect(registrationJob).not.toContain('verify-browser-native-handshake.mjs');
+    expect(browserJob).toMatch(/runs-on:\s*ubuntu-latest/);
+    expect(browserJob).toContain('browser-actions/setup-chrome@');
+    expect(browserJob).toContain('node scripts/verify-browser-native-handshake.mjs');
   });
 });
