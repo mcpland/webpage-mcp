@@ -1,7 +1,14 @@
 import console from "node:console";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
@@ -91,14 +98,23 @@ async function main() {
     }
 
     const runtimeRequire = createRequire(join(installedRoot, "package.json"));
-    runtimeRequire("./dist/mcp/register-tools.js");
+    const installedMcpSdk = join(
+      installRoot,
+      "node_modules",
+      "@modelcontextprotocol",
+      "sdk",
+    );
+    const hiddenMcpSdk = join(
+      installRoot,
+      "node_modules",
+      "@modelcontextprotocol",
+      ".sdk-bundle-smoke",
+    );
+    await rename(installedMcpSdk, hiddenMcpSdk);
     try {
-      runtimeRequire.resolve("@modelcontextprotocol/sdk/server/index.js");
-      throw new Error(
-        "bundled MCP SDK unexpectedly remained externally resolvable",
-      );
-    } catch (error) {
-      if (error?.code !== "MODULE_NOT_FOUND") throw error;
+      runtimeRequire("./dist/mcp/register-tools.js");
+    } finally {
+      await rename(hiddenMcpSdk, installedMcpSdk);
     }
 
     runNpm(["audit", "--omit=dev", "--audit-level=low"], installRoot);
