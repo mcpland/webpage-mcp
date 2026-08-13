@@ -71,7 +71,7 @@
     "@types/chrome": "^0.0.318",
     "@types/node": "^22.15.3",
     "@typescript-eslint/parser": "^8.31.1",
-    "@vitest/coverage-v8": "^3.2.6",
+    "@vitest/coverage-v8": "^4.1.10",
     "cross-env": "^7.0.3",
     "nodemon": "^3.1.10",
     "pino-pretty": "^13.0.0",
