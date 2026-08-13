@@ -1,16 +1,16 @@
 packages:
-  - 'app/*'
-  - 'packages/*'
+  - "app/*"
+  - "packages/*"
 
 overrides:
-  '@babel/core': 7.29.6
-  '@hono/node-server': 2.0.10
-  '@protobufjs/utf8': 1.1.1
-  'minimatch@<4': 3.1.4
-  'minimatch@>=10 <11': 10.2.3
-  'picomatch@<3': 2.3.2
-  'picomatch@>=4 <5': 4.0.5
-  'brace-expansion@<2': 1.1.13
+  "@babel/core": 7.29.6
+  "@hono/node-server": 2.0.10
+  "@protobufjs/utf8": 1.1.1
+  "minimatch@<4": 3.1.4
+  "minimatch@>=10 <11": 10.2.3
+  "picomatch@<3": 2.3.2
+  "picomatch@>=4 <5": 4.0.5
+  "brace-expansion@<2": 1.1.13
   defu: 6.1.5
   esbuild: 0.28.1
   express-rate-limit: 8.2.2
@@ -38,4 +38,4 @@ onlyBuiltDependencies:
   - better-sqlite3
 
 patchedDependencies:
-  '@xenova/transformers@2.17.2': patches/@xenova__transformers@2.17.2.patch
+  "@xenova/transformers@2.17.2": patches/@xenova__transformers@2.17.2.patch

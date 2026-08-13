@@ -5,3 +5,12 @@ app/chrome-extension/public/THIRD_PARTY_COMPONENTS.json
 
 # npm emits canonical lockfile JSON; release checks compare those exact bytes.
 app/mcp-server/npm-shrinkwrap.json
+
+# pnpm and the WASM artifact generator own these canonical files. Formatting
+# them would create large diffs and invalidate the recorded artifact bytes.
+pnpm-lock.yaml
+packages/wasm-simd/artifacts.json
+
+# This self-contained injected script intentionally preserves its established
+# single-quoted style. A whole-file rewrite obscures security-sensitive diffs.
+app/chrome-extension/inject-scripts/accessibility-tree-helper.js

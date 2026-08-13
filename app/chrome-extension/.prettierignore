@@ -1,2 +1,5 @@
 # Generated canonical legal inventory; see scripts/npm-license-inventory.mjs.
 public/THIRD_PARTY_COMPONENTS.json
+
+# Preserve focused diffs in this large self-contained injected script.
+inject-scripts/accessibility-tree-helper.js

@@ -18,7 +18,7 @@
     "verify:ort": "pnpm --filter webpage-mcp-connector verify:ort",
     "test:release": "node --test scripts/release-preflight.test.mjs scripts/set-app-version.test.mjs scripts/legal-notices.test.mjs scripts/npm-license-inventory.test.mjs scripts/mcp-npm-shrinkwrap.test.mjs scripts/mcp-bundle-components.test.mjs scripts/audit-mcp-bundle.test.mjs scripts/install-cargo-deny.test.mjs scripts/install-wasm-pack.test.mjs scripts/verify-release-tag-sha.test.mjs",
     "legal:check": "node ./scripts/legal-notices.mjs check",
-    "test:workspace": "node --test scripts/clean-workspace.test.mjs scripts/commitlint-security.test.mjs app/chrome-extension/scripts/rename-zip.test.mjs app/chrome-extension/scripts/ort-artifacts.test.mjs app/chrome-extension/scripts/bundle-code-policy.test.mjs",
+    "test:workspace": "node --test scripts/clean-workspace.test.mjs scripts/prettier-ignore.test.mjs scripts/commitlint-security.test.mjs app/chrome-extension/scripts/rename-zip.test.mjs app/chrome-extension/scripts/ort-artifacts.test.mjs app/chrome-extension/scripts/bundle-code-policy.test.mjs",
     "shrinkwrap:mcp": "node ./scripts/mcp-npm-shrinkwrap.mjs refresh",
     "shrinkwrap:mcp:check": "node ./scripts/mcp-npm-shrinkwrap.mjs check",
     "shrinkwrap:mcp:check-current": "node ./scripts/mcp-npm-shrinkwrap.mjs check-current",
@@ -58,8 +58,7 @@
   },
   "lint-staged": {
     "**/*.{js,jsx,ts,tsx}": [
-      "eslint --fix",
-      "prettier --write"
+      "eslint --fix"
     ],
     "**/*.{json,md,yaml,html,css}": [
       "prettier --write"
