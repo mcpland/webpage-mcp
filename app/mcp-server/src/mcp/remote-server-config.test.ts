@@ -6,6 +6,8 @@ import {
   DEFAULT_REMOTE_MCP_HOST,
   DEFAULT_REMOTE_MCP_PORT,
   REMOTE_MCP_TOKEN_ENV,
+  isLoopbackHost,
+  normalizeRemoteHostname,
   resolveRemoteMcpServerOptions,
 } from './remote-server-config';
 
@@ -95,6 +97,31 @@ describe('remote MCP server configuration', () => {
         { [REMOTE_MCP_TOKEN_ENV]: TOKEN },
       ),
     ).toThrow('--allowed-host');
+  });
+
+  it('canonicalizes equivalent IPv6 listener and allowed-host spellings', () => {
+    expect(normalizeRemoteHostname('[2001:0DB8:0:0:0:0:0:1]', 'test host')).toBe('2001:db8::1');
+    expect(isLoopbackHost('0:0:0:0:0:0:0:1')).toBe(true);
+
+    const loopback = resolveRemoteMcpServerOptions(
+      { host: '0:0:0:0:0:0:0:1' },
+      { [REMOTE_MCP_TOKEN_ENV]: TOKEN },
+    );
+    expect(loopback.host).toBe('::1');
+    expect(loopback.allowedHosts).toEqual(
+      expect.arrayContaining(['::1', '127.0.0.1', 'localhost']),
+    );
+
+    const routable = resolveRemoteMcpServerOptions(
+      {
+        host: '2001:0DB8:0:0:0:0:0:1',
+        allowedHost: ['[2001:db8::1]'],
+        allowInsecureHttp: true,
+      },
+      { [REMOTE_MCP_TOKEN_ENV]: TOKEN },
+    );
+    expect(routable.host).toBe('2001:db8::1');
+    expect(routable.allowedHosts).toEqual(['2001:db8::1']);
   });
 
   it('normalizes exact browser origins and rejects malformed authority values', () => {

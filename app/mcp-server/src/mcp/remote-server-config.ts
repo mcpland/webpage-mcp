@@ -109,8 +109,13 @@ export function normalizeRemoteHostname(value: string, label: string): string {
   if (!unwrapped || unwrapped.length > 255 || /[\s/?#@]/.test(unwrapped)) {
     throw new Error(`Invalid ${label}: expected a hostname or IP address without a port`);
   }
-  if (net.isIP(unwrapped)) {
-    return unwrapped.toLowerCase();
+  const ipVersion = net.isIP(unwrapped);
+  if (ipVersion === 4) {
+    return unwrapped;
+  }
+  if (ipVersion === 6) {
+    const canonical = new URL(`http://[${unwrapped}]/`).hostname;
+    return canonical.slice(1, -1).toLowerCase();
   }
   const normalized = unwrapped.replace(/\.$/, '').toLowerCase();
   if (
