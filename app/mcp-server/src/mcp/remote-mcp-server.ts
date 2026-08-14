@@ -198,7 +198,7 @@ export class RemoteMcpServer {
   private readonly sessionIdleTimeoutMs: number;
   private readonly allowedHosts: Set<string>;
   private readonly allowedOrigins: Set<string>;
-  private readonly expectedTokenHash?: Buffer;
+  private readonly expectedTokenHash: Buffer;
   private readonly sessions = new Map<string, RemoteMcpSessionRecord>();
   private listener: http.Server | null = null;
   private cleanupTimer: NodeJS.Timeout | null = null;
@@ -229,7 +229,10 @@ export class RemoteMcpServer {
     }
     this.allowedHosts = new Set(options.allowedHosts);
     this.allowedOrigins = new Set(options.allowedOrigins);
-    this.expectedTokenHash = options.token ? secureHash(options.token) : undefined;
+    if (!options.token) {
+      throw new Error('Remote MCP server requires a bearer token');
+    }
+    this.expectedTokenHash = secureHash(options.token);
   }
 
   public get sessionCount(): number {
@@ -345,7 +348,6 @@ export class RemoteMcpServer {
   }
 
   private validateAuthorization(request: IncomingMessage, response: ServerResponse): boolean {
-    if (!this.expectedTokenHash) return true;
     const token = extractBearerToken(request.headers.authorization);
     if (!token || !constantTimeSecretEquals(token, this.expectedTokenHash)) {
       sendJson(response, 401, { error: 'Unauthorized' }, { 'WWW-Authenticate': 'Bearer' });

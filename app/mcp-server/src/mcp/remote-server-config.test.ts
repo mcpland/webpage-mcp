@@ -25,14 +25,16 @@ afterEach(() => {
 });
 
 describe('remote MCP server configuration', () => {
-  it('defaults to an unauthenticated loopback-only listener', () => {
-    const options = resolveRemoteMcpServerOptions({}, {});
+  it('requires authentication even for the default loopback-only listener', () => {
+    expect(() => resolveRemoteMcpServerOptions({}, {})).toThrow(REMOTE_MCP_TOKEN_ENV);
+
+    const options = resolveRemoteMcpServerOptions({}, { [REMOTE_MCP_TOKEN_ENV]: TOKEN });
 
     expect(options).toMatchObject({
       host: DEFAULT_REMOTE_MCP_HOST,
       port: DEFAULT_REMOTE_MCP_PORT,
       instanceId: 'default',
-      token: undefined,
+      token: TOKEN,
       allowInsecureHttp: false,
     });
     expect(options.allowedHosts).toEqual(expect.arrayContaining(['127.0.0.1', 'localhost', '::1']));
@@ -62,11 +64,7 @@ describe('remote MCP server configuration', () => {
     expect(options.token).toBe(TOKEN);
   });
 
-  it('requires explicit authentication and transport acknowledgement off loopback', () => {
-    expect(() =>
-      resolveRemoteMcpServerOptions({ host: '0.0.0.0', allowedHost: ['mcp.example.test'] }, {}),
-    ).toThrow(REMOTE_MCP_TOKEN_ENV);
-
+  it('requires explicit transport acknowledgement off loopback', () => {
     expect(() =>
       resolveRemoteMcpServerOptions(
         { host: '0.0.0.0', allowedHost: ['mcp.example.test'] },
@@ -105,23 +103,33 @@ describe('remote MCP server configuration', () => {
         allowedHost: ['MCP.EXAMPLE.TEST.'],
         allowedOrigin: ['https://Agent.Example.Test:443'],
       },
-      {},
+      { [REMOTE_MCP_TOKEN_ENV]: TOKEN },
     );
     expect(options.allowedHosts).toContain('mcp.example.test');
     expect(options.allowedOrigins).toEqual(['https://agent.example.test']);
 
     expect(() =>
-      resolveRemoteMcpServerOptions({ allowedOrigin: ['https://agent.example.test/path'] }, {}),
+      resolveRemoteMcpServerOptions(
+        { allowedOrigin: ['https://agent.example.test/path'] },
+        { [REMOTE_MCP_TOKEN_ENV]: TOKEN },
+      ),
     ).toThrow('Invalid allowed origin');
     expect(() =>
-      resolveRemoteMcpServerOptions({ allowedHost: ['agent.example.test:8443'] }, {}),
+      resolveRemoteMcpServerOptions(
+        { allowedHost: ['agent.example.test:8443'] },
+        { [REMOTE_MCP_TOKEN_ENV]: TOKEN },
+      ),
     ).toThrow('Invalid allowed host');
-    expect(() => resolveRemoteMcpServerOptions({ port: '0' }, {})).toThrow(
-      'Invalid remote MCP port',
-    );
-    expect(resolveRemoteMcpServerOptions({ port: 0 }, {}, { allowEphemeralPort: true }).port).toBe(
-      0,
-    );
+    expect(() =>
+      resolveRemoteMcpServerOptions({ port: '0' }, { [REMOTE_MCP_TOKEN_ENV]: TOKEN }),
+    ).toThrow('Invalid remote MCP port');
+    expect(
+      resolveRemoteMcpServerOptions(
+        { port: 0 },
+        { [REMOTE_MCP_TOKEN_ENV]: TOKEN },
+        { allowEphemeralPort: true },
+      ).port,
+    ).toBe(0);
   });
 
   it('reads bearer credentials only from bounded private regular files', () => {
@@ -153,8 +161,11 @@ describe('remote MCP server configuration', () => {
     expect(() =>
       resolveRemoteMcpServerOptions({}, { [REMOTE_MCP_TOKEN_ENV]: `${TOKEN} with-space` }),
     ).toThrow('Bearer token characters');
-    expect(() => resolveRemoteMcpServerOptions({ tlsCert: '/tmp/cert.pem' }, {})).toThrow(
-      'requires both',
-    );
+    expect(() =>
+      resolveRemoteMcpServerOptions(
+        { tlsCert: '/tmp/cert.pem' },
+        { [REMOTE_MCP_TOKEN_ENV]: TOKEN },
+      ),
+    ).toThrow('requires both');
   });
 });

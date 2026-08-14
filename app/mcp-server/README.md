@@ -65,16 +65,20 @@ Recommended: copy the register command from extension popup/welcome page, becaus
 Start a loopback-only Streamable HTTP endpoint with the main CLI subcommand:
 
 ```bash
-npx -y webpage-mcp@latest webpage-mcp-server
+install -d -m 700 "$HOME/.config/webpage-mcp"
+(umask 077 && openssl rand -base64 32 > "$HOME/.config/webpage-mcp/remote-token")
+npx -y webpage-mcp@latest webpage-mcp-server \
+  --token-file "$HOME/.config/webpage-mcp/remote-token"
 ```
 
 Or invoke the standalone bin directly:
 
 ```bash
-npx -y -p webpage-mcp@latest webpage-mcp-server
+npx -y -p webpage-mcp@latest webpage-mcp-server \
+  --token-file "$HOME/.config/webpage-mcp/remote-token"
 ```
 
-The default URL is `http://127.0.0.1:12306/mcp`. Binding to a non-loopback address requires a separate `WEBPAGE_MCP_REMOTE_TOKEN` or private `--token-file`. Wildcard binds also require at least one `--allowed-host`, and plaintext requires `--allow-insecure-http`.
+The default URL is `http://127.0.0.1:12306/mcp`, but every HTTP listener requires a separate `WEBPAGE_MCP_REMOTE_TOKEN` or private `--token-file`. Non-loopback wildcard binds also require at least one `--allowed-host`, and non-loopback plaintext requires `--allow-insecure-http`.
 
 Example with direct TLS:
 

@@ -69,10 +69,13 @@ Starting the MCP client runs the bootstrap shown above. Chrome must be open, the
 Only use the network listener when the MCP client cannot run on the Chrome host:
 
 ```bash
-npx -y webpage-mcp@latest webpage-mcp-server
+install -d -m 700 "$HOME/.config/webpage-mcp"
+(umask 077 && openssl rand -base64 32 > "$HOME/.config/webpage-mcp/remote-token")
+npx -y webpage-mcp@latest webpage-mcp-server \
+  --token-file "$HOME/.config/webpage-mcp/remote-token"
 ```
 
-This default is loopback-only (`http://127.0.0.1:12306/mcp`). Non-loopback access requires a separate remote token, Host allowlist for wildcard binds, and TLS or an explicit plaintext acknowledgement. The remote entry does not replace registration or Chrome's Native Messaging process. Follow [Remote MCP Access](../../docs/REMOTE_MCP.md) before exposing it to another machine.
+This default is loopback-only (`http://127.0.0.1:12306/mcp`), but every HTTP listener requires a separate remote token. Non-loopback access additionally requires a Host allowlist for wildcard binds, and TLS or an explicit plaintext acknowledgement. The remote entry does not replace registration or Chrome's Native Messaging process. Follow [Remote MCP Access](../../docs/REMOTE_MCP.md) before exposing it to another machine.
 
 ### 2. Optional global CLI installation
 

@@ -275,10 +275,13 @@ This remains the recommended local configuration and does not open a network por
 On the computer running Chrome and the Connector, start the opt-in gateway:
 
 ```bash
-npx -y webpage-mcp@latest webpage-mcp-server
+install -d -m 700 "$HOME/.config/webpage-mcp"
+(umask 077 && openssl rand -base64 32 > "$HOME/.config/webpage-mcp/remote-token")
+npx -y webpage-mcp@latest webpage-mcp-server \
+  --token-file "$HOME/.config/webpage-mcp/remote-token"
 ```
 
-The default endpoint is loopback-only at `http://127.0.0.1:12306/mcp`. A non-loopback listener requires a dedicated bearer token and, for wildcard addresses, an explicit Host allowlist. It also requires TLS unless plaintext use is acknowledged explicitly. For example, on a trusted private network behind TLS:
+The default endpoint is loopback-only at `http://127.0.0.1:12306/mcp`, but every HTTP listener requires a dedicated bearer token. A non-loopback listener additionally requires, for wildcard addresses, an explicit Host allowlist. It also requires TLS unless plaintext use is acknowledged explicitly. For example, on a trusted private network behind TLS:
 
 ```bash
 npx -y webpage-mcp@latest webpage-mcp-server \

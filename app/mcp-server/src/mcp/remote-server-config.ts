@@ -41,7 +41,7 @@ export interface RemoteMcpServerOptions {
   host: string;
   port: number;
   instanceId: string;
-  token?: string;
+  token: string;
   allowedHosts: string[];
   allowedOrigins: string[];
   tls?: RemoteMcpTlsOptions;
@@ -288,10 +288,8 @@ export function resolveRemoteMcpServerOptions(
     [...(raw.allowedOrigin || []), ...splitList(env[ALLOWED_ORIGINS_ENV])].map(normalizeOrigin),
   );
 
-  if (!isLoopbackHost(host) && !token) {
-    throw new Error(
-      `A non-loopback remote MCP listener requires ${REMOTE_MCP_TOKEN_ENV} or --token-file`,
-    );
+  if (!token) {
+    throw new Error(`Remote MCP listener requires ${REMOTE_MCP_TOKEN_ENV} or --token-file`);
   }
   if (!isLoopbackHost(host) && !tls && !allowInsecureHttp) {
     throw new Error(

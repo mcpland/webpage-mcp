@@ -20,16 +20,25 @@ The HTTP process is a gateway, not a replacement for Chrome Native Messaging. Ch
 
 ## Local-Only Quick Start
 
+Create a private bearer-token file on macOS or Linux:
+
+```bash
+install -d -m 700 "$HOME/.config/webpage-mcp"
+(umask 077 && openssl rand -base64 32 > "$HOME/.config/webpage-mcp/remote-token")
+```
+
 The main CLI accepts the `webpage-mcp-server` subcommand requested by `npx` users:
 
 ```bash
-npx -y webpage-mcp@latest webpage-mcp-server
+npx -y webpage-mcp@latest webpage-mcp-server \
+  --token-file "$HOME/.config/webpage-mcp/remote-token"
 ```
 
 The equivalent standalone bin is:
 
 ```bash
-npx -y -p webpage-mcp@latest webpage-mcp-server
+npx -y -p webpage-mcp@latest webpage-mcp-server \
+  --token-file "$HOME/.config/webpage-mcp/remote-token"
 ```
 
 Both commands listen on `127.0.0.1:12306` by default. Configure a local Streamable HTTP client with:
@@ -38,7 +47,7 @@ Both commands listen on `127.0.0.1:12306` by default. Configure a local Streamab
 http://127.0.0.1:12306/mcp
 ```
 
-No bearer token is required for the default loopback-only listener. Starting this command also performs the same Native Messaging registration/bootstrap check as the stdio entry. It does not make Chrome launch the native host; keep Chrome open and connect the extension.
+A dedicated bearer token is required even for the default loopback-only listener so that unrelated local processes and OS users cannot invoke privileged browser tools. Starting this command also performs the same Native Messaging registration/bootstrap check as the stdio entry. It does not make Chrome launch the native host; keep Chrome open and connect the extension.
 
 ## Private-Network Setup
 
@@ -48,7 +57,7 @@ Binding outside loopback deliberately requires all of the following:
 - An explicit allowed `Host` hostname or IP when listening on `0.0.0.0` or `::`.
 - TLS, or the explicit `--allow-insecure-http` acknowledgement.
 
-Create a private token file on macOS or Linux:
+If you have not already done so, create a private token file on macOS or Linux:
 
 ```bash
 install -d -m 700 "$HOME/.config/webpage-mcp"
@@ -122,9 +131,9 @@ The listener exposes three routes:
 
 | Route      | Purpose                                                               | Authentication                                    |
 | ---------- | --------------------------------------------------------------------- | ------------------------------------------------- |
-| `/mcp`     | Stateful MCP Streamable HTTP (`POST`, `GET`, and `DELETE`)            | Bearer token when configured                      |
+| `/mcp`     | Stateful MCP Streamable HTTP (`POST`, `GET`, and `DELETE`)            | Bearer token required                             |
 | `/healthz` | Process/listener liveness; does not touch Chrome or the native bridge | Public, but still protected by Host/Origin checks |
-| `/readyz`  | Pings the local native bridge for the configured `instanceId`         | Bearer token when configured                      |
+| `/readyz`  | Pings the local native bridge for the configured `instanceId`         | Bearer token required                             |
 
 Examples:
 
@@ -158,15 +167,15 @@ Examples:
 | `--host <host>`               | `WEBPAGE_MCP_REMOTE_HOST`            | Listen address; default `127.0.0.1`                       |
 | `--port <port>`               | `WEBPAGE_MCP_REMOTE_PORT`            | Listen port; default `12306`                              |
 | `--instance-id <id>`          | `WEBPAGE_MCP_INSTANCE_ID`            | Connector instance to route to; default `default`         |
-| `--token-file <file>`         | `WEBPAGE_MCP_REMOTE_TOKEN_FILE`      | Read the dedicated bearer token from a private file       |
-| —                             | `WEBPAGE_MCP_REMOTE_TOKEN`           | Dedicated bearer token value                              |
+| `--token-file <file>`         | `WEBPAGE_MCP_REMOTE_TOKEN_FILE`      | Read the required bearer token from a private file        |
+| —                             | `WEBPAGE_MCP_REMOTE_TOKEN`           | Required dedicated bearer token value                     |
 | repeatable `--allowed-host`   | `WEBPAGE_MCP_REMOTE_ALLOWED_HOSTS`   | Accepted Host names; env list is comma/whitespace split   |
 | repeatable `--allowed-origin` | `WEBPAGE_MCP_REMOTE_ALLOWED_ORIGINS` | Exact browser origins; env list is comma/whitespace split |
 | `--tls-cert <file>`           | `WEBPAGE_MCP_REMOTE_TLS_CERT`        | PEM certificate                                           |
 | `--tls-key <file>`            | `WEBPAGE_MCP_REMOTE_TLS_KEY`         | Private PEM key                                           |
 | `--allow-insecure-http`       | —                                    | Acknowledge plaintext use outside loopback                |
 
-There is intentionally no `--token` argument, which keeps credentials out of shell history and process listings. A token file takes precedence over `WEBPAGE_MCP_REMOTE_TOKEN`.
+There is intentionally no `--token` argument, which keeps credentials out of shell history and process listings. Every listener requires either a token file or `WEBPAGE_MCP_REMOTE_TOKEN`; a token file takes precedence.
 
 `WEBPAGE_MCP_REMOTE_TOKEN` is separate from the legacy `WEBPAGE_MCP_AUTH_TOKEN`. The latter is exposed to the extension UI and is not an authorization check for MCP calls; it does not satisfy the remote listener's token requirement.
 
@@ -202,4 +211,4 @@ The HTTP process is running but cannot ping the Native Messaging bridge. Open Ch
 
 ### TLS or startup validation fails
 
-Provide both certificate and key files. On Unix, remove group/other access from the key and token file with `chmod 600 <file>`. A non-loopback listener also requires a remote token even when TLS is enabled.
+Provide both certificate and key files. On Unix, remove group/other access from the key and token file with `chmod 600 <file>`. Every listener requires a remote token; non-loopback listeners require TLS unless `--allow-insecure-http` is explicitly acknowledged.

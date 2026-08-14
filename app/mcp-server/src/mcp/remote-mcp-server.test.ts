@@ -81,17 +81,15 @@ async function startServer(
   overrides: {
     allowedOrigin?: string[];
     maxSessions?: number;
-    token?: string;
   } = {},
 ): Promise<RunningServer> {
   const bridge = new FakeBridge();
-  const token = overrides.token === undefined ? TOKEN : overrides.token;
   const options = resolveRemoteMcpServerOptions(
     {
       port: 0,
       allowedOrigin: overrides.allowedOrigin,
     },
-    token ? { WEBPAGE_MCP_REMOTE_TOKEN: token } : {},
+    { WEBPAGE_MCP_REMOTE_TOKEN: TOKEN },
     { allowEphemeralPort: true },
   );
   const server = new RemoteMcpServer(options, {
@@ -267,12 +265,11 @@ describe('remote Streamable HTTP MCP server', () => {
     });
   });
 
-  it('allows an explicitly unauthenticated loopback server but never accepts a wrong token', async () => {
-    const unauthenticated = await startServer({ token: '' });
-    const localHealth = await fetch(endpoint(unauthenticated.listening, '/readyz'));
-    expect(localHealth.status).toBe(200);
-
+  it('requires a valid token for privileged loopback routes', async () => {
     const authenticated = await startServer();
+    const missingAuth = await fetch(endpoint(authenticated.listening, '/readyz'));
+    expect(missingAuth.status).toBe(401);
+
     await expect(
       connectClient(authenticated.listening.endpoint, `${TOKEN}wrong`, 'wrong-token-client'),
     ).rejects.toThrow(/401|Unauthorized/i);

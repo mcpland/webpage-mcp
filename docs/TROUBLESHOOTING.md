@@ -112,7 +112,7 @@ Use the actual HTTPS hostname when TLS or a Host allowlist is configured. Interp
 - `403 Forbidden Origin`: the client sent an `Origin` that is missing from `--allowed-origin`. Normal server-side clients generally do not send this header.
 - TLS certificate failure: use a certificate trusted by the remote client and make sure its SAN covers the hostname in the MCP URL.
 
-The MCP URL must include `/mcp`, for example `https://mcp-host.example.internal:12306/mcp`. A non-loopback listener requires a dedicated remote token; wildcard binds require an allowed Host; plaintext also requires `--allow-insecure-http`. See [Remote MCP Access](REMOTE_MCP.md) for the complete secure setup.
+The MCP URL must include `/mcp`, for example `https://mcp-host.example.internal:12306/mcp`. Every listener requires a dedicated remote token; non-loopback wildcard binds require an allowed Host; non-loopback plaintext also requires `--allow-insecure-http`. See [Remote MCP Access](REMOTE_MCP.md) for the complete secure setup.
 
 ## ENOENT Socket Missing
 

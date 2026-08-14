@@ -78,13 +78,16 @@ To opt into a loopback-only Streamable HTTP endpoint at
 \`http://127.0.0.1:12306/mcp\`, run:
 
 \`\`\`
-npx -y ${packageJson.name}@latest webpage-mcp-server
+install -d -m 700 "$HOME/.config/webpage-mcp"
+(umask 077 && openssl rand -base64 32 > "$HOME/.config/webpage-mcp/remote-token")
+npx -y ${packageJson.name}@latest webpage-mcp-server --token-file "$HOME/.config/webpage-mcp/remote-token"
 \`\`\`
 
-Remote network binds require a dedicated bearer token and additional Host/TLS
-configuration. Read the package's main README and docs/REMOTE_MCP.md before
-exposing the gateway outside loopback. The gateway still depends on the Chrome
-extension's Native Messaging host and authenticated local IPC bridge.
+Every HTTP listener requires a dedicated bearer token. Remote network binds also
+require additional Host/TLS configuration. Read the package's main README and
+docs/REMOTE_MCP.md before exposing the gateway outside loopback. The gateway
+still depends on the Chrome extension's Native Messaging host and authenticated
+local IPC bridge.
 `;
 
 fs.writeFileSync(path.join(distDir, 'README.md'), readmeContent, 'utf8');
