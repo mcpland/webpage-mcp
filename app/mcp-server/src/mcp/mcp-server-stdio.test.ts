@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type net from 'node:net';
+import net from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IPC_CANCEL_REQUEST_METHOD } from '../ipc/bridge-protocol';
 import { NativeIpcBridgeClient } from './native-ipc-bridge-client';
@@ -14,7 +14,7 @@ class FakeSocket extends EventEmitter {
     return true;
   }
 
-  destroy(): this {
+  destroy(_error?: Error): this {
     this.destroyed = true;
     return this;
   }
@@ -35,9 +35,51 @@ interface BridgeClientInternals {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
-describe('NativeIpcBridgeClient request cancellation', () => {
+describe('NativeIpcBridgeClient lifecycle and request cancellation', () => {
+  it('cancels an in-flight connection and remains permanently closed', async () => {
+    const socket = new FakeSocket();
+    const createConnection = vi
+      .spyOn(net, 'createConnection')
+      .mockReturnValue(socket as unknown as net.Socket);
+    const client = new NativeIpcBridgeClient();
+
+    const request = client.request('ping');
+    const rejection = expect(request).rejects.toThrow('IPC client closed');
+    expect(createConnection).toHaveBeenCalledTimes(1);
+
+    client.close();
+    await rejection;
+    expect(socket.destroyed).toBe(true);
+
+    await expect(client.request('ping')).rejects.toThrow('IPC client closed');
+    expect(createConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it('interrupts the connection retry delay when closed', async () => {
+    vi.useFakeTimers();
+    const createConnection = vi.spyOn(net, 'createConnection').mockImplementation(() => {
+      const socket = new FakeSocket();
+      const error = Object.assign(new Error('Socket missing'), { code: 'ENOENT' });
+      queueMicrotask(() => socket.emit('error', error));
+      return socket as unknown as net.Socket;
+    });
+    const client = new NativeIpcBridgeClient();
+
+    const request = client.request('ping');
+    const rejection = expect(request).rejects.toThrow('IPC client closed');
+    await vi.advanceTimersByTimeAsync(0);
+    const attemptsBeforeClose = createConnection.mock.calls.length;
+    expect(attemptsBeforeClose).toBeGreaterThan(0);
+
+    client.close();
+    await rejection;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(createConnection).toHaveBeenCalledTimes(attemptsBeforeClose);
+  });
+
   it('cancels remote work when a written request times out locally', async () => {
     vi.useFakeTimers();
     const client = new NativeIpcBridgeClient();

@@ -45,6 +45,10 @@ function createAbortError(): Error {
   return error;
 }
 
+function createClientClosedError(): Error {
+  return new Error('IPC client closed');
+}
+
 function waitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
   if (signal.aborted) return Promise.reject(createAbortError());
@@ -67,9 +71,19 @@ function waitWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T
   });
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(createClientClosedError());
+
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(createClientClosedError());
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -142,6 +156,8 @@ function formatBridgeConnectError(
 }
 
 export class NativeIpcBridgeClient {
+  private closed = false;
+  private readonly closeController = new AbortController();
   private socket: net.Socket | null = null;
   private authenticated = false;
   private readonly decoder = new BoundedNdjsonDecoder(IPC_MAX_RESPONSE_LINE_BYTES);
@@ -162,16 +178,47 @@ export class NativeIpcBridgeClient {
   }
 
   private connectOnce(socketPath: string): Promise<void> {
+    if (this.closed) return Promise.reject(createClientClosedError());
+
     return new Promise<void>((resolve, reject) => {
       const socket = net.createConnection(socketPath);
+      const closeSignal = this.closeController.signal;
+      let settled = false;
 
       const cleanup = (): void => {
-        socket.removeAllListeners('connect');
-        socket.removeAllListeners('error');
+        socket.removeListener('connect', onConnect);
+        socket.removeListener('error', onError);
+        socket.removeListener('close', onClose);
+        closeSignal.removeEventListener('abort', onAbort);
       };
-
-      socket.on('connect', () => {
+      const rejectOnce = (error: unknown): void => {
+        if (settled) return;
+        settled = true;
         cleanup();
+        reject(error);
+      };
+      const onAbort = (): void => {
+        rejectOnce(createClientClosedError());
+        if (!socket.destroyed) socket.destroy();
+      };
+      const onClose = (): void => {
+        rejectOnce(
+          this.closed
+            ? createClientClosedError()
+            : new Error('IPC socket closed before connection'),
+        );
+      };
+      const onError = (error: Error): void => {
+        rejectOnce(error);
+      };
+      const onConnect = (): void => {
+        cleanup();
+        if (this.closed) {
+          rejectOnce(createClientClosedError());
+          socket.destroy();
+          return;
+        }
+
         this.socket = socket;
         this.authenticated = false;
         this.connectedSocketPath = socketPath;
@@ -183,10 +230,14 @@ export class NativeIpcBridgeClient {
 
         void this.authenticate(socket, socketPath)
           .then(() => {
+            if (this.closed) {
+              throw createClientClosedError();
+            }
             if (this.socket !== socket || socket.destroyed) {
               throw new Error('IPC socket closed during authentication');
             }
             this.authenticated = true;
+            settled = true;
             resolve();
           })
           .catch((error) => {
@@ -196,14 +247,15 @@ export class NativeIpcBridgeClient {
               this.connectedSocketPath = null;
             }
             socket.destroy();
-            reject(error);
+            rejectOnce(this.closed ? createClientClosedError() : error);
           });
-      });
+      };
 
-      socket.on('error', (error) => {
-        cleanup();
-        reject(error);
-      });
+      socket.once('connect', onConnect);
+      socket.once('error', onError);
+      socket.once('close', onClose);
+      closeSignal.addEventListener('abort', onAbort, { once: true });
+      if (closeSignal.aborted) onAbort();
     });
   }
 
@@ -213,11 +265,13 @@ export class NativeIpcBridgeClient {
     const candidateErrors = new Map<string, unknown>();
 
     while (Date.now() - start <= CONNECT_MAX_WAIT_MS) {
+      if (this.closed) throw createClientClosedError();
       for (const socketPath of socketPaths) {
         try {
           await this.connectOnce(socketPath);
           return;
         } catch (error) {
+          if (this.closed) throw createClientClosedError();
           lastError = error;
           candidateErrors.set(socketPath, error);
           if (!shouldRetryConnect(error)) {
@@ -226,13 +280,15 @@ export class NativeIpcBridgeClient {
         }
       }
 
-      await sleep(CONNECT_RETRY_INTERVAL_MS);
+      await sleep(CONNECT_RETRY_INTERVAL_MS, this.closeController.signal);
     }
 
+    if (this.closed) throw createClientClosedError();
     throw formatBridgeConnectError(socketPaths, lastError, candidateErrors);
   }
 
   async ensureConnected(): Promise<void> {
+    if (this.closed) throw createClientClosedError();
     if (this.socket && !this.socket.destroyed && this.authenticated) {
       return;
     }
@@ -326,6 +382,9 @@ export class NativeIpcBridgeClient {
     signal?: AbortSignal,
     sendCancellation = false,
   ): Promise<T> {
+    if (this.closed) {
+      return Promise.reject(createClientClosedError());
+    }
     if (socket.destroyed || this.socket !== socket) {
       return Promise.reject(new Error('IPC socket is not connected'));
     }
@@ -439,19 +498,26 @@ export class NativeIpcBridgeClient {
   }
 
   close(): void {
-    if (this.socket) {
+    if (this.closed) return;
+    this.closed = true;
+    this.closeController.abort();
+
+    const socket = this.socket;
+    this.socket = null;
+    this.authenticated = false;
+    this.connectedSocketPath = null;
+    this.decoder.reset();
+    if (socket) {
       try {
-        this.socket.destroy();
+        socket.destroy();
       } catch {
         // ignore
       }
-      this.socket = null;
     }
-    this.authenticated = false;
     for (const id of Array.from(this.pending.keys())) {
       const pending = this.takePending(id);
       if (!pending) continue;
-      pending.reject(new Error('IPC client closed'));
+      pending.reject(createClientClosedError());
     }
   }
 }
