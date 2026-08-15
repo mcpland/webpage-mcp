@@ -22,6 +22,7 @@ describe("Windows native host wrapper source", () => {
     expect(source).not.toMatch(/enabledelayedexpansion/i);
     expect(source).not.toMatch(/^\s*call\s+/im);
     expect(source).not.toContain("echo Initial PATH: %PATH%");
+    expect(source).not.toContain("\\NUL");
   });
 });
 

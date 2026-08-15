@@ -12,11 +12,11 @@ set "LOG_RUNNER_SCRIPT=%SCRIPT_DIR%\scripts\native-log-runner.js"
 REM Prefer a user-writable log directory.
 if defined LOCALAPPDATA set "LOG_DIR=%LOCALAPPDATA%\webpage-mcp\logs"
 if not defined LOG_DIR set "LOG_DIR=%TEMP%\webpage-mcp\logs"
-if exist "%LOG_DIR%\NUL" goto log_dir_ready
+if exist "%LOG_DIR%\." goto log_dir_ready
 mkdir "%LOG_DIR%" 2>nul
-if exist "%LOG_DIR%\NUL" goto log_dir_ready
+if exist "%LOG_DIR%\." goto log_dir_ready
 set "LOG_DIR=%SCRIPT_DIR%\logs"
-if not exist "%LOG_DIR%\NUL" mkdir "%LOG_DIR%" 2>nul
+if not exist "%LOG_DIR%\." mkdir "%LOG_DIR%" 2>nul
 
 :log_dir_ready
 set "RUN_ID=%RANDOM%_%RANDOM%_%RANDOM%"
@@ -47,7 +47,7 @@ set "NODE_EXEC_SOURCE="
 REM Priority 0: explicit override.
 if not defined WEBPAGE_MCP_NODE_PATH goto node_path_file
 set "CANDIDATE_NODE=%WEBPAGE_MCP_NODE_PATH%"
-if exist "%CANDIDATE_NODE%\NUL" set "CANDIDATE_NODE=%CANDIDATE_NODE%\node.exe"
+if exist "%CANDIDATE_NODE%\." set "CANDIDATE_NODE=%CANDIDATE_NODE%\node.exe"
 if not exist "%CANDIDATE_NODE%" goto node_path_file
 set "NODE_EXEC=%CANDIDATE_NODE%"
 set "NODE_EXEC_SOURCE=WEBPAGE_MCP_NODE_PATH"
@@ -159,7 +159,7 @@ set "NODE_MODULES_PATH_FILE=%SCRIPT_DIR%\node_modules_path.txt"
 if not exist "%NODE_MODULES_PATH_FILE%" goto modules_ready
 set "MODULES_PATH="
 set /p MODULES_PATH=<"%NODE_MODULES_PATH_FILE%"
-if not exist "%MODULES_PATH%\NUL" goto modules_ready
+if not exist "%MODULES_PATH%\." goto modules_ready
 if not defined NODE_PATH goto modules_path_only
 set "NODE_PATH=%MODULES_PATH%;%NODE_PATH%"
 goto modules_ready
