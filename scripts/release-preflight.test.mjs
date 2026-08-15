@@ -1799,16 +1799,17 @@ test("release workflow enforces structural publish contracts", async () => {
     "Download verified release artifacts",
     "Reverify npm publish ref",
     "Reverify release metadata and artifacts (archive-only; no build directory)",
-    "Setup Node.js for npm publish",
-    "Ensure NPM token is configured",
     "Reverify release tag commit",
-    "Publish package",
+    "Publish package with npm Trusted Publishing",
   ]);
   const npmSteps = workflowSteps(npmPublish);
   const npmTagCheckIndex = npmSteps.findIndex(
     (step) => step.name === "Reverify release tag commit",
   );
-  assert.equal(npmSteps[npmTagCheckIndex + 1].name, "Publish package");
+  assert.equal(
+    npmSteps[npmTagCheckIndex + 1].name,
+    "Publish package with npm Trusted Publishing",
+  );
   assert.equal(
     namedStep(npmPublish, "Reverify npm publish ref").run,
     'node scripts/release-preflight.mjs npm-publish --ref "$GITHUB_REF"',
@@ -1838,14 +1839,26 @@ test("release workflow enforces structural publish contracts", async () => {
     npmTagCheck.run,
     'node scripts/verify-release-tag-sha.mjs --tag "$GITHUB_REF_NAME" --expected-sha "$EXPECTED_RELEASE_SHA"',
   );
-  const npmMutation = namedStep(npmPublish, "Publish package");
+  const npmMutation = namedStep(
+    npmPublish,
+    "Publish package with npm Trusted Publishing",
+  );
   assert.ok(
-    npmMutation.run.includes("--provenance --access public --tag latest"),
+    npmMutation.run.includes(
+      "--access public --tag latest --registry=https://registry.npmjs.org",
+    ),
   );
-  assert.equal(
-    npmMutation.env.NODE_AUTH_TOKEN,
-    "${{ secrets.NPM_AUTH_TOKEN }}",
+  assert.equal(npmMutation.env, undefined);
+  assert.ok(
+    !npmSteps.some((step) => step.name === "Setup Node.js for npm publish"),
   );
+  assert.ok(
+    !npmSteps.some((step) => step.name === "Ensure NPM token is configured"),
+  );
+  const serializedNpmPublish = JSON.stringify(npmPublish);
+  assert.ok(!serializedNpmPublish.includes("NPM_AUTH_TOKEN"));
+  assert.ok(!serializedNpmPublish.includes("NODE_AUTH_TOKEN"));
+  assert.ok(!serializedNpmPublish.includes("secrets.NPM"));
 
   assert.ok(
     !actionReferences({ jobs: { build } }).some((reference) =>

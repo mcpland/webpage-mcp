@@ -678,9 +678,10 @@ Dependabot checks GitHub Actions, the root pnpm workspace, and the Rust/WASM cra
   - `SHA256SUMS.txt`
 - Verifies that each artifact contains the reviewed `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `THIRD_PARTY_COMPONENTS.json` bytes; the extension ZIP must also contain its reviewed `THIRD_PARTY_LICENSES.txt`.
 - On tag pushes, creates a GitHub Release and uploads assets
-- On tag pushes (`v*`), publishes `webpage-mcp` to npm (requires `NPM_AUTH_TOKEN` secret)
+- On tag pushes (`v*`), publishes `webpage-mcp` to npm through [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC); no long-lived npm token or Actions secret is used
 - Manual npm publish is available via `workflow_dispatch` with `publish_npm=true` only when the selected ref is the exact matching `v<package-version>` tag. A branch dispatch that requests publishing fails closed.
-- The npm mutation job uses the `npm-publish` GitHub Environment so repository administrators can configure required reviewers or other deployment protection rules.
+- The npm mutation job uses the `npm-publish` GitHub Environment so repository administrators can configure required reviewers or other deployment protection rules. The npm package's Trusted Publisher must authorize GitHub owner `mcpland`, repository `webpage-mcp`, workflow filename `release.yml`, environment `npm-publish`, and the `npm publish` action.
+- The publish job runs on a GitHub-hosted runner with `id-token: write`, passes the npm registry explicitly, and deliberately has no `NPM_AUTH_TOKEN`/`NODE_AUTH_TOKEN` fallback. The package manifest keeps provenance enabled, and npm Trusted Publishing automatically binds the publication to the workflow identity.
 </details>
 
 ---
