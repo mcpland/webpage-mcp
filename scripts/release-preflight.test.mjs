@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   chmod,
   mkdtemp,
@@ -25,20 +25,10 @@ import {
   verifyReleaseMetadata,
   verifyNpmPublishRef,
 } from "./release-preflight.mjs";
-import {
-  EXTENSION_EXPECTED_ID_ENV,
-  EXTENSION_PUBLIC_KEY_ENV,
-  LEGACY_EXTENSION_KEY_ENV,
-  REQUIRE_EXTENSION_PUBLIC_KEY_ENV,
-  deriveChromeExtensionId,
-  resolveChromeExtensionPublicKey,
-  validateChromeExtensionPublicKey,
-} from "./extension-public-key.mjs";
 import { loadReviewedLegalFiles } from "./legal-notices.mjs";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const RELEASE_PREFLIGHT_RUNTIME_MODULES = [
-  "extension-public-key.mjs",
   "legal-notices.mjs",
   "mcp-bundle-components.mjs",
   "mcp-npm-shrinkwrap.mjs",
@@ -165,29 +155,6 @@ function actionReferences(workflow) {
     .filter((reference) => typeof reference === "string");
 }
 const VERSION = "1.2.3";
-const { publicKey: testPublicKey, privateKey: testPrivateKey } =
-  generateKeyPairSync("rsa", { modulusLength: 2048 });
-const TEST_EXTENSION_PUBLIC_KEY = testPublicKey
-  .export({ format: "der", type: "spki" })
-  .toString("base64");
-const TEST_PRIVATE_KEY_DER = testPrivateKey
-  .export({ format: "der", type: "pkcs8" })
-  .toString("base64");
-const TEST_PKCS1_PUBLIC_KEY = testPublicKey
-  .export({ format: "der", type: "pkcs1" })
-  .toString("base64");
-const { publicKey: testEcPublicKey } = generateKeyPairSync("ec", {
-  namedCurve: "prime256v1",
-});
-const TEST_EC_PUBLIC_KEY = testEcPublicKey
-  .export({ format: "der", type: "spki" })
-  .toString("base64");
-const TEST_EXTENSION_ID = deriveChromeExtensionId(TEST_EXTENSION_PUBLIC_KEY);
-const TEST_RELEASE_ENVIRONMENT = {
-  [EXTENSION_EXPECTED_ID_ENV]: TEST_EXTENSION_ID,
-  [EXTENSION_PUBLIC_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
-  [REQUIRE_EXTENSION_PUBLIC_KEY_ENV]: "true",
-};
 const MCP_PACKAGE_TEMPLATE = {
   name: "webpage-mcp",
   version: VERSION,
@@ -511,9 +478,6 @@ async function createArtifacts(rootDir, overrides = {}) {
     delete packedPackage[field];
   const extensionManifest = createExtensionManifest({
     version: overrides.extensionVersion ?? VERSION,
-    ...(overrides.extensionKey === undefined
-      ? {}
-      : { key: overrides.extensionKey }),
     ...(overrides.extensionManifest ?? {}),
   });
   const [mcpLegal, extensionLegal] = await Promise.all([
@@ -692,7 +656,7 @@ test("release identity preflights run before dependencies are installed", async 
     );
   }
   const executionRoot = await realpath(rootDir);
-  const environment = { ...process.env, ...TEST_RELEASE_ENVIRONMENT };
+  const environment = { ...process.env };
   delete environment.NODE_PATH;
   for (const [arguments_, expectedOutput] of [
     [
@@ -729,10 +693,7 @@ test("repository release metadata satisfies the publish contract", async () => {
       "utf8",
     ),
   );
-  const result = await verifyReleaseMetadata({
-    rootDir: REPOSITORY_ROOT,
-    environment: {},
-  });
+  const result = await verifyReleaseMetadata({ rootDir: REPOSITORY_ROOT });
   assert.equal(result.version, sourcePackage.version);
 });
 
@@ -817,104 +778,6 @@ test("npm publish refs must exactly match the package version tag", async (t) =>
   );
 });
 
-test("extension identity accepts only a canonical public DER key", () => {
-  assert.equal(
-    validateChromeExtensionPublicKey(TEST_EXTENSION_PUBLIC_KEY),
-    TEST_EXTENSION_PUBLIC_KEY,
-  );
-  assert.match(TEST_EXTENSION_ID, /^[a-p]{32}$/);
-  assert.equal(resolveChromeExtensionPublicKey({}), undefined);
-  assert.equal(
-    resolveChromeExtensionPublicKey(TEST_RELEASE_ENVIRONMENT),
-    TEST_EXTENSION_PUBLIC_KEY,
-  );
-
-  assert.throws(
-    () =>
-      resolveChromeExtensionPublicKey({
-        [EXTENSION_EXPECTED_ID_ENV]: TEST_EXTENSION_ID,
-        [REQUIRE_EXTENSION_PUBLIC_KEY_ENV]: "true",
-      }),
-    /is required for a formal release/,
-  );
-  assert.throws(
-    () =>
-      resolveChromeExtensionPublicKey({
-        [EXTENSION_PUBLIC_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
-        [REQUIRE_EXTENSION_PUBLIC_KEY_ENV]: "true",
-      }),
-    /CHROME_EXTENSION_EXPECTED_ID is required/,
-  );
-  assert.throws(
-    () =>
-      resolveChromeExtensionPublicKey({
-        [EXTENSION_EXPECTED_ID_ENV]: "a".repeat(32),
-        [EXTENSION_PUBLIC_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
-      }),
-    /does not derive the CHROME_EXTENSION_EXPECTED_ID identity/,
-  );
-  assert.throws(
-    () =>
-      resolveChromeExtensionPublicKey({
-        [EXTENSION_EXPECTED_ID_ENV]: "invalid",
-        [EXTENSION_PUBLIC_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
-      }),
-    /must be a 32-character Chrome extension ID/,
-  );
-  assert.throws(
-    () =>
-      resolveChromeExtensionPublicKey({
-        [LEGACY_EXTENSION_KEY_ENV]: TEST_EXTENSION_PUBLIC_KEY,
-      }),
-    /old name encouraged private-key use/,
-  );
-  assert.throws(
-    () =>
-      resolveChromeExtensionPublicKey({
-        [REQUIRE_EXTENSION_PUBLIC_KEY_ENV]: "sometimes",
-      }),
-    /must be true, false, 1, or 0/,
-  );
-  assert.throws(
-    () => validateChromeExtensionPublicKey("YOUR_PUBLIC_KEY_HERE"),
-    /private key, or a placeholder/,
-  );
-  assert.throws(
-    () =>
-      validateChromeExtensionPublicKey(
-        testPrivateKey.export({ format: "pem", type: "pkcs8" }),
-      ),
-    /never PEM text/,
-  );
-  assert.throws(
-    () =>
-      validateChromeExtensionPublicKey(
-        testPublicKey.export({ format: "pem", type: "spki" }),
-      ),
-    /never PEM text/,
-  );
-  assert.throws(
-    () => validateChromeExtensionPublicKey(TEST_PRIVATE_KEY_DER),
-    /SubjectPublicKeyInfo public key/,
-  );
-  assert.throws(
-    () => validateChromeExtensionPublicKey(TEST_PKCS1_PUBLIC_KEY),
-    /SubjectPublicKeyInfo public key/,
-  );
-  assert.throws(
-    () => validateChromeExtensionPublicKey(TEST_EC_PUBLIC_KEY),
-    /must contain an RSA public key/,
-  );
-  assert.throws(
-    () => validateChromeExtensionPublicKey("not+canonical=base64"),
-    /not canonical base64/,
-  );
-  assert.throws(
-    () => validateChromeExtensionPublicKey(`${TEST_EXTENSION_PUBLIC_KEY}\n`),
-    /without whitespace/,
-  );
-});
-
 test("local environment files are ignored without hiding the safe example", () => {
   for (const path of [
     ".env",
@@ -989,14 +852,6 @@ test("release artifact CLI reports its extension verification mode", async (t) =
   const rootDir = await createReleaseRoot(t);
   await createArtifacts(rootDir, { skipExtensionBuild: true });
   const environment = { ...process.env };
-  for (const name of [
-    EXTENSION_EXPECTED_ID_ENV,
-    EXTENSION_PUBLIC_KEY_ENV,
-    LEGACY_EXTENSION_KEY_ENV,
-    REQUIRE_EXTENSION_PUBLIC_KEY_ENV,
-  ]) {
-    delete environment[name];
-  }
   const scriptPath = join(REPOSITORY_ROOT, "scripts/release-preflight.mjs");
 
   const defaultMode = spawnSync(
@@ -1090,31 +945,6 @@ test("release artifact CLI rejects verification modes for other commands", () =>
     assert.notEqual(result.status, 0, arguments_.join(" "));
     assert.match(result.stderr, /is supported only by the artifacts command/);
   }
-});
-
-test("formal release artifacts bind the configured public key", async (t) => {
-  const rootDir = await createReleaseRoot(t);
-  const { artifactsDir } = await createArtifacts(rootDir, {
-    extensionKey: TEST_EXTENSION_PUBLIC_KEY,
-  });
-
-  const result = await verifyReleaseArtifacts({
-    rootDir,
-    artifactsDir,
-    environment: TEST_RELEASE_ENVIRONMENT,
-  });
-  assert.equal(result.extensionPublicKey, TEST_EXTENSION_PUBLIC_KEY);
-
-  const missingKeyRoot = await createReleaseRoot(t);
-  const missingKeyArtifacts = await createArtifacts(missingKeyRoot);
-  await assert.rejects(
-    verifyReleaseArtifacts({
-      rootDir: missingKeyRoot,
-      artifactsDir: missingKeyArtifacts.artifactsDir,
-      environment: TEST_RELEASE_ENVIRONMENT,
-    }),
-    /manifest public key does not match/,
-  );
 });
 
 test("release artifact verification fails closed", async (t) => {
@@ -1652,11 +1482,7 @@ test("release workflow enforces structural publish contracts", async () => {
     default: false,
     type: "boolean",
   });
-  assert.deepEqual(workflow.env, {
-    CHROME_EXTENSION_PUBLIC_KEY: "${{ vars.CHROME_EXTENSION_PUBLIC_KEY }}",
-    CHROME_EXTENSION_EXPECTED_ID: "iehgbogeakiedihodennfcnigojnncag",
-    WEBPAGE_MCP_REQUIRE_EXTENSION_PUBLIC_KEY: "true",
-  });
+  assert.equal(workflow.env, undefined);
 
   const identity = workflowJob(workflow, "release-identity");
   const platformGate = workflowJob(workflow, "release-platform-gate");

@@ -4,14 +4,11 @@ import { viteStaticCopy } from "vite-plugin-static-copy";
 import { config } from "dotenv";
 import { resolve } from "path";
 import { shouldMinifyExtensionBuild } from "./config/build-mode";
-import { resolveChromeExtensionPublicKey } from "../../scripts/extension-public-key.mjs";
 
 config({ path: resolve(process.cwd(), ".env") });
 config({ path: resolve(process.cwd(), ".env.local") });
 
-const CHROME_EXTENSION_PUBLIC_KEY = resolveChromeExtensionPublicKey(
-  process.env,
-);
+const CHROME_EXTENSION_KEY = process.env.CHROME_EXTENSION_KEY;
 // Detect dev mode early for manifest-level switches
 const IS_DEV =
   process.env.NODE_ENV !== "production" && process.env.MODE !== "production";
@@ -35,9 +32,8 @@ export default defineConfig({
   },
   manifest: {
     minimum_chrome_version: "135",
-    // Chrome accepts the base64 DER SubjectPublicKeyInfo body, never a private key.
-    // Development builds may omit it; the release workflow requires and revalidates it.
-    key: CHROME_EXTENSION_PUBLIC_KEY,
+    // Optional manifest key for deterministic unpacked test/development IDs.
+    key: CHROME_EXTENSION_KEY,
     default_locale: "zh_CN",
     name: "__MSG_extensionName__",
     description: "__MSG_extensionDescription__",

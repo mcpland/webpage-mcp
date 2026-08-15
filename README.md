@@ -681,8 +681,6 @@ Dependabot checks GitHub Actions, the root pnpm workspace, and the Rust/WASM cra
 - On tag pushes (`v*`), publishes `webpage-mcp` to npm (requires `NPM_AUTH_TOKEN` secret)
 - Manual npm publish is available via `workflow_dispatch` with `publish_npm=true` only when the selected ref is the exact matching `v<package-version>` tag. A branch dispatch that requests publishing fails closed.
 - The npm mutation job uses the `npm-publish` GitHub Environment so repository administrators can configure required reviewers or other deployment protection rules.
-- Formal release builds require the Actions repository variable `CHROME_EXTENSION_PUBLIC_KEY`. It must contain the single-line base64 DER public-key body from Chrome Web Store, never a PEM or private key, and must derive the configured official extension ID. Local builds may omit it, but then unpacked builds do not use the official stable extension ID.
-
 </details>
 
 ---

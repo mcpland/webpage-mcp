@@ -8,10 +8,6 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
-import {
-  resolveChromeExtensionPublicKey,
-  validateChromeExtensionPublicKey,
-} from "./extension-public-key.mjs";
 import { loadReviewedLegalFiles } from "./legal-notices.mjs";
 import { validateUnifiedReleaseVersion } from "./unified-release-version.mjs";
 import {
@@ -228,10 +224,8 @@ function normalizeReleaseTag(tag) {
 export async function verifyReleaseMetadata({
   rootDir = process.cwd(),
   tag,
-  environment = process.env,
 } = {}) {
   const tagVersion = normalizeReleaseTag(tag);
-  const extensionPublicKey = resolveChromeExtensionPublicKey(environment);
   const packages = [];
 
   for (const releasePackage of RELEASE_PACKAGES) {
@@ -279,14 +273,12 @@ export async function verifyReleaseMetadata({
     version: expectedVersion,
     tagVersion,
     packages,
-    extensionPublicKey,
   };
 }
 
 export async function verifyNpmPublishRef({
   rootDir = process.cwd(),
   ref,
-  environment = process.env,
 } = {}) {
   const prefix = "refs/tags/";
   invariant(
@@ -297,7 +289,6 @@ export async function verifyNpmPublishRef({
   const metadata = await verifyReleaseMetadata({
     rootDir,
     tag,
-    environment,
   });
   const expectedRef = `${prefix}v${metadata.version}`;
   invariant(
@@ -1139,7 +1130,6 @@ export async function verifyReleaseArtifacts({
   extensionBuildDir,
   extensionVerificationMode = EXTENSION_VERIFICATION_BUILD_MATCH,
   tag,
-  environment = process.env,
 } = {}) {
   invariant(artifactsDir, "artifactsDir is required");
   invariant(
@@ -1147,7 +1137,7 @@ export async function verifyReleaseArtifacts({
       extensionVerificationMode === EXTENSION_VERIFICATION_ARCHIVE_ONLY,
     `extensionVerificationMode must be ${EXTENSION_VERIFICATION_BUILD_MATCH} or ${EXTENSION_VERIFICATION_ARCHIVE_ONLY}`,
   );
-  const metadata = await verifyReleaseMetadata({ rootDir, tag, environment });
+  const metadata = await verifyReleaseMetadata({ rootDir, tag });
   const mcpRelativePath = `mcp/webpage-mcp-${metadata.version}.tgz`;
   const extensionRelativePath = `extension/webpage-mcp-connector-${metadata.version}-chrome-extension.zip`;
   const expectedFiles = [
@@ -1218,16 +1208,6 @@ export async function verifyReleaseArtifacts({
     packedExtensionVersion === metadata.version,
     `Extension manifest version ${packedExtensionVersion} does not match release version ${metadata.version}`,
   );
-  const packedExtensionPublicKey =
-    extensionManifest.key === undefined
-      ? undefined
-      : validateChromeExtensionPublicKey(extensionManifest.key);
-  if (metadata.extensionPublicKey !== undefined) {
-    invariant(
-      packedExtensionPublicKey === metadata.extensionPublicKey,
-      "Extension manifest public key does not match CHROME_EXTENSION_PUBLIC_KEY",
-    );
-  }
   verifyExtensionManifest({ manifest: extensionManifest, zipEntries });
   const extensionBuildCompared =
     extensionVerificationMode === EXTENSION_VERIFICATION_BUILD_MATCH

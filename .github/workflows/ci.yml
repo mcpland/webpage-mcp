@@ -247,10 +247,10 @@ jobs:
         run: |
           set -euo pipefail
           SMOKE_IDENTITY="$(node scripts/browser-native-smoke-identity.mjs)"
-          CHROME_EXTENSION_PUBLIC_KEY="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.encodedPublicKey)' "$SMOKE_IDENTITY")"
+          CHROME_EXTENSION_KEY="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.encodedPublicKey)' "$SMOKE_IDENTITY")"
           SMOKE_EXTENSION_ID="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.extensionId)' "$SMOKE_IDENTITY")"
           echo "SMOKE_EXTENSION_ID=$SMOKE_EXTENSION_ID" >> "$GITHUB_ENV"
-          export CHROME_EXTENSION_PUBLIC_KEY
+          export CHROME_EXTENSION_KEY
           pnpm build:shared
           pnpm build:mcp
           pnpm build:extension

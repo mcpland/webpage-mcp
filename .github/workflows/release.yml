@@ -15,12 +15,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # This is the public DER-SPKI body from Chrome Web Store, not a secret/private key.
-  CHROME_EXTENSION_PUBLIC_KEY: ${{ vars.CHROME_EXTENSION_PUBLIC_KEY }}
-  CHROME_EXTENSION_EXPECTED_ID: iehgbogeakiedihodennfcnigojnncag
-  WEBPAGE_MCP_REQUIRE_EXTENSION_PUBLIC_KEY: "true"
-
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
