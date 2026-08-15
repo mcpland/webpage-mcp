@@ -7,6 +7,7 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -18,8 +19,8 @@ import { fileURLToPath } from "node:url";
 import { deflateRawSync, gzipSync } from "node:zlib";
 import { parseDocument } from "yaml";
 
+import { findExternalBundledDependency } from "./packed-javascript-policy.mjs";
 import {
-  findExternalBundledDependency,
   verifyReleaseArtifacts,
   verifyReleaseMetadata,
   verifyNpmPublishRef,
@@ -36,6 +37,16 @@ import {
 import { loadReviewedLegalFiles } from "./legal-notices.mjs";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const RELEASE_PREFLIGHT_RUNTIME_MODULES = [
+  "extension-public-key.mjs",
+  "legal-notices.mjs",
+  "mcp-bundle-components.mjs",
+  "mcp-npm-shrinkwrap.mjs",
+  "npm-license-inventory.mjs",
+  "packed-javascript-policy.mjs",
+  "release-preflight.mjs",
+  "unified-release-version.mjs",
+];
 
 test("bundled dependency scanning distinguishes executable imports from codegen strings", () => {
   const reviewed = new Set(["ajv", "fast-uri"]);
@@ -672,6 +683,82 @@ test("release metadata requires aligned package and tag versions", async (t) => 
   );
 });
 
+test("release identity preflights run before dependencies are installed", async (t) => {
+  const rootDir = await createReleaseRoot(t);
+  for (const moduleName of RELEASE_PREFLIGHT_RUNTIME_MODULES) {
+    await writeFile(
+      join(rootDir, "scripts", moduleName),
+      await readFile(join(REPOSITORY_ROOT, "scripts", moduleName)),
+    );
+  }
+  const executionRoot = await realpath(rootDir);
+  const environment = { ...process.env, ...TEST_RELEASE_ENVIRONMENT };
+  delete environment.NODE_PATH;
+  for (const [arguments_, expectedOutput] of [
+    [
+      ["metadata", "--tag", `v${VERSION}`],
+      `Release metadata verified for version ${VERSION}.`,
+    ],
+    [
+      ["npm-publish", "--ref", `refs/tags/v${VERSION}`],
+      `npm publish ref verified for version ${VERSION}.`,
+    ],
+  ]) {
+    const result = spawnSync(
+      process.execPath,
+      [join(executionRoot, "scripts/release-preflight.mjs"), ...arguments_],
+      {
+        cwd: executionRoot,
+        encoding: "utf8",
+        env: environment,
+      },
+    );
+    assert.equal(
+      result.status,
+      0,
+      `dependency-free release preflight failed:\n${result.stderr}${result.stdout}`,
+    );
+    assert.ok(result.stdout.includes(expectedOutput));
+  }
+});
+
+test("repository release metadata satisfies the publish contract", async () => {
+  const sourcePackage = JSON.parse(
+    await readFile(
+      join(REPOSITORY_ROOT, "app/mcp-server/package.json"),
+      "utf8",
+    ),
+  );
+  const result = await verifyReleaseMetadata({
+    rootDir: REPOSITORY_ROOT,
+    environment: {},
+  });
+  assert.equal(result.version, sourcePackage.version);
+});
+
+test("release metadata requires dual-distributed dependency versions to match", async (t) => {
+  const rootDir = await createReleaseRoot(t);
+  const bundleComponentsPath = join(
+    rootDir,
+    "scripts/mcp-bundle-components.json",
+  );
+  const bundleComponents = JSON.parse(
+    await readFile(bundleComponentsPath, "utf8"),
+  );
+  await writeJson(
+    bundleComponentsPath,
+    Object.fromEntries(
+      Object.entries({ ...bundleComponents, chalk: "5.4.2" }).sort(
+        ([left], [right]) => left.localeCompare(right),
+      ),
+    ),
+  );
+  await assert.rejects(
+    verifyReleaseMetadata({ rootDir }),
+    /dual-distributed dependency chalk must match bundled version 5\.4\.2/,
+  );
+});
+
 test("release metadata accepts only stable Chrome-safe versions", async (t) => {
   const stableBoundaryRoot = await createReleaseRoot(t, {
     mcp: "65535.65535.65535",
@@ -1227,6 +1314,48 @@ test("release artifact verification fails closed", async (t) => {
 });
 
 test("release artifacts must contain runnable npm and extension payloads", async (t) => {
+  await t.test(
+    "when a dependency is intentionally both bundled and installed",
+    async (t) => {
+      const rootDir = await createReleaseRoot(t);
+      const bundleComponentsPath = join(
+        rootDir,
+        "scripts/mcp-bundle-components.json",
+      );
+      const bundleComponents = JSON.parse(
+        await readFile(bundleComponentsPath, "utf8"),
+      );
+      await writeJson(
+        bundleComponentsPath,
+        Object.fromEntries(
+          Object.entries({ ...bundleComponents, chalk: "5.4.1" }).sort(
+            ([left], [right]) => left.localeCompare(right),
+          ),
+        ),
+      );
+      const { artifactsDir } = await createArtifacts(rootDir, {
+        extraMcpEntries: {
+          "package/dist/runtime-peer.js": 'require("chalk");\n',
+        },
+      });
+      const result = await verifyReleaseArtifacts({ rootDir, artifactsDir });
+      assert.equal(result.version, VERSION);
+    },
+  );
+
+  await t.test("when a bundled-only dependency remains external", async (t) => {
+    const rootDir = await createReleaseRoot(t);
+    const { artifactsDir } = await createArtifacts(rootDir, {
+      extraMcpEntries: {
+        "package/dist/external-bundle.js": 'require("ajv");\n',
+      },
+    });
+    await assert.rejects(
+      verifyReleaseArtifacts({ rootDir, artifactsDir }),
+      /leaves a bundled-only dependency external/,
+    );
+  });
+
   await t.test(
     "when the published dependency closure is absent or drifts",
     async (t) => {
