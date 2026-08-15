@@ -27,7 +27,7 @@
     "dist"
   ],
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.2.0",
     "@typescript-eslint/parser": "^8.32.0",
     "tsup": "^8.4.0"
   },
