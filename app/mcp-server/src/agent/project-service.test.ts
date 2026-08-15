@@ -59,7 +59,7 @@ describe("validateRootPath", () => {
   it("rejects prefix-matching sibling paths outside the allowed workspace base", async () => {
     const allowedBase = await createTempDir("project-service-base-");
     const { validateRootPath } = await loadProjectService(allowedBase);
-    const siblingPath = `${allowedBase}-evil/project`;
+    const siblingPath = path.join(`${allowedBase}-evil`, "project");
 
     const result = await validateRootPath(siblingPath);
 
