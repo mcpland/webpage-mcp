@@ -11,6 +11,10 @@ import {
 } from './claude-process';
 import { BoundedDiagnosticBuffer } from './diagnostic-redaction';
 
+vi.mock('./trusted-executable', () => ({
+  resolveTrustedExecutable: (command: string) => command,
+}));
+
 class FakeClaudeChildProcess extends EventEmitter {
   public readonly stdin = new PassThrough();
   public readonly stdout = new PassThrough();
