@@ -23,7 +23,7 @@ export const LEGAL_ARTIFACTS = Object.freeze({
     inventorySource: NPM_INVENTORY_ARTIFACTS.mcp.inventorySource,
     archiveInventory: NPM_INVENTORY_ARTIFACTS.mcp.archiveInventory,
     inventorySha256:
-      "e10a2c9dbc57261942c22e19550460d26a0fdbaa969138e174c6f4e39e8a24bf",
+      "b3699eeb1180a81eab2a6171dede728b4d9197323de5518fa5469d14c2eaa3a9",
     requiredMarkers: Object.freeze([
       "THIRD_PARTY_COMPONENTS.json",
       "@anthropic-ai/claude-agent-sdk",
