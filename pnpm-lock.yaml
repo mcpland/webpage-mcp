@@ -209,8 +209,8 @@ importers:
         specifier: 1.0.1587905
         version: 1.0.1587905
       commander:
-        specifier: 13.1.0
-        version: 13.1.0
+        specifier: 15.0.0
+        version: 15.0.0
       cross-spawn:
         specifier: 7.0.6
         version: 7.0.6
@@ -2019,6 +2019,10 @@ packages:
   commander@13.1.0:
     resolution: {integrity: sha512-/rFeCpNJQbhSZjGVwO9RFV3xPqbnERS8MmIQzCtD/zl6gpJuV/bMLuN92oG3F7d8oDEHHRrujSXNUr8fpjntKw==}
     engines: {node: '>=18'}
+
+  commander@15.0.0:
+    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
+    engines: {node: '>=22.12.0'}
 
   commander@2.9.0:
     resolution: {integrity: sha512-bmkUukX8wAOjHdN26xj5c4ctEV22TQ7dQYhSmuckKhToXrkUn0iIaolHdIxYYqD55nhpSPA9zPQ1yP57GdXP2A==}
@@ -6631,6 +6635,8 @@ snapshots:
   colorette@2.0.20: {}
 
   commander@13.1.0: {}
+
+  commander@15.0.0: {}
 
   commander@2.9.0:
     dependencies:
