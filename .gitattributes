@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+# Keep Windows command wrappers native while preserving canonical LF bytes for
+# JSON, TOML, YAML, JavaScript, and other reviewed text artifacts.
+*.bat text eol=crlf
