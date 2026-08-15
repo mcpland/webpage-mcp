@@ -38,6 +38,16 @@ const RELEASE_PREFLIGHT_RUNTIME_MODULES = [
   "unified-release-version.mjs",
 ];
 
+test("workspace build filter is cross-platform and fails closed", async () => {
+  const rootPackage = JSON.parse(
+    await readFile(join(REPOSITORY_ROOT, "package.json"), "utf8"),
+  );
+  assert.equal(
+    rootPackage.scripts?.build,
+    "pnpm -r --filter=!@webpage-mcp/wasm-simd --fail-if-no-match build",
+  );
+});
+
 test("bundled dependency scanning distinguishes executable imports from codegen strings", () => {
   const reviewed = new Set(["ajv", "fast-uri"]);
   assert.equal(

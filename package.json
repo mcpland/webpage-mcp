@@ -11,7 +11,7 @@
     "build:mcp": "pnpm --filter webpage-mcp build",
     "build:extension": "pnpm --filter webpage-mcp-connector build",
     "build:wasm": "pnpm --filter @webpage-mcp/wasm-simd build",
-    "build": "pnpm -r --filter='!@webpage-mcp/wasm-simd' build",
+    "build": "pnpm -r --filter=!@webpage-mcp/wasm-simd --fail-if-no-match build",
     "zip": "pnpm build && pnpm --filter webpage-mcp-connector zip",
     "copy:wasm": "pnpm --filter @webpage-mcp/wasm-simd copy:artifacts",
     "verify:wasm": "pnpm --filter @webpage-mcp/wasm-simd verify:artifacts",
