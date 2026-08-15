@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -135,11 +136,30 @@ describe("stable runtime dependencies", () => {
       expect(isPathInside(canonicalNodeModulesDir, resolvedPath)).toBe(true);
     }
 
-    const BetterSqlite3 = runtimeRequire("better-sqlite3") as new (
-      filename: string,
-    ) => { close: () => void };
-    const database = new BetterSqlite3(":memory:");
-    database.close();
+    const sqliteSmoke = spawnSync(
+      process.execPath,
+      [
+        "--input-type=commonjs",
+        "--eval",
+        [
+          'const { createRequire } = require("node:module");',
+          'const path = require("node:path");',
+          'const runtimeRequire = createRequire(path.join(process.argv[1], ".sqlite-smoke.cjs"));',
+          'const BetterSqlite3 = runtimeRequire("better-sqlite3");',
+          'const database = new BetterSqlite3(":memory:");',
+          "database.close();",
+        ].join("\n"),
+        configuredNodeModulesDir,
+      ],
+      {
+        encoding: "utf8",
+        timeout: 30_000,
+        windowsHide: true,
+      },
+    );
+    expect(sqliteSmoke.error).toBeUndefined();
+    expect(sqliteSmoke.signal).toBeNull();
+    expect(sqliteSmoke.status, sqliteSmoke.stderr).toBe(0);
 
     const recovered = await installStableRuntimeDependencies(
       runtimeDistDir,
