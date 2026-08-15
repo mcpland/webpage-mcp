@@ -35,11 +35,11 @@ function encodeNativeMessage(message) {
 
 function wrapperCommand(wrapperPath) {
   if (process.platform === "win32") {
-    // Keep the batch path as one quoted /c command. The Windows wrapper test
-    // exercises this same form from a directory containing cmd metacharacters.
+    // /s strips one outer quote pair from the /c command string. Keep a second
+    // pair around the batch path so cmd treats path metacharacters as data.
     return {
       command: process.env.ComSpec || "cmd.exe",
-      args: ["/d", "/s", "/c", `"${wrapperPath}"`],
+      args: ["/d", "/s", "/c", `""${wrapperPath}""`],
     };
   }
   return { command: wrapperPath, args: [] };

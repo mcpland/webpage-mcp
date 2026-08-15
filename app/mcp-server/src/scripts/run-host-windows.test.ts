@@ -50,7 +50,7 @@ describe.skipIf(process.platform !== "win32")(
         const inheritedPath = process.env.PATH ?? "";
         const result = spawnSync(
           process.env.ComSpec ?? "cmd.exe",
-          ["/d", "/s", "/c", `"${join(root, "run_host.bat")}"`],
+          ["/d", "/s", "/c", `""${join(root, "run_host.bat")}""`],
           {
             encoding: "utf8",
             env: {
@@ -65,7 +65,10 @@ describe.skipIf(process.platform !== "win32")(
         );
 
         expect(result.error).toBeUndefined();
-        expect(result.status).toBe(0);
+        expect(
+          result.status,
+          `${result.stdout}\n${result.stderr}`.slice(0, 4096),
+        ).toBe(0);
         await expect(readFile(markerPath, "utf8")).resolves.toBe("ok");
 
         const logDir = join(root, "webpage-mcp", "logs");
