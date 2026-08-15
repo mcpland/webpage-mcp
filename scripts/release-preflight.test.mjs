@@ -1833,6 +1833,10 @@ test("release native wrapper smoke exercises the platform process boundary", asy
   assert.match(source, /response\.type === "pong_to_extension"/);
   assert.match(source, /WEBPAGE_MCP_NODE_PATH: process\.execPath/);
   assert.match(source, /WEBPAGE_MCP_NATIVE_SOCKET: socketPath\(smokeRoot\)/);
+  assert.match(
+    source,
+    /windowsVerbatimArguments: process\.platform === "win32"/,
+  );
   assert.match(source, /contents withheld/);
   assert.doesNotMatch(source, /stderr\.(?:subarray|toString)/);
 });

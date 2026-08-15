@@ -161,6 +161,7 @@ function verifyNativeHostWrapper() {
       maxBuffer: MAX_OUTPUT_BYTES,
       timeout: SMOKE_TIMEOUT_MS,
       windowsHide: true,
+      windowsVerbatimArguments: process.platform === "win32",
     });
 
     if (result.error) {
