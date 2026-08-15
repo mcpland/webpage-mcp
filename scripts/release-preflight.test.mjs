@@ -1704,6 +1704,27 @@ test("release workflow enforces structural publish contracts", async () => {
         "fetch-depth": 0,
       },
     );
+    assert.match(
+      namedStep(publishJob, "Setup pnpm for publish verification").uses,
+      /^pnpm\/action-setup@[a-f0-9]{40}$/,
+    );
+    assert.deepEqual(
+      namedStep(publishJob, "Setup pnpm for publish verification").with,
+      { run_install: false },
+    );
+    assert.deepEqual(
+      namedStep(publishJob, "Setup Node.js for publish verification").with,
+      { "node-version": 24, cache: "pnpm" },
+    );
+    const installVerificationDependencies = namedStep(
+      publishJob,
+      "Install publish verification dependencies",
+    );
+    assert.equal(
+      installVerificationDependencies.run,
+      "pnpm install --frozen-lockfile --ignore-scripts",
+    );
+    assert.equal(installVerificationDependencies.env, undefined);
     assert.deepEqual(
       namedStep(publishJob, "Download verified release artifacts").with,
       {
@@ -1717,7 +1738,10 @@ test("release workflow enforces structural publish contracts", async () => {
   assert.deepEqual(githubPublish.environment, { name: "github-release" });
   assert.deepEqual(githubPublish.permissions, { contents: "write" });
   assertStepOrder(githubPublish, [
+    "Setup pnpm for publish verification",
     "Setup Node.js for publish verification",
+    "Install publish verification dependencies",
+    "Download verified release artifacts",
     "Reverify release metadata and artifacts (archive-only; no build directory)",
     "Reverify release tag commit",
     "Publish GitHub Release",
@@ -1769,6 +1793,10 @@ test("release workflow enforces structural publish contracts", async () => {
     "id-token": "write",
   });
   assertStepOrder(npmPublish, [
+    "Setup pnpm for publish verification",
+    "Setup Node.js for publish verification",
+    "Install publish verification dependencies",
+    "Download verified release artifacts",
     "Reverify npm publish ref",
     "Reverify release metadata and artifacts (archive-only; no build directory)",
     "Setup Node.js for npm publish",
@@ -1784,6 +1812,22 @@ test("release workflow enforces structural publish contracts", async () => {
   assert.equal(
     namedStep(npmPublish, "Reverify npm publish ref").run,
     'node scripts/release-preflight.mjs npm-publish --ref "$GITHUB_REF"',
+  );
+  for (const verificationStepName of [
+    "Install publish verification dependencies",
+    "Reverify npm publish ref",
+    "Reverify release metadata and artifacts (archive-only; no build directory)",
+  ]) {
+    const verificationEnv =
+      namedStep(npmPublish, verificationStepName).env ?? {};
+    assert.equal(verificationEnv.NODE_AUTH_TOKEN, undefined);
+    assert.equal(verificationEnv.NPM_AUTH_TOKEN, undefined);
+  }
+  assert.equal(
+    namedStep(npmPublish, "Setup Node.js for publish verification").with[
+      "registry-url"
+    ],
+    undefined,
   );
   const npmTagCheck = namedStep(npmPublish, "Reverify release tag commit");
   assert.equal(
