@@ -48,6 +48,8 @@ describe.skipIf(process.platform !== "win32")(
         );
 
         const inheritedPath = process.env.PATH ?? "";
+        // `/s /c` needs the doubled outer quotes to reach cmd.exe verbatim;
+        // Node's default C argv escaping would insert backslashes instead.
         const result = spawnSync(
           process.env.ComSpec ?? "cmd.exe",
           ["/d", "/s", "/c", `""${join(root, "run_host.bat")}""`],
@@ -61,6 +63,7 @@ describe.skipIf(process.platform !== "win32")(
               WEBPAGE_MCP_NODE_PATH: process.execPath,
             },
             timeout: 30_000,
+            windowsVerbatimArguments: true,
           },
         );
 
