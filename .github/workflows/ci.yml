@@ -116,11 +116,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint and typecheck
-        run: |
-          pnpm lint
-          pnpm typecheck
-          pnpm --filter webpage-mcp-connector compile
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck (shared + native)
+        run: pnpm typecheck
+
+      - name: Typecheck (extension)
+        run: pnpm --filter webpage-mcp-connector compile
 
       - name: Test release policies
         run: pnpm test:release

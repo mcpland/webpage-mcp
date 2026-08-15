@@ -164,10 +164,11 @@ jobs:
         if: matrix.enforce_coverage
         run: pnpm lint
 
-      - name: Typecheck workspace
-        run: |
-          pnpm typecheck
-          pnpm --filter webpage-mcp-connector compile
+      - name: Typecheck (shared + native)
+        run: pnpm typecheck
+
+      - name: Typecheck (extension)
+        run: pnpm --filter webpage-mcp-connector compile
 
       - name: Test release policies
         run: pnpm test:release
