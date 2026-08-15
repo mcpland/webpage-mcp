@@ -25,16 +25,16 @@
 ## How It Works
 
 ```
-┌──────────────┐  MCP stdio (default)  ┌────────────────────┐
-│ Local Client ├───────────────────────►│ webpage-mcp-stdio  │──┐
-└──────────────┘                        └────────────────────┘  │
-                                                                ├─ authenticated local IPC
-┌──────────────┐  Streamable HTTP       ┌────────────────────┐  │
-│ Remote Client├────── (opt-in) ───────►│ webpage-mcp-server │──┘
-└──────────────┘                        └────────────────────┘
-                                                     │
-                                           Chrome Native Messaging
-                                                     │
+┌──────────────┐  MCP stdio (default)    ┌────────────────────┐
+│ Local Client ├────────────────────────►│ webpage-mcp-stdio  │──┐
+└──────────────┘                         └────────────────────┘  │
+                                                                 ├─ authenticated local IPC
+┌──────────────┐  Streamable HTTP        ┌────────────────────┐  │
+│ Remote Client├────── (opt-in) ────────►│ webpage-mcp-server │──┘
+└──────────────┘                         └────────────────────┘
+                                                      │
+                                            Chrome Native Messaging
+                                                      │
 ┌─────────────┐       Chrome APIs          ┌──────────▼───────┐
 │ Your Webpage│◄───────────────────────────┤  MCP Connector   │
 └─────────────┘        DevTools            └──────────────────┘
@@ -470,24 +470,11 @@ pnpm typecheck     # TypeScript type checking
 
 ### Dependency License Inventory
 
-`pnpm legal:check` verifies the committed, full production npm closures against
-the frozen pnpm graph and lockfile without using the network. It also checks
-locally available package metadata and license evidence, the exact Cargo notice
-closure, and the reviewed legal-file digests.
+`pnpm legal:check` verifies the committed, full production npm closures against the frozen pnpm graph and lockfile without using the network. It also checks locally available package metadata and license evidence, the exact Cargo notice closure, and the reviewed legal-file digests.
 
-After an intentional dependency or lockfile change, refresh the inventories
-with `node scripts/legal-notices.mjs refresh`. Refresh downloads registry
-tarballs without running dependency lifecycle scripts and accepts evidence only
-after the complete tarball matches the lockfile SHA-512 integrity. Review the
-resulting `THIRD_PARTY_COMPONENTS.json` files and notice changes before
-committing them.
+After an intentional dependency or lockfile change, refresh the inventories with `node scripts/legal-notices.mjs refresh`. Refresh downloads registry tarballs without running dependency lifecycle scripts and accepts evidence only after the complete tarball matches the lockfile SHA-512 integrity. Review the resulting `THIRD_PARTY_COMPONENTS.json` files and notice changes before committing them.
 
-The machine-readable inventories describe production install/build inputs;
-they do not assert that every component is emitted into a bundle. The release
-artifacts include those inventories byte-for-byte. Human-readable
-`THIRD_PARTY_NOTICES.md` files summarize distribution boundaries, while the
-extension's `THIRD_PARTY_LICENSES.txt` covers emitted or vendored code and its
-attributions.
+The machine-readable inventories describe production install/build inputs; they do not assert that every component is emitted into a bundle. The release artifacts include those inventories byte-for-byte. Human-readable `THIRD_PARTY_NOTICES.md` files summarize distribution boundaries, while the extension's `THIRD_PARTY_LICENSES.txt` covers emitted or vendored code and its attributions.
 
 ---
 
@@ -597,11 +584,7 @@ npx -y webpage-mcp@latest doctor --fix     # Auto-fix common issues
 
 ## CI/CD
 
-Chrome Web Store submission and rollout are manual external steps. Before every
-upload, review submission, or rollout, complete the
-[Chrome Web Store release and privacy checklist](docs/CHROME_WEB_STORE_RELEASE.md);
-the repository workflow does not validate Developer Dashboard fields or the
-live store listing.
+Chrome Web Store submission and rollout are manual external steps. Before every upload, review submission, or rollout, complete the [Chrome Web Store release and privacy checklist](docs/CHROME_WEB_STORE_RELEASE.md); the repository workflow does not validate Developer Dashboard fields or the live store listing.
 
 <details>
 <summary><strong>GitHub Actions workflows</strong></summary>
@@ -609,67 +592,34 @@ live store listing.
 **`ci.yml`**
 
 - Trigger: pushes and pull requests on `main`/`develop`
-- Runs: frozen install, production npm and Rust advisory gates, lint,
-  typecheck (mcp/shared + extension), tests, build
+- Runs: frozen install, production npm and Rust advisory gates, lint, typecheck (mcp/shared + extension), tests, build
 
 **`dependency-security.yml`**
 
 - Trigger: daily at 04:17 UTC and manual dispatch
-- Audits the committed production pnpm and Cargo lockfile graphs without
-  installing project dependencies or executing dependency lifecycle scripts
-- Uses the same fail-closed npm and Rust advisory checks as CI and release, so
-  newly disclosed advisories are detected even when source code is unchanged
+- Audits the committed production pnpm and Cargo lockfile graphs without installing project dependencies or executing dependency lifecycle scripts
+- Uses the same fail-closed npm and Rust advisory checks as CI and release, so newly disclosed advisories are detected even when source code is unchanged
 
-The Rust gate installs the Linux x64 musl `cargo-deny` binary described by
-`scripts/cargo-deny-tool.json`. The installer accepts only GitHub's fixed HTTPS
-release-asset redirect, streams into a bounded temporary file, verifies both
-the archive and extracted executable by exact byte count and SHA-256, installs
-mode `0755` atomically, and probes the pinned version through an absolute path.
-The workflow first validates the Cargo graph with `cargo metadata --locked`,
-then runs `cargo-deny` without its `--locked`/`--offline` flags so the RustSec
-database is refreshed on every gate; download, refresh, and scan failures remain
-fatal.
+The Rust gate installs the Linux x64 musl `cargo-deny` binary described by `scripts/cargo-deny-tool.json`. The installer accepts only GitHub's fixed HTTPS release-asset redirect, streams into a bounded temporary file, verifies both the archive and extracted executable by exact byte count and SHA-256, installs mode `0755` atomically, and probes the pinned version through an absolute path. The workflow first validates the Cargo graph with `cargo metadata --locked`, then runs `cargo-deny` without its `--locked`/`--offline` flags so the RustSec database is refreshed on every gate; download, refresh, and scan failures remain fatal.
 
-WASM rebuild gates apply the same byte-verification pipeline to the official
-Linux x64 musl `wasm-pack` release described by `scripts/wasm-pack-tool.json`.
-Both its archive and extracted executable are size- and SHA-256-pinned, and the
-artifact builder invokes that verified executable by absolute path. Exact WASM
-byte reproducibility is a Linux x64 contract enforced by `artifacts.json`;
-other hosts can verify the committed portable runtime with
-`pnpm verify:wasm:runtime`.
+WASM rebuild gates apply the same byte-verification pipeline to the official Linux x64 musl `wasm-pack` release described by `scripts/wasm-pack-tool.json`. Both its archive and extracted executable are size- and SHA-256-pinned, and the artifact builder invokes that verified executable by absolute path. Exact WASM byte reproducibility is a Linux x64 contract enforced by `artifacts.json`; other hosts can verify the committed portable runtime with `pnpm verify:wasm:runtime`.
 
-Dependabot checks GitHub Actions, the root pnpm workspace, and the Rust/WASM
-crate weekly. Live advisory databases can make an unchanged commit fail a
-subsequent CI or release run; resolve or explicitly review the advisory rather
-than weakening the gate.
+Dependabot checks GitHub Actions, the root pnpm workspace, and the Rust/WASM crate weekly. Live advisory databases can make an unchanged commit fail a subsequent CI or release run; resolve or explicitly review the advisory rather than weakening the gate.
 
 **`release.yml`**
 
-- Trigger: tag push `v*` and manual dispatch. A branch dispatch with
-  `publish_npm=false` remains available as a build-only release dry run.
-- Before artifact construction, the workflow binds the event to one immutable
-  commit SHA and requires Linux, Windows, and macOS gates on that exact commit.
-  Every gate performs a frozen workspace install, typechecks, tests, builds,
-  and exchanges a native-message ping/pong through the built platform wrapper.
-  Production npm and Rust advisory checks and coverage are collected only by
-  the Linux gate rather than repeated on all three operating systems.
+- Trigger: tag push `v*` and manual dispatch. A branch dispatch with `publish_npm=false` remains available as a build-only release dry run.
+- Before artifact construction, the workflow binds the event to one immutable commit SHA and requires Linux, Windows, and macOS gates on that exact commit. Every gate performs a frozen workspace install, typechecks, tests, builds, and exchanges a native-message ping/pong through the built platform wrapper. Production npm and Rust advisory checks and coverage are collected only by the Linux gate rather than repeated on all three operating systems.
 - Unified releases accept stable `x.y.z` versions only. Prerelease (`-rc.1`, `-beta.1`) and build-metadata (`+build.1`) versions are rejected before any artifact or publish step because Chrome's update version is numeric and must stay aligned with the npm package version.
 - Builds release assets:
   - Chrome extension zip (`app/chrome-extension/.output/webpage-mcp-connector-<version>-chrome-extension.zip`)
   - MCP server npm tarball (`.tgz`)
   - `SHA256SUMS.txt`
-- Verifies that each artifact contains the reviewed `LICENSE`,
-  `THIRD_PARTY_NOTICES.md`, and `THIRD_PARTY_COMPONENTS.json` bytes; the
-  extension ZIP must also contain its reviewed `THIRD_PARTY_LICENSES.txt`.
+- Verifies that each artifact contains the reviewed `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `THIRD_PARTY_COMPONENTS.json` bytes; the extension ZIP must also contain its reviewed `THIRD_PARTY_LICENSES.txt`.
 - On tag pushes, creates a GitHub Release and uploads assets
 - On tag pushes (`v*`), publishes `webpage-mcp` to npm (requires `NPM_AUTH_TOKEN` secret)
-- Manual npm publish is available via `workflow_dispatch` with
-  `publish_npm=true` only when the selected ref is the exact matching
-  `v<package-version>` tag. A branch dispatch that requests publishing fails
-  closed.
-- The npm mutation job uses the `npm-publish` GitHub Environment so repository
-  administrators can configure required reviewers or other deployment
-  protection rules.
+- Manual npm publish is available via `workflow_dispatch` with `publish_npm=true` only when the selected ref is the exact matching `v<package-version>` tag. A branch dispatch that requests publishing fails closed.
+- The npm mutation job uses the `npm-publish` GitHub Environment so repository administrators can configure required reviewers or other deployment protection rules.
 - Formal release builds require the Actions repository variable `CHROME_EXTENSION_PUBLIC_KEY`. It must contain the single-line base64 DER public-key body from Chrome Web Store, never a PEM or private key, and must derive the configured official extension ID. Local builds may omit it, but then unpacked builds do not use the official stable extension ID.
 
 </details>
