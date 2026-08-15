@@ -4,7 +4,7 @@ The browser side always uses the native bridge:
 
 - Chrome Extension <-> MCP Server: Chrome Native Messaging
 - Local MCP Client <-> MCP Server: stdio (`webpage-mcp-stdio`) by default
-- Remote MCP Client <-> MCP Server: optional Streamable HTTP (`webpage-mcp-server`)
+- Local or Remote HTTP MCP Client <-> MCP Server: optional Streamable HTTP (`webpage-mcp-server`)
 - Both MCP entries <-> Native Messaging host: authenticated local IPC socket/pipe
 
 No HTTP port is required for the default setup. A listener exists only when `webpage-mcp-server` is explicitly started. If it is not running, the stdio/native path is unchanged.
@@ -38,7 +38,9 @@ Then fully restart Chrome (quit all Chrome processes) before retrying.
 
 3. Keep Chrome open with the extension enabled.
 
-4. Ensure your MCP client uses `npx -y -p webpage-mcp@latest webpage-mcp-stdio`.
+4. For stdio, ensure the MCP client uses
+   `npx -y -p webpage-mcp@latest webpage-mcp-stdio`. For HTTP, confirm that
+   `webpage-mcp-server` is running separately and that the client URL ends in `/mcp`.
 
 ## Is Register One-Time?
 
@@ -92,7 +94,7 @@ export WEBPAGE_MCP_NATIVE_SOCKET="$HOME/.webpage-mcp/native-custom.sock"
 
 Use the same env for Chrome-launched native host environment and MCP client environment.
 
-## Remote Streamable HTTP Cannot Connect
+## Streamable HTTP Cannot Connect
 
 First verify the listener separately from Chrome/native readiness:
 
@@ -105,14 +107,34 @@ curl --fail \
 
 Use the actual HTTPS hostname when TLS or a Host allowlist is configured. Interpret the result as follows:
 
-- Connection refused: `webpage-mcp-server` is not running, the address/port is wrong, or a firewall blocks it.
-- `/healthz` is `200` but `/readyz` is `503`: the listener is alive but the Native Messaging host is not connected. Open Chrome, connect the extension, and run `doctor`.
-- `401 Unauthorized`: send `Authorization: Bearer <remote token>`. URL/query tokens and `WEBPAGE_MCP_AUTH_TOKEN` are not accepted.
+- Connection refused: `webpage-mcp-server` is not running, the address/port is wrong, or a firewall blocks it. A URL-based MCP configuration does not start the gateway.
+- `/healthz` is `200` but `/readyz` is `503`: the listener is alive but the Native Messaging host is not connected. Open Chrome, connect the extension, and run `doctor`. After an npm upgrade, reconnect Native Messaging or fully restart Chrome so the running host loads the refreshed runtime.
+- `401 Unauthorized`: send `Authorization: Bearer <HTTP token>`. URL/query tokens and `WEBPAGE_MCP_AUTH_TOKEN` are not accepted.
 - `403 Forbidden Host`: the hostname or IP used in the client URL is missing from `--allowed-host`.
 - `403 Forbidden Origin`: the client sent an `Origin` that is missing from `--allowed-origin`. Normal server-side clients generally do not send this header.
 - TLS certificate failure: use a certificate trusted by the remote client and make sure its SAN covers the hostname in the MCP URL.
 
-The MCP URL must include `/mcp`, for example `https://mcp-host.example.internal:12306/mcp`. Every listener requires a dedicated remote token; non-loopback wildcard binds require an allowed Host; non-loopback plaintext also requires `--allow-insecure-http`. See [Remote MCP Access](REMOTE_MCP.md) for the complete secure setup.
+For a same-computer client, the default URL is `http://127.0.0.1:12306/mcp`. A remote URL can be
+`https://mcp-host.example.internal:12306/mcp`. Every listener requires a dedicated HTTP token;
+non-loopback wildcard binds require an allowed Host; non-loopback plaintext also requires
+`--allow-insecure-http`. See [Streamable HTTP MCP Access](REMOTE_MCP.md) for the complete local and
+remote setup.
+
+## Webpage MCP Tools Appear Twice
+
+Symptoms:
+
+- The MCP client shows two namespaces containing the same Webpage MCP browser tools.
+
+Root cause:
+
+- The same client has both a `webpage-mcp-stdio` entry and a `webpage-mcp-server` HTTP URL entry
+  enabled.
+
+Fix:
+
+- Disable one transport for that client, or keep both only when the duplicate transport namespaces
+  are intentional. The gateways may still run simultaneously for different clients.
 
 ## ENOENT Socket Missing
 
@@ -125,6 +147,8 @@ Root cause:
 
 - `webpage-mcp-stdio` started, but the native host socket was not created yet.
 - Most commonly: extension is not connected to native host, auto-connect is disabled, or socket env mismatch.
+- After an npm upgrade, an old Native Host process may still own the socket without the credential
+  required by the refreshed runtime.
 - On older builds, native host and MCP client may compute different `TMPDIR`, resulting in different socket paths.
 
 Fix:

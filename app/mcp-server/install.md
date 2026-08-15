@@ -1,15 +1,18 @@
 ---
 type: runbook
 title: Webpage MCP Installation and Native Host Registration
-description: Install, register, verify, and repair the local Native Messaging runtime.
+description: Install, register, verify, and repair the Native Messaging runtime and optional HTTP gateway.
 owner: NEEDS_OWNER
 status: proposed
-tags: [installation, native-messaging, troubleshooting]
+tags: [installation, native-messaging, streamable-http, troubleshooting]
 ---
 
 # Webpage MCP Installation Guide
 
-This document covers installation and Native Messaging registration. The normal MCP client entry is `webpage-mcp-stdio`; it validates the stable runtime and user-level manifests on every startup before connecting to Chrome's native bridge. `webpage-mcp-server` is an optional Streamable HTTP gateway to the same bridge and is never started automatically.
+This document covers installation and Native Messaging registration. The normal MCP client entry is
+`webpage-mcp-stdio`; it validates the stable runtime and user-level manifests on every startup before
+connecting to Chrome's native bridge. `webpage-mcp-server` is an optional local-or-remote Streamable
+HTTP gateway to the same bridge and is never started automatically.
 
 ## Installation Overview
 
@@ -30,7 +33,7 @@ Install or npx resolution
 └─ webpage-mcp-server startup (only when explicitly invoked)
    ├─ Run the same Native Messaging bootstrap
    ├─ Open a bounded Streamable HTTP listener
-   └─ Route authenticated remote sessions through the same local IPC bridge
+   └─ Route authenticated HTTP sessions through the same local IPC bridge
 ```
 
 System-level registration is a fallback and always requires explicit `--system` plus administrator/root privileges.
@@ -64,18 +67,52 @@ Global installation is not required. Configure the MCP client to resolve the pub
 
 Starting the MCP client runs the bootstrap shown above. Chrome must be open, the connector extension must be enabled, and both processes must use the same `WEBPAGE_MCP_NATIVE_SOCKET` value when that variable is customized.
 
-### 1b. Optional remote MCP entry
+### 1b. Optional Streamable HTTP entry
 
-Only use the network listener when the MCP client cannot run on the Chrome host:
+Use this entry when a same-computer client specifically requires Streamable HTTP or when the MCP
+client runs on another trusted computer. For ordinary same-computer use, keep the recommended stdio
+entry above.
+
+For a local loopback listener on macOS or Linux, create a persistent private token:
 
 ```bash
 install -d -m 700 "$HOME/.config/webpage-mcp"
 (umask 077 && openssl rand -base64 32 > "$HOME/.config/webpage-mcp/remote-token")
-npx -y webpage-mcp@latest webpage-mcp-server \
+```
+
+Start the published gateway on the computer running Chrome and keep it running:
+
+```bash
+npx -y -p webpage-mcp@latest webpage-mcp-server \
+  --host 127.0.0.1 \
+  --port 12306 \
   --token-file "$HOME/.config/webpage-mcp/remote-token"
 ```
 
-This default is loopback-only (`http://127.0.0.1:12306/mcp`), but every HTTP listener requires a separate remote token. Non-loopback access additionally requires a Host allowlist for wildcard binds, and TLS or an explicit plaintext acknowledgement. The remote entry does not replace registration or Chrome's Native Messaging process. Follow [Remote MCP Access](../../docs/REMOTE_MCP.md) before exposing it to another machine.
+For local Codex, load the same token into the Codex process environment and configure the HTTP URL:
+
+```bash
+export WEBPAGE_MCP_REMOTE_TOKEN="$(
+  tr -d '\r\n' < "$HOME/.config/webpage-mcp/remote-token"
+)"
+```
+
+```toml
+[mcp_servers."webpage-mcp-http"]
+url = "http://127.0.0.1:12306/mcp"
+bearer_token_env_var = "WEBPAGE_MCP_REMOTE_TOKEN"
+tool_timeout_sec = 120
+```
+
+The `url` entry does not start the gateway. Keep `webpage-mcp-server` running and start Codex from an
+environment containing the token. If that Codex installation also enables the stdio entry, normally
+disable one transport to avoid duplicate Webpage MCP tools.
+
+Every HTTP listener requires a separate HTTP bearer token. Non-loopback access additionally requires
+a Host allowlist for wildcard binds, and TLS or an explicit plaintext acknowledgement. The HTTP entry
+does not replace registration or Chrome's Native Messaging process. Follow
+[Streamable HTTP MCP Access](../../docs/REMOTE_MCP.md) for Windows commands, readiness probes,
+source-build usage, service lifecycle, and secure remote deployment.
 
 ### 2. Optional global CLI installation
 
@@ -228,8 +265,10 @@ Verify Installation
 │  └─ Extension not installed → Install extension
 │
 └─ Test Connection
-   ├─ Connection successful → Installation complete
-   └─ Connection failed → Check error logs → See Troubleshooting
+   ├─ stdio → Start configured entry and list tools
+   ├─ HTTP `/healthz` → Listener is alive
+   ├─ HTTP `/readyz` → Native bridge is ready
+   └─ Failure → Check error logs → See Troubleshooting
 ```
 
 ### Verification Steps
@@ -249,6 +288,14 @@ After installation, you can verify the installation was successful through the f
    - Start the configured `webpage-mcp-stdio` MCP entry
    - Refresh connection status in the extension popup
    - Run `npx -y webpage-mcp@latest doctor` and inspect the extension service-worker logs if connection still fails
+
+4. If using Streamable HTTP, verify both layers
+   - Keep `webpage-mcp-server` running
+   - Check unauthenticated `/healthz` for listener liveness
+   - Check authenticated `/readyz` for the Connector/native-host path
+   - Confirm the MCP client URL includes `/mcp` and sends the HTTP bearer token
+   - After an npm upgrade, reconnect Native Messaging or fully restart Chrome if `/readyz` returns
+     `503`
 
 ## Troubleshooting
 
@@ -400,7 +447,14 @@ If the problem persists, please submit an issue to the project repository with t
 
 - Published bin and postinstall behavior: `app/mcp-server/package.json` and `app/mcp-server/src/scripts/postinstall.ts`; verify with `pnpm --filter webpage-mcp build` and package preflight in `pnpm test:release`.
 - Startup runtime/manifest bootstrap: `app/mcp-server/src/mcp/mcp-server-stdio.ts` and `app/mcp-server/src/scripts/utils.ts`; stable dependency behavior is covered by `pnpm --filter webpage-mcp exec vitest run src/scripts/stable-runtime-dependencies.test.ts`.
-- Optional remote transport: `app/mcp-server/src/mcp/mcp-server-http.ts`, `remote-server-config.ts`, and `remote-mcp-server.ts`; SDK interoperability and security boundaries are covered by `pnpm --filter webpage-mcp exec vitest run src/mcp/remote-server-config.test.ts src/mcp/remote-mcp-server.test.ts`.
+- Optional Streamable HTTP transport: `app/mcp-server/src/mcp/mcp-server-http.ts`,
+  `remote-server-config.ts`, and `remote-mcp-server.ts`; SDK interoperability and security boundaries
+  are covered by:
+
+  ```bash
+  pnpm --filter webpage-mcp exec vitest run src/mcp/remote-server-config.test.ts src/mcp/remote-mcp-server.test.ts
+  ```
+
 - Manifest path/contents: `pnpm --filter webpage-mcp exec vitest run src/scripts/native-manifest-file.test.ts` plus the manual `doctor` command on each target operating system.
 - CLI registration and repair commands: static command wiring in `app/mcp-server/src/cli.ts`; installed-browser end-to-end registration remains `Verification: Missing` and requires manual Chrome/Chromium checks.
 

@@ -10,12 +10,12 @@ It provides:
 
 - `webpage-mcp`: CLI for registration, diagnostics, and maintenance
 - `webpage-mcp-stdio`: MCP stdio server entry used by MCP clients
-- `webpage-mcp-server`: optional MCP Streamable HTTP server entry for remote clients
+- `webpage-mcp-server`: optional MCP Streamable HTTP server entry for local or remote HTTP clients
 
 This package uses:
 
 - Local MCP Client <-> MCP Server: `stdio` by default
-- Remote MCP Client <-> MCP Server: opt-in Streamable HTTP
+- Local or Remote HTTP MCP Client <-> MCP Server: opt-in Streamable HTTP
 - Webpage MCP Connector (Chrome extension) <-> MCP Server: Chrome Native Messaging
 - Both MCP transports <-> Native Messaging host: authenticated local IPC socket / pipe
 
@@ -60,25 +60,54 @@ npx -y webpage-mcp@latest doctor --fix
 
 Recommended: copy the register command from extension popup/welcome page, because it already includes the current extension ID.
 
-## Optional Remote MCP Server
+## Optional Streamable HTTP Server
 
-Start a loopback-only Streamable HTTP endpoint with the main CLI subcommand:
+Use HTTP only when a client specifically requires Streamable HTTP or runs on another computer. The
+stdio entry above remains the recommended same-computer setup. The HTTP process must remain running;
+a URL-based MCP client connects to it but does not launch it.
+
+For a local loopback endpoint, create a persistent bearer token on macOS or Linux:
 
 ```bash
 install -d -m 700 "$HOME/.config/webpage-mcp"
 (umask 077 && openssl rand -base64 32 > "$HOME/.config/webpage-mcp/remote-token")
-npx -y webpage-mcp@latest webpage-mcp-server \
-  --token-file "$HOME/.config/webpage-mcp/remote-token"
 ```
 
-Or invoke the standalone bin directly:
+Then start the published standalone bin on the computer running Chrome:
 
 ```bash
 npx -y -p webpage-mcp@latest webpage-mcp-server \
+  --host 127.0.0.1 \
+  --port 12306 \
   --token-file "$HOME/.config/webpage-mcp/remote-token"
 ```
 
-The default URL is `http://127.0.0.1:12306/mcp`, but every HTTP listener requires a separate `WEBPAGE_MCP_REMOTE_TOKEN` or private `--token-file`. Non-loopback wildcard binds also require at least one `--allowed-host`, and non-loopback plaintext requires `--allow-insecure-http`.
+The default URL is `http://127.0.0.1:12306/mcp`. Every HTTP listener requires a separate
+`WEBPAGE_MCP_REMOTE_TOKEN` or private `--token-file`.
+
+For Codex on the same computer, load the token into the Codex process environment:
+
+```bash
+export WEBPAGE_MCP_REMOTE_TOKEN="$(
+  tr -d '\r\n' < "$HOME/.config/webpage-mcp/remote-token"
+)"
+```
+
+Then configure the already-running gateway:
+
+```toml
+[mcp_servers."webpage-mcp-http"]
+url = "http://127.0.0.1:12306/mcp"
+bearer_token_env_var = "WEBPAGE_MCP_REMOTE_TOKEN"
+tool_timeout_sec = 120
+```
+
+Verify `http://127.0.0.1:12306/healthz` for listener health and authenticated `/readyz` for the
+Chrome/native bridge. If the same MCP client also has a Webpage MCP stdio entry, normally disable one
+transport so the tools do not appear twice.
+
+Non-loopback wildcard binds additionally require at least one `--allowed-host`, and non-loopback
+plaintext requires `--allow-insecure-http`. Prefer TLS or a private tunnel/VPN.
 
 Example with direct TLS:
 
@@ -91,13 +120,21 @@ npx -y webpage-mcp@latest webpage-mcp-server \
   --tls-key /path/to/private-key.pem
 ```
 
-The remote process is only a gateway to the existing authenticated local bridge. Chrome must remain open and the Connector must be connected. See [Remote MCP Access](../../docs/REMOTE_MCP.md) for secure deployment, Agent/Codex configuration, probes, all options, and troubleshooting.
+The HTTP process is only a gateway to the existing authenticated local bridge. Chrome must remain
+open and the Connector must be connected. See
+[Streamable HTTP MCP Access](../../docs/REMOTE_MCP.md) for Windows commands, the complete local Codex
+flow, local source builds, secure remote deployment, lifecycle, probes, all options, and
+troubleshooting.
 
 ## Version Compatibility
 
 The Webpage MCP Connector Chrome extension and this `webpage-mcp` npm package are built and released from the same CI pipeline, but Chrome Web Store review and rollout timing is not fixed. This means the latest npm package may be available before the matching Chrome extension version reaches users.
 
-We aim to keep nearby versions compatible. If you run into connection, protocol, or tool behavior issues, first make sure the Chrome extension and the MCP npm package use the same version for the best compatibility.
+We aim to keep nearby versions compatible. If you run into connection, protocol, or tool behavior
+issues, first make sure the Chrome extension and the MCP npm package use the same version for the best
+compatibility. After an npm upgrade, reconnect the extension's Native connection or fully restart
+Chrome if the stdio bridge or HTTP `/readyz` probe cannot reach the Native Host; a running host does
+not hot-reload refreshed runtime files.
 
 ## Is Register One-Time?
 
@@ -118,10 +155,10 @@ webpage-mcp register [--browser chrome|chromium|all] [--detect] [--system] [--ex
 webpage-mcp doctor [--fix] [--json] [--browser chrome|chromium|all]
 webpage-mcp report [--json] [--output <file>] [--copy] [--no-redact] [--include-logs none|tail|full] [--log-lines <n>] [--browser chrome|chromium|all]
 webpage-mcp fix-permissions
-webpage-mcp webpage-mcp-server [remote options]
+webpage-mcp webpage-mcp-server [HTTP options]
 # aliases/standalone forms:
-webpage-mcp serve [remote options]
-webpage-mcp-server [remote options]
+webpage-mcp serve [HTTP options]
+webpage-mcp-server [HTTP options]
 ```
 
 Notes:
@@ -169,11 +206,15 @@ Use local stdio entry in MCP client config:
 }
 ```
 
-Start the local-build HTTP gateway only when testing remote transport:
+Start the local-build HTTP gateway only when testing Streamable HTTP. It requires the same token
+setup and client configuration as the published loopback flow:
 
 ```bash
 node app/mcp-server/dist/mcp/mcp-server-http.js --help
-node app/mcp-server/dist/cli.js webpage-mcp-server
+node app/mcp-server/dist/mcp/mcp-server-http.js \
+  --host 127.0.0.1 \
+  --port 12306 \
+  --token-file "$HOME/.config/webpage-mcp/remote-token"
 ```
 
 ## Environment Variables
@@ -193,9 +234,9 @@ node app/mcp-server/dist/cli.js webpage-mcp-server
 - `WEBPAGE_MCP_AUTH_TOKEN`
   - Optional token exposed to extension via `auth_get_token` (for UI display/copy and downstream use).
 - `WEBPAGE_MCP_REMOTE_HOST` / `WEBPAGE_MCP_REMOTE_PORT`
-  - Optional remote gateway listen address and port (defaults: `127.0.0.1:12306`).
+  - Optional HTTP gateway listen address and port (defaults: `127.0.0.1:12306`).
 - `WEBPAGE_MCP_REMOTE_TOKEN` / `WEBPAGE_MCP_REMOTE_TOKEN_FILE`
-  - Dedicated remote Bearer credential; a private token file takes precedence.
+  - Dedicated HTTP Bearer credential; a private token file takes precedence.
 - `WEBPAGE_MCP_REMOTE_ALLOWED_HOSTS` / `WEBPAGE_MCP_REMOTE_ALLOWED_ORIGINS`
   - Comma/whitespace-separated HTTP Host and exact browser Origin allowlists.
 - `WEBPAGE_MCP_REMOTE_TLS_CERT` / `WEBPAGE_MCP_REMOTE_TLS_KEY`
@@ -213,7 +254,8 @@ Current behavior:
 
 - Token is returned by native host `auth_get_token`.
 - Token is not currently enforced as an auth check for MCP tool calls.
-- It is intentionally not accepted as the remote HTTP credential. Use the separate `WEBPAGE_MCP_REMOTE_TOKEN` or `--token-file` for remote access.
+- It is intentionally not accepted as the HTTP credential. Use the separate
+  `WEBPAGE_MCP_REMOTE_TOKEN` or `--token-file` for HTTP access.
 
 ## Troubleshooting
 
@@ -235,10 +277,12 @@ npx -y webpage-mcp@latest doctor --fix
 
 5. Fully restart Chrome and retry.
 
-For HTTP `401`, `403`, TLS, firewall, or `/readyz` failures, use the remote-specific checks in [Remote MCP Access](../../docs/REMOTE_MCP.md) and [Troubleshooting](../../docs/TROUBLESHOOTING.md).
+For HTTP `401`, `403`, TLS, firewall, or `/readyz` failures, use the transport-specific checks in
+[Streamable HTTP MCP Access](../../docs/REMOTE_MCP.md) and
+[Troubleshooting](../../docs/TROUBLESHOOTING.md).
 
 ## Related Docs
 
 - Root project guide: [../../README.md](../../README.md)
-- Remote MCP access: [../../docs/REMOTE_MCP.md](../../docs/REMOTE_MCP.md)
+- Streamable HTTP MCP access: [../../docs/REMOTE_MCP.md](../../docs/REMOTE_MCP.md)
 - Troubleshooting: [../../docs/TROUBLESHOOTING.md](../../docs/TROUBLESHOOTING.md)
