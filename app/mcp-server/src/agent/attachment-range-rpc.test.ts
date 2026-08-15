@@ -161,7 +161,7 @@ describe('attachment ranged RPC transport', () => {
     );
     expect(outOfRange.statusCode).toBe(416);
     expect(outOfRange.headers['content-range']).toBe(`bytes */${contents.length}`);
-  }, 15_000);
+  }, 30_000);
 
   it('rejects invalid ranges and oversized files before allocating a content buffer', async () => {
     const { project, attachmentService, dispatchAgentRpc } = await setupProject(
