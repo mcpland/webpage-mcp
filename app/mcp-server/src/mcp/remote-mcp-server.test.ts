@@ -64,6 +64,16 @@ interface RunningServer {
   server: RemoteMcpServer;
 }
 
+interface RemoteMcpSessionInternals {
+  activeOperations: number;
+  activeSseStreams: number;
+}
+
+interface RemoteMcpServerInternals {
+  sessions: Map<string, RemoteMcpSessionInternals>;
+  pruneIdleSessions(): Promise<void>;
+}
+
 const runningServers: RemoteMcpServer[] = [];
 const connectedClients: ConnectedClient[] = [];
 
@@ -81,6 +91,10 @@ async function startServer(
   overrides: {
     allowedOrigin?: string[];
     maxSessions?: number;
+    now?: () => number;
+    sessionIdleTimeoutMs?: number;
+    sessionMaxLifetimeMs?: number;
+    sseStreamMaxLifetimeMs?: number;
   } = {},
 ): Promise<RunningServer> {
   const bridge = new FakeBridge();
@@ -95,6 +109,10 @@ async function startServer(
   const server = new RemoteMcpServer(options, {
     bridgeClient: bridge,
     maxSessions: overrides.maxSessions,
+    now: overrides.now,
+    sessionIdleTimeoutMs: overrides.sessionIdleTimeoutMs,
+    sessionMaxLifetimeMs: overrides.sessionMaxLifetimeMs,
+    sseStreamMaxLifetimeMs: overrides.sseStreamMaxLifetimeMs,
   });
   runningServers.push(server);
   const listening = await server.start();
@@ -105,9 +123,11 @@ async function connectClient(
   endpoint: string,
   token = TOKEN,
   name = 'remote-test-client',
+  fetchFn?: typeof fetch,
 ): Promise<ConnectedClient> {
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
+    fetch: fetchFn,
   });
   const client = new Client(
     { name, version: '1.0.0' },
@@ -263,6 +283,56 @@ describe('remote Streamable HTTP MCP server', () => {
       jsonrpc: '2.0',
       error: { message: 'MCP request body is too large' },
     });
+  });
+
+  it('reclaims an idle session even while its standalone SSE stream is connected', async () => {
+    let now = 0;
+    const { listening, server } = await startServer({
+      now: () => now,
+      sessionIdleTimeoutMs: 100,
+      sessionMaxLifetimeMs: 10_000,
+      sseStreamMaxLifetimeMs: 10_000,
+    });
+    const { client } = await connectClient(listening.endpoint, TOKEN, 'idle-sse-client');
+    const internals = server as unknown as RemoteMcpServerInternals;
+
+    await expect.poll(() => [...internals.sessions.values()][0]?.activeSseStreams).toBe(1);
+    expect([...internals.sessions.values()][0]?.activeOperations).toBe(0);
+
+    now = 101;
+    await internals.pruneIdleSessions();
+    expect(server.sessionCount).toBe(0);
+    await client.close();
+  });
+
+  it('bounds standalone SSE streams and the absolute session lifetime', async () => {
+    let now = 0;
+    let standaloneSseRequests = 0;
+    const observingFetch: typeof fetch = async (input, init) => {
+      if (init?.method === 'GET') standaloneSseRequests += 1;
+      return await fetch(input, init);
+    };
+    const { listening, server } = await startServer({
+      now: () => now,
+      sessionIdleTimeoutMs: 10_000,
+      sessionMaxLifetimeMs: 100,
+      sseStreamMaxLifetimeMs: 25,
+    });
+    const { client } = await connectClient(
+      listening.endpoint,
+      TOKEN,
+      'bounded-sse-client',
+      observingFetch,
+    );
+    const internals = server as unknown as RemoteMcpServerInternals;
+
+    await expect.poll(() => standaloneSseRequests).toBe(1);
+    await expect.poll(() => standaloneSseRequests, { timeout: 2_000 }).toBeGreaterThanOrEqual(2);
+
+    now = 101;
+    await internals.pruneIdleSessions();
+    expect(server.sessionCount).toBe(0);
+    await client.close();
   });
 
   it('requires a valid token for privileged loopback routes', async () => {

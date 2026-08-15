@@ -388,7 +388,10 @@ HTTP listener's token requirement.
 
 - Each initialized HTTP client receives an isolated MCP/native-bridge session ID.
 - Up to 64 HTTP sessions and 128 active HTTP requests are accepted by default.
-- Idle sessions are removed after 30 minutes.
+- Sessions with no non-streaming MCP activity are removed after 30 minutes, even if their standalone
+  GET SSE stream remains connected.
+- Each standalone GET SSE response is rotated after 5 minutes, and each session has an absolute
+  24-hour lifetime. Conforming clients reconnect the notification stream automatically.
 - Request bodies are limited to 1 MiB; local IPC responses retain their existing 16 MiB bound.
 - Successful workflow mutations broadcast `tools/list_changed` to connected HTTP sessions.
 - `SIGINT` and `SIGTERM` stop accepting traffic and close active sessions.

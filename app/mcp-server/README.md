@@ -126,6 +126,10 @@ open and the Connector must be connected. See
 flow, local source builds, secure remote deployment, lifecycle, probes, all options, and
 troubleshooting.
 
+HTTP sessions without non-streaming MCP activity expire after 30 minutes even when a standalone GET
+SSE stream is connected. Individual SSE responses rotate after 5 minutes, and every session has an
+absolute 24-hour lifetime.
+
 ## Version Compatibility
 
 The Webpage MCP Connector Chrome extension and this `webpage-mcp` npm package are built and released from the same CI pipeline, but Chrome Web Store review and rollout timing is not fixed. This means the latest npm package may be available before the matching Chrome extension version reaches users.

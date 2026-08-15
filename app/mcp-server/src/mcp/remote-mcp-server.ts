@@ -13,6 +13,8 @@ export const REMOTE_MCP_READY_ENDPOINT = '/readyz';
 export const REMOTE_MCP_MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 export const REMOTE_MCP_DEFAULT_MAX_SESSIONS = 64;
 export const REMOTE_MCP_DEFAULT_SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+export const REMOTE_MCP_DEFAULT_SESSION_MAX_LIFETIME_MS = 24 * 60 * 60 * 1000;
+export const REMOTE_MCP_DEFAULT_SSE_STREAM_MAX_LIFETIME_MS = 5 * 60 * 1000;
 
 const MAX_SESSION_ID_BYTES = 256;
 const DEFAULT_MAX_ACTIVE_HTTP_REQUESTS = 128;
@@ -34,7 +36,8 @@ interface RemoteMcpSessionRecord {
   readonly bridgeSession: McpBridgeSession;
   readonly createdAt: number;
   lastActivityAt: number;
-  activeRequests: number;
+  activeOperations: number;
+  activeSseStreams: number;
 }
 
 export interface RemoteMcpServerDependencies {
@@ -43,6 +46,8 @@ export interface RemoteMcpServerDependencies {
   maxSessions?: number;
   maxActiveHttpRequests?: number;
   sessionIdleTimeoutMs?: number;
+  sessionMaxLifetimeMs?: number;
+  sseStreamMaxLifetimeMs?: number;
 }
 
 export interface RemoteMcpListenResult {
@@ -196,6 +201,8 @@ export class RemoteMcpServer {
   private readonly maxSessions: number;
   private readonly maxActiveHttpRequests: number;
   private readonly sessionIdleTimeoutMs: number;
+  private readonly sessionMaxLifetimeMs: number;
+  private readonly sseStreamMaxLifetimeMs: number;
   private readonly allowedHosts: Set<string>;
   private readonly allowedOrigins: Set<string>;
   private readonly expectedTokenHash: Buffer;
@@ -217,15 +224,23 @@ export class RemoteMcpServer {
       dependencies.maxActiveHttpRequests ?? DEFAULT_MAX_ACTIVE_HTTP_REQUESTS;
     this.sessionIdleTimeoutMs =
       dependencies.sessionIdleTimeoutMs ?? REMOTE_MCP_DEFAULT_SESSION_IDLE_TIMEOUT_MS;
+    this.sessionMaxLifetimeMs =
+      dependencies.sessionMaxLifetimeMs ?? REMOTE_MCP_DEFAULT_SESSION_MAX_LIFETIME_MS;
+    this.sseStreamMaxLifetimeMs =
+      dependencies.sseStreamMaxLifetimeMs ?? REMOTE_MCP_DEFAULT_SSE_STREAM_MAX_LIFETIME_MS;
     if (
       !Number.isInteger(this.maxSessions) ||
       this.maxSessions <= 0 ||
       !Number.isInteger(this.maxActiveHttpRequests) ||
       this.maxActiveHttpRequests <= 0 ||
       !Number.isFinite(this.sessionIdleTimeoutMs) ||
-      this.sessionIdleTimeoutMs <= 0
+      this.sessionIdleTimeoutMs <= 0 ||
+      !Number.isFinite(this.sessionMaxLifetimeMs) ||
+      this.sessionMaxLifetimeMs <= 0 ||
+      !Number.isFinite(this.sseStreamMaxLifetimeMs) ||
+      this.sseStreamMaxLifetimeMs <= 0
     ) {
-      throw new Error('Remote MCP server capacity limits must be positive');
+      throw new Error('Remote MCP server capacity and lifecycle limits must be positive');
     }
     this.allowedHosts = new Set(options.allowedHosts);
     this.allowedOrigins = new Set(options.allowedOrigins);
@@ -288,7 +303,10 @@ export class RemoteMcpServer {
     });
     this.listener = listener;
 
-    const cleanupInterval = Math.max(1_000, Math.min(60_000, this.sessionIdleTimeoutMs / 2));
+    const cleanupInterval = Math.max(
+      1_000,
+      Math.min(60_000, this.sessionIdleTimeoutMs / 2, this.sessionMaxLifetimeMs / 2),
+    );
     this.cleanupTimer = setInterval(() => {
       void this.pruneIdleSessions();
     }, cleanupInterval);
@@ -472,13 +490,28 @@ export class RemoteMcpServer {
       newlyCreated = true;
     }
 
-    record.activeRequests += 1;
-    record.lastActivityAt = this.now();
+    const isStandaloneSseRequest = request.method === 'GET';
+    let streamLifetimeTimer: NodeJS.Timeout | null = null;
+    if (isStandaloneSseRequest) {
+      record.activeSseStreams += 1;
+      streamLifetimeTimer = setTimeout(() => {
+        record.transport.closeStandaloneSSEStream();
+      }, this.sseStreamMaxLifetimeMs);
+      streamLifetimeTimer.unref();
+    } else {
+      record.activeOperations += 1;
+      record.lastActivityAt = this.now();
+    }
     try {
       await record.transport.handleRequest(request, response, parsedBody);
     } finally {
-      record.activeRequests = Math.max(0, record.activeRequests - 1);
-      record.lastActivityAt = this.now();
+      if (streamLifetimeTimer) {
+        clearTimeout(streamLifetimeTimer);
+        record.activeSseStreams = Math.max(0, record.activeSseStreams - 1);
+      } else {
+        record.activeOperations = Math.max(0, record.activeOperations - 1);
+        record.lastActivityAt = this.now();
+      }
       if (newlyCreated && record.transport.sessionId !== record.id) {
         await this.disposeSession(record.id);
       }
@@ -506,7 +539,8 @@ export class RemoteMcpServer {
       bridgeSession,
       createdAt: now,
       lastActivityAt: now,
-      activeRequests: 0,
+      activeOperations: 0,
+      activeSseStreams: 0,
     };
     transport.onerror = (error) => {
       console.warn(`[webpage-mcp-server] MCP session ${id} transport error:`, error.message);
@@ -544,7 +578,9 @@ export class RemoteMcpServer {
     const expired = [...this.sessions.values()]
       .filter(
         (record) =>
-          record.activeRequests === 0 && now - record.lastActivityAt >= this.sessionIdleTimeoutMs,
+          now - record.createdAt >= this.sessionMaxLifetimeMs ||
+          (record.activeOperations === 0 &&
+            now - record.lastActivityAt >= this.sessionIdleTimeoutMs),
       )
       .map((record) => record.id);
     await Promise.allSettled(expired.map((id) => this.disposeSession(id)));
