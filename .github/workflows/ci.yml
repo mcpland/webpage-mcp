@@ -79,13 +79,16 @@ jobs:
       - name: Typecheck (extension)
         run: pnpm --filter webpage-mcp-connector compile
 
-      - name: Test
+      - name: Test release policies
+        run: pnpm test:release
+
+      - name: Test workspace scripts
+        run: pnpm test:workspace
+
+      - name: Test workspace packages
         env:
           ENFORCE_COVERAGE: "true"
-        run: |
-          pnpm test:release
-          pnpm test:workspace
-          pnpm -r --if-present test
+        run: pnpm -r --if-present test
 
       - name: Build
         run: pnpm build
@@ -119,12 +122,17 @@ jobs:
           pnpm typecheck
           pnpm --filter webpage-mcp-connector compile
 
-      - name: Test cross-platform scripts and applications
-        run: |
-          pnpm test:release
-          pnpm test:workspace
-          pnpm --filter webpage-mcp test
-          pnpm --filter webpage-mcp-connector test
+      - name: Test release policies
+        run: pnpm test:release
+
+      - name: Test workspace scripts
+        run: pnpm test:workspace
+
+      - name: Test MCP server
+        run: pnpm --filter webpage-mcp test
+
+      - name: Test Chrome extension
+        run: pnpm --filter webpage-mcp-connector test
 
       - name: Build
         run: pnpm build

@@ -1598,8 +1598,26 @@ test("release workflow enforces structural publish contracts", async () => {
   ]) {
     assert.equal(namedStep(platformGate, name).if, "matrix.enforce_coverage");
   }
+  assertStepOrder(platformGate, [
+    "Test release policies",
+    "Test workspace scripts",
+    "Test workspace packages",
+    "Build workspace",
+  ]);
   assert.equal(
-    namedStep(platformGate, "Test workspace").env.ENFORCE_COVERAGE,
+    namedStep(platformGate, "Test release policies").run,
+    "pnpm test:release",
+  );
+  assert.equal(
+    namedStep(platformGate, "Test workspace scripts").run,
+    "pnpm test:workspace",
+  );
+  assert.equal(
+    namedStep(platformGate, "Test workspace packages").run,
+    "pnpm -r --if-present test",
+  );
+  assert.equal(
+    namedStep(platformGate, "Test workspace packages").env.ENFORCE_COVERAGE,
     "${{ matrix.enforce_coverage && 'true' || 'false' }}",
   );
 

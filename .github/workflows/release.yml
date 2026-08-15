@@ -169,13 +169,16 @@ jobs:
           pnpm typecheck
           pnpm --filter webpage-mcp-connector compile
 
-      - name: Test workspace
+      - name: Test release policies
+        run: pnpm test:release
+
+      - name: Test workspace scripts
+        run: pnpm test:workspace
+
+      - name: Test workspace packages
         env:
           ENFORCE_COVERAGE: ${{ matrix.enforce_coverage && 'true' || 'false' }}
-        run: |
-          pnpm test:release
-          pnpm test:workspace
-          pnpm -r --if-present test
+        run: pnpm -r --if-present test
 
       - name: Build workspace
         run: pnpm build
