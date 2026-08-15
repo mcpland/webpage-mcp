@@ -37,6 +37,9 @@ import {
   writeCodexPromptToStdin,
 } from './codex';
 
+const EXPECTED_TERMINATION_SIGNAL: NodeJS.Signals =
+  process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM';
+
 class CollectingWritable extends Writable {
   public readonly chunks: Buffer[] = [];
 
@@ -494,10 +497,12 @@ describe('CodexEngine prompt transport', () => {
     const isSettled = observeSettlement(execution);
 
     child.emit('spawn');
-    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGTERM'));
+    await vi.waitFor(() =>
+      expect(child.kill).toHaveBeenCalledWith(EXPECTED_TERMINATION_SIGNAL),
+    );
     expect(isSettled()).toBe(false);
 
-    child.emit('close', null, 'SIGTERM');
+    child.emit('close', null, EXPECTED_TERMINATION_SIGNAL);
     await expect(execution).rejects.toThrow(
       'failed to write prompt to stdin: broken pipe',
     );
@@ -516,10 +521,12 @@ describe('CodexEngine prompt transport', () => {
 
     child.emit('spawn');
     abortController.abort();
-    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGTERM'));
+    await vi.waitFor(() =>
+      expect(child.kill).toHaveBeenCalledWith(EXPECTED_TERMINATION_SIGNAL),
+    );
     expect(isSettled()).toBe(false);
 
-    child.emit('close', null, 'SIGTERM');
+    child.emit('close', null, EXPECTED_TERMINATION_SIGNAL);
     await expect(execution).rejects.toThrow('execution was cancelled');
   });
 
@@ -547,8 +554,10 @@ describe('CodexEngine prompt transport', () => {
       );
       child.stdout.write('{"type":"error"}\n');
 
-      await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGTERM'));
-      child.emit('close', null, 'SIGTERM');
+      await vi.waitFor(() =>
+        expect(child.kill).toHaveBeenCalledWith(EXPECTED_TERMINATION_SIGNAL),
+      );
+      child.emit('close', null, EXPECTED_TERMINATION_SIGNAL);
       const rejection = await execution.then(
         () => null,
         (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
@@ -580,12 +589,14 @@ describe('CodexEngine prompt transport', () => {
           `${secretMarker}${'x'.repeat(CODEX_STDOUT_MAX_LINE_BYTES + 1)}`,
         );
 
-        await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGTERM'));
+        await vi.waitFor(() =>
+          expect(child.kill).toHaveBeenCalledWith(EXPECTED_TERMINATION_SIGNAL),
+        );
         expect(isSettled()).toBe(false);
         expect(parseSpy).not.toHaveBeenCalled();
         expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secretMarker);
 
-        child.emit('close', null, 'SIGTERM');
+        child.emit('close', null, EXPECTED_TERMINATION_SIGNAL);
         await expect(execution).rejects.toThrow(
           `stdout line exceeds the ${CODEX_STDOUT_MAX_LINE_BYTES}-byte limit`,
         );
@@ -625,10 +636,12 @@ describe('CodexEngine prompt transport', () => {
 
     child.stdout.write(`${line}\n`);
 
-    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGTERM'));
+    await vi.waitFor(() =>
+      expect(child.kill).toHaveBeenCalledWith(EXPECTED_TERMINATION_SIGNAL),
+    );
     expect(isSettled()).toBe(false);
 
-    child.emit('close', null, 'SIGTERM');
+    child.emit('close', null, EXPECTED_TERMINATION_SIGNAL);
     await expect(execution).rejects.toThrow(expectedError);
   });
 
