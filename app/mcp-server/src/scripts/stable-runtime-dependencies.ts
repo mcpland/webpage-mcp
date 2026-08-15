@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -615,11 +616,40 @@ function validateRuntimeDependencies(
   }
 
   if (loadNativeModule) {
-    const BetterSqlite3 = runtimeRequire("better-sqlite3") as new (
-      filename: string,
-    ) => { close: () => void };
-    const database = new BetterSqlite3(":memory:");
-    database.close();
+    const nativeValidation = spawnSync(
+      process.execPath,
+      [
+        "--input-type=commonjs",
+        "--eval",
+        [
+          'const { createRequire } = require("node:module");',
+          'const path = require("node:path");',
+          'const runtimeRequire = createRequire(path.join(process.argv[1], ".webpage-mcp-native-validator.cjs"));',
+          'const BetterSqlite3 = runtimeRequire("better-sqlite3");',
+          'const database = new BetterSqlite3(":memory:");',
+          "database.close();",
+        ].join("\n"),
+        nodeModulesDir,
+      ],
+      {
+        encoding: "utf8",
+        timeout: 30_000,
+        windowsHide: true,
+      },
+    );
+    if (nativeValidation.error) {
+      throw new Error(
+        `Unable to validate the stable better-sqlite3 runtime: ${nativeValidation.error.message}`,
+      );
+    }
+    if (nativeValidation.status !== 0) {
+      const details = `${nativeValidation.stderr || nativeValidation.stdout}`
+        .trim()
+        .slice(0, 4096);
+      throw new Error(
+        `Stable better-sqlite3 runtime validation exited with status ${String(nativeValidation.status)}${details ? `: ${details}` : ""}`,
+      );
+    }
   }
 }
 
