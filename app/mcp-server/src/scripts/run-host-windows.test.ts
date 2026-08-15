@@ -13,6 +13,8 @@ import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 const wrapperPath = join(process.cwd(), "src", "scripts", "run_host.bat");
+const wrapperProcessTimeoutMs = 30_000;
+const wrapperTestTimeoutMs = wrapperProcessTimeoutMs + 10_000;
 
 describe("Windows native host wrapper source", () => {
   it("does not enable delayed expansion or reparse executable paths with call", async () => {
@@ -63,7 +65,7 @@ describe.skipIf(process.platform !== "win32")(
               RUN_HOST_TEST_MARKER: markerPath,
               WEBPAGE_MCP_NODE_PATH: process.execPath,
             },
-            timeout: 30_000,
+            timeout: wrapperProcessTimeoutMs,
             windowsVerbatimArguments: true,
           },
         );
@@ -88,6 +90,6 @@ describe.skipIf(process.platform !== "win32")(
       } finally {
         await rm(root, { recursive: true, force: true });
       }
-    });
+    }, wrapperTestTimeoutMs);
   },
 );
