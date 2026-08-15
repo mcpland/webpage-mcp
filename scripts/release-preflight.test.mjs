@@ -1810,6 +1810,15 @@ test("release workflow enforces structural publish contracts", async () => {
   );
   assert.ok(!joinedRunScripts(build).includes("npm publish"));
 });
+test("Windows CI verifies native wrapper output after building", async () => {
+  const workflow = await readYaml(".github/workflows/ci.yml");
+  const windows = workflowJob(workflow, "verify-windows");
+  assert.equal(
+    namedStep(windows, "Verify native host wrapper handshake").run,
+    "node scripts/verify-native-host-wrapper.mjs",
+  );
+  assertStepOrder(windows, ["Build", "Verify native host wrapper handshake"]);
+});
 test("release native wrapper smoke exercises the platform process boundary", async () => {
   const source = await readFile(
     join(REPOSITORY_ROOT, "scripts/verify-native-host-wrapper.mjs"),

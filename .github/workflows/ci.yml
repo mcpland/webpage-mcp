@@ -140,6 +140,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Verify native host wrapper handshake
+        run: node scripts/verify-native-host-wrapper.mjs
+
   verify-macos-native-registration:
     name: macOS Native Registration Smoke (Node 24)
     runs-on: macos-latest
