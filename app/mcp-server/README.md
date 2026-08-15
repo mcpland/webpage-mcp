@@ -130,6 +130,10 @@ HTTP sessions without non-streaming MCP activity expire after 30 minutes even wh
 SSE stream is connected. Individual SSE responses rotate after 5 minutes, and every session has an
 absolute 24-hour lifetime.
 
+Native-bridge calls use a fair bounded queue shared by all HTTP sessions: up to 12 calls are
+dispatched at once, with at most 4 per session; another 128 may wait globally, with a 32-request
+waiting limit per session. Queue time counts toward each call's timeout.
+
 ## Version Compatibility
 
 The Webpage MCP Connector Chrome extension and this `webpage-mcp` npm package are built and released from the same CI pipeline, but Chrome Web Store review and rollout timing is not fixed. This means the latest npm package may be available before the matching Chrome extension version reaches users.

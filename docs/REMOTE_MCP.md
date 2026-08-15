@@ -392,6 +392,9 @@ HTTP listener's token requirement.
   GET SSE stream remains connected.
 - Each standalone GET SSE response is rotated after 5 minutes, and each session has an absolute
   24-hour lifetime. Conforming clients reconnect the notification stream automatically.
+- Native-bridge work is dispatched through a fair per-session queue: at most 12 IPC requests are
+  dispatched at once and at most 4 belong to one session. Up to 128 requests may wait globally, with
+  a 32-request waiting limit per session; queue time counts toward the request timeout.
 - Request bodies are limited to 1 MiB; local IPC responses retain their existing 16 MiB bound.
 - Successful workflow mutations broadcast `tools/list_changed` to connected HTTP sessions.
 - `SIGINT` and `SIGTERM` stop accepting traffic and close active sessions.
@@ -456,6 +459,12 @@ The HTTP process is running but cannot ping the Native Messaging bridge:
 
 The client has both stdio and HTTP Webpage MCP entries enabled. Disable one entry, or keep both only
 when the duplicate transport namespaces are intentional.
+
+### A tool reports that the native bridge queue is full
+
+One authorized client or several concurrent clients exceeded the bounded native-bridge waiting
+queue. Reduce tool-call parallelism and retry after current browser operations finish. Dispatch is
+round-robin across sessions, and cancelling an MCP request removes it from the waiting queue.
 
 ### TLS or startup validation fails
 

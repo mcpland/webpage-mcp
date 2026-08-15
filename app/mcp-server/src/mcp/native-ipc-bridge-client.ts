@@ -374,6 +374,39 @@ export class NativeIpcBridgeClient {
     }
   }
 
+  private sendCancellationRequest(socket: net.Socket, requestId: string): void {
+    if (this.closed || socket.destroyed || this.socket !== socket) return;
+    const payload = JSON.stringify({
+      id: randomUUID(),
+      method: IPC_CANCEL_REQUEST_METHOD,
+      params: { requestId },
+    });
+    if (Buffer.byteLength(payload, 'utf8') > IPC_MAX_REQUEST_LINE_BYTES) return;
+
+    const write = this.writeTail.then(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          if (this.closed || socket.destroyed || this.socket !== socket) {
+            reject(new Error('IPC socket is not connected'));
+            return;
+          }
+          socket.write(`${payload}\n`, (error) => {
+            if (error) {
+              reject(error);
+            } else {
+              resolve();
+            }
+          });
+        }),
+    );
+    this.writeTail = write.catch(() => {});
+    void write.catch((error) => {
+      if (this.socket === socket && !socket.destroyed) {
+        socket.destroy(error instanceof Error ? error : new Error('IPC cancellation write failed'));
+      }
+    });
+  }
+
   private sendRequest<T>(
     socket: net.Socket,
     method: string,
@@ -410,14 +443,7 @@ export class NativeIpcBridgeClient {
       if (!sendCancellation || !requestWritten || this.socket !== socket || socket.destroyed) {
         return;
       }
-      void this.sendRequest(
-        socket,
-        IPC_CANCEL_REQUEST_METHOD,
-        { requestId: id },
-        5_000,
-      ).catch(() => {
-        // The original request is already finished locally.
-      });
+      this.sendCancellationRequest(socket, id);
     };
     const response = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {

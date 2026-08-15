@@ -7,10 +7,16 @@ import { NativeIpcBridgeClient } from './native-ipc-bridge-client';
 class FakeSocket extends EventEmitter {
   public readonly writes: string[] = [];
   public destroyed = false;
+  public failWriteNumber: number | null = null;
 
   write(payload: string, callback?: (error?: Error | null) => void): boolean {
     this.writes.push(payload);
-    queueMicrotask(() => callback?.());
+    const writeNumber = this.writes.length;
+    queueMicrotask(() =>
+      callback?.(
+        writeNumber === this.failWriteNumber ? new Error('simulated write failure') : undefined,
+      ),
+    );
     return true;
   }
 
@@ -23,6 +29,7 @@ class FakeSocket extends EventEmitter {
 interface BridgeClientInternals {
   socket: net.Socket | null;
   authenticated: boolean;
+  pending: Map<string, unknown>;
   sendRequest<T>(
     socket: net.Socket,
     method: string,
@@ -111,7 +118,46 @@ describe('NativeIpcBridgeClient lifecycle and request cancellation', () => {
       method: IPC_CANCEL_REQUEST_METHOD,
       params: { requestId: original.id },
     });
+    expect(internals.pending.size).toBe(0);
 
+    const nextRequest = internals.sendRequest(
+      socket as unknown as net.Socket,
+      'mcp_call_tool',
+      { name: 'next_tool' },
+      30_000,
+    );
+    const nextRejection = expect(nextRequest).rejects.toThrow('IPC client closed');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.writes).toHaveLength(3);
+
+    client.close();
+    await nextRejection;
+  });
+
+  it('tears down the IPC connection when a cancellation cannot be written', async () => {
+    vi.useFakeTimers();
+    const client = new NativeIpcBridgeClient();
+    const socket = new FakeSocket();
+    socket.failWriteNumber = 2;
+    const internals = client as unknown as BridgeClientInternals;
+    internals.socket = socket as unknown as net.Socket;
+    internals.authenticated = true;
+
+    const request = internals.sendRequest(
+      socket as unknown as net.Socket,
+      'mcp_call_tool',
+      { name: 'long_running_tool' },
+      100,
+      undefined,
+      true,
+    );
+    const timedOut = expect(request).rejects.toThrow('IPC request timed out after 100ms');
+    await vi.advanceTimersByTimeAsync(100);
+    await timedOut;
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(socket.writes).toHaveLength(2);
+    expect(socket.destroyed).toBe(true);
     client.close();
   });
 });

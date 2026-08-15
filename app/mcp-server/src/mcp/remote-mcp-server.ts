@@ -4,6 +4,7 @@ import https from 'node:https';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createMcpBridgeSession, type McpBridgeSession } from './mcp-bridge-session';
+import { NativeBridgeRequestScheduler } from './native-bridge-request-scheduler';
 import { NativeIpcBridgeClient, type NativeBridgeRequestClient } from './native-ipc-bridge-client';
 import { normalizeRemoteHostname, type RemoteMcpServerOptions } from './remote-server-config';
 
@@ -195,7 +196,8 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
 }
 
 export class RemoteMcpServer {
-  private readonly bridgeClient: ClosableNativeBridge;
+  private readonly nativeBridgeClient: ClosableNativeBridge;
+  private readonly bridgeClient: NativeBridgeRequestScheduler;
   private readonly ownsBridgeClient: boolean;
   private readonly now: () => number;
   private readonly maxSessions: number;
@@ -216,7 +218,8 @@ export class RemoteMcpServer {
     private readonly options: RemoteMcpServerOptions,
     dependencies: RemoteMcpServerDependencies = {},
   ) {
-    this.bridgeClient = dependencies.bridgeClient || new NativeIpcBridgeClient();
+    this.nativeBridgeClient = dependencies.bridgeClient || new NativeIpcBridgeClient();
+    this.bridgeClient = new NativeBridgeRequestScheduler(this.nativeBridgeClient);
     this.ownsBridgeClient = !dependencies.bridgeClient;
     this.now = dependencies.now || Date.now;
     this.maxSessions = dependencies.maxSessions ?? REMOTE_MCP_DEFAULT_MAX_SESSIONS;
@@ -615,12 +618,13 @@ export class RemoteMcpServer {
         })
       : Promise.resolve();
 
+    this.bridgeClient.close();
     await Promise.allSettled([...this.sessions.keys()].map((id) => this.disposeSession(id)));
     listener?.closeIdleConnections?.();
     listener?.closeAllConnections?.();
     await listenerClosed;
     if (this.ownsBridgeClient) {
-      this.bridgeClient.close?.();
+      this.nativeBridgeClient.close?.();
     }
   }
 }
