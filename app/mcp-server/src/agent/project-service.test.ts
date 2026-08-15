@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const originalAllowedWorkspaceBase = process.env.MCP_ALLOWED_WORKSPACE_BASE;
+const originalUserProfile = process.env.USERPROFILE;
 const tempDirs: string[] = [];
 
 async function createTempDir(prefix: string): Promise<string> {
@@ -14,12 +15,24 @@ async function createTempDir(prefix: string): Promise<string> {
 
 async function loadProjectService(allowedBase: string) {
   process.env.MCP_ALLOWED_WORKSPACE_BASE = allowedBase;
+  process.env.USERPROFILE = allowedBase;
   vi.resetModules();
+  vi.doMock("node:os", () => ({
+    ...os,
+    default: { ...os, homedir: () => allowedBase },
+    homedir: () => allowedBase,
+  }));
   return import("./project-service");
 }
 
 afterEach(async () => {
   process.env.MCP_ALLOWED_WORKSPACE_BASE = originalAllowedWorkspaceBase;
+  if (originalUserProfile === undefined) {
+    delete process.env.USERPROFILE;
+  } else {
+    process.env.USERPROFILE = originalUserProfile;
+  }
+  vi.doUnmock("node:os");
   vi.resetModules();
 
   await Promise.all(
