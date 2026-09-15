@@ -86,6 +86,7 @@ export class NativeMessageWriter {
   private activeDrainListener: (() => void) | null = null;
   private queuedBytes = 0;
   private terminalError: Error | null = null;
+  private readonly terminalListeners = new Set<(error: Error) => void>();
 
   public constructor(
     private readonly output: Writable,
@@ -101,6 +102,19 @@ export class NativeMessageWriter {
 
     output.on('error', this.handleOutputError);
     output.on('close', this.handleOutputClose);
+    output.on('finish', this.handleOutputClose);
+  }
+
+  /** Observe transport failure even when no message is currently queued. */
+  public onTerminalError(listener: (error: Error) => void): () => void {
+    if (this.output.destroyed || this.output.writableEnded) this.handleOutputClose();
+    if (this.terminalError) listener(this.terminalError);
+    else this.terminalListeners.add(listener);
+    return () => this.terminalListeners.delete(listener);
+  }
+
+  public close(): void {
+    this.handleOutputClose();
   }
 
   public send(message: unknown, options: NativeMessageSendOptions = {}): Promise<void> {
@@ -258,6 +272,7 @@ export class NativeMessageWriter {
         completeIfReady();
       });
       writeReturned = true;
+      if (this.terminalError) return;
 
       if (!accepted) {
         drainComplete = false;
@@ -298,5 +313,8 @@ export class NativeMessageWriter {
       this.queuedBytes -= item.frame.length;
       item.reject(error);
     }
+    const listeners = Array.from(this.terminalListeners);
+    this.terminalListeners.clear();
+    for (const listener of listeners) listener(error);
   }
 }

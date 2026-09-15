@@ -204,3 +204,43 @@ describe('NativeMessageWriter', () => {
     expect(output.chunks).toHaveLength(1);
   });
 });
+
+describe('terminal native output lifecycle', () => {
+  it('notifies idle observers once and replays failure to late observers', () => {
+    const output = new ControlledWritable();
+    const writer = new NativeMessageWriter(output);
+    const failed = vi.fn();
+    writer.onTerminalError(failed);
+    output.emit('error', new Error('broken pipe'));
+    output.emit('close');
+    expect(failed).toHaveBeenCalledOnce();
+    const late = vi.fn();
+    writer.onTerminalError(late);
+    expect(late).toHaveBeenCalledExactlyOnceWith(failed.mock.calls[0][0]);
+  });
+
+  it('drops queued frames and drain listeners on shutdown', async () => {
+    const output = new ControlledWritable();
+    const writer = new NativeMessageWriter(output);
+    const writes = Promise.allSettled([writer.send({ id: 1 }), writer.send({ id: 2 })]);
+    expect(output.listenerCount('drain')).toBe(1);
+    writer.close();
+    expect((await writes).map((result) => result.status)).toEqual(['rejected', 'rejected']);
+    expect(output.listenerCount('drain')).toBe(0);
+    output.completeNext();
+    expect(output.chunks).toHaveLength(1);
+    await expect(writer.send({ id: 3 })).rejects.toMatchObject({ code: 'OUTPUT_CLOSED' });
+  });
+
+  it('does not treat encoding errors as a disconnected transport', async () => {
+    const output = new ControlledWritable();
+    const writer = new NativeMessageWriter(output, 16);
+    const failed = vi.fn();
+    writer.onTerminalError(failed);
+    await expect(writer.send('x'.repeat(17))).rejects.toMatchObject({ code: 'MESSAGE_TOO_LARGE' });
+    expect(failed).not.toHaveBeenCalled();
+    const sent = writer.send({ ok: true });
+    output.completeNext();
+    await sent;
+  });
+});

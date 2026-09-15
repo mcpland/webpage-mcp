@@ -142,10 +142,10 @@ describe('NativeMessagingHost outbound requests', () => {
     );
     const gate = deferred();
     const handled: unknown[] = [];
+    const shutdown = vi.spyOn(host, 'requestProcessShutdown').mockImplementation(() => {});
     const internal = host as unknown as {
       setupMessageHandling: () => void;
       handleMessage: (message: unknown) => Promise<void>;
-      processShutdownRequested: boolean;
     };
     internal.handleMessage = vi.fn(async (message: any) => {
       handled.push(message);
@@ -165,7 +165,7 @@ describe('NativeMessagingHost outbound requests', () => {
       responseToRequestId: 'second-directive',
       error: expect.stringContaining('[queue_bytes_exceeded]'),
     });
-    expect(internal.processShutdownRequested).toBe(false);
+    expect(shutdown).not.toHaveBeenCalled();
 
     gate.resolve();
     await host.shutdown();
@@ -177,10 +177,10 @@ describe('NativeMessagingHost outbound requests', () => {
     const input = new PassThrough();
     const host = new NativeMessagingHost(new NativeMessageWriter(output), input);
     const handled: unknown[] = [];
+    const shutdown = vi.spyOn(host, 'requestProcessShutdown').mockImplementation(() => {});
     const internal = host as unknown as {
       setupMessageHandling: () => void;
       handleMessage: (message: unknown) => Promise<void>;
-      processShutdownRequested: boolean;
     };
     internal.handleMessage = vi.fn(async (message) => {
       handled.push(message);
@@ -201,7 +201,7 @@ describe('NativeMessagingHost outbound requests', () => {
       type: NativeMessageType.ERROR_FROM_NATIVE_HOST,
       payload: { message: expect.stringContaining('[invalid_json]') },
     });
-    expect(internal.processShutdownRequested).toBe(false);
+    expect(shutdown).not.toHaveBeenCalled();
 
     await host.shutdown();
     input.destroy();
@@ -669,5 +669,50 @@ describe('NativeMessagingHost outbound requests', () => {
 
     expect(dispose).toHaveBeenCalledOnce();
     expect(stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe('native host disconnect lifecycle', () => {
+  it('waits for startup before releasing resources without reattaching input', async () => {
+    const input = new PassThrough();
+    const host = new NativeMessagingHost(new NativeMessageWriter(new CollectingWritable()), input);
+    const gate = deferred();
+    const internal = host as unknown as { setupIpcServer: () => Promise<void> };
+    vi.spyOn(internal, 'setupIpcServer').mockImplementation(() => gate.promise);
+    const stop = vi.spyOn(host, 'stopServers').mockResolvedValue(undefined);
+    const startup = host.start();
+    const shutdown = host.shutdown();
+    await Promise.resolve();
+    expect(stop).not.toHaveBeenCalled();
+    gate.resolve();
+    await Promise.all([startup, shutdown]);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(input.listenerCount('readable')).toBe(0);
+    expect(input.listenerCount('close')).toBe(0);
+  });
+
+  it('requests shutdown when an idle output closes', async () => {
+    const output = new CollectingWritable();
+    const host = new NativeMessagingHost(new NativeMessageWriter(output), new PassThrough());
+    const internal = host as unknown as { setupIpcServer: () => Promise<void> };
+    vi.spyOn(internal, 'setupIpcServer').mockResolvedValue(undefined);
+    const shutdown = vi.spyOn(host, 'requestProcessShutdown').mockImplementation(() => {});
+    await host.start();
+    output.emit('close');
+    output.emit('error', new Error('late pipe error'));
+    expect(shutdown).toHaveBeenCalledExactlyOnceWith(1, 'NativeMessagingHost', expect.any(Error));
+    await host.shutdown();
+  });
+
+  it('handles input close without waiting for an end event', async () => {
+    const input = new PassThrough();
+    const host = new NativeMessagingHost(new NativeMessageWriter(new CollectingWritable()), input);
+    const internal = host as unknown as { setupIpcServer: () => Promise<void> };
+    vi.spyOn(internal, 'setupIpcServer').mockResolvedValue(undefined);
+    const shutdown = vi.spyOn(host, 'requestProcessShutdown').mockImplementation(() => {});
+    await host.start();
+    input.destroy();
+    await vi.waitFor(() => expect(shutdown).toHaveBeenCalledWith(0));
+    await host.shutdown();
   });
 });

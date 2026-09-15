@@ -258,3 +258,13 @@ npx -y webpage-mcp@latest report --json
 ```
 
 Include the report and service worker logs when filing an issue.
+
+## Native runtime uses a CPU core after disconnect
+
+For the v0.10.0 disconnect failure reported in [issue #22](https://github.com/mcpland/webpage-mcp/issues/22),
+see the [failure analysis and regression verification](NATIVE_RUNTIME_LIFECYCLE.md).
+A lost native output pipe combined with a lost log reader could trap the old
+runtime in repeated error reporting and prevent SIGTERM from completing.
+The fix exits on terminal native transport failure and makes error reporting
+safe after the log supervisor disconnects. Re-register a package containing the
+fix and restart Chrome to replace the installed runtime.

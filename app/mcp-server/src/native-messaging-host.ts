@@ -1,3 +1,4 @@
+import { createNativeProcessShutdown, reportNativeError } from './native-process-shutdown';
 import { stdin, stdout } from 'process';
 import net from 'node:net';
 import type { Readable } from 'node:stream';
@@ -246,8 +247,10 @@ export class NativeMessagingHost {
   private ipcSocketIdentity: UnixSocketIdentity | null = null;
   private ipcSocketPath: string | null = null;
   private messageHandlingCleanup: (() => void) | null = null;
-  private processShutdownRequested = false;
+  private outputFailureCleanup: (() => void) | null = null;
+  public readonly requestProcessShutdown = createNativeProcessShutdown(() => this.shutdown());
   private shutdownPromise: Promise<void> | null = null;
+  private startupPromise: Promise<void> | null = null;
   private static readonly AUTH_TOKEN_ENV = 'WEBPAGE_MCP_AUTH_TOKEN';
 
   public constructor(
@@ -269,9 +272,17 @@ export class NativeMessagingHost {
   }
 
   // add message handler to wait for start server
-  public async start(): Promise<void> {
+  public start(): Promise<void> {
+    if (!this.startupPromise) this.startupPromise = this.performStart();
+    return this.startupPromise;
+  }
+
+  private async performStart(): Promise<void> {
+    this.outputFailureCleanup = this.messageWriter.onTerminalError((error) => {
+      this.requestProcessShutdown(1, 'NativeMessagingHost', error);
+    });
     await this.setupIpcServer();
-    this.setupMessageHandling();
+    if (!this.shutdownPromise) this.setupMessageHandling();
   }
 
   public async stopServers(): Promise<void> {
@@ -292,7 +303,9 @@ export class NativeMessagingHost {
   /** Release every native-host resource. Safe to call more than once. */
   public shutdown(): Promise<void> {
     if (!this.shutdownPromise) {
-      this.shutdownPromise = this.performShutdown();
+      this.shutdownPromise = Promise.resolve()
+        .then(() => this.startupPromise?.catch(() => {}))
+        .then(() => this.performShutdown());
     }
     return this.shutdownPromise;
   }
@@ -818,11 +831,13 @@ export class NativeMessagingHost {
     this.messageInput.on('readable', onReadable);
     this.messageInput.on('end', onEnd);
     this.messageInput.on('error', onError);
+    this.messageInput.on('close', onEnd);
     this.messageHandlingCleanup = () => {
       directiveQueue.close();
       this.messageInput.removeListener('readable', onReadable);
       this.messageInput.removeListener('end', onEnd);
       this.messageInput.removeListener('error', onError);
+      this.messageInput.removeListener('close', onEnd);
       this.messageHandlingCleanup = null;
     };
   }
@@ -948,8 +963,7 @@ export class NativeMessagingHost {
   }
 
   private reportMessageWriteFailure(error: unknown): void {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`[NativeMessagingHost] ${message}\n`);
+    reportNativeError('NativeMessagingHost', error);
   }
 
   private resolveStartDirective(
@@ -1639,22 +1653,11 @@ export class NativeMessagingHost {
     });
   }
 
-  private requestProcessShutdown(exitCode: number): void {
-    if (this.processShutdownRequested) return;
-    this.processShutdownRequested = true;
-    void this.shutdown().then(
-      () => process.exit(exitCode),
-      (error) => {
-        console.error(
-          `[mcp-server] shutdown failed: ${error instanceof Error ? error.stack || error.message : String(error)}`,
-        );
-        process.exit(1);
-      },
-    );
-  }
-
   private async performShutdown(): Promise<void> {
+    this.outputFailureCleanup?.();
+    this.outputFailureCleanup = null;
     this.messageHandlingCleanup?.();
+    this.messageWriter.close();
 
     // Reject all pending requests
     this.pendingRequests.forEach((pending) => {

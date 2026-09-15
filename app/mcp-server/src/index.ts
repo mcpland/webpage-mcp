@@ -2,35 +2,9 @@
 import serverInstance from "./server";
 import nativeMessagingHostInstance from "./native-messaging-host";
 
-const reportError = (label: string, error: unknown): void => {
-  const message =
-    error instanceof Error ? error.stack || error.message : String(error);
-  console.error(`[mcp-server] ${label}: ${message}`);
-};
-
-let shutdownStarted = false;
-let requestedExitCode = 0;
-const shutdown = async (
-  exitCode: number,
-  errorLabel?: string,
-  error?: unknown,
-): Promise<void> => {
-  requestedExitCode = Math.max(requestedExitCode, exitCode);
-  if (errorLabel) reportError(errorLabel, error);
-  if (shutdownStarted) return;
-  shutdownStarted = true;
-
-  try {
-    await nativeMessagingHostInstance.shutdown();
-  } catch (error) {
-    requestedExitCode = 1;
-    reportError("shutdown failed", error);
-  }
-  process.exit(requestedExitCode);
-};
-
+const shutdown = nativeMessagingHostInstance.requestProcessShutdown;
 const exitWithError = (label: string, error: unknown): void => {
-  void shutdown(1, label, error);
+  shutdown(1, `mcp-server ${label}`, error);
 };
 
 try {
@@ -49,11 +23,11 @@ process.on("error", (error) => {
 
 // Handle process signals and uncaught exceptions
 process.on("SIGINT", () => {
-  void shutdown(0);
+  shutdown(0);
 });
 
 process.on("SIGTERM", () => {
-  void shutdown(0);
+  shutdown(0);
 });
 
 process.on("uncaughtException", (error) => {
@@ -63,3 +37,8 @@ process.on("uncaughtException", (error) => {
 process.on("unhandledRejection", (reason) => {
   exitWithError("unhandled rejection", reason);
 });
+
+// A supervisor disconnect can break stderr independently of Chrome's stdout.
+// Do not report this through the same failed stream.
+process.stderr.on("error", () => shutdown(1));
+process.on("SIGHUP", () => shutdown(0));
