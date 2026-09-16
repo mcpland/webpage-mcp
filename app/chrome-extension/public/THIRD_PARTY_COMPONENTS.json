@@ -3153,12 +3153,12 @@
     },
     {
       "name": "qs",
-      "version": "6.15.2",
-      "resolved": "https://registry.npmjs.org/qs/-/qs-6.15.2.tgz",
-      "integrity": "sha512-Rzq0KEyX/w/tEybncDgdkZrJgVUsUMk3xjh3t5bv3S1HTAtg+uOYt72+ZfwiQwKdysThkTBdL/rTi6HDmX9Ddw==",
+      "version": "6.16.0",
+      "resolved": "https://registry.npmjs.org/qs/-/qs-6.16.0.tgz",
+      "integrity": "sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==",
       "declaredLicense": "BSD-3-Clause",
       "concludedLicense": "BSD-3-Clause",
-      "packageJsonSha256": "79bf51639d428f4eb6c87cedb7f0d79d5c699e1870cc1dcda31f0c7d3c694611",
+      "packageJsonSha256": "69d58ca5abcff9be3f6becc70940caa76d8ec1b72ef7d2d735305c16cb877dca",
       "licenseEvidence": [
         {
           "path": "LICENSE.md",
@@ -3447,12 +3447,12 @@
     },
     {
       "name": "side-channel-list",
-      "version": "1.0.0",
-      "resolved": "https://registry.npmjs.org/side-channel-list/-/side-channel-list-1.0.0.tgz",
-      "integrity": "sha512-FCLHtRD/gnpCiCHEiJLOwdmFP+wzCmDEkc9y7NsYxeF4u7Btsn1ZuwgwJGxImImHicJArLP4R0yX4c2KCrMrTA==",
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/side-channel-list/-/side-channel-list-1.0.1.tgz",
+      "integrity": "sha512-mjn/0bi/oUURjc5Xl7IaWi/OJJJumuoJFQJfDDyO46+hBWsfaVM65TBHq2eoZBhzl9EchxOijpkbRC8SVBQU0w==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "48b25a94e64980d573699ad6f5128ac8c521e908884a41a3835e97ef529ed584",
+      "packageJsonSha256": "90f0c08c6c17f4a3fa3dd61873223957b89da4201f01dc0c8b95b0b9e6a2a59a",
       "licenseEvidence": [
         {
           "path": "LICENSE",
@@ -3501,12 +3501,12 @@
     },
     {
       "name": "side-channel",
-      "version": "1.1.0",
-      "resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.0.tgz",
-      "integrity": "sha512-ZX99e6tRweoUXqR+VBrslhda51Nh5MTQwou5tnUDgbtyM0dBgmhEDtWGP/xbKn6hqfPRHujUNwz5fy/wbbhnpw==",
+      "version": "1.1.1",
+      "resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.1.tgz",
+      "integrity": "sha512-6x6dK6zJdpTzF4sQeNYxwtvBzf6Eg4GtlesS94HOvTudUeyK2WXAaIfmDgsyslYrRBeFIlsi54AYsFGUuhmvrQ==",
       "declaredLicense": "MIT",
       "concludedLicense": "MIT",
-      "packageJsonSha256": "b33b18efda612f3149f2e5102b305cb77bc5067eae372fb1c83f74c263b5b18e",
+      "packageJsonSha256": "14da3b013c3762da85cfd8b173290285394dfa41870bc4a1e8243aaa38316f2a",
       "licenseEvidence": [
         {
           "path": "LICENSE",
