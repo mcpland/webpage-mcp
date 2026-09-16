@@ -88,6 +88,7 @@ const METADATA_ONLY_LICENSE_REVIEWS = new Map([
   ["guid-typescript@1.0.9", "canonical-isc-fallback"],
   ["markstream-react@0.0.20-beta.7", "metadata-license-only"],
   ["standardwebhooks@1.0.0", "metadata-license-only"],
+  ["standardwebhooks@1.1.1", "metadata-license-only"],
   ["stream-markdown-parser@0.0.60", "metadata-license-only"],
   ["onnxruntime-common@1.14.0", "onnx-excluded-build-input"],
   ["onnxruntime-node@1.14.0", "onnx-excluded-build-input"],
@@ -98,6 +99,7 @@ const METADATA_ONLY_LICENSE_REVIEWS = new Map([
 const MCP_METADATA_ONLY_LICENSE_REVIEWS = new Set([
   "drizzle-orm@0.45.2",
   "standardwebhooks@1.0.0",
+  "standardwebhooks@1.1.1",
 ]);
 const ANTHROPIC_CLAUDE_SDK_PLATFORM_PACKAGES_0_3_231 = new Set([
   "@anthropic-ai/claude-agent-sdk-darwin-arm64",

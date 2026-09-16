@@ -123,7 +123,7 @@ test("reviewed legal notices match package metadata and vendored boundaries", as
     "MIT",
   );
   assert.deepEqual(
-    mcpInventory.components.get("standardwebhooks@1.0.0").review,
+    mcpInventory.components.get("standardwebhooks@1.1.1").review,
     ["metadata-license-only"],
   );
   assert.deepEqual(mcpInventory.components.get("drizzle-orm@0.45.2").review, [
