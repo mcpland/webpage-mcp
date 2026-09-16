@@ -26,6 +26,13 @@
         "TIFF",
         "VIPS"
       ]
+    },
+    "GHSA-rgj7-g3m4-5g8c": {
+      "component": "sharp",
+      "version": "0.34.5",
+      "blockedFormats": [
+        "HEIF"
+      ]
     }
   }
 }

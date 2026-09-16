@@ -96,7 +96,7 @@ test("reviewed legal notices match package metadata and vendored boundaries", as
     true,
   );
   assert.equal(
-    extensionInventory.components.has("@img/sharp-win32-ia32@0.35.3"),
+    extensionInventory.components.has("@img/sharp-win32-ia32@0.35.4"),
     true,
   );
 
@@ -143,7 +143,7 @@ test("reviewed legal notices match package metadata and vendored boundaries", as
   ]);
   assert.ok(
     extensionInventory.components
-      .get("@img/sharp-libvips-linux-x64@1.3.2")
+      .get("@img/sharp-libvips-linux-x64@1.3.3")
       .review.includes("sharp-lgpl-platform"),
   );
   assert.ok(

@@ -55,3 +55,20 @@ test("only the exact reviewed Sharp advisory is classified as mitigated", () => 
   assert.deepEqual(result.mitigated, [reviewed]);
   assert.equal(result.active.length, 2);
 });
+
+test("libheif mitigation requires the exact reviewed content boundary", () => {
+  const policy = loadClaudeSdkRuntimePolicy(repositoryRoot);
+  const id = "GHSA-rgj7-g3m4-5g8c";
+  assert.deepEqual(policy.mitigations.get(id).blockedFormats, ["HEIF"]);
+  const advisory = { name: "sharp", version: "0.34.5", githubAdvisoryId: id };
+  assert.deepEqual(
+    partitionMitigatedAdvisories([advisory], policy.mitigations).mitigated,
+    [advisory],
+  );
+  policy.raw.advisoryMitigations[id].blockedFormats = ["AVIF"];
+  assert.throws(
+    () =>
+      parseClaudeSdkRuntimePolicy(`${JSON.stringify(policy.raw, null, 2)}\n`),
+    /does not match the reviewed boundary/,
+  );
+});

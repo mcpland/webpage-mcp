@@ -159,3 +159,72 @@ describe('Claude image decoder boundary', () => {
     ).resolves.toEqual({});
   });
 });
+
+describe("bundled libheif admission boundary", () => {
+  const containers = [
+    "avif",
+    "avis",
+    "heic",
+    "heix",
+    "mif1",
+    "msf1",
+    "zzzz",
+  ].map((brand) => {
+    const bytes = Buffer.alloc(24);
+    bytes.writeUInt32BE(bytes.length);
+    bytes.write("ftyp", 4);
+    bytes.write(brand, 8);
+    bytes.write("avif", 16);
+    return [brand, bytes] as const;
+  });
+
+  it.each(containers)(
+    "blocks %s containers through every image input path",
+    async (_brand, bytes) => {
+      expect(detectUnsafeClaudeImageFormat(bytes)).toBe("HEIF");
+      expect(() =>
+        assertClaudeSafeAttachment({
+          type: "image",
+          name: "disguised.png",
+          mimeType: "image/png",
+          dataBase64: bytes.toString("base64"),
+        }),
+      ).toThrow(/HEIF images/);
+      const file = await temporaryFile("disguised.png", bytes);
+      await expect(assertClaudeSafeImagePath(file)).rejects.toThrow(
+        /HEIF images/,
+      );
+      await expect(
+        enforceClaudeImageReadSafety({
+          hook_event_name: "PreToolUse",
+          tool_name: "Read",
+          tool_input: { file_path: file },
+        }),
+      ).resolves.toMatchObject({
+        hookSpecificOutput: { permissionDecision: "deny" },
+      });
+      for (const data of [
+        bytes.toString("base64"),
+        `data:image/png;base64,${bytes.toString("base64")}`,
+      ]) {
+        await expect(
+          enforceClaudeToolResultImageSafety({
+            hook_event_name: "PostToolUse",
+            tool_response: { type: "image", source: { type: "base64", data } },
+          }),
+        ).resolves.toMatchObject({
+          hookSpecificOutput: { updatedToolOutput: { isError: true } },
+        });
+      }
+    },
+  );
+
+  it("rejects extended-size and truncated ftyp headers without parsing box lengths", () => {
+    const bytes = Buffer.alloc(24);
+    bytes.writeUInt32BE(1);
+    bytes.write("ftyp", 4);
+    expect(detectUnsafeClaudeImageFormat(bytes)).toBe("HEIF");
+    expect(detectUnsafeClaudeImageFormat(bytes.subarray(0, 8))).toBe("HEIF");
+    expect(detectUnsafeClaudeImageFormat(bytes.subarray(0, 7))).toBeUndefined();
+  });
+});

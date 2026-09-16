@@ -10,8 +10,10 @@ const EXACT_VERSION_PATTERN =
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
 const PACKAGE_NAME_PATTERN =
   /^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const REVIEWED_ADVISORY_ID = "GHSA-f88m-g3jw-g9cj";
-const REVIEWED_BLOCKED_FORMATS = ["GIF", "TIFF", "VIPS"];
+const REVIEWED_ADVISORIES = new Map([
+  ["GHSA-f88m-g3jw-g9cj", ["GIF", "TIFF", "VIPS"]],
+  ["GHSA-rgj7-g3m4-5g8c", ["HEIF"]],
+]);
 
 function fail(message) {
   throw new Error(`[claude-sdk-runtime-policy] ${message}`);
@@ -106,37 +108,32 @@ export function parseClaudeSdkRuntimePolicy(source) {
   }
   exactKeys(
     raw.advisoryMitigations,
-    [REVIEWED_ADVISORY_ID],
+    [...REVIEWED_ADVISORIES.keys()],
     "advisory mitigations",
   );
-  const mitigation = raw.advisoryMitigations[REVIEWED_ADVISORY_ID];
-  exactKeys(
-    mitigation,
-    ["component", "version", "blockedFormats"],
-    "Sharp advisory mitigation",
-  );
-  if (
-    mitigation.component !== "sharp" ||
-    mitigation.version !== embeddedComponents.get("sharp") ||
-    JSON.stringify(mitigation.blockedFormats) !==
-      JSON.stringify(REVIEWED_BLOCKED_FORMATS)
-  ) {
-    fail("Sharp advisory mitigation does not match the reviewed boundary");
+  const mitigations = new Map();
+  for (const [advisoryId, blockedFormats] of REVIEWED_ADVISORIES) {
+    const mitigation = raw.advisoryMitigations[advisoryId];
+    exactKeys(
+      mitigation,
+      ["component", "version", "blockedFormats"],
+      "Sharp advisory mitigation",
+    );
+    if (
+      mitigation.component !== "sharp" ||
+      mitigation.version !== embeddedComponents.get("sharp") ||
+      JSON.stringify(mitigation.blockedFormats) !==
+        JSON.stringify(blockedFormats)
+    ) {
+      fail("Sharp advisory mitigation does not match the reviewed boundary");
+    }
+    mitigations.set(advisoryId, {
+      component: mitigation.component,
+      version: mitigation.version,
+      blockedFormats: [...mitigation.blockedFormats],
+    });
   }
-  return {
-    raw,
-    embeddedComponents,
-    mitigations: new Map([
-      [
-        REVIEWED_ADVISORY_ID,
-        {
-          component: mitigation.component,
-          version: mitigation.version,
-          blockedFormats: [...mitigation.blockedFormats],
-        },
-      ],
-    ]),
-  };
+  return { raw, embeddedComponents, mitigations };
 }
 
 export function loadClaudeSdkRuntimePolicy(rootDir) {

@@ -268,3 +268,25 @@ runtime in repeated error reporting and prevent SIGTERM from completing.
 The fix exits on terminal native transport failure and makes error reporting
 safe after the log supervisor disconnects. Re-register a package containing the
 fix and restart Chrome to replace the installed runtime.
+
+## Claude rejects HEIF, HEIC or AVIF images
+
+The workspace Sharp dependency is patched to 0.35.4. The separately bundled
+Claude Agent SDK 0.3.231 binary still embeds Sharp 0.34.5. For that pinned
+runtime, Webpage MCP blocks HEIF-family content before attachment delivery,
+built-in Read, and MCP image-result delivery to avoid the libheif decoder
+covered by [GHSA-rgj7-g3m4-5g8c](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c).
+This extends the existing GIF/TIFF/VIPS content restrictions.
+
+The check examines bytes, regardless of the filename or declared MIME type.
+It conservatively rejects every ISO BMFF `ftyp` header (including unknown brands
+and non-image containers), avoiding reliance on a potentially incomplete list
+of HEIF/AVIF brands. PNG, JPEG and WebP are unaffected; convert a blocked image
+with a patched decoder before attaching it. This is a mitigation at the managed
+Claude input boundaries, not a patch to the SDK binary or a sandbox for arbitrary
+programs launched by agent tools.
+
+The audit recognizes only the exact advisory and embedded Sharp version after
+verifying the pinned SDK binary identity. Other advisories remain failures.
+The restriction should be removed only after separately reviewing and adopting
+an upstream runtime that no longer contains the affected decoder.

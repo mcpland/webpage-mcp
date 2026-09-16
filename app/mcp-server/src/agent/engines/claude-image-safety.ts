@@ -11,14 +11,14 @@ const MAX_TOOL_RESPONSE_KEYS = 256;
 const MAX_TOOL_RESPONSE_NODES = 4_096;
 const BASE64_HEADER_CHARACTERS = 24;
 
-export type UnsafeClaudeImageFormat = 'GIF' | 'TIFF' | 'VIPS';
+export type UnsafeClaudeImageFormat = 'GIF' | 'TIFF' | 'VIPS' | 'HEIF';
 
 function startsWith(bytes: Uint8Array, signature: readonly number[]): boolean {
   return signature.every((byte, index) => bytes[index] === byte);
 }
 
 /**
- * Detect formats covered by GHSA-f88m-g3jw-g9cj without invoking an image
+ * Detect formats covered by the reviewed Sharp advisories without invoking an image
  * decoder. Claude Code currently embeds an affected Sharp release, so these
  * formats must not reach its image loader until the upstream binary is fixed.
  */
@@ -41,6 +41,12 @@ export function detectUnsafeClaudeImageFormat(
   }
   if (startsWith(bytes, [0xb6, 0xa6, 0xf2, 0x08]) || startsWith(bytes, [0x08, 0xf2, 0xa6, 0xb6])) {
     return 'VIPS';
+  }
+  // HEIF/HEIC/AVIF use an ISO BMFF ftyp box. Reject the whole container
+  // family, not just known major brands: compatible brands and extended-size
+  // boxes must not bypass the bundled libheif boundary (GHSA-rgj7-g3m4-5g8c).
+  if (startsWith(bytes.subarray(4), [0x66, 0x74, 0x79, 0x70])) {
+    return 'HEIF';
   }
   return undefined;
 }
