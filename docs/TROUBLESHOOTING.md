@@ -271,7 +271,7 @@ fix and restart Chrome to replace the installed runtime.
 
 ## Claude rejects HEIF, HEIC or AVIF images
 
-The workspace Sharp dependency is patched to 0.35.4. The separately bundled
+The workspace Sharp dependency is patched to 0.35.5. The separately bundled
 Claude Agent SDK 0.3.231 binary still embeds Sharp 0.34.5. For that pinned
 runtime, Webpage MCP blocks HEIF-family content before attachment delivery,
 built-in Read, and MCP image-result delivery to avoid the libheif decoder
@@ -290,3 +290,24 @@ The audit recognizes only the exact advisory and embedded Sharp version after
 verifying the pinned SDK binary identity. Other advisories remain failures.
 The restriction should be removed only after separately reviewing and adopting
 an upstream runtime that no longer contains the affected decoder.
+
+## Claude rejects SVG or gzip image inputs
+
+The embedded Sharp 0.34.5 also ships the librsvg decoder covered by
+[GHSA-wq5f-xc86-pv6w](https://github.com/advisories/GHSA-wq5f-xc86-pv6w),
+fixed upstream in Sharp 0.35.5. Webpage MCP therefore blocks content that the
+embedded libvips would route to librsvg before attachment delivery and MCP
+image-result delivery.
+
+The check follows the libvips sniffing rule, by bytes rather than filename or
+declared MIME type: it rejects gzip streams (SVGZ is inflated before sniffing)
+and any case-insensitive `<svg` that appears before the first NUL or invalid
+UTF-8 sequence. When only a prefix of a payload can be inspected and it is still
+text at its end, the payload is rejected as SVG. PNG, JPEG and WebP stop the
+scan within their first bytes and are unaffected; rasterize an SVG with a
+patched decoder before attaching it.
+
+Built-in Read is not restricted for SVG. The pinned Claude Code Read only hands
+a file to Sharp after its own PNG/JPEG/GIF/WebP signature check, so SVG sources
+and HTML with inline SVG stay readable as text. As with the other restrictions,
+remove this only after adopting a reviewed runtime without the affected decoder.

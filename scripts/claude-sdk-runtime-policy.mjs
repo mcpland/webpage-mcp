@@ -13,6 +13,7 @@ const PACKAGE_NAME_PATTERN =
 const REVIEWED_ADVISORIES = new Map([
   ["GHSA-f88m-g3jw-g9cj", ["GIF", "TIFF", "VIPS"]],
   ["GHSA-rgj7-g3m4-5g8c", ["HEIF"]],
+  ["GHSA-wq5f-xc86-pv6w", ["SVG"]],
 ]);
 
 function fail(message) {

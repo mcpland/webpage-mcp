@@ -6,6 +6,7 @@ import {
   assertClaudeSafeAttachment,
   assertClaudeSafeImagePath,
   detectUnsafeClaudeImageFormat,
+  detectUnsafeClaudeImagePayload,
   enforceClaudeImageReadSafety,
   enforceClaudeToolResultImageSafety,
 } from './claude-image-safety';
@@ -226,5 +227,107 @@ describe("bundled libheif admission boundary", () => {
     expect(detectUnsafeClaudeImageFormat(bytes)).toBe("HEIF");
     expect(detectUnsafeClaudeImageFormat(bytes.subarray(0, 8))).toBe("HEIF");
     expect(detectUnsafeClaudeImageFormat(bytes.subarray(0, 7))).toBeUndefined();
+  });
+});
+
+describe('bundled librsvg admission boundary', () => {
+  const svgPayloads = [
+    ['plain SVG', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>')],
+    ['an XML prolog and comment', Buffer.from('<?xml version="1.0"?>\n<!-- icon -->\n<SVG/>')],
+    ['UTF-8 text before the tag', Buffer.from('é中\u{1f600} <Svg>')],
+    ['stray continuation bytes', Buffer.concat([Buffer.from([0x89, 0x80]), Buffer.from('<svg>')])],
+    ['a gzip stream', Buffer.from([0x1f, 0x8b, 0x08, 0x00])],
+  ] as const;
+
+  it.each(svgPayloads)('blocks %s through every image input path', async (_name, bytes) => {
+    expect(detectUnsafeClaudeImagePayload(bytes, { complete: true })).toBe('SVG');
+    expect(() =>
+      assertClaudeSafeAttachment({
+        type: 'image',
+        name: 'disguised.png',
+        mimeType: 'image/png',
+        dataBase64: bytes.toString('base64'),
+      }),
+    ).toThrow(/SVG images/);
+    const file = await temporaryFile('disguised.png', bytes);
+    await expect(assertClaudeSafeImagePath(file)).rejects.toThrow(/SVG images/);
+    for (const data of [
+      bytes.toString('base64'),
+      `data:image/svg+xml;base64,${bytes.toString('base64')}`,
+    ]) {
+      await expect(
+        enforceClaudeToolResultImageSafety({
+          hook_event_name: 'PostToolUse',
+          tool_response: { type: 'image', source: { type: 'base64', data } },
+        }),
+      ).resolves.toMatchObject({
+        hookSpecificOutput: { updatedToolOutput: { isError: true } },
+      });
+    }
+  });
+
+  it('stops scanning where libvips stops', () => {
+    expect(
+      detectUnsafeClaudeImagePayload(Buffer.from('text\0<svg>'), { complete: true }),
+    ).toBeUndefined();
+    expect(
+      detectUnsafeClaudeImagePayload(Buffer.concat([Buffer.from([0xff]), Buffer.from('<svg>')]), {
+        complete: true,
+      }),
+    ).toBeUndefined();
+    expect(detectUnsafeClaudeImagePayload(Buffer.from('plain text'), { complete: true })).toBe(
+      undefined,
+    );
+  });
+
+  it('treats text running past an inspected prefix as SVG', () => {
+    expect(detectUnsafeClaudeImagePayload(Buffer.from('<?xml version'), { complete: false })).toBe(
+      'SVG',
+    );
+  });
+
+  const webp = Buffer.alloc(16);
+  webp.write('RIFF', 0);
+  webp.writeUInt32LE(4096, 4);
+  webp.write('WEBPVP8 ', 8);
+
+  it.each([
+    [
+      'PNG',
+      Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52,
+      ]),
+    ],
+    ['JPEG', Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01])],
+    ['WebP', webp],
+  ] as const)('keeps %s deliverable from a truncated prefix', async (_name, bytes) => {
+    expect(detectUnsafeClaudeImagePayload(bytes, { complete: false })).toBeUndefined();
+    await expect(
+      enforceClaudeToolResultImageSafety({
+        hook_event_name: 'PostToolUse',
+        tool_response: {
+          content: [
+            { type: 'image', data: Buffer.concat([bytes, Buffer.alloc(64, 0x41)]).toString('base64') },
+          ],
+        },
+      }),
+    ).resolves.toEqual({});
+  });
+
+  it('keeps SVG and HTML sources readable through built-in Read', async () => {
+    for (const [name, text] of [
+      ['icon.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>'],
+      ['page.html', '<!doctype html><body><svg></svg></body>'],
+    ]) {
+      const file = await temporaryFile(name, Buffer.from(text));
+      await expect(
+        enforceClaudeImageReadSafety({
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Read',
+          tool_input: { file_path: file },
+        }),
+      ).resolves.toEqual({});
+    }
   });
 });

@@ -33,6 +33,13 @@
       "blockedFormats": [
         "HEIF"
       ]
+    },
+    "GHSA-wq5f-xc86-pv6w": {
+      "component": "sharp",
+      "version": "0.34.5",
+      "blockedFormats": [
+        "SVG"
+      ]
     }
   }
 }

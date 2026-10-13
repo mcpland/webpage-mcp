@@ -72,3 +72,20 @@ test("libheif mitigation requires the exact reviewed content boundary", () => {
     /does not match the reviewed boundary/,
   );
 });
+
+test("librsvg mitigation requires the exact reviewed content boundary", () => {
+  const policy = loadClaudeSdkRuntimePolicy(repositoryRoot);
+  const id = "GHSA-wq5f-xc86-pv6w";
+  assert.deepEqual(policy.mitigations.get(id).blockedFormats, ["SVG"]);
+  const advisory = { name: "sharp", version: "0.34.5", githubAdvisoryId: id };
+  assert.deepEqual(
+    partitionMitigatedAdvisories([advisory], policy.mitigations).mitigated,
+    [advisory],
+  );
+  policy.raw.advisoryMitigations[id].blockedFormats = ["SVGZ"];
+  assert.throws(
+    () =>
+      parseClaudeSdkRuntimePolicy(`${JSON.stringify(policy.raw, null, 2)}\n`),
+    /does not match the reviewed boundary/,
+  );
+});

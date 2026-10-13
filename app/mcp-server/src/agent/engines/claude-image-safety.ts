@@ -11,15 +11,15 @@ const MAX_TOOL_RESPONSE_KEYS = 256;
 const MAX_TOOL_RESPONSE_NODES = 4_096;
 const BASE64_HEADER_CHARACTERS = 24;
 
-export type UnsafeClaudeImageFormat = 'GIF' | 'TIFF' | 'VIPS' | 'HEIF';
+export type UnsafeClaudeImageFormat = 'GIF' | 'TIFF' | 'VIPS' | 'HEIF' | 'SVG';
 
 function startsWith(bytes: Uint8Array, signature: readonly number[]): boolean {
   return signature.every((byte, index) => bytes[index] === byte);
 }
 
 /**
- * Detect formats covered by the reviewed Sharp advisories without invoking an image
- * decoder. Claude Code currently embeds an affected Sharp release, so these
+ * Detect binary formats covered by the reviewed Sharp advisories without invoking
+ * an image decoder. Claude Code currently embeds an affected Sharp release, so these
  * formats must not reach its image loader until the upstream binary is fixed.
  */
 export function detectUnsafeClaudeImageFormat(
@@ -51,6 +51,71 @@ export function detectUnsafeClaudeImageFormat(
   return undefined;
 }
 
+function utf8SequenceLength(lead: number): number {
+  if (lead === 0x00) return 0;
+  if (lead < 0x80) return 1;
+  if (lead >= 0xc0 && lead <= 0xdf) return 2;
+  if (lead >= 0xe0 && lead <= 0xef) return 3;
+  if (lead >= 0xf0 && lead <= 0xf7) return 4;
+  return 0;
+}
+
+function startsWithSvgTag(bytes: Uint8Array, index: number): boolean {
+  return (
+    bytes[index] === 0x3c &&
+    (bytes[index + 1] | 0x20) === 0x73 &&
+    (bytes[index + 2] | 0x20) === 0x76 &&
+    (bytes[index + 3] | 0x20) === 0x67
+  );
+}
+
+/**
+ * Mirror the SVG sniffing of the libvips bundled with the embedded Sharp
+ * (vips_utf8_strcasestr in 8.17): walk the buffer as UTF-8, skipping stray
+ * continuation bytes, stop at NUL or an invalid sequence, and treat any
+ * case-insensitive "<svg" before that point as SVG. Overlong and surrogate
+ * encodings that libvips rejects are accepted here, so this walk can only scan
+ * further than libvips does, never less.
+ */
+function scanForSvgTag(bytes: Uint8Array): 'svg' | 'stopped' | 'truncated' {
+  let index = 0;
+  while (index < bytes.length) {
+    const lead = bytes[index];
+    if (lead >= 0x80 && lead <= 0xbf) {
+      index += 1;
+      continue;
+    }
+    const length = utf8SequenceLength(lead);
+    if (length === 0) return 'stopped';
+    for (let offset = 1; offset < length; offset += 1) {
+      if (index + offset >= bytes.length) return 'truncated';
+      if ((bytes[index + offset] & 0xc0) !== 0x80) return 'stopped';
+    }
+    if (startsWithSvgTag(bytes, index)) return 'svg';
+    index += length;
+  }
+  return 'truncated';
+}
+
+/**
+ * Detect image payloads that must not reach the embedded Sharp, including content
+ * its libvips would route to librsvg (GHSA-wq5f-xc86-pv6w). `complete` says whether
+ * `bytes` is the whole payload; when it is only a prefix, text running to its end
+ * could still hold an SVG tag further on, so it is treated as SVG.
+ */
+export function detectUnsafeClaudeImagePayload(
+  bytes: Uint8Array,
+  { complete }: { complete: boolean },
+): UnsafeClaudeImageFormat | undefined {
+  const format = detectUnsafeClaudeImageFormat(bytes);
+  if (format) return format;
+  // libvips inflates gzip (SVGZ) before sniffing; no accepted raster format is gzip.
+  if (startsWith(bytes, [0x1f, 0x8b])) return 'SVG';
+  const scan = scanForSvgTag(bytes);
+  if (scan === 'svg' || (scan === 'truncated' && !complete)) return 'SVG';
+  return undefined;
+}
+
 function unsafeImageError(format: UnsafeClaudeImageFormat): Error {
   return new Error(
     `ClaudeEngine: ${format} images are temporarily blocked because the bundled image runtime is not patched`,
@@ -58,12 +123,15 @@ function unsafeImageError(format: UnsafeClaudeImageFormat): Error {
 }
 
 export function assertClaudeSafeAttachment(attachment: AgentAttachment): void {
-  const format = detectUnsafeClaudeImageFormat(decodeValidatedAgentAttachment(attachment));
+  const format = detectUnsafeClaudeImagePayload(decodeValidatedAgentAttachment(attachment), {
+    complete: true,
+  });
   if (format) throw unsafeImageError(format);
 }
 
 async function inspectClaudeImageFile(
   filePath: string,
+  { payload }: { payload: boolean },
 ): Promise<UnsafeClaudeImageFormat | undefined> {
   let flags = fsConstants.O_RDONLY;
   if (typeof fsConstants.O_NONBLOCK === 'number') {
@@ -75,7 +143,10 @@ async function inspectClaudeImageFile(
     if (!stats.isFile()) return undefined;
     const header = Buffer.alloc(HEADER_BYTES);
     const { bytesRead } = await handle.read(header, 0, header.length, 0);
-    return detectUnsafeClaudeImageFormat(header.subarray(0, bytesRead));
+    const bytes = header.subarray(0, bytesRead);
+    return payload
+      ? detectUnsafeClaudeImagePayload(bytes, { complete: bytesRead >= stats.size })
+      : detectUnsafeClaudeImageFormat(bytes);
   } finally {
     await handle.close();
   }
@@ -84,7 +155,7 @@ async function inspectClaudeImageFile(
 export async function assertClaudeSafeImagePath(filePath: string): Promise<void> {
   let format: UnsafeClaudeImageFormat | undefined;
   try {
-    format = await inspectClaudeImageFile(filePath);
+    format = await inspectClaudeImageFile(filePath, { payload: true });
   } catch {
     throw new Error('ClaudeEngine: image attachment could not be inspected safely');
   }
@@ -141,9 +212,12 @@ export async function enforceClaudeImageReadSafety(
     ? requestedPath
     : path.resolve(cwd, requestedPath);
 
+  // SVG is not checked here: the pinned Claude Code Read only hands a file to
+  // Sharp after its own PNG/JPEG/GIF/WebP signature check, and SVG sources or
+  // HTML with inline SVG must stay readable as text.
   let format: UnsafeClaudeImageFormat | undefined;
   try {
-    format = await inspectClaudeImageFile(absolutePath);
+    format = await inspectClaudeImageFile(absolutePath, { payload: false });
   } catch {
     return denyClaudeImageRead('ClaudeEngine: Read target could not be inspected safely');
   }
@@ -153,33 +227,39 @@ export async function enforceClaudeImageReadSafety(
 
 function decodeBase64Header(value: string): {
   header?: Uint8Array;
+  complete: boolean;
   inspectable: boolean;
 } {
   let encoded = value;
   if (/^data:/i.test(encoded)) {
     const comma = encoded.indexOf(',');
     if (comma <= 0 || comma > 256 || !/;base64$/i.test(encoded.slice(0, comma))) {
-      return { inspectable: false };
+      return { complete: false, inspectable: false };
     }
     encoded = encoded.slice(comma + 1);
   }
 
   let prefix = '';
   let examined = 0;
+  let complete = true;
   for (const character of encoded) {
     examined += character.length;
-    if (examined > 512) return { inspectable: false };
+    if (examined > 512) return { complete: false, inspectable: false };
     if (/\s/.test(character)) continue;
     if (!/[A-Za-z0-9+/=]/.test(character)) {
-      return { inspectable: false };
+      return { complete: false, inspectable: false };
+    }
+    if (prefix.length >= BASE64_HEADER_CHARACTERS) {
+      complete = false;
+      break;
     }
     prefix += character;
-    if (prefix.length >= BASE64_HEADER_CHARACTERS) break;
     if (character === '=') break;
   }
-  if (prefix.length < 4) return { inspectable: false };
+  if (prefix.length < 4) return { complete: false, inspectable: false };
   return {
-    header: Buffer.from(prefix, 'base64').subarray(0, HEADER_BYTES),
+    header: Buffer.from(prefix, 'base64'),
+    complete,
     inspectable: true,
   };
 }
@@ -234,7 +314,9 @@ function scanToolResponseForUnsafeImage(root: unknown): ToolResponseScan {
         exceededLimit = true;
         return undefined;
       }
-      const format = decoded.header ? detectUnsafeClaudeImageFormat(decoded.header) : undefined;
+      const format = decoded.header
+        ? detectUnsafeClaudeImagePayload(decoded.header, { complete: decoded.complete })
+        : undefined;
       if (format) return format;
     }
     for (const key of keys) {
