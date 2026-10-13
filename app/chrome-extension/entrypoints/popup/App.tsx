@@ -123,7 +123,8 @@ export default function PopupApp() {
 
   const isConnectedAndRunning =
     nativeConnectionStatus === "connected" && serverStatus.isRunning;
-  const showRegisterFallback = nativeConnectionStatus !== "connected";
+  // Wait for detection to finish so the block does not flash on every open.
+  const showRegisterFallback = nativeConnectionStatus === "disconnected";
   const extensionId = chrome.runtime.id;
   const extensionVersion = chrome.runtime.getManifest().version;
 
@@ -754,6 +755,41 @@ export default function PopupApp() {
                 </p>
               ) : null}
 
+              {showRegisterFallback ? (
+                <div className="register-fallback-section">
+                  <p className="mcp-config-label">
+                    {t(
+                      "popupManualRegistrationLabel",
+                      "Manual registration (if auto-registration fails)",
+                    )}
+                  </p>
+                  <p className="register-fallback-hint">
+                    {t(
+                      "popupManualRegistrationHint",
+                      "Only needed if auto-registration did not work. Requires Node.js.",
+                    )}
+                  </p>
+                  <div className="mcp-config-header">
+                    <p className="mcp-config-label">
+                      {t(
+                        "popupOneTimeHostRegistrationLabel",
+                        "One-time host registration (current extension ID)",
+                      )}
+                    </p>
+                    <button
+                      className="copy-config-button"
+                      type="button"
+                      onClick={() => void copyRegisterCommand()}
+                    >
+                      {copyRegisterButtonText}
+                    </button>
+                  </div>
+                  <div className="mcp-config-content">
+                    <pre className="mcp-config-json">{registerCommand}</pre>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="mcp-background-mode-section">
                 <div className="mcp-background-mode-row">
                   <div className="mcp-background-mode-info">
@@ -839,43 +875,6 @@ export default function PopupApp() {
                     <pre className="mcp-config-json">{nativeAuthToken}</pre>
                   </div>
                 </div>
-              ) : null}
-
-              {showRegisterFallback ? (
-                <details className="register-fallback-section">
-                  <summary className="register-fallback-summary">
-                    {t(
-                      "popupManualRegistrationLabel",
-                      "Manual registration (if auto-registration fails)",
-                    )}
-                  </summary>
-                  <div className="register-fallback-content">
-                    <p className="register-fallback-hint">
-                      {t(
-                        "popupManualRegistrationHint",
-                        "Only needed if auto-registration did not work. Requires Node.js.",
-                      )}
-                    </p>
-                    <div className="mcp-config-header">
-                      <p className="mcp-config-label">
-                        {t(
-                          "popupOneTimeHostRegistrationLabel",
-                          "One-time host registration (current extension ID)",
-                        )}
-                      </p>
-                      <button
-                        className="copy-config-button"
-                        type="button"
-                        onClick={() => void copyRegisterCommand()}
-                      >
-                        {copyRegisterButtonText}
-                      </button>
-                    </div>
-                    <div className="mcp-config-content">
-                      <pre className="mcp-config-json">{registerCommand}</pre>
-                    </div>
-                  </div>
-                </details>
               ) : null}
             </div>
           </div>

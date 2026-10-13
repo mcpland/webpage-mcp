@@ -5,7 +5,14 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  font-family: var(--ac-font-body, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  font-family: var(
+    --ac-font-body,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif
+  );
   background: var(--ac-bg, #fdfcf8);
   color: var(--ac-text, #1a1a1a);
   height: 100%;
@@ -374,7 +381,7 @@
 }
 
 .mcp-background-mode-slider::before {
-  content: '';
+  content: "";
   position: absolute;
   width: 18px;
   height: 18px;
@@ -391,7 +398,9 @@
   background: var(--ac-accent, #d97757);
 }
 
-.mcp-background-mode-toggle input:checked + .mcp-background-mode-slider::before {
+.mcp-background-mode-toggle
+  input:checked
+  + .mcp-background-mode-slider::before {
   transform: translateX(18px);
 }
 
@@ -425,7 +434,7 @@
 }
 
 .mcp-config-json {
-  font-family: var(--ac-font-code, 'JetBrains Mono', monospace);
+  font-family: var(--ac-font-code, "JetBrains Mono", monospace);
   font-size: 11px;
   line-height: 1.5;
   color: var(--ac-text, #1a1a1a);
@@ -445,47 +454,17 @@
 }
 
 /* =============================================
-   Register Fallback (collapsible)
+   Register Fallback (shown while disconnected)
    ============================================= */
 .register-fallback-section {
   border-top: 1px solid var(--ac-border, #e7e5e4);
   padding-top: 12px;
 }
 
-.register-fallback-summary {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--ac-text-muted, #6e6e6e);
-  cursor: pointer;
-  padding: 2px 0;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.register-fallback-summary::-webkit-details-marker {
-  display: none;
-}
-
-.register-fallback-summary::before {
-  content: '▸';
-  font-size: 10px;
-  transition: transform var(--ac-motion-fast, 120ms) ease;
-}
-
-details.register-fallback-section[open] > .register-fallback-summary::before {
-  transform: rotate(90deg);
-}
-
-.register-fallback-content {
-  padding-top: 10px;
-}
-
 .register-fallback-hint {
   font-size: 11px;
   color: var(--ac-text-subtle, #a8a29e);
-  margin: 0 0 8px;
+  margin: 4px 0 10px;
   line-height: 1.4;
 }
 
@@ -602,7 +581,7 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
 .recorded-flow-id {
   font-size: 10px;
   color: var(--ac-text-subtle, #a8a29e);
-  font-family: var(--ac-font-code, 'JetBrains Mono', monospace);
+  font-family: var(--ac-font-code, "JetBrains Mono", monospace);
 }
 
 .recorded-flow-fields {
@@ -681,13 +660,15 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
   border-radius: 6px;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 80ms ease, visibility 80ms ease;
+  transition:
+    opacity 80ms ease,
+    visibility 80ms ease;
   pointer-events: none;
   z-index: 100;
 }
 
 .has-tooltip::before {
-  content: '';
+  content: "";
   position: absolute;
   bottom: calc(100% + 2px);
   left: 50%;
@@ -696,7 +677,9 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
   border-top-color: var(--ac-text, #1a1a1a);
   opacity: 0;
   visibility: hidden;
-  transition: opacity 80ms ease, visibility 80ms ease;
+  transition:
+    opacity 80ms ease,
+    visibility 80ms ease;
   pointer-events: none;
   z-index: 100;
 }
@@ -869,7 +852,7 @@ details.register-fallback-section[open] > .register-fallback-summary::before {
   font-size: 10px;
   color: var(--ac-text-subtle, #a8a29e);
   margin: 4px 0 0;
-  font-family: var(--ac-font-code, 'JetBrains Mono', monospace);
+  font-family: var(--ac-font-code, "JetBrains Mono", monospace);
   letter-spacing: 0.04em;
 }
 
