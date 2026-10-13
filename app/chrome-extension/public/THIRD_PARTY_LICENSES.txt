@@ -96,7 +96,7 @@ SOFTWARE.
 ===============================================================================
 LICENSE MATERIAL 2
 Applies to:
-  - @modelcontextprotocol/sdk@1.29.0 (declared, type-only in current bundle)
+  - @modelcontextprotocol/sdk@1.31.0 (declared, type-only in current bundle)
 Source material:
   - app/chrome-extension/node_modules/@modelcontextprotocol/sdk/LICENSE
 ===============================================================================

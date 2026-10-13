@@ -9,14 +9,14 @@ License identifiers in this table are the upstream package declarations. `THIRD_
 | npm       | `@anthropic-ai/claude-agent-sdk` | `0.3.231`     | `SEE LICENSE IN README.md` | Runtime dependency under Anthropic terms | https://github.com/anthropics/claude-agent-sdk-typescript |
 | npm       | `@anthropic-ai/sdk`              | `0.116.0`     | `MIT`                      | Runtime peer dependency                  | https://github.com/anthropics/anthropic-sdk-typescript    |
 | npm       | `@hono/node-server`              | `2.0.10`      | `MIT`                      | Bundled SDK HTTP adapter code            | https://github.com/honojs/node-server                     |
-| npm       | `@modelcontextprotocol/sdk`      | `1.29.0`      | `MIT`                      | Runtime peer and bundled protocol code   | https://github.com/modelcontextprotocol/typescript-sdk    |
+| npm       | `@modelcontextprotocol/sdk`      | `1.31.0`      | `MIT`                      | Runtime peer and bundled protocol code   | https://github.com/modelcontextprotocol/typescript-sdk    |
 | npm       | `better-sqlite3`                 | `12.11.1`     | `MIT`                      | Runtime dependency with native binary    | https://github.com/WiseLibs/better-sqlite3                |
 | npm       | `chalk`                          | `5.6.2`       | `MIT`                      | Declared runtime dependency              | https://github.com/chalk/chalk                            |
 | npm       | `chrome-devtools-frontend`       | `1.0.1587905` | `BSD-3-Clause`             | Runtime trace-analysis dependency        | https://github.com/ChromeDevTools/devtools-frontend       |
 | npm       | `commander`                      | `13.1.0`      | `MIT`                      | Runtime CLI dependency                   | https://github.com/tj/commander.js                        |
 | npm       | `cross-spawn`                    | `7.0.6`       | `MIT`                      | Runtime process-launch dependency        | https://github.com/moxystudio/node-cross-spawn            |
 | npm       | `drizzle-orm`                    | `0.45.2`      | `Apache-2.0`               | Runtime database dependency              | https://github.com/drizzle-team/drizzle-orm               |
-| npm       | `hono`                           | `4.13.5`      | `MIT`                      | Bundled SDK HTTP routing code            | https://github.com/honojs/hono                            |
+| npm       | `hono`                           | `4.13.13`     | `MIT`                      | Bundled SDK HTTP routing code            | https://github.com/honojs/hono                            |
 | npm       | `is-admin`                       | `4.0.0`       | `MIT`                      | Runtime Windows privilege helper         | https://github.com/sindresorhus/is-admin                  |
 | npm       | `pino`                           | `9.14.0`      | `MIT`                      | Declared runtime dependency              | https://github.com/pinojs/pino                            |
 | npm       | `uuid`                           | `11.1.1`      | `MIT`                      | Runtime identifier dependency            | https://github.com/uuidjs/uuid                            |
