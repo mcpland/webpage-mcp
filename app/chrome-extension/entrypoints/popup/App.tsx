@@ -760,13 +760,13 @@ export default function PopupApp() {
                   <p className="mcp-config-label">
                     {t(
                       "popupManualRegistrationLabel",
-                      "Manual registration (if auto-registration fails)",
+                      "Connect the local service",
                     )}
                   </p>
                   <p className="register-fallback-hint">
                     {t(
                       "popupManualRegistrationHint",
-                      "Only needed if auto-registration did not work. Requires Node.js.",
+                      "Run the command below in a terminal (requires Node.js), then click the refresh button above.",
                     )}
                   </p>
                   <div className="mcp-config-header">

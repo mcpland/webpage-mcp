@@ -1896,7 +1896,7 @@
     "description": "Auto-generated localized message"
   },
   "popupCopyRegisterCommand": {
-    "message": "コピーレジスタコマンド",
+    "message": "登録コマンドをコピー",
     "description": "Auto-generated localized message"
   },
   "popupCopyToken": {
@@ -1980,11 +1980,11 @@
     "description": "Auto-generated localized message"
   },
   "popupManualRegistrationHint": {
-    "message": "自動登録が機能しなかった場合にのみ必要です。 Node.jsが必要です。",
+    "message": "ターミナルで次のコマンドを実行し（Node.js が必要です）、上の更新ボタンをクリックしてください。",
     "description": "Auto-generated localized message"
   },
   "popupManualRegistrationLabel": {
-    "message": "手動登録（自動登録が失敗した場合）",
+    "message": "ローカルサービスに接続",
     "description": "Auto-generated localized message"
   },
   "popupMarkerNamePlaceholder": {

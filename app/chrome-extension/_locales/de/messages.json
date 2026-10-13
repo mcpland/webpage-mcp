@@ -1896,7 +1896,7 @@
     "description": "Auto-generated localized message"
   },
   "popupCopyRegisterCommand": {
-    "message": "Befehl zum Kopieren des Registers",
+    "message": "Registrierungsbefehl kopieren",
     "description": "Auto-generated localized message"
   },
   "popupCopyToken": {
@@ -1980,11 +1980,11 @@
     "description": "Auto-generated localized message"
   },
   "popupManualRegistrationHint": {
-    "message": "Wird nur benötigt, wenn die automatische Registrierung nicht funktioniert hat. Erfordert Node.js.",
+    "message": "Führen Sie den folgenden Befehl in einem Terminal aus (Node.js erforderlich) und klicken Sie dann oben auf die Schaltfläche zum Aktualisieren.",
     "description": "Auto-generated localized message"
   },
   "popupManualRegistrationLabel": {
-    "message": "Manuelle Registrierung (wenn die automatische Registrierung fehlschlägt)",
+    "message": "Lokalen Service verbinden",
     "description": "Auto-generated localized message"
   },
   "popupMarkerNamePlaceholder": {

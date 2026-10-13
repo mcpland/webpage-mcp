@@ -1980,11 +1980,11 @@
     "description": "自動生成的 i18n 文案"
   },
   "popupManualRegistrationHint": {
-    "message": "僅當自動註冊不起作用時才需要。需要 Node.js。",
+    "message": "在終端機執行以下命令（需要 Node.js），然後按一下上方的重新整理按鈕。",
     "description": "自動生成的 i18n 文案"
   },
   "popupManualRegistrationLabel": {
-    "message": "手動註冊（如果自動註冊失敗）",
+    "message": "連線本機服務",
     "description": "自動生成的 i18n 文案"
   },
   "popupMarkerNamePlaceholder": {

@@ -1980,11 +1980,11 @@
     "description": "自动生成的 i18n 文案"
   },
   "popupManualRegistrationHint": {
-    "message": "仅当自动注册不起作用时才需要。需要 Node.js。",
+    "message": "在终端运行以下命令（需要 Node.js），然后点击上方的刷新按钮。",
     "description": "自动生成的 i18n 文案"
   },
   "popupManualRegistrationLabel": {
-    "message": "手动注册（如果自动注册失败）",
+    "message": "连接本地服务",
     "description": "自动生成的 i18n 文案"
   },
   "popupMarkerNamePlaceholder": {

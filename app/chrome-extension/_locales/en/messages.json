@@ -1980,11 +1980,11 @@
     "description": "Auto-generated i18n message"
   },
   "popupManualRegistrationHint": {
-    "message": "Only needed if auto-registration did not work. Requires Node.js.",
+    "message": "Run the command below in a terminal (requires Node.js), then click the refresh button above.",
     "description": "Auto-generated i18n message"
   },
   "popupManualRegistrationLabel": {
-    "message": "Manual registration (if auto-registration fails)",
+    "message": "Connect the local service",
     "description": "Auto-generated i18n message"
   },
   "popupMarkerNamePlaceholder": {
