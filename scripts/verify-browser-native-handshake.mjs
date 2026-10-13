@@ -147,7 +147,10 @@ async function fetchTargets(port) {
   return targets;
 }
 
-async function waitForExtensionTarget(port, extensionId, child) {
+// Chrome for Testing 155+ can navigate a startup URL before an unpacked
+// extension is registered, leaving it on ERR_BLOCKED_BY_CLIENT. Wait for the
+// extension service worker before opening any extension page.
+async function waitForExtensionWorker(port, extensionId, child) {
   const prefix = `chrome-extension://${extensionId}/`;
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -156,22 +159,68 @@ async function waitForExtensionTarget(port, extensionId, child) {
       true,
       "Chrome exited before the extension loaded",
     );
-    const targets = (await fetchTargets(port)).filter(
-      (candidate) =>
-        candidate &&
-        (candidate.type === "page" || candidate.type === "service_worker") &&
-        typeof candidate.url === "string" &&
-        candidate.url.startsWith(prefix) &&
-        typeof candidate.webSocketDebuggerUrl === "string",
-    );
-    const target =
-      targets.find((candidate) => candidate.url === `${prefix}popup.html`) ??
-      targets.find((candidate) => candidate.type === "page") ??
-      targets.find((candidate) => candidate.type === "service_worker");
-    if (target) return target;
+    const targets = await fetchTargets(port);
+    if (
+      targets.some(
+        (candidate) =>
+          candidate?.type === "service_worker" &&
+          typeof candidate.url === "string" &&
+          candidate.url.startsWith(prefix),
+      )
+    ) {
+      return;
+    }
     await delay(200);
   }
-  throw new Error("Chrome did not expose the expected extension target");
+  throw new Error("Chrome did not start the extension service worker");
+}
+
+async function openExtensionPage(port, pageUrl) {
+  const response = await globalThis.fetch(
+    `http://127.0.0.1:${port}/json/new?${pageUrl}`,
+    {
+      method: "PUT",
+      redirect: "error",
+      signal: globalThis.AbortSignal.timeout(5_000),
+    },
+  );
+  assert.equal(
+    response.ok,
+    true,
+    `Chrome could not open the extension page (${response.status})`,
+  );
+  const target = await response.json();
+  assert.equal(
+    typeof target?.webSocketDebuggerUrl,
+    "string",
+    "Chrome did not expose the extension page target",
+  );
+  return target;
+}
+
+async function waitForExtensionRuntime(cdp, pageUrl) {
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  let context;
+  while (Date.now() < deadline) {
+    try {
+      context = runtimeValue(
+        await cdp.call("Runtime.evaluate", {
+          expression:
+            "({ href: globalThis.location?.href, runtimeType: typeof globalThis.chrome?.runtime })",
+          returnByValue: true,
+        }),
+      );
+      if (context?.href === pageUrl && context.runtimeType === "object") {
+        return;
+      }
+    } catch {
+      // The page may still be committing its navigation.
+    }
+    await delay(200);
+  }
+  assert.fail(
+    `extension page has no extension runtime (href: ${String(context?.href)})`,
+  );
 }
 
 async function connectCdp(webSocketUrl) {
@@ -315,7 +364,6 @@ async function main() {
     "--remote-debugging-port=0",
     "--remote-allow-origins=*",
     ...(process.platform === "linux" ? ["--no-sandbox"] : []),
-    `chrome-extension://${extensionId}/popup.html`,
   ];
   const child = spawn(chromeBinary, args, {
     env: process.env,
@@ -327,19 +375,12 @@ async function main() {
   let cdp;
   try {
     const port = await waitForDevtoolsPort(userDataDir, child);
-    const target = await waitForExtensionTarget(port, extensionId, child);
+    await waitForExtensionWorker(port, extensionId, child);
+    const pageUrl = `chrome-extension://${extensionId}/popup.html`;
+    const target = await openExtensionPage(port, pageUrl);
     cdp = await connectCdp(target.webSocketDebuggerUrl);
     await cdp.call("Runtime.enable");
-    const contextProbe = await cdp.call("Runtime.evaluate", {
-      expression:
-        "({ href: globalThis.location?.href, runtimeType: typeof globalThis.chrome?.runtime })",
-      returnByValue: true,
-    });
-    assert.equal(
-      runtimeValue(contextProbe)?.runtimeType,
-      "object",
-      `selected Chrome target has no extension runtime (${target.type}: ${target.url})`,
-    );
+    await waitForExtensionRuntime(cdp, pageUrl);
     const evaluation = await cdp.call("Runtime.evaluate", {
       expression: `(async () => {
         const ensure = await chrome.runtime.sendMessage({ type: "ensure_native" });
