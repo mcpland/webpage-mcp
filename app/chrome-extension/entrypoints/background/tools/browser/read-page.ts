@@ -9,12 +9,40 @@ import {
   truncateInteractiveString,
   utf8ByteLengthBounded,
 } from './interactive-elements-limits';
+import { qualifyPageContentRefs, resolveRefTarget } from './target-resolution';
 
 const READ_PAGE_LIMITS = {
   refIdBytes: 128,
   pageContentBytes: 384 * 1024,
   refMapCount: 256,
+  frames: 32,
 } as const;
+
+interface ReadPageFrameInfo {
+  frameId: number;
+  parentFrameId: number;
+  url: string | null;
+}
+
+/** Other frames of the tab, so callers can read an iframe explicitly. */
+async function listOtherFrames(
+  tabId: number,
+  targetFrameId: number,
+): Promise<ReadPageFrameInfo[]> {
+  try {
+    const frames = (await chrome.webNavigation.getAllFrames({ tabId })) || [];
+    return frames
+      .filter((frame) => frame.frameId !== targetFrameId)
+      .slice(0, READ_PAGE_LIMITS.frames)
+      .map((frame) => ({
+        frameId: frame.frameId,
+        parentFrameId: frame.parentFrameId,
+        url: /^https?:\/\//i.test(frame.url || '') ? frame.url : null,
+      }));
+  } catch {
+    return [];
+  }
+}
 
 function finiteNonNegative(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
@@ -30,6 +58,7 @@ interface ReadPageParams {
   filter?: 'interactive'; // when omitted, return all visible elements
   depth?: number; // maximum DOM depth to traverse (0 = root only)
   refId?: string; // focus on subtree rooted at this refId
+  frameId?: number; // read this frame instead of the top frame
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
   background?: boolean; // when true, do not activate tab or focus window
@@ -73,6 +102,31 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       return createErrorResponse(
         `${ERROR_MESSAGES.INVALID_PARAMETERS}: refId exceeds the ${READ_PAGE_LIMITS.refIdBytes}-byte UTF-8 limit`,
       );
+    }
+
+    // Resolve the frame to read: an explicit frameId or the frame encoded in a
+    // frame-qualified refId ("f<frameId>:ref_<n>"). Defaults to the top frame.
+    const explicitFrameId = args?.frameId;
+    if (
+      explicitFrameId !== undefined &&
+      (!Number.isSafeInteger(explicitFrameId) || explicitFrameId < 0)
+    ) {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: frameId must be a non-negative integer`,
+      );
+    }
+    let focusRef = '';
+    let targetFrameId = explicitFrameId ?? 0;
+    if (focusRefId) {
+      try {
+        const resolvedRef = resolveRefTarget(focusRefId, explicitFrameId);
+        focusRef = resolvedRef?.ref || '';
+        targetFrameId = resolvedRef?.frameId ?? targetFrameId;
+      } catch (error) {
+        return createErrorResponse(
+          `${ERROR_MESSAGES.INVALID_PARAMETERS}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
 
     // Validate depth parameter
@@ -120,28 +174,29 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       const currentUrl = String(tab.url || '');
       const userMarkers = currentUrl ? await listMarkersForUrl(currentUrl) : [];
 
-      // Inject helper in ISOLATED world to enable chrome.runtime messaging
-      // Inject into all frames to support same-origin iframe operations
-      await this.injectContentScript(
-        targetTabId,
-        ['inject-scripts/accessibility-tree-helper.js'],
-        false,
-        'ISOLATED',
-        true,
-      );
+      // Only the target frame builds a tree. Broadcasting to every frame made
+      // whichever frame answered first (usually a small iframe) win, and its
+      // frame-local refs then collided with the top frame's refs.
+      await this.injectAccessibilityHelper(targetTabId, targetFrameId);
 
       // Ask content script to generate accessibility tree
-      const resp = await this.sendMessageToTab(targetTabId, {
-        action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
-        filter: filter || null,
-        depth: requestedDepth,
-        refId: focusRefId || undefined,
-      });
+      const resp = await this.sendMessageToTab(
+        targetTabId,
+        {
+          action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
+          filter: filter || null,
+          depth: requestedDepth,
+          refId: focusRef || undefined,
+        },
+        targetFrameId,
+      );
 
       // Evaluate tree result and decide whether to fallback
       const treeOk = resp && resp.success === true;
-      const rawPageContent: string =
-        resp && typeof resp.pageContent === 'string' ? resp.pageContent : '';
+      const rawPageContent: string = qualifyPageContentRefs(
+        resp && typeof resp.pageContent === 'string' ? resp.pageContent : '',
+        targetFrameId,
+      );
       const pageContent = truncateInteractiveString(
         rawPageContent,
         READ_PAGE_LIMITS.pageContentBytes,
@@ -233,6 +288,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         fallbackSource: null,
         reason: null,
       };
+      // Iframe contents are not inlined. Report the other frames so a caller
+      // can read one explicitly; its refs come back frame-qualified.
+      if (targetFrameId !== 0) basePayload.frameId = targetFrameId;
+      const otherFrames = await listOtherFrames(targetTabId, targetFrameId);
+      if (otherFrames.length > 0) basePayload.frames = otherFrames;
 
       // Normal path: return tree
       if (treeOk && !isSparse) {
@@ -258,13 +318,22 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
       // Fallback path: try get_interactive_elements once
       try {
-        await this.injectContentScript(targetTabId, [
-          'inject-scripts/interactive-elements-helper.js',
-        ]);
-        const fallback = await this.sendMessageToTab(targetTabId, {
-          action: TOOL_MESSAGE_TYPES.GET_INTERACTIVE_ELEMENTS,
-          includeCoordinates: true,
-        });
+        await this.injectContentScript(
+          targetTabId,
+          ['inject-scripts/interactive-elements-helper.js'],
+          false,
+          'ISOLATED',
+          false,
+          [targetFrameId],
+        );
+        const fallback = await this.sendMessageToTab(
+          targetTabId,
+          {
+            action: TOOL_MESSAGE_TYPES.GET_INTERACTIVE_ELEMENTS,
+            includeCoordinates: true,
+          },
+          targetFrameId,
+        );
 
         if (fallback && fallback.success && Array.isArray(fallback.elements)) {
           const boundedFallback = boundInteractiveElements(fallback.elements, 150);

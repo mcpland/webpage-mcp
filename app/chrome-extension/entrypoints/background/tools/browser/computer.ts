@@ -20,9 +20,9 @@ import {
 import {
   getResolvedViewportCoordinates,
   isCompositeSelector,
-  normalizeBrowserTargetRef,
   normalizeBrowserTargetSelector,
   resolveFrameIdForMessageResult,
+  resolveRefTarget,
 } from './target-resolution';
 
 type MouseButton = 'left' | 'right' | 'middle';
@@ -388,35 +388,25 @@ class ComputerTool extends BaseBrowserToolExecutor {
       return { x: scaled.x, y: scaled.y };
     };
 
-    const injectAccessibilityHelper = async (
-      frameId?: number,
-    ): Promise<void> => {
-      await this.injectContentScript(
-        tab.id!,
-        ['inject-scripts/accessibility-tree-helper.js'],
-        false,
-        'ISOLATED',
-        false,
-        typeof frameId === 'number' ? [frameId] : undefined,
-      );
-    };
+    const injectAccessibilityHelper = (frameId?: number): Promise<void> =>
+      this.injectAccessibilityHelper(tab.id!, frameId);
 
     const resolveRefPoint = async (
       ref: string,
       frameId?: number,
     ): Promise<Coordinates | undefined> => {
-      const normalizedRef = normalizeBrowserTargetRef(ref);
-      if (!normalizedRef) return undefined;
-      await injectAccessibilityHelper(frameId);
+      const target = resolveRefTarget(ref, frameId);
+      if (!target) return undefined;
+      await injectAccessibilityHelper(target.frameId);
       const resolved = await this.sendMessageToTab(
         tab.id!,
         {
           action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-          ref: normalizedRef,
+          ref: target.ref,
         },
-        frameId,
+        target.frameId,
       );
-      const point = getResolvedViewportCoordinates(resolved, frameId);
+      const point = getResolvedViewportCoordinates(resolved, target.frameId);
       return point ? project(point) : undefined;
     };
 
@@ -553,11 +543,12 @@ class ComputerTool extends BaseBrowserToolExecutor {
         try {
           if (params.ref) {
             try {
-              await injectAccessibilityHelper(params.frameId);
+              const target = resolveRefTarget(params.ref, params.frameId);
+              await injectAccessibilityHelper(target?.frameId);
               await this.sendMessageToTab(
                 tab.id,
-                { action: 'focusByRef', ref: params.ref },
-                params.frameId,
+                { action: 'focusByRef', ref: target?.ref },
+                target?.frameId,
               );
             } catch {
               // Best effort - continue even if scroll fails
@@ -1322,12 +1313,13 @@ class ComputerTool extends BaseBrowserToolExecutor {
               0,
               Math.min(((params as any).timeout as number) || 10000, 120000),
             );
+            // Any frame may satisfy a text wait, so this is an intentional broadcast.
             const resp = await this.sendMessageToTab(tab.id, {
               action: TOOL_MESSAGE_TYPES.WAIT_FOR_TEXT,
               text: (params as any).text,
               appear,
               timeout: timeoutMs,
-            });
+            }, 'all');
             if (!resp || resp.success !== true) {
               return createErrorResponse(
                 resp && resp.reason === 'timeout'
@@ -1386,13 +1378,16 @@ class ComputerTool extends BaseBrowserToolExecutor {
           return createErrorResponse('ref is required for scroll_to action');
         }
         try {
-          await this.injectContentScript(tab.id, [
-            'inject-scripts/accessibility-tree-helper.js',
-          ]);
-          const resp = await this.sendMessageToTab(tab.id, {
-            action: 'focusByRef',
-            ref: params.ref,
-          });
+          const target = resolveRefTarget(params.ref, params.frameId);
+          await injectAccessibilityHelper(target?.frameId);
+          const resp = await this.sendMessageToTab(
+            tab.id,
+            {
+              action: 'focusByRef',
+              ref: target?.ref,
+            },
+            target?.frameId,
+          );
           if (!resp || resp.success !== true) {
             return createErrorResponse(
               resp?.error || 'scroll_to failed: element not found',
@@ -1570,10 +1565,15 @@ class ComputerTool extends BaseBrowserToolExecutor {
     // Try ref-based approach first (handles iframes correctly)
     if (ref) {
       try {
-        const resp = await this.sendMessageToTab(tabId, {
-          action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
-          ref,
-        });
+        const target = resolveRefTarget(ref);
+        const resp = await this.sendMessageToTab(
+          tabId,
+          {
+            action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
+            ref: target?.ref,
+          },
+          target?.frameId,
+        );
         if (resp?.success) {
           return {
             content: [

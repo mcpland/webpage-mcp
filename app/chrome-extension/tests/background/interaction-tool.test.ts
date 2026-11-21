@@ -110,16 +110,18 @@ describe('interaction tools', () => {
       false,
       'ISOLATED',
       false,
-      undefined,
+      [0],
     );
-    expect(mocks.tabsSendMessage).toHaveBeenCalledWith(7, {
-      action: 'focusByRef',
-      ref: 'ref_click',
-    });
-    expect(mocks.tabsSendMessage).toHaveBeenCalledWith(7, {
-      action: 'resolveRef',
-      ref: 'ref_click',
-    });
+    expect(mocks.tabsSendMessage).toHaveBeenCalledWith(
+      7,
+      { action: 'focusByRef', ref: 'ref_click' },
+      { frameId: 0 },
+    );
+    expect(mocks.tabsSendMessage).toHaveBeenCalledWith(
+      7,
+      { action: 'resolveRef', ref: 'ref_click' },
+      { frameId: 0 },
+    );
     expect(mocks.attach).toHaveBeenCalledWith(7, 'click');
     expect(mocks.sendCommand).toHaveBeenCalledWith(
       7,
@@ -401,7 +403,7 @@ describe('interaction tools', () => {
       false,
       'ISOLATED',
       false,
-      undefined,
+      [0],
     );
     expect(injectContentScript).toHaveBeenNthCalledWith(
       2,
@@ -412,11 +414,17 @@ describe('interaction tools', () => {
       false,
       [21],
     );
-    expect(mocks.tabsSendMessage).toHaveBeenNthCalledWith(1, 7, {
-      action: 'ensureRefForSelector',
-      selector: 'iframe[data-app] |> button.save',
-      isXPath: false,
-    });
+    // Composite selectors are bridged by the top frame's helper.
+    expect(mocks.tabsSendMessage).toHaveBeenNthCalledWith(
+      1,
+      7,
+      {
+        action: 'ensureRefForSelector',
+        selector: 'iframe[data-app] |> button.save',
+        isXPath: false,
+      },
+      { frameId: 0 },
+    );
     expect(mocks.tabsSendMessage).toHaveBeenNthCalledWith(
       2,
       7,

@@ -62,7 +62,10 @@ import {
   type GifCaptureOwner,
 } from './gif-capture-owner';
 import { encodeGifCanvasFrame } from './gif-frame-transport';
-import { getResolvedViewportCoordinates } from './target-resolution';
+import {
+  getResolvedViewportCoordinates,
+  resolveRefTarget,
+} from './target-resolution';
 
 // ============================================================================
 // Constants
@@ -1381,14 +1384,20 @@ class GifRecorderTool extends BaseBrowserToolExecutor {
             if (ref) {
               // Use the project's built-in ref resolution mechanism
               try {
-                await this.injectContentScript(tab.id, [
-                  'inject-scripts/accessibility-tree-helper.js',
-                ]);
-                const resolved = await this.sendMessageToTab(tab.id, {
-                  action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-                  ref,
-                });
-                const targetPoint = getResolvedViewportCoordinates(resolved);
+                const refTarget = resolveRefTarget(ref);
+                await this.injectAccessibilityHelper(tab.id, refTarget?.frameId);
+                const resolved = await this.sendMessageToTab(
+                  tab.id,
+                  {
+                    action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
+                    ref: refTarget?.ref,
+                  },
+                  refTarget?.frameId,
+                );
+                const targetPoint = getResolvedViewportCoordinates(
+                  resolved,
+                  refTarget?.frameId,
+                );
                 if (resolved?.success && targetPoint) {
                   targetX = targetPoint.x;
                   targetY = targetPoint.y;

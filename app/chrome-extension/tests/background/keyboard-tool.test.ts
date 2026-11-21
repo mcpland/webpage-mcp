@@ -102,7 +102,7 @@ describe('keyboardTool', () => {
       false,
       'ISOLATED',
       false,
-      undefined,
+      [0],
     );
     expect(injectContentScript).toHaveBeenNthCalledWith(
       2,
@@ -111,7 +111,7 @@ describe('keyboardTool', () => {
       false,
       'ISOLATED',
       false,
-      undefined,
+      [0],
     );
     expect(sendMessageToTab).toHaveBeenCalledWith(
       7,

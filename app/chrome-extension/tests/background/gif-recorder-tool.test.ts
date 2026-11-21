@@ -817,13 +817,19 @@ describe('gifRecorderTool', () => {
 
     expect(exportResult.isError).toBe(false);
     expect(resolveTargetTab).toHaveBeenCalledWith(7);
-    expect(injectContentScript).toHaveBeenCalledWith(7, [
-      'inject-scripts/accessibility-tree-helper.js',
-    ]);
-    expect(sendMessageToTab).toHaveBeenCalledWith(7, {
-      action: 'resolveRef',
-      ref: 'ref_drop_zone',
-    });
+    expect(injectContentScript).toHaveBeenCalledWith(
+      7,
+      ['inject-scripts/accessibility-tree-helper.js'],
+      false,
+      'ISOLATED',
+      false,
+      [0],
+    );
+    expect(sendMessageToTab).toHaveBeenCalledWith(
+      7,
+      { action: 'resolveRef', ref: 'ref_drop_zone' },
+      undefined,
+    );
     expect(executeScript).toHaveBeenCalledWith(
       expect.objectContaining({
         target: { tabId: 7 },

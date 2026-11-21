@@ -119,6 +119,7 @@ describe('readPageTool', () => {
     expect(sendMessageToTab).toHaveBeenCalledWith(
       7,
       expect.objectContaining({ action: 'generateAccessibilityTree' }),
+      0,
     );
   });
 

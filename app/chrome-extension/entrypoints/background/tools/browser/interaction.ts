@@ -8,9 +8,10 @@ import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
   getResolvedViewportCoordinates,
   isCompositeSelector,
-  normalizeBrowserTargetRef,
   normalizeBrowserTargetSelector,
+  qualifyFrameRef,
   resolveFrameIdForMessageResult,
+  resolveRefTarget,
 } from './target-resolution';
 
 interface Coordinates {
@@ -214,8 +215,9 @@ class ClickTool extends BaseBrowserToolExecutor {
   ): Promise<ResolvedClickTarget> {
     const { selectorType = 'css', coordinates, frameId } = args;
     const selector = normalizeBrowserTargetSelector(args.selector, selectorType);
-    let ref = normalizeBrowserTargetRef(args.ref);
-    let targetFrameId = frameId;
+    const refTarget = resolveRefTarget(args.ref, frameId);
+    let ref = refTarget?.ref;
+    let targetFrameId = refTarget ? refTarget.frameId : frameId;
 
     if (
       coordinates &&
@@ -235,14 +237,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       };
     }
 
-    await this.injectContentScript(
-      tabId,
-      ['inject-scripts/accessibility-tree-helper.js'],
-      false,
-      'ISOLATED',
-      false,
-      typeof targetFrameId === 'number' ? [targetFrameId] : undefined,
-    );
+    await this.injectAccessibilityHelper(tabId, targetFrameId);
 
     if (!ref && selector) {
       const selectorFrameId = isCompositeSelector(selector)
@@ -269,14 +264,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         targetFrameId,
         ensured,
       );
-      await this.injectContentScript(
-        tabId,
-        ['inject-scripts/accessibility-tree-helper.js'],
-        false,
-        'ISOLATED',
-        false,
-        typeof targetFrameId === 'number' ? [targetFrameId] : undefined,
-      );
+      await this.injectAccessibilityHelper(tabId, targetFrameId);
       ref = String(ensured.ref);
     }
 
@@ -320,7 +308,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       },
       elementInfo: {
         selector: resolved.selector,
-        ref,
+        ref: qualifyFrameRef(ref, targetFrameId),
         rect,
         frameId: targetFrameId,
         ...(resolved.projectionError
@@ -498,12 +486,15 @@ class FillTool extends BaseBrowserToolExecutor {
    * Execute fill operation
    */
   async execute(args: FillToolParams): Promise<ToolResult> {
-    const { selectorType = 'css', value, frameId } = args;
+    const { selectorType = 'css', value } = args;
     let selector: string | undefined;
     let ref: string | undefined;
+    let frameId = args.frameId;
     try {
       selector = normalizeBrowserTargetSelector(args.selector, selectorType);
-      ref = normalizeBrowserTargetRef(args.ref);
+      const refTarget = resolveRefTarget(args.ref, args.frameId);
+      ref = refTarget?.ref;
+      if (refTarget) frameId = refTarget.frameId;
     } catch (error) {
       return createErrorResponse(
         `${ERROR_MESSAGES.INVALID_PARAMETERS}: ${error instanceof Error ? error.message : String(error)}`,
@@ -552,9 +543,7 @@ class FillTool extends BaseBrowserToolExecutor {
 
       // If selector is XPath, convert to ref first
       if (selector && selectorType === 'xpath') {
-        await this.injectContentScript(targetTabId, [
-          'inject-scripts/accessibility-tree-helper.js',
-        ]);
+        await this.injectAccessibilityHelper(targetTabId, frameId);
         try {
           const resolved = await this.sendMessageToTab(
             targetTabId,
@@ -580,9 +569,15 @@ class FillTool extends BaseBrowserToolExecutor {
         }
       }
 
-      await this.injectContentScript(targetTabId, [
-        'inject-scripts/fill-helper.js',
-      ]);
+      // The fill helper must live in the frame that owns the target element.
+      await this.injectContentScript(
+        targetTabId,
+        ['inject-scripts/fill-helper.js'],
+        false,
+        'ISOLATED',
+        false,
+        typeof frameId === 'number' ? [frameId] : undefined,
+      );
 
       // Send fill message to content script
       const result = await this.sendMessageToTab(

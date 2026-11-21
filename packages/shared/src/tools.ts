@@ -1213,7 +1213,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.READ_PAGE,
     description:
-      "Get an accessibility tree representation of visible elements on the current HTTP(S) page. Only returns elements that are visible in the viewport. Optionally filter for only interactive elements.\nTip: If the returned elements do not include the specific element you need, use the computer tool's screenshot (action=\"screenshot\") to capture the element's on-screen coordinates, then operate by coordinates.",
+      "Get an accessibility tree representation of visible elements on the current HTTP(S) page. Only returns elements that are visible in the viewport. Optionally filter for only interactive elements.\nThe tree covers the top frame; iframe contents are not inlined. When the page has iframes the result lists them in `frames` — pass a frameId to read one. Refs from an iframe are frame-qualified (e.g. \"f12:ref_3\") and work unchanged with every ref-accepting tool.\nTip: If the returned elements do not include the specific element you need, use the computer tool's screenshot (action=\"screenshot\") to capture the element's on-screen coordinates, then operate by coordinates.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1230,7 +1230,12 @@ export const TOOL_SCHEMAS: Tool[] = [
         refId: {
           type: "string",
           description:
-            'Focus on the subtree rooted at this element refId (e.g., "ref_12"). The refId must come from a recent chrome_read_page response in the same tab (refs may expire).',
+            'Focus on the subtree rooted at this element refId (e.g., "ref_12", or "f5:ref_3" for an iframe ref). The refId must come from a recent chrome_read_page response in the same tab (refs may expire).',
+        },
+        frameId: {
+          type: "number",
+          description:
+            "Read this frame (a frameId from the `frames` list of a previous chrome_read_page result) instead of the top frame.",
         },
         tabId: {
           type: "number",

@@ -7,9 +7,9 @@ import { hasDisallowedPublicUrlScheme } from './common';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
   isCompositeSelector,
-  normalizeBrowserTargetRef,
   normalizeBrowserTargetSelector,
   resolveFrameIdForMessageResult,
+  resolveRefTarget,
 } from './target-resolution';
 
 interface KeyboardToolParams {
@@ -248,18 +248,12 @@ class KeyboardTool extends BaseBrowserToolExecutor {
       }
 
       let finalSelector = normalizeBrowserTargetSelector(selector, selectorType);
-      let refForFocus = normalizeBrowserTargetRef(args.ref);
-      let targetFrameId = args.frameId;
+      const refTarget = resolveRefTarget(args.ref, args.frameId);
+      let refForFocus = refTarget?.ref;
+      let targetFrameId = refTarget ? refTarget.frameId : args.frameId;
 
       // Ensure helper is loaded for XPath or potential focus operations
-      await this.injectContentScript(
-        targetTabId,
-        ['inject-scripts/accessibility-tree-helper.js'],
-        false,
-        'ISOLATED',
-        false,
-        typeof targetFrameId === 'number' ? [targetFrameId] : undefined,
-      );
+      await this.injectAccessibilityHelper(targetTabId, targetFrameId);
 
       // Resolve any selector to a stable ref first so failures are explicit.
       if (finalSelector) {
@@ -288,14 +282,7 @@ class KeyboardTool extends BaseBrowserToolExecutor {
             targetFrameId,
             ensured,
           );
-          await this.injectContentScript(
-            targetTabId,
-            ['inject-scripts/accessibility-tree-helper.js'],
-            false,
-            'ISOLATED',
-            false,
-            typeof targetFrameId === 'number' ? [targetFrameId] : undefined,
-          );
+          await this.injectAccessibilityHelper(targetTabId, targetFrameId);
           refForFocus = ensured.ref;
           // Try to resolve ref to CSS selector
           const resolved = await this.sendMessageToTab(

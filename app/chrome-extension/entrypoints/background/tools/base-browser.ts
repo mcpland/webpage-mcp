@@ -4,6 +4,7 @@ import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 
 const PING_TIMEOUT_MS = 300;
 const TOP_FRAME_ID = 0;
+const ACCESSIBILITY_HELPER = 'inject-scripts/accessibility-tree-helper.js';
 
 /**
  * Ping action answered by each injected helper once it has initialized.
@@ -126,18 +127,69 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
   }
 
   /**
-   * Send message to tab
+   * Inject the accessibility helper into `frameId` (top frame by default) and
+   * every ancestor frame. Child frames project ref coordinates into the top
+   * viewport through their parents' helpers.
+   */
+  protected async injectAccessibilityHelper(
+    tabId: number,
+    frameId?: number,
+  ): Promise<void> {
+    const targetFrameId = typeof frameId === 'number' ? frameId : TOP_FRAME_ID;
+    const chain = await this.getFrameAncestry(tabId, targetFrameId);
+    for (const id of chain) {
+      await this.injectContentScript(
+        tabId,
+        [ACCESSIBILITY_HELPER],
+        false,
+        'ISOLATED',
+        false,
+        [id],
+      );
+    }
+  }
+
+  /**
+   * Frame ids from the top frame down to `frameId` (inclusive). Falls back to
+   * just the target when the frame tree cannot be read.
+   */
+  protected async getFrameAncestry(tabId: number, frameId: number): Promise<number[]> {
+    if (frameId === TOP_FRAME_ID) return [TOP_FRAME_ID];
+    try {
+      const frames = (await chrome.webNavigation.getAllFrames({ tabId })) || [];
+      const parentOf = new Map<number, number>();
+      for (const frame of frames) parentOf.set(frame.frameId, frame.parentFrameId);
+      const chain: number[] = [];
+      let current: number | undefined = frameId;
+      while (typeof current === 'number' && current >= 0 && chain.length < 32) {
+        chain.unshift(current);
+        if (current === TOP_FRAME_ID) break;
+        current = parentOf.get(current);
+      }
+      return chain.length > 0 ? chain : [frameId];
+    } catch {
+      return [frameId];
+    }
+  }
+
+  /**
+   * Send message to tab. Messages go to the top frame unless a frameId is
+   * given: broadcasting to every frame lets whichever frame answers first win,
+   * and frame-local refs collide across frames. Pass 'all' only when any
+   * frame's answer is acceptable.
    */
   protected async sendMessageToTab(
     tabId: number,
     message: any,
-    frameId?: number,
+    frameId?: number | 'all',
   ): Promise<any> {
     try {
       const response =
-        typeof frameId === 'number'
-          ? await chrome.tabs.sendMessage(tabId, message, { frameId })
-          : await chrome.tabs.sendMessage(tabId, message);
+        frameId === 'all'
+          ? await chrome.tabs.sendMessage(tabId, message)
+          : await chrome.tabs.sendMessage(tabId, message, {
+              frameId: typeof frameId === 'number' ? frameId : TOP_FRAME_ID,
+            });
 
       if (response && response.error) {
         throw new Error(String(response.error));
