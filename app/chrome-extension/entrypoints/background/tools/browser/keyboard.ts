@@ -7,6 +7,13 @@ import { hasDisallowedPublicUrlScheme } from './common';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { dispatchKeyStroke, parseKeyboardInput } from '@/utils/cdp-keyboard';
 import {
+  PageUnresponsiveError,
+  pendingDialogHint,
+  runCdpInputWithDialogs,
+  type CdpInputResult,
+} from '@/utils/cdp-input';
+import { parseDialogResponse } from '@/utils/dialog-tracker';
+import {
   isCompositeSelector,
   normalizeBrowserTargetSelector,
   resolveFrameIdForMessageResult,
@@ -23,6 +30,7 @@ interface KeyboardToolParams {
   windowId?: number; // when no tabId, pick active tab from this window
   frameId?: number; // target frame id for iframe support
   background?: boolean; // when true, do not activate tab or focus window
+  dialog?: unknown; // how to answer a JavaScript dialog the keys open
 }
 
 function sleep(ms: number): Promise<void> {
@@ -107,6 +115,12 @@ class KeyboardTool extends BaseBrowserToolExecutor {
     if (!keys) {
       return createErrorResponse(
         ERROR_MESSAGES.INVALID_PARAMETERS + ': Keys parameter must be provided',
+      );
+    }
+    const dialogResponse = parseDialogResponse(args.dialog);
+    if (dialogResponse instanceof Error) {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: ${dialogResponse.message}`,
       );
     }
 
@@ -208,14 +222,18 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         }
       }
 
+      let input: CdpInputResult = {};
       try {
-        await cdpSessionManager.attach(targetTabId, 'keyboard');
-        try {
-          await dispatchKeySequence(targetTabId, keys, delay);
-        } finally {
-          await cdpSessionManager.detach(targetTabId, 'keyboard');
-        }
+        input = await runCdpInputWithDialogs(
+          targetTabId,
+          'keyboard',
+          () => dispatchKeySequence(targetTabId, keys, delay),
+          { dialog: dialogResponse },
+        );
       } catch (cdpError) {
+        if (cdpError instanceof PageUnresponsiveError) {
+          return createErrorResponse(cdpError.message);
+        }
         console.warn(
           '[KeyboardTool] CDP keyboard dispatch failed, falling back to helper',
           cdpError,
@@ -257,10 +275,15 @@ class KeyboardTool extends BaseBrowserToolExecutor {
             type: 'text',
             text: JSON.stringify({
               success: true,
-              message: 'Keyboard operation successful',
+              message:
+                input.dialog && input.dialog.handled === false
+                  ? `Keys sent. ${pendingDialogHint(input.dialog)}`
+                  : 'Keyboard operation successful',
               transport: 'cdp',
               selector: finalSelector,
               keys,
+              ...(input.dialog ? { dialog: input.dialog } : {}),
+              ...(input.dialogs ? { dialogs: input.dialogs } : {}),
             }),
           },
         ],

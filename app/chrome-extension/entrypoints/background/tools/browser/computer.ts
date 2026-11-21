@@ -13,6 +13,13 @@ import {
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import { dispatchKeyStroke, parseKeySequence } from '@/utils/cdp-keyboard';
 import {
+  PageUnresponsiveError,
+  pendingDialogHint,
+  runCdpInputWithDialogs,
+  type CdpInputResult,
+} from '@/utils/cdp-input';
+import { parseDialogResponse } from '@/utils/dialog-tracker';
+import {
   captureFrameOnAction,
   isAutoCaptureActive,
   type ActionMetadata,
@@ -191,6 +198,20 @@ function firstResultText(result: ToolResult): string {
   return typeof block?.text === 'string' ? block.text : '';
 }
 
+/** Merge a dialog opened by the input into an action's JSON payload. */
+function withDialogOutcome(
+  payload: Record<string, unknown>,
+  input: CdpInputResult,
+): Record<string, unknown> {
+  if (!input.dialog) return payload;
+  return {
+    ...payload,
+    ...(input.dialog.handled === false ? { message: pendingDialogHint(input.dialog) } : {}),
+    dialog: input.dialog,
+    ...(input.dialogs ? { dialogs: input.dialogs } : {}),
+  };
+}
+
 class ComputerTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.COMPUTER;
 
@@ -287,6 +308,12 @@ class ComputerTool extends BaseBrowserToolExecutor {
     if (!tab.id) {
       return createErrorResponse(
         ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID',
+      );
+    }
+    const dialogResponse = parseDialogResponse((params as any).dialog);
+    if (dialogResponse instanceof Error) {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: ${dialogResponse.message}`,
       );
     }
 
@@ -516,43 +543,51 @@ class ComputerTool extends BaseBrowserToolExecutor {
         }
 
         try {
-          await CDPHelper.attach(tab.id);
-          try {
-            // Move pointer to target. We can dispatch a single mouseMoved; browsers will generate mouseover/mouseenter as needed.
-            await CDPHelper.dispatchMouseEvent(tab.id, {
-              type: 'mouseMoved',
-              x: coord.x,
-              y: coord.y,
-              button: 'none',
-              buttons: 0,
-            });
-          } finally {
-            await CDPHelper.detach(tab.id);
-          }
+          // Move pointer to target. We can dispatch a single mouseMoved; browsers will generate mouseover/mouseenter as needed.
+          const input = await runCdpInputWithDialogs(
+            tab.id,
+            'computer',
+            async () => {
+              await CDPHelper.dispatchMouseEvent(tab.id!, {
+                type: 'mouseMoved',
+                x: coord!.x,
+                y: coord!.y,
+                button: 'none',
+                buttons: 0,
+              });
+            },
+            { dialog: dialogResponse, graceMs: 0 },
+          );
 
           // Optional hold to allow UI (menus/tooltips) to appear
           const holdMs = Math.max(
             0,
             Math.min(params.duration ? params.duration * 1000 : 400, 5000),
           );
-          if (holdMs > 0) await new Promise((r) => setTimeout(r, holdMs));
+          if (holdMs > 0 && !input.dialog) await new Promise((r) => setTimeout(r, holdMs));
 
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  action: 'hover',
-                  coordinates: coord,
-                  resolvedBy,
-                  transport: 'cdp',
-                }),
+                text: JSON.stringify(
+                  withDialogOutcome(
+                    {
+                      success: true,
+                      action: 'hover',
+                      coordinates: coord,
+                      resolvedBy,
+                      transport: 'cdp',
+                    },
+                    input,
+                  ),
+                ),
               },
             ],
             isError: false,
           };
         } catch (error) {
+          if (error instanceof PageUnresponsiveError) return createErrorResponse(error.message);
           console.warn(
             '[ComputerTool] CDP hover failed, attempting DOM fallback',
             error,
@@ -589,6 +624,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             tabId: tab.id,
             windowId: tab.windowId,
             background: params.background === true,
+            dialog: dialogResponse,
           });
           return domResult;
         }
@@ -605,6 +641,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             tabId: tab.id,
             windowId: tab.windowId,
             background: params.background === true,
+            dialog: dialogResponse,
           });
           return domResult;
         }
@@ -646,60 +683,71 @@ class ComputerTool extends BaseBrowserToolExecutor {
           tabId: tab.id,
           windowId: tab.windowId,
           background: params.background === true,
+          dialog: dialogResponse,
         });
         if (!domResult.isError) {
           return domResult; // Standardized response from click tool
         }
         // Fallback to CDP if DOM failed
         try {
-          await CDPHelper.attach(tab.id);
-          const button: MouseButton =
-            params.action === 'right_click' ? 'right' : 'left';
-          const clickCount = 1;
-          await CDPHelper.dispatchMouseEvent(tab.id, {
-            type: 'mouseMoved',
-            x: coord.x,
-            y: coord.y,
-            button: 'none',
-            buttons: 0,
-            modifiers: modifiersMask,
-          });
-          for (let i = 1; i <= clickCount; i++) {
-            await CDPHelper.dispatchMouseEvent(tab.id, {
-              type: 'mousePressed',
-              x: coord.x,
-              y: coord.y,
-              button,
-              buttons: button === 'left' ? 1 : 2,
-              clickCount: i,
-              modifiers: modifiersMask,
-            });
-            await CDPHelper.dispatchMouseEvent(tab.id, {
-              type: 'mouseReleased',
-              x: coord.x,
-              y: coord.y,
-              button,
-              buttons: 0,
-              clickCount: i,
-              modifiers: modifiersMask,
-            });
-          }
-          await CDPHelper.detach(tab.id);
+          const input = await runCdpInputWithDialogs(
+            tab.id!,
+            'computer',
+            async () => {
+              const button: MouseButton =
+                params.action === 'right_click' ? 'right' : 'left';
+              const clickCount = 1;
+              await CDPHelper.dispatchMouseEvent(tab.id!, {
+                type: 'mouseMoved',
+                x: coord.x,
+                y: coord.y,
+                button: 'none',
+                buttons: 0,
+                modifiers: modifiersMask,
+              });
+              for (let i = 1; i <= clickCount; i++) {
+                await CDPHelper.dispatchMouseEvent(tab.id!, {
+                  type: 'mousePressed',
+                  x: coord.x,
+                  y: coord.y,
+                  button,
+                  buttons: button === 'left' ? 1 : 2,
+                  clickCount: i,
+                  modifiers: modifiersMask,
+                });
+                await CDPHelper.dispatchMouseEvent(tab.id!, {
+                  type: 'mouseReleased',
+                  x: coord.x,
+                  y: coord.y,
+                  button,
+                  buttons: 0,
+                  clickCount: i,
+                  modifiers: modifiersMask,
+                });
+              }
+            },
+            { dialog: dialogResponse, graceMs: 150 },
+          );
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  action: params.action,
-                  coordinates: coord,
-                }),
+                text: JSON.stringify(
+                  withDialogOutcome(
+                    {
+                      success: true,
+                      action: params.action,
+                      coordinates: coord,
+                    },
+                    input,
+                  ),
+                ),
               },
             ],
             isError: false,
           };
         } catch (e) {
-          await CDPHelper.detach(tab.id);
+          if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
           return createErrorResponse(
             `CDP click failed: ${e instanceof Error ? e.message : String(e)}`,
           );
@@ -776,53 +824,63 @@ class ComputerTool extends BaseBrowserToolExecutor {
           if (stale) return stale;
         }
         try {
-          await CDPHelper.attach(tab.id);
-          const button: MouseButton = 'left';
-          const clickCount = params.action === 'double_click' ? 2 : 3;
-          await CDPHelper.dispatchMouseEvent(tab.id, {
-            type: 'mouseMoved',
-            x: coord.x,
-            y: coord.y,
-            button: 'none',
-            buttons: 0,
-            modifiers: modifiersMask,
-          });
-          for (let i = 1; i <= clickCount; i++) {
-            await CDPHelper.dispatchMouseEvent(tab.id, {
-              type: 'mousePressed',
-              x: coord.x,
-              y: coord.y,
-              button,
-              buttons: 1,
-              clickCount: i,
-              modifiers: modifiersMask,
-            });
-            await CDPHelper.dispatchMouseEvent(tab.id, {
-              type: 'mouseReleased',
-              x: coord.x,
-              y: coord.y,
-              button,
-              buttons: 0,
-              clickCount: i,
-              modifiers: modifiersMask,
-            });
-          }
-          await CDPHelper.detach(tab.id);
+          const input = await runCdpInputWithDialogs(
+            tab.id!,
+            'computer',
+            async () => {
+              const button: MouseButton = 'left';
+              const clickCount = params.action === 'double_click' ? 2 : 3;
+              await CDPHelper.dispatchMouseEvent(tab.id!, {
+                type: 'mouseMoved',
+                x: coord.x,
+                y: coord.y,
+                button: 'none',
+                buttons: 0,
+                modifiers: modifiersMask,
+              });
+              for (let i = 1; i <= clickCount; i++) {
+                await CDPHelper.dispatchMouseEvent(tab.id!, {
+                  type: 'mousePressed',
+                  x: coord.x,
+                  y: coord.y,
+                  button,
+                  buttons: 1,
+                  clickCount: i,
+                  modifiers: modifiersMask,
+                });
+                await CDPHelper.dispatchMouseEvent(tab.id!, {
+                  type: 'mouseReleased',
+                  x: coord.x,
+                  y: coord.y,
+                  button,
+                  buttons: 0,
+                  clickCount: i,
+                  modifiers: modifiersMask,
+                });
+              }
+            },
+            { dialog: dialogResponse, graceMs: 150 },
+          );
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  action: params.action,
-                  coordinates: coord,
-                }),
+                text: JSON.stringify(
+                  withDialogOutcome(
+                    {
+                      success: true,
+                      action: params.action,
+                      coordinates: coord,
+                    },
+                    input,
+                  ),
+                ),
               },
             ],
             isError: false,
           };
         } catch (e) {
-          await CDPHelper.detach(tab.id);
+          if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
           return createErrorResponse(
             `CDP ${params.action} failed: ${e instanceof Error ? e.message : String(e)}`,
           );
@@ -886,54 +944,64 @@ class ComputerTool extends BaseBrowserToolExecutor {
         if (!start || !end)
           return createErrorResponse('Failed to resolve drag coordinates');
         try {
-          await CDPHelper.attach(tab.id);
-          await CDPHelper.dispatchMouseEvent(tab.id, {
-            type: 'mouseMoved',
-            x: start.x,
-            y: start.y,
-            button: 'none',
-            buttons: 0,
-          });
-          await CDPHelper.dispatchMouseEvent(tab.id, {
-            type: 'mousePressed',
-            x: start.x,
-            y: start.y,
-            button: 'left',
-            buttons: 1,
-            clickCount: 1,
-          });
-          await CDPHelper.dispatchMouseEvent(tab.id, {
-            type: 'mouseMoved',
-            x: end.x,
-            y: end.y,
-            button: 'left',
-            buttons: 1,
-          });
-          await CDPHelper.dispatchMouseEvent(tab.id, {
-            type: 'mouseReleased',
-            x: end.x,
-            y: end.y,
-            button: 'left',
-            buttons: 0,
-            clickCount: 1,
-          });
-          await CDPHelper.detach(tab.id);
+          const input = await runCdpInputWithDialogs(
+            tab.id!,
+            'computer',
+            async () => {
+              await CDPHelper.dispatchMouseEvent(tab.id!, {
+                type: 'mouseMoved',
+                x: start.x,
+                y: start.y,
+                button: 'none',
+                buttons: 0,
+              });
+              await CDPHelper.dispatchMouseEvent(tab.id!, {
+                type: 'mousePressed',
+                x: start.x,
+                y: start.y,
+                button: 'left',
+                buttons: 1,
+                clickCount: 1,
+              });
+              await CDPHelper.dispatchMouseEvent(tab.id!, {
+                type: 'mouseMoved',
+                x: end.x,
+                y: end.y,
+                button: 'left',
+                buttons: 1,
+              });
+              await CDPHelper.dispatchMouseEvent(tab.id!, {
+                type: 'mouseReleased',
+                x: end.x,
+                y: end.y,
+                button: 'left',
+                buttons: 0,
+                clickCount: 1,
+              });
+            },
+            { dialog: dialogResponse, graceMs: 0 },
+          );
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  action: 'left_click_drag',
-                  start,
-                  end,
-                }),
+                text: JSON.stringify(
+                  withDialogOutcome(
+                    {
+                      success: true,
+                      action: 'left_click_drag',
+                      start,
+                      end,
+                    },
+                    input,
+                  ),
+                ),
               },
             ],
             isError: false,
           };
         } catch (e) {
-          await CDPHelper.detach(tab.id);
+          if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
           return createErrorResponse(
             `Drag failed: ${e instanceof Error ? e.message : String(e)}`,
           );
@@ -990,32 +1058,42 @@ class ComputerTool extends BaseBrowserToolExecutor {
         if (direction === 'left') deltaX = -amount * unit;
         if (direction === 'right') deltaX = amount * unit;
         try {
-          await CDPHelper.attach(tab.id);
-          await CDPHelper.dispatchMouseEvent(tab.id, {
-            type: 'mouseWheel',
-            x: coord.x,
-            y: coord.y,
-            deltaX,
-            deltaY,
-          });
-          await CDPHelper.detach(tab.id);
+          const input = await runCdpInputWithDialogs(
+            tab.id!,
+            'computer',
+            async () => {
+              await CDPHelper.dispatchMouseEvent(tab.id!, {
+                type: 'mouseWheel',
+                x: coord.x,
+                y: coord.y,
+                deltaX,
+                deltaY,
+              });
+            },
+            { dialog: dialogResponse, graceMs: 0 },
+          );
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  action: 'scroll',
-                  coordinates: coord,
-                  deltaX,
-                  deltaY,
-                }),
+                text: JSON.stringify(
+                  withDialogOutcome(
+                    {
+                      success: true,
+                      action: 'scroll',
+                      coordinates: coord,
+                      deltaX,
+                      deltaY,
+                    },
+                    input,
+                  ),
+                ),
               },
             ],
             isError: false,
           };
         } catch (e) {
-          await CDPHelper.detach(tab.id);
+          if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
           return createErrorResponse(
             `Scroll failed: ${e instanceof Error ? e.message : String(e)}`,
           );
@@ -1045,25 +1123,36 @@ class ComputerTool extends BaseBrowserToolExecutor {
               );
             }
           }
-          await CDPHelper.attach(tab.id);
-          // Use CDP insertText to avoid complex KeyboardEvent emulation for long text
-          await CDPHelper.insertText(tab.id, params.text);
-          await CDPHelper.detach(tab.id);
+          const text = params.text;
+          const input = await runCdpInputWithDialogs(
+            tab.id!,
+            'computer',
+            async () => {
+              // Use CDP insertText to avoid complex KeyboardEvent emulation for long text
+              await CDPHelper.insertText(tab.id!, text);
+            },
+            { dialog: dialogResponse, graceMs: 0 },
+          );
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  action: 'type',
-                  length: params.text.length,
-                }),
+                text: JSON.stringify(
+                  withDialogOutcome(
+                    {
+                      success: true,
+                      action: 'type',
+                      length: params.text.length,
+                    },
+                    input,
+                  ),
+                ),
               },
             ],
             isError: false,
           };
         } catch (e) {
-          await CDPHelper.detach(tab.id);
+          if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
           // Fallback to DOM-based keyboard tool
           const res = await keyboardTool.execute({
             keys: params.text,
@@ -1202,31 +1291,41 @@ class ComputerTool extends BaseBrowserToolExecutor {
               );
             }
           }
-          await CDPHelper.attach(tab.id);
-          const dispatch = (event: Record<string, unknown>) =>
-            CDPHelper.send(tab.id!, 'Input.dispatchKeyEvent', event);
-          for (let i = 0; i < repeat; i++) {
-            for (const stroke of strokes) {
-              await dispatchKeyStroke(dispatch, stroke);
-            }
-          }
-          await CDPHelper.detach(tab.id);
+          const input = await runCdpInputWithDialogs(
+            tab.id!,
+            'computer',
+            async () => {
+              const dispatch = (event: Record<string, unknown>) =>
+                CDPHelper.send(tab.id!, 'Input.dispatchKeyEvent', event);
+              for (let i = 0; i < repeat; i++) {
+                for (const stroke of strokes) {
+                  await dispatchKeyStroke(dispatch, stroke);
+                }
+              }
+            },
+            { dialog: dialogResponse, graceMs: 150 },
+          );
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  action: 'key',
-                  keys: tokens,
-                  repeat,
-                }),
+                text: JSON.stringify(
+                  withDialogOutcome(
+                    {
+                      success: true,
+                      action: 'key',
+                      keys: tokens,
+                      repeat,
+                    },
+                    input,
+                  ),
+                ),
               },
             ],
             isError: false,
           };
         } catch (e) {
-          await CDPHelper.detach(tab.id);
+          if (e instanceof PageUnresponsiveError) return createErrorResponse(e.message);
           // Fallback to DOM keyboard simulation (comma-separated combinations)
           const keysStr = tokens.join(',');
           const repeatedKeys =

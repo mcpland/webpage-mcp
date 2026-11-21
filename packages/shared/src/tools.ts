@@ -96,6 +96,25 @@ export const JAVASCRIPT_TOOL_LIMITS = Object.freeze({
   MAX_OUTPUT_BYTES: 1024 * 1024,
 });
 
+/**
+ * Shared `dialog` argument for actions that may open a JavaScript dialog.
+ */
+const DIALOG_RESPONSE_SCHEMA = {
+  description:
+    'How to answer a JavaScript dialog (alert/confirm/prompt/beforeunload) that this action opens: "accept", "dismiss", or { "action": "accept", "promptText": "..." }. Without it the action returns as soon as a dialog opens and reports it as `dialog`; answer it with chrome_handle_dialog.',
+  oneOf: [
+    { type: "string", enum: ["accept", "dismiss"] },
+    {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["accept", "dismiss"] },
+        promptText: { type: "string" },
+      },
+      required: ["action"],
+    },
+  ],
+};
+
 export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
@@ -1404,6 +1423,7 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: "number",
           description: "Seconds to wait for action=wait (max 30s)",
         },
+        dialog: DIALOG_RESPONSE_SCHEMA,
       },
       required: ["action"],
     },
@@ -2156,6 +2176,7 @@ export const TOOL_SCHEMAS: Tool[] = [
           type: "number",
           description: "Target frame ID for iframe support.",
         },
+        dialog: DIALOG_RESPONSE_SCHEMA,
       },
       required: [],
     },
@@ -2314,6 +2335,7 @@ export const TOOL_SCHEMAS: Tool[] = [
           description:
             "Send keys without activating/focusing the target tab. Default: false so keyboard input reaches the expected page. When the user has enabled MCP Background Mode, this defaults to true and an explicit false is ignored.",
         },
+        dialog: DIALOG_RESPONSE_SCHEMA,
       },
       required: ["keys"],
     },
@@ -2450,7 +2472,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.HANDLE_DIALOG,
     description:
-      "Handle JavaScript dialogs (alert/confirm/prompt) on an HTTP(S) browser tab via CDP",
+      "Accept or dismiss the JavaScript dialog (alert/confirm/prompt/beforeunload) open on an HTTP(S) tab. Click and key actions report a dialog they open as `dialog`; answer it here, or pass dialog: \"accept\" | \"dismiss\" to the action to answer it in the same call.",
     inputSchema: {
       type: "object",
       properties: {

@@ -6,6 +6,16 @@ import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { hasDisallowedPublicUrlScheme } from './common';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 import {
+  isTimeoutError,
+  PageUnresponsiveError,
+  pendingDialogHint,
+  runCdpInputWithDialogs,
+  withTimeout,
+  type CdpInputResult,
+  type DialogOutcome,
+} from '@/utils/cdp-input';
+import { parseDialogResponse, type DialogResponse } from '@/utils/dialog-tracker';
+import {
   getResolvedViewportCoordinates,
   isCompositeSelector,
   normalizeBrowserTargetSelector,
@@ -60,15 +70,18 @@ async function dispatchNativeClick(
     button?: 'left' | 'right' | 'middle';
     double?: boolean;
     modifiers?: ClickToolParams['modifiers'];
+    dialog?: DialogResponse;
   },
-): Promise<void> {
+): Promise<CdpInputResult> {
   const button = options.button || 'left';
   const clickCount = options.double === true ? 2 : 1;
   const modifiers = toModifierMask(options.modifiers);
   const buttonMask = button === 'right' ? 2 : button === 'middle' ? 4 : 1;
 
-  await cdpSessionManager.attach(tabId, 'click');
-  try {
+  return runCdpInputWithDialogs(
+    tabId,
+    'click',
+    async () => {
     await cdpSessionManager.sendCommand(tabId, 'Input.dispatchMouseEvent', {
       type: 'mouseMoved',
       x: Math.round(coordinates.x),
@@ -98,9 +111,9 @@ async function dispatchNativeClick(
         modifiers,
       });
     }
-  } finally {
-    await cdpSessionManager.detach(tabId, 'click');
-  }
+    },
+    { dialog: options.dialog },
+  );
 }
 
 async function waitForNavigationAfterClick(
@@ -180,6 +193,10 @@ async function dispatchHelperClick(
   );
 }
 
+const HELPER_CLICK_RESPONSE_MARGIN_MS = 2000;
+
+class HelperClickError extends Error {}
+
 interface ClickToolParams {
   selector?: string; // CSS selector or XPath for the element to click
   selectorType?: 'css' | 'xpath'; // Type of selector (default: 'css')
@@ -201,6 +218,7 @@ interface ClickToolParams {
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
   background?: boolean; // when true, do not activate tab or focus window
+  dialog?: unknown; // how to answer a JavaScript dialog the click opens
 }
 
 /**
@@ -344,6 +362,12 @@ class ClickTool extends BaseBrowserToolExecutor {
           ': Provide ref or selector or coordinates',
       );
     }
+    const dialogResponse = parseDialogResponse(args.dialog);
+    if (dialogResponse instanceof Error) {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: ${dialogResponse.message}`,
+      );
+    }
 
     try {
       // Resolve tab
@@ -377,56 +401,83 @@ class ClickTool extends BaseBrowserToolExecutor {
         ? 'cdp'
         : 'helper';
       let elementInfo = resolvedTarget.elementInfo;
+      let dialog: DialogOutcome | undefined;
+      let dialogs: DialogOutcome[] | undefined;
+      let pageUnresponsive = false;
 
-      if (resolvedTarget.nativeCoordinates) {
+      // The DOM fallback cannot observe dialogs. Bound its wait so a click that
+      // opens a modal dialog reports an unresponsive page instead of hanging.
+      const runHelperClick = async (): Promise<void> => {
+        transport = 'helper';
+        let helperResult: any;
         try {
-          await dispatchNativeClick(
-            targetTabId,
-            resolvedTarget.nativeCoordinates,
-            {
-              button,
-              double: args.double === true,
-              modifiers,
-            },
+          helperResult = await withTimeout(
+            dispatchHelperClick(this, targetTabId, args, resolvedTarget.helperTarget),
+            Math.max(Number(timeout) || 0, 0) + HELPER_CLICK_RESPONSE_MARGIN_MS,
+            'Page response to the click',
           );
-          if (waitForNavigation) {
-            navigationOccurred = await waitForNavigationAfterClick(
-              targetTabId,
-              beforeUrl,
-              timeout,
-            );
-          }
-        } catch (cdpError) {
-          console.warn(
-            '[ClickTool] CDP click failed, falling back to helper',
-            cdpError,
-          );
-          transport = 'helper';
-          const helperResult = await dispatchHelperClick(
-            this,
-            targetTabId,
-            args,
-            resolvedTarget.helperTarget,
-          );
-          if (helperResult?.error) {
-            return createErrorResponse(helperResult.error);
-          }
-          navigationOccurred = helperResult?.navigationOccurred === true;
-          elementInfo = helperResult?.elementInfo || elementInfo;
+        } catch (error) {
+          if (!isTimeoutError(error)) throw error;
+          pageUnresponsive = true;
+          return;
         }
-      } else {
-        const helperResult = await dispatchHelperClick(
-          this,
-          targetTabId,
-          args,
-          resolvedTarget.helperTarget,
-        );
-        if (helperResult?.error) {
-          return createErrorResponse(helperResult.error);
-        }
+        if (helperResult?.error) throw new HelperClickError(String(helperResult.error));
         navigationOccurred = helperResult?.navigationOccurred === true;
         elementInfo = helperResult?.elementInfo || elementInfo;
+      };
+
+      try {
+        if (resolvedTarget.nativeCoordinates) {
+          try {
+            const input = await dispatchNativeClick(
+              targetTabId,
+              resolvedTarget.nativeCoordinates,
+              {
+                button,
+                double: args.double === true,
+                modifiers,
+                dialog: dialogResponse,
+              },
+            );
+            dialog = input.dialog;
+            dialogs = input.dialogs;
+            if (waitForNavigation && !(dialog && dialog.handled === false)) {
+              navigationOccurred = await waitForNavigationAfterClick(
+                targetTabId,
+                beforeUrl,
+                timeout,
+              );
+            }
+          } catch (cdpError) {
+            if (cdpError instanceof PageUnresponsiveError) {
+              return createErrorResponse(cdpError.message);
+            }
+            console.warn(
+              '[ClickTool] CDP click failed, falling back to helper',
+              cdpError,
+            );
+            await runHelperClick();
+          }
+        } else {
+          await runHelperClick();
+        }
+      } catch (error) {
+        if (error instanceof HelperClickError) return createErrorResponse(error.message);
+        throw error;
       }
+
+      const warnings: string[] = [];
+      if (waitForNavigation && !navigationOccurred && !dialog) {
+        warnings.push(
+          'waitForNavigation was requested, but the page URL/status did not change before timeout.',
+        );
+      }
+      if (pageUnresponsive) {
+        warnings.push(
+          'The page stopped responding after the click, which usually means a JavaScript dialog opened. It could not be observed because the debugger was unavailable; ask the user to close it or reload the tab.',
+        );
+      }
+      const pendingDialog = dialog && dialog.handled === false ? dialog : undefined;
 
       return {
         content: [
@@ -434,18 +485,16 @@ class ClickTool extends BaseBrowserToolExecutor {
             type: 'text',
             text: JSON.stringify({
               success: true,
-              message:
-                waitForNavigation && !navigationOccurred
+              message: pendingDialog
+                ? `Click dispatched. ${pendingDialogHint(pendingDialog)}`
+                : waitForNavigation && !navigationOccurred && !dialog
                   ? 'Click dispatched; no navigation was observed before timeout'
                   : 'Click operation successful',
               elementInfo,
               navigationOccurred,
-              warnings:
-                waitForNavigation && !navigationOccurred
-                  ? [
-                      'waitForNavigation was requested, but the page URL/status did not change before timeout.',
-                    ]
-                  : undefined,
+              ...(dialog ? { dialog } : {}),
+              ...(dialogs ? { dialogs } : {}),
+              warnings: warnings.length > 0 ? warnings : undefined,
               clickMethod: elementInfo.clickMethod,
               transport,
             }),
