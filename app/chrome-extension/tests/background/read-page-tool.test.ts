@@ -161,6 +161,50 @@ describe('readPageTool', () => {
     );
   });
 
+  it('returns a sparse tree instead of failing when the fallback is unavailable', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'activateTabIfNeeded').mockResolvedValue(makeTab());
+    const tree =
+      '- heading "Example Domain" [ref=ref_2] (x=640,y=44)\n' +
+      '  - link "More information..." [ref=ref_5] (x=82,y=137) href="/form"';
+    vi.spyOn(readPageTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: tree,
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        stats: { processed: 8, included: 5, durationMs: 1 },
+        refMap: [{ ref: 'ref_5' }],
+      })
+      .mockRejectedValueOnce(new Error('The message port closed before a response was received.'));
+
+    const result = await readPageTool.execute({ tabId: 7 });
+    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: true,
+      sparse: true,
+      pageContent: tree,
+      fallbackUsed: false,
+      reason: 'sparse_tree',
+    });
+  });
+
+  it('still fails when neither the tree nor the fallback is available', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue(makeTab());
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'activateTabIfNeeded').mockResolvedValue(makeTab());
+    vi.spyOn(readPageTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({ success: false, error: 'tree exploded' })
+      .mockRejectedValueOnce(new Error('no fallback'));
+
+    const result = await readPageTool.execute({ tabId: 7 });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content[0] as { text?: string })?.text || '')).toContain('tree exploded');
+  });
+
   it('re-bounds the primary page tree and viewport at the background boundary', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue(makeTab());
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
