@@ -16,9 +16,9 @@ import {
   resolveMcpClientCapabilities,
 } from './register-tools';
 import { shouldNotifyWorkflowToolListChanged } from './tool-list-change';
+import { resolveBridgeCallTimeoutMs } from './tool-timeouts';
 
 const LIST_TOOLS_TIMEOUT_MS = 30_000;
-const CALL_TOOL_TIMEOUT_MS = 120_000;
 
 export interface McpBridgeSessionOptions {
   bridgeClient: NativeBridgeRequestClient;
@@ -100,7 +100,7 @@ export function createMcpBridgeSession(options: McpBridgeSessionOptions): McpBri
           name: request.params.name,
           args,
         },
-        CALL_TOOL_TIMEOUT_MS,
+        resolveBridgeCallTimeoutMs(request.params.name, args),
         extra.signal,
       );
       if (!response?.result) {

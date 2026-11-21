@@ -98,7 +98,8 @@ describe('MCP bridge session', () => {
         name: 'chrome_read_page',
         args: { tabId: 7 },
       },
-      timeoutMs: 120_000,
+      // The session waits a little longer than the native host's own 120s limit.
+      timeoutMs: 130_000,
     });
   });
 

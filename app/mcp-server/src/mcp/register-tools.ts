@@ -15,6 +15,7 @@ import {
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { NativeMessagingHost } from '../native-messaging-host';
 import { isSuccessfulMcpToolResult, shouldRefreshWorkflowToolList } from './tool-list-change';
+import { resolveToolCallTimeoutMs } from './tool-timeouts';
 
 export interface McpToolContext {
   sessionId: string;
@@ -1706,7 +1707,7 @@ export const callToolForContext = async (
             meta: buildExtensionToolMeta(ctx),
           },
           NativeMessageType.CALL_TOOL,
-          120000,
+          resolveToolCallTimeoutMs(WORKFLOW_RUN_TOOL_NAME, args),
         );
         if (proxyRes.status === 'success') return proxyRes.data;
         return {
@@ -1767,7 +1768,7 @@ export const callToolForContext = async (
             meta: buildExtensionToolMeta(ctx),
           },
           NativeMessageType.CALL_TOOL,
-          120000,
+          resolveToolCallTimeoutMs(name, args),
         );
         if (proxyRes.status === 'success') return proxyRes.data;
         return {
@@ -1817,7 +1818,7 @@ export const callToolForContext = async (
         meta: buildExtensionToolMeta(ctx),
       },
       NativeMessageType.CALL_TOOL,
-      120000, // Extended to 120 seconds to avoid timeout for long tasks such as performance analysis
+      resolveToolCallTimeoutMs(name, forwardedArgs),
     );
     if (response.status === 'success') {
       if (

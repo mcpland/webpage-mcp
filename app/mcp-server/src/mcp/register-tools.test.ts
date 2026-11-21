@@ -1172,6 +1172,29 @@ describe('dynamic published flow tools', () => {
     );
   });
 
+  it('extends the extension request timeout for tools that wait on purpose', async () => {
+    const sendRequestToExtensionAndWait = vi.fn(async (_payload: unknown, type: string) =>
+      type === 'rr_list_published_flows'
+        ? { status: 'success', items: [] }
+        : {
+            status: 'success',
+            data: { content: [{ type: 'text', text: 'picked' }], isError: false },
+          },
+    );
+    const ctx = createContext('wait-timeout', sendRequestToExtensionAndWait);
+
+    await callToolForContext(ctx, 'chrome_request_element_selection', {
+      requests: [{ name: 'Login button' }],
+      timeoutMs: 300_000,
+    });
+
+    expect(sendRequestToExtensionAndWait).toHaveBeenLastCalledWith(
+      expect.objectContaining({ name: 'chrome_request_element_selection' }),
+      NativeMessageType.CALL_TOOL,
+      315_000,
+    );
+  });
+
   it('hides extension-backed tools when the capability handshake fails', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockRejectedValue(new Error('extension offline'));
     const ctx = createContext(
