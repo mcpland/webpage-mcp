@@ -625,7 +625,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             windowId: tab.windowId,
             background: params.background === true,
             dialog: dialogResponse,
-          });
+            waitForDownload: (params as any).waitForDownload,          });
           return domResult;
         }
         if (params.selector) {
@@ -642,7 +642,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
             windowId: tab.windowId,
             background: params.background === true,
             dialog: dialogResponse,
-          });
+            waitForDownload: (params as any).waitForDownload,          });
           return domResult;
         }
         if (!params.coordinates)
@@ -684,7 +684,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           windowId: tab.windowId,
           background: params.background === true,
           dialog: dialogResponse,
-        });
+          waitForDownload: (params as any).waitForDownload,        });
         if (!domResult.isError) {
           return domResult; // Standardized response from click tool
         }

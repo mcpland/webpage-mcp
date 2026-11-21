@@ -10,7 +10,11 @@ interface HandleDownloadParams {
   waitForComplete?: boolean; // default true
 }
 
-const RECENT_DOWNLOAD_GRACE_MS = 5000;
+// How far back handle_download looks for a download the agent already triggered.
+const RECENT_DOWNLOAD_LOOKBACK_MS = 60_000;
+const MAX_REPORTED_DOWNLOAD_IDS = 100;
+// Downloads already returned to a caller; each download is reported once.
+const reportedDownloadIds = new Set<number>();
 
 function toPublicDownloadUrl(url?: string | null): { url?: string | null; urlRedacted?: true } {
   if (typeof url !== 'string' || !url.trim()) {
@@ -50,88 +54,83 @@ class HandleDownloadTool extends BaseBrowserToolExecutor {
   }
 }
 
-async function waitForDownload(opts: {
+export interface WaitForDownloadOptions {
   filenameContains?: string;
   waitForComplete: boolean;
   timeoutMs: number;
-}) {
-  const { filenameContains, waitForComplete, timeoutMs } = opts;
-  const observationStartedAt = Date.now();
+  /** Ignore downloads that already exist; only report one created after arming. */
+  onlyNew?: boolean;
+  signal?: AbortSignal;
+}
+
+function parseDownloadTimestamp(value?: string | null): number | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Test hook: forget which downloads were already reported. */
+export function resetReportedDownloadsForTests(): void {
+  reportedDownloadIds.clear();
+}
+
+function rememberReported(id: number): void {
+  reportedDownloadIds.add(id);
+  while (reportedDownloadIds.size > MAX_REPORTED_DOWNLOAD_IDS) {
+    const oldest = reportedDownloadIds.values().next().value;
+    if (oldest === undefined) break;
+    reportedDownloadIds.delete(oldest);
+  }
+}
+
+/**
+ * Wait for a download and return its sanitized details.
+ *
+ * Agents usually click first and ask about the download in a later turn, so a
+ * recent download that was not reported before is returned immediately (the
+ * newest one wins). Otherwise the next matching download is awaited.
+ */
+export function waitForDownload(opts: WaitForDownloadOptions): Promise<any> {
+  const { filenameContains, waitForComplete, timeoutMs, onlyNew, signal } = opts;
+  const armedAt = Date.now();
   return new Promise<any>((resolve, reject) => {
-    let timer: any = null;
-    const onError = (err: any) => {
-      cleanup();
-      reject(err instanceof Error ? err : new Error(String(err)));
-    };
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+    // A specific in-progress download we are waiting to finish.
+    let awaitedId: number | undefined;
+
     const cleanup = () => {
-      try {
-        if (timer) clearTimeout(timer);
-      } catch {}
+      if (timer) clearTimeout(timer);
       try {
         chrome.downloads.onCreated.removeListener(onCreated);
       } catch {}
       try {
         chrome.downloads.onChanged.removeListener(onChanged);
       } catch {}
+      signal?.removeEventListener('abort', onAbort);
     };
+    const fail = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+    const onAbort = () => fail(new Error('Download wait cancelled'));
     const matches = (item: chrome.downloads.DownloadItem) => {
       if (!filenameContains) return true;
       const name = (item.filename || '').split(/[/\\]/).pop() || '';
       return name.includes(filenameContains) || (item.url || '').includes(filenameContains);
     };
-    const parseDownloadTimestamp = (value?: string | null): number | null => {
-      if (typeof value !== 'string' || !value.trim()) {
-        return null;
-      }
-
-      const parsed = Date.parse(value);
-      return Number.isFinite(parsed) ? parsed : null;
-    };
-    const getDownloadActivityTimestamp = (item: chrome.downloads.DownloadItem): number => {
-      const endTime = parseDownloadTimestamp((item as any).endTime);
-      const startTime = parseDownloadTimestamp(item.startTime);
-      return Math.max(endTime ?? -1, startTime ?? -1);
-    };
-    const isRecentDownload = (item: chrome.downloads.DownloadItem): boolean => {
-      const activityAt = getDownloadActivityTimestamp(item);
-      return activityAt >= observationStartedAt - RECENT_DOWNLOAD_GRACE_MS;
-    };
-    const selectInitialMatch = (
-      items: chrome.downloads.DownloadItem[],
-    ): chrome.downloads.DownloadItem | null => {
-      const matchingItems = items.filter((item) => matches(item));
-      if (!matchingItems.length) {
-        return null;
-      }
-
-      const freshItems = matchingItems.filter((item) => isRecentDownload(item));
-      const candidates = freshItems.length > 0 ? freshItems : [];
-
-      if (!candidates.length) {
-        return null;
-      }
-
-      if (waitForComplete) {
-        const completed = candidates.filter((item) => item.state === 'complete');
-        if (!completed.length) {
-          return null;
-        }
-
-        return completed.sort(
-          (left, right) => getDownloadActivityTimestamp(right) - getDownloadActivityTimestamp(left),
-        )[0];
-      }
-
-      return candidates.sort(
-        (left, right) => getDownloadActivityTimestamp(right) - getDownloadActivityTimestamp(left),
-      )[0];
-    };
+    const isFinished = (item: chrome.downloads.DownloadItem) =>
+      item.state === 'complete' || item.state === 'interrupted';
     const fulfill = async (item: chrome.downloads.DownloadItem) => {
-      // try to fill more details via downloads.search
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rememberReported(item.id);
       try {
         const [found] = await chrome.downloads.search({ id: item.id });
         const out = found || item;
-        cleanup();
         resolve({
           id: out.id,
           filename: toDownloadDisplayName(out.filename),
@@ -145,9 +144,7 @@ async function waitForDownload(opts: {
           pathRedacted: true,
           ...toPublicDownloadUrl(out.url),
         });
-        return;
       } catch {
-        cleanup();
         resolve({
           id: item.id,
           filename: toDownloadDisplayName(item.filename),
@@ -157,38 +154,62 @@ async function waitForDownload(opts: {
         });
       }
     };
+    const consider = (item: chrome.downloads.DownloadItem) => {
+      if (settled || !matches(item) || reportedDownloadIds.has(item.id)) return;
+      if (typeof awaitedId === 'number' && item.id !== awaitedId) return;
+      if (!waitForComplete || isFinished(item)) {
+        void fulfill(item);
+      } else {
+        awaitedId = item.id;
+      }
+    };
     const onCreated = (item: chrome.downloads.DownloadItem) => {
       try {
-        if (!matches(item)) return;
-        if (!waitForComplete) {
-          fulfill(item);
-        }
+        consider(item);
       } catch {}
     };
     const onChanged = (delta: chrome.downloads.DownloadDelta) => {
       try {
         if (!delta || typeof delta.id !== 'number') return;
-        // pull item and check
         chrome.downloads
           .search({ id: delta.id })
           .then((arr) => {
             const item = arr && arr[0];
-            if (!item) return;
-            if (!matches(item)) return;
-            if (waitForComplete && item.state === 'complete') fulfill(item);
+            if (item) consider(item);
           })
           .catch(() => {});
       } catch {}
     };
+
+    if (signal?.aborted) {
+      fail(new Error('Download wait cancelled'));
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
     chrome.downloads.onCreated.addListener(onCreated);
     chrome.downloads.onChanged.addListener(onChanged);
-    timer = setTimeout(() => onError(new Error('Download wait timed out')), timeoutMs);
-    // Try to find a matching download that started or completed around this invocation.
+    timer = setTimeout(() => fail(new Error('Download wait timed out')), timeoutMs);
+    if (onlyNew) return;
+
     chrome.downloads
-      .search({})
-      .then((arr) => {
-        const hit = selectInitialMatch(arr || []);
-        if (hit) fulfill(hit);
+      .search({
+        startedAfter: new Date(armedAt - RECENT_DOWNLOAD_LOOKBACK_MS).toISOString(),
+      } as chrome.downloads.DownloadQuery)
+      .then((items) => {
+        const lookbackStart = armedAt - RECENT_DOWNLOAD_LOOKBACK_MS;
+        const recent = (items || [])
+          .filter(
+            (item) =>
+              matches(item) &&
+              !reportedDownloadIds.has(item.id) &&
+              (parseDownloadTimestamp(item.startTime) ?? 0) >= lookbackStart,
+          )
+          .sort(
+            (left, right) =>
+              (parseDownloadTimestamp(right.startTime) ?? 0) -
+              (parseDownloadTimestamp(left.startTime) ?? 0),
+          );
+        if (recent.length > 0 && typeof awaitedId !== 'number') consider(recent[0]);
       })
       .catch(() => {});
   });

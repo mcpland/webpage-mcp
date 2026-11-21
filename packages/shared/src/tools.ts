@@ -115,6 +115,24 @@ const DIALOG_RESPONSE_SCHEMA = {
   ],
 };
 
+/**
+ * Shared `waitForDownload` argument for clicks that start a download.
+ */
+const WAIT_FOR_DOWNLOAD_SCHEMA = {
+  description:
+    'Wait for the download this click starts and return it as `download` (true, or { timeoutMs, filenameContains }; default timeout 30000ms). Replaces a separate chrome_handle_download call.',
+  oneOf: [
+    { type: "boolean" },
+    {
+      type: "object",
+      properties: {
+        timeoutMs: { type: "number", minimum: 1000, maximum: 300000 },
+        filenameContains: { type: "string" },
+      },
+    },
+  ],
+};
+
 export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
@@ -1424,6 +1442,10 @@ export const TOOL_SCHEMAS: Tool[] = [
           description: "Seconds to wait for action=wait (max 30s)",
         },
         dialog: DIALOG_RESPONSE_SCHEMA,
+        waitForDownload: {
+          ...WAIT_FOR_DOWNLOAD_SCHEMA,
+          description: `For left_click/right_click: ${WAIT_FOR_DOWNLOAD_SCHEMA.description}`,
+        },
       },
       required: ["action"],
     },
@@ -1827,7 +1849,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD,
     description:
-      "Wait for a browser download and return sanitized details (id, filename basename, public source url when available, state, size). Local download paths and non-public source URLs are redacted.",
+      "Return a browser download with sanitized details (id, filename basename, public source url when available, state, size). The newest download started within the last 60s that was not reported before is returned right away; otherwise the next one is awaited. Prefer waitForDownload on the click that starts it. Local download paths and non-public source URLs are redacted.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2177,6 +2199,7 @@ export const TOOL_SCHEMAS: Tool[] = [
           description: "Target frame ID for iframe support.",
         },
         dialog: DIALOG_RESPONSE_SCHEMA,
+        waitForDownload: WAIT_FOR_DOWNLOAD_SCHEMA,
       },
       required: [],
     },

@@ -15,6 +15,7 @@ import {
   type DialogOutcome,
 } from '@/utils/cdp-input';
 import { parseDialogResponse, type DialogResponse } from '@/utils/dialog-tracker';
+import { waitForDownload } from './download';
 import {
   getResolvedViewportCoordinates,
   isCompositeSelector,
@@ -219,6 +220,32 @@ interface ClickToolParams {
   windowId?: number; // when no tabId, pick active tab from this window
   background?: boolean; // when true, do not activate tab or focus window
   dialog?: unknown; // how to answer a JavaScript dialog the click opens
+  waitForDownload?: unknown; // true | { timeoutMs, filenameContains }
+}
+
+const DEFAULT_CLICK_DOWNLOAD_TIMEOUT_MS = 30_000;
+
+function parseWaitForDownload(
+  value: unknown,
+): { timeoutMs: number; filenameContains?: string } | undefined | Error {
+  if (value === undefined || value === null || value === false) return undefined;
+  if (value === true) return { timeoutMs: DEFAULT_CLICK_DOWNLOAD_TIMEOUT_MS };
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    const timeoutMs =
+      record.timeoutMs === undefined ? DEFAULT_CLICK_DOWNLOAD_TIMEOUT_MS : Number(record.timeoutMs);
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 300_000) {
+      return new Error('waitForDownload.timeoutMs must be between 1000 and 300000');
+    }
+    if (record.filenameContains !== undefined && typeof record.filenameContains !== 'string') {
+      return new Error('waitForDownload.filenameContains must be a string');
+    }
+    return {
+      timeoutMs,
+      ...(record.filenameContains ? { filenameContains: record.filenameContains } : {}),
+    };
+  }
+  return new Error('waitForDownload must be true or { timeoutMs, filenameContains }');
 }
 
 /**
@@ -368,6 +395,15 @@ class ClickTool extends BaseBrowserToolExecutor {
         `${ERROR_MESSAGES.INVALID_PARAMETERS}: ${dialogResponse.message}`,
       );
     }
+    const downloadWait = parseWaitForDownload(args.waitForDownload);
+    if (downloadWait instanceof Error) {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.INVALID_PARAMETERS}: ${downloadWait.message}`,
+      );
+    }
+    // Armed right before the click so the download it triggers is caught
+    // without racing a separate chrome_handle_download call.
+    const downloadAbort = new AbortController();
 
     try {
       // Resolve tab
@@ -426,6 +462,18 @@ class ClickTool extends BaseBrowserToolExecutor {
         elementInfo = helperResult?.elementInfo || elementInfo;
       };
 
+      const pendingDownload = downloadWait
+        ? waitForDownload({
+            ...downloadWait,
+            waitForComplete: true,
+            onlyNew: true,
+            signal: downloadAbort.signal,
+          }).then(
+            (download) => ({ download }),
+            (error: Error) => ({ downloadError: error.message }),
+          )
+        : undefined;
+
       try {
         if (resolvedTarget.nativeCoordinates) {
           try {
@@ -478,6 +526,12 @@ class ClickTool extends BaseBrowserToolExecutor {
         );
       }
       const pendingDialog = dialog && dialog.handled === false ? dialog : undefined;
+      // A dialog still waiting for an answer blocks the page; don't wait for a download behind it.
+      if (pendingDialog) downloadAbort.abort();
+      const downloadOutcome = pendingDownload && !pendingDialog ? await pendingDownload : undefined;
+      if (downloadOutcome && 'downloadError' in downloadOutcome) {
+        warnings.push(`waitForDownload: ${downloadOutcome.downloadError}`);
+      }
 
       return {
         content: [
@@ -494,6 +548,9 @@ class ClickTool extends BaseBrowserToolExecutor {
               navigationOccurred,
               ...(dialog ? { dialog } : {}),
               ...(dialogs ? { dialogs } : {}),
+              ...(downloadOutcome && 'download' in downloadOutcome
+                ? { download: downloadOutcome.download }
+                : {}),
               warnings: warnings.length > 0 ? warnings : undefined,
               clickMethod: elementInfo.clickMethod,
               transport,
@@ -507,6 +564,9 @@ class ClickTool extends BaseBrowserToolExecutor {
       return createErrorResponse(
         `Error performing click: ${error instanceof Error ? error.message : String(error)}`,
       );
+    } finally {
+      // Release the download listener on every exit path (a no-op once settled).
+      downloadAbort.abort();
     }
   }
 }
