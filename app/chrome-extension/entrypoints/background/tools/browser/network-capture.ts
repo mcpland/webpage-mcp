@@ -323,10 +323,15 @@ class NetworkCaptureTool extends BaseBrowserToolExecutor {
       return createErrorResponse('Network capture URL is too long.');
     }
 
-    const explicitTab = await this.tryGetTab(args.tabId);
-    const targetTab = explicitTab || (await this.getActiveTabInWindow(args.windowId));
-    if (targetTab?.url && hasDisallowedPublicPageScheme(String(targetTab.url))) {
-      return createErrorResponse(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);
+    // With a url the capture runs on that (already validated) page, so the tab's
+    // current page, such as a fresh browser's new-tab page, does not matter.
+    const hasTargetUrl = typeof args.url === 'string' && args.url.trim() !== '';
+    if (!hasTargetUrl) {
+      const explicitTab = await this.tryGetTab(args.tabId);
+      const targetTab = explicitTab || (await this.getActiveTabInWindow(args.windowId));
+      if (targetTab?.url && hasDisallowedPublicPageScheme(String(targetTab.url))) {
+        return createErrorResponse(NETWORK_CAPTURE_PUBLIC_PAGE_ERROR);
+      }
     }
 
     const delegate = wantBody ? networkDebuggerStartTool : networkCaptureStartTool;

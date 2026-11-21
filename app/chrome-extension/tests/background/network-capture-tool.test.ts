@@ -105,6 +105,34 @@ describe('networkCaptureTool', () => {
     expect(mocks.webRequestStartExecute).not.toHaveBeenCalled();
   });
 
+  it('starts on a url even when the current tab is not an http page', async () => {
+    const { networkCaptureTool } = await loadNetworkCaptureTool();
+    vi.spyOn(networkCaptureTool as any, 'getActiveTabInWindow').mockResolvedValue(
+      makeTab({ url: 'chrome://newtab/' }),
+    );
+    vi.spyOn(networkCaptureTool as any, 'tryGetTab').mockResolvedValue(
+      makeTab({ url: 'chrome://newtab/' }),
+    );
+    mocks.webRequestStartExecute.mockResolvedValue({
+      content: [{ type: 'text', text: JSON.stringify({ success: true, tabId: 7 }) }],
+      isError: false,
+    });
+
+    const withoutTab = await networkCaptureTool.execute({
+      action: 'start',
+      url: 'https://example.com/',
+    });
+    const withTab = await networkCaptureTool.execute({
+      action: 'start',
+      tabId: 7,
+      url: 'https://example.com/',
+    });
+
+    expect(withoutTab.isError).toBe(false);
+    expect(withTab.isError).toBe(false);
+    expect(mocks.webRequestStartExecute).toHaveBeenCalledTimes(2);
+  });
+
   it('redacts stop results for non-public page captures', async () => {
     const { networkCaptureTool } = await loadNetworkCaptureTool();
     mocks.webRequestCaptureData.set(7, {});
