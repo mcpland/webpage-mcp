@@ -5,6 +5,7 @@ import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { hasDisallowedPublicUrlScheme } from './common';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { dispatchKeyStroke, parseKeyboardInput } from '@/utils/cdp-keyboard';
 import {
   isCompositeSelector,
   normalizeBrowserTargetSelector,
@@ -24,146 +25,32 @@ interface KeyboardToolParams {
   background?: boolean; // when true, do not activate tab or focus window
 }
 
-const KEY_MODIFIER_MASKS: Record<string, number> = {
-  alt: 1,
-  ctrl: 2,
-  control: 2,
-  meta: 4,
-  cmd: 4,
-  command: 4,
-  win: 4,
-  windows: 4,
-  shift: 8,
-};
-
-const KEY_ALIASES: Record<
-  string,
-  { key: string; code?: string; text?: string }
-> = {
-  enter: { key: 'Enter', code: 'Enter' },
-  return: { key: 'Enter', code: 'Enter' },
-  backspace: { key: 'Backspace', code: 'Backspace' },
-  delete: { key: 'Delete', code: 'Delete' },
-  tab: { key: 'Tab', code: 'Tab' },
-  escape: { key: 'Escape', code: 'Escape' },
-  esc: { key: 'Escape', code: 'Escape' },
-  space: { key: ' ', code: 'Space', text: ' ' },
-  pageup: { key: 'PageUp', code: 'PageUp' },
-  pagedown: { key: 'PageDown', code: 'PageDown' },
-  home: { key: 'Home', code: 'Home' },
-  end: { key: 'End', code: 'End' },
-  arrowup: { key: 'ArrowUp', code: 'ArrowUp' },
-  arrowdown: { key: 'ArrowDown', code: 'ArrowDown' },
-  arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft' },
-  arrowright: { key: 'ArrowRight', code: 'ArrowRight' },
-};
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function normalizeTokens(keys: string): string[] {
-  return keys
-    .split(',')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
-function resolveKeyDef(token: string): {
-  key: string;
-  code?: string;
-  text?: string;
-} {
-  const normalized = token.trim().toLowerCase();
-  if (KEY_ALIASES[normalized]) {
-    return KEY_ALIASES[normalized];
-  }
-  if (/^f([1-9]|1[0-2])$/.test(normalized)) {
-    return { key: normalized.toUpperCase(), code: normalized.toUpperCase() };
-  }
-  if (normalized.length === 1) {
-    const upper = normalized.toUpperCase();
-    return { key: upper, code: `Key${upper}`, text: normalized };
-  }
-  return { key: token.trim() };
-}
-
-function getModifierMask(modifiers: string[]): number {
-  return modifiers.reduce(
-    (mask, modifier) => mask | (KEY_MODIFIER_MASKS[modifier] || 0),
-    0,
-  );
-}
-
-async function dispatchSimpleKey(tabId: number, token: string): Promise<void> {
-  const def = resolveKeyDef(token);
-  if (def.text && def.text.length === 1) {
-    await cdpSessionManager.sendCommand(tabId, 'Input.insertText', {
-      text: def.text,
-    });
-    return;
-  }
-  await cdpSessionManager.sendCommand(tabId, 'Input.dispatchKeyEvent', {
-    type: 'rawKeyDown',
-    key: def.key,
-    code: def.code,
-    text: def.text,
-  });
-  await cdpSessionManager.sendCommand(tabId, 'Input.dispatchKeyEvent', {
-    type: 'keyUp',
-    key: def.key,
-    code: def.code,
-  });
-}
-
-async function dispatchChord(tabId: number, chord: string): Promise<void> {
-  const parts = chord
-    .split('+')
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const modifiers: string[] = [];
-  let keyToken = '';
-
-  for (const part of parts) {
-    const normalized = part.toLowerCase();
-    if (normalized in KEY_MODIFIER_MASKS) {
-      modifiers.push(normalized);
-    } else {
-      keyToken = part;
-    }
-  }
-
-  const def = resolveKeyDef(keyToken);
-  const mask = getModifierMask(modifiers);
-  await cdpSessionManager.sendCommand(tabId, 'Input.dispatchKeyEvent', {
-    type: 'rawKeyDown',
-    key: def.key,
-    code: def.code,
-    text: def.text,
-    modifiers: mask,
-  });
-  await cdpSessionManager.sendCommand(tabId, 'Input.dispatchKeyEvent', {
-    type: 'keyUp',
-    key: def.key,
-    code: def.code,
-    modifiers: mask,
-  });
-}
-
+/**
+ * Dispatch `keys` over CDP. Key sequences become real key strokes; any other
+ * input is inserted as literal text (see parseKeyboardInput).
+ */
 async function dispatchKeySequence(
   tabId: number,
   keys: string,
   delay: number,
 ): Promise<void> {
-  const tokens = normalizeTokens(keys);
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token.includes('+')) {
-      await dispatchChord(tabId, token);
+  const steps = parseKeyboardInput(keys);
+  const dispatch = (event: Record<string, unknown>) =>
+    cdpSessionManager.sendCommand(tabId, 'Input.dispatchKeyEvent', event);
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    if (step.kind === 'text') {
+      await cdpSessionManager.sendCommand(tabId, 'Input.insertText', {
+        text: step.text,
+      });
     } else {
-      await dispatchSimpleKey(tabId, token);
+      await dispatchKeyStroke(dispatch, step.stroke);
     }
-    if (delay > 0 && index < tokens.length - 1) {
+    if (delay > 0 && index < steps.length - 1) {
       await sleep(delay);
     }
   }

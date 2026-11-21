@@ -1314,7 +1314,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         text: {
           type: "string",
           description:
-            'Text to type (for action=type) or keys/chords separated by space (for action=key, e.g. "Backspace Enter" or "cmd+a")',
+            'Text to type (for action=type) or keys/chords separated by space (for action=key, e.g. "Backspace Enter" or "cmd+a"). action=key accepts named keys, single characters, and chords; unknown key names are rejected.',
         },
         repeat: {
           type: "number",
@@ -2269,7 +2269,7 @@ export const TOOL_SCHEMAS: Tool[] = [
         keys: {
           type: "string",
           description:
-            'Keys or key combinations to simulate. Examples: "Enter", "Tab", "Ctrl+C", "Shift+Tab", "Hello World".',
+            'A key, a key sequence, or text. Key sequences are space- or comma-separated named keys and chords, e.g. "Enter", "Shift+Tab", "Ctrl+A Backspace", "Tab,Tab,Enter". Any other input, such as "Hello World" or "Hello, World", is typed literally. On macOS, Ctrl/Cmd+A/C/X/V/Z run the matching editing command (select all, copy, cut, paste, undo).',
         },
         selector: {
           type: "string",

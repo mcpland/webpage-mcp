@@ -144,14 +144,19 @@ describe('keyboardTool', () => {
       undefined,
     );
     expect(mocks.attach).toHaveBeenCalledWith(7, 'keyboard');
+    // Enter needs its virtual key code and "\r" text to submit forms.
     expect(mocks.sendCommand).toHaveBeenCalledWith(
       7,
       'Input.dispatchKeyEvent',
       {
-        type: 'rawKeyDown',
+        type: 'keyDown',
         key: 'Enter',
         code: 'Enter',
-        text: undefined,
+        windowsVirtualKeyCode: 13,
+        text: '\r',
+        unmodifiedText: '\r',
+        modifiers: 0,
+        location: 0,
       },
     );
     expect(mocks.sendCommand).toHaveBeenCalledWith(
@@ -161,6 +166,9 @@ describe('keyboardTool', () => {
         type: 'keyUp',
         key: 'Enter',
         code: 'Enter',
+        windowsVirtualKeyCode: 13,
+        modifiers: 0,
+        location: 0,
       },
     );
     expect(mocks.detach).toHaveBeenCalledWith(7, 'keyboard');
