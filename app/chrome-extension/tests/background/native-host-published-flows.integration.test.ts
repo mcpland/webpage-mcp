@@ -158,4 +158,38 @@ describe("native published workflow handshake", () => {
       response.payload.items.map((item) => item.slug).sort(),
     );
   });
+  it("still reports its capabilities when listing published workflows fails", async () => {
+    vi.doMock("@/entrypoints/background/record-replay-v3", async (importOriginal) => ({
+      ...(await importOriginal<RecordReplayV3Module>()),
+      createStoragePort: () => ({
+        flows: {
+          listPublishedDetails: async () => {
+            throw new Error("IndexedDB unavailable");
+          },
+        },
+      }),
+    }));
+    const { connectNativeHost } = await import(
+      "@/entrypoints/background/native-host"
+    );
+    expect(connectNativeHost()).toBe(true);
+
+    await messageListener!({
+      type: "rr_list_published_flows",
+      requestId: "published-error",
+      payload: {},
+    });
+
+    const response = postMessage.mock.calls[0][0] as {
+      payload: {
+        status: string;
+        error: string;
+        capabilities?: { supportedTools: string[] };
+      };
+    };
+    expect(response.payload.status).toBe("error");
+    expect(response.payload.error).toContain("IndexedDB unavailable");
+    expect(response.payload.capabilities?.supportedTools).toContain("chrome_navigate");
+    vi.doUnmock("@/entrypoints/background/record-replay-v3");
+  });
 });

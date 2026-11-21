@@ -1195,7 +1195,7 @@ describe('dynamic published flow tools', () => {
     );
   });
 
-  it('hides extension-backed tools when the capability handshake fails', async () => {
+  it('keeps browser tools but withholds workflow tools when the capability handshake fails', async () => {
     const sendRequestToExtensionAndWait = vi.fn().mockRejectedValue(new Error('extension offline'));
     const ctx = createContext(
       'capability-fallback-conservative',
@@ -1205,9 +1205,34 @@ describe('dynamic published flow tools', () => {
     );
 
     const tools = await listToolsForContext(ctx);
+    const names = tools.map((tool) => tool.name);
 
-    expect(tools).toEqual([]);
+    expect(names).toContain('chrome_navigate');
+    expect(names).toContain('chrome_read_page');
+    expect(names.some((name) => /^(workflow_|record_replay_|recording_|flow_)/.test(name))).toBe(
+      false,
+    );
     expect(sendRequestToExtensionAndWait).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the capabilities reported alongside a workflow listing error', async () => {
+    const sendRequestToExtensionAndWait = vi.fn().mockResolvedValue({
+      status: 'error',
+      error: 'IndexedDB unavailable',
+      capabilities: DEFAULT_TEST_EXTENSION_CAPABILITIES,
+    });
+    const ctx = createContext(
+      'capability-error-with-capabilities',
+      sendRequestToExtensionAndWait,
+      undefined,
+      { injectDefaultExtensionCapabilities: false },
+    );
+
+    const tools = await listToolsForContext(ctx);
+
+    expect(tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(['chrome_navigate', 'recording_start', 'workflow_run']),
+    );
   });
 
   it('does not infer workflow support when the extension omits capability data', async () => {

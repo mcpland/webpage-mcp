@@ -6,6 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import {
   NativeMessageType,
+  TOOL_NAMES,
   TOOL_SCHEMAS,
   WEBPAGE_MCP_CAPABILITY_VERSION,
   WEBPAGE_MCP_PROTOCOL_VERSION,
@@ -814,15 +815,24 @@ function shouldExposeLegacyDynamicFlowTools(): boolean {
   return process.env[EXPOSE_LEGACY_FLOW_TOOLS_ENV] === '1';
 }
 
+// Browser tools do not depend on workflow storage. When the capability
+// handshake fails (for example because listing workflows failed) they stay
+// available; only the workflow tools, whose support cannot be confirmed, are
+// withheld. Advertising nothing left clients with an empty tool list.
+const FALLBACK_BROWSER_TOOL_NAMES: readonly string[] = (() => {
+  const browserToolNames = new Set<string>(Object.values(TOOL_NAMES.BROWSER));
+  return TOOL_SCHEMAS.map((tool) => tool.name).filter((name) => browserToolNames.has(name));
+})();
+
 function createFallbackExtensionCapabilities(
-  warning = 'Extension capability handshake unavailable; using conservative workflow schema.',
+  warning = 'Extension capability handshake unavailable; browser tools only, workflow tools withheld.',
 ): WebpageMcpExtensionCapabilities {
   return {
     protocolVersion: WEBPAGE_MCP_PROTOCOL_VERSION,
     capabilityVersion: WEBPAGE_MCP_CAPABILITY_VERSION,
     extensionVersion: 'unknown',
     mcpServerVersion: MCP_SERVER_VERSION,
-    supportedTools: [],
+    supportedTools: [...FALLBACK_BROWSER_TOOL_NAMES],
     supportedRunOptions: [],
     featureFlags: ['capability_handshake_fallback'],
     warnings: [warning],
@@ -1300,7 +1310,7 @@ async function fetchPublishedFlows(
     rememberExtensionCapabilities(
       ctx.sessionId,
       createFallbackExtensionCapabilities(
-        'Extension capability handshake failed; using conservative workflow schema.',
+        'Extension capability handshake failed; browser tools only, workflow tools withheld.',
       ),
     );
     publishedFlowsCache.set(ctx.sessionId, {

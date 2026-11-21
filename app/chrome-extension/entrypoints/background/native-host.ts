@@ -1624,6 +1624,9 @@ export function connectNativeHost(): boolean {
             payload: {
               status: "error",
               error: error?.message || String(error),
+              // Browser tools do not depend on workflow storage; keep the
+              // server's tool list intact when only listing flows failed.
+              capabilities: buildExtensionCapabilities(message.payload),
             },
           });
         }
