@@ -1433,10 +1433,10 @@ class ComputerTool extends BaseBrowserToolExecutor {
                   success: true,
                   action: 'zoom',
                   mimeType: 'image/png',
-                  base64Data,
                   region: { x0: rx0, y0: ry0, x1: rx1, y1: ry1 },
                 }),
               },
+              { type: 'image', data: base64Data, mimeType: 'image/png' },
             ],
             isError: false,
           };

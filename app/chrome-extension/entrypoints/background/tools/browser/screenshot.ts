@@ -220,13 +220,12 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
    * Execute screenshot operation
    */
   async execute(args: ScreenshotToolParams): Promise<ToolResult> {
-    const {
-      name = 'screenshot',
-      selector,
-      storeBase64 = false,
-      fullPage = false,
-      savePng = true,
-    } = args;
+    const { name = 'screenshot', selector, fullPage = false } = args;
+    // Return the image to the caller by default. Saving a PNG to Downloads is
+    // opt-in, except when the caller explicitly declines the inline image
+    // (the historical storeBase64=false behaviour).
+    const storeBase64 = args.storeBase64 !== false;
+    const savePng = args.savePng ?? !storeBase64;
 
 
     try {
@@ -259,7 +258,8 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
     let finalImageDataUrl: string | undefined;
     let finalImageWidthCss: number | undefined;
     let finalImageHeightCss: number | undefined;
-    const results: any = { base64: null, fileSaved: false };
+    const results: any = { fileSaved: false };
+    let image: { data: string; mimeType: string; width: number; height: number } | undefined;
     let originalScroll: { x: number; y: number } | null = null;
     let didPreparePage = false;
     let pageDetails: ScreenshotPageDetails | undefined;
@@ -414,31 +414,6 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
       } catch (e) {
         console.warn('Failed to set screenshot context:', e);
       }
-      if (storeBase64 === true) {
-        // Compress image for base64 output to reduce size
-        const compressed = await compressImage(finalImageDataUrl, {
-          scale: 0.7, // Reduce dimensions by 30%
-          quality: 0.8, // 80% quality for good balance
-          format: 'image/jpeg', // JPEG for better compression
-        });
-
-        // Include base64 data in response (without prefix)
-        const base64Data = compressed.dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
-        results.base64 = base64Data;
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                base64Data,
-                mimeType: compressed.mimeType,
-              }),
-            },
-          ],
-          isError: false,
-        };
-      }
-
       if (savePng === true) {
         // Save PNG file to downloads
         this.logInfo('Saving PNG...');
@@ -461,6 +436,22 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
           console.error('Error saving PNG file:', error);
           results.saveError = String(error instanceof Error ? error.message : error);
         }
+      }
+
+      if (storeBase64) {
+        // Inline images are delivered as MCP image content so clients can show
+        // them to the model; JPEG at 70% scale keeps the payload small.
+        const compressed = await compressImage(finalImageDataUrl, {
+          scale: 0.7,
+          quality: 0.8,
+          format: 'image/jpeg',
+        });
+        image = {
+          data: compressed.dataUrl.replace(/^data:image\/[^;]+;base64,/, ''),
+          mimeType: compressed.mimeType,
+          width: compressed.width,
+          height: compressed.height,
+        };
       }
     } catch (error) {
       console.error('Error during screenshot execution:', error);
@@ -499,8 +490,12 @@ class ScreenshotTool extends BaseBrowserToolExecutor {
             url: tab.url,
             name: name,
             ...results,
+            ...(image
+              ? { image: { mimeType: image.mimeType, width: image.width, height: image.height } }
+              : {}),
           }),
         },
+        ...(image ? [{ type: 'image' as const, data: image.data, mimeType: image.mimeType }] : []),
       ],
       isError: false,
     };

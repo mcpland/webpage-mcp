@@ -1588,16 +1588,16 @@ export const TOOL_SCHEMAS: Tool[] = [
         storeBase64: {
           type: "boolean",
           description:
-            "return screenshot in base64 format (default: false) if you want to see the page, recommend set this to be true",
+            "Return the screenshot as an inline image (JPEG, 70% scale) so it can be viewed (default: true).",
         },
         fullPage: {
           type: "boolean",
-          description: "Store screenshot of the entire page (default: true)",
+          description: "Capture the entire page instead of the viewport (default: false)",
         },
         savePng: {
           type: "boolean",
           description:
-            "Save screenshot as PNG file (default: true)，if you want to see the page, recommend set this to be false, and set storeBase64 to be true",
+            "Also save the full-resolution screenshot as a PNG in Downloads (default: false; true when storeBase64 is false).",
         },
       },
       required: [],

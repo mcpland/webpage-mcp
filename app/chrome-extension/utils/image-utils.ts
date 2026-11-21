@@ -294,7 +294,7 @@ export async function compressImage(
     quality?: number;
     format?: 'image/jpeg' | 'image/webp';
   },
-): Promise<{ dataUrl: string; mimeType: string }> {
+): Promise<{ dataUrl: string; mimeType: string; width: number; height: number }> {
   const { scale = 1.0, quality = 0.8, format = 'image/jpeg' } = options;
   if (!Number.isFinite(scale) || scale <= 0 || scale > 1) {
     throw new Error('Image compression scale must be greater than 0 and no more than 1.');
@@ -322,7 +322,7 @@ export async function compressImage(
     }
     ctx.drawImage(imageBitmap, 0, 0, newWidth, newHeight);
     const dataUrl = await canvasToDataURL(canvas, format, quality);
-    return { dataUrl, mimeType: format };
+    return { dataUrl, mimeType: format, width: newWidth, height: newHeight };
   } finally {
     imageBitmap?.close();
   }

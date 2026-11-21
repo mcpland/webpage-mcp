@@ -149,6 +149,51 @@ describe('screenshotTool', () => {
     expect('fullPath' in payload).toBe(false);
   });
 
+  async function loadWithCompressedImage() {
+    vi.doMock('@/utils/image-utils', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('@/utils/image-utils')>()),
+      compressImage: vi.fn(async () => ({
+        dataUrl: 'data:image/jpeg;base64,QUJD',
+        mimeType: 'image/jpeg',
+        width: 896,
+        height: 504,
+      })),
+    }));
+    return await loadScreenshotTool();
+  }
+
+  it('returns an inline MCP image by default without saving a file', async () => {
+    const { screenshotTool } = await loadWithCompressedImage();
+    (chrome.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeTab());
+    const downloadsDownload = chrome.downloads.download as ReturnType<typeof vi.fn>;
+
+    const result = await screenshotTool.execute({ tabId: 7, background: true });
+
+    expect(result.isError).toBe(false);
+    expect(result.content[1]).toEqual({ type: 'image', data: 'QUJD', mimeType: 'image/jpeg' });
+    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
+    expect(payload.image).toEqual({ mimeType: 'image/jpeg', width: 896, height: 504 });
+    expect(payload.fileSaved).toBe(false);
+    expect(downloadsDownload).not.toHaveBeenCalled();
+    vi.doUnmock('@/utils/image-utils');
+  });
+
+  it('saves a PNG and still returns the image when savePng is requested', async () => {
+    const { screenshotTool } = await loadWithCompressedImage();
+    (chrome.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeTab());
+    const downloadsDownload = chrome.downloads.download as ReturnType<typeof vi.fn>;
+    downloadsDownload.mockResolvedValue(9);
+
+    const result = await screenshotTool.execute({ tabId: 7, background: true, savePng: true });
+
+    expect(result.isError).toBe(false);
+    expect(result.content.map((item) => item.type)).toEqual(['text', 'image']);
+    const payload = JSON.parse(String((result.content[0] as { text?: string })?.text || '{}'));
+    expect(payload).toMatchObject({ fileSaved: true, downloadId: 9 });
+    expect(downloadsDownload).toHaveBeenCalledTimes(1);
+    vi.doUnmock('@/utils/image-utils');
+  });
+
   it('rejects background full-page captures before using visible-tab capture', async () => {
     const { screenshotTool } = await loadScreenshotTool();
     const tabsGet = chrome.tabs.get as ReturnType<typeof vi.fn>;
